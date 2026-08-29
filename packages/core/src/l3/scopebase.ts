@@ -1,5 +1,18 @@
-// L3 re-spelling lever: hoist a reused global base into a pointer local at the INNERMOST scope
-// that contains all of its uses.
+// L3 re-spelling lever: name a reused global base in a pointer local placed by SCOPE rather than at
+// the function top. Two region rules ship, one pass and one collected index behind them:
+//
+//   `/scopebase`   ONE local for a key, at the innermost list holding all of its uses (else the
+//                  deepest cluster of two).
+//   `/regionbase`  ONE LOCAL PER REGION — a base the source spells inside N disjoint regions is N
+//                  locals. agbcc discriminates on how many distinct locals with disjoint live
+//                  ranges exist, NOT on where they are declared: the three-at-function-top spelling
+//                  and the three-block-scoped one assemble byte-identically. So there is no nested
+//                  declaration block here and none is needed — the locals are declared at function
+//                  top and only their ASSIGNMENTS are placed per region. That compiler fact is
+//                  PINNED rather than asserted: packages/cli/test/matching/decl-scope-axis.test.ts
+//                  compiles both spellings through the project's own agbcc and compares the object
+//                  bytes, and compiles a count-collapsed third spelling to show the COUNT is not
+//                  free either.
 //
 // The lever earns its place: returning `null` from `hoistScopedBases` costs
 // kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.
@@ -31,41 +44,33 @@
 // shape. The decomp author's alternative is a no-op read-modify-write (`g[0][K] += 0;`) purely to
 // force that materialization; naming the base is the same codegen without the quirk.
 //
-// A LEVER, not a rewrite: emitted as an ADDITIONAL candidate (rank.ts `/scopebase`) with the
-// differ refereeing, so the un-hoisted spelling is always still in the list and this can never cost
-// a match.
+// A LEVER, not a rewrite: both region rules are emitted as ADDITIONAL candidates (rank.ts
+// `/scopebase`, `/regionbase`) with the differ refereeing, so the un-hoisted spelling is always
+// still in the list and neither can cost a match.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION. The hoisted value is a pure ADDRESS of a global — no
 // load, nothing observable, nothing that can fault — so evaluating it earlier in a scope that
 // DOMINATES every use is invisible. The rewritten accesses keep their own width/signedness, so
-// every stride is unchanged. Domination is the load-bearing half: `collect` and `rewriteStmt` must
-// walk the SAME tree, or an access the planner never placed gets repointed at a local whose
-// assignment does not reach it — compiling C that reads an uninitialized pointer, which neither
-// boundary contract catches (they check resolution and deref typing, not definite assignment).
+// every stride is unchanged. Domination is the load-bearing half, and it is CHECKED rather than
+// argued: `assertHoistsDominate` re-walks the emitted tree, because an access repointed at a local
+// whose assignment does not reach it compiles, scores, and can WIN, and no stage-boundary contract
+// sees it (they check resolution, deref typing, and whether a local is written ANYWHERE).
 //
 // ORDERING: `hoistBaseLocals` (basecse) runs unconditionally in `structureChecked`, BEFORE
 // rank's levers see the tree. So this pass's `addr`/`const` input is what basecse's DEFAULT table
 // refused — EVERY gate in it, single-use bases as much as loop and repeated-constant-offset ones —
-// which is why the two refusals below re-state basecse's rather than assuming those bases never
+// which is why `SCOPEBASE_GATES` re-states basecse's rules rather than assuming those bases never
 // arrive.
+import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, stmtExprs } from './ast';
+import { mapExprChildren, stmtExprs, stmtLists } from './ast';
+import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 import { addressableGlobals } from './storage';
 
-/** A base this lever may name: a leaf whose value is a fixed address.
- *
- *  `var` is included ONLY for a name in `SFn.globals`. That list is populated by `noteGlobal` alone
- *  (two call sites in structure.ts, both on the `bareArrayLead` path, which requires
- *  `shape === 'array'`) — so a `var` base here is always an ARRAY-declared global and `(T *)&gSym`
- *  is its start address under any declaration. The invariant is worth stating because it is what
- *  keeps a POINTER-shaped global out: for one of those, `(T *)&gPtr` names the pointer CELL rather
- *  than the object it points at, which would be silently the wrong address. A local `var` is
- *  excluded for the ordinary reason: it can be assigned between the hoist point and a use. */
+/** A base this lever may name: a leaf whose value is a fixed address. */
 type LeafBase = Extract<Expr, { k: 'addr' } | { k: 'const' } | { k: 'var' }>;
-const isLeaf = (e: Expr, globals: ReadonlySet<string>): e is LeafBase =>
-  e.k === 'addr' || e.k === 'const' || (e.k === 'var' && globals.has(e.name));
 
 /** THE identity of a base — what makes two accesses "the same address".
  *
@@ -73,19 +78,60 @@ const isLeaf = (e: Expr, globals: ReadonlySet<string>): e is LeafBase =>
  *  cell; keying on the NAME alone means a function that mixes them still sees one base. */
 const baseId = (b: LeafBase): string => (b.k === 'const' ? `c:${b.value}` : `n:${b.name}`);
 
-/** An access this lever may re-point, or null.
+/** One candidate ACCESS, as the eligibility rules see it. */
+export interface AccessCtx {
+  readonly base: LeafBase;
+  readonly lead: readonly number[] | undefined;
+  /** the names declared as GLOBALS in this function — a local or param of the same name is absent */
+  readonly addressable: ReadonlySet<string>;
+}
+
+/** Which accesses this lever may re-point. BOTH rules are SOUND: each one, removed, makes the
+ *  rewrite name DIFFERENT BYTES — C that compiles, type-checks and scores, which is the failure
+ *  mode nothing downstream catches.
  *
- *  REFUSES a non-zero `lead`. `lead` pins the leading subscripts of a multidimensional array, so
- *  `g[1][i]` is a whole ROW past `g[0][i]`. The hoisted local points at the START of the object, and
- *  the rewrite DROPS the lead — sound only when every leading subscript is 0. A non-zero lead would
- *  silently address the wrong row, which no contract checks: the tree stays well-typed and
- *  spellable, it just names different bytes. (Today `bareArrayLead` only ever emits zeros; this
- *  guard is what keeps that an implementation detail rather than a correctness dependency.) */
-function eligible(e: Expr, globals: ReadonlySet<string>): Extract<Expr, { k: 'index' }> | null {
-  if (e.k !== 'index' || !isLeaf(e.base, globals)) {
+ *  `lead` pins the leading subscripts of a multidimensional array, so `g[1][i]` is a whole ROW past
+ *  `g[0][i]`; the hoisted local points at the START of the object and the rewrite DROPS the lead.
+ *  (Today `bareArrayLead` only ever emits zeros; the guard is what keeps that an implementation
+ *  detail rather than a correctness dependency.)
+ *
+ *  A `var` base is admitted ONLY for a name in `SFn.globals`. That list is populated by `noteGlobal`
+ *  alone (two call sites in structure.ts, both on the `bareArrayLead` path, which requires
+ *  `shape === 'array'`) — so a `var` base here is always an ARRAY-declared global and `(T *)&gSym`
+ *  is its start address under any declaration. For a POINTER-shaped global `(T *)&gPtr` names the
+ *  pointer CELL rather than the object it points at; for a LOCAL it names a cell something may
+ *  assign between the hoist point and a use. */
+export const SCOPEBASE_ELIGIBILITY: readonly Gate<AccessCtx>[] = [
+  {
+    id: 'nonzero-lead',
+    why: 'the rewrite drops `lead`, so a non-zero one would name a different array row',
+    sound: true,
+    guardedBy: 'scopebase.test.ts: a NON-ZERO lead is refused',
+    rejects: (c) => (c.lead ?? []).some((n) => n !== 0),
+  },
+  {
+    id: 'shadowed-or-nonarray-base',
+    why: '`&name` on a local or a pointer-shaped global names a different object',
+    sound: true,
+    guardedBy: 'addr-placement.test.ts: scopebase declines the shadowed name rather than take its address',
+    rejects: (c) => c.base.k === 'var' && !c.addressable.has(c.base.name),
+  },
+];
+
+/** An access this lever may re-point, or null. */
+function eligible(
+  e: Expr,
+  globals: ReadonlySet<string>,
+  rules: readonly Gate<AccessCtx>[],
+): Extract<Expr, { k: 'index' }> | null {
+  if (e.k !== 'index') {
     return null;
   }
-  return (e.lead ?? []).every((n) => n === 0) ? e : null;
+  const b = e.base;
+  if (b.k !== 'addr' && b.k !== 'const' && b.k !== 'var') {
+    return null;
+  }
+  return firstRejection(rules, { base: b, lead: e.lead, addressable: globals }) === null ? e : null;
 }
 
 /** The (base, access-shape) key an access shares with its reuse siblings. Width and signedness are
@@ -111,6 +157,9 @@ interface Site {
    *  or a `for`'s increment. No scope reachable from `path` runs at that cadence, so a key with any
    *  such use is refused outright rather than hoisted to a point that runs once. */
   perIteration: boolean;
+  /** the access node itself — what the rewrite repoints, so `collect` and the rewrite cannot
+   *  disagree about which uses a plan entry owns */
+  node: Extract<Expr, { k: 'index' }>;
 }
 
 /** Set when the tree holds a shape `collect` and `rewriteStmt` would disagree about — see the
@@ -121,21 +170,25 @@ let compound = false;
 function collect(
   body: Stmt[],
   globals: ReadonlySet<string>,
-  out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }>,
+  out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>,
   path: Stmt[][],
   loop: boolean[],
   idxPath: number[],
+  rules: readonly Gate<AccessCtx>[],
+  seenNodes: Set<Expr>,
+  sharedKeys: Set<string>,
 ): void {
   let at = 0;
   const visit = (e: Expr, perIteration: boolean): void => {
-    const ix = eligible(e, globals);
+    const ix = eligible(e, globals, rules);
     if (ix) {
       const k = keyOf(ix);
-      const rec = out.get(k) ?? { uses: [], sample: ix, constOff: new Map<number, number>() };
-      rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at] });
-      if (ix.idx.k === 'const') {
-        rec.constOff.set(ix.idx.value, (rec.constOff.get(ix.idx.value) ?? 0) + 1);
+      if (seenNodes.has(ix)) {
+        sharedKeys.add(k);
       }
+      seenNodes.add(ix);
+      const rec = out.get(k) ?? { uses: [], sample: ix };
+      rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at], node: ix });
       out.set(k, rec);
     }
     mapExprChildren(e, (c) => {
@@ -163,7 +216,7 @@ function collect(
       // rather than grow a second recursion this REFUSES the whole function — loud decline over a
       // silently unreachable definition. Delete this when `stmtLists` makes collect/rewrite share
       // one traversal.
-      if (childLists(s.init).length > 0 || childLists(s.inc).length > 0) {
+      if (stmtLists(s.init).length > 0 || stmtLists(s.inc).length > 0) {
         compound = true;
       }
       // `init` and `inc` are STATEMENTS, so their expressions are reached by neither `stmtExprs`
@@ -174,37 +227,9 @@ function collect(
       stmtExprs(s.init).forEach((e) => visit(e, false));
       stmtExprs(s.inc).forEach((e) => visit(e, true));
     }
-    for (const child of childLists(s)) {
-      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i]);
+    for (const child of stmtLists(s)) {
+      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i], rules, seenNodes, sharedKeys);
     }
-  }
-}
-
-/** The nested statement LISTS of a statement — the scopes a hoist could land in.
- *
- *  Deliberately not `stmtChildren`, which flattens a `for`'s `init`/`inc` in with its body: those
- *  are single statements, not lists, and a hoist has nowhere legal to go in either (before the loop
- *  changes when it runs, inside the body repeats it). A `for`'s body IS a list and is included. */
-function childLists(s: Stmt): Stmt[][] {
-  switch (s.k) {
-    case 'if':
-      return [s.then, s.else];
-    case 'while':
-    case 'dowhile':
-    case 'for':
-      return [s.body];
-    case 'switch':
-      return [...s.cases.map((c) => c.body), ...(s.default ? [s.default] : [])];
-    // Exhaustive on purpose — no `default`. A future Stmt kind carrying a nested list must be a
-    // COMPILE error here, exactly as it is in `stmtChildren`: a silent `[]` would collect that
-    // kind's uses at the wrong scope while `rewriteStmt`, which IS exhaustive, still rewrote them.
-    case 'assign':
-    case 'store':
-    case 'exprstmt':
-    case 'return':
-    case 'break':
-    case 'continue':
-      return [];
   }
 }
 
@@ -223,13 +248,20 @@ function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
   return depth === 0 ? null : { scope: first[depth - 1], depth };
 }
 
-/** The DEEPEST statement list holding 2+ uses, with just those uses — the fallback when no single
- *  scope holds them all.
+/** `'whole'`'s fallback: the DEEPEST statement list holding 2+ uses, with just those uses.
  *
  *  Ties are broken by first appearance, so emission stays deterministic. Returning a SUBSET is the
  *  whole point: the uses outside the cluster keep their original spelling, which is exactly the
  *  mixed form the compiler produces when it materializes an address in one arm and re-derives it
- *  elsewhere. */
+ *  elsewhere.
+ *
+ *  DEEPEST with no size term, and that is a limitation rather than a model of the compiler: a scope
+ *  with four uses enclosing a nested scope with two names the TWO and leaves the four re-deriving
+ *  (pinned in test/scopebase.test.ts). Only ONE cluster is ever served here — serving all of them
+ *  is what `'per-region'` does, under its own admission table.
+ *
+ *  Its uses are RESIDUAL — a list's entry holds every use beneath it, not just its direct ones —
+ *  which is why `regionsOf` builds its partition itself rather than reusing this. */
 function deepestCluster(all: Site[]): { scope: Stmt[]; depth: number; uses: Site[] } | null {
   const byList = new Map<Stmt[], { depth: number; uses: Site[] }>();
   for (const u of all) {
@@ -248,116 +280,341 @@ function deepestCluster(all: Site[]): { scope: Stmt[]; depth: number; uses: Site
   return best;
 }
 
-/** Does any use sit inside a LOOP nested below the chosen scope?
+/** How a key's uses are cut into REGIONS — the one axis this pass varies. Names a `REGION_RULES`
+ *  entry; it is the only field a production caller passes. */
+export type RegionSelector = 'whole' | 'per-region';
+
+interface Region {
+  scope: Stmt[];
+  depth: number;
+  uses: Site[];
+}
+
+/** `'whole'`'s partition: ONE region for the key — the innermost list holding every use, else the
+ *  deepest cluster of two. `body` is unused; the signature is the RULE's, so both partitions are
+ *  one type and the selector can be a value. */
+function wholeRegion(all: Site[], _body: Stmt[]): Region[] {
+  const at = commonScope(all);
+  if (at) {
+    return [{ scope: at.scope, depth: at.depth, uses: all }];
+  }
+  const cluster = deepestCluster(all);
+  return cluster ? [cluster] : [];
+}
+
+/** `'per-region'`'s partition: one region per INNERMOST ENCLOSING LIST, and every partition is
+ *  served. DIRECT uses only, and the FUNCTION BODY is a region like any other.
  *
- *  OVER-REFUSES in two shapes, deliberately: a `do { … } while (g[1]) ;` body head and a
- *  `for (…; …; i = g[5])` body head both DO run at the flagged cadence, so a hoist there would be
- *  legal. Refusing them costs a missed spelling and nothing else (bench: 0 lost, 0 gained), and the
- *  precise rule needs the loop-DEPTH model an extraction would bring. Otherwise:
- *  the hoist would be loop-invariant code motion to a point the original never had — the
- *  register-pressure failure `basecse.ts`'s own `inLoop` gate refuses, and the reason that gate
- *  exists. When EVERY use is inside the loop, the common scope IS the loop body: the assignment
- *  then runs per iteration exactly as the inline spelling did, and there is nothing to refuse. */
-function underNestedLoop(uses: Site[], depth: number): boolean {
-  return uses.some((u) => u.perIteration || u.loop.slice(depth).some(Boolean));
+ *  Not the residual-subtree rule (a list's entry holding every use beneath it, which is what
+ *  `deepestCluster` builds): under that rule the body region holds the arms' uses too, and the
+ *  loop and offset rules then judge a region on uses that are not in it. Not an ANTICHAIN of
+ *  scope-disjoint regions either — the body list encloses both arms and is served anyway. What
+ *  separates a region from the ones nested in it is only which uses are direct.
+ *
+ *  The synthetic depth-0 entry is why `collect`'s `path` is NOT seeded with `sfn.body`: `idx`
+ *  carries one entry more than `path` and `before` reads `idx[depth]` through that invariant, so
+ *  re-seeding would shift it for every key in every function. A region at depth 0 reads `idx[0]`,
+ *  which is already the index within the body. */
+function perRegions(all: Site[], body: Stmt[]): Region[] {
+  const byList = new Map<Stmt[], Region>();
+  for (const u of all) {
+    const depth = u.path.length;
+    const scope = depth === 0 ? body : u.path[depth - 1];
+    const e = byList.get(scope) ?? { scope, depth, uses: [] };
+    e.uses.push(u);
+    byList.set(scope, e);
+  }
+  // insertion order — first appearance of each region, so emission stays deterministic
+  return [...byList.values()];
+}
+
+/** The two loop facts, split apart because they are two different rules with two different
+ *  arguments — see the gate table.
+ *
+ *  `perIteration` OVER-REFUSES in two shapes, deliberately: a `do { … } while (g[1]) ;` body head
+ *  and a `for (…; …; i = g[5])` body head both DO run at the flagged cadence, so a hoist there
+ *  would be legal. Refusing them costs a missed spelling and nothing else (bench: 0 lost, 0
+ *  gained), and the precise rule needs a loop-DEPTH model. When EVERY use is inside the loop the
+ *  scope IS the loop body: the assignment then runs per iteration exactly as the inline spelling
+ *  did, and `nestedLoop` is false — there is nothing to refuse. */
+/** Is some literal offset reached twice among these uses? Tallied from the SITES, so the answer is
+ *  scoped by whichever set the caller judges — the key's, or one region's. */
+function repeatsAConstOffset(uses: Site[]): boolean {
+  const seen = new Set<number>();
+  for (const u of uses) {
+    const i = u.node.idx;
+    if (i.k === 'const') {
+      if (seen.has(i.value)) {
+        return true;
+      }
+      seen.add(i.value);
+    }
+  }
+  return false;
+}
+
+const runsPerIteration = (uses: Site[]): boolean => uses.some((u) => u.perIteration);
+const underNestedLoop = (uses: Site[], depth: number): boolean => uses.some((u) => u.loop.slice(depth).some(Boolean));
+
+/** One candidate REGION, as the admission rules see it. */
+export interface RegionCtx {
+  /** how many uses the local would serve */
+  readonly uses: number;
+  /** some constant offset is reached twice through this base */
+  readonly repeatedConstOffset: boolean;
+  /** some use runs at a cadence no reachable scope has — a loop's own condition, a `for`'s inc */
+  readonly perIteration: boolean;
+  /** some use sits inside a loop nested BELOW the region */
+  readonly nestedLoop: boolean;
+  /** how many of this key's regions hold two or more direct uses */
+  readonly siblingRegions: number;
+}
+
+/** The rules judged over a POPULATION OF USES — the half the region rule re-reads. Split out
+ *  because that is what `perRegionReading` below renames, so a fourth counting rule is renamed by
+ *  construction instead of by remembering to extend a list of ids. */
+const COUNTING_RULES: readonly Gate<RegionCtx>[] = [
+  {
+    id: 'single-use',
+    why: 'one access re-materializes as cheaply as a named local',
+    sound: false,
+    rejects: (c) => c.uses < 2,
+  },
+  {
+    id: 'repeated-const-offset',
+    why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
+    sound: false,
+    rejects: (c) => c.repeatedConstOffset,
+  },
+];
+
+/** The rules judged over the REGION's own loop facts, which every region rule reads the same way
+ *  (`RegionRule.judged` says why: no reachable scope answers for a use outside the region). */
+const LOOP_RULES: readonly Gate<RegionCtx>[] = [
+  {
+    id: 'per-iteration-use',
+    why: 'no scope reachable from the use runs at a loop condition or `for` inc cadence',
+    sound: false,
+    rejects: (c) => c.perIteration,
+  },
+  {
+    id: 'nested-loop-use',
+    why: 'hoisting out of a nested loop is code motion to a point the original never had',
+    sound: false,
+    rejects: (c) => c.nestedLoop,
+  },
+];
+
+/** The admission rules. NONE is sound: a wrong choice here names the same address in a different
+ *  place, so it costs bytes and a match, never meaning — the eligibility table above is where
+ *  meaning is at stake, and `rank.ts` keeps the un-hoisted spelling beside every candidate.
+ *
+ *  `repeated-const-offset` and `nested-loop-use` are inherited from `BASECSE_GATES`, which learned
+ *  them by losing the ProcessHBlankWait match and by forcing a callee-saved register across a loop.
+ *  `per-iteration-use` is the half of the loop question basecse never faces: this pass places into
+ *  a NESTED list, and no reachable list runs at a loop condition's cadence.
+ *
+ *  `repeated-const-offset` is an EXTRAPOLATION on half this pass's input, and honestly so: the
+ *  evidence is a `const` MMIO address, and the `var` (array-global) half is input basecse never
+ *  saw. It also SLIPS on a fixed offset not spelled as a literal — two identical `g[i]` accesses
+ *  are not tallied. rank's `/livebase` takes the OPPOSITE side, ablating the same rule in
+ *  `LIVEBASE_GATES` for the poll shapes it mispredicts, and the differ arbitrates.
+ *
+ *  MEASURED REACH, so a reader prices these from evidence rather than from the table's existence.
+ *  Instrumented census over the klonoa corpus with no symbol map (469 `.s`, 257 lifting functions),
+ *  every rule evaluated on every admission context the pass builds. `any` counts the contexts a
+ *  rule rejects; `first` the ones where it is the DECIDING rejection, which is the only column that
+ *  prices it — `firstRejection` short-circuits, so a rule that is never first changes no decision.
+ *  `relaxed` re-asks `first` with the counting rules dropped, which is what separates a rule that
+ *  decides nothing from one MASKED by the two that precede it:
+ *
+ *      table   contexts    rule                            any     first   relaxed
+ *      SB        79880     single-use                    24268     24268         —
+ *                          repeated-const-offset         54120     54120         —
+ *                          per-iteration-use              8784         0      8784
+ *                          nested-loop-use                6560       656      4768
+ *      RB       512760     region-single-use            393153    393153         —
+ *                          region-repeated-const-offset  94857     94857         —
+ *                          per-iteration-use             32586         0     32586
+ *                          regions-degenerate           353352       846    331530
+ *
+ *  So `per-iteration-use` decides nothing on this corpus in either table, and ablating it moves no
+ *  gating row. It is kept, and the `relaxed` column is why: every context it rejects it would
+ *  decide, the moment a counting rule stopped rejecting first. Dropping a masked rule is a change
+ *  one corpus licenses; `nested-loop-use` left the region table on a proof that it CANNOT fire
+ *  there, which is a different standard and the one this file holds. */
+export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [...COUNTING_RULES, ...LOOP_RULES];
+
+/** A counting rule's PER-REGION reading. Same predicate, different POPULATION — under `'whole'` it
+ *  is judged over the KEY's uses (the cluster fallback serves a SUBSET of them, so the two really
+ *  do differ), under `'per-region'` over one region's direct uses. One id naming two predicates
+ *  makes `without(table, id)` two different ablations and a price table ambiguous about which
+ *  reading it priced, so the per-region reading gets its own id. */
+const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> => ({
+  ...g,
+  id: `region-${g.id}`,
+  why: `${g.why} — judged over ONE region's direct uses`,
+});
+
+/** `/regionbase`'s admission (rank.ts): the per-region readings of `SCOPEBASE_GATES`, MINUS the one
+ *  rule the region rule makes vacuous, plus the one that exists only once a key can hold MORE THAN
+ *  ONE local.
+ *
+ *  `nested-loop-use` CANNOT FIRE under `'per-region'` and is dropped rather than left in the table
+ *  reading as safety. `perRegions` sets a region's `depth` to `u.path.length`, and a region is
+ *  exactly the uses whose innermost enclosing list IS that region — so `u.loop.slice(depth)` is
+ *  the empty slice for every use it judges, and "a use under a loop BELOW the region" is a shape
+ *  the partition cannot produce. A use inside a nested loop is its own region, at its own depth.
+ *  Measured on the PREDICATE, not on table membership, since a rule the table no longer holds
+ *  cannot be censused through it: over the corpus census above, `underNestedLoop` is true on 0 of
+ *  512760 `'per-region'` contexts and on 6560 of 79880 `'whole'` ones, where the rule stays in
+ *  `SCOPEBASE_GATES` and is load-bearing.
+ *
+ *  `regions-degenerate` is a FAN SAVING, not a codegen model: it counts regions holding two or
+ *  more DIRECT uses, which is `single-use` applied region-wise and so is computable before any
+ *  gate runs. Its saving is USUALLY a duplicate — one such region is the function-top question
+ *  `basecse`/`/livebase`/`/scopebase` already answer — but not always, and this pass produces the
+ *  counterexample: one arm with three direct uses plus a nested loop holding a fourth is refused
+ *  under `'whole'` by `nested-loop-use` and here by this rule, and ablating it alone is the only
+ *  way to reach the hoist (test/regionbase.test.ts). A heuristic, and the differ referees what it
+ *  admits.
+ *
+ *  ONE RULE HERE IS PRICED BY A ROW; three are not. Ablating `region-single-use` moves
+ *  `synthetic:dmascope` — the lever's own row — from 9 to 30, so it is worth 21 there, while
+ *  `region-repeated-const-offset`, `per-iteration-use` and `regions-degenerate` each leave all five
+ *  gating rows exactly where they stand. The OVER-SCOPING controls (`synthetic:dmascope1`,
+ *  `synthetic:offhi_fused`) must stay MATCH but can price nothing here: censused on their own
+ *  disassembly, `dmascope1` enumerates 6 candidates with 0 carrying `/regionbase` and
+ *  `offhi_fused` 12 with 0. The other three are guarded by unit fixtures in test/regionbase.test.ts
+ *  and by the reach census above. */
+export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
+  ...COUNTING_RULES.map(perRegionReading),
+  ...ablateHeuristic(LOOP_RULES, 'nested-loop-use'),
+  {
+    id: 'regions-degenerate',
+    why: 'one region is the function-top hoist basecse and /livebase already offer',
+    sound: false,
+    rejects: (c) => c.siblingRegions < 2,
+  },
+];
+
+/** THE REGION RULE, as a value. A third rule is one entry here — a partition, a gate table, and
+ *  the population its counting rules are judged over — rather than three hand-edited branches in
+ *  three functions, which is the same doctrine `rank.ts` states for its own admissions ("one entry
+ *  here, one gate table, and that table's line in the gate-contract roster — not nine hand-edited
+ *  sites that can drift"). */
+export interface RegionRule {
+  readonly id: RegionSelector;
+  /** how a key's uses are cut into regions */
+  readonly partition: (all: Site[], body: Stmt[]) => Region[];
+  /** the admission table `hoistScopedBases` uses when no ablation is passed */
+  readonly gates: readonly Gate<RegionCtx>[];
+  /** the uses the COUNTING rules (`uses`, `repeatedConstOffset`) are tallied over. The loop facts
+   *  are always the region's own — no reachable scope answers for a use outside it. */
+  readonly judged: (region: Region, key: Site[]) => Site[];
+}
+
+export const REGION_RULES: Record<RegionSelector, RegionRule> = {
+  // `'whole'` judges the count and the offset tally over the KEY and the loop facts over the
+  // chosen region — the scoping this pass has always used, and the cluster case is why: its region
+  // is a SUBSET of the key's uses.
+  whole: { id: 'whole', partition: wholeRegion, gates: SCOPEBASE_GATES, judged: (_r, key) => key },
+  // `'per-region'` judges every rule over the region's own direct uses — a REFINEMENT and not a
+  // relaxation: an offset repeated INSIDE one region is still repeated.
+  'per-region': { id: 'per-region', partition: perRegions, gates: REGIONBASE_GATES, judged: (r) => r.uses },
+};
+
+/** `regions` picks the region rule and is the only field a caller passes in production
+ *  (`'per-region'` is `/regionbase`). The two tables are for ABLATION — the differentials in
+ *  test/scopebase.test.ts re-run the real pass with one rule dropped — and default to the pair the
+ *  selector implies. */
+export interface ScopeBaseOpts {
+  readonly regions?: RegionSelector;
+  readonly eligibility?: readonly Gate<AccessCtx>[];
+  readonly gates?: readonly Gate<RegionCtx>[];
 }
 
 /**
- * The `/scopebase` re-spelling, or null when nothing qualifies (the caller then adds no candidate
- * rather than a duplicate of the primary).
+ * The re-spelling `regions` asks for — `/scopebase` or `/regionbase` — or null when nothing
+ * qualifies (the caller then adds no candidate rather than a duplicate of the primary).
  */
-export function hoistScopedBases(sfn: SFn): SFn | null {
+export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null {
+  const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
+  const rule = REGION_RULES[opts.regions ?? 'whole'];
+  const gates = opts.gates ?? rule.gates;
   compound = false;
   const globals = addressableGlobals(sfn);
-  const found = new Map<
-    string,
-    { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }
-  >();
-  collect(sfn.body, globals, found, [], [], []);
+  const found = new Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>();
+  /** The KEYS whose tree holds one `index` OBJECT at two positions. The rewrite repoints by node
+   *  identity, so a shared node is one plan entry claiming two uses it need not dominate.
+   *
+   *  PER KEY, not per function, and the difference is not hypothetical. Nothing in the L3 contract
+   *  forbids the sharing — `l3/pollguard.ts` already emits it (`{ k: 'if', cond: s.cond, then: [s] }`
+   *  puts one `cond` object at two tree positions), and it is harmless today only because the shapes
+   *  are derived AFTER this lever in `rank.ts`, an ordering nothing pins. A whole-function decline
+   *  would make a future producer that shares one node silently delete every base this pass names —
+   *  including `kleod:UpdateHUDCounterDisplay`'s match, which returning `null` costs. Refusing the
+   *  key that actually shares costs that key's spelling and nothing else, and the differ still has
+   *  every other spelling in the list.
+   *
+   *  Not a `Gate`: it is decided during `collect`, before a `RegionCtx` exists. */
+  const sharedKeys = new Set<string>();
+  collect(sfn.body, globals, found, [], [], [], rules, new Set(), sharedKeys);
   if (compound) {
     return null;
   }
 
   const fresh = nameAllocator(sfn);
-  // key → (scope list identity, local name)
+  // one entry per (key, admitted region) — several for one key under `'per-region'`
   const plan: { scope: Stmt[]; key: string; name: string; type: IrType; base: LeafBase; before: number }[] = [];
+  // access node → the local that replaces its base. Built from the SITES a plan entry was judged
+  // on, so the set the planner counted and the set the rewrite repoints are the same set by
+  // construction rather than by a second predicate that could disagree.
+  const repoint = new Map<Expr, string>();
   for (const [key, rec] of found) {
-    if (rec.uses.length < 2) {
-      continue; // one access re-materializes as cheaply as a named local
+    if (sharedKeys.has(key)) {
+      continue; // one node at two positions — see `sharedKeys`
     }
-    // A constant offset touched 2+ times is a SCALAR re-access at one fixed location (an MMIO
-    // read-modify-write, a repeated `*p`), which the compiler re-materializes rather than
-    // register-holds. basecse.ts learned this by LOSING the ProcessHBlankWait match to it. Inherited
-    // here rather than re-lost — but honestly: the evidence is a `const` MMIO address, and it
-    // applies cleanly only to the `addr`/`const` half of this pass's input, which is exactly what
-    // basecse refused and left behind. For the `var` (array-global) half basecse never ran, so this
-    // is an EXTRAPOLATION, not an inheritance. Conservative direction, so the cost is a missed
-    // hoist rather than a wrong one. It also SLIPS on a fixed offset not spelled as a literal —
-    // two identical `g[i]` accesses are not tallied — which basecse acknowledges in its own comment
-    // and which this pass is MORE exposed to, since it deliberately admits loop-body uses, exactly
-    // the input basecse's `inLoop` gate kept away from that hole. rank's `/livebase` takes the
-    // OPPOSITE side — it ablates this same rule (LIVEBASE_GATES) for the poll shapes the rule
-    // mispredicts — and the differ arbitrates between the two spellings; a decision, not a drift.
-    if ([...rec.constOff.values()].some((n) => n >= 2)) {
-      continue;
-    }
-    let at = commonScope(rec.uses);
-    let uses = rec.uses;
-    if (!at) {
-      // The uses span the FUNCTION BODY, so no single scope holds them. Rather than decline, take a
-      // scope that holds two or more and name the base for THOSE only, leaving the rest as they
-      // were.
-      //
-      // The selection rule is DEEPEST, with no size term, and that is a real limitation rather than
-      // a model of the compiler: a scope with four uses enclosing a nested scope with two will name
-      // the TWO and leave the four re-deriving the address. Only ONE cluster is ever served, and
-      // when two siblings tie on depth the first-appearing wins — arbitrary, not principled.
-      // Largest-cluster-with-deepest-as-tie-break is the better rule; it is a behaviour change and
-      // belongs with the placement-selector consolidation, not bolted on here.
-      //
-      // NOTE this fires for an `addr`/`const` base too — nothing here tests the base kind. That is
-      // not a duplicate of basecse's hoist: basecse runs FIRST (see the ordering note in the file
-      // header), so any `addr`/`const` base reaching this pass is one basecse already REFUSED.
-      const cluster = deepestCluster(rec.uses);
-      if (!cluster) {
+    const regions = rule.partition(rec.uses, sfn.body);
+    const siblingRegions = regions.filter((r) => r.uses.length >= 2).length;
+    for (const r of regions) {
+      // WHICH USES the counting rules are tallied over is the RULE's answer, not a branch here —
+      // see `REGION_RULES`. Nothing here tests the base kind: an `addr`/`const` base reaching this
+      // pass is one basecse already REFUSED (see the ordering note in the file header).
+      const judged = rule.judged(r, rec.uses);
+      if (
+        firstRejection(gates, {
+          uses: judged.length,
+          repeatedConstOffset: repeatsAConstOffset(judged),
+          perIteration: runsPerIteration(r.uses),
+          nestedLoop: underNestedLoop(r.uses, r.depth),
+          siblingRegions,
+        }) !== null
+      ) {
         continue;
       }
-      at = { scope: cluster.scope, depth: cluster.depth };
-      uses = cluster.uses;
+      const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
+      // the earliest statement of the region list that (transitively) holds one of its uses.
+      // `path` starts EMPTY, so `idx` carries one entry more than `path`: idx[j+1] is the index
+      // within path[j]. The region is path[depth-1], so its index is idx[depth] — and idx[0] for
+      // the depth-0 body region.
+      const before = Math.min(...r.uses.map((u) => u.idx[r.depth]));
+      const name = fresh();
+      r.uses.forEach((u) => repoint.set(u.node, name));
+      plan.push({ scope: r.scope, key, name, type, base: rec.sample.base as LeafBase, before });
     }
-    if (underNestedLoop(uses, at.depth)) {
-      continue;
-    }
-    const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
-    // the earliest statement of the scope list that (transitively) holds a use
-    // `path` starts EMPTY, so `idx` carries one entry more than `path`: idx[j+1] is the index
-    // within path[j]. The scope is path[depth-1], so its index is idx[depth].
-    const before = Math.min(...uses.map((u) => u.idx[at.depth]));
-    plan.push({ scope: at.scope, key, name: fresh(), type, base: rec.sample.base as LeafBase, before });
   }
   if (plan.length === 0) {
     return null;
   }
 
-  // A plan entry may own only a SUBSET of its key's uses (see deepestCluster), so repointing is
-  // scoped: a key becomes active when the rewrite enters its scope and inactive on the way out.
-  // Repointing by key alone would rewrite uses the hoist does not dominate.
-  // SAFE ONLY because `plan` holds at most one entry per key, so `delete` on the way out cannot
-  // discard an outer binding. Serving a second cluster for one key — the obvious next step — makes
-  // that false, and an inner delete would silently unbind the outer one for the rest of its scope:
-  // a use of an unassigned pointer, the defect class this module has already shipped twice. Switch
-  // to save/restore (or pass the bindings as an argument) before serving more than one cluster.
-  const active = new Map<string, string>();
   const point = (e: Expr): Expr => {
-    const ix = eligible(e, globals);
-    if (ix) {
-      const nm = active.get(keyOf(ix));
-      if (nm) {
-        // `lead` is DROPPED — the local already points at the object start, and `eligible` has
-        // established every leading subscript is 0.
-        const { lead: _drop, ...rest } = ix;
-        return { ...rest, base: { k: 'var', name: nm }, idx: point(ix.idx) };
-      }
+    const nm = repoint.get(e);
+    if (nm) {
+      // `lead` is DROPPED — the local already points at the object start, and `nonzero-lead` has
+      // established every leading subscript is 0.
+      const { lead: _drop, ...rest } = e as Extract<Expr, { k: 'index' }>;
+      return { ...rest, base: { k: 'var', name: nm }, idx: point(rest.idx) };
     }
     return mapExprChildren(e, point);
   };
@@ -367,22 +624,7 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   // fresh tree in one pass — a two-pass version would compare rebuilt lists that no longer match.
   const rewriteList = (list: Stmt[]): Stmt[] => {
     const here = plan.filter((p) => p.scope === list);
-    // SAVE/RESTORE, not set/delete. A plain delete on the way out is correct only while `plan`
-    // holds one entry per key; the moment a second cluster for one key is served, an inner exit
-    // would unbind an OUTER hoist for the rest of its scope — under-repointing silently. Restoring
-    // makes the nesting correct by construction instead of by an unguarded invariant.
-    const saved = here.map((p) => [p.key, active.get(p.key)] as const);
-    for (const p of here) {
-      active.set(p.key, p.name);
-    }
     const rewritten = list.map(rewriteStmt);
-    for (const [key, prev] of saved) {
-      if (prev === undefined) {
-        active.delete(key);
-      } else {
-        active.set(key, prev);
-      }
-    }
     // Insert each hoist immediately before the first statement that uses it. Descending by index so
     // earlier insertions do not shift the positions later ones were computed against. NOTE that two
     // hoists sharing a `before` come out REVERSED relative to `plan` order — the sort is stable and
@@ -440,5 +682,7 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   // Declared from `plan`, one per hoist — NOT accumulated inside `rewriteList`, which would emit a
   // duplicate declaration (non-compiling C) if a `Stmt[]` were ever structurally shared by two tree
   // positions.
-  return { ...sfn, body, locals: [...sfn.locals, ...plan.map((p) => ({ name: p.name, type: p.type }))] };
+  const out = { ...sfn, body, locals: [...sfn.locals, ...plan.map((p) => ({ name: p.name, type: p.type }))] };
+  assertHoistsDominate(out, new Set(plan.map((p) => p.name)));
+  return out;
 }

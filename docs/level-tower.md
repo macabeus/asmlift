@@ -265,6 +265,12 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   position in the top-level statement list — the function top, the minted inits above a run already
   there, or each init at its first use (`l3/basecse.ts`, `l3/nearbase.ts`, `l3/sinkinit.ts`) — the
   innermost enclosing scope (`l3/scopebase.ts`), immediately before the call (`l3/argbase.ts`).
+  `l3/scopebase.ts` also answers a SECOND question the others do not have, and it is a different
+  axis from placement: HOW MANY locals one address gets. Its `REGION_RULES` carry both readings —
+  `'whole'` gives a key one local (`/scopebase`), `'per-region'` one per disjoint region
+  (`/regionbase`) — and the count, not the declaration scope, is what agbcc discriminates on
+  ([`decl-scope-axis.test.ts`](../packages/cli/test/matching/decl-scope-axis.test.ts) compiles both
+  spellings and both directions).
   All but `gvn` and basecse's own committed hoist are candidate generators, so their
   disagreement costs a candidate. Those two are committed, so theirs would cost a **match**, and
   the constraint that keeps them compatible lives in neither file: `gvn`'s entry-block hoist is

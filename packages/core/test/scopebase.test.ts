@@ -5,13 +5,18 @@
 // function top or an init's first use, never inside a nested scope — and only for an `addr`/`const`
 // base. Both limits cost real bytes: neither of those positions is inside the `if` arm that holds
 // the uses, and the rank-aware bare spelling `gSym[0][i]` has a `var` base basecse cannot see.
-// These pin the scope choice and every refusal — the lever is differ-refereed, so its risk is spelling
-// quality, not correctness of the winner, but a wrong REWRITE would still be shown on a nonmatch row.
+// These pin the scope choice, every refusal, and the two POSTCONDITIONS. The lever is
+// differ-refereed, so its risk is spelling quality — except for the placement, where a base local
+// the assignment does not reach is a different variable and the differ REWARDS it.
+// test/regionbase.test.ts carries the second region rule.
 import { describe, expect, test } from 'vitest';
 
+import { assertHoistsDominate, assertLocalsWritten, assertPlacementSurvives } from '../src/contracts';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { hoistScopedBases } from '../src/l3/scopebase';
+import { without } from '../src/l3/gates';
+import { pollGuards } from '../src/l3/pollguard';
+import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -378,5 +383,217 @@ describe('a throwing lever is reported, not swallowed', () => {
     });
     // no lever throws on this input, so nothing is reported — the hook exists and is wired
     expect(seen).toEqual([]);
+  });
+});
+
+describe('the admission rules are DATA, and every one of them is load-bearing', () => {
+  // `firstRejection` cannot instrument an inline `continue`, and `without(table, id)` cannot ablate
+  // one. Each case below re-runs the REAL pass with one rule dropped and asserts the refusal it was
+  // holding back — the differential the `gates.ts` contract test cannot do for a pass.
+  const armOf = (out: SFn | null): Stmt[] => (out!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+  const inArm = (arm: Stmt[], globals = G): SFn =>
+    fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }], globals);
+
+  test('nonzero-lead: ablated, the pass names a base whose lead points at another ROW', () => {
+    const arm: Stmt[] = [store(ix(594, { lead: [1] }), ix(659, { lead: [1] }))];
+    expect(hoistScopedBases(inArm(arm))).toBeNull();
+    const out = hoistScopedBases(inArm(arm), { eligibility: without(SCOPEBASE_ELIGIBILITY, 'nonzero-lead') });
+    expect(hoists(armOf(out))).toEqual(['p0']);
+  });
+
+  test('shadowed-or-nonarray-base: ablated, the pass takes the address of a LOCAL', () => {
+    const arm: Stmt[] = [store(ix(1), ix(2))];
+    expect(hoistScopedBases(inArm(arm, []))).toBeNull();
+    const out = hoistScopedBases(inArm(arm, []), {
+      eligibility: without(SCOPEBASE_ELIGIBILITY, 'shadowed-or-nonarray-base'),
+    });
+    expect(hoists(armOf(out))).toEqual(['p0']);
+  });
+
+  test('single-use: ablated, one access still gets a local', () => {
+    const arm: Stmt[] = [store(ix(1), { k: 'const', value: 0 })];
+    expect(hoistScopedBases(inArm(arm))).toBeNull();
+    expect(hoists(armOf(hoistScopedBases(inArm(arm), { gates: without(SCOPEBASE_GATES, 'single-use') })))).toEqual([
+      'p0',
+    ]);
+  });
+
+  test('repeated-const-offset: ablated, the scalar RMW shape is named', () => {
+    const arm: Stmt[] = [store(ix(7), ix(7)), store(ix(7), ix(7))];
+    expect(hoistScopedBases(inArm(arm))).toBeNull();
+    expect(
+      hoists(armOf(hoistScopedBases(inArm(arm), { gates: without(SCOPEBASE_GATES, 'repeated-const-offset') }))),
+    ).toEqual(['p0']);
+  });
+
+  test('per-iteration-use: ablated, a loop-CONDITION use hoists above the loop', () => {
+    const body = [
+      {
+        k: 'while' as const,
+        cond: { k: 'bin' as const, op: '!=' as const, l: ix(1), r: { k: 'const' as const, value: 0 } },
+        body: [],
+      },
+      store(ix(2), { k: 'const', value: 0 }),
+    ];
+    expect(hoistScopedBases(inArm(body))).toBeNull();
+    expect(
+      hoists(armOf(hoistScopedBases(inArm(body), { gates: without(SCOPEBASE_GATES, 'per-iteration-use') }))),
+    ).toEqual(['p0']);
+  });
+
+  test('nested-loop-use: ablated, a use inside a nested loop is hoisted out of it', () => {
+    const body = [
+      { k: 'while' as const, cond: { k: 'const' as const, value: 1 }, body: [store(ix(1), { k: 'const', value: 0 })] },
+      store(ix(2), { k: 'const', value: 0 }),
+    ];
+    expect(hoistScopedBases(inArm(body))).toBeNull();
+    expect(
+      hoists(armOf(hoistScopedBases(inArm(body), { gates: without(SCOPEBASE_GATES, 'nested-loop-use') }))),
+    ).toEqual(['p0']);
+  });
+});
+
+describe('a structurally SHARED access node refuses ITS KEY, and only its key', () => {
+  test('one `index` object at two tree positions is refused, the same shape unshared fires', () => {
+    // The plan repoints by NODE IDENTITY, so one object at two positions is one entry claiming two
+    // uses the hoist need not dominate. Nothing in the L3 contract forbids the sharing, so this is
+    // a loud decline rather than a second traversal.
+    const shared = ix(0, { idx: { k: 'var', name: 'i' } });
+    const arm: Stmt[] = [store(shared, { k: 'const', value: 0 }), store(shared, { k: 'const', value: 0 })];
+    expect(hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]))).toBeNull();
+
+    const distinct: Stmt[] = [
+      store(ix(0, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+      store(ix(0, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+    ];
+    const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: distinct, else: [] }]));
+    expect(hoists((out!.body[0] as Extract<Stmt, { k: 'if' }>).then)).toEqual(['p0']);
+  });
+
+  test('a SECOND key in the same function is untouched by the sharing', () => {
+    // Per KEY, not per function. A whole-function decline would make any future producer that
+    // shares one node delete every base this pass names — including the one match that returning
+    // `null` from this pass is known to cost.
+    const shared = ix(0, { idx: { k: 'var', name: 'i' }, base: { k: 'const', value: 0x40000d4 } });
+    const arm: Stmt[] = [
+      store(shared, { k: 'const', value: 0 }),
+      store(shared, { k: 'const', value: 0 }),
+      store(ix(4, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+      store(ix(8, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+    ];
+    const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]));
+    expect(out).not.toBeNull();
+    const thenArm = (out!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    // one hoist, for `g` — the shared 0x40000d4 key contributed none
+    expect(hoists(thenArm)).toEqual(['p0']);
+    expect(thenArm.filter((st) => st.k === 'assign')).toHaveLength(1);
+  });
+
+  test('`pollGuards` ALREADY shares a node, so the ordering it relies on is pinned here', () => {
+    // `l3/pollguard.ts` returns `{ k: 'if', cond: s.cond, then: [s], else: [] }` — one `cond`
+    // object at two tree positions. It is harmless only because `rank.ts` derives the statement
+    // shapes AFTER this lever, an ordering nothing else pins. Run in the other order, the key in
+    // the shared condition drops out and every other key survives.
+    const poll = ix(2, { idx: { k: 'var', name: 'i' }, base: { k: 'const', value: 0x40000d4 } });
+    const body: Stmt[] = [
+      { k: 'dowhile', cond: poll, body: [] },
+      {
+        k: 'if',
+        cond: { k: 'const', value: 1 },
+        then: [
+          store(ix(4, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+          store(ix(8, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+        ],
+        else: [],
+      },
+    ];
+    const guarded = pollGuards(fn(body));
+    expect(guarded).not.toBeNull();
+    const out = hoistScopedBases(guarded!);
+    expect(out).not.toBeNull();
+    expect(out!.locals.map((l) => l.name)).toEqual(['p0']); // `g`, not the polled device word
+  });
+});
+
+describe('the dominance POSTCONDITION, checked on the pass`s own output', () => {
+  // The catastrophic failure this module can ship is not a bad spelling: it is a base local
+  // declared where its assignment does not reach the use, which is a DIFFERENT VARIABLE — C that
+  // compiles, scores, and can win. `rank.ts`'s `respell` catches a throw and drops the candidate,
+  // so the check turns that silent wrong answer back into a loud one.
+  const pAt = (i: number): Expr => ({
+    k: 'index',
+    base: { k: 'var', name: 'p0' },
+    idx: { k: 'const', value: i },
+    width: 2,
+    signed: false,
+  });
+  const assignP0: Stmt = {
+    k: 'assign',
+    name: 'p0',
+    value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'g' } },
+  };
+  const undominated: SFn = {
+    ...fn([
+      { k: 'if', cond: { k: 'const', value: 1 }, then: [assignP0, store(pAt(1), { k: 'const', value: 0 })], else: [] },
+      store(pAt(2), { k: 'const', value: 0 }),
+    ]),
+    locals: [{ name: 'p0', type: T.ptr(T.u(16)) }],
+  };
+
+  test('a use the assignment does not reach THROWS', () => {
+    expect(() => assertHoistsDominate(undominated, new Set(['p0']))).toThrow(/p0/);
+  });
+
+  test('the same input passes assertLocalsWritten — which is why this check has to exist', () => {
+    // `assertLocalsWritten` accumulates reads and writes as SETS over the whole body, so a local
+    // assigned in one arm and read after the `if` is written somewhere and satisfies it.
+    expect(() => assertLocalsWritten(undominated)).not.toThrow();
+  });
+
+  test('the assignment moved above the `if` is accepted', () => {
+    const dominated: SFn = { ...undominated, body: [assignP0, ...undominated.body] };
+    expect(() => assertHoistsDominate(dominated, new Set(['p0']))).not.toThrow();
+  });
+
+  test('a name the pass did not mint is not this check`s business', () => {
+    expect(() => assertHoistsDominate(undominated, new Set())).not.toThrow();
+  });
+});
+
+describe('a statement SHAPE may not move a placed def below the use it serves', () => {
+  // `rank.ts` derives the statement-shape products (`/initfirst`, `/pollguard`, `/pollread`) onto
+  // EVERY spelling, AFTER a lever has placed its defs — `pollReads` folds a materialized re-read
+  // back into a loop condition, which is a move ACROSS the placement this pass computed. The
+  // postcondition inside the pass cannot see that; this is the differential that can.
+  const pAt = (i: number): Expr => ({
+    k: 'index',
+    base: { k: 'var', name: 'p0' },
+    idx: { k: 'const', value: i },
+    width: 2,
+    signed: false,
+  });
+  const assignP0: Stmt = {
+    k: 'assign',
+    name: 'p0',
+    value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'g' } },
+  };
+  const use: Stmt = store(pAt(1), { k: 'const', value: 0 });
+  const placed: SFn = { ...fn([assignP0, use]), locals: [{ name: 'p0', type: T.ptr(T.u(16)) }] };
+  const reordered: SFn = { ...placed, body: [use, assignP0] };
+
+  test('a reshaped tree that broke the placement THROWS', () => {
+    expect(() => assertPlacementSurvives(placed, reordered, new Set(['p0']))).toThrow(/p0/);
+  });
+
+  test('a reshaped tree that kept it does not', () => {
+    expect(() => assertPlacementSurvives(placed, placed, new Set(['p0']))).not.toThrow();
+  });
+
+  test('a placement this walk cannot model is not judged by it — in EITHER tree', () => {
+    // A def inside a loop body read earlier in the same body is assigned on every iteration but
+    // the first; the walk says undominated. It is not this check's business, and a shape derived
+    // from it must not be dropped on the strength of a model that never described it.
+    expect(() => assertPlacementSurvives(reordered, reordered, new Set(['p0']))).not.toThrow();
+    expect(() => assertPlacementSurvives(reordered, placed, new Set(['p0']))).not.toThrow();
   });
 });

@@ -540,6 +540,37 @@ export function stmtChildren(s: Stmt): Stmt[] {
   }
 }
 
+/** The nested statement LISTS of a statement — the SCOPES it opens.
+ *
+ *  Deliberately not `stmtChildren`, which flattens a `for`'s `init`/`inc` in with its body: those
+ *  are single statements, not lists. A `for`'s body is the only list here, which is what a caller
+ *  that PLACES into a list wants (`l3/scopebase.ts` — before the loop changes when a statement
+ *  runs, inside the body repeats it) and not what a caller that reads the init as a DEF wants
+ *  (`contracts.ts`'s dominance walk, which descends into the loop's parts itself).
+ *
+ *  It lives here so a new `Stmt` kind carrying a list is one compile error rather than a silent
+ *  miss in each caller's own recursion. Exhaustive on purpose: no `default`.
+ */
+export function stmtLists(s: Stmt): Stmt[][] {
+  switch (s.k) {
+    case 'if':
+      return [s.then, s.else];
+    case 'while':
+    case 'dowhile':
+    case 'for':
+      return [s.body];
+    case 'switch':
+      return [...s.cases.map((c) => c.body), ...(s.default ? [s.default] : [])];
+    case 'assign':
+    case 'store':
+    case 'exprstmt':
+    case 'return':
+    case 'break':
+    case 'continue':
+      return [];
+  }
+}
+
 /** Every expression node in a body, statements nested and children included — the whole-tree walk
  *  the three functions above compose into, kept here so a new node kind is a compile error in one
  *  of them rather than a silent miss in each caller's own recursion.

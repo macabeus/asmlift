@@ -9,7 +9,7 @@
 // scoreFn, so the same enumeration feeds the cli's Node/objdiff scorer and the webapp's
 // wasm/objdiff scorer alike.
 import { cBackend } from './backend/c';
-import { assertDerefsTyped, assertLocalsWritten, assertResolved } from './contracts';
+import { assertDerefsTyped, assertLocalsWritten, assertPlacementSurvives, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
@@ -985,20 +985,42 @@ export function enumerateCandidates(
         // a statement-order/shape fact orthogonal to representation; subsets compose in the
         // fixed order below. A shape that never fires declines and costs nothing.
         if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
+          // A shape REORDERS statements, and it is derived after a lever has placed its defs — so
+          // the placement is re-checked on the shaped tree (contracts.ts). Differential: judged
+          // only where the unshaped tree already satisfied the walk, so a lever whose placement it
+          // never described is not dropped on the strength of a model that does not apply.
+          //
+          // `minted` is a NAME DIFF, so for a RENAMING lever (`/regspell`, `/merge-names`) it also
+          // holds locals the lever never PLACED. Harmless and deliberate: the differential's
+          // early return absorbs a name the unshaped tree already fails on, and a renamed local
+          // whose def a shape moved below a read is the same wrongness as a placed one.
+          const minted = createdLocals(sfn, alt);
           for (const subset of SHAPE_SUBSETS) {
-            const shaped = applyShapes(subset, alt);
-            if (shaped !== null) {
-              assertResolved(shaped.out);
-              assertDerefsTyped(shaped.out);
-              assertLocalsWritten(shaped.out);
-              spellings.push({
-                suffix: `${suffix}${shaped.suffix}`,
-                source: backend.emit(shaped.out),
-                ...refsOf(shaped.out),
-                ...volOf(shaped.out),
-                // a shape derived from a proof-gated spelling inherits the requirement
-                ...proof,
-              });
+            // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
+            // Sharing the lever's outer try would let a throw deriving one subset discard every
+            // later one, under a label (the base lever's suffix) that names no shape at all.
+            const shapeSuffix = subset.map((x) => x.suffix).join('');
+            try {
+              const shaped = applyShapes(subset, alt);
+              if (shaped !== null) {
+                assertResolved(shaped.out);
+                assertDerefsTyped(shaped.out);
+                assertLocalsWritten(shaped.out);
+                assertPlacementSurvives(alt, shaped.out, minted);
+                spellings.push({
+                  suffix: `${suffix}${shaped.suffix}`,
+                  source: backend.emit(shaped.out),
+                  ...refsOf(shaped.out),
+                  ...volOf(shaped.out),
+                  // a shape derived from a proof-gated spelling inherits the requirement
+                  ...proof,
+                });
+              }
+            } catch (e) {
+              opts.onLeverError?.(
+                name + suffix + shapeSuffix,
+                e instanceof Error ? e.message.split('\n')[0] : String(e),
+              );
             }
           }
         }
@@ -1168,6 +1190,35 @@ export function enumerateCandidates(
     // runs outside `respell`'s try is the one way a lever can cost a match. `enumerate` re-runs
     // the hoist per candidate, which is pure and cheap, rather than caching it outside the guard.
     respell('/scopebase', () => hoistScopedBases(sfn));
+    // `/regionbase` — the same pass under its second region rule: a base the source spells inside N
+    // disjoint regions becomes N locals, one per region, rather than one at function scope. A LEVER
+    // beside `/scopebase`, not a replacement for it: both spellings and the un-hoisted primary stay
+    // in the list, so the differ settles which allocation the original had.
+    const regionbase = (): SFn | null => hoistScopedBases(sfn, { regions: 'per-region' });
+    respell('/regionbase', regionbase);
+    // …and its `/volatile` PRODUCT, narrowed to exactly the locals this lever mints — the same
+    // pairing `/livebase` and `/inlinebase` already carry, for the same reason. The shape this
+    // lever exists for is a DEVICE base (the DMA block at 0x040000D4), and the project's own
+    // reference spells it `vu32 *dmaRegs`; without the product every region local this lever wins
+    // with is published UNqualified, and `compareScored`'s `deviceVolatile` term — which prefers
+    // the qualified twin on a tie — never sees a qualified twin to prefer. It is a candidate like
+    // any other where the qualifier costs bytes, and the differ referees.
+    const regionVolatile = (): SFn | null => {
+      const r = regionbase();
+      return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
+    };
+    respell('/regionbase/volatile', regionVolatile);
+    // …and the `/vol-store` triple, the pairing this lever is the first to inhabit (see
+    // l3/volstore.ts, where the two qualifiers' reach over a tree's OWN locals is disjoint).
+    // `/volatile` qualifies a pointer LOCAL and `/vol-store` a STORE SITE, and this lever leaves
+    // both in one function: it homes the regions holding two or more direct uses and leaves every
+    // other spelling of the same device address inline. On `synthetic:dmascope` that residue is
+    // the write to REG_DMA0CNT that STARTS the transfer, and without the triple it is published
+    // bare beside three `volatile s32 *` region locals.
+    respell('/regionbase/volatile/vol-store', () => {
+      const v = regionVolatile();
+      return v ? volStore(v) : null;
+    });
     const enumerate = (
       label: string,
       from: () => SFn | null | undefined,
@@ -1250,6 +1301,28 @@ export function enumerateCandidates(
       };
       return { suffix, hoist, volatiles, pairings };
     });
+    // THE PLACEMENT DIFFERENTIAL, one composition inwards. `respell` re-checks a lever's
+    // placement across the statement SHAPES derived onto it; the lever-on-lever products below
+    // are the same hazard in the same file and are outside it, because the composition happens
+    // INSIDE one `make()` thunk and the intermediate tree never reaches `respell`'s check. A
+    // def-MOVING pass (`sinkInitsToFirstUse`, `nearBaseClusters`, `reindexWalks`) running on a
+    // tree a PLACING lever built can move a def below a use exactly as a shape can. Same
+    // differential, so a placement neither pass can model is not judged either way, and the throw
+    // lands inside the thunk — a reported, dropped candidate.
+    //
+    // BOTH SIDES' minted locals, because the mover MINTS TOO: `nearBaseClusters` creates the
+    // cluster base it then places, and `reindexWalks` creates the induction variable, so the
+    // outer lever's name diff alone is empty for a standalone mover and a strict subset for a
+    // composition — the mover's own stranding of its own local walks straight through. Judging a
+    // name the BEFORE tree does not carry keeps the differential honest rather than turning it
+    // absolute: a name absent from `before` is never read there, so that walk passes and only the
+    // `after` placement is judged.
+    const survives = (before: SFn | null, after: SFn | null): SFn | null => {
+      if (before !== null && after !== null) {
+        assertPlacementSurvives(before, after, new Set([...createdLocals(sfn, before), ...createdLocals(sfn, after)]));
+      }
+      return after;
+    };
     // Every product below fans over the rows a demanding row earned, never the whole roster.
     const paired = livebases.filter((l) => l.pairings);
     for (const { suffix, hoist, volatiles } of livebases) {
@@ -1263,11 +1336,11 @@ export function enumerateCandidates(
     for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/indexed`, () => {
         const r = hoist();
-        return r ? reindexWalks(r) : null;
+        return r ? survives(r, reindexWalks(r)) : null;
       });
       respell(`${suffix}/volatile/indexed`, () => {
         const r = volatiles();
-        return r ? reindexWalks(r) : null;
+        return r ? survives(r, reindexWalks(r)) : null;
       });
     }
     // The livebase × sinkinit PAIRINGS — the same admission again: row-demanded
@@ -1277,11 +1350,11 @@ export function enumerateCandidates(
     for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/sinkinit`, () => {
         const r = hoist();
-        return r ? sinkInitsToFirstUse(r) : null;
+        return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
       respell(`${suffix}/volatile/sinkinit`, () => {
         const r = volatiles();
-        return r ? sinkInitsToFirstUse(r) : null;
+        return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
     }
     // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
@@ -1294,7 +1367,7 @@ export function enumerateCandidates(
     // spellings are emitted; the differ referees.
     const nearSpan = target.compilerBehaviors.nearBaseSpan;
     const near = (base: SFn | null): SFn | null =>
-      base !== null && nearSpan !== undefined ? nearBaseClusters(base, nearSpan) : null;
+      base !== null && nearSpan !== undefined ? survives(base, nearBaseClusters(base, nearSpan)) : null;
     // …and WHERE its cluster inits sit, which is a second question with its own answer.
     // `l3/nearbase.ts` places them above the run already there, and that is a committed choice
     // made on one row (`synthetic:dmafield`) rather than on a compiler fact — a cluster base is
@@ -1308,7 +1381,7 @@ export function enumerateCandidates(
     // 1140 observations — where the two orderings agree the sink declines and nothing is added.
     const nearSunk = (base: SFn | null): SFn | null => {
       const r = near(base);
-      return r ? sinkInitsToFirstUse(r) : null;
+      return r ? survives(r, sinkInitsToFirstUse(r)) : null;
     };
     respell('/nearbase', () => near(sfn));
     respell('/nearbase/sinkinit', () => nearSunk(sfn));
