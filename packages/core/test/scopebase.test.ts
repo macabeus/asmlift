@@ -13,7 +13,13 @@ import { assertLocalsWritten } from '../src/contracts';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
-import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, assertHoistsDominate, hoistScopedBases } from '../src/l3/scopebase';
+import {
+  SCOPEBASE_ELIGIBILITY,
+  SCOPEBASE_GATES,
+  assertHoistsDominate,
+  assertPlacementSurvives,
+  hoistScopedBases,
+} from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -511,5 +517,43 @@ describe('the dominance POSTCONDITION, checked on the pass`s own output', () => 
 
   test('a name the pass did not mint is not this check`s business', () => {
     expect(() => assertHoistsDominate(undominated, new Set())).not.toThrow();
+  });
+});
+
+describe('a statement SHAPE may not move a placed def below the use it serves', () => {
+  // `rank.ts` derives the statement-shape products (`/initfirst`, `/pollguard`, `/pollread`) onto
+  // EVERY spelling, AFTER a lever has placed its defs — `pollReads` folds a materialized re-read
+  // back into a loop condition, which is a move ACROSS the placement this pass computed. The
+  // postcondition inside the pass cannot see that; this is the differential that can.
+  const pAt = (i: number): Expr => ({
+    k: 'index',
+    base: { k: 'var', name: 'p0' },
+    idx: { k: 'const', value: i },
+    width: 2,
+    signed: false,
+  });
+  const assignP0: Stmt = {
+    k: 'assign',
+    name: 'p0',
+    value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'g' } },
+  };
+  const use: Stmt = store(pAt(1), { k: 'const', value: 0 });
+  const placed: SFn = { ...fn([assignP0, use]), locals: [{ name: 'p0', type: T.ptr(T.u(16)) }] };
+  const reordered: SFn = { ...placed, body: [use, assignP0] };
+
+  test('a reshaped tree that broke the placement THROWS', () => {
+    expect(() => assertPlacementSurvives(placed, reordered, new Set(['p0']))).toThrow(/p0/);
+  });
+
+  test('a reshaped tree that kept it does not', () => {
+    expect(() => assertPlacementSurvives(placed, placed, new Set(['p0']))).not.toThrow();
+  });
+
+  test('a placement this walk cannot model is not judged by it — in EITHER tree', () => {
+    // A def inside a loop body read earlier in the same body is assigned on every iteration but
+    // the first; the walk says undominated. It is not this check's business, and a shape derived
+    // from it must not be dropped on the strength of a model that never described it.
+    expect(() => assertPlacementSurvives(reordered, reordered, new Set(['p0']))).not.toThrow();
+    expect(() => assertPlacementSurvives(reordered, placed, new Set(['p0']))).not.toThrow();
   });
 });

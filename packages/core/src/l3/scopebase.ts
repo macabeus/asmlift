@@ -1,5 +1,14 @@
-// L3 re-spelling lever: hoist a reused global base into a pointer local at the INNERMOST scope
-// that contains all of its uses.
+// L3 re-spelling lever: name a reused global base in a pointer local placed by SCOPE rather than at
+// the function top. Two region rules ship, one pass and one collected index behind them:
+//
+//   `/scopebase`   ONE local for a key, at the innermost list holding all of its uses (else the
+//                  deepest cluster of two).
+//   `/regionbase`  ONE LOCAL PER REGION — a base the source spells inside N disjoint regions is N
+//                  locals. agbcc discriminates on how many distinct locals with disjoint live
+//                  ranges exist, NOT on where they are declared: the three-at-function-top spelling
+//                  and the three-block-scoped one assemble byte-identically. So there is no nested
+//                  declaration block here and none is needed — the locals are declared at function
+//                  top and only their ASSIGNMENTS are placed per region.
 //
 // The lever earns its place: returning `null` from `hoistScopedBases` costs
 // kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.
@@ -31,17 +40,17 @@
 // shape. The decomp author's alternative is a no-op read-modify-write (`g[0][K] += 0;`) purely to
 // force that materialization; naming the base is the same codegen without the quirk.
 //
-// A LEVER, not a rewrite: emitted as an ADDITIONAL candidate (rank.ts `/scopebase`) with the
-// differ refereeing, so the un-hoisted spelling is always still in the list and this can never cost
-// a match.
+// A LEVER, not a rewrite: both region rules are emitted as ADDITIONAL candidates (rank.ts
+// `/scopebase`, `/regionbase`) with the differ refereeing, so the un-hoisted spelling is always
+// still in the list and neither can cost a match.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION. The hoisted value is a pure ADDRESS of a global — no
 // load, nothing observable, nothing that can fault — so evaluating it earlier in a scope that
 // DOMINATES every use is invisible. The rewritten accesses keep their own width/signedness, so
-// every stride is unchanged. Domination is the load-bearing half: `collect` and `rewriteStmt` must
-// walk the SAME tree, or an access the planner never placed gets repointed at a local whose
-// assignment does not reach it — compiling C that reads an uninitialized pointer, which neither
-// boundary contract catches (they check resolution and deref typing, not definite assignment).
+// every stride is unchanged. Domination is the load-bearing half, and it is CHECKED rather than
+// argued: `assertHoistsDominate` re-walks the emitted tree, because an access repointed at a local
+// whose assignment does not reach it compiles, scores, and can WIN, and no stage-boundary contract
+// sees it (they check resolution, deref typing, and whether a local is written ANYWHERE).
 //
 // ORDERING: `hoistBaseLocals` (basecse) runs unconditionally in `structureChecked`, BEFORE
 // rank's levers see the tree. So this pass's `addr`/`const` input is what basecse's DEFAULT table
@@ -529,6 +538,27 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
     }
   };
   walk(sfn.body, new Set());
+}
+
+/** The same guarantee across a STATEMENT-SHAPE re-spelling (`rank.ts`'s `/initfirst`,
+ *  `/pollguard`, `/pollread`), which is derived onto every lever tree AFTER this pass has placed
+ *  its defs and can therefore move one — `pollReads` folds a materialized re-read back into a loop
+ *  condition, a move across the placement computed here.
+ *
+ *  A DIFFERENTIAL, and that is what makes it safe to apply to every lever rather than this one:
+ *  the walk judges the reshaped tree only where it already described the unshaped one, so a
+ *  placement it cannot model (a def inside a loop body read earlier in the same body is assigned
+ *  on every iteration but the first) is not judged by it either way. */
+export function assertPlacementSurvives(before: SFn, after: SFn, minted: ReadonlySet<string>): void {
+  if (minted.size === 0) {
+    return;
+  }
+  try {
+    assertHoistsDominate(before, minted);
+  } catch {
+    return;
+  }
+  assertHoistsDominate(after, minted);
 }
 
 /**

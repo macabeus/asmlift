@@ -39,7 +39,7 @@ import { pollGuards, pollReads } from './l3/pollguard';
 import { pointerFields } from './l3/ptrfield';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
-import { hoistScopedBases } from './l3/scopebase';
+import { assertPlacementSurvives, hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
@@ -985,12 +985,18 @@ export function enumerateCandidates(
         // a statement-order/shape fact orthogonal to representation; subsets compose in the
         // fixed order below. A shape that never fires declines and costs nothing.
         if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
+          // A shape REORDERS statements, and it is derived after a lever has placed its defs — so
+          // the placement is re-checked on the shaped tree (l3/scopebase.ts). Differential: judged
+          // only where the unshaped tree already satisfied the walk, so a lever whose placement it
+          // never described is not dropped on the strength of a model that does not apply.
+          const minted = createdLocals(sfn, alt);
           for (const subset of SHAPE_SUBSETS) {
             const shaped = applyShapes(subset, alt);
             if (shaped !== null) {
               assertResolved(shaped.out);
               assertDerefsTyped(shaped.out);
               assertLocalsWritten(shaped.out);
+              assertPlacementSurvives(alt, shaped.out, minted);
               spellings.push({
                 suffix: `${suffix}${shaped.suffix}`,
                 source: backend.emit(shaped.out),
