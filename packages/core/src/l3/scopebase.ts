@@ -296,6 +296,53 @@ function deepestCluster(all: Site[]): { scope: Stmt[]; depth: number; uses: Site
   return best;
 }
 
+/** How a key's uses are cut into REGIONS — the one axis this pass now varies.
+ *
+ *  `'whole'` names a key ONCE: the innermost list holding every use, else the deepest cluster of
+ *  two. `'per-region'` partitions the uses by their INNERMOST ENCLOSING LIST and serves every
+ *  surviving partition, which is what a source spelling the same base inside N disjoint regions
+ *  looks like. */
+export type RegionSelector = 'whole' | 'per-region';
+
+interface Region {
+  scope: Stmt[];
+  depth: number;
+  uses: Site[];
+}
+
+/** DIRECT uses only, and the FUNCTION BODY is a region like any other.
+ *
+ *  Not the residual-subtree rule (a list's entry holding every use beneath it, which is what
+ *  `deepestCluster` builds): under that rule the body region holds the arms' uses too, and the
+ *  loop and offset rules then judge a region on uses that are not in it. Not an ANTICHAIN of
+ *  scope-disjoint regions either — the body list encloses both arms and is served anyway. What
+ *  separates a region from the ones nested in it is only which uses are direct.
+ *
+ *  The synthetic depth-0 entry is why `collect`'s `path` is NOT seeded with `sfn.body`: `idx`
+ *  carries one entry more than `path` and `before` reads `idx[depth]` through that invariant, so
+ *  re-seeding would shift it for every key in every function. A region at depth 0 reads `idx[0]`,
+ *  which is already the index within the body. */
+function regionsOf(all: Site[], body: Stmt[], selector: RegionSelector): Region[] {
+  if (selector === 'whole') {
+    const at = commonScope(all);
+    if (at) {
+      return [{ scope: at.scope, depth: at.depth, uses: all }];
+    }
+    const cluster = deepestCluster(all);
+    return cluster ? [cluster] : [];
+  }
+  const byList = new Map<Stmt[], Region>();
+  for (const u of all) {
+    const depth = u.path.length;
+    const scope = depth === 0 ? body : u.path[depth - 1];
+    const e = byList.get(scope) ?? { scope, depth, uses: [] };
+    e.uses.push(u);
+    byList.set(scope, e);
+  }
+  // insertion order — first appearance of each region, so emission stays deterministic
+  return [...byList.values()];
+}
+
 /** The two loop facts, split apart because they are two different rules with two different
  *  arguments — see the gate table.
  *
@@ -365,6 +412,7 @@ export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [
 /** How `hoistScopedBases` may be re-run: with one rule dropped (the ablation differentials in
  *  test/scopebase.test.ts) — nothing here changes what the default call does. */
 export interface ScopeBaseOpts {
+  readonly regions?: RegionSelector;
   readonly eligibility?: readonly Gate<AccessCtx>[];
   readonly gates?: readonly Gate<RegionCtx>[];
 }
@@ -430,6 +478,7 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
 export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null {
   const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
   const gates = opts.gates ?? SCOPEBASE_GATES;
+  const selector = opts.regions ?? 'whole';
   compound = false;
   sharedNode = false;
   const globals = addressableGlobals(sfn);
@@ -450,52 +499,31 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   // construction rather than by a second predicate that could disagree.
   const repoint = new Map<Expr, string>();
   for (const [key, rec] of found) {
-    // The count and the offset tally are judged over the KEY, the loop facts over the REGION the
-    // selector picks below — the scoping this pass has always used, now stated rather than implied
-    // by where each `continue` sat.
+    // The count and the offset tally are judged over the KEY, the loop facts over the REGION — the
+    // scoping this pass has always used, now stated rather than implied by where each `continue`
+    // sat.
     const repeatedConstOffset = [...rec.constOff.values()].some((n) => n >= 2);
-    let at = commonScope(rec.uses);
-    let uses = rec.uses;
-    if (!at) {
-      // The uses span the FUNCTION BODY, so no single scope holds them. Rather than decline, take a
-      // scope that holds two or more and name the base for THOSE only, leaving the rest as they
-      // were.
-      //
-      // The selection rule is DEEPEST, with no size term, and that is a real limitation rather than
-      // a model of the compiler: a scope with four uses enclosing a nested scope with two will name
-      // the TWO and leave the four re-deriving the address. Only ONE cluster is ever served, and
-      // when two siblings tie on depth the first-appearing wins — arbitrary, not principled.
-      // Largest-cluster-with-deepest-as-tie-break is the better rule; it is a behaviour change and
-      // belongs with the placement-selector consolidation, not bolted on here.
-      //
-      // NOTE this fires for an `addr`/`const` base too — nothing here tests the base kind. That is
-      // not a duplicate of basecse's hoist: basecse runs FIRST (see the ordering note in the file
-      // header), so any `addr`/`const` base reaching this pass is one basecse already REFUSED.
-      const cluster = deepestCluster(rec.uses);
-      if (!cluster) {
+    for (const r of regionsOf(rec.uses, sfn.body, selector)) {
+      if (
+        firstRejection(gates, {
+          uses: rec.uses.length,
+          repeatedConstOffset,
+          perIteration: runsPerIteration(r.uses),
+          nestedLoop: underNestedLoop(r.uses, r.depth),
+        }) !== null
+      ) {
         continue;
       }
-      at = { scope: cluster.scope, depth: cluster.depth };
-      uses = cluster.uses;
+      const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
+      // the earliest statement of the region list that (transitively) holds one of its uses.
+      // `path` starts EMPTY, so `idx` carries one entry more than `path`: idx[j+1] is the index
+      // within path[j]. The region is path[depth-1], so its index is idx[depth] — and idx[0] for
+      // the depth-0 body region.
+      const before = Math.min(...r.uses.map((u) => u.idx[r.depth]));
+      const name = fresh();
+      r.uses.forEach((u) => repoint.set(u.node, name));
+      plan.push({ scope: r.scope, key, name, type, base: rec.sample.base as LeafBase, before });
     }
-    if (
-      firstRejection(gates, {
-        uses: rec.uses.length,
-        repeatedConstOffset,
-        perIteration: runsPerIteration(uses),
-        nestedLoop: underNestedLoop(uses, at.depth),
-      }) !== null
-    ) {
-      continue;
-    }
-    const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
-    // the earliest statement of the scope list that (transitively) holds a use
-    // `path` starts EMPTY, so `idx` carries one entry more than `path`: idx[j+1] is the index
-    // within path[j]. The scope is path[depth-1], so its index is idx[depth].
-    const before = Math.min(...uses.map((u) => u.idx[at.depth]));
-    const name = fresh();
-    uses.forEach((u) => repoint.set(u.node, name));
-    plan.push({ scope: at.scope, key, name, type, base: rec.sample.base as LeafBase, before });
   }
   if (plan.length === 0) {
     return null;
