@@ -3418,7 +3418,6 @@ export const SYNTHETIC: SynthSpec[] = [
   // `invalid type argument of '->'`). It REACHES the construct in every case, and its output shows
   // it has the same two absences asmlift does — no base local anywhere (all three expansions
   // spelled through the raw constant) and the third store merged below the arms through `var_r0`.
-  // spelled through the raw constant) and the third store merged below the arms through `var_r0`.
   {
     sym: 'dmascope1',
     src:
