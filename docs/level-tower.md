@@ -95,8 +95,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/vol-store`,
     `/unreduce`, `/ptr-field`, `/mulfirst`, `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
     lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
-    `/merge-names`, `/fresh-merge`) — plus `/raw-globals`, the signedness pin and `/setup-args`, which re-run the
-    lift itself.
+    `/merge-names`, `/fresh-merge`) — plus `/raw-globals`, the signedness pin, `/setup-args` and
+    `/connective`, which re-run the lift itself.
     The roster is illustrative; `rank.ts` is the source of truth.
     Each emits an _alternative candidate_ rather than replacing the primary, and the differ
     referees — the
@@ -144,6 +144,35 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   the shapes the substitution cannot reach have no row demanding them, take the axis when one
   appears — and name the fork in the lever's header, because otherwise the gap left behind reads as
   an oversight rather than as the price of the mechanism.
+
+  **Before either, ask whether the DEFAULT can already spell it — and prove the answer by
+  compiling.** `/connective` was shipped on the premise that `x == 0 || x == 2` and
+  `switch (x) { case 0: case 2: … }` are two spellings of one asm shape that only a differ can
+  choose between, and the row it was built for turned out to want neither: what was missing was a
+  ten-line grouping in the structurer, which took
+  `kleod:ProcessInputAndUpdateEntities:agbcc` from 367 to 306 with the axis ON and to 306 with it
+  OFF — same breakdown, half the wall clock.
+
+  The rule that follows is cheap: **an underdetermination claim about two source spellings is a
+  COMPILER claim, so compile both and diff the objects before building anything.** A score table
+  cannot make it for you — the cheaper spelling was never in the fan to lose. And the compile has a
+  second half, which two attempts here got wrong in the same way: **compile the shape you are
+  generalizing over, not the first shape that fits in a test file, and record the flags.** The
+  measurements, all at `TOOLCHAIN.agbccFlags` and `IDO_TOOLCHAIN.ccFlags`:
+
+  | shape                            | grouped vs `\|\|`                                                        | duplicated body vs grouped                                                                                                                                 |
+  | -------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | agbcc, 1 case group + `default:` | 12 insns each, **one object**                                            | agbcc MERGES the copies                                                                                                                                    |
+  | agbcc, 2 groups                  | 20 vs 16 — **different** (balanced `bgt` dispatch vs a sequential chain) | merged block keeps the LAST copy's position, so it equals the grouped arm placed THERE (md5 555abb1a) and not the one placed at the first value (fe4d7d35) |
+  | agbcc, 3 groups                  | 24 vs 20 — **different**                                                 | —                                                                                                                                                          |
+  | IDO, 1 group + `default:`        | 64 bytes each, **one object**                                            | IDO does **not** merge: 224 bytes against 144                                                                                                              |
+  | IDO, 2 groups                    | 80 bytes each, **different bytes**                                       | the two placements also differ (689f34ec vs ec39af99)                                                                                                      |
+
+  So the identity is a property of the DEGENERATE shape, on both compilers, and the axis is a real
+  second spelling on every recovered multi-group switch. What makes the grouping right is an
+  argument about the ROM rather than about which source is prettier: under agbcc the duplicated
+  source is unreachable as a ROM shape, and under IDO it is a different ROM, so a shared block means
+  stacked labels on either compiler.
 
   **And 2× is a LOWER bound, not the price.** A new axis doubles its own admitting rows, and it
   also UN-COLLAPSES sibling axes that `seenTrees` was deduping away on the base tree: a sibling
@@ -292,6 +321,14 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   ~200 lines whose safety rests on every copy staying no stricter than the scope it mirrors, with
   nothing checking that and nothing in the harness reporting a candidate that was never
   enumerated.
+
+  `/connective`'s `onTreeOwned` is the SHAPE that blocker wants, one level down: the enumeration
+  gate is a callback the pass fires from its own refusal (`raise/shortcircuit.ts`), so there is no
+  second copy of the matcher to keep in step and the "no stricter than the scope it mirrors"
+  obligation is vacuous — and `PreRecoveryOptions` is the steering channel that makes it reusable,
+  one field per pass, the L1 analogue of `AnalyzeOptions`. Absorbing it into `STRUCTURING_AXES`
+  still needs one more gate KIND, since what is shipped is a side-effecting report rather than a
+  `variantGate` predicate; that step is smaller than the ~200 lines above and is not paid here.
 
 The **backends** ([`backend/`](../packages/core/src/backend)) then print L3 as concrete source —
 C, Pascal, and a scoped C++ — one neutral tree, three spellings. Every language-specific decision

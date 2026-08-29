@@ -174,29 +174,7 @@ describe('a shared block behind long-branch trampolines', () => {
     // switch-recover.ts (its `isCmpOpcode` gate), so a scrutinee compared against constants more
     // than once is left alone — here ^h's split node is RELATIONAL and ^g's leaf is an equality,
     // which the pairwise test used on a direct edge would not catch.
-    const x = mkValue(T.unk(32));
-    const constTest = (out: Value, k: number, opcode: 'icmp_eq' | 'icmp_sgt'): Op[] => {
-      const c = mkValue(T.unk(32));
-      return [mkOp('const', { results: [c], attrs: { value: k } }), mkOp(opcode, { operands: [x, c], results: [out] })];
-    };
-    const fn = chain({
-      gOnTaken: true,
-      sharedOnGTaken: false,
-      trampolines: true,
-      gBody: (out) => constTest(out, 20, 'icmp_eq'),
-    });
-    const head = fn.blocks[0];
-    const c1 = head.ops[head.ops.length - 1].operands[0];
-    // `x` must not be a constant itself, or neither test reads as "value against a constant"
-    const seed = mkValue(T.unk(32));
-    // keep the head's first op — the value `shared` returns — and replace only the comparison
-    head.ops.splice(
-      1,
-      head.ops.length - 2,
-      mkOp('const', { results: [seed], attrs: { value: 3 } }),
-      mkOp('add', { operands: [seed, seed], results: [x] }),
-      ...constTest(c1, 10, 'icmp_sgt'),
-    );
+    const fn = relayedComparisonTree();
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
     expect(connective(fn)).toBeNull();
     verify(fn);
@@ -478,41 +456,7 @@ describe('the refusals found by the adversarial round', () => {
     // `switch (x) { case 1: case 2: … }` compiles to exactly this fold's input shape. Taking it
     // would replace the `cond_br`'s icmp with a `logic_or`, which switch-recover.ts's isCmpOpcode
     // gate rejects — permanently degrading a clean `switch` into nested ifs.
-    const shared = blk([mkOp('ret', { operands: [] })]);
-    const other = blk([mkOp('ret', { operands: [] })]);
-    const x = mkValue(T.unk(32)); // ONE scrutinee, compared against two constants
-    const mkTest = (v: number, out: Value): Op[] => {
-      const k = mkValue(T.unk(32));
-      return [
-        mkOp('const', { results: [k], attrs: { value: v } }),
-        mkOp('icmp_eq', { operands: [x, k], results: [out] }),
-      ];
-    };
-    const c2 = mkValue(T.unk(32));
-    const g = blk([
-      ...mkTest(2, c2),
-      {
-        ...mkOp('cond_br', { operands: [c2] }),
-        successors: [
-          { block: shared, args: [] },
-          { block: other, args: [] },
-        ],
-      },
-    ]);
-    const c1 = mkValue(T.unk(32));
-    const head = blk([
-      mkOp('load', { operands: [mkValue(T.ptr(T.u(32)))], results: [x], attrs: { off: 0, signed: false, width: 4 } }),
-      ...mkTest(1, c1),
-      {
-        ...mkOp('cond_br', { operands: [c1] }),
-        successors: [
-          { block: shared, args: [] },
-          { block: g, args: [] },
-        ],
-      },
-    ]);
-    const fn: Fn = { name: 'f', blocks: [head, g, shared, other] };
-    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(recognizeBranchShortCircuit(comparisonTree())).toBe(false);
   });
 
   test('a RELATIONAL pair on one value still folds — a range check is a real connective', () => {
@@ -564,6 +508,148 @@ describe('the refusals found by the adversarial round', () => {
       ],
     });
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+});
+
+/** The same tree reached through RELAYS, with a RELATIONAL split node on the head — the shape that
+ *  escapes the pairwise test and needs the function-wide count. */
+function relayedComparisonTree(): Fn {
+  const x = mkValue(T.unk(32));
+  const constTest = (out: Value, k: number, opcode: 'icmp_eq' | 'icmp_sgt'): Op[] => {
+    const c = mkValue(T.unk(32));
+    return [mkOp('const', { results: [c], attrs: { value: k } }), mkOp(opcode, { operands: [x, c], results: [out] })];
+  };
+  const fn = chain({
+    gOnTaken: true,
+    sharedOnGTaken: false,
+    trampolines: true,
+    gBody: (out) => constTest(out, 20, 'icmp_eq'),
+  });
+  const head = fn.blocks[0];
+  const c1 = head.ops[head.ops.length - 1].operands[0];
+  // `x` must not be a constant itself, or neither test reads as "value against a constant"
+  const seed = mkValue(T.unk(32));
+  // keep the head's first op — the value `shared` returns — and replace only the comparison
+  head.ops.splice(
+    1,
+    head.ops.length - 2,
+    mkOp('const', { results: [seed], attrs: { value: 3 } }),
+    mkOp('add', { operands: [seed, seed], results: [x] }),
+    ...constTest(c1, 10, 'icmp_sgt'),
+  );
+  return fn;
+}
+
+/** `x == 1` on the head, `x == 2` on the second block, both reaching one shared block — the shape
+ *  `switch (x) { case 1: case 2: … }` compiles to, and the one `if (x == 1 || x == 2)` compiles to
+ *  as well WHERE THE SWITCH HAS NOTHING ELSE TO DISPATCH ON. They part as soon as it does (agbcc
+ *  20 instructions against 16 at two case groups), which is why the choice is the differ's. */
+function comparisonTree(): Fn {
+  const shared = blk([mkOp('ret', { operands: [] })]);
+  const other = blk([mkOp('ret', { operands: [] })]);
+  const x = mkValue(T.unk(32)); // ONE scrutinee, compared against two constants
+  const mkTest = (v: number, out: Value): Op[] => {
+    const k = mkValue(T.unk(32));
+    return [
+      mkOp('const', { results: [k], attrs: { value: v } }),
+      mkOp('icmp_eq', { operands: [x, k], results: [out] }),
+    ];
+  };
+  const c2 = mkValue(T.unk(32));
+  const g = blk([
+    ...mkTest(2, c2),
+    {
+      ...mkOp('cond_br', { operands: [c2] }),
+      successors: [
+        { block: shared, args: [] },
+        { block: other, args: [] },
+      ],
+    },
+  ]);
+  const c1 = mkValue(T.unk(32));
+  // `x` is computed, not a `const`: `constTestScrutinee` wants exactly one side of each `icmp`
+  // constant, and a constant scrutinee reads as neither test comparing a value against one.
+  const seed = mkValue(T.unk(32));
+  const head = blk([
+    mkOp('const', { results: [seed], attrs: { value: 3 } }),
+    mkOp('add', { operands: [seed, seed], results: [x] }),
+    ...mkTest(1, c1),
+    {
+      ...mkOp('cond_br', { operands: [c1] }),
+      successors: [
+        { block: shared, args: [] },
+        { block: g, args: [] },
+      ],
+    },
+  ]);
+  return { name: 'f', blocks: [head, g, shared, other] };
+}
+
+// The tree-ownership refusal chooses a SPELLING where every other refusal in this pass guards
+// soundness, so it is the one with a second arm: `foldTreeOwned` takes the fold, `onTreeOwned`
+// reports the site either way, and rank.ts gates its axis on that report.
+describe('the connective-vs-tree axis', () => {
+  test('`foldTreeOwned` takes the fold the tree refusal owns, and the result verifies', () => {
+    const fn = comparisonTree();
+    expect(recognizeBranchShortCircuit(fn, { foldTreeOwned: true })).toBe(true);
+    expect(connective(fn)).toBe('logic_or');
+    verify(fn);
+  });
+
+  test('the relayed clause does NOT move with the flag — it is a different statement', () => {
+    // The pairwise clause is switch-recover.ts's own PRE1, a NECESSARY condition for recovery, so
+    // it refuses "a switch could not be ruled out here" — close enough to a spelling question that
+    // an axis can referee it. The relayed clause is a blunt function-wide COUNT that fires on an
+    // ordinary loop counter (see the REFUSALS note) with no second legitimate spelling behind it.
+    // It has no inhabitant in any benchmark row, so widening it would be scaffolding.
+    const fn = relayedComparisonTree();
+    let seen = 0;
+    expect(recognizeBranchShortCircuit(fn, { foldTreeOwned: true, onTreeOwned: () => seen++ })).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(seen).toBe(0); // and it is not reported either — the axis has no inhabitant here
+    verify(fn);
+  });
+
+  test('`onTreeOwned` reports the site while the default still refuses it', () => {
+    let seen = 0;
+    const fn = comparisonTree();
+    expect(recognizeBranchShortCircuit(fn, { onTreeOwned: () => seen++ })).toBe(false);
+    expect(seen).toBeGreaterThan(0);
+  });
+
+  test('…and stays silent where a LATER refusal would have stopped the fold anyway', () => {
+    // The gate is asked LAST. A site the tree refusal owns but that `sameArgs` also refuses has no
+    // `/connective` candidate to offer, and reporting it would double the row's whole candidate
+    // cross to enumerate duplicates the dedup collapses.
+    const fn = comparisonTree();
+    const h = fn.blocks[0];
+    const ht = h.ops[h.ops.length - 1];
+    // give the shared edge from ^h an argument its sibling from ^g does not carry
+    const shared = forwardingTargetOf(ht.successors[0].block);
+    shared.params.push(mkValue(T.unk(32)));
+    ht.successors[0].args = [mkValue(T.unk(32))];
+    let seen = 0;
+    expect(recognizeBranchShortCircuit(fn, { onTreeOwned: () => seen++ })).toBe(false);
+    expect(seen).toBe(0);
+  });
+
+  test('…and stays silent where the fold was going to happen anyway', () => {
+    // A RELATIONAL pair shares a scrutinee and is not a dispatch tree, so it never reaches the
+    // refusal — reporting it would enumerate the axis on a function with no inhabitant for it.
+    let seen = 0;
+    const fn = chain({ gOnTaken: false, sharedOnGTaken: true });
+    expect(recognizeBranchShortCircuit(fn, { onTreeOwned: () => seen++ })).toBe(true);
+    expect(seen).toBe(0);
+  });
+
+  test('the flag widens the SHAPE only — every other refusal still applies', () => {
+    // The tree fixture with a side effect in the second block: folding would run the store
+    // unconditionally, and that is wrong under either spelling.
+    const fn = comparisonTree();
+    fn.blocks[1].ops.unshift(
+      mkOp('store', { operands: [mkValue(T.ptr(T.u(8))), mkValue(T.unk(32))], attrs: { off: 0, width: 1 } }),
+    );
+    expect(recognizeBranchShortCircuit(fn, { foldTreeOwned: true })).toBe(false);
   });
 });
 

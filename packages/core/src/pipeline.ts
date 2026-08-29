@@ -24,7 +24,7 @@ import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternAppli
 import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
 import { foldEmptyLatches } from './raise/latch';
-import { type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
+import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
 import { StructureError, structure } from './structure/structure';
@@ -196,7 +196,13 @@ export interface RaiseHooks {
  *  of return-sinking does take away `br` predecessors it needs — the dominance gate is what makes
  *  that unreachable, since the blocks retsink wants are never back-edge sources. It goes last
  *  because that is where the CFG stops moving. */
-export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHooks = {}, self?: FnProto): void {
+export function raiseRecovered(
+  fn: Fn,
+  target: TargetDescription,
+  hooks: RaiseHooks = {},
+  self?: FnProto,
+  pre: PreRecoveryOptions = {},
+): void {
   runPreRecovery(
     fn,
     target,
@@ -205,6 +211,7 @@ export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHo
       hooks.afterPass?.(pass, result);
     },
     self,
+    pre,
   );
   hooks.beforeRecover?.();
   recoverTypes(fn);

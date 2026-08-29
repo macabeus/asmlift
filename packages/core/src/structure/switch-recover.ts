@@ -604,18 +604,59 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // the bodies is the SOURCE's arm order instead.
     //
     // TWO arms the layout cannot order, both falling back rather than recovering:
-    //   - two case VALUES sharing one body block share its index. jump.c's CROSS-JUMP is what
-    //     produces that on agbcc (stacked labels are not: `case 2: case 3:` compiles to a range test
-    //     the walk reads as navigation and declines), so the tie is one the MERGE erased, and
-    //     ascending value breaks it;
+    //   - two case VALUES sharing one body block share its index, so the tie is one the merge (or
+    //     the source's own stacked labels) erased, and ascending value breaks it. They become ONE
+    //     arm below, so the tie only orders that arm against the others. ADJACENT stacked labels
+    //     never get here: `case 2: case 3:` compiles to a range test the walk reads as navigation
+    //     and declines, while `case 0: case 2:` compiles to the two equality tests it recovers —
+    //     both checked against agbcc;
     //   - an arm with no body of its own (`case k: break;`) has its edge resolve to the MERGE, so it
     //     inherits the merge's index and sorts after every arm that HAS a body.
+    //
+    // BOOKED, UNPAID: the grouping makes arm ORDER observable on a shape the ascending-value
+    // fallback did not have before, and IDO turns out to lay case bodies out in SOURCE order too —
+    // the same function with `case 1:` written first and last differ (.text md5 ec39af99 against
+    // 689f34ec, 144 bytes each), which is what `switchArmsFollowLayout` recovers. target.ts sets
+    // the bar for opting a compiler in at a SOURCE-level argument about its passes, not at two
+    // objects, and that argument is unpaid for IDO; nothing here changes while it is. What the
+    // grouping cannot do is make a non-agbcc row worse, because the ungrouped spelling is not a
+    // rival there: under IDO it compiles to two copies and a different ROM entirely.
     const scrutExpr = expr(scrut);
     const sortedCases = [...cases.entries()].sort((a, c) =>
       switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],
     );
-    const outCases: SwitchCase[] = sortedCases.map(([k, blk]) => ({
-      values: [k],
+    // TWO VALUES ONE BODY IS ONE ARM. `SwitchCase.values` stacks labels for exactly this, and the
+    // jump-table regime groups the same way (structure.ts's `armOf`). Emitting the body once per
+    // label is `structureRegion` run twice over one block: a duplication, not a spelling choice.
+    //
+    // WHY BLOCK IDENTITY IS THE KEY, and not a body-equality one like `sameBareExit` above. agbcc
+    // MERGES two written-out copies into one block — target.ts's `switchArmsFollowLayout` note
+    // says so from agbcc's own sources, SRCS compiling jump.c — and compiling both directions at
+    // TOOLCHAIN.agbccFlags says WHERE the merged block lands: at the last copy's position. So
+    // `case 0: A break; case 1: … case 2: A break;` and the grouped arm placed THERE are one
+    // object (.text md5 555abb1a), while the grouped arm placed at the first value is not
+    // (fe4d7d35). That is why the grouped spelling round-trips rather than merely reading shorter:
+    // agbcc declares `switchArmsFollowLayout`, so the arm goes exactly where the merged block sits.
+    // IDO does not merge at all — 224 bytes against the grouped 144 — so on MIPS a shared block can
+    // only have come from stacked labels. Two DISTINCT blocks with equal bodies therefore mean one
+    // arm on neither compiler: under agbcc that ROM is unreachable, under IDO it is what two arms
+    // compile to. Sound also because a case entry with a phi already declined above
+    // (`asLeafOrTest`), so two edges onto one body bind nothing that could differ.
+    //
+    // An arm takes the position of its FIRST value, which keeps the sort above. `defaultLayoutPos`
+    // is handed the GROUPED entry list because what it returns is an INDEX INTO the arm array, so
+    // the list it counts and the list it indexes must be one list.
+    const armsByBlock = new Map<Block, number[]>();
+    for (const [k, blk] of sortedCases) {
+      const prev = armsByBlock.get(blk);
+      if (prev) {
+        prev.push(k);
+      } else {
+        armsByBlock.set(blk, [k]);
+      }
+    }
+    const outCases: SwitchCase[] = [...armsByBlock.entries()].map(([blk, values]) => ({
+      values,
       body: structureRegion(blk, merge),
       fallsThrough: false,
     }));
@@ -635,11 +676,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         return succ.length > 1 && succ[1].block === blk;
       }) && dispatchTargets.filter((e) => e === blk).length < 2;
     const defaultAt = defaultBlk
-      ? defaultLayoutPos(
-          defaultBlk,
-          sortedCases.map(([, blk]) => blk),
-          ranOutInto(defaultBlk),
-        )
+      ? defaultLayoutPos(defaultBlk, [...armsByBlock.keys()], ranOutInto(defaultBlk))
       : undefined;
     const sw: Stmt = {
       k: 'switch',

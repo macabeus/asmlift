@@ -754,6 +754,43 @@ export function enumerateCandidates(
   const bitfieldCands = mapHasBitfields
     ? [...baseSense, ...baseSense.map((s) => ({ ...s, suffix: `${s.suffix}/no-bitfield`, bitfields: false }))]
     : baseSense;
+  // `/connective`'s enumeration gate, read off the pass's OWN refusal rather than from a second
+  // copy of its matcher: the fold reports every site where the PAIRWISE comparison-tree refusal is
+  // the ONE thing stopping it — asked after `sameArgs` and the negatability check, so a report
+  // means a candidate that DIFFERS, not a refusal merely reached — and a function with none has no
+  // inhabitant for the axis.
+  //
+  // PER SYMBOL VARIANT, on a lift of its OWN, for the reason the `/setup-args` gate below states
+  // for itself: no lift may be governed by a fact measured on a different one. The pin and
+  // `/setup-args` cannot move this answer — neither a parameter's type nor a call's argument list
+  // moves a `cond_br` — but a SYMBOL MAP can, by lifting a pool-loaded comparison constant as a
+  // `gaddr` the const-test test then does not read. Today they agree: over the 164 real rows that
+  // lift (the other 88 are frontend declines, and the 671 synthetic rows carry no map at all), 21
+  // sites mapped and 21 raw with no per-row divergence. So this buys no candidate; what it buys is
+  // that a lift-time change which splits them enumerates both arms rather than silently dropping
+  // one, the failure nothing reports.
+  //
+  // The MAPPED variant reads it off the probe below, itself a lift in exactly that configuration —
+  // reuse, not inheritance. Only a variant lifting under DIFFERENT symbols pays a lift of its own,
+  // so the price is one per `/raw-globals` arm and zero on a map-less row, never per candidate.
+  let probeTreeOwned = false;
+  const treeOwnedIn = (symbols: typeof opts.symbols): boolean => {
+    if (symbols === opts.symbols) {
+      return probeTreeOwned;
+    }
+    const p = frontend.lift(name, asm, target, prototypes, opts.asmData, symbols);
+    verify(p);
+    applyIdiomPatterns(p, target, opts.patterns);
+    let seen = false;
+    runPreRecovery(p, target, () => verify(p), prototypes[name], {
+      shortCircuit: {
+        onTreeOwned: () => {
+          seen = true;
+        },
+      },
+    });
+    return seen;
+  };
   // Probe: recover ONCE with no signedness pin, to learn which entry params are pointers/aggregates
   // so they are excluded from the signedness axis (see NO_PIN_KINDS). One extra lift+recover, no
   // compile. (The probe deliberately stops after recoverTypes — it only reads the param KINDS, so
@@ -761,7 +798,13 @@ export function enumerateCandidates(
   const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
-  runPreRecovery(probe, target, () => verify(probe), prototypes[name]);
+  runPreRecovery(probe, target, () => verify(probe), prototypes[name], {
+    shortCircuit: {
+      onTreeOwned: () => {
+        probeTreeOwned = true;
+      },
+    },
+  });
   recoverTypes(probe);
   const ptrIdx = new Set<number>(probe.blocks[0].params.flatMap((p, i) => (NO_PIN_KINDS.has(p.type.kind) ? [i] : [])));
   // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
@@ -1330,6 +1373,7 @@ export function enumerateCandidates(
     // Declining is not pruning — same posture as the signedness decline below, and the same
     // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
     const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields);
+    const treeOwnedFold = treeOwnedIn(sv.symbols);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
     // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises and
@@ -1365,16 +1409,57 @@ export function enumerateCandidates(
       // adds 1201 distinct candidates to 3862, all of them in the 13 rows whose narrowing changes
       // anything downstream — measured before those six kleod rows declared their callee arities,
       // and declaring one takes its row out of this population.
-      const liftVariants: { suffix: string; narrow: boolean }[] = hasSetupArgsNarrowing(base)
+      //
+      // `/connective` — spell a same-scrutinee const-test chain as `x == 0 || x == 2` rather than
+      // leaving it to switch recovery. They are mutually exclusive within one raise
+      // (raise/shortcircuit.ts's REFUSALS note has the mechanism: a folded `logic_or` is not the
+      // `icmp` switch-recover.ts requires), so no predicate settles it — the differ does.
+      // Enumerated only where THIS VARIANT's lift reports the PAIRWISE refusal — 6 of 923 rows.
+      //
+      // WHAT IT IS *NOT* FOR: the shared-arm spelling `switch (x) { case 0: case 2: … }`. That is
+      // the structurer's DEFAULT (switch-recover.ts groups case values sharing a body), and it is
+      // the same object as the `||` only in the DEGENERATE shape — one case group plus `default:`,
+      // where the dispatch has nothing to balance (agbcc 12 instructions each and one .text md5,
+      // IDO 64 bytes each and one md5). A second group parts them: agbcc 20 against 16, the switch
+      // building a balanced `bgt` dispatch where the chain tests sequentially; IDO 80 bytes each,
+      // different bytes. So on a recovered MULTI-GROUP switch the connective is a genuine second
+      // spelling, and this axis is the only thing that reaches it.
+      //
+      // Where it is worth 0 POINTS is one ROW, not the shape: on
+      // `kleod:ProcessInputAndUpdateEntities:agbcc` the grouping alone scores 306, and so does the
+      // grouping with this axis — same breakdown cell for cell, in half the wall clock (681s →
+      // 339s). Worth 0 points is not worth nothing: the published winner there carries
+      // `/connective` and spells its site `gUnk_030034C0 == 0 || gUnk_030034C0 == 2`, so deleting
+      // the axis moves that row's source. It moves the SCORE where switch recovery declined
+      // ENTIRELY and the tree came out as nested `if`s — `CountCollectedGems` 327 → 299,
+      // `CheckWorldCompletion` 135 → 124, neither with a `switch` at all. Telling the populations
+      // apart needs an L3 fact (did recovery produce a grouped arm?) at a raise-level hook, which
+      // is a level inversion; the fan is the price instead.
+      //
+      // It rides the LIFT variants because the raise mutates in place: a second raise policy needs
+      // its own copy of the lifted fn, exactly as `/setup-args` needs one to narrow. Crossed with
+      // `/setup-args` rather than nested under it — dropping a call argument and choosing this
+      // shape are independent, and the four combinations dedup down to whatever the trees differ on.
+      const connectiveVariants = treeOwnedFold
         ? [
-            { suffix: '', narrow: false },
-            { suffix: '/setup-args', narrow: true },
+            { suffix: '', connective: false },
+            { suffix: '/connective', connective: true },
           ]
-        : [{ suffix: '', narrow: false }];
+        : [{ suffix: '', connective: false }];
+      const liftVariants: { suffix: string; narrow: boolean; connective: boolean }[] = (
+        hasSetupArgsNarrowing(base)
+          ? [
+              { suffix: '', narrow: false },
+              { suffix: '/setup-args', narrow: true },
+            ]
+          : [{ suffix: '', narrow: false }]
+      ).flatMap((l) => connectiveVariants.map((c) => ({ ...l, ...c, suffix: `${l.suffix}${c.suffix}` })));
       for (const lv of liftVariants) {
         let fn: Fn;
         try {
-          fn = lv.narrow ? frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols) : base;
+          // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
+          // flags here would leave a fourth axis sharing the primary's already-mutated `base`.
+          fn = lv.suffix === '' ? base : frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
           if (lv.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the base lift's own candidates already cover it
           }
@@ -1392,13 +1477,18 @@ export function enumerateCandidates(
               },
             },
             prototypes[name],
+            { shortCircuit: { foldTreeOwned: lv.connective } },
           );
         } catch (e) {
-          if (!lv.narrow) {
+          // THE PRIMARY IS THE EMPTY SUFFIX, by construction: every lift axis appends a non-empty
+          // one, so `suffix === ''` is the only spelling of "no lever is on" that stays correct
+          // when a fourth is added — the same reason the structuring half below reads its table
+          // instead of naming its flags.
+          if (lv.suffix === '') {
             throw e; // the base lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped lever, never an aborted enumeration — the same posture as `respell`.
-          opts.onLeverError?.(`${name}/setup-args`, e instanceof Error ? e.message.split('\n')[0] : String(e));
+          opts.onLeverError?.(name + lv.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
           continue;
         }
         // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
@@ -1436,7 +1526,13 @@ export function enumerateCandidates(
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
             });
           } catch (e) {
-            if (!lv.narrow && !s.anchor && !s.join && s.bitfields && STRUCTURING_AXES.every((ax) => !s[ax.flag])) {
+            if (
+              lv.suffix === '' &&
+              !s.anchor &&
+              !s.join &&
+              s.bitfields &&
+              STRUCTURING_AXES.every((ax) => !s[ax.flag])
+            ) {
               throw e; // the base lift's base axes keep their behavior: a failure aborts the row
             }
             // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings

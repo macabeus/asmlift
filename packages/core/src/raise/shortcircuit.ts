@@ -265,14 +265,34 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     not a hand-written `||`. switch-recover.ts requires every test's `cond_br` operand to be an
 //     `icmp` (its `isCmpOpcode` gate), and a `logic_or` is not one, so folding first PERMANENTLY
 //     disqualifies the recovery and a clean `switch (x) { case 1: case 2: … }` degrades to a chain
-//     of nested `if`s. The switch is the better recovery and it is the more specific one, so it
-//     wins the shape. Cost: a genuine source-level `x == 1 || x == 2` that is NOT part of a wider
-//     tree also declines — the same conservative trade loops.ts makes when it refuses to infer a
-//     header from `cond_br` shape.
+//     of nested `if`s. The two spellings are mutually exclusive within one raise and BOTH are
+//     legitimate C, and which of them the asm rules out depends on the shape: `x == 0 || x == 2`
+//     and `switch (x) { case 0: case 2: }` are ONE object only where the switch has a single case
+//     group plus `default:` (agbcc 12 instructions each, one md5; IDO 64 bytes each, one md5), and
+//     part as soon as there is a second group to balance a dispatch against (agbcc 20 against 16,
+//     IDO 80 bytes and different bytes). So this is a DEFAULT rather than a decision: the switch
+//     is the more specific recovery and wins the shape here, while
+//     `foldTreeOwned` spells the connective instead and the differ referees (rank.ts's
+//     `/connective`). ONLY THIS CLAUSE. Its notion of "same scrutinee" is switch-recover.ts's own
+//     PRE1 — a NECESSARY condition for recovery, never a sufficient one, so what it refuses is
+//     "a switch could not be ruled out here" and it is a proxy too, just a far tighter one than
+//     the relayed clause. Priced over the set it REFUSES rather than the set it admits: it fires on
+//     6 rows, protects 2 (`pokeemerald:IsStringLengthAtLeast`,
+//     `pokeemerald:TrySetCantSelectMoveBattleScript`), and on the other 4 the published winner
+//     folds THROUGH it — `kleod:CheckWorldCompletion`'s refused site is `v5 == 3 || v5 == 5` on an
+//     ordinary inner-loop counter with no dispatch region near it. It is the axis, not the clause,
+//     that keeps those 4. A structural discriminator is L1-visible and would be strictly better —
+//     is the shared block the entry of a region with dispatch-shaped in-edges, is the scrutinee
+//     defined by the enclosing loop header — and is UNBUILT.
+//     The relayed clause below is a different statement (see its own note: a blunt proxy that
+//     fires on an ordinary loop counter), it has NO inhabitant anywhere in the benchmark's 923
+//     rows, and a candidate born there would carry a `/connective` label for a fold that answers
+//     no connective-vs-tree question. It stays absolute.
 //   - the shared block was reached through a RELAY, and either test's scrutinee is compared against
-//     constants more than once in the function. Same reason as the bullet above, widened because the
-//     reach is: a relay is what agbcc puts on a tree's default edge, so resolving one walks this
-//     fold into a dispatch chain, where the sibling that gives the tree away may be neither test in
+//     constants more than once in the function. This one is ABSOLUTE — `foldTreeOwned` does not
+//     widen it. Same reason as the bullet above, widened because the reach is: a relay is what
+//     agbcc puts on a tree's default edge, so resolving one walks this fold into a dispatch chain,
+//     where the sibling that gives the tree away may be neither test in
 //     hand — the split node is RELATIONAL and only its children are equalities, which is precisely
 //     what the pairwise test cannot see. Without it `sub_807BD88` and `sub_808491C` each lose a
 //     `switch` (sa3).
@@ -336,7 +356,33 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // that has no dual candidate (synthetic:ifand_near:agbcc).
 //
 // Every refusal falls through untouched — a miss, never a miscompile.
-export function recognizeBranchShortCircuit(fn: Fn): boolean {
+/** Per-call options for `recognizeBranchShortCircuit` — the tree-ownership refusal's two ends. */
+export interface BranchShortCircuitOptions {
+  /** Take the fold at a site the PAIRWISE comparison-tree refusal owns, spelling the connective
+   *  where the default leaves the tree for switch-recover.ts. rank.ts's `/connective` axis; see the
+   *  REFUSALS note. It widens the SHAPE the fold accepts and nothing about what the fold may move —
+   *  every other refusal still applies, the RELAYED clause included.
+   *
+   *  A NEW REFUSAL CONDITION, stated because it is one: this is per-FUNCTION and the question is
+   *  per-SITE. Every tree-owned site in a function flips together, so a function with two of them
+   *  wanting OPPOSITE spellings has no candidate that spells the mix, and nothing reports the gap.
+   *  A per-FUNCTION predicate cannot decide a per-SITE question — the same shape the joined-if
+   *  default hit — and here it costs completeness rather than correctness. The alternative is a
+   *  fork per site: `kleod:CheckWorldCompletion` refuses at 10 and goes 96 → 192 candidates as one
+   *  boolean, where a per-site fork would be 1024×. That is why the boolean, not an oversight. */
+  foldTreeOwned?: boolean;
+  /** Called at each site the pairwise tree-ownership refusal is the ONE thing stopping the fold —
+   *  how rank.ts learns the axis has an inhabitant here without re-running the matcher. Asked LAST,
+   *  after `sameArgs` and the negatability check, so a report means a `/connective` candidate that
+   *  differs from its sibling: reporting a refusal merely REACHED would double the row's whole
+   *  candidate cross for a lift that produces duplicates the dedup collapses. (Its sibling gate
+   *  `hasSetupArgsNarrowing` asks the same question the same way — does the lever CHANGE anything.)
+   *  The pass re-scans after every rewrite, so one site can report more than once; read it as a
+   *  boolean. */
+  onTreeOwned?: () => void;
+}
+
+export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOptions = {}): boolean {
   let changed = false;
   const term = (b: Block) => b.ops[b.ops.length - 1];
   let progress = true;
@@ -408,12 +454,12 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         // the wider test is blunt, and that is why it is not asked everywhere.
         const throughRelay = sharedEdge.block !== sharedFromH.block;
         if (
-          throughRelay
-            ? inComparisonTree(fn, defs, ht.operands[0]) || inComparisonTree(fn, defs, gt.operands[0])
-            : sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0])
+          throughRelay &&
+          (inComparisonTree(fn, defs, ht.operands[0]) || inComparisonTree(fn, defs, gt.operands[0]))
         ) {
-          continue;
+          continue; // the relayed clause is absolute — `foldTreeOwned` does not widen it
         }
+        const treeOwned = !throughRelay && sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0]);
         const otherEdge = sharedEdge === gTaken ? gFall : gTaken;
         if (!sameArgs(sharedFromH.args, sharedEdge.args)) {
           continue;
@@ -423,14 +469,23 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         const wantEdge = gIsFall ? sharedEdge : otherEdge;
         const c2 = gt.operands[0];
         const c2Def = defs.get(c2);
+        if (wantEdge !== gTaken && (!c2Def || !NEGATED_ICMP[c2Def.opcode])) {
+          continue;
+        }
+        // LAST refusal, so `onTreeOwned` reports a site where tree ownership is the ONE thing in
+        // the way — nothing above allocates, so continuing here costs exactly what continuing at
+        // the top did. See the option's doc for why the position is the gate's meaning.
+        if (treeOwned) {
+          opts.onTreeOwned?.();
+          if (!opts.foldTreeOwned) {
+            continue;
+          }
+        }
         let second = c2;
         const negated: Op[] = [];
         if (wantEdge !== gTaken) {
-          if (!c2Def || !NEGATED_ICMP[c2Def.opcode]) {
-            continue;
-          }
           second = mkValue(T.unk(32));
-          negated.push(mkOp(NEGATED_ICMP[c2Def.opcode], { operands: [...c2Def.operands], results: [second] }));
+          negated.push(mkOp(NEGATED_ICMP[c2Def!.opcode], { operands: [...c2Def!.operands], results: [second] }));
         }
         const res = mkValue(T.unk(32));
         const connective = mkOp(gIsFall ? 'logic_or' : 'logic_and', {
