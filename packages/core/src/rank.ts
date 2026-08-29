@@ -1276,6 +1276,20 @@ export function enumerateCandidates(
       };
       return { suffix, hoist, volatiles, pairings };
     });
+    // THE PLACEMENT DIFFERENTIAL, one composition inwards. `respell` re-checks a lever's
+    // placement across the statement SHAPES derived onto it; the lever-on-lever products below
+    // are the same hazard in the same file and were outside it, because the composition happens
+    // INSIDE one `make()` thunk and the intermediate tree never reaches `respell`'s check. A
+    // def-MOVING pass (`sinkInitsToFirstUse`, `nearBaseClusters`) running on a tree a PLACING
+    // lever built can move a def below a use exactly as a shape can. Same differential, so a
+    // placement neither pass can model is not judged either way, and the throw lands inside the
+    // thunk — a reported, dropped candidate.
+    const survives = (before: SFn | null, after: SFn | null): SFn | null => {
+      if (before !== null && after !== null) {
+        assertPlacementSurvives(before, after, createdLocals(sfn, before));
+      }
+      return after;
+    };
     // Every product below fans over the rows a demanding row earned, never the whole roster.
     const paired = livebases.filter((l) => l.pairings);
     for (const { suffix, hoist, volatiles } of livebases) {
@@ -1303,11 +1317,11 @@ export function enumerateCandidates(
     for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/sinkinit`, () => {
         const r = hoist();
-        return r ? sinkInitsToFirstUse(r) : null;
+        return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
       respell(`${suffix}/volatile/sinkinit`, () => {
         const r = volatiles();
-        return r ? sinkInitsToFirstUse(r) : null;
+        return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
     }
     // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
@@ -1320,7 +1334,7 @@ export function enumerateCandidates(
     // spellings are emitted; the differ referees.
     const nearSpan = target.compilerBehaviors.nearBaseSpan;
     const near = (base: SFn | null): SFn | null =>
-      base !== null && nearSpan !== undefined ? nearBaseClusters(base, nearSpan) : null;
+      base !== null && nearSpan !== undefined ? survives(base, nearBaseClusters(base, nearSpan)) : null;
     // …and WHERE its cluster inits sit, which is a second question with its own answer.
     // `l3/nearbase.ts` places them above the run already there, and that is a committed choice
     // made on one row (`synthetic:dmafield`) rather than on a compiler fact — a cluster base is
@@ -1334,7 +1348,7 @@ export function enumerateCandidates(
     // 1140 observations — where the two orderings agree the sink declines and nothing is added.
     const nearSunk = (base: SFn | null): SFn | null => {
       const r = near(base);
-      return r ? sinkInitsToFirstUse(r) : null;
+      return r ? survives(r, sinkInitsToFirstUse(r)) : null;
     };
     respell('/nearbase', () => near(sfn));
     respell('/nearbase/sinkinit', () => nearSunk(sfn));
