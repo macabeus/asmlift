@@ -126,7 +126,17 @@ describe('the admission rules are judged over the REGION, and it is a refinement
     expect(hoistScopedBases(one, { regions: 'per-region' })).toBeNull();
   });
 
-  test('key-already-homed: a function-top local already holding the base pays for nothing', () => {
+  test('a base the function ALREADY homes is served anyway — `key-already-homed` is gone', () => {
+    // The rule refused a key when a function-top statement already assigned that base to a local.
+    // It was priced at ZERO on the row it was written against, and it MISSED the shape it names on
+    // two counts at once: `homedBases` scanned top-level statements only, while `/defsite` sinks
+    // the home into the arms; and it required a `cast` wrapper, while a base home reaches L3 as a
+    // bare `v0 = 67109076` (the backend spells the cast from the local's declared type). The
+    // branch's own published `synthetic:dmascope2` winner was the counterexample.
+    //
+    // Made to mean what it says — recursive, cast-optional — it costs that row 12 points
+    // (diff:13 -> diff:25, back to the pre-lever winner). A rule measured at zero may not take
+    // twelve, so it is deleted rather than repaired.
     const homed: SFn = {
       ...fn([
         { k: 'assign', name: 'q', value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'g' } } },
@@ -134,10 +144,11 @@ describe('the admission rules are judged over the REGION, and it is a refinement
       ]),
       locals: [{ name: 'q', type: T.ptr(T.u(16)) }],
     };
-    expect(hoistScopedBases(homed, { regions: 'per-region' })).toBeNull();
-    // ...and it is the HOME that decided, not the shape
-    const unhomed: SFn = { ...homed, body: homed.body.slice(1) };
-    expect(hoists(arms(hoistScopedBases(unhomed, { regions: 'per-region' })).then)).toEqual(['p0']);
+    const out = hoistScopedBases(homed, { regions: 'per-region' });
+    const iff = out!.body[1] as Extract<Stmt, { k: 'if' }>;
+    expect(hoists(iff.then)).toEqual(['p0']);
+    expect(hoists(iff.else)).toEqual(['p1']);
+    expect(REGIONBASE_GATES.map((g) => g.id)).not.toContain('key-already-homed');
   });
 });
 

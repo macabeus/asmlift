@@ -349,21 +349,6 @@ function repeatsAConstOffset(uses: Site[]): boolean {
   return false;
 }
 
-/** Base ids a FUNCTION-TOP statement already assigns to a local — `q = (T *)&g;`. A region local
- *  for one of these is a second name for an address the function already holds. */
-function homedBases(body: Stmt[]): Set<string> {
-  const out = new Set<string>();
-  for (const st of body) {
-    if (st.k === 'assign' && st.value.k === 'cast') {
-      const e = st.value.e;
-      if (e.k === 'const' || e.k === 'addr' || e.k === 'var') {
-        out.add(baseId(e));
-      }
-    }
-  }
-  return out;
-}
-
 const runsPerIteration = (uses: Site[]): boolean => uses.some((u) => u.perIteration);
 const underNestedLoop = (uses: Site[], depth: number): boolean => uses.some((u) => u.loop.slice(depth).some(Boolean));
 
@@ -377,8 +362,6 @@ export interface RegionCtx {
   readonly perIteration: boolean;
   /** some use sits inside a loop nested BELOW the region */
   readonly nestedLoop: boolean;
-  /** a FUNCTION-TOP statement already assigns this base to a local */
-  readonly keyHomed: boolean;
   /** how many of this key's regions hold two or more direct uses */
   readonly siblingRegions: number;
 }
@@ -461,12 +444,6 @@ export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
     sound: false,
     rejects: (c) => c.siblingRegions < 2,
   },
-  {
-    id: 'key-already-homed',
-    why: 'region locals buy nothing while a function-scope local still holds the same base',
-    sound: false,
-    rejects: (c) => c.keyHomed,
-  },
 ];
 
 /** THE REGION RULE, as a value. A third rule is one entry here — a partition, a gate table, and
@@ -542,7 +519,6 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   // on, so the set the planner counted and the set the rewrite repoints are the same set by
   // construction rather than by a second predicate that could disagree.
   const repoint = new Map<Expr, string>();
-  const homed = homedBases(sfn.body);
   for (const [key, rec] of found) {
     if (sharedKeys.has(key)) {
       continue; // one node at two positions — see `sharedKeys`
@@ -560,7 +536,6 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
           repeatedConstOffset: repeatsAConstOffset(judged),
           perIteration: runsPerIteration(r.uses),
           nestedLoop: underNestedLoop(r.uses, r.depth),
-          keyHomed: homed.has(baseId(rec.sample.base as LeafBase)),
           siblingRegions,
         }) !== null
       ) {
