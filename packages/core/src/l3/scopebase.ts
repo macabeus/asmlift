@@ -276,12 +276,8 @@ function deepestCluster(all: Site[]): { scope: Stmt[]; depth: number; uses: Site
   return best;
 }
 
-/** How a key's uses are cut into REGIONS — the one axis this pass now varies.
- *
- *  `'whole'` names a key ONCE: the innermost list holding every use, else the deepest cluster of
- *  two. `'per-region'` partitions the uses by their INNERMOST ENCLOSING LIST and serves every
- *  surviving partition, which is what a source spelling the same base inside N disjoint regions
- *  looks like. */
+/** How a key's uses are cut into REGIONS — the one axis this pass varies. Names a `REGION_RULES`
+ *  entry; it is the only field a production caller passes. */
 export type RegionSelector = 'whole' | 'per-region';
 
 interface Region {
@@ -290,7 +286,20 @@ interface Region {
   uses: Site[];
 }
 
-/** DIRECT uses only, and the FUNCTION BODY is a region like any other.
+/** `'whole'`'s partition: ONE region for the key — the innermost list holding every use, else the
+ *  deepest cluster of two. `body` is unused; the signature is the RULE's, so both partitions are
+ *  one type and the selector can be a value. */
+function wholeRegion(all: Site[], _body: Stmt[]): Region[] {
+  const at = commonScope(all);
+  if (at) {
+    return [{ scope: at.scope, depth: at.depth, uses: all }];
+  }
+  const cluster = deepestCluster(all);
+  return cluster ? [cluster] : [];
+}
+
+/** `'per-region'`'s partition: one region per INNERMOST ENCLOSING LIST, and every partition is
+ *  served. DIRECT uses only, and the FUNCTION BODY is a region like any other.
  *
  *  Not the residual-subtree rule (a list's entry holding every use beneath it, which is what
  *  `deepestCluster` builds): under that rule the body region holds the arms' uses too, and the
@@ -302,15 +311,7 @@ interface Region {
  *  carries one entry more than `path` and `before` reads `idx[depth]` through that invariant, so
  *  re-seeding would shift it for every key in every function. A region at depth 0 reads `idx[0]`,
  *  which is already the index within the body. */
-function regionsOf(all: Site[], body: Stmt[], selector: RegionSelector): Region[] {
-  if (selector === 'whole') {
-    const at = commonScope(all);
-    if (at) {
-      return [{ scope: at.scope, depth: at.depth, uses: all }];
-    }
-    const cluster = deepestCluster(all);
-    return cluster ? [cluster] : [];
-  }
+function perRegions(all: Site[], body: Stmt[]): Region[] {
   const byList = new Map<Stmt[], Region>();
   for (const u of all) {
     const depth = u.path.length;
@@ -423,20 +424,27 @@ export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [
   },
 ];
 
-/** `/regionbase`'s admission (rank.ts): `SCOPEBASE_GATES` plus two rules that exist only once a key
- *  can hold MORE THAN ONE local. Both are honest fan savings, not codegen models — measured at zero
- *  on the rows they were written against — and both are stated that way rather than credited with a
- *  match they do not protect.
+/** The PER-REGION readings of the two counting rules. Same predicate, different POPULATION — under
+ *  `'whole'` `single-use` and `repeated-const-offset` are judged over the KEY's uses (the cluster
+ *  fallback serves a SUBSET of them, so the two really do differ), under `'per-region'` over one
+ *  region's direct uses. One id naming two predicates makes `without(table, id)` two different
+ *  ablations and a price table ambiguous about which reading it priced, so the per-region reading
+ *  gets its own id and the population that decides it now lives in the rule value below. */
+const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> =>
+  g.id === 'single-use' || g.id === 'repeated-const-offset'
+    ? { ...g, id: `region-${g.id}`, why: `${g.why} — judged over ONE region's direct uses` }
+    : g;
+
+/** `/regionbase`'s admission (rank.ts): the per-region readings of `SCOPEBASE_GATES`, plus the one
+ *  rule that exists only once a key can hold MORE THAN ONE local.
  *
- *  `regions-degenerate` counts regions holding two or more DIRECT uses, which is exactly
- *  `single-use` applied region-wise and so is computable before any gate runs. One such region is
- *  the function-top question `basecse`/`/livebase`/`/scopebase` already answer, so serving it here
- *  adds a spelling those levers already offer.
- *
- *  `key-already-homed` is NOT in `SCOPEBASE_GATES`, deliberately: it would change what `/scopebase`
- *  emits, and a rule worth zero points may not risk a shipped match to say so. */
+ *  `regions-degenerate` is an honest fan saving, not a codegen model, and is stated that way
+ *  rather than credited with a match it does not protect: it counts regions holding two or more
+ *  DIRECT uses, which is exactly `single-use` applied region-wise and so is computable before any
+ *  gate runs. One such region is the function-top question `basecse`/`/livebase`/`/scopebase`
+ *  already answer, so serving it here adds a spelling those levers already offer. */
 export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
-  ...SCOPEBASE_GATES,
+  ...SCOPEBASE_GATES.map(perRegionReading),
   {
     id: 'regions-degenerate',
     why: 'one region is the function-top hoist basecse and /livebase already offer',
@@ -450,6 +458,32 @@ export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
     rejects: (c) => c.keyHomed,
   },
 ];
+
+/** THE REGION RULE, as a value. A third rule is one entry here — a partition, a gate table, and
+ *  the population its counting rules are judged over — rather than three hand-edited branches in
+ *  three functions, which is the same doctrine `rank.ts` states for its own admissions ("one entry
+ *  here, one gate table, and that table's line in the gate-contract roster — not nine hand-edited
+ *  sites that can drift"). */
+export interface RegionRule {
+  readonly id: RegionSelector;
+  /** how a key's uses are cut into regions */
+  readonly partition: (all: Site[], body: Stmt[]) => Region[];
+  /** the admission table `hoistScopedBases` uses when no ablation is passed */
+  readonly gates: readonly Gate<RegionCtx>[];
+  /** the uses the COUNTING rules (`uses`, `repeatedConstOffset`) are tallied over. The loop facts
+   *  are always the region's own — no reachable scope answers for a use outside it. */
+  readonly judged: (region: Region, key: Site[]) => Site[];
+}
+
+export const REGION_RULES: Record<RegionSelector, RegionRule> = {
+  // `'whole'` judges the count and the offset tally over the KEY and the loop facts over the
+  // chosen region — the scoping this pass has always used, and the cluster case is why: its region
+  // is a SUBSET of the key's uses.
+  whole: { id: 'whole', partition: wholeRegion, gates: SCOPEBASE_GATES, judged: (_r, key) => key },
+  // `'per-region'` judges every rule over the region's own direct uses — a REFINEMENT and not a
+  // relaxation: an offset repeated INSIDE one region is still repeated.
+  'per-region': { id: 'per-region', partition: perRegions, gates: REGIONBASE_GATES, judged: (r) => r.uses },
+};
 
 /** `regions` picks the region rule and is the only field a caller passes in production
  *  (`'per-region'` is `/regionbase`). The two tables are for ABLATION — the differentials in
@@ -467,8 +501,8 @@ export interface ScopeBaseOpts {
  */
 export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null {
   const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
-  const selector = opts.regions ?? 'whole';
-  const gates = opts.gates ?? (selector === 'per-region' ? REGIONBASE_GATES : SCOPEBASE_GATES);
+  const rule = REGION_RULES[opts.regions ?? 'whole'];
+  const gates = opts.gates ?? rule.gates;
   compound = false;
   const globals = addressableGlobals(sfn);
   const found = new Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>();
@@ -503,16 +537,13 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
     if (sharedKeys.has(key)) {
       continue; // one node at two positions — see `sharedKeys`
     }
-    const regions = regionsOf(rec.uses, sfn.body, selector);
+    const regions = rule.partition(rec.uses, sfn.body);
     const siblingRegions = regions.filter((r) => r.uses.length >= 2).length;
     for (const r of regions) {
-      // `'whole'` judges the count and the offset tally over the KEY and the loop facts over the
-      // chosen region — the scoping this pass has always used, and the cluster case is why: its
-      // region is a SUBSET of the key's uses. `'per-region'` judges every rule over the region's
-      // own direct uses, a REFINEMENT and not a relaxation — an offset repeated INSIDE one region
-      // is still repeated. Nothing here tests the base kind: an `addr`/`const` base reaching this
+      // WHICH USES the counting rules are tallied over is the RULE's answer, not a branch here —
+      // see `REGION_RULES`. Nothing here tests the base kind: an `addr`/`const` base reaching this
       // pass is one basecse already REFUSED (see the ordering note in the file header).
-      const judged = selector === 'per-region' ? r.uses : rec.uses;
+      const judged = rule.judged(r, rec.uses);
       if (
         firstRejection(gates, {
           uses: judged.length,

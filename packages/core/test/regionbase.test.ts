@@ -16,7 +16,8 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { hoistScopedBases } from '../src/l3/scopebase';
+import { without } from '../src/l3/gates';
+import { REGIONBASE_GATES, REGION_RULES, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -137,6 +138,47 @@ describe('the admission rules are judged over the REGION, and it is a refinement
     // ...and it is the HOME that decided, not the shape
     const unhomed: SFn = { ...homed, body: homed.body.slice(1) };
     expect(hoists(arms(hoistScopedBases(unhomed, { regions: 'per-region' })).then)).toEqual(['p0']);
+  });
+});
+
+describe('the region RULE is a VALUE, not a string branched on in three places', () => {
+  test('a rule carries its partition, its table, and the population its counting rules judge', () => {
+    expect(REGION_RULES['per-region'].id).toBe('per-region');
+    expect(REGION_RULES['per-region'].gates).toBe(REGIONBASE_GATES);
+    expect(REGION_RULES.whole.gates).toBe(SCOPEBASE_GATES);
+    // the POPULATION is the rule's answer, not a ternary at the call site: `'whole'` tallies the
+    // KEY's uses (its cluster fallback serves a subset of them), `'per-region'` the region's own.
+    const key = ['a', 'b', 'c'] as unknown as Parameters<(typeof REGION_RULES)['whole']['judged']>[1];
+    const region = { scope: [], depth: 0, uses: ['a'] } as unknown as Parameters<
+      (typeof REGION_RULES)['whole']['judged']
+    >[0];
+    expect(REGION_RULES.whole.judged(region, key)).toBe(key);
+    expect(REGION_RULES['per-region'].judged(region, key)).toEqual(['a']);
+  });
+
+  test('the PER-REGION reading of a counting rule has its own id', () => {
+    // `single-use` over the key and `single-use` over one region are two predicates. Sharing an id
+    // makes `without(table, id)` two different ablations and a price table ambiguous about which
+    // reading it priced.
+    const ids = REGIONBASE_GATES.map((g) => g.id);
+    expect(ids).toContain('region-single-use');
+    expect(ids).toContain('region-repeated-const-offset');
+    expect(ids).not.toContain('single-use');
+    expect(ids).not.toContain('repeated-const-offset');
+  });
+
+  test('…and ablating it is an ablation of ONE predicate', () => {
+    // the single-use tail below two arms: refused by the per-region reading, admitted without it
+    const oneUse = fn([
+      { k: 'if', cond: { k: 'const', value: 1 }, then: [put(1), put(2)], else: [put(3), put(4)] },
+      put(5),
+    ]);
+    expect(hoists(hoistScopedBases(oneUse, { regions: 'per-region' })!.body)).toEqual([]);
+    const ablated = hoistScopedBases(oneUse, {
+      regions: 'per-region',
+      gates: without(REGIONBASE_GATES, 'region-single-use'),
+    });
+    expect(hoists(ablated!.body)).toEqual(['p2']);
   });
 });
 
