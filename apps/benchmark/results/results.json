@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-29T15:17:21.473Z",
+    "generatedAt": "2026-08-29T19:41:20.582Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "cdc0156ba8260d7ce3cda2e47c01f52675f444d1",
+      "commit": "bb275e2d770884f0bde0fad03f04f394ea82aad0",
       "dirty": false
     },
     "m2c": {
@@ -59277,9 +59277,9 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/regionbase/initfirst",
+        "candidateLabel": "signed/regionbase/volatile/initfirst",
         "outcome": "nonmatch",
-        "source": "void dmascope(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 * p0;\n    s32 * p1;\n    s32 * p2;\n    v0 = 0;\n    if (v0 < a0) {\n        do {\n            if (((s32 *)50335744)[v0] != 0) {\n                p0 = (s32 *)67109076;\n                *p0 = ((s32 *)50335744)[v0];\n                p0[1] = ((s32 *)50335748)[v0];\n                v1 = -2147483616;\n            } else {\n                p1 = (s32 *)67109076;\n                *p1 = ((s32 *)50335752)[v0];\n                p1[1] = ((s32 *)50335756)[v0];\n                v1 = -2147483584;\n            }\n            ((s32 *)67109076)[2] = v1;\n            v0 = v0 + 1;\n        } while (v0 < a0);\n    }\n    p2 = (s32 *)67109076;\n    *p2 = *(s32 *)50335744;\n    p2[1] = *(s32 *)50335748;\n    p2[2] = -2147483520;\n    return;\n}\n",
+        "source": "void dmascope(s32 a0) {\n    s32 v0;\n    s32 v1;\n    volatile s32 * p0;\n    volatile s32 * p1;\n    volatile s32 * p2;\n    v0 = 0;\n    if (v0 < a0) {\n        do {\n            if (((s32 *)50335744)[v0] != 0) {\n                p0 = (s32 *)67109076;\n                *p0 = ((s32 *)50335744)[v0];\n                p0[1] = ((s32 *)50335748)[v0];\n                v1 = -2147483616;\n            } else {\n                p1 = (s32 *)67109076;\n                *p1 = ((s32 *)50335752)[v0];\n                p1[1] = ((s32 *)50335756)[v0];\n                v1 = -2147483584;\n            }\n            ((s32 *)67109076)[2] = v1;\n            v0 = v0 + 1;\n        } while (v0 < a0);\n    }\n    p2 = (s32 *)67109076;\n    *p2 = *(s32 *)50335744;\n    p2[1] = *(s32 *)50335748;\n    p2[2] = -2147483520;\n    return;\n}\n",
         "score": 9,
         "maxScore": 56,
         "compileErrors": null,
@@ -59453,9 +59453,9 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/defsite/regionbase",
+        "candidateLabel": "unsigned/defsite/regionbase/volatile",
         "outcome": "nonmatch",
-        "source": "void dmascope2(u32 a0) {\n    s32 * v0;\n    s32 v1;\n    s32 * p0;\n    s32 * p1;\n    s32 * p2;\n    p0 = (s32 *)50335744;\n    if (p0[a0] != 0) {\n        v0 = (s32 *)67109076;\n        p1 = (s32 *)67109076;\n        *p1 = p0[a0];\n        p1[1] = ((s32 *)50335748)[a0];\n        v1 = -2147483616;\n    } else {\n        v0 = (s32 *)67109076;\n        p2 = (s32 *)67109076;\n        *p2 = ((s32 *)50335752)[a0];\n        p2[1] = ((s32 *)50335756)[a0];\n        v1 = -2147483584;\n    }\n    v0[2] = v1;\n    return;\n}\n",
+        "source": "void dmascope2(u32 a0) {\n    s32 * v0;\n    s32 v1;\n    s32 * p0;\n    volatile s32 * p1;\n    volatile s32 * p2;\n    p0 = (s32 *)50335744;\n    if (p0[a0] != 0) {\n        v0 = (s32 *)67109076;\n        p1 = (s32 *)67109076;\n        *p1 = p0[a0];\n        p1[1] = ((s32 *)50335748)[a0];\n        v1 = -2147483616;\n    } else {\n        v0 = (s32 *)67109076;\n        p2 = (s32 *)67109076;\n        *p2 = ((s32 *)50335752)[a0];\n        p2[1] = ((s32 *)50335756)[a0];\n        v1 = -2147483584;\n    }\n    v0[2] = v1;\n    return;\n}\n",
         "score": 13,
         "maxScore": 33,
         "compileErrors": null,
