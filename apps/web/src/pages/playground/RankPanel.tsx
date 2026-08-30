@@ -7,6 +7,7 @@
 //    score, best first, plus the declarations asmlift refused to synthesize.
 import { renderDeclarations } from '@asmlift/core/declare';
 
+import { progressBar, progressLabel } from './rank-progress';
 import type { RefusedDeclaration } from './score-wasm';
 import type { Ranking } from './useRanking';
 
@@ -33,9 +34,41 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
 
   const base = 'rounded-md px-2.5 py-1 text-[11px] font-medium';
   if (ranking.status === 'loading') {
+    // A REAL progressbar, and only as determinate as the run actually is. The candidate total does
+    // not exist until `enumerateCandidates` returns — 62.3 s of one measured run — so three of the
+    // four phases render with `aria-valuenow` OMITTED, which is the ARIA spelling of
+    // indeterminate; an invented 0 would not be. The phase sentence is visible text either way, so
+    // this is never LESS informative than the bare div it replaces.
+    //
+    // No `aria-live`: a ~10 Hz live region is a screen-reader flood. `role="progressbar"` plus
+    // `aria-valuetext` is the accessible channel.
+    const bar = progressBar(ranking);
     return (
       <div className={`${base} border border-slate-700 bg-slate-900/60 text-slate-400`}>
-        scoring candidates with agbcc + objdiff…
+        <div
+          role="progressbar"
+          aria-valuetext={bar.label}
+          aria-valuemin={bar.determinate ? 0 : undefined}
+          aria-valuemax={bar.valueMax}
+          aria-valuenow={bar.valueNow}
+        >
+          <span>{bar.label}</span>
+          <div className="mt-1 h-1 overflow-hidden rounded bg-slate-800">
+            {bar.determinate ? (
+              // `bar.pct` is clamped to 99 while `aria-valuenow` above stays EXACT: the last
+              // scoring tick is followed by the sort and a six-figure structured clone, and a full
+              // bar over that is the lie a bar most easily tells. The phase then changes to
+              // `ranking` and this element falls back to the indeterminate stripe — a visible
+              // change of character rather than a bar sitting full.
+              <div
+                className="h-full rounded bg-teal-500 transition-[width] duration-200"
+                style={{ width: `${bar.pct}%` }}
+              />
+            ) : (
+              <div className="h-full w-1/3 animate-pulse rounded bg-slate-600" />
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -117,7 +150,9 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
     );
   }
   if (ranking.status === 'loading') {
-    return <p className="pt-1 text-[11px] italic text-slate-500">scoring candidates with agbcc + objdiff…</p>;
+    // The SAME sentence the badge shows, from the same helper — two views that spell the phase
+    // themselves are two views that come to disagree about one run.
+    return <p className="pt-1 text-[11px] italic text-slate-500">{progressLabel(ranking)}</p>;
   }
   if (ranking.status === 'error') {
     return (
