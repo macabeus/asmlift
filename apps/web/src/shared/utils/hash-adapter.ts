@@ -84,6 +84,15 @@ function updateUrl(search: URLSearchParams, options: Required<unstable_AdapterOp
   }
 }
 
+/** The BASE every write is merged onto. nuqs's default is
+ *  `new URLSearchParams(location.search)` (its `getSearchParamsSnapshotFromLocation`), which is
+ *  empty under this transport — so without this, a write of one key would drop every OTHER key
+ *  from the URL. Found in the browser, not by a test: clicking an Overview aggregate turned
+ *  `#view=benchmark` into a URL with no `view` at all. */
+function getSearchParamsSnapshot(): URLSearchParams {
+  return hashToSearchParams(window.location.hash);
+}
+
 function useHashAdapter(watchKeys: string[]) {
   const cache = useRef<{ key: string; search: URLSearchParams } | null>(null);
   // `useSyncExternalStore` compares snapshots with Object.is and throws "The result of getSnapshot
@@ -91,7 +100,7 @@ function useHashAdapter(watchKeys: string[]) {
   // serialised watched keys — which also turns "the watched values did not change" into "the same
   // object", i.e. no re-render for a component watching `s` when `tab` moves.
   const snapshot = (): URLSearchParams => {
-    const filtered = pickKeys(hashToSearchParams(window.location.hash), watchKeys);
+    const filtered = pickKeys(getSearchParamsSnapshot(), watchKeys);
     const key = filtered.toString();
     if (cache.current?.key === key) {
       return cache.current.search;
@@ -99,7 +108,11 @@ function useHashAdapter(watchKeys: string[]) {
     cache.current = { key, search: filtered };
     return filtered;
   };
-  return { searchParams: useSyncExternalStore(subscribe, snapshot), updateUrl };
+  return {
+    searchParams: useSyncExternalStore(subscribe, snapshot),
+    updateUrl,
+    getSearchParamsSnapshot,
+  };
 }
 
 /** Drop-in replacement for nuqs's `NuqsAdapter`; wrap the app in it exactly the same way. */
