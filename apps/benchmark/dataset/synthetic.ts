@@ -2907,7 +2907,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     // THE SAME REFUSAL FROM THE OTHER DIRECTION: an arm that is one C assignment but not one
     // THUMB INSN. `v = a + 0x12345` needs a literal-pool load before the add, so the arm is two
-    // insns and `gcc/jump.c:472`'s `single_set` on `prev_active_insn` never matches — the diamond
+    // insns and `gcc/jump.c:472`/`:474`'s `single_set` on `prev_active_insn` never matches — the diamond
     // survives under the CAST spelling too. In the lifted IR the pool word is a `const` feeding an
     // `add`, which is why the arm clause counts constants: an immediate the target cannot fold is
     // a second SET, and the IR does not say which is which. The FOLDABLE case (`a + 3`, one
