@@ -16,7 +16,8 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { LIVEBASE_BLOCK_GATES, admittedBases } from '../src/l3/basecse';
+import { LIVEBASE_BLOCK_GATES, admittedBases, hoistBaseLocals } from '../src/l3/basecse';
+import { without } from '../src/l3/gates';
 import {
   HOMESPLIT_FAN_GATES,
   HOMESPLIT_GATES,
@@ -25,6 +26,7 @@ import {
   splitHomeBases,
   withholdingKey,
 } from '../src/l3/homesplit';
+import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -154,6 +156,12 @@ describe('the PER-KEY refusals, each priced by the spelling it keeps out of the 
     ]);
     expect(admittedBases(oneRegion, LIVEBASE_BLOCK_GATES)).toHaveLength(2);
     expect(splitHomeBases(oneRegion, { ...OPTS, key: DMA_KEY })).toBeNull();
+    // …and ABLATING it is a pure removal, not a throw. The applier's loud `declined` throw rests on
+    // exactly what this rule establishes, so without the rule that guarantee is gone — and a throw
+    // there would price the rule at every dropped candidate rather than at the spelling it refuses.
+    const ablated = { ...OPTS, key: DMA_KEY, admission: without(HOMESPLIT_GATES, 'homesplit-no-region') };
+    expect(() => splitHomeBases(oneRegion, ablated)).not.toThrow();
+    expect(splitHomeBases(oneRegion, ablated)).toBeNull();
   });
 
   /** the dmapoll shape plus ONE device read the region rule leaves inline, at `where` */
@@ -191,10 +199,13 @@ describe('the PER-KEY refusals, each priced by the spelling it keeps out of the 
     }
   });
 
-  test('…and it asks about an ADDRESS, so a NAMED device base refuses the same way', () => {
-    // Under a symbol map an absolute pool constant lifts to a `gaddr`, so on the arm the benchmark
-    // runs the base is `addr REG_DMA3SAD`, not a `const`. Its address is the map's fact.
-    const named = (dev: Expr, iw: Expr): SFn =>
+  test('…and it asks `/volatile` about the home it replaces, so a NAMED device base RIDES', () => {
+    // Under a symbol map an absolute pool constant lifts to a `gaddr`, and `/volatile` VETOES a
+    // local fed `&gSym` — the symbol map owns a declared global's volatility. So on a named base
+    // the head home this rule protects is unqualified too, nothing is dropped, and refusing there
+    // would delete a spelling to protect a qualifier NEITHER side carries. Asserted through
+    // `volatilePtrLocals` itself, so the rule and the qualifier cannot drift apart in silence.
+    const shape = (dev: Expr, iw: Expr): SFn =>
       fn([
         {
           k: 'if',
@@ -210,13 +221,18 @@ describe('the PER-KEY refusals, each priced by the spelling it keeps out of the 
         },
         { k: 'store', lval: idx(iw, 6), value: idx(dev, 7) },
       ]);
-    const sfn = named({ k: 'addr', name: 'REG_DMA3SAD' }, { k: 'addr', name: 'gBuf' });
+    const sfn = shape({ k: 'addr', name: 'REG_DMA3SAD' }, { k: 'addr', name: 'gBuf' });
     const key = 'a:REG_DMA3SAD 4 true';
     expect(admittedBases(sfn, LIVEBASE_BLOCK_GATES)).toContain(key);
-    const addressOf = (n: string): number | null => (n === 'REG_DMA3SAD' ? DEVICE : null);
-    expect(splitHomeBases(sfn, { ...OPTS, key, deviceRegisters: WINDOW, addressOf })).toBeNull();
-    // …and with no resolver the rule stands down rather than guessing the address
+    expect(volatilePtrLocals(hoistBaseLocals(sfn, LIVEBASE_BLOCK_GATES, 'head')!)).toBeNull();
     expect(splitHomeBases(sfn, { ...OPTS, key, deviceRegisters: WINDOW })).not.toBeNull();
+    // …and the NUMERIC twin of that same shape, where the baseline IS qualified, refuses — with the
+    // refusal attributed by ablating the one rule, so it is not some other gate answering.
+    const raw = shape({ k: 'const', value: DEVICE }, { k: 'const', value: IWRAM });
+    expect(volatilePtrLocals(hoistBaseLocals(raw, LIVEBASE_BLOCK_GATES, 'head')!)).not.toBeNull();
+    expect(splitHomeBases(raw, { ...OPTS, key: DMA_KEY, deviceRegisters: WINDOW })).toBeNull();
+    const ablated = without(HOMESPLIT_GATES, 'homesplit-drops-device-volatile');
+    expect(splitHomeBases(raw, { ...OPTS, key: DMA_KEY, deviceRegisters: WINDOW, admission: ablated })).not.toBeNull();
   });
 
   test('the table is the complete list, and nothing in it claims to be sound', () => {

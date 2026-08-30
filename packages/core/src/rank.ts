@@ -859,17 +859,6 @@ export function enumerateCandidates(
     const n = deviceVolatileClaims(tree, target.capabilities.deviceRegisters);
     return n > 0 ? { deviceVolatile: n } : {};
   };
-  // A SYMBOL's address, for the device-window questions — which are about an address, and under a
-  // symbol map an absolute pool constant lifts to a `gaddr` whose address only the map carries. A
-  // name at two addresses (an ldscript alias) resolves to NEITHER: the rule asking stands down
-  // rather than qualify a cell it picked between two.
-  const addressOfSymbol = new Map<string, number | null>();
-  for (const [address, infos] of opts.symbols ?? []) {
-    for (const { name } of infos) {
-      addressOfSymbol.set(name, addressOfSymbol.has(name) && addressOfSymbol.get(name) !== address ? null : address);
-    }
-  }
-  const symbolAddress = (name: string): number | null => addressOfSymbol.get(name) ?? null;
   const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     const refs = baseOpts.symbols
       ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
@@ -1382,18 +1371,28 @@ export function enumerateCandidates(
     // ADDITIVE, like every lever here: `/livebase-block`, `/regionbase`, `/scopebase` and the
     // un-hoisted primary all stay in the list, which is what keeps `synthetic:dmaflat` — where the
     // composed spelling scores 13 against its own 0 — at MATCH.
-    for (const { suffix, gates, placement } of paired) {
-      // The function-level half of the pairing's admission, asked ONCE: both its rules read the key
-      // count and nothing else, and asking them per candidate ran the whole pipe — head hoist,
-      // region plan, rewrite, census — to be told the function has more than three keys.
-      for (const key of homeSplitWithholds(census(gates))) {
+    for (const [i, { suffix, gates, placement }] of paired.entries()) {
+      const bound = census(gates);
+      // The ROSTER's dedup, which `hoist` applies to every other product and this loop has to spell
+      // for itself: a row binding exactly what an earlier row bound at the same placement is that
+      // row's spelling under a second label, and so is every pairing piped from it. Asked over the
+      // PAIRED rows only, so a skip can never drop a withhold no other row enumerates — the earlier
+      // row runs the identical pipe and emits the identical source. Without it both run and `seen`
+      // collapses the pair afterwards, having paid a head hoist, region plan, rewrite and emit for
+      // each.
+      if (paired.slice(0, i).some((p) => p.placement === placement && sameBases(bound, census(p.gates)))) {
+        continue;
+      }
+      // The function-level half of the pairing's admission, asked ONCE over the census: both its
+      // rules read the key count and nothing else, so inside the pipe they would cost that whole
+      // pipe to report a fact this loop already holds.
+      for (const key of homeSplitWithholds(bound)) {
         const lever = `${suffix}/homesplit-${homeSplitTag(key)}`;
         const homesplit = (): SFn | null => {
           const p = splitHomeBases(sfn, {
             gates,
             placement,
             key,
-            addressOf: symbolAddress,
             ...(target.capabilities.deviceRegisters ? { deviceRegisters: target.capabilities.deviceRegisters } : {}),
           });
           return p ? survives(p.homed, p.split) : null;

@@ -644,9 +644,11 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
   const fresh = nameAllocator(sfn);
   // one entry per (key, admitted region) — several for one key under `'per-region'`
   const entries: ScopedBaseEntry[] = [];
-  // WHY a key it serves nowhere is worth recording: a caller gating on this pass reads a decline as
-  // `the key is not split`, and the id separates a region that held too few uses from a shape the
-  // pass refuses outright. `firstRejection` short-circuits, so this is the DECIDING rule.
+  // INSTRUMENTATION, with no production reader (`grep -rn '\.refusals' packages apps` finds only
+  // this constructor): the caller that gates on this pass counts the ENTRIES a key got, and a
+  // decline tells it only `not split`. Recorded because the id separates a region that held too few
+  // uses from a shape the pass refuses outright, which is what a probe of this pass has to know.
+  // `firstRejection` short-circuits, so this is the DECIDING rule.
   const refusals = new Map<string, string>();
   for (const [key, rec] of found) {
     if (sharedKeys.has(key)) {
@@ -716,10 +718,26 @@ export const hoistScopedBases = (sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
 /**
  * `plan` applied to the tree it was planned over — null when it decided nothing (the caller then
  * adds no candidate rather than a duplicate of the primary).
+ *
+ * IDENTITY-BOUND to that tree, and not by the type: `scope` is matched against statement LISTS and
+ * `repoint` against access NODES, both by reference. A plan from a DIFFERENT tree therefore splices
+ * nothing and repoints nothing while still declaring its locals; `assertLocalsWritten` (rank.ts's
+ * `respell`) is what makes that loud rather than a silently wrong candidate.
  */
 export function applyScopedBasePlan(sfn: SFn, { entries: plan, repoint, compound: bad }: ScopedBasePlan): SFn | null {
   if (bad || plan.length === 0) {
     return null;
+  }
+  // THE TWO FIELDS MUST AGREE, and they arrive as independent data. `assertPlanOwnership` runs in
+  // the planner, so it cannot see an edit made between plan and apply — which is exactly the seam
+  // exporting this applier opened. A `repoint` naming a local no entry mints is neither declared
+  // nor assigned, and both boundary contracts pass it: `assertResolved` looks for absent names, not
+  // for unwritten ones. Checked here, where the two halves meet.
+  const minted = new Set(plan.map((p) => p.name));
+  for (const name of repoint.values()) {
+    if (!minted.has(name)) {
+      throw new Error(`scopebase: the plan repoints an access to \`${name}\`, which no entry mints`);
+    }
   }
 
   const point = (e: Expr): Expr => {

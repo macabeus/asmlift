@@ -330,7 +330,7 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
   });
 
   test('and every label that binds the base three times is this pass, or a pipe THROUGH it', () => {
-    // `/livebase-block/homesplit` (l3/homesplit.ts) pipes a head hoist into this pass with one key
+    // The `/homesplit` pairing (l3/homesplit.ts) pipes a head hoist into this pass with one key
     // withheld, so the region reading it applies is this one — which is why the claim is about the
     // PASS and not about a label. `dmascope` stopped being a lever-clean control for `/regionbase`
     // the moment that pairing existed; the dataset block comment predicted exactly this.
@@ -435,6 +435,18 @@ describe('the PLAN is a value, and its OWNERSHIP is a contract', () => {
       hoistScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' }),
     );
     expect(applyScopedBasePlan(TWO_ARMS_AND_A_TAIL, { ...plan, entries: [] })).toBeNull();
+  });
+
+  test('…and the two fields have to AGREE, which only the applier is placed to check', () => {
+    // `assertPlanOwnership` runs inside the planner, so it cannot see an edit made between plan and
+    // apply — the seam exporting the applier opened. A plan keeping ONE entry while `repoint` still
+    // names the others emits reads of locals nothing declares or assigns, and both boundary
+    // contracts pass it: `assertResolved` looks for absent names, not for unwritten ones.
+    const plan = planScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' });
+    expect(plan.entries.length).toBeGreaterThan(1);
+    expect(() => applyScopedBasePlan(TWO_ARMS_AND_A_TAIL, { ...plan, entries: plan.entries.slice(0, 1) })).toThrow(
+      /repoints an access to/,
+    );
   });
 
   test('…and the pipe rank.ts uses really does re-derive its taken names', () => {

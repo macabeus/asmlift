@@ -131,6 +131,19 @@ export function volatileEligibleLocals(sfn: SFn): string[] {
   return sfn.locals.filter(eligibility(sfn)).map((l) => l.name);
 }
 
+/** the value-side VETO of the header's GATE: `&gSym` at any depth, under a cast or inside interior
+ *  address arithmetic. Named because the taint seed and `volatileEligibleValue` are the same test. */
+const feedsSymbolAddress = (e: Expr): boolean => exprHas(e, (x) => x.k === 'addr');
+
+/** Whether a pointer local fed exactly this value, and nothing else, would qualify — the header's
+ *  GATE at its one-assignment case, where the taint fixpoint is its own seed.
+ *
+ *  Exported because a caller asking "would the spelling I am REPLACING have carried the qualifier?"
+ *  has to ask this model rather than re-derive it. The const-vs-symbol answer is this file's: a
+ *  numeric address has no declaration anywhere, a symbol's volatility is the map's, and a rule that
+ *  hard-codes that split drifts the moment the veto moves (l3/homesplit.ts). */
+export const volatileEligibleValue = (e: Expr): boolean => rematerializableAddress(e) && !feedsSymbolAddress(e);
+
 /** the shared eligibility predicate (the GATE in the header) for one function's locals */
 function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
   const assigns: { name: string; value: Expr }[] = [];
@@ -141,7 +154,7 @@ function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
     if (rematerializableAddress(a.value)) {
       numericFed.add(a.name);
     }
-    if (exprHas(a.value, (x) => x.k === 'addr')) {
+    if (feedsSymbolAddress(a.value)) {
       tainted.add(a.name);
     }
   }
