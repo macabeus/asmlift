@@ -6,7 +6,16 @@
 // 144.9 MB logical and only 14,484 distinct = 32.1 MB. Content-addressed bytes under `objects/`,
 // hardlinked per key under `ns/<namespace>/` — so a key costs an inode, not a copy, and evicting
 // one namespace leaves every other namespace's answers intact.
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -253,6 +262,58 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
       expect(m.cacheStats().prunedObjects, '…but its objects are too young to reap').toBeUndefined();
     });
     expect(objectsIn(root).length, 'the bytes survive the window and are reclaimed by a later prune').toBe(2);
+  });
+
+  test('a namespace a LIVE process holds is never evicted, however cold its mtime is', async () => {
+    // `keepNs` protects only the pruner's OWN namespace. The store is shared: `pnpm bench run`
+    // forks 8-16 shards over one directory, and `bench fidelity` re-executes 1234 scripts for far
+    // longer than any wall-clock grace window. A shard that resolved hours ago and is still
+    // serving objects BY PATH out of its namespace was protected by nothing. So a process CLAIMS
+    // its namespace with a lease file, and a pruner reads the lease's pid.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
+      m.candCache('t', () => NS_A).put('k1', 'f', object('A-ONE'));
+    });
+    age(root, NS_A);
+    // pid 1 is launchd/init: a process that is certainly alive and is certainly not us.
+    mkdirSync(join(root, 'ns', NS_A.slice(0, 16), '.live'), { recursive: true });
+    writeFileSync(join(root, 'ns', NS_A.slice(0, 16), '.live', '1-sibling'), '1\n');
+
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' }, (m) => {
+      m.candCache('t', () => NS_B).warm();
+      expect(m.cacheStats().prunedNamespaces, 'a live holder outranks the cap').toBeUndefined();
+    });
+    expect(readdirSync(join(root, 'ns')).sort()).toEqual([NS_A.slice(0, 16), NS_B.slice(0, 16)].sort());
+
+    // …and once the lease's pid is gone, the same namespace IS reclaimable.
+    rmSync(join(root, 'ns', NS_A.slice(0, 16), '.live', '1-sibling'), { force: true });
+    writeFileSync(join(root, 'ns', NS_A.slice(0, 16), '.live', '2147483000-dead'), '2147483000\n');
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' }, (m) => {
+      m.candCache('t', () => NS_B).warm();
+      expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1 });
+    });
+  });
+
+  test('the cap counts the NEGATIVE entries too — they are 77% of the store and weighed zero', async () => {
+    // MEASURED on one full-bench store: `objects/` 7.57 MB against `du -sm` 156 MB, because
+    // `putFail` writes straight into `ns/` and a 200-byte `.fail` costs a whole allocation block.
+    // A cap counting only `objects/` saw 4.9% of the cost and would fire after ~540 bench runs.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      for (let i = 0; i < 300; i++) {
+        c.putFail(`k${i}`, 'f', "agbcc failed: c.c:2: conflicting types for `f'");
+      }
+    });
+    expect(objectsIn(root).length, 'not one byte of this store is in objects/').toBe(0);
+    age(root, NS_A);
+    // 300 entries x one 4096-byte block = ~1.2 MB of real cost against a 0.5 MB cap; the same
+    // store weighs 0 MB by the old accounting, so nothing would prune.
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0.5' }, (m) => {
+      m.candCache('t', () => NS_B).warm();
+      expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1 });
+    });
+    expect(readdirSync(join(root, 'ns'))).toEqual([NS_B.slice(0, 16)]);
   });
 
   test('under the cap: nothing is pruned at all', async () => {

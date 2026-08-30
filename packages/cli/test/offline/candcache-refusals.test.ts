@@ -3,6 +3,7 @@
 //
 // Every case below is a shape an audit reproduced on the shipped code, each of which served a
 // stale or wrong answer with no perturbation of anything the design considered an input.
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -285,6 +286,28 @@ describe('the store survives another process rewriting it under us', () => {
       mkdirSync(key.replace(/\.o$/, '.fail')); // …and now the negative branch's path is one
       expect(() => c.get('k', 'f')).not.toThrow();
       expect(c.get('k', 'f')).toBeUndefined();
+    });
+  });
+
+  test('a replacement that FAILS does not destroy the answer already there', async () => {
+    // `rmSync(dest); linkSync(objPath, dest)` deletes the answer BEFORE it has one to put back —
+    // a sibling process reading that path in the window gets ENOENT on a key that is permanently
+    // in the store (13 throws and 34 failed reads in 15,000 concurrent lookups, measured). The
+    // fix is link-to-temp-then-rename, and the observable consequence, without a race: when the
+    // link cannot be made at all, the previous answer is still there afterwards.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      const dest = c.put('k', 'f', object('ONE'));
+      expect(readFileSync(dest, 'utf8')).toBe('ONE');
+      // Make the content-addressed entry for the NEW bytes a directory: linkSync and copyFileSync
+      // both fail on it, which is the "replacement could not be completed" case.
+      const h = createHash('sha256').update('TWO').digest('hex');
+      mkdirSync(join(root, 'objects', h.slice(0, 2), h), { recursive: true });
+      c.put('k', 'f', object('TWO'));
+      expect(existsSync(dest), 'the old answer must survive a replacement that could not finish').toBe(true);
+      expect(readFileSync(dest, 'utf8')).toBe('ONE');
+      expect(c.get('k', 'f')).toBe(dest);
     });
   });
 
