@@ -60,8 +60,8 @@ import {
   hasMergeFeedHome,
 } from './structure/analysis';
 import { hasParamRootedMerge } from './structure/structure';
-import { type SymbolMap, symbolsByName } from './symbols';
-import { type TargetDescription, structureOptionsFor } from './target';
+import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
+import { C_TYPEDEFS, type TargetDescription, structureOptionsFor } from './target';
 
 /** The STRUCTURING AXES — the boolean candidate dimensions crossed into every enumeration
  *  (after signedness/branch-sense/defsite/bitfields, which have their own shapes). One entry per
@@ -513,6 +513,63 @@ function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boo
   return out;
 }
 
+/** Names a synthesized declaration must never claim: the C89 keywords plus the candidate
+ *  prelude's own typedef names, derived FROM `C_TYPEDEFS` rather than re-listed (a prelude that
+ *  grows a name grows this set with it). `extern u32 u16;` is not a bad declaration, it is a
+ *  syntax error that fails the WHOLE translation unit — including candidates that never named
+ *  the symbol. */
+const DECL_RESERVED = new Set<string>([
+  ...[...C_TYPEDEFS.matchAll(/(\w+)\s*;/g)].map((m) => m[1]),
+  ...(
+    'auto break case char const continue default do double else enum extern float for goto if int long ' +
+    'register return short signed sizeof static struct switch typedef union unsigned void volatile while'
+  ).split(' '),
+]);
+
+/** The globals a MAP-LESS candidate names, as name-only `SymbolInfo`s — the declaration-synthesis
+ *  input where there is no symbol map to supply one.
+ *
+ *  asmlift does not need a map to EMIT a symbol name: the Thumb frontend reads it out of the
+ *  `.s` file's own literal pool (`.word gBgTilemapBufs` → `gaddr`, thumb.ts's pool grammar) and
+ *  the MIPS frontend out of an object relocation, and structure() spells such a `gaddr` as
+ *  `&gSym`. So the invariant "a candidate's source only names symbols the map knows" is FALSE,
+ *  and a consumer that compiles candidates OUTSIDE the project's own headers (the playground)
+ *  needs these declarations or every candidate fails with "`gSym' undeclared".
+ *
+ *  `kind: 'data'` unconditionally: `code: true` is set only where a symbol MAP said so
+ *  (frontend/thumb.ts), so map-less the IR cannot tell a function pointer from a data address —
+ *  and it does not need to. structure() spells a `code`-less `gaddr` as `&Name`, and `&Name`
+ *  under `extern u32 Name;` is the relocated address whatever Name really is.
+ *
+ *  REFUSALS — each leaves the name UNDECLARED, so the candidate fails to compile LOUDLY and the
+ *  ranker drops it; none of them substitutes a guess:
+ *    R1 a name that is not a C identifier (frontend/mips.ts takes `sym` from a relocation, which
+ *       can name `$L1` or `.rodata.str1`; `extern u32 $L1;` is a syntax error that poisons the
+ *       whole TU, candidates that never named it included),
+ *    R2 a C89 keyword or prelude typedef name (DECL_RESERVED, same poisoning argument),
+ *    R3 a call target or the function's OWN name — refused one level up inside
+ *       `collectSymbolRefs`, for reasons that were never map-dependent.
+ *  The one remaining GUESS is bounded and pre-existing: with no bare off-0 access fact
+ *  (`bareGlobalAccessFacts`) declare.ts renders the `extern u32` cell, which is address-identical
+ *  for every `&name` spelling core emits — and a divergent declaration can only LOSE score,
+ *  never false-match, because the target bytes come from the user's own assembled `.s`. */
+export function bareGlobalSymbols(fn: Fn): Map<string, SymbolInfo> {
+  const out = new Map<string, SymbolInfo>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode !== 'gaddr') {
+        continue;
+      }
+      const sym = op.attrs.sym;
+      if (typeof sym !== 'string' || !/^[A-Za-z_]\w*$/.test(sym) || DECL_RESERVED.has(sym)) {
+        continue;
+      }
+      out.set(sym, { name: sym, kind: 'data' });
+    }
+  }
+  return out;
+}
+
 export interface EnumerateOptions {
   patterns?: RewritePattern[];
   backend?: LanguageBackend;
@@ -810,7 +867,12 @@ export function enumerateCandidates(
   const ptrIdx = new Set<number>(probe.blocks[0].params.flatMap((p, i) => (NO_PIN_KINDS.has(p.type.kind) ? [i] : [])));
   // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
   // from the probe: widths/offsets are lift-time facts, identical across every candidate.
-  const accessFacts = opts.symbols ? bareGlobalAccessFacts(probe) : new Map<string, never>();
+  // Ungated on `opts.symbols`: map-less candidates now carry name-only refs too (see
+  // `bareGlobalSymbols`), and these facts are their declarations' WIDTH AUTHORITY — without them
+  // every map-less decl would be the `extern u32` fallback and a bare `gCell = x` would compile
+  // to `str` where the target says `strh`. One IR walk; on a function with no `gaddr` at all
+  // (every synthetic corpus row) it returns the same empty map the gate used to hand back.
+  const accessFacts = bareGlobalAccessFacts(probe);
   // The axis chain, derived from STRUCTURING_AXES: each admitted axis doubles the list, OFF arm
   // first — order is load-bearing for the dropped-primary skip below (every OFF sibling
   // enumerates before its ON twin, so a twin's stripped-key lookup always finds a sibling that
@@ -859,15 +921,21 @@ export function enumerateCandidates(
     const n = deviceVolatileClaims(tree, target.capabilities.deviceRegisters);
     return n > 0 ? { deviceVolatile: n } : {};
   };
+  // With NO map at all, the names the tree spells are read out of the asm's own literal pool and
+  // synthesized as name-only symbols (`bareGlobalSymbols`) — the map-ful branch is untouched.
+  // `??`, deliberately, not a `.size` test: a map that is defined-but-EMPTY (asIfUndecompiled can
+  // return one) must keep taking the existing branch, so no map-ful row can move.
+  // SCOPE: `declSymbols` is used ONLY here. It must never reach `opts.symbols`/`baseOpts.symbols`
+  // or `frontend.lift` — feeding it to the lift would turn on pool promotion, interior
+  // attribution and the `/raw-globals` variant, which is a different (and source-moving) change.
+  const declSymbols = baseOpts.symbols ?? bareGlobalSymbols(probe);
   const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
-    const refs = baseOpts.symbols
-      ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
-          // name-only symbols carry the IR-derived access facts — the width authority
-          // for their synthesized declaration (shaped symbols keep the map's truth)
-          const access = r.info.shape === undefined ? accessFacts.get(r.name) : undefined;
-          return access ? { ...r, access } : r;
-        })
-      : [];
+    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name).map((r) => {
+      // name-only symbols carry the IR-derived access facts — the width authority
+      // for their synthesized declaration (shaped symbols keep the map's truth)
+      const access = r.info.shape === undefined ? accessFacts.get(r.name) : undefined;
+      return access ? { ...r, access } : r;
+    });
     return refs.length ? { symbolRefs: refs } : {};
   };
   // THE RE-SPELLING FAN, as a function whose PARAMETER LIST is the invariant the tree skip below
