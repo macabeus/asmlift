@@ -458,7 +458,7 @@ function armIsOneSet(b: Block): boolean {
  *  program agbcc never compiled — an arm whose `lsl/asr/add` this pass just shortened to `add`
  *  would read as one SET because of a SIBLING carrier's narrowing. The evidence is a fact about
  *  the lifted asm, so it is snapshotted before the first rewrite. */
-export function mergeShapes(fn: Fn): Map<Block, MergeShape> {
+function mergeShapes(fn: Fn): Map<Block, MergeShape> {
   const preds = predecessorsOf(fn);
   const out = new Map<Block, MergeShape>();
   for (const b of fn.blocks) {
