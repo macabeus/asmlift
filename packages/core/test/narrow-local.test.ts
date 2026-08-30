@@ -570,7 +570,7 @@ describe('the join shape is recorded as evidence', () => {
     // to `rtx_addr_can_trap_p` where `:144-147` says a plain pseudo address CAN trap. So a load is
     // one op and never one hoistable SET — the diamond survives under BOTH spellings and carries
     // nothing. Counting ops alone spells `u16 v` for a source that wrote the cast: the benchmark's
-    // `mergeldcast` row, MATCH at base and 6 with an arm test that reads only the size.
+    // `synthetic:mergeldcast:agbcc` row, MATCH at base and 6 with an arm test reading only size.
     expect(diamonds(MERGE_DIAMOND_LOAD_ARMS).at(-1)).toBe(true);
     expect(hoistable(MERGE_DIAMOND_LOAD_ARMS).at(-1)).toBe(false);
     expect(run(MERGE_DIAMOND_LOAD_ARMS).n).toBe(0);
@@ -580,8 +580,8 @@ describe('the join shape is recorded as evidence', () => {
 
   test('a constant counts toward the arm: one C assignment is not always one insn', () => {
     // `v = a + 0x12345` is a pool `ldr` and an `add`. The IR spells foldable and unfoldable
-    // immediates identically, so the budget counts both; the benchmark's `mergepool` row is this
-    // shape and scores 1 when the constant is exempted.
+    // immediates identically, so the budget counts both; `synthetic:mergepool:agbcc` is this shape
+    // and scores 1 when the constant is exempted.
     expect(diamonds(MERGE_DIAMOND_POOL_ARM).at(-1)).toBe(true);
     expect(hoistable(MERGE_DIAMOND_POOL_ARM).at(-1)).toBe(false);
     expect(run(MERGE_DIAMOND_POOL_ARM).n).toBe(0);
