@@ -167,7 +167,7 @@ const MERGE_SUNK_TRUNCATION = `fn f {
  *  ROM: `u16 v; if (c) { v = a + b; } else { v = a - b; } out[0] = v;` compiled by this benchmark's
  *  agbcc leaves a DIAMOND — the join has two predecessors and neither of them branches to the
  *  other. `gcc/jump.c:443-445` collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;`
- *  only while the else arm is ONE insn holding ONE SET (its guard at `:895-902`), and
+ *  only while the else arm is ONE insn holding ONE SET (`:480`, inside the guard at `:471-502`), and
  *  `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared assignment into the arithmetic PLUS its
  *  truncation pair — five insns, not one SET. So a surviving diamond is positive evidence that the
  *  source DECLARED the local narrow. Same carrier, same single `zext16` reader, same raw in-edges
@@ -212,12 +212,12 @@ const MERGE_HOISTED_ARM = `fn f {
 }
 `;
 
-/** THE SAME DIAMOND WITH AN ARM GCC COULD NOT HAVE HOISTED. `jump.c:895-902` wants the else arm to
- *  be ONE insn holding ONE SET, and that guard fails for a big arm whatever the local's width — so
- *  here the surviving diamond says nothing about the declaration, and the carrier must stay refused
- *  rather than narrowed on evidence that is not evidence. Measured over the sa3 corpus, this is 23
- *  the arm-SIZE reading of the guard already refuses; MERGE_DIAMOND_LOAD_ARMS and
- *  MERGE_DIAMOND_POOL_ARM are the two it did not, and each is a lost byte-match. */
+/** THE SAME DIAMOND WITH AN ARM GCC COULD NOT HAVE HOISTED. `jump.c:480` wants the else arm to be
+ *  ONE insn holding ONE SET, and that fails for a big arm whatever the local's width — so here the
+ *  surviving diamond says nothing about the declaration, and the carrier must stay refused rather
+ *  than narrowed on evidence that is not evidence. This is the shape an arm-SIZE test already
+ *  refuses; MERGE_DIAMOND_LOAD_ARMS and MERGE_DIAMOND_POOL_ARM are the two it did not, and each is
+ *  a lost byte-match. */
 const MERGE_DIAMOND_BIG_ARM = `fn f {
 ^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
   %4: unk32 = const {value=0}
@@ -366,9 +366,6 @@ const MERGE_FORWARDED_ARM = `fn f {
 }
 `;
 
-/** ONE PREDECESSOR REACHING THE JOIN TWICE. `predecessorsOf` deduplicates, so this is a ONE-armed
- *  join and not a diamond; `ir/core.ts`'s `predecessors` lists a block once per EDGE and would
- *  report two. The two models are not interchangeable and this fixture is what says so. */
 /** THE SAME ARM WITH A SYMBOL MAP. Without one an absolute pool word lifts to `const`; with one it
  *  is promoted to `gaddr`. An arm test that exempted constants therefore flipped on the MAP and not
  *  on the program — the same ROM getting a different local depending on whether `--elf` was passed,
@@ -422,8 +419,9 @@ const MERGE_DIAMOND_MAPLESS = `fn f {
  *  the SIBLING first, which DELETES that `sext`, and re-reading the arm afterwards finds one op and
  *  calls the join hoistable. The arm gcc compiled had `lsl / asr / add` in it; judging the rewritten
  *  one prices a program agbcc never saw, and makes a carrier's spelling depend on whether an
- *  unrelated sibling happened to narrow. `mergeShapes` snapshots the shape before the first rewrite,
- *  which is what this fixture pins. */
+ *  unrelated sibling happened to narrow. The shape is snapshotted once, before the first rewrite,
+ *  which is what this fixture pins — `runPreRecovery` takes that snapshot even earlier, before the
+ *  passes AHEAD of this one rewrite the CFG. */
 const MERGE_ARM_WITH_SIBLING = `fn f {
 ^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
   %30: unk32 = sext %0 {width=16}
@@ -444,6 +442,9 @@ const MERGE_ARM_WITH_SIBLING = `fn f {
 }
 `;
 
+/** ONE PREDECESSOR REACHING THE JOIN TWICE, which is ONE arm. The predecessor list holds `^bb0`
+ *  twice, so a count alone reads this as a two-armed merge; what refuses it is the arm test, since
+ *  a block reaching the join twice ends in a `cond_br` rather than the plain `br` an arm ends in. */
 const MERGE_DOUBLE_EDGE = `fn f {
 ^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
   %6: unk32 = add %0, %1
@@ -646,10 +647,8 @@ describe('the join shape is recorded as evidence', () => {
   });
 
   test('a block reached twice from one predecessor is ONE arm', () => {
-    // `predecessorsOf`'s dedup is SEMANTICS: swapping in `ir/core.ts`'s `predecessors`, which lists
-    // one entry per EDGE, makes this join look two-armed. Over 2288 sa3 functions the two models
-    // disagree on 26 blocks and on 8 of them the shared one reports the two predecessors this file
-    // reads — so the swap is a silent behaviour change, and this is the test that fails on it.
+    // A head whose two successors are the same block is not an `if`/`else`, and `gcc/jump.c:480`'s
+    // `single_set` has no second arm to match. The arm test is what says so.
     expect(diamonds(MERGE_DOUBLE_EDGE).at(-1)).toBe(false);
     expect(run(MERGE_DOUBLE_EDGE).n).toBe(0);
     expect(reasons(MERGE_DOUBLE_EDGE).at(-1)).toBe('edge-extends');
@@ -755,9 +754,10 @@ describe('refusals', () => {
     // This fixture is `mergecast`'s cell: one `sext16` over raw in-edges AND a HOISTED join, which
     // is what agbcc leaves when the source cast a wide local. Refusing it costs `mergecast:agbcc`
     // its match, measured. The carrier the join clause re-decides is the DIAMOND above; over 2288
-    // sa3 sources this refusal falls only 40 -> 39, because 31 of its 32 diamonds have arms gcc
-    // could not have collapsed either way — which is why these fixtures and the ablated fuzz arm
-    // carry the rule and no score does.
+    // sa3 sources this refusal does not fall at all — 40 before the clause and 40 after, because
+    // 28 of the 40 are diamonds and NONE of the 28 has arms gcc could have collapsed. So no score
+    // over that corpus can price the clause, and these fixtures and the fuzz's diamond tail are
+    // what carry it.
     expect(run(MERGE_NO_TRUNCATION).n).toBe(0);
     expect(runWithout(MERGE_NO_TRUNCATION, 'edge-extends')).toBe(1);
     // and the same fixture with the truncation SUNK to the join is admitted — the two differ by

@@ -2782,7 +2782,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // do reach `raise/narrowlocal.ts` as the same IR — one `zext16` over raw in-edges — but they do
   // not compile to the same CFG: `gcc/jump.c:443-445` hoists the else arm above the compare for the
   // cast spelling and cannot for the declared one, because `gcc/thumb.h:344` PROMOTE_MODE makes
-  // that arm five insns and the transform's guard at `:895-902` wants one. asmlift reads the join
+  // that arm five insns and the transform's guard at `:471-502` wants one. asmlift reads the join
   // shape and takes both cells; m2c takes the narrow spelling unconditionally, so it wins `mergeu16`
   // and pays on `mergecast`. `mergecastu` is the fourth cell and exists to hold the new rule to a
   // score: it is the shape a diamond test must keep REFUSED, and without it the whole column can be

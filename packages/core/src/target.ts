@@ -118,7 +118,8 @@ export interface TargetDescription {
     deviceMemoryWriters?: readonly (readonly [number, number])[];
   };
   // COMPILER BEHAVIORS — the specific compiler's canonicalization choices, distinct from
-  // hardware `capabilities`. All consumed by the structurer (threaded through StructureOptions).
+  // hardware `capabilities`. Mostly consumed by the structurer (threaded through StructureOptions);
+  // the exceptions are listed at the top of this file and each says so at its own field.
   compilerBehaviors: {
     // When a loop induction variable's initial value comes from an argument register, some
     // compilers keep mutating that register across the loop (coalesce → no init copy); others
@@ -338,9 +339,15 @@ export const PPC_MWCC: TargetDescription = {
 };
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every
- *  `compilerBehaviors` lever (they map 1:1 onto StructureOptions field names). The ONE place a
- *  target's compiler behaviors flow into the target-agnostic structurer — a new behavior lever
- *  is a field in `compilerBehaviors`, consumed automatically. */
+ *  `compilerBehaviors` lever. The ONE place a target's compiler behaviors flow into the
+ *  target-agnostic structurer — a new behavior lever is a field in `compilerBehaviors`, consumed
+ *  automatically.
+ *
+ *  The spread is over the WHOLE bag, so a behavior whose reader is not the structurer rides along
+ *  and is simply never read: `hoistsSingleSetArm` is one (its reader is a pre-recovery pass), and
+ *  `nearBaseSpan` / `foldsConstAddrOffset` are read off the target by rank.ts. So the field names
+ *  are a SUPERSET of StructureOptions', not a bijection, and nothing may derive one from the other
+ *  by enumerating keys. */
 export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean): StructureOptions {
   // `littleEndian` is the one HARDWARE capability the structurer consumes (bitfield extract
   // recognition is LSB-first); everything else is a compiler behavior.

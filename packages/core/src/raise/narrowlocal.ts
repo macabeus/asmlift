@@ -97,9 +97,21 @@
 // see `mergeArms` and `armIsOneSet`. Over-refusal is free: it returns the carrier to the
 // wide-local-plus-cast spelling this pass emitted before the rule existed.
 //
-// PHRASED AS POSITIVE EVIDENCE, DELIBERATELY. `!mergeDiamond` and not `hoistedJoin`: the negation
-// of a hoist is not evidence of a declaration, so a rule that refused only what is provably hoisted
-// would newly admit every one-predecessor, three-armed and irreducible join on nothing at all.
+// PHRASED AS POSITIVE EVIDENCE, DELIBERATELY. The shape is required, not `hoistedJoin` refused: the
+// negation of a hoist is not evidence of a declaration, so a rule that refused only what is provably
+// hoisted would newly admit every one-predecessor, three-armed and irreducible join on nothing at
+// all.
+//
+// AND WHAT IT READS IS THE FINAL ASM, WHERE `jump_optimize` READ THE RTL — the one gap in the
+// mechanism, and it runs in BOTH directions. Compiled with this benchmark's own agbcc:
+// `if (c) v = a << b; else v = a >> b;` leaves arms of TWO insns each (`adds` / `asrs`) and gcc
+// hoisted anyway, because reload added the copies afterwards — this pass over-refuses there, which
+// is free. The other way, `s32 v; if (c) v = (u16)a; else v = (u16)b; out[0] = (u8)v;` is refused
+// the hoist (its arms were `lsl`/`lsr` at jump time) and then has its common `lsr` SUNK past the
+// join, leaving one-insn arms `armIsOneSet` calls hoistable. Nothing here models an insn gcc moved
+// out of an arm, and no fixture can: the mutation is the compiler's. Six authored cast spellings
+// were aimed at that hole and all six hoisted, so it costs no measured row — but a future widening
+// of the arm test is widening into it.
 //
 // ITS PRICE IS MEASURED OVER THE SET IT REFUSES, never over the set it admits — a gate priced on
 // its own accepts cannot show a cost. Over 2288 per-function sa3 sources (1742 lift, 546 decline at
@@ -121,8 +133,15 @@
 // (`45b1755f7fc7 -> c528e2a30ab2`, gapCountChanged 0 over all 930). That a score-level `bench diff`
 // can see one of the rows this decides is the whole reason the `merge*` rows in
 // apps/benchmark/dataset/synthetic.ts exist — four cells of the 2x2 plus `mergeldcast` and
-// `mergepool` for the arm clause — and the reason the behavioural oracle for the rule is the
-// ablated arm of narrowlocal-fuzz.test.ts rather than any score.
+// `mergepool` for the arm clause.
+//
+// THE ADMIT SIDE'S OWN ORACLE IS THE FUZZ, and it had to be built for it: every block
+// narrowlocal-fuzz.test.ts generated ended in `cond_br`, so it emitted no diamond at all and the
+// clause admitted 0 of 163397 candidates. It now appends the shape to half its functions and the
+// clause admits 7421 acyclic / 7522 loop-bearing carriers, every one of them structured,
+// interpreted and compared against the un-narrowed spelling. That is where a widening of this rule
+// that changes what a function COMPUTES would show up; the rows above are where a widening that
+// only changes the SPELLING shows up.
 //
 // WHAT PRICING THE SA3 POPULATION BY SCORE WOULD TAKE, measured rather than assumed: the sa3
 // functions a looser form of this rule flipped all fail to produce a scorable candidate outside the
@@ -149,10 +168,12 @@
 // BACKWARDS. `docs/level-tower.md` legislates exactly this case — a per-compiler default belongs in
 // `TargetDescription.compilerBehaviors` and owes an explicit refusal for every pass that moves the
 // thing it is placing. Both debts are paid: `NarrowLocalOptions.hoistsSingleSetArm` carries the
-// fact (absent ⇒ the clause never admits), and `mergeShapes` snapshots the CFG before this pass's
-// own rewrites — the passes AHEAD of it in pre-recovery.ts (divpow2 DELETES a block, both
-// short-circuit folds rewrite edges) are answered by the head test, which refuses any join whose
-// two arms do not share one `cond_br` predecessor.
+// fact (absent ⇒ the clause never admits), and the shape is read BEFORE any pass that moves it —
+// `runPreRecovery` snapshots it once and threads it down, because the passes ahead of this one in
+// pre-recovery.ts rewrite the very CFG it judges. `raise/shortcircuit.ts` is the one that mattered:
+// it MANUFACTURES two-armed single-SET diamonds out of condition trees, 20 of them over sa3, and
+// the head test does NOT answer it — the head test passes on exactly those blocks. See
+// `mergeShapes` for what the snapshot still does not reach.
 import { type Block, type Fn, type Op, type Value, predecessors, replaceAllUsesWith } from '../ir/core';
 import { CAST_WIDTHS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
@@ -340,7 +361,7 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
 export interface MergeShape {
   /** the block is a TWO-ARMED DIAMOND: `gcc/jump.c:471-502`'s input shape. */
   diamond: boolean;
-  /** …and both arms are ones that guard could have collapsed. False whenever `diamond` is. */
+  /** …and both arms are ones that guard could have collapsed. Never true without `diamond`. */
   hoistable: boolean;
 }
 
@@ -415,6 +436,9 @@ function mergeArms(preds: Map<Block, Block[]>, fn: Fn, blk: Block): [Block, Bloc
  *      `const` feeding `add` and does not say which immediate the target can fold, so constants
  *      COUNT: the foldable case is refused too, and that costs nothing, because agbcc really does
  *      hoist it and the join is then not a diamond at all.
+ *    • an arm with NOTHING in it is not one SET either, which is why the budget is EXACTLY one and
+ *      not at most one: `:480` runs `single_set` on the arm's own insn, and an arm whose only insn
+ *      is its jump has none.
  *
  *  Over-refusal here is free by construction: refusing returns the carrier to the wide-local-plus-
  *  cast spelling this pass emitted before the rule existed. */
