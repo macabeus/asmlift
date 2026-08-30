@@ -19,7 +19,15 @@ import { describe, expect, test } from 'vitest';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
-import { REGIONBASE_GATES, REGION_RULES, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
+import {
+  REGIONBASE_GATES,
+  REGION_RULES,
+  type RegionRule,
+  SCOPEBASE_GATES,
+  assertPlanOwnership,
+  hoistScopedBases,
+  planScopedBases,
+} from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -324,5 +332,84 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     const three = cands.filter((c) => dmaLocals(c.source) >= 3);
     expect(three.length).toBeGreaterThan(0);
     expect(three.every((c) => c.label.includes('/regionbase'))).toBe(true);
+  });
+});
+
+describe('the PLAN is a value, and its OWNERSHIP is a contract', () => {
+  // `planScopedBases` is the census half of this pass — which keys it found, which regions it
+  // admitted, and for a key it serves nowhere the id of the rule that refused it first;
+  // `hoistScopedBases` is the applier. The split is what lets a caller ask whether one particular
+  // key would be split without applying anything, which is what `rank.ts` gates the
+  // `/livebase-block/homesplit` pairing on.
+  test('the plan names every key and every entry', () => {
+    const plan = planScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' });
+    expect(plan.keys).toEqual(['n:g 2 false']);
+    expect(plan.entries.map((e) => e.name)).toEqual(['p0', 'p1', 'p2']);
+    expect(plan.entries.every((e) => e.key === 'n:g 2 false')).toBe(true);
+    expect([...plan.refusals]).toEqual([]);
+  });
+
+  test('…and a key it serves nowhere names the DECIDING rule rather than vanishing', () => {
+    const one = fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [put(1), put(2)], else: [] }]);
+    const plan = planScopedBases(one, { regions: 'per-region' });
+    expect(plan.entries).toEqual([]);
+    expect(plan.refusals.get('n:g 2 false')).toBe('regions-degenerate');
+  });
+
+  test('the applier mints exactly the plan’s locals, in the plan’s order', () => {
+    const plan = planScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' });
+    const out = hoistScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' });
+    expect(out!.locals.map((l) => l.name)).toEqual(plan.entries.map((e) => e.name));
+  });
+
+  test('the plan is DETERMINISTIC — two runs over one tree name the same entries', () => {
+    const shape = (p: ReturnType<typeof planScopedBases>): string[] =>
+      p.entries.map((e) => `${e.key} ${e.name} ${e.before}`);
+    expect(shape(planScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' }))).toEqual(
+      shape(planScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' })),
+    );
+  });
+
+  // `repoint.set(node, name)` is LAST-WRITE-WINS. It fires zero times under either shipped region
+  // rule — both partitions are node-disjoint by construction — so the only way to show the check
+  // load-bearing is to hand the pass a rule that violates the property. Without it an overlapping
+  // partition repoints an access at whichever entry ran last, whose assignment need not dominate
+  // it: the silent-wrong-variable failure this file's header names, not a compile error.
+  const OVERLAPPING: RegionRule = {
+    ...REGION_RULES['per-region'],
+    partition: (all, body) => {
+      const [one] = REGION_RULES['per-region'].partition(all, body);
+      return [one, { ...one, uses: [...one.uses] }];
+    },
+  };
+
+  test('two plan entries claiming ONE access node throw', () => {
+    expect(() => planScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region', rule: OVERLAPPING })).toThrow(
+      /claimed by two plan entries/,
+    );
+  });
+
+  test('…and the applier throws through the same contract rather than emitting the tree', () => {
+    expect(() => hoistScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region', rule: OVERLAPPING })).toThrow(
+      /claimed by two plan entries/,
+    );
+  });
+
+  test('a plan whose entries share a NAME, or shadow a declared local, throws', () => {
+    // The applier appends `plan`'s names to `sfn.locals` wholesale, so either shape emits a
+    // duplicate C declaration. `nameAllocator` is what keeps both unreachable today — including
+    // across the rank.ts PIPE, where the second pass re-derives its taken names from the tree the
+    // first produced; the contract is what keeps that a checked property rather than an argument.
+    const entry = { name: 'p0', key: 'n:g 2 false' };
+    expect(() => assertPlanOwnership(TWO_ARMS_AND_A_TAIL, [entry, { ...entry }])).toThrow(/mints `p0`/);
+    const shadow: SFn = { ...TWO_ARMS_AND_A_TAIL, locals: [{ name: 'p0', type: T.ptr(T.u(16)) }] };
+    expect(() => assertPlanOwnership(shadow, [entry])).toThrow(/mints `p0`/);
+  });
+
+  test('…and the pipe rank.ts uses really does re-derive its taken names', () => {
+    // hoistScopedBases over a tree that already declares `p0` must not mint a second `p0`.
+    const already: SFn = { ...TWO_ARMS_AND_A_TAIL, locals: [{ name: 'p0', type: T.ptr(T.u(16)) }] };
+    const out = hoistScopedBases(already, { regions: 'per-region' });
+    expect(out!.locals.map((l) => l.name)).toEqual(['p0', 'p1', 'p2', 'p3']);
   });
 });
