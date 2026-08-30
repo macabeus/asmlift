@@ -314,7 +314,7 @@ const LOOP_HEADER_DIAMOND = `fn f {
 /** AN ARM THE FRONTEND INVENTED. `^bb3` is an empty forwarding block cut at a label whose own
  *  predecessor is another join, not the head — there is no `x = b;` insn for `gcc/jump.c:478`'s
  *  `single_set` to match, so the transform's shape never existed in either direction. This is
- *  sa3:sub_80B6198's carrier, the ONE corpus carrier the arm-size test admitted. */
+ *  `sub_80B6198` in the sa3 checkout's carrier, the ONE corpus carrier the arm-size test admitted. */
 const MERGE_FORWARDED_ARM = `fn f {
 ^bb0(%0: unk32, %2: s32*, %3: unk32):
   %4: unk32 = const {value=0}
@@ -573,7 +573,7 @@ describe('the join shape is recorded as evidence', () => {
   });
 
   test('an empty forwarding arm has no insn to be one SET, and is refused as the head is not shared', () => {
-    // sa3:sub_80B6198 — the ONE corpus carrier an arm-SIZE test admitted, and a misclassification:
+    // `sub_80B6198` in the sa3 checkout — the ONE corpus carrier an arm-SIZE test admitted, and a misclassification:
     // `^bb3` is a nested join flattened by the frontend, not an `if`/`else` arm.
     expect(diamonds(MERGE_FORWARDED_ARM).at(-1)).toBe(false);
     expect(hoistable(MERGE_FORWARDED_ARM).at(-1)).toBe(false);
