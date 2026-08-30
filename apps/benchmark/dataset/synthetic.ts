@@ -3501,6 +3501,28 @@ export const SYNTHETIC: SynthSpec[] = [
   // anything but MATCH on the commit that ships it. Every number in this block that is not marked
   // PREDICTION is a compile or a ranked run.
   //
+  // A PER-BASE CHOICE OF REGION RULE IS NOT THE FREEDOM THIS ROW NEEDS, AND THE CENSUS IS WHY. The
+  // obvious reading of "make the region reading per-base" is to let `hoistScopedBases` pick its
+  // `RegionRule` per BASE KEY rather than per function. That choice has a ONE-ELEMENT DOMAIN here:
+  // `SCOPEBASE_GATES`' `repeated-const-offset` is tallied over the KEY's uses, and both of this
+  // function's bases repeat one — 0x03004000 reaches subscript 2 twice, 0x040000D4 reaches 0, 1 and
+  // 2 three times each — so NEITHER key admits under `'whole'` and there is nothing to choose
+  // between. Measured three ways that agree: `hoistScopedBases(sfn, { regions: 'whole' })` serves 0
+  // keys on this row and on `dmaflat`; the ranked fan carries 0 `/scopebase` candidates on either;
+  // and over 62 agbcc trees censused at the plan (11 synthetic — the nine core corpus fixtures plus
+  // these two rows — and the 51 klonoa functions that lift map-less with no `--asm-data`), the
+  // number of keys served under BOTH region rules is 0. Trees where `/livebase-block` homes two or
+  // more keys, which is the population any pairing can reach: 3 of the 11 and 6 of the 51.
+  //
+  // AND EVEN WITH THAT GATE ABLATED THE PER-KEY READING CANNOT REACH 0, because WHERE the init
+  // sits is a second axis this pass has no knob for. `hoistScopedBases` splices a region's init at
+  // `Math.min(...r.uses.map((u) => u.idx[r.depth]))` — the first statement that uses it — which on
+  // this function is index 1, below `v0 = 0`. The endpoint needs it at index 0, and the difference
+  // is compiled: the composed spelling scores 0 with the 0x03004000 assignment at the very head of
+  // the body and 2 with it one statement lower. `HoistPlacement: 'head'` is where that lives
+  // (rank.ts LIVEBASE_ADMISSIONS), which is the OTHER lever — so the freedom that reaches 0 is not
+  // which RULE a key gets, it is which key the head hoist WITHHOLDS.
+  //
   // WHAT ASMLIFT DOES TODAY, AND WHAT EACH LEVER IS WORTH HERE — one ranked run of the row's own
   // target per cell. The instrument is a reversible source edit at the ONE site that produces the
   // lever (core is browser-pure, so no env switch can live there): the lever's own thunk in
