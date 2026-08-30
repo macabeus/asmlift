@@ -39,6 +39,9 @@ export type RankProgress =
 
 /** Wrap an emitter so it posts at most once per `intervalMs` of WALL TIME.
  *
+ *  EVERY NUMBER BELOW IS ONE MACHINE'S MEASUREMENT ON 2026-08-30, not a property of the code — it
+ *  is the ARGUMENT that is durable, and the numbers will rot.
+ *
  *  WHY A THROTTLE AT ALL: one real function enumerates 117,760 candidates in the browser (measured;
  *  the CLI's number for the same function, WITH a symbol map, is 66,816). A postMessage per
  *  candidate would flood the main thread the worker exists to protect.

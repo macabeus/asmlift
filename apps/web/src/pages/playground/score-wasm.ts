@@ -229,7 +229,7 @@ export async function rankCandidatesInBrowser(
   const emit: (p: RankProgress) => void = onProgress ?? (() => {});
 
   // ASSEMBLE FIRST. This used to run AFTER `enumerateCandidates`, and the ordering cost a measured
-  // 62.3 s of discarded work on every pret-dialect `.s`: agbcc's `assemble()` hands the source to
+  // 62.3 s (2026-08-30) of discarded work on every pret-dialect `.s`: agbcc's `assemble()` hands the source to
   // GNU as AS-IS, which does not know `thumb_func_start`, so `LoadBGTilemapData` enumerated 117,760
   // candidates and THEN died on line 1. `enumerateCandidates` does not consume `t`, so the swap is
   // behaviour-neutral whenever assembly succeeds and turns a minute into milliseconds when it does
@@ -246,8 +246,8 @@ export async function rankCandidatesInBrowser(
   // attribute an undeclared name to that decision instead of leaving the user to guess — and,
   // for `emitter-name`, so a row that produced NO candidate at all says which symbol collided.
   //
-  // `enumerateCandidates` is SYNCHRONOUS and returns a finished array (62.3 s of it, measured, on
-  // the function above), so there is no honest number to show inside it — the phase is named and
+  // `enumerateCandidates` is SYNCHRONOUS and returns a finished array (62.3 s of it, measured
+  // 2026-08-30, on the function above), so there is no honest number to show inside it — the phase is named and
   // carries none. Subdividing it is a core change and a follow-up, not this round's.
   emit({ phase: 'enumerating' });
   const refused: RefusedDeclaration[] = [];

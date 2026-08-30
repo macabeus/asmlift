@@ -164,6 +164,18 @@ describe('applyRankMessage (H1)', () => {
     expect(applyRankMessage(failed, { kind: 'progress', reqId: 3, phase: 'ranking' }, 3)).toBeNull();
   });
 
+  test("(b') rule 2's LIVE case: onerror settles the CURRENT run, whose ticks keep arriving", () => {
+    // postMessage is FIFO per port, so a run's ticks always precede its own result — "its own
+    // result already landed" cannot happen. What CAN: `worker.onerror` sets {status:'error'} for a
+    // run that is still current and still emitting. Without rule 2 the spinner re-opens over the
+    // loud error, which is constraint 4 (a failure path must stay loud) broken by progress.
+    const afterOnError: Ranking = { status: 'error', error: 'the ranking worker failed to load' };
+    expect(applyRankMessage(afterOnError, { kind: 'progress', reqId: 9, phase: 'enumerating' }, 9)).toBeNull();
+    expect(
+      applyRankMessage(afterOnError, { kind: 'progress', reqId: 9, phase: 'scoring', done: 400, total: 800 }, 9),
+    ).toBeNull();
+  });
+
   test('(c) a current-reqId progress message yields loading with the phase and counts', () => {
     const prev: Ranking = { status: 'loading', phase: 'assembling' };
     expect(applyRankMessage(prev, { kind: 'progress', reqId: 4, phase: 'scoring', done: 5, total: 9 }, 4)).toEqual({

@@ -33,8 +33,12 @@ export type Ranking =
  *  Three refusals, each closing a way the UI could tell a lie:
  *   1. any message (progress or result) whose reqId is not the current one — it belongs to an asm
  *      the user has already edited away from, and rendering it is the cardinal sin H1 names;
- *   2. a progress tick arriving after its own request has settled — it would re-open the spinner
- *      over a finished verdict;
+ *   2. a progress tick arriving into a request that has ALREADY SETTLED — it would re-open the
+ *      spinner over a finished verdict. Its live path is `worker.onerror` below, NOT "its own
+ *      result already landed": postMessage is FIFO per port, so a run's ticks always precede its
+ *      own result. `onerror` settles `{status:'error'}` while the still-CURRENT run keeps emitting
+ *      under the still-current reqId, and without this rule the bar would visibly re-open over the
+ *      loud error — constraint 4, a failure path that must stay loud;
  *   3. progress into anything but `loading` — enforced by the type, not by a convention. */
 export function applyRankMessage(prev: Ranking, msg: RankMessage, currentReqId: number): Ranking | null {
   if (msg.reqId !== currentReqId) {
@@ -42,7 +46,7 @@ export function applyRankMessage(prev: Ranking, msg: RankMessage, currentReqId: 
   }
   if (msg.kind === 'progress') {
     if (prev.status !== 'loading') {
-      return null; // its own result already landed; a bar must never outlive the verdict
+      return null; // settled (in practice: by worker.onerror) — a bar must never outlive a verdict
     }
     const { kind: _kind, reqId: _reqId, ...progress } = msg;
     return { status: 'loading', ...progress };
@@ -103,7 +107,7 @@ export function useRanking(input: RankingInput): Ranking {
     // first frame, never an empty message. The phase is `queued`, the one the worker never sends,
     // because it is the only thing the MAIN THREAD can honestly claim here: the request has been
     // handed over and nothing has been observed back. Naming `assembling` would be an assertion,
-    // not an observation, and it is wrong for a measured 62.3 s whenever the worker is still
+    // not an observation, and it is wrong for a measured 62.3 s (2026-08-30) whenever the worker is still
     // enumerating a superseded run (its event loop cannot dequeue this message until it returns).
     setRanking({ status: 'loading', phase: 'queued' });
     workerRef.current?.postMessage({ reqId, name, asm, target, ...(symbols ? { symbols } : {}) } satisfies RankRequest);

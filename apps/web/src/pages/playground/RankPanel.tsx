@@ -35,7 +35,7 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
   const base = 'rounded-md px-2.5 py-1 text-[11px] font-medium';
   if (ranking.status === 'loading') {
     // A REAL progressbar, and only as determinate as the run actually is. The candidate total does
-    // not exist until `enumerateCandidates` returns — 62.3 s of one measured run — so four of the
+    // not exist until `enumerateCandidates` returns — 62.3 s of one run measured 2026-08-30 — so four of the
     // five phases render with `aria-valuenow` OMITTED, which is the ARIA spelling of
     // indeterminate; an invented 0 would not be. The phase sentence is visible text either way, so
     // this is never LESS informative than the bare div it replaces.
