@@ -24,6 +24,7 @@ import {
   REGION_RULES,
   type RegionRule,
   SCOPEBASE_GATES,
+  applyScopedBasePlan,
   assertPlanOwnership,
   hoistScopedBases,
   planScopedBases,
@@ -408,6 +409,32 @@ describe('the PLAN is a value, and its OWNERSHIP is a contract', () => {
     expect(() => assertPlanOwnership(TWO_ARMS_AND_A_TAIL, [entry, { ...entry }])).toThrow(/mints `p0`/);
     const shadow: SFn = { ...TWO_ARMS_AND_A_TAIL, locals: [{ name: 'p0', type: T.ptr(T.u(16)) }] };
     expect(() => assertPlanOwnership(shadow, [entry])).toThrow(/mints `p0`/);
+  });
+
+  test('…and freshness is `takenNames`, not the declared locals — a param or a body name counts', () => {
+    // `nameAllocator` mints against `takenNames`: params, locals, every `var`/`addr`/`call` name,
+    // every assignment target. A plan entry that only shadows one of those is not a duplicate
+    // declaration — it is a DIFFERENT VARIABLE, which is the failure class this contract is for,
+    // so the check has to read the same set the allocator does.
+    const entry = { name: 'p0', key: 'n:g 2 false' };
+    const param: SFn = { ...TWO_ARMS_AND_A_TAIL, params: [{ name: 'p0', type: T.s(32) }] };
+    expect(() => assertPlanOwnership(param, [entry])).toThrow(/mints `p0`/);
+    const assigned: SFn = {
+      ...TWO_ARMS_AND_A_TAIL,
+      body: [{ k: 'assign', name: 'p0', value: { k: 'const', value: 0 } }, ...TWO_ARMS_AND_A_TAIL.body],
+    };
+    expect(() => assertPlanOwnership(assigned, [entry])).toThrow(/mints `p0`/);
+  });
+
+  test('the applier applies the plan it is HANDED, so a caller can count and rewrite one decision', () => {
+    // l3/homesplit.ts has to know how many locals the withheld key got AND emit the tree. Two runs
+    // of the planner is a second predicate that could disagree with the first; this is the seam
+    // that makes it one.
+    const plan = planScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' });
+    expect(applyScopedBasePlan(TWO_ARMS_AND_A_TAIL, plan)).toEqual(
+      hoistScopedBases(TWO_ARMS_AND_A_TAIL, { regions: 'per-region' }),
+    );
+    expect(applyScopedBasePlan(TWO_ARMS_AND_A_TAIL, { ...plan, entries: [] })).toBeNull();
   });
 
   test('…and the pipe rank.ts uses really does re-derive its taken names', () => {

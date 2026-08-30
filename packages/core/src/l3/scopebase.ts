@@ -66,7 +66,7 @@ import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs, stmtLists } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
-import { nameAllocator } from './hoist';
+import { nameAllocator, takenNames } from './hoist';
 import { addressableGlobals } from './storage';
 
 /** A base this lever may name: a leaf whose value is a fixed address. */
@@ -556,8 +556,9 @@ export interface ScopedBaseEntry {
   readonly uses: readonly Expr[];
 }
 
-/** What the pass DECIDED, before anything is applied. A caller that only needs to know whether one
- *  key would be split reads this and applies nothing (rank.ts's `/livebase-block/homesplit`). */
+/** What the pass DECIDED, before anything is applied. `applyScopedBasePlan` is the other half: a
+ *  caller that has to both COUNT what a key got and rewrite the tree (l3/homesplit.ts) plans once
+ *  and applies that same plan, rather than re-deriving the decision from the applied tree. */
 export interface ScopedBasePlan {
   /** every eligible key `collect` found, in first-appearance order */
   readonly keys: readonly string[];
@@ -581,7 +582,10 @@ export interface ScopedBasePlan {
  *      access is silently repointed at a local whose assignment need not dominate it — C that
  *      compiles, scores, and names a different variable.
  *    • a minted name that is not fresh. The applier appends `entries`' names to `sfn.locals`
- *      wholesale, so a duplicate emits a duplicate declaration.
+ *      wholesale, so a duplicate emits a duplicate declaration — and freshness is `takenNames`'
+ *      reading of it, which is what `nameAllocator` mints against: a name that only shadows a
+ *      PARAMETER, or a body assignment no declaration list carries, is a different variable rather
+ *      than a duplicate declaration, and that is the failure this contract exists for.
  *
  *  Both fire ZERO times under either shipped region rule (the partitions are node-disjoint, and
  *  `nameAllocator` re-derives its taken names from the tree it is handed — including across the
@@ -592,7 +596,7 @@ export function assertPlanOwnership(
   sfn: SFn,
   entries: readonly { name: string; key: string; uses?: readonly Expr[] }[],
 ): void {
-  const taken = new Set(sfn.locals.map((l) => l.name));
+  const taken = takenNames(sfn);
   const claimed = new Set<Expr>();
   for (const e of entries) {
     if (taken.has(e.name)) {
@@ -608,9 +612,9 @@ export function assertPlanOwnership(
   }
 }
 
-/** What the pass DECIDES for `sfn` under `opts`, with nothing applied. `hoistScopedBases` is the
- *  applier; this is the census, and it is what a caller gating a PAIRING on "would this key be
- *  split?" reads (rank.ts, `/livebase-block/homesplit`). */
+/** What the pass DECIDES for `sfn` under `opts`, with nothing applied. `applyScopedBasePlan` is the
+ *  applier and `hoistScopedBases` the two of them in order; a caller that gates a PAIRING on "how
+ *  many locals did this key get?" reads the plan and applies THAT one (l3/homesplit.ts). */
 export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBasePlan {
   const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
   const rule = opts.rule ?? REGION_RULES[opts.regions ?? 'whole'];
@@ -706,8 +710,14 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
  * The re-spelling `regions` asks for — `/scopebase` or `/regionbase` — or null when nothing
  * qualifies (the caller then adds no candidate rather than a duplicate of the primary).
  */
-export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null {
-  const { entries: plan, repoint, compound: bad } = planScopedBases(sfn, opts);
+export const hoistScopedBases = (sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null =>
+  applyScopedBasePlan(sfn, planScopedBases(sfn, opts));
+
+/**
+ * `plan` applied to the tree it was planned over — null when it decided nothing (the caller then
+ * adds no candidate rather than a duplicate of the primary).
+ */
+export function applyScopedBasePlan(sfn: SFn, { entries: plan, repoint, compound: bad }: ScopedBasePlan): SFn | null {
   if (bad || plan.length === 0) {
     return null;
   }
