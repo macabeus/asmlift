@@ -6,6 +6,13 @@ import { createSnapshotCache, hashToSearchParams, hashUrl, pickKeys } from '../s
 import { encodeShare } from '../src/shared/utils/permalink';
 import { parseAsShareState } from '../src/shared/utils/url-state';
 
+/** The WHOLE write-then-read path, not a string-level shortcut: params -> the URL the adapter
+ *  hands to `pushState` -> what `location.hash` gives back -> params. `URL`'s hash setter is the
+ *  one platform component that could re-encode a payload, and only this route touches it. */
+function throughTheFragment(params: URLSearchParams): URLSearchParams {
+  return hashToSearchParams(new URL(hashUrl('https://x.test/asmlift/', params)).hash);
+}
+
 test('hashToSearchParams strips exactly one leading #, and tolerates none', () => {
   expect([...hashToSearchParams('')]).toEqual([]);
   // `new URLSearchParams('#')` on its own yields one entry keyed '#': the strip must be ours.
@@ -21,7 +28,7 @@ test('a hostile value round-trips through the fragment verbatim', () => {
   const nasty = 'a b+c&d=e%f#g"h<i>j`k/l:m?n';
   const params = new URLSearchParams();
   params.set('x', nasty);
-  expect(hashToSearchParams(params.toString()).get('x')).toBe(nasty);
+  expect(throughTheFragment(params).get('x')).toBe(nasty);
 });
 
 test('a real lz-string ShareState whose encoding contains + round-trips through the fragment', () => {
@@ -43,7 +50,7 @@ test('a real lz-string ShareState whose encoding contains + round-trips through 
 
   const params = new URLSearchParams();
   params.set('s', encoded);
-  const back = hashToSearchParams(params.toString()).get('s');
+  const back = throughTheFragment(params).get('s');
   expect(back).toBe(encoded);
   expect(parseAsShareState.parse(back!)).toEqual(state);
 });
@@ -63,11 +70,11 @@ test('hashUrl changes only the fragment', () => {
   );
 });
 
-test('a 200,000-character payload round-trips (the fragment has no transport ceiling)', () => {
+test('a 200,000-character payload round-trips through the fragment (no transport ceiling)', () => {
   const huge = 'A'.repeat(200_000);
   const params = new URLSearchParams();
   params.set('s', huge);
-  expect(hashToSearchParams(params.toString()).get('s')).toBe(huge);
+  expect(throughTheFragment(params).get('s')).toBe(huge);
 });
 
 // --- key isolation: nuqs's own filterSearchParams is internal (no hit in any dist/**/*.d.ts),
