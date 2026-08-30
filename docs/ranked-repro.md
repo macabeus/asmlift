@@ -98,8 +98,9 @@ reason=object-is-not-a-pure-function-of-its-input` is what `ido7.1` gets, becaus
   through a script serves the stale object for that file, measured. List every file and directory
   the command reads, including anything a wrapper script of yours opens. The one shape asmlift
   checks by itself is the SHAPE of the declaration — a scalar where a list was meant (`cacheInputs:
-gen`) is now a loud load error, because a string iterates per character and used to turn the
-  cache on having measured nothing at all. If in doubt, leave the key out: no key, no cache.
+gen`) is a loud load error, because a string iterates per character, and three `MISSING`
+  characters hash exactly like three declared files that are not there — the cache on, the
+  declaration measured, and nothing of the project in the namespace. If in doubt, leave the key out: no key, no cache.
 - **The store is bounded, but only between runs.** `ASMLIFT_CANDCACHE_MAX_MB` (default 4096)
   counts the distinct object bytes plus one allocation block per stored key — 77% of a warm store
   is negative entries, which weigh nothing logically and cost a block each. It is enforced ONCE per
