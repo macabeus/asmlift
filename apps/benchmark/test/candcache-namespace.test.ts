@@ -9,7 +9,7 @@
 //
 //   1. The harness's OWN TypeScript. `compileCandidateRaw` preprocesses, runs `stripPrototype`,
 //      runs agbcc, APPENDS `.text/.align 2, 0` to the `.s`, and assembles. Patching that tail to
-//      `.align 4, 0` served the 648-byte object where the truth is 660, with every binary, flag
+//      `.align 4, 0` served the 644-byte object where the truth is 660, with every binary, flag
 //      and `--version` banner identical.
 //   4. The BINARIES behind the bare command names. `arm-none-eabi-cpp` and `arm-none-eabi-as`
 //      entered only through their `--version` output; a shell wrapper first on $PATH left the
@@ -17,30 +17,43 @@
 //   5. The compile ENVIRONMENT. `CPATH` is honoured by the preprocessor even under `-nostdinc`,
 //      so it is an input to every candidate compile although nothing on the command line names it.
 //
-// The assertions below are on the two exported halves of the namespace rather than on a live
-// compile, so they run in the toolchain-free gate: `candCacheNamespaceFiles()` is the LIST (a
-// dropped entry is an input the cache stops noticing) and `candCacheStaticStamp(files)` is the
-// digest over it (content, not paths). The pipeline's own object bytes are the third half and are
-// measured by the two-directory probe, which needs agbcc and is exercised by the matching suite.
+// The assertions are on the two exported halves of the namespace rather than on a live compile:
+// `candCacheNamespaceFiles()` is the LIST (a dropped entry is an input the cache stops noticing)
+// and `candCacheStaticStamp(files)` is the digest over it (content, not paths). The pipeline's own
+// object bytes are the third half, measured by the two-directory probe, which needs agbcc and is
+// exercised by the matching suite.
+//
+// Only the DIGEST half runs everywhere. Building the LIST is itself a measurement of the machine's
+// compilers — it resolves `TOOLCHAIN.agbcc` and follows its delegates, and REFUSES rather than
+// guess when the binary is not installed — so the two tests that call it are skipped where agbcc
+// is absent, which is every hosted runner. What must not be lost there is the dropped-entry guard,
+// so `SHAPING_SOURCES` is asserted directly: that half is a constant and needs no toolchain.
 import { toolchainFileChain } from '@asmlift/cli/candcache';
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { TOOLCHAIN } from '@asmlift/toolchains';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { candCacheNamespaceFiles, candCacheStaticStamp } from '../src/compile/agbcc';
+import { SHAPING_SOURCES, candCacheNamespaceFiles, candCacheStaticStamp } from '../src/compile/agbcc';
 
 const HARNESS = join(import.meta.dirname, '../src/compile');
+/** Building the namespace's file list resolves the installed agbcc and follows what it delegates
+ *  to; where there is no agbcc there is nothing to measure and the module refuses, by design. */
+const HAVE_AGBCC = existsSync(TOOLCHAIN.agbcc);
 const scratch = (): string => mkdtempSync(join(tmpdir(), 'candcache-ns-'));
 
 describe('hole 1 — the namespace hashes the harness code that shapes the compiler input', () => {
-  test('agbcc.ts and util.ts are ON the list, and they exist', () => {
-    const files = candCacheNamespaceFiles();
+  test('agbcc.ts and util.ts are shaping sources, and they exist', () => {
     for (const shaping of ['agbcc.ts', 'util.ts']) {
-      const hit = files.find((f) => f === join(HARNESS, shaping));
+      const hit = SHAPING_SOURCES.find((f) => f === join(HARNESS, shaping));
       expect(hit, `${shaping} must be a namespace input: it shapes what the compiler is handed`).toBeDefined();
       expect(readFileSync(hit!, 'utf8').length).toBeGreaterThan(0);
     }
+  });
+
+  test.skipIf(!HAVE_AGBCC)('…and the list the namespace hashes ends with exactly those two', () => {
+    expect(candCacheNamespaceFiles().slice(-SHAPING_SOURCES.length)).toEqual([...SHAPING_SOURCES]);
   });
 
   test('patching the .s tail agbcc.ts appends MOVES the digest — the exact stale-object repro', () => {
@@ -77,20 +90,23 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
 });
 
 describe('hole 4 — the namespace hashes the BINARIES, not their version banners', () => {
-  test('the assembler and the preprocessor are on the list, resolved or explicitly UNRESOLVED', () => {
-    const files = candCacheNamespaceFiles();
-    // agbcc, the assembler, the preprocessor AND WHATEVER THOSE DELEGATE TO, then the two shaping
-    // sources. The count is not the claim (a chain is as long as the toolchain makes it); every
-    // entry being a real file or an explicit marker is.
-    expect(files.length).toBeGreaterThanOrEqual(5);
-    for (const entry of files.slice(0, -2)) {
-      expect(
-        entry.startsWith('/') || entry.startsWith('UNRESOLVED:'),
-        `a bare command name must resolve to a file to hash, or say it did not: ${entry}`,
-      ).toBe(true);
-    }
-    expect(files.slice(-2)).toEqual([join(HARNESS, 'agbcc.ts'), join(HARNESS, 'util.ts')]);
-  });
+  test.skipIf(!HAVE_AGBCC)(
+    'the assembler and the preprocessor are on the list, resolved or explicitly UNRESOLVED',
+    () => {
+      const files = candCacheNamespaceFiles();
+      // agbcc, the assembler, the preprocessor AND WHATEVER THOSE DELEGATE TO, then the two shaping
+      // sources. The count is not the claim (a chain is as long as the toolchain makes it); every
+      // entry being a real file or an explicit marker is.
+      expect(files.length).toBeGreaterThanOrEqual(5);
+      for (const entry of files.slice(0, -2)) {
+        expect(
+          entry.startsWith('/') || entry.startsWith('UNRESOLVED:'),
+          `a bare command name must resolve to a file to hash, or say it did not: ${entry}`,
+        ).toBe(true);
+      }
+      expect(files.slice(-2)).toEqual([join(HARNESS, 'agbcc.ts'), join(HARNESS, 'util.ts')]);
+    },
+  );
 
   test('a DELEGATE is a namespace input: the chain does not stop at the file a name resolves to', () => {
     // The hole this closes, measured on this machine: `cpp` is a 208-byte `#!/bin/sh` shim that

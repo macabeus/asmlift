@@ -84,8 +84,11 @@ const vendorScratch = scratchSlot('bench-vendor-');
 // (it owns `run`'s env and timeout, and `scratchSlot`), are hashed in. An unreadable source is a
 // REFUSAL, never a guess.
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** Every harness module whose text shapes what the compiler is handed, or how it is invoked. */
-const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), join(HERE, 'util.ts')];
+/** Every harness module whose text shapes what the compiler is handed, or how it is invoked.
+ *  Exported so the dropped-entry guard can be asserted where no toolchain is installed:
+ *  `candCacheNamespaceFiles()` below MEASURES the machine's compilers and refuses when it cannot
+ *  read one, so the assertion that these two are on the list cannot itself run on a bare runner. */
+export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), join(HERE, 'util.ts')];
 const CAND_CPP_FLAGS = ['-nostdinc'];
 
 /** Run the candidate pipeline on a fixed probe TU in `dir`, returning the object's sha256 — or
@@ -120,7 +123,7 @@ function stampProbeIn(dir: string): string | null {
  * `.text/.align 2, 0` to the `.s`, then `as`; `util.ts` owns `run`'s env pass-through and its
  * 120 s timeout. Patching that tail to `.align 4, 0` changes the object by 16 bytes while every
  * binary, flag and version banner stays identical — and a namespace that hashed only the
- * toolchain served the stale 648-byte object where the truth is 660.
+ * toolchain served the stale 644-byte object where the truth is 660.
  */
 export function candCacheNamespaceFiles(): string[] {
   // `toolchainFileChain` is what makes a bare command name an identity. Hashing the file a name
