@@ -168,8 +168,8 @@ export interface NarrowLocalCandidate {
    *  write-back truncation sunk past a join, then the declaration's own sign extension */
   writeBackTruncation: boolean;
   /** the carrier's block is a two-armed merge (`mergeArms`). READ BY NO GATE — `armsHoistable`
-   *  implies it — and carried only so a census can separate "not a diamond" from "a diamond over
-   *  arms gcc could not have collapsed", which are different refusals. */
+   *  implies it — and carried only so a census can tell two different refusals apart: no diamond
+   *  at all, against a diamond over arms gcc could not have collapsed. */
   mergeDiamond: boolean;
   /** …and the arms of that merge are ones that guard could have collapsed. The guard is about the
    *  ARM, so a diamond over arms gcc could not have collapsed survives whatever the local's width
