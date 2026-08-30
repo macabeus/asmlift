@@ -26,8 +26,10 @@
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
 //     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
-//     The exceptions are the two rank.ts reads off the target directly, because their consumers
-//     are L3 levers rather than the structurer: `nearBaseSpan` and `foldsConstAddrOffset`.
+//     Three exceptions are read off the target directly, their consumers not being the
+//     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers) and
+//     `hoistsSingleSetArm` (raise/pre-recovery.ts, a raising pass). The field names are a
+//     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
 // deliberately separate bags: a new compiler must set its behaviors EXPLICITLY instead of
@@ -118,7 +120,8 @@ export interface TargetDescription {
     deviceMemoryWriters?: readonly (readonly [number, number])[];
   };
   // COMPILER BEHAVIORS — the specific compiler's canonicalization choices, distinct from
-  // hardware `capabilities`. All consumed by the structurer (threaded through StructureOptions).
+  // hardware `capabilities`. Mostly consumed by the structurer (threaded through StructureOptions);
+  // the exceptions are listed at the top of this file and each says so at its own field.
   compilerBehaviors: {
     // When a loop induction variable's initial value comes from an argument register, some
     // compilers keep mutating that register across the loop (coalesce → no init copy); others
@@ -143,6 +146,20 @@ export interface TargetDescription {
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
     // decline path keeps recovery sound either way.
     switchAllowsNeqCase?: boolean;
+    // The compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both
+    // arms are ONE speculatable SET — gcc 2.x's `jump_optimize` (`gcc/jump.c:443-445`, guard at
+    // `:471-502`). The ONE reader is raise/narrowlocal.ts's `edge-extends`, which uses it
+    // BACKWARDS: a diamond this compiler would have collapsed and did not is evidence the source
+    // DECLARED the local narrow, because `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared
+    // assignment past one SET. Absent ⇒ false, and the clause never admits. `structureOptionsFor`
+    // spreads it onto StructureOptions like every other field here, but NO structurer code reads
+    // it: its reader is a pre-recovery pass, threaded from `runPreRecovery`'s own `target`.
+    //
+    // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored. NOT
+    // set on MIPS_GCC despite it being the same compiler family: nothing has measured the pair
+    // there, the clause reaches 0 of its benchmark rows, and `docs/level-tower.md`'s rule for an
+    // unmeasured per-compiler default is to claim nothing.
+    hoistsSingleSetArm?: boolean;
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation.
@@ -266,6 +283,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     readsStayWhereWritten: true,
     switchAllowsBoundCase: true,
     switchArmsFollowLayout: true,
+    hoistsSingleSetArm: true,
   },
 };
 
@@ -323,9 +341,15 @@ export const PPC_MWCC: TargetDescription = {
 };
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every
- *  `compilerBehaviors` lever (they map 1:1 onto StructureOptions field names). The ONE place a
- *  target's compiler behaviors flow into the target-agnostic structurer — a new behavior lever
- *  is a field in `compilerBehaviors`, consumed automatically. */
+ *  `compilerBehaviors` lever. The ONE place a target's compiler behaviors flow into the
+ *  target-agnostic structurer — a new behavior lever is a field in `compilerBehaviors`, consumed
+ *  automatically.
+ *
+ *  The spread is over the WHOLE bag, so a behavior whose reader is not the structurer rides along
+ *  and is simply never read: `hoistsSingleSetArm` is one (its reader is a pre-recovery pass), and
+ *  `nearBaseSpan` / `foldsConstAddrOffset` are read off the target by rank.ts. So the field names
+ *  are a SUPERSET of StructureOptions', not a bijection, and nothing may derive one from the other
+ *  by enumerating keys. */
 export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean): StructureOptions {
   // `littleEndian` is the one HARDWARE capability the structurer consumes (bitfield extract
   // recognition is LSB-first); everything else is a compiler behavior.

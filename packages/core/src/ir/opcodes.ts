@@ -258,7 +258,15 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *  KNOWN GAP: the trapping divides are absent too, and there the re-guard argument does NOT carry
  *  — a hoisted `sdiv` that the structurer NAMES becomes an unconditional statement. Left as it is
  *  because closing it is a separate change with its own measurement; `REEVAL_UNSAFE_OPS` does
- *  refuse them, so the pre-update sink is not exposed to it. */
+ *  refuse them, so the pre-update sink is not exposed to it.
+ *
+ *  AND THE EXEMPTION IS NOT TRANSFERABLE, which is worth saying beside it: a second consumer once
+ *  read this set to answer "would gcc have SPECULATED this arm above a compare", where nothing
+ *  re-guards anything, and admitted single-load arms `gcc/jump.c:483`'s `! may_trap_p` refuses.
+ *  Pointing that consumer back at this set costs `synthetic:mergeldcast:agbcc` its byte-match
+ *  (MATCH -> diff:6), measured. That consumer is `raise/narrowlocal.ts` and it reads
+ *  `REEVAL_UNSAFE_OPS` instead. Reach for this set only when the argument above — a C-level
+ *  re-guard at the new point — actually holds at your call site. */
 export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
 
 /** Ops whose answer depends on WHERE they run: an effect (its order against other effects is

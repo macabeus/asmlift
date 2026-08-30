@@ -10,7 +10,7 @@
 // rank's score-probe both verify; the report's trace entries ride pipeline's hook). The `dce` after a
 // pass that changed the IR is INTRINSIC to the pass (it declares whether it leaves dead ops) and lives
 // in the driver.
-import { Fn } from '../ir/core';
+import { Block, Fn } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { dce } from '../pattern/engine';
 import type { FnProto } from '../proto';
@@ -22,7 +22,7 @@ import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { recognizeMemberArrays } from './memberarrays';
 import { rerootNarrowReads } from './narrow';
-import { narrowBlockLocals } from './narrowlocal';
+import { type MergeShape, mergeShapes, narrowBlockLocals } from './narrowlocal';
 import { narrowEntryParams } from './paramwidth';
 import { type BranchShortCircuitOptions, recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
@@ -38,13 +38,31 @@ export interface PreRecoveryOptions {
   shortCircuit?: BranchShortCircuitOptions;
 }
 
+/** CFG facts read off the function ONCE, before the first pass below rewrites it.
+ *
+ *  A pass that judges the SHAPE agbcc emitted cannot read that shape off `fn` when its turn comes:
+ *  by then divpow2 has deleted a block, both short-circuit folds have rewritten edges, and the
+ *  eight `dce: true` passes have changed op counts. So the driver reads it here and hands it down. */
+export interface PreRecoveryFacts {
+  /** the join shape of every block, for raise/narrowlocal.ts's `edge-extends`. Blocks a later pass
+   *  creates are absent, and absent reads as "no diamond" — the refusing direction. */
+  mergeShapes: Map<Block, MergeShape>;
+}
+
 export interface PreRecoveryPass {
   /** stable id — also the report's trace-stage key. */
   id: string;
   /** run the recognizer; returns a truthy value (a change count, or `true`) iff it CHANGED the IR.
    *  `self` is the prototype the caller supplied for the function being raised — read only by
-   *  parameter-width, which checks its inference against a declared width. */
-  run: (fn: Fn, self: FnProto | undefined, opts: PreRecoveryOptions) => number | boolean;
+   *  parameter-width, which checks its inference against a declared width. `lifted` is the
+   *  pre-pass CFG snapshot — read only by narrow-local. */
+  run: (
+    fn: Fn,
+    self: FnProto | undefined,
+    opts: PreRecoveryOptions,
+    target: TargetDescription,
+    lifted: PreRecoveryFacts,
+  ) => number | boolean;
   /** run `dce` after this pass changes the IR (the pass declares it leaves dead ops behind). */
   dce: boolean;
   /** optional target gate (soft-div only fires on a no-hardware-divide target — see raise/softdiv.ts). */
@@ -123,7 +141,22 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // parameter carrying BOTH a `zext` and a `sext` has two readers and is refused.
   // `dce: false` on both — the extension each drops is spliced out in place, and its result has no
   // other reader.
-  { id: 'narrowlocal', run: (fn) => narrowBlockLocals(fn), dce: false },
+  // The `target` argument is read by ONE conjunct of ONE gate — see raise/narrowlocal.ts's
+  // `NarrowLocalOptions`. A whole-pass `gate` would be wrong: the pass's SOUND rules are claims
+  // about C and run everywhere; only the join-shape evidence is a claim about gcc 2.x's optimizer.
+  // That same conjunct is why this is the one pass reading `lifted`: every pass above it can
+  // rewrite the CFG whose shape it judges.
+  {
+    id: 'narrowlocal',
+    run: (fn, _self, _opts, target, lifted) =>
+      narrowBlockLocals(
+        fn,
+        undefined,
+        { hoistsSingleSetArm: target.compilerBehaviors.hoistsSingleSetArm },
+        lifted.mergeShapes,
+      ),
+    dce: false,
+  },
   { id: 'paramwidth', run: (fn, self) => narrowEntryParams(fn, self), dce: false },
 ];
 
@@ -137,11 +170,12 @@ export function runPreRecovery(
   self?: FnProto,
   opts: PreRecoveryOptions = {},
 ): void {
+  const lifted: PreRecoveryFacts = { mergeShapes: mergeShapes(fn) };
   for (const pass of PRE_RECOVERY_PASSES) {
     if (pass.gate && !pass.gate(target)) {
       continue;
     }
-    const result = pass.run(fn, self, opts);
+    const result = pass.run(fn, self, opts, target, lifted);
     if (result) {
       if (pass.dce) {
         dce(fn);

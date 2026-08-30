@@ -58,34 +58,91 @@
 //   u16 v; … *out = v;                  zext16                 4     0 MATCH
 //   s32 v; … *out = (u16)v;             zext16             0 MATCH       4
 //
-// Rows one and two are DECIDABLE and are decided: a `zext_w` read by a `sext_w` is the write-back
-// truncation followed by the declaration's own sign extension, and no cast on a wide local writes
-// that pair. Rows three and four are the same IR in this pass's whole vocabulary — same reader,
-// same raw in-edges, opposite answers — and differ only in the branch shape agbcc chose, which is
-// the score's business and not a raise-level gate's. So the gate admits the decidable half and
-// leaves the other refused, and the refusal is a CHOICE this file makes rather than evidence it
-// reads.
+// Rows one and two are DECIDABLE by the carrier's own readers: a `zext_w` read by a `sext_w` is the
+// write-back truncation followed by the declaration's own sign extension, and no cast on a wide
+// local writes that pair. Rows three and four are the same IR in this pass's READER vocabulary —
+// same single extension, same raw in-edges, opposite answers — so nothing the carrier reads decides
+// them.
+//
+// THE BRANCH SHAPE IS EVIDENCE THIS PASS CAN READ, and it decides rows three and four. Compiled
+// with this benchmark's own agbcc, `u16 v` leaves a DIAMOND of 14 instructions and `s32 v` +
+// `(u16)v` a HOISTED join of 12:
+//
+//   u16 v;  if (c) v = a+b; else v = a-b;  *out = v;      cmp / beq / adds / b / lsl+lsr / str
+//   s32 v;  if (c) v = a+b; else v = a-b;  *out = (u16)v; subs / cmp / beq / adds / lsl+lsr / str
+//                                                         ^^^^ the else arm ABOVE the compare
+//
+// `gcc/jump.c:443-445` rewrites `if (...) x = a; else x = b;` to `x = b; if (...) x = a;`, and
+// `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-DECLARED assignment into the arithmetic PLUS its
+// `ashift`/`lshiftrt` truncation pair — five insns in the `.jump` dump, past the ONE SET that
+// transform's guard wants. So a join gcc could have hoisted and did not is positive evidence FOR a
+// declaration. `mergeArms` and `armIsOneSet` hold the guard, conjunct by conjunct. The shape is
+// REQUIRED rather than `hoistedJoin` REFUSED, because the negation of a hoist is not evidence of a
+// declaration: phrased that way the rule would newly admit every one-predecessor, three-armed and
+// irreducible join on nothing at all.
+//
+// AND WHAT IT READS IS THE FINAL ASM, WHERE `jump_optimize` READ THE RTL — the one gap in the
+// mechanism, and it runs BOTH ways. `if (c) v = a << b; else v = a >> b;` leaves arms of TWO insns
+// (`adds` / `asrs`) and gcc hoisted anyway, reload having added the copies afterwards — an
+// over-refusal, which is free. The other way, `s32 v; if (c) v = (u16)a; else v = (u16)b;
+// out[0] = (u8)v;` is refused the hoist (its arms were `lsl`/`lsr` at jump time) and then has its
+// common `lsr` SUNK past the join, leaving one-insn arms `armIsOneSet` calls hoistable. No fixture
+// can close that: the mutation is the compiler's. Six authored cast spellings were aimed at the
+// hole and all six hoisted, so it costs no measured row — but widening the arm test widens into
+// it.
 //
 // ITS PRICE IS MEASURED OVER THE SET IT REFUSES, never over the set it admits — a gate priced on
-// its own accepts cannot show a cost. Over 2288 per-function sa3 sources, every one lifted, the
-// shipped table is `entry-param 1228 · reader-is-extension 2114 · param-typed 33 · raw-reader 13 ·
-// forwarded 7 · edge-reader 28 · edge-extends 40 · ACCEPT 60`. Reading the sunk write-back moved 9
-// carriers, in 9 functions, out of `edge-extends` and into `ACCEPT`. Of the 40 refusals left, 30
-// are a single `zext` (rows three and four) and 10 a single `sext` (row two), and they live in 37
-// functions, not one of which is among the 42 sa3 rows the benchmark carries — which is why
-// `bench diff` cannot price this gate at all, and why the three `merge*` rows in
-// apps/benchmark/dataset/synthetic.ts exist.
+// its own accepts cannot show a cost. Over 2288 per-function sa3 sources (1742 lift, 546 decline at
+// the frontend) the table is IDENTICAL with the join conjunct and without it:
 //
-// NO LOOP GATE, deliberately: the extension is what states the width, and it states it whether or
-// not the block is a loop header. The loop is where the width is worth something, not where it
-// becomes true.
+//   entry-param 1228 · reader-is-extension 2114 · param-typed 33 · raw-reader 13 · forwarded 7 ·
+//   edge-reader 28 · edge-extends 40 (zext 30 / sext 10) · ACCEPT 60 (sext 51 / zext 9)
+//   flipped carriers: 0        of the 40 refusals: diamond 28, diamond AND arms hoistable 0
 //
-// NOT agbcc-GATED, and not target-gated at all — a C declaration is not a target fact. Over the
-// benchmark's 894 rows the only ones it moves are agbcc's, which is a measurement, not a rule.
-import { type Block, type Fn, type Op, type Value, replaceAllUsesWith } from '../ir/core';
-import { CAST_WIDTHS } from '../ir/opcodes';
+// Over the benchmark's own 930 base rows, decompiled twice — the conjunct as shipped and cleared —
+// exactly ONE row's emitted SOURCE BYTES change (`synthetic:mergeu16:agbcc`,
+// `45b1755f7fc7 -> c528e2a30ab2`, gapCountChanged 0 over all 930). So over every corpus anything
+// here has measured, this rule's only inhabitant is the row that motivated it, and the `merge*`
+// rows in apps/benchmark/dataset/synthetic.ts are its whole score: four cells of the 2x2, plus
+// `mergeldcast` (both arms one load) and `mergepool` (an arm whose immediate needs a pool load),
+// which cost 6 and 1 under an arm test that read only the op count. sa3 can add nothing — every one
+// of those functions references external symbols and its `ctx.c` is per translation unit, so no
+// per-function score exists there.
+//
+// THE ADMIT SIDE'S ORACLE IS narrowlocal-fuzz.test.ts, whose generator appends this join shape to
+// half its functions for this clause alone — 7421 acyclic and 7522 loop-bearing carriers admitted,
+// every one structured, interpreted and compared against the un-narrowed spelling. A widening that
+// changes what a function COMPUTES shows up there; one that only changes the SPELLING shows up in
+// the rows.
+//
+// NO LOOP GATE, deliberately, AND THAT SENTENCE IS ABOUT THE SOUND RULES ONLY. The extension states
+// the width whether or not the block is a loop header — the loop is where the width is worth
+// something, not where it becomes true. The join clause gets no such licence: a rotated loop header
+// IS a two-armed merge and `gcc/jump.c` never considers a back edge. It is refused by `mergeArms`'
+// head test rather than by a loop predicate, because a per-FUNCTION loop question cannot decide a
+// per-SITE one.
+//
+// TARGET-GATED IN ONE CONJUNCT AND NOWHERE ELSE, and the split is the point. The sound rules above
+// are claims about C and hold for every compiler; "gcc 2.x's `jump_optimize` would have collapsed
+// this diamond and did not" names one compiler's optimizer, and reads that compiler fact BACKWARDS.
+// `docs/level-tower.md` legislates the case: such a fact belongs in
+// `TargetDescription.compilerBehaviors`, and owes an explicit refusal from every pass that moves
+// the thing it reads. `NarrowLocalOptions.hoistsSingleSetArm` carries it (absent ⇒ the clause never
+// admits), and `runPreRecovery` reads the shape ahead of the pass that manufactures it —
+// `mergeShapes`.
+import { type Block, type Fn, type Op, type Value, predecessors, replaceAllUsesWith } from '../ir/core';
+import { CAST_WIDTHS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
+
+/** THE ONE PER-COMPILER FACT THIS PASS READS, threaded rather than defaulted — see the header for
+ *  why this conjunct and no other is a target's claim. ABSENT ⇒ the clause never admits, which is
+ *  the behaviour this pass had before it existed. */
+export interface NarrowLocalOptions {
+  /** the compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both arms
+   *  are one speculatable SET (`gcc/jump.c:471-502`). Absent ⇒ false. */
+  hoistsSingleSetArm?: boolean;
+}
 
 /** What the gates below judge: one block parameter and the extension that reads it. */
 export interface NarrowLocalCandidate {
@@ -110,6 +167,19 @@ export interface NarrowLocalCandidate {
   /** the sole reader is a `zext {w}` whose own sole reader is a `sext {w}` — PROMOTE_MODE's
    *  write-back truncation sunk past a join, then the declaration's own sign extension */
   writeBackTruncation: boolean;
+  /** the carrier's block is a two-armed merge (`mergeArms`). READ BY NO GATE — `armsHoistable`
+   *  implies it — and carried only so a census can tell two different refusals apart: no diamond
+   *  at all, against a diamond over arms gcc could not have collapsed. */
+  mergeDiamond: boolean;
+  /** …and the arms of that merge are ones that guard could have collapsed. The guard is about the
+   *  ARM, so a diamond over arms gcc could not have collapsed survives whatever the local's width
+   *  and carries no information at all — see `armIsOneSet`, whose refusals are two benchmark rows.
+   *  IMPLIES `mergeDiamond`: there are no arms to judge without one. */
+  armsHoistable: boolean;
+  /** the TARGET's claim, kept apart from the IR facts above because it is not one. `armsHoistable`
+   *  says what the arms are; this says whether this compiler's optimizer would have acted on that.
+   *  Fused into one field the name lies and every census number over it is target-conditioned. */
+  targetHoistsSingleSetArm: boolean;
 }
 
 export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
@@ -193,12 +263,145 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
     // call site of a narrow-declared callee — bytes in other functions, which no per-function
     // differ sees. A block local's width leaves the function's interface alone, so the worst this
     // rule can do is pick the losing spelling of two that compile, and nothing here is wrong.
-    why: 'the write-back truncation is the evidence: no truncation on an in-edge and none sunk to the join',
+    why: 'no truncation on an in-edge, none sunk to the join, and a join gcc would have hoisted',
     sound: false,
     guardedBy: 'narrow-local.test.ts: a merge whose in-edges carry no truncation is a cast, not a declaration',
-    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation,
+    // ONE ENTRY, three conjuncts, and it cannot be split: a gate is a REJECTION, so "refuse unless
+    // some evidence" is one rule — split across rows, each half over-fires alone. `without`
+    // therefore cannot ablate the join half, but the COMPILER FACT can, and that is the second
+    // reason `hoistsSingleSetArm` is threaded rather than defaulted: clearing it leaves the two
+    // edge conjuncts standing and removes exactly this one. That is the ablation `narrow-local.
+    // test.ts: a target that claims no single-SET hoist gets no join evidence` runs and the sa3
+    // census is measured against; the FIXTURES then price the conjunct's own halves —
+    // MERGE_HOISTED_ARM the join, MERGE_DIAMOND_BIG_ARM / _LOAD_ARMS / _POOL_ARM the arms.
+    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation && !(c.armsHoistable && c.targetHoistsSingleSetArm),
   },
 ];
+
+/** What the join shape says about the source — one record, because the second field is a property
+ *  of the arms the first identifies. */
+export interface MergeShape {
+  /** the block is a TWO-ARMED DIAMOND: `gcc/jump.c:471-502`'s input shape. */
+  diamond: boolean;
+  /** …and both arms are ones that guard could have collapsed. Never true without `diamond`. */
+  hoistable: boolean;
+}
+
+/** THE ARMS OF A TWO-ARMED DIAMOND, or `null` — `gcc/jump.c:443-445`'s input shape, read conjunct
+ *  by conjunct off that transform's guard at `:471-502` in the agbcc checkout:
+ *
+ *    :472/:474  `temp3 = prev_active_insn (insn)` … `single_set (temp3)`   the `x = a;` arm, ONE insn
+ *    :490/:491  `temp  = prev_active_insn (temp3)` … `condjump_p (temp)`   the arm's own
+ *               predecessor insn IS the conditional jump
+ *    :478/:480  `temp2 = next_active_insn (insn)` … `single_set (temp2)`   the `x = b;` arm, ONE insn
+ *    :482/:483  `! side_effects_p` … `! may_trap_p (SET_SRC (temp4))`      …and speculatable
+ *
+ *  THE HEAD TEST — both arms' SOLE predecessor being the same `cond_br` — is what keeps out the
+ *  three two-predecessor joins this rule has no evidence about:
+ *
+ *    • a LOOP HEADER, whose preheader and latch really are distinct non-branching predecessors, and
+ *      `gcc/jump.c` never considers a back edge. Their sole predecessors differ.
+ *    • a FRONTEND-INVENTED join: an empty forwarding block cut at a label is an "arm" with no insn
+ *      for `:480`'s `single_set` to match, and its own predecessor is another join.
+ *    • the ENTRY block, whose implicit entry edge a predecessor map cannot see (the trap
+ *      `raise/divpow2.ts:92-98` documents for the same recognizer).
+ *
+ *  `raise/divpow2.ts:99-115` walks a ONE-armed diamond (head → bias arm → merge, plus a direct
+ *  head → merge edge) and is deliberately not shared with this: that pass DELETES a block and needs
+ *  the arm's contents, this one only reads a shape.
+ *
+ *  THESE REFUSALS ARE NOT `NARROW_LOCAL_GATES` ENTRIES and cannot be: a gate rejects a CANDIDATE,
+ *  and these are per-BLOCK shape facts read once per function, before any candidate exists. What
+ *  the candidate carries instead is the ANSWER, split so a census can attribute it — `mergeDiamond`
+ *  for the shape and `armsHoistable` for the arms. Their reach, over the 13733 blocks of 2288 sa3
+ *  sources, first refusal only: pred-count 10734, arm-not-br 2169, head-not-shared 387,
+ *  arm-unsafe-op 324, arm-op-count 59, head-not-cond_br 1, entry-block 0, and 59 hoistable. The
+ *  entry-block guard is the one that never fires there; it stays because the shape it refuses is a
+ *  wrong ANSWER rather than a missing one, and refusing costs nothing. */
+function mergeArms(preds: Map<Block, Block[]>, fn: Fn, blk: Block): [Block, Block] | null {
+  const p = preds.get(blk);
+  if (p === undefined || p.length !== 2 || blk === fn.blocks[0]) {
+    return null;
+  }
+  const [x, y] = p;
+  const term = (b: Block): Op | undefined => b.ops[b.ops.length - 1];
+  for (const arm of [x, y]) {
+    const t = term(arm);
+    if (t === undefined || t.opcode !== 'br' || t.successors[0]?.block !== blk) {
+      return null;
+    }
+  }
+  const hx = preds.get(x) ?? [];
+  const hy = preds.get(y) ?? [];
+  if (hx.length !== 1 || hy.length !== 1 || hx[0] !== hy[0]) {
+    return null;
+  }
+  const ht = term(hx[0]);
+  if (ht === undefined || ht.opcode !== 'cond_br') {
+    return null;
+  }
+  return [x, y];
+}
+
+/** ONE INSN HOLDING ONE SET, approximated over the lifted IR — `gcc/jump.c:474`/`:480`'s
+ *  `single_set` and `:482`/`:483`'s `! side_effects_p` / `! may_trap_p` beside it. THREE THINGS AN
+ *  OP COUNT ALONE GETS WRONG, and the first two are the benchmark rows `mergeldcast`/`mergepool`:
+ *
+ *    • a MEMORY READ is one op and is NOT one speculatable SET. `gcc/rtlanal.c:1770-1771` sends a
+ *      MEM to `rtx_addr_can_trap_p` and `:144-147` says an address held in a plain pseudo CAN trap,
+ *      so `jump.c` never hoists a load and the diamond survives under BOTH spellings, carrying no
+ *      information. `REEVAL_UNSAFE_OPS` answers this (effects, reads, or traps — `may_trap_p`
+ *      refuses the trapping divides too, at `rtlanal.c:1774-1784`); `HOIST_UNSAFE_OPS` does NOT,
+ *      because it omits reads for `raise/shortcircuit.ts`, whose arm C's own `&&` re-guards, and
+ *      that exemption does not transfer to speculation above a compare.
+ *    • a CONSTANT is not free. `v = a + 0x12345` is a literal-pool `ldr` plus the `add` — two
+ *      insns, no `single_set` — while `v = a + 3` is one `adds`. The lifted IR spells both as
+ *      `const` feeding `add` and does not say which immediate the target can fold, so constants
+ *      COUNT: refusing the foldable case costs nothing, because agbcc really does hoist it and the
+ *      join is then not a diamond at all.
+ *    • an arm with NOTHING in it is not one SET either — which is why the budget is EXACTLY one and
+ *      not at most one: `:480` runs `single_set` on the arm's own insn, and an arm whose only insn
+ *      is its jump has none.
+ *
+ *  Over-refusal here is free by construction: it returns the carrier to the wide-local-plus-cast
+ *  spelling this pass emits without the clause. */
+function armIsOneSet(b: Block): boolean {
+  return (
+    !b.ops.some((op) => REEVAL_UNSAFE_OPS.has(op.opcode)) && b.ops.filter((op) => op.results.length > 0).length === 1
+  );
+}
+
+/** The join shape of every block, read ONCE off the IR it is handed.
+ *
+ *  WHERE it is read is part of the rule, because the shape is a claim about what AGBCC emitted and
+ *  asmlift rewrites the CFG on the way here. Two rewriters move it:
+ *
+ *    • this pass itself, which deletes an extension and re-enumerates: an arm whose `lsl/asr/add` a
+ *      SIBLING carrier's narrowing just shortened to `add` would re-read as one SET.
+ *    • the twelve pre-recovery passes ahead of it, eight of them followed by `dce`. Over sa3, 20
+ *      blocks gain `diamond` and 10 gain `hoistable` between lift and narrowlocal's turn, and
+ *      `branch-shortcircuit` accounts for all 10 (`IsWorldPtActive`, `IsScreenPtActive`,
+ *      `sub_802C0D4`, `sub_802C1F8`, …): `raise/shortcircuit.ts` MANUFACTURES the shape out of
+ *      condition trees the ROM never merged, and the head test does not answer it, because the head
+ *      test PASSES on exactly those blocks.
+ *
+ *  So `runPreRecovery` calls this ONCE before the first pass and threads the map down
+ *  (`PreRecoveryFacts`). A block a later pass creates is absent from the map and reads as no
+ *  diamond, which refuses it.
+ *
+ *  IT IS STILL NOT THE ROM: the frontend cuts blocks at labels and `applyIdiomPatterns` folds shift
+ *  pairs into casts before pre-recovery runs, so this is the CFG as it ENTERS pre-recovery, the
+ *  earliest point any pass can name. Both of those only ever make an arm SHORTER, so they can admit
+ *  a diamond gcc's guard would have refused. */
+export function mergeShapes(fn: Fn): Map<Block, MergeShape> {
+  const preds = predecessors(fn);
+  const out = new Map<Block, MergeShape>();
+  for (const b of fn.blocks) {
+    const arms = mergeArms(preds, fn, b);
+    out.set(b, { diamond: arms !== null, hoistable: arms !== null && arms.every(armIsOneSet) });
+  }
+  return out;
+}
 
 /** Every value arriving at `blk`'s parameter `idx`, over every edge in the function. */
 function incomingArgs(fn: Fn, blk: Block, idx: number): (Value | undefined)[] {
@@ -237,7 +440,11 @@ function readersOf(fn: Fn, v: Value): { ops: Op[]; forwarded: number } {
 /** Every block parameter this pass judges, with the extension that would be deleted — the gate
  *  table's INPUT, separated from its application so a test can ask WHICH gate refuses a shape
  *  rather than only whether the pass fired. */
-export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: Op }[] {
+export function narrowLocalCandidates(
+  fn: Fn,
+  shapes: Map<Block, MergeShape> = mergeShapes(fn),
+  opts: NarrowLocalOptions = {},
+): { c: NarrowLocalCandidate; ext: Op }[] {
   const out: { c: NarrowLocalCandidate; ext: Op }[] = [];
   const defs = new Map<Value, Op>();
   for (const b of fn.blocks) {
@@ -248,6 +455,7 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
     }
   }
   for (const [i, b] of fn.blocks.entries()) {
+    const shape = shapes.get(b) ?? { diamond: false, hoistable: false };
     for (const [pi, p] of b.params.entries()) {
       const { ops, forwarded } = readersOf(fn, p);
       const ext = ops[0];
@@ -303,6 +511,9 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
           edgeArgsObservedNarrow: observedNarrow,
           edgeArgsExtend: argExtends,
           writeBackTruncation,
+          mergeDiamond: shape.diamond,
+          armsHoistable: shape.hoistable,
+          targetHoistsSingleSetArm: opts.hoistsSingleSetArm === true,
         },
         ext,
       });
@@ -313,7 +524,15 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
 
 /** Type each block parameter at the width its sole reading extension proves, and drop that
  *  extension. Returns the number of carriers narrowed. */
-export function narrowBlockLocals(fn: Fn, gates: readonly Gate<NarrowLocalCandidate>[] = NARROW_LOCAL_GATES): number {
+export function narrowBlockLocals(
+  fn: Fn,
+  gates: readonly Gate<NarrowLocalCandidate>[] = NARROW_LOCAL_GATES,
+  opts: NarrowLocalOptions = {},
+  // The join shape, read before ANY pre-recovery pass rewrote the CFG — `mergeShapes` says why the
+  // reading point is part of the rule. Defaulted for callers with no pass list around them (the
+  // tests). Everything else the gates read is re-enumerated after every rewrite, deliberately.
+  shapes: Map<Block, MergeShape> = mergeShapes(fn),
+): number {
   let narrowed = 0;
   // Re-enumerated after each rewrite: narrowing one carrier deletes an op and re-points its
   // readers, which is exactly the evidence the edge rules of a LATER carrier read. `done` is the
@@ -322,7 +541,7 @@ export function narrowBlockLocals(fn: Fn, gates: readonly Gate<NarrowLocalCandid
   const done = new Set<Value>();
   for (let again = true; again;) {
     again = false;
-    for (const { c, ext } of narrowLocalCandidates(fn)) {
+    for (const { c, ext } of narrowLocalCandidates(fn, shapes, opts)) {
       if (done.has(c.param) || firstRejection(gates, c) !== null) {
         continue;
       }

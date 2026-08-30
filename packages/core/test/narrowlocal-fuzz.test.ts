@@ -58,6 +58,11 @@ function generate(seed: number, withLoop: boolean): Fn {
     entryVals.push(r);
   }
   const loopHeader = withLoop ? 1 + Math.floor(rnd() * (nBlocks - 2)) : -1;
+  // Every block this generator makes otherwise ends in `cond_br`, so it emits no TWO-ARMED DIAMOND
+  // at all and the join clause of `edge-extends` has no inhabitant to judge. Half the functions get
+  // one appended: `gcc/jump.c:471-502`'s input shape, which is a head, two arms of exactly one
+  // arithmetic op each ending in a plain `br`, and a join parameter read once by an extension.
+  const diamondTail = rnd() < 0.5;
   for (let i = 0; i < nBlocks; i++) {
     const b = blocks[i];
     const avail = [...entryVals, ...b.params];
@@ -89,13 +94,42 @@ function generate(seed: number, withLoop: boolean): Fn {
                 results: [r],
                 attrs: { width: rnd() < 0.5 ? 8 : 16 },
               })
-            : mkOp(pick(['add', 'sub']), { operands: [pick(avail), pick(avail)], results: [r] }),
+            : mkOp(pick(['add', 'sub', 'mul', 'shl']), { operands: [pick(avail), pick(avail)], results: [r] }),
       );
       avail.push(r);
     }
     const argsFor = (t: Block): Value[] => t.params.map(() => pick(avail));
     if (i === nBlocks - 1) {
-      b.ops.push(mkOp('ret', { operands: [pick(avail)] }));
+      if (!diamondTail) {
+        b.ops.push(mkOp('ret', { operands: [pick(avail)] }));
+        continue;
+      }
+      const arm = (): Block => ({
+        params: [],
+        ops: [
+          mkOp(pick(['add', 'sub', 'mul', 'shl']), {
+            operands: [pick(avail), pick(avail)],
+            results: [mkValue(T.unk())],
+          }),
+        ],
+      });
+      const arms = [arm(), arm()];
+      const p = mkValue(T.unk());
+      const e = mkValue(T.unk());
+      const join: Block = {
+        params: [p],
+        ops: [
+          mkOp(rnd() < 0.5 ? 'sext' : 'zext', { operands: [p], results: [e], attrs: { width: rnd() < 0.5 ? 8 : 16 } }),
+          mkOp('ret', { operands: [e] }),
+        ],
+      };
+      for (const a of arms) {
+        a.ops.push(mkOp('br', { successors: [{ block: join, args: [a.ops[0].results[0]] }] }));
+      }
+      const c2 = mkValue(T.u(32));
+      b.ops.push(mkOp('icmp_slt', { operands: [pick(avail), pick(avail)], results: [c2] }));
+      b.ops.push(mkOp('cond_br', { operands: [c2], successors: arms.map((a) => ({ block: a, args: [] })) }));
+      blocks.push(...arms, join);
       continue;
     }
     const isLatch = withLoop && i > loopHeader && rnd() < 0.6;
@@ -168,6 +202,12 @@ function run(sfn: SFn, seed: number): Event[] {
             return (l + r) | 0;
           case '-':
             return (l - r) | 0;
+          case '*':
+            return Math.imul(l, r);
+          case '<<':
+            // both spellings run through THIS interpreter, so what matters is that the model is
+            // deterministic and width-faithful, not that it reproduces C's UB for r >= 32
+            return (l << (r & 31)) | 0;
           case '<':
             return l < r ? 1 : 0;
           case '>':
@@ -267,7 +307,10 @@ function spellings(
     base = generate(seed, withLoop);
     narrowed = generate(seed, withLoop);
     verify(base);
-    fired = narrowBlockLocals(narrowed, gates);
+    // `hoistsSingleSetArm` ON — the agbcc setting, and the only one under which the join clause of
+    // `edge-extends` can admit anything. It admits 7421 acyclic and 7522 loop-bearing carriers of
+    // the diamond tails `generate` appends, all of them judged below.
+    fired = narrowBlockLocals(narrowed, gates, { hoistsSingleSetArm: true });
     verify(narrowed);
     recoverTypes(base);
     recoverTypes(narrowed);
@@ -305,6 +348,11 @@ const differs = (r: { off: Event[]; on: Event[] }): boolean => {
   });
 };
 
+/** How many functions the SHIPPED arm judged, per configuration — read by the ablated arm below,
+ *  which asserts it judges strictly more. Recorded rather than hardcoded so the relation stays the
+ *  assertion when the shipped rule widens or narrows. */
+const judgedByShippedArm = new Map<boolean, number>();
+
 describe.each([
   ['acyclic', false],
   ['loop-bearing', true],
@@ -318,12 +366,59 @@ describe.each([
       judged++;
       if (differs(r)) bad.push(seed);
     }
-    // the sweep is not vacuous: the pass really fires and both trees interpret. At 15000 seeds
-    // that is 373 acyclic and 262 loop-bearing functions; the floor sits well under both, so a
-    // generator tweak cannot turn this green by quietly narrowing nothing.
+    // the sweep is not vacuous: the pass really fires and both trees interpret. At 15000 seeds that
+    // is 7634 acyclic and 4808 loop-bearing functions (the ablated arm below judges 8191 and 5168);
+    // the floor sits well under all four, so a generator tweak cannot turn this green by quietly
+    // narrowing nothing.
     expect(judged).toBeGreaterThan(100);
     expect(bad).toEqual([]);
-  });
+    judgedByShippedArm.set(withLoop, judged);
+    // Structuring and interpreting two trees per judged function, and the diamond tail multiplies
+    // that count twentyfold — 2.2s alone, and this suite forks 160 files in parallel.
+  }, 30_000);
+
+  // THE POPULATION THE ONLY UNSOUND GATE MASKS, and the reason this arm exists at all.
+  //
+  // `edge-extends` is the LAST entry, so "first rejection is `edge-extends`" means every SOUND rule
+  // already admitted that carrier and it was then never emitted, never interpreted, never scored. A
+  // hole in `edge-reader`'s `edgeArgsObservedNarrow` or `raw-reader`'s operand-only counting is
+  // therefore MASKED by a rule whose own author calls it a spelling choice — and any future
+  // widening of that rule converts the hole into C that compiles and computes different numbers.
+  // `bench diff` structurally cannot see it: the sa3 functions carrying these carriers hold no
+  // benchmark row (40 `edge-extends` refusals over 2288 sa3 sources, 0 of them a row).
+  //
+  // So the mask comes off HERE, where the oracle is the program's behaviour rather than a score.
+  // The full ablation is a strict SUPERSET of anything a narrower `edge-extends` can admit, which
+  // is what makes this the strongest available form.
+  //
+  // AND THE SCOPE OF THAT LICENCE IS THE GENERATOR'S VOCABULARY, not "every widening". `generate`
+  // emits `const`, `sext`, `zext`, `add`, `sub`, `mul`, `shl`, `call`, `icmp_slt`, `cond_br`, `br`
+  // and `ret`; there is no `load`, `store`, `aload` or `gaddr`, because the interpreter models no
+  // memory, and its only observables are call arguments and the returned value. So green here says:
+  // over carriers whose producers are pure arithmetic and extensions, no admission `edge-extends`
+  // could make changes what the function computes. A widening whose new admissions are MEMORY
+  // shapes is outside it and owes its own evidence — which is why the arm clause's REFUSALS are
+  // priced by the `mergeldcast`/`mergepool` rows: both are memory or pool shapes this generator
+  // cannot make, and their arms are exactly what it never emits.
+  test('…and neither does the population `edge-extends` masks', () => {
+    const bad: number[] = [];
+    let judged = 0;
+    const ablated = without(NARROW_LOCAL_GATES, 'edge-extends');
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const r = spellings(seed, withLoop, ablated as never);
+      if (!r) continue;
+      judged++;
+      if (differs(r)) bad.push(seed);
+    }
+    // STRICTLY MORE FUNCTIONS THAN THE SHIPPED ARM ABOVE JUDGES — asserted as the RELATION it is,
+    // against the count that arm actually recorded, and not as a hardcoded floor. If the two were
+    // equal the ablation would be inert and this arm would assert nothing about the masked set;
+    // a hardcoded number cannot tell those apart once the shipped rule widens.
+    const shipped = judgedByShippedArm.get(withLoop);
+    expect(shipped).toBeDefined();
+    expect(judged).toBeGreaterThan(shipped as number);
+    expect(bad).toEqual([]);
+  }, 30_000);
 });
 
 // The two sound rules this oracle cannot reach, and why — an exemption is a visible act with a
@@ -360,7 +455,7 @@ test('every SOUND gate is load-bearing: dropping it changes what some function d
   }
   expect(inert).toEqual([]);
   expect([...OUT_OF_REACH].filter((id) => !NARROW_LOCAL_GATES.some((g) => g.id === id && g.sound))).toEqual([]);
-  // A full SEEDS sweep per gate: ~1.8s alone, but this suite forks 160 files in parallel and the
-  // same loop measured 6.1s under that load — past vitest's 5s default, which fails as a timeout
+  // A full SEEDS sweep per gate: ~8s alone, and this suite forks 160 files in parallel, where the
+  // same loop measured 3.4x its solo cost — past vitest's 5s default, which fails as a timeout
   // rather than as an inert gate.
-}, 30_000);
+}, 90_000);

@@ -30,14 +30,25 @@ import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import { firstRejection, without } from '../src/l3/gates';
-import { NARROW_LOCAL_GATES, narrowBlockLocals, narrowLocalCandidates } from '../src/raise/narrowlocal';
+import {
+  NARROW_LOCAL_GATES,
+  type NarrowLocalOptions,
+  narrowBlockLocals,
+  narrowLocalCandidates,
+} from '../src/raise/narrowlocal';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
-const run = (ir: string) => {
+/** The per-compiler fact `edge-extends`'s join clause is gated on — `THUMB_AGBCC`'s setting, which
+ *  is where the header's 2x2 was compiled and scored. Every fixture below is run WITH it, because
+ *  the clause is inert without it; the one test that leaves it off is `a target that claims no
+ *  single-SET hoist gets no join evidence`, which is that inertness. */
+const AGBCC: NarrowLocalOptions = { hoistsSingleSetArm: true };
+
+const run = (ir: string, opts: NarrowLocalOptions = AGBCC) => {
   const fn = parse(ir);
   verify(fn);
-  const n = narrowBlockLocals(fn);
+  const n = narrowBlockLocals(fn, NARROW_LOCAL_GATES, opts);
   verify(fn);
   return { fn, n, ir: print(fn) };
 };
@@ -45,7 +56,7 @@ const run = (ir: string) => {
 const runWithout = (ir: string, gate: string): number => {
   const fn = parse(ir);
   verify(fn);
-  return narrowBlockLocals(fn, without(NARROW_LOCAL_GATES, gate));
+  return narrowBlockLocals(fn, without(NARROW_LOCAL_GATES, gate), AGBCC);
 };
 const emit = (ir: string): string => {
   const { fn } = run(ir);
@@ -53,8 +64,10 @@ const emit = (ir: string): string => {
   return cBackend.emit(structure(fn));
 };
 /** which gate the table names for each block parameter — the table's ATTRIBUTION, not its verdict */
-const reasons = (ir: string): (string | null)[] =>
-  narrowLocalCandidates(parse(ir)).map(({ c }) => firstRejection(NARROW_LOCAL_GATES, c));
+const reasons = (ir: string, opts: NarrowLocalOptions = AGBCC): (string | null)[] => {
+  const fn = parse(ir);
+  return narrowLocalCandidates(fn, undefined, opts).map(({ c }) => firstRejection(NARROW_LOCAL_GATES, c));
+};
 
 /** the benchmark's `narrowcnt` row as it reaches this pass: `s16 i` summed into an `s32` total.
  *  `%2` is the narrow counter — sole reader `%4`, its own sign extension. `%3` is the accumulator,
@@ -150,6 +163,300 @@ const MERGE_SUNK_TRUNCATION = `fn f {
 }
 `;
 
+/** THE JOIN SHAPE, and it is the fact the header's rows three and four turn on. `mergeu16`'s own
+ *  ROM: `u16 v; if (c) { v = a + b; } else { v = a - b; } out[0] = v;` compiled by this benchmark's
+ *  agbcc leaves a DIAMOND — the join has two predecessors and neither of them branches to the
+ *  other. `gcc/jump.c:443-445` collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;`
+ *  only while the else arm is ONE insn holding ONE SET (`:480`, inside the guard at `:471-502`), and
+ *  `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared assignment into the arithmetic PLUS its
+ *  truncation pair — five insns, not one SET. So a surviving diamond is positive evidence that the
+ *  source DECLARED the local narrow. Same carrier, same single `zext16` reader, same raw in-edges
+ *  as MERGE_NO_TRUNCATION below; only the shape of the join differs. */
+const MERGE_DIAMOND = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %6: unk32 = add %0, %1
+  br ^bb3(%6)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** THE OTHER HALF OF THE 2x2 and the sharpest control in this file: `s32 v; … out[0] = (u16)v;`,
+ *  which is the benchmark's `mergecastu` row. Identical to MERGE_DIAMOND in every field the gate
+ *  table reads — one `zext16` reader, raw in-edges, no sunk write-back — and it must stay REFUSED,
+ *  because agbcc really did take `jump.c`'s hoist here: the else arm is computed before the compare
+ *  and the join has the CONDITIONAL BRANCH itself as a predecessor. MERGE_NO_TRUNCATION is the
+ *  `sext` cell of the same column and is this shape too. */
+const MERGE_HOISTED_ARM = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %6: unk32 = sub %0, %1
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(%6), ^bb1()
+^bb1():
+  %7: unk32 = add %0, %1
+  br ^bb2(%7)
+^bb2(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** THE SAME DIAMOND WITH AN ARM GCC COULD NOT HAVE HOISTED. `jump.c:480` wants the else arm to be
+ *  ONE insn holding ONE SET, and that fails for a big arm whatever the local's width — so here the
+ *  surviving diamond says nothing about the declaration, and the carrier must stay refused rather
+ *  than narrowed on evidence that is not evidence. This is the shape an arm-SIZE test already
+ *  refuses; MERGE_DIAMOND_LOAD_ARMS and MERGE_DIAMOND_POOL_ARM are the two it did not, and each is
+ *  a lost byte-match. */
+const MERGE_DIAMOND_BIG_ARM = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %6: unk32 = add %0, %1
+  %10: unk32 = mul %6, %0
+  %11: unk32 = add %10, %1
+  br ^bb3(%11)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** THE BENCHMARK'S `mergeldcast` ROW: the same diamond with both arms a single LOAD. One SET each
+ *  by op count, so an arm-SIZE test admits it — and `gcc/jump.c:483`'s `! may_trap_p` refuses to
+ *  speculate a MEM above the compare (`gcc/rtlanal.c:1770` MEM -> `rtx_addr_can_trap_p`, `:144` a
+ *  plain pseudo address CAN trap), so agbcc leaves the diamond for the CAST spelling too and it
+ *  says nothing. Narrowed, `s32 v; … *out = (u16)v` is spelled `u16 v` and the row scores 6. */
+const MERGE_DIAMOND_LOAD_ARMS = `fn f {
+^bb0(%0: s32*, %1: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %6: unk32 = load %1 {off=0, signed=true, width=4}
+  br ^bb3(%6)
+^bb2():
+  %7: unk32 = load %1 {off=4, signed=true, width=4}
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %0, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** THE BENCHMARK'S `mergepool` ROW: one arm is `v = a + 0x12345`, which thumb spells as a literal-
+ *  pool `ldr` and then an `add` — one C assignment, TWO insns, no `single_set`. In the lifted IR it
+ *  is a `const` feeding an `add`, and the IR does not say which immediates the target can fold, so
+ *  constants count toward the arm's op budget. The foldable twin (`a + 3`, one `adds`) is refused
+ *  here too and that costs nothing: agbcc really hoists it, so its join is not a diamond at all. */
+const MERGE_DIAMOND_POOL_ARM = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %10: unk32 = const {value=74565}
+  %6: unk32 = add %0, %10
+  br ^bb3(%6)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** AN ARM WITH NOTHING IN IT. `^bb1` forwards a value the head already computed, so it holds ZERO
+ *  value-producing ops. `gcc/jump.c:480` runs `single_set` on `next_active_insn (insn)` — the arm's
+ *  JUMP, which is not a SET — so the transform never applied here and the surviving diamond says
+ *  nothing about the declaration. An op budget of AT MOST one admits it; the budget is EXACTLY one.
+ *  This is the shape one side of an `if`/`else` takes when the value on that side was hoisted long
+ *  before `jump_optimize` ran. */
+const MERGE_DIAMOND_EMPTY_ARM = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %6: unk32 = add %0, %1
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  br ^bb3(%6)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** A ROTATED LOOP HEADER, and it IS a two-predecessor join whose predecessors do not branch to each
+ *  other — the preheader and the latch are distinct blocks. `gcc/jump.c` never considers a back-edge
+ *  merge, so nothing about a declaration follows from this diamond surviving, and the head test is
+ *  what refuses it: the preheader's sole predecessor is not the latch's. NARROW_COUNTER cannot
+ *  witness this — it is a SELF-loop, whose latch IS the header, so it is refused for a reason that
+ *  does not generalise to two blocks. */
+const LOOP_HEADER_DIAMOND = `fn f {
+^bb0(%1: s32*):
+  %2: unk32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: unk32):
+  %4: unk32 = zext %3 {width=16}
+  %20: unk32 = const {value=1}
+  %7: unk32 = add %4, %20
+  %21: unk32 = const {value=9}
+  %5: u32 = icmp_slt %4, %21
+  cond_br %5, ^bb2(), ^bb3()
+^bb2():
+  br ^bb1(%7)
+^bb3():
+  store %1, %4 {off=0, width=4}
+  ret
+}
+`;
+
+/** AN ARM THE FRONTEND INVENTED. `^bb3` is an empty forwarding block cut at a label whose own
+ *  predecessor is another join, not the head — there is no `x = b;` insn for `gcc/jump.c:478`'s
+ *  `single_set` to match, so the transform's shape never existed in either direction. The shape is
+ *  a real one: `sub_80B6198`'s carrier in the sa3 checkout. */
+const MERGE_FORWARDED_ARM = `fn f {
+^bb0(%0: unk32, %2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb1(), ^bb4()
+^bb1():
+  %14: unk32 = const {value=1}
+  %15: u32 = icmp_eq %0, %14
+  cond_br %15, ^bb2(), ^bb6()
+^bb2():
+  %10: unk32 = const {value=8}
+  br ^bb3(%10)
+^bb6():
+  %11: unk32 = const {value=9}
+  br ^bb3(%11)
+^bb3(%12: unk32):
+  br ^bb5(%12)
+^bb4():
+  %13: unk32 = zext %0 {width=16}
+  br ^bb5(%13)
+^bb5(%8: unk32):
+  %9: unk32 = sext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** THE SAME ARM WITH A SYMBOL MAP. Without one an absolute pool word lifts to `const`; with one it
+ *  is promoted to `gaddr`. An arm test that exempted constants therefore flipped on the MAP and not
+ *  on the program — the same ROM getting a different local depending on whether `--elf` was passed,
+ *  and the real tier runs map-FUL on every row while the synthetic tier runs map-less, so no gate
+ *  saw it. Counting every value-producing op makes the two spellings identical (and the load beside
+ *  them is unspeculatable either way); this fixture is MERGE_DIAMOND_MAPLESS's twin and the two must
+ *  agree. */
+const MERGE_DIAMOND_MAPFUL = `fn f {
+^bb0(%2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %14: unk32 = gaddr {sym=gTable}
+  %6: unk32 = load %14 {off=0, signed=true, width=4}
+  br ^bb3(%6)
+^bb2():
+  %15: unk32 = gaddr {sym=gTable}
+  %7: unk32 = load %15 {off=4, signed=true, width=4}
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** …and the map-LESS spelling of it: the pool word as a bare `const`. */
+const MERGE_DIAMOND_MAPLESS = `fn f {
+^bb0(%2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %14: unk32 = const {value=134221824}
+  %6: unk32 = load %14 {off=0, signed=true, width=4}
+  br ^bb3(%6)
+^bb2():
+  %15: unk32 = const {value=134221824}
+  %7: unk32 = load %15 {off=4, signed=true, width=4}
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** AN ARM HOLDING A CARRIER OF ITS OWN. `^bb1` is two value-producing ops — the sibling's `sext16`
+ *  and the `add` — so the join `^bb3` is NOT hoistable and must stay refused. But this pass narrows
+ *  the SIBLING first, which DELETES that `sext`, and re-reading the arm afterwards finds one op and
+ *  calls the join hoistable. The arm gcc compiled had `lsl / asr / add` in it; judging the rewritten
+ *  one prices a program agbcc never saw, and makes a carrier's spelling depend on whether an
+ *  unrelated sibling happened to narrow. The shape is snapshotted once, before the first rewrite,
+ *  which is what this fixture pins — `runPreRecovery` takes that snapshot even earlier, before the
+ *  passes AHEAD of this one rewrite the CFG. */
+const MERGE_ARM_WITH_SIBLING = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %30: unk32 = sext %0 {width=16}
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1(%30)
+^bb1(%20: unk32):
+  %21: unk32 = sext %20 {width=16}
+  %6: unk32 = add %21, %1
+  br ^bb3(%6)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** ONE PREDECESSOR REACHING THE JOIN TWICE, which is ONE arm. The predecessor list holds `^bb0`
+ *  twice, so a count alone reads this as a two-armed merge; what refuses it is the arm test, since
+ *  a block reaching the join twice ends in a `cond_br` rather than the plain `br` an arm ends in. */
+const MERGE_DOUBLE_EDGE = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %6: unk32 = add %0, %1
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb3(%6), ^bb3(%6)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
 describe('a block parameter extended at its only read is declared at that width', () => {
   test('a sole `sext {16}` types the carrier `s16` and drops the extension', () => {
     const { n, fn, ir } = run(NARROW_COUNTER);
@@ -191,6 +498,171 @@ describe('a block parameter extended at its only read is declared at that width'
     expect(at('zext', 16)).toEqual({ kind: 'int', width: 16, signed: false });
     expect(at('sext', 8)).toEqual({ kind: 'int', width: 8, signed: true });
     expect(at('zext', 8)).toEqual({ kind: 'int', width: 8, signed: false });
+  });
+});
+
+describe('the join shape is recorded as evidence', () => {
+  // Three fields, and only two of them are IR facts. `mergeDiamond` is a two-armed merge — both
+  // arms' SOLE predecessor being one `cond_br` head — and `armsHoistable` is that merge over arms
+  // `gcc/jump.c:471-502` could have collapsed; `targetHoistsSingleSetArm` is the target's claim
+  // beside them. The hoisted shape fails the first because the join's own predecessor is the
+  // conditional branch that also targets the surviving arm.
+  const diamonds = (ir: string): boolean[] => {
+    const fn = parse(ir);
+    return narrowLocalCandidates(fn, undefined, AGBCC).map(({ c }) => c.mergeDiamond);
+  };
+  const hoistable = (ir: string, opts: NarrowLocalOptions = AGBCC): boolean[] => {
+    const fn = parse(ir);
+    return narrowLocalCandidates(fn, undefined, opts).map(({ c }) => c.armsHoistable);
+  };
+  const claims = (ir: string, opts: NarrowLocalOptions = AGBCC): boolean[] => {
+    const fn = parse(ir);
+    return narrowLocalCandidates(fn, undefined, opts).map(({ c }) => c.targetHoistsSingleSetArm);
+  };
+
+  test('a two-armed merge is a diamond and a hoisted arm is not', () => {
+    // every entry parameter is judged too and none of them is a merge; the carrier is last
+    expect(diamonds(MERGE_DIAMOND)).toEqual([false, false, false, false, true]);
+    expect(diamonds(MERGE_HOISTED_ARM)).toEqual([false, false, false, false, false]);
+    expect(diamonds(MERGE_DIAMOND).at(-1)).toBe(true);
+    expect(diamonds(MERGE_HOISTED_ARM).at(-1)).toBe(false);
+    // the file's existing merge fixtures are BOTH the hoisted shape — `gcc/jump.c` took the hoist
+    expect(diamonds(MERGE_NO_TRUNCATION).at(-1)).toBe(false);
+    expect(diamonds(MERGE_SUNK_TRUNCATION).at(-1)).toBe(false);
+    // and a self-loop header is not one either: its two in-edges come from the entry and from
+    // itself, so the arms have no common `cond_br` head
+    expect(diamonds(NARROW_COUNTER)).toEqual([false, false]);
+  });
+
+  test('a surviving diamond narrows and a hoisted arm does not', () => {
+    // THE 2x2's THIRD AND FOURTH ROWS, decided. Both fixtures present this table with one
+    // `zext16` reader over raw in-edges and no sunk write-back — identical in every other field —
+    // and they are the two spellings the header calls indistinguishable. The join separates them.
+    const { n, fn, ir } = run(MERGE_DIAMOND);
+    expect(n).toBe(1);
+    expect(fn.blocks[3].params[0].type).toEqual({ kind: 'int', width: 16, signed: false });
+    expect(ir).not.toMatch(/zext/);
+
+    // and the hoisted twin — `s32 v; … *out = (u16)v`, the benchmark's `mergecastu` row — is still
+    // refused, by this gate and no other
+    expect(run(MERGE_HOISTED_ARM).n).toBe(0);
+    expect(reasons(MERGE_HOISTED_ARM).at(-1)).toBe('edge-extends');
+    expect(runWithout(MERGE_HOISTED_ARM, 'edge-extends')).toBe(1);
+  });
+
+  test('a diamond gcc could not have hoisted is not evidence, and is refused', () => {
+    // The mechanism is `jump.c`'s guard and the guard is about the ARM, so reading only the join
+    // reads half of it. An arm too big for ONE SET keeps its diamond whatever the local's width,
+    // and narrowing there would be a spelling guess dressed as evidence. Measured over 2288 sa3
+    // functions, 28 of the 40 `edge-extends` refusals are diamonds and NONE of them has arms gcc
+    // could have collapsed.
+    expect(diamonds(MERGE_DIAMOND_BIG_ARM).at(-1)).toBe(true);
+    expect(hoistable(MERGE_DIAMOND_BIG_ARM).at(-1)).toBe(false);
+    expect(run(MERGE_DIAMOND_BIG_ARM).n).toBe(0);
+    expect(reasons(MERGE_DIAMOND_BIG_ARM).at(-1)).toBe('edge-extends');
+    expect(runWithout(MERGE_DIAMOND_BIG_ARM, 'edge-extends')).toBe(1);
+    // the accepted diamond's own arms are one `add` and one `sub` — exactly what gcc hoists
+    expect(hoistable(MERGE_DIAMOND).at(-1)).toBe(true);
+  });
+
+  test('an arm gcc could not SPECULATE is not one SET, however few ops it holds', () => {
+    // `gcc/jump.c:483` `! may_trap_p (SET_SRC (temp4))`, and `gcc/rtlanal.c:1770-1771` sends a MEM
+    // to `rtx_addr_can_trap_p` where `:144-147` says a plain pseudo address CAN trap. So a load is
+    // one op and never one hoistable SET — the diamond survives under BOTH spellings and carries
+    // nothing. Counting ops alone spells `u16 v` for a source that wrote the cast: the benchmark's
+    // `synthetic:mergeldcast:agbcc` row, MATCH at base and 6 with an arm test reading only size.
+    expect(diamonds(MERGE_DIAMOND_LOAD_ARMS).at(-1)).toBe(true);
+    expect(hoistable(MERGE_DIAMOND_LOAD_ARMS).at(-1)).toBe(false);
+    expect(run(MERGE_DIAMOND_LOAD_ARMS).n).toBe(0);
+    expect(reasons(MERGE_DIAMOND_LOAD_ARMS).at(-1)).toBe('edge-extends');
+    expect(runWithout(MERGE_DIAMOND_LOAD_ARMS, 'edge-extends')).toBe(1);
+  });
+
+  test('a constant counts toward the arm: one C assignment is not always one insn', () => {
+    // `v = a + 0x12345` is a pool `ldr` and an `add`. The IR spells foldable and unfoldable
+    // immediates identically, so the budget counts both; `synthetic:mergepool:agbcc` is this shape
+    // and scores 1 when the constant is exempted.
+    expect(diamonds(MERGE_DIAMOND_POOL_ARM).at(-1)).toBe(true);
+    expect(hoistable(MERGE_DIAMOND_POOL_ARM).at(-1)).toBe(false);
+    expect(run(MERGE_DIAMOND_POOL_ARM).n).toBe(0);
+    expect(reasons(MERGE_DIAMOND_POOL_ARM).at(-1)).toBe('edge-extends');
+  });
+
+  test('an arm with no insn in it is not one SET', () => {
+    // The budget is EXACTLY one value-producing op, not at most one. `gcc/jump.c:480` matches
+    // `single_set` against the arm's own insn, and an arm whose only insn is the jump has none.
+    expect(diamonds(MERGE_DIAMOND_EMPTY_ARM).at(-1)).toBe(true);
+    expect(hoistable(MERGE_DIAMOND_EMPTY_ARM).at(-1)).toBe(false);
+    expect(run(MERGE_DIAMOND_EMPTY_ARM).n).toBe(0);
+    expect(reasons(MERGE_DIAMOND_EMPTY_ARM).at(-1)).toBe('edge-extends');
+  });
+
+  test('a rotated loop header is a two-armed merge and is still not this evidence', () => {
+    // A rotated loop's preheader and latch are distinct blocks and neither branches to the other,
+    // so only the head test refuses this: the preheader's sole predecessor is not the latch's.
+    // NARROW_COUNTER, a SELF-loop, is a weaker shape and cannot stand in for it.
+    const armless = LOOP_HEADER_DIAMOND;
+    expect(diamonds(armless)).toEqual([false, false]);
+    expect(run(armless).n).toBe(0);
+    expect(reasons(armless).at(-1)).toBe('edge-extends');
+  });
+
+  test('an empty forwarding arm has no insn to be one SET, and is refused as the head is not shared', () => {
+    // `sub_80B6198` in the sa3 checkout — the ONE corpus carrier an arm-SIZE test admitted, and a misclassification:
+    // `^bb3` is a nested join flattened by the frontend, not an `if`/`else` arm.
+    expect(diamonds(MERGE_FORWARDED_ARM).at(-1)).toBe(false);
+    expect(hoistable(MERGE_FORWARDED_ARM).at(-1)).toBe(false);
+    expect(run(MERGE_FORWARDED_ARM).n).toBe(0);
+    expect(reasons(MERGE_FORWARDED_ARM).at(-1)).toBe('edge-extends');
+  });
+
+  test('the same ROM gets the same local with and without a symbol map', () => {
+    // A DECOMPILER ANSWER THAT DEPENDS ON `--elf` IS NOT A PROPERTY OF THE PROGRAM. The pool word
+    // lifts to `const` map-less and to `gaddr` map-ful, so exempting constants from the arm's op
+    // budget made the verdict a function of the invocation. The real tier is map-FUL on 252/252
+    // rows and the synthetic tier is map-less, so this asymmetry was structurally invisible to
+    // `bench diff`.
+    expect(diamonds(MERGE_DIAMOND_MAPFUL).at(-1)).toBe(diamonds(MERGE_DIAMOND_MAPLESS).at(-1));
+    expect(hoistable(MERGE_DIAMOND_MAPFUL).at(-1)).toBe(hoistable(MERGE_DIAMOND_MAPLESS).at(-1));
+    expect(hoistable(MERGE_DIAMOND_MAPFUL).at(-1)).toBe(false);
+    expect(run(MERGE_DIAMOND_MAPFUL).n).toBe(run(MERGE_DIAMOND_MAPLESS).n);
+    expect(run(MERGE_DIAMOND_MAPFUL).n).toBe(0);
+  });
+
+  test('the arm is judged as agbcc compiled it, not as this pass rewrote it', () => {
+    // ORDER-INDEPENDENCE, and it is not free: `narrowBlockLocals` re-enumerates after every rewrite
+    // because the EDGE rules of a later carrier read the ops an earlier one changed. The join shape
+    // is the one thing that must NOT be re-read — it is a fact about the lifted asm. Here the
+    // sibling in `^bb1` narrows, deleting the `sext` that made the arm two ops; the join's verdict
+    // must be the one taken before that.
+    const { n, fn } = run(MERGE_ARM_WITH_SIBLING);
+    expect(n).toBe(1); // the sibling, and only the sibling
+    expect(fn.blocks[1].params[0].type).toEqual({ kind: 'int', width: 16, signed: true });
+    expect(fn.blocks[3].params[0].type).toEqual({ kind: 'unknown', width: 32 });
+    expect(hoistable(MERGE_ARM_WITH_SIBLING).at(-1)).toBe(false);
+    expect(reasons(MERGE_ARM_WITH_SIBLING).at(-1)).toBe('edge-extends');
+  });
+
+  test('a block reached twice from one predecessor is ONE arm', () => {
+    // A head whose two successors are the same block is not an `if`/`else`, and `gcc/jump.c:480`'s
+    // `single_set` has no second arm to match. The arm test is what says so.
+    expect(diamonds(MERGE_DOUBLE_EDGE).at(-1)).toBe(false);
+    expect(run(MERGE_DOUBLE_EDGE).n).toBe(0);
+    expect(reasons(MERGE_DOUBLE_EDGE).at(-1)).toBe('edge-extends');
+  });
+
+  test('a target that claims no single-SET hoist gets no join evidence', () => {
+    // The join clause is a claim about gcc 2.x's `jump_optimize`, not about C, so it is
+    // `TargetDescription.compilerBehaviors.hoistsSingleSetArm` and absent means the target claims
+    // nothing. Same fixture, same IR: the two IR facts are unchanged — it is still a diamond over
+    // arms that guard could have collapsed — and only the target's claim goes away, which is what
+    // separates "this compiler would not have acted" from "these arms were not collapsible".
+    expect(diamonds(MERGE_DIAMOND).at(-1)).toBe(true);
+    expect(hoistable(MERGE_DIAMOND, {}).at(-1)).toBe(true);
+    expect(claims(MERGE_DIAMOND, {}).at(-1)).toBe(false);
+    expect(claims(MERGE_DIAMOND).at(-1)).toBe(true);
+    expect(run(MERGE_DIAMOND, {}).n).toBe(0);
+    expect(reasons(MERGE_DIAMOND, {}).at(-1)).toBe('edge-extends');
   });
 });
 
@@ -276,12 +748,13 @@ describe('refusals', () => {
 
   test('a merge whose in-edges carry no truncation is a cast, not a declaration', () => {
     // EVIDENCE, not soundness — `s32 v` with one `(s16)v` at the use computes the same numbers.
-    // With ONE extension the two spellings are the same IR in this pass's whole vocabulary: `u16 v`
-    // and `s32 v` + `(u16)v` both arrive as a merge carrier read by one `zext16` over raw in-edges,
-    // and they want opposite answers (the file header carries all four compiled round-trips). This
-    // refusal is therefore a CHOICE — keep the wide spelling where the asm does not say — and its
-    // price is 40 of 128 carriers over 2288 sa3 functions, none of them on a benchmark row. The
-    // `mergecast` row in the synthetic dataset is what holds the choice to a score.
+    // This fixture is `mergecast`'s cell: one `sext16` over raw in-edges AND a HOISTED join, which
+    // is what agbcc leaves when the source cast a wide local. Refusing it costs `mergecast:agbcc`
+    // its match, measured. The carrier the join clause re-decides is the DIAMOND above; over 2288
+    // sa3 sources this refusal does not fall at all — 40 before the clause and 40 after, because
+    // 28 of the 40 are diamonds and NONE of the 28 has arms gcc could have collapsed. So no score
+    // over that corpus can price the clause, and these fixtures and the fuzz's diamond tail are
+    // what carry it.
     expect(run(MERGE_NO_TRUNCATION).n).toBe(0);
     expect(runWithout(MERGE_NO_TRUNCATION, 'edge-extends')).toBe(1);
     // and the same fixture with the truncation SUNK to the join is admitted — the two differ by
