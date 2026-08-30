@@ -393,6 +393,33 @@ const MERGE_DIAMOND_MAPLESS = `fn f {
 }
 `;
 
+/** AN ARM HOLDING A CARRIER OF ITS OWN. `^bb1` is two value-producing ops — the sibling's `sext16`
+ *  and the `add` — so the join `^bb3` is NOT hoistable and must stay refused. But this pass narrows
+ *  the SIBLING first, which DELETES that `sext`, and re-reading the arm afterwards finds one op and
+ *  calls the join hoistable. The arm gcc compiled had `lsl / asr / add` in it; judging the rewritten
+ *  one prices a program agbcc never saw, and makes a carrier's spelling depend on whether an
+ *  unrelated sibling happened to narrow. `mergeShapes` snapshots the shape before the first rewrite,
+ *  which is what this fixture pins. */
+const MERGE_ARM_WITH_SIBLING = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %30: unk32 = sext %0 {width=16}
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1(%30)
+^bb1(%20: unk32):
+  %21: unk32 = sext %20 {width=16}
+  %6: unk32 = add %21, %1
+  br ^bb3(%6)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
 const MERGE_DOUBLE_EDGE = `fn f {
 ^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
   %6: unk32 = add %0, %1
@@ -565,6 +592,20 @@ describe('the join shape is recorded as evidence', () => {
     expect(hoistable(MERGE_DIAMOND_MAPFUL).at(-1)).toBe(false);
     expect(run(MERGE_DIAMOND_MAPFUL).n).toBe(run(MERGE_DIAMOND_MAPLESS).n);
     expect(run(MERGE_DIAMOND_MAPFUL).n).toBe(0);
+  });
+
+  test('the arm is judged as agbcc compiled it, not as this pass rewrote it', () => {
+    // ORDER-INDEPENDENCE, and it is not free: `narrowBlockLocals` re-enumerates after every rewrite
+    // because the EDGE rules of a later carrier read the ops an earlier one changed. The join shape
+    // is the one thing that must NOT be re-read — it is a fact about the lifted asm. Here the
+    // sibling in `^bb1` narrows, deleting the `sext` that made the arm two ops; the join's verdict
+    // must be the one taken before that.
+    const { n, fn } = run(MERGE_ARM_WITH_SIBLING);
+    expect(n).toBe(1); // the sibling, and only the sibling
+    expect(fn.blocks[1].params[0].type).toEqual({ kind: 'int', width: 16, signed: true });
+    expect(fn.blocks[3].params[0].type).toEqual({ kind: 'unknown', width: 32 });
+    expect(hoistable(MERGE_ARM_WITH_SIBLING).at(-1)).toBe(false);
+    expect(reasons(MERGE_ARM_WITH_SIBLING).at(-1)).toBe('edge-extends');
   });
 
   test('a block reached twice from one predecessor is ONE arm', () => {

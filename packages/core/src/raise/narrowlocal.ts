@@ -300,9 +300,14 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
     sound: false,
     guardedBy: 'narrow-local.test.ts: a merge whose in-edges carry no truncation is a cast, not a declaration',
     // ONE ENTRY, three conjuncts, and it cannot be split: a gate is a REJECTION, so "refuse unless
-    // some evidence" is one rule — split across rows, each half over-fires alone. The consequence
-    // is that `mergeDiamond` is not independently ablatable by `without`; its price is the fixture
-    // pair above plus the sa3 sweep, never a `without` diff.
+    // some evidence" is one rule — split across rows, each half over-fires alone.
+    //
+    // `without` therefore cannot ablate the join half alone — but the COMPILER FACT can, and that
+    // is the second reason `hoistsSingleSetArm` is threaded rather than defaulted. Clearing it
+    // leaves the two edge conjuncts standing and removes exactly this one, which is the ablation
+    // `narrow-local.test.ts: a target that claims no single-SET hoist gets no join evidence` runs
+    // and the sa3 census is measured against. The FIXTURES then price the halves of the conjunct
+    // itself: MERGE_HOISTED_ARM the join, MERGE_DIAMOND_BIG_ARM / _LOAD_ARMS / _POOL_ARM the arms.
     //
     // The third conjunct is POSITIVE evidence, deliberately, and not `!hoistedJoin`. The negation
     // of a hoist is not evidence of a declaration: a one-predecessor join, a three-armed one, an
