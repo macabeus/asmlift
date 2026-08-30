@@ -17,6 +17,7 @@
 // The asymmetry that licenses hashing generously: OVER-hashing costs a cold start, UNDER-hashing
 // serves a stale object.
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -26,9 +27,19 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+
+// Every case here drives ~6 BLOCKING `spawnSync('sh')` calls (two stamp probes and a compile,
+// twice) plus a full directory walk, and this file joins a pool whose config says "no blocking
+// spawnSync — so these run in PARALLEL worker forks". Under the 5000 ms default it is load-
+// dependent, and a test abandoned at its `await import()` resumes into a project directory the
+// shared `afterEach` has already removed — so it goes red on a CONTENT assertion and reads like
+// a soundness failure. Measured on one machine at one commit: loadavg ~50 -> 32 passed in 18.1 s;
+// loadavg ~76 -> 2 failed on `Test timed out in 5000ms`; loadavg ~87 -> 20 failed. `test:offline`
+// is a CI gate on a shared runner.
+vi.setConfig({ testTimeout: 120_000 });
 
 type CompileCommandModule = typeof import('../../src/compile-command');
 
@@ -363,5 +374,363 @@ describe('the operand parser, on the template the hole was measured on', () => {
   test('a flag whose operand is another flag takes none — and neither do the ordinary ones', async () => {
     const { templatePathOperands } = await import('../../src/compile-command');
     expect(templatePathOperands('cc -I -Wall -O2 -fhex-asm -mthumb-interwork -o out.o in.c')).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------------------------------------
+// THE POISON PROBES. Every case below was a MEASURED stale object on the first spelling of this
+// mechanism — a flag table with a `/[/.]/.test(tok)` guard in front of `hashPath` in the stamp.
+// Each one compiles, mutates the header THE SHELL actually reads, compiles again in a fresh
+// module instance, and fails if the second run was served the first run's object.
+//
+// The ablation that says which half of the mechanism earns what: with the guard deleted and the
+// operand scan replaced by `[]`, the twenty spellings above ran 21 passed / 11 failed — one
+// deleted clause covers every SEPARATED spelling, and the table earns the ATTACHED ones and the
+// glob. That is why `PATH_FLAGS` is documented as a DE-GLUER: a list that is the mechanism has an
+// invisible incompleteness, and the shapes in the first block here are exactly what that
+// invisibility cost.
+// ------------------------------------------------------------------------------------------
+
+describe('a flag NOBODY listed still measures its operand, because the filesystem answers', () => {
+  // The point of dropping the `/[/.]/` guard: these flags are not in `PATH_FLAGS` at all (or, for
+  // the last one, are separated from their operand by two other tokens), and the operand is
+  // measured anyway because every token is tried as a path.
+  const UNLISTED: [string, string][] = [
+    ['--include-directory inc', 'the GNU long spelling of -I'],
+    ['-iframework inc', 'a clang/darwin framework dir'],
+    ['-imultilib inc', ''],
+    ['-Xpreprocessor -I -Xpreprocessor inc', 'the operand two tokens away from its flag'],
+    ['-fsome-future-flag inc', 'a flag that does not exist yet'],
+  ];
+  test.each(UNLISTED)('`%s` — editing inside it re-namespaces%s', async (flags) => {
+    const p = project();
+    const r = await acrossAnEdit(p, templateWith(flags));
+    expect(r.first).toContain('#define K 3');
+    expect(r.second, `${flags}: the directory moved, so the stored object is not the answer`).toContain(
+      '#define K 999',
+    );
+    expect(r.namespaces).toBe(2);
+  });
+
+  // The other half: an ATTACHED long spelling, where the filesystem cannot help because the
+  // operand is glued to the flag. This is what the de-gluer table is for, and it is the reason
+  // the table survives at all.
+  test('`--include-directory=inc` — glued, so only the table can un-glue it', async () => {
+    const p = project();
+    const r = await acrossAnEdit(p, templateWith('--include-directory=inc'));
+    expect(r.second).toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+
+  test('a token longer than 300 characters is an ordinary deep checkout, not noise', async () => {
+    const p = project();
+    const deep = join(p.cwd, 'd'.repeat(120), 'e'.repeat(120), 'f'.repeat(120));
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(deep, 'k.h'), '#define K 3\n');
+    const template =
+      `: -I ${deep}; cat "{{inputPath}}" > "{{outputPath}}"; ` +
+      `if grep -q USES_K "{{inputPath}}"; then cat ${deep}/k.h >> "{{outputPath}}"; fi`;
+    const served = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        writeFileSync(join(deep, 'k.h'), '#define K 999\n');
+        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        return { first, second };
+      },
+    );
+    expect(served.first).toContain('#define K 3');
+    expect(served.second, `an operand ${deep.length} chars long was dropped by the scan`).toContain('#define K 999');
+  });
+});
+
+describe('an operand the SHELL spells differently than the scan does', () => {
+  test('`-I $INC` where the TEMPLATE assigns INC — the assignment RHS is a token too', async () => {
+    // klonoa's own template already assigns four variables, so this is one edit from the corpus
+    // rather than a hypothetical: `AGBCC=tools/agbcc; … -I $AGBCC/include`.
+    const p = project();
+    const template =
+      'INC=inc; : -I $INC; cat "{{inputPath}}" > "{{outputPath}}"; ' +
+      'if grep -q USES_K "{{inputPath}}"; then cat $INC/k.h >> "{{outputPath}}"; fi';
+    const r = await acrossAnEdit(p, template);
+    expect(r.first).toContain('#define K 3');
+    expect(r.second, 'the operand lives in a variable the template itself assigns').toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+
+  test('`-iquote "my inc"` — a quoted operand with a space in it', async () => {
+    const p = project();
+    mkdirSync(join(p.cwd, 'my inc'));
+    writeFileSync(join(p.cwd, 'my inc/k.h'), '#define K 3\n');
+    const template =
+      ': -iquote "my inc"; cat "{{inputPath}}" > "{{outputPath}}"; ' +
+      'if grep -q USES_K "{{inputPath}}"; then D=my; cat "$D inc/k.h" >> "{{outputPath}}"; fi';
+    const served = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        writeFileSync(join(p.cwd, 'my inc/k.h'), '#define K 999\n');
+        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        return { first, second };
+      },
+    );
+    expect(served.first).toContain('#define K 3');
+    expect(served.second, 'the splitter treats a quote as a separator, so the path arrived as two tokens').toContain(
+      '#define K 999',
+    );
+  });
+
+  test('`cd sub; -I inc` — a `cd` moves what a relative operand means', async () => {
+    const p = project();
+    mkdirSync(join(p.cwd, 'sub/inc'), { recursive: true });
+    writeFileSync(join(p.cwd, 'sub/inc/k.h'), '#define K 3\n');
+    const template =
+      'cd sub; : -I inc; cat "{{inputPath}}" > "{{outputPath}}"; ' +
+      'if grep -q USES_K "{{inputPath}}"; then H=in; cat ${H}c/k.h >> "{{outputPath}}"; fi';
+    const served = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        writeFileSync(join(p.cwd, 'sub/inc/k.h'), '#define K 999\n');
+        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        return { first, second };
+      },
+    );
+    expect(served.first).toContain('#define K 3');
+    expect(served.second, 'the operand resolves against the cd target, not the decomp.yaml dir').toContain(
+      '#define K 999',
+    );
+  });
+
+  test('`-I ~/inc` — the SHELL expands the tilde before any compiler sees it', async () => {
+    const p = project();
+    const home = mkdtempSync(join(tmpdir(), 'candcache-dirflag-home-'));
+    roots.push(home);
+    mkdirSync(join(home, 'inc'));
+    writeFileSync(join(home, 'inc/k.h'), '#define K 3\n');
+    const template =
+      ': -I ~/inc; cat "{{inputPath}}" > "{{outputPath}}"; ' +
+      'if grep -q USES_K "{{inputPath}}"; then cat ~/inc/k.h >> "{{outputPath}}"; fi';
+    const savedHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      const served = await withCache(
+        { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+        ({ compileFromCommand }) => {
+          const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+          writeFileSync(join(home, 'inc/k.h'), '#define K 999\n');
+          const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+          return { first, second };
+        },
+      );
+      expect(served.first).toContain('#define K 3');
+      expect(served.second, "resolve(cwd, '~/inc') names a directory that does not exist").toContain('#define K 999');
+    } finally {
+      if (savedHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = savedHome;
+      }
+    }
+    // `homedir()` is what the mechanism uses; if the two ever disagree this test is measuring
+    // nothing, so say so rather than pass vacuously.
+    expect(typeof homedir()).toBe('string');
+  });
+
+  test('`cat *.h` — a glob with no directory part expands in the CURRENT directory', async () => {
+    const p = project();
+    writeFileSync(join(p.cwd, 'k.h'), '#define K 3\n');
+    const template =
+      ': -Wall; cat "{{inputPath}}" > "{{outputPath}}"; ' +
+      'if grep -q USES_K "{{inputPath}}"; then cat *.h >> "{{outputPath}}"; fi';
+    const served = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        writeFileSync(join(p.cwd, 'k.h'), '#define K 999\n');
+        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        return { first, second };
+      },
+    );
+    expect(served.first).toContain('#define K 3');
+    expect(served.second, 'the glob has no `/`, so its directory is the cwd').toContain('#define K 999');
+  });
+});
+
+describe('a file that holds MORE FLAGS is scanned, not merely hashed', () => {
+  // Hashing the file's bytes is not measuring what it NAMES. `@opts` containing `-iquote inc` was
+  // hashed as a file while `inc/` was not — which made writing the flag in a response file look
+  // SAFER than writing it inline, the exact inversion a residual list must not publish.
+  test('`@opts` whose contents name the include directory', async () => {
+    const p = project();
+    writeFileSync(join(p.cwd, 'opts'), '-nostdinc -iquote inc\n');
+    const r = await acrossAnEdit(p, templateWith('@opts'));
+    expect(r.first).toContain('#define K 3');
+    expect(r.second, 'the response file names the directory; its contents moved').toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+
+  test('`-specs=x.specs` whose body adds the include directory', async () => {
+    const p = project();
+    writeFileSync(join(p.cwd, 'x.specs'), '*cpp:\n+ -iquote inc\n');
+    const r = await acrossAnEdit(p, templateWith('-specs=x.specs'));
+    expect(r.second, 'a specs body is compile flags, and one of them is a path').toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+
+  test('`-include pre.h` — the injected header resolves ITS quoted includes from its own dir', async () => {
+    // gcc resolves `#include "sub/x.h"` inside an injected header from the DIRECTORY THE HEADER
+    // IS IN, which is never an operand and never a token. `-include` is the one flag that puts a
+    // `#include` outside the TU, so `candidateCacheRefusal` — which inspects the TU — cannot see
+    // it either. Both guards blind at once is exactly where the measurement has to reach.
+    const p = project();
+    mkdirSync(join(p.cwd, 'inc/sub'), { recursive: true });
+    writeFileSync(join(p.cwd, 'inc/pre.h'), '/* injected */\n');
+    writeFileSync(join(p.cwd, 'inc/sub/x.h'), '#define K 3\n');
+    const template =
+      ': -include inc/pre.h; cat "{{inputPath}}" > "{{outputPath}}"; ' +
+      'if grep -q USES_K "{{inputPath}}"; then H=in; cat ${H}c/sub/x.h >> "{{outputPath}}"; fi';
+    const served = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        writeFileSync(join(p.cwd, 'inc/sub/x.h'), '#define K 999\n');
+        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        return { first, second };
+      },
+    );
+    expect(served.first).toContain('#define K 3');
+    expect(served.second, "the injected header's own closure is read from the directory it lives in").toContain(
+      '#define K 999',
+    );
+    expect(dirname('inc/pre.h')).toBe('inc');
+  });
+});
+
+describe('a path the walk CANNOT read is a refusal, never a miss', () => {
+  const stderrCapture = async (fn: () => Promise<void> | void): Promise<string> => {
+    let out = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      out += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString();
+      return true;
+    });
+    try {
+      await fn();
+    } finally {
+      spy.mockRestore();
+    }
+    return out;
+  };
+
+  // Mode 0311 — `--wx--x--x`: SEARCHABLE and not LISTABLE, which is exactly what a compile needs
+  // of an include directory and exactly what a walk does not get. The first spelling swallowed
+  // the EACCES into "contributes nothing" and served a stale object with no stderr line at all.
+  // The transient case is worse than the permanent one: one EIO on one readdirSync would mint a
+  // PERMANENTLY incomplete namespace.
+  test('an include directory that is searchable but not listable refuses out loud', async () => {
+    const p = project();
+    chmodSync(join(p.cwd, 'inc'), 0o311);
+    try {
+      // Skip rather than pass vacuously where the filesystem (or root) makes it listable anyway.
+      let listable = false;
+      try {
+        readdirSync(join(p.cwd, 'inc'));
+        listable = true;
+      } catch {
+        listable = false;
+      }
+      if (listable) {
+        return;
+      }
+      const err = await stderrCapture(async () => {
+        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+          // A refusal is not a failure: the compile still happens and still answers.
+          const out = compileFromCommand(templateWith('-iquote inc'), { cwd: p.cwd })(CAND_K, 'f', 'c');
+          expect(readFileSync(out, 'utf8')).toContain('#define K 3');
+        });
+      });
+      expect(err).toContain('[candcache] REFUSED label=command reason=stamp-threw');
+      expect(err).toContain('cannot list the directory');
+      expect(existsSync(join(p.store, 'ns')), 'a refused pipeline stores nothing at all').toBe(false);
+    } finally {
+      chmodSync(join(p.cwd, 'inc'), 0o755);
+    }
+  });
+
+  test('a DANGLING SYMLINK inside a measured directory is not a refusal — the walk goes on', async () => {
+    // The other side of the same coin: refusing over a dangling symlink would refuse half the
+    // toolchains on earth. The entry's NAME joins the digest and the measurement continues.
+    const p = project();
+    symlinkSync(join(p.cwd, 'inc/nothing-here'), join(p.cwd, 'inc/broken'));
+    const r = await acrossAnEdit(p, templateWith('-iquote inc'));
+    expect(r.first).toContain('#define K 3');
+    expect(r.second).toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+
+  test('an opaque runtime named through a variable the TEMPLATE assigns is refused', async () => {
+    // `DOCKER=docker; $DOCKER run …` defeated the first spelling, which resolved `$VAR` only
+    // through `process.env` — while every template in this repo assigns shell variables.
+    const p = project();
+    const err = await stderrCapture(async () => {
+      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+        compileFromCommand('DOCKER=docker; ' + templateWith('$DOCKER run img cc'), { cwd: p.cwd })(CAND_K, 'f', 'c');
+      });
+    });
+    expect(err).toContain('reason=stamp-threw');
+    expect(existsSync(join(p.store, 'ns'))).toBe(false);
+  });
+
+  test.each([['ssh builder cc'], ['chroot /opt/sysroot cc'], ['distrobox-enter -n box -- cc'], ['qemu-i386 ./cc']])(
+    '`%s` runs the compiler where this namespace cannot read it',
+    async (runner) => {
+      const p = project();
+      const err = await stderrCapture(async () => {
+        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+          compileFromCommand(templateWith(runner), { cwd: p.cwd })(CAND_K, 'f', 'c');
+        });
+      });
+      expect(err).toContain('reason=stamp-threw');
+    },
+  );
+});
+
+describe("a project's own REFUSAL — tools.asmlift.candidateCache: off", () => {
+  // The escape the deny-list above cannot be: a project whose compiler runs somewhere nothing
+  // here can read it says so in its own decomp.yaml, and the worst case of getting it wrong is a
+  // cold start. It is the inverse shape of the deleted `cacheInputs`, whose worst case was a
+  // stale object.
+  test('the store is never even created for a command that declares it', async () => {
+    const p = project();
+    const r = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+      const compile = compileFromCommand(templateWith('-iquote inc'), { cwd: p.cwd, candidateCache: 'off' });
+      const first = readFileSync(compile(CAND_K, 'f', 'c'), 'utf8');
+      p.setK(999);
+      const second = readFileSync(compile(CAND_K, 'f', 'c'), 'utf8');
+      return { first, second };
+    });
+    expect(r.first).toContain('#define K 3');
+    expect(r.second, 'with no cache there is nothing to serve stale').toContain('#define K 999');
+    expect(existsSync(join(p.store, 'ns')), 'a declared refusal writes no namespace at all').toBe(false);
+  });
+
+  test('and it is silent — a declared refusal is not an alarm', async () => {
+    const p = project();
+    let out = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      out += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString();
+      return true;
+    });
+    try {
+      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+        compileFromCommand('docker run img cc; ' + templateWith('-iquote inc'), {
+          cwd: p.cwd,
+          candidateCache: 'off',
+        })(CAND_K, 'f', 'c');
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(out, 'the project already said no — there is nothing to warn about').not.toContain('[candcache]');
   });
 });

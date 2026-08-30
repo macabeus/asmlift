@@ -724,9 +724,16 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   };
   /** One entry of a delegate chain. A measurement entry (`UNRESOLVED:`, `ENV:`) is hashed as the
    *  STRING it is — it is an answer, not a file, and skipping it drops the answer. A file is
-   *  hashed by CONTENT under its BASENAME, never its absolute path: two worktrees of this repo
-   *  hold byte-identical toolchains at different paths, and keying on the path gives each its own
-   *  namespace, so every parallel round cold-starts and leaves a second store behind. */
+   *  hashed by CONTENT under its BASENAME, never its absolute path, so that a toolchain MOVED but
+   *  not changed keeps its digest.
+   *
+   *  CORRECTED, because the rationale this comment used to give was measured FALSE: it claimed
+   *  the basename kept two worktrees holding byte-identical toolchains in ONE namespace, so
+   *  parallel rounds would not each cold-start. They do not share one — `h.update(cwd)` in
+   *  `stamp()` below already keys the whole namespace on the absolute working directory, which
+   *  makes that benefit unreachable no matter what these tags say (two byte-identical worktrees,
+   *  identical template, identical `inc/`: two namespaces, measured). The basename is still the
+   *  right tag — a tag is not a key, and content is what decides — but it is not buying that. */
   const hashChain = (h: ReturnType<typeof createHash>, tok: string, entry: string): void => {
     if (isChainMeasurement(entry)) {
       h.update(tok + '>' + entry);
@@ -852,8 +859,9 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     // separated spellings are already covered by the token scan above; these are what
     // `statSync` structurally cannot be asked about.
     //
-    // Tagged by BASENAME, never by absolute path, for the same reason the delegate chain is: two
-    // worktrees of this repo hold byte-identical toolchains at different paths.
+    // Tagged by BASENAME, never by absolute path, for the same reason the delegate chain is: a
+    // toolchain MOVED but not changed should keep its digest. (It does not follow that two
+    // worktrees share a namespace — `h.update(cwd)` above settles that, and they do not.)
     for (const operand of templatePathOperands(template, cwd)) {
       for (const p of candidatePaths(operand)) {
         // An operand that is not there contributes nothing and needs no MISSING marker: the

@@ -86,28 +86,52 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
   and a warm one, the cache is wrong; run the `diff` below, then re-run with `ASMLIFT_CANDCACHE=0`
   and report it.
 - **On a PROJECT's own `decomp.yaml` command, the cache runs — there is nothing to declare.**
-  There used to be an opt-in (`tools.asmlift.cacheInputs`), because one input class could not be
-  measured: a directory named by a flag. `-I tools/agbcc/include` was hashed by content already;
-  `-iquote include` — klonoa's own template — was a bare word nothing looked at. Both are measured
-  now, along with every other path flag (separated and attached), `@response` files, the DIRECTORY
-  of any glob the command expands, and what `CPATH` and friends point AT. A declaration a project
-  could get incomplete was itself a stale-object hole, so it is gone: the namespace measures the
-  toolchain rather than listing it. The cache still refuses, out loud, when the compile is not a
-  pure function of its input — `[candcache] REFUSED label=command
-reason=object-is-not-a-pure-function-of-its-input` is what `ido7.1` gets, because it writes the
-  absolute path of its input `.c` into the object — and when the command runs a CONTAINER, whose
-  image is named by a tag no measurement here can pin (`reason=stamp-threw`).
+  **THE POSTURE CHANGE, stated where it happens:** before this, `ASMLIFT_CANDCACHE=1` was INERT on
+  a project's own command unless that project also declared `tools.asmlift.cacheInputs`. It is not
+  inert now. If you have that variable exported in a shell profile, an `.envrc` or a CI job, your
+  next run caches your own project's compiles with no further action, and the only signal is one
+  `asmlift: [candcache]` line among the phase output.
+  The opt-in existed because one input class could not be measured: a directory named by a flag.
+  `-I tools/agbcc/include` was hashed by content already; `-iquote include` — klonoa's own template
+  — was a bare word nothing looked at. A declaration a project could get incomplete was itself a
+  stale-object hole, so it is gone: the namespace measures the toolchain rather than listing it.
+  Measured now: **every token that names an existing path**, whether or not anyone listed the flag
+  in front of it (`--include-directory inc`, `-iframework inc`, a flag invented after this was
+  written); every ATTACHED operand of the flags in the de-gluer table (`-Iinc`, `--sysroot=dir`,
+  `-Wa,-Iinc`); the CONTENTS of a `@response` or `-specs` file, not just its bytes; the directory
+  an injected `-include` header resolves its own quoted includes from; the DIRECTORY of a glob,
+  including one with no `/` in it (`cat *.h` → the cwd); an operand held in a variable the template
+  assigns, quoted with a space in it, or written `~/…`; the base a `cd` in the template moves to;
+  and what `CPATH` and friends point AT.
+  The cache still refuses, out loud, when the compile is not a pure function of its input —
+  `[candcache] REFUSED label=command reason=object-is-not-a-pure-function-of-its-input` is what
+  `ido7.1` gets, because it writes the absolute path of its input `.c` into the object — when a
+  measured path exists and CANNOT BE READ (an include directory at mode 0311 is searchable and not
+  listable: the compile can read it and the walk cannot, so nothing is cached), and when the
+  command runs the compiler somewhere this namespace cannot follow — a container image named by a
+  mutable tag, another host over `ssh`, a `chroot`/`qemu`/`wine` (`reason=stamp-threw`).
+- **A project can refuse for itself: `tools.asmlift.candidateCache: off`.** One key, one value.
+  Declare it when your command runs the compiler somewhere nothing here can read it, or reaches
+  something in the residual list below. It is deliberately the inverse of the deleted
+  `cacheInputs`: that key asserted what a command reads and an incomplete assertion served a stale
+  object; this one only ever turns the cache OFF, so an unnecessary one costs a cold start.
+  `ASMLIFT_CANDCACHE=0` is the same answer for a whole process; this one is per project, which is
+  what you want when only one of your projects has the problem.
 - **What is still NOT measured, said out loud.** A path the command itself COMPUTES
-  (`H=in; cat ${H}c/k.h`), which no token scan can resolve; a wrapper script that reads a config
-  DIRECTORY (the chain follows what a script EXECS, not what it OPENS — though editing the script
-  itself does move the namespace); `-B /opt/tc/arm-` used as a filename PREFIX rather than a
-  directory;
+  (`H=in; cat ${H}c/k.h`), which no token scan can resolve, and its cousin, a `cd` into a computed
+  directory (`cd "$(dirname …)"` contributes no resolution base); a wrapper script that reads a
+  config DIRECTORY (the chain follows what a script EXECS, not what it OPENS — though editing the
+  script itself does move the namespace); `-B /opt/tc/arm-` used as a filename PREFIX rather than a
+  directory (the operand is measured as a path, so the prefix spelling names nothing that exists
+  and contributes nothing);
   a candidate's assembler `.include`/`.incbin` (the per-key refusal tests the C preprocessor's
   `#include`, and asmlift's emitter emits object-like `#define` only — measured 0 of 66,816 on
-  LoadBGTilemapData); and the compiler's own built-in search directories, which every corpus
-  template puts out of reach with `-nostdinc`. If your command reads something in one of those
-  shapes, run with `ASMLIFT_CANDCACHE=verify` — it compiles anyway and fails on any disagreement —
-  or `ASMLIFT_CANDCACHE=0`.
+  LoadBGTilemapData); the compiler's own built-in search directories, which every corpus
+  template puts out of reach with `-nostdinc`; and an opaque runtime this build has never heard of
+  — the refusal above is a deny-list of process names, and a deny-list's miss is on the
+  stale-object side. If your command reads something in one of those shapes, declare
+  `tools.asmlift.candidateCache: off`, or run with `ASMLIFT_CANDCACHE=verify` — it compiles anyway
+  and fails on any disagreement — or `ASMLIFT_CANDCACHE=0`.
 - **The store is bounded, but only between runs.** `ASMLIFT_CANDCACHE_MAX_MB` (default 4096)
   counts the distinct object bytes plus one allocation block per stored key — 77% of a warm store
   is negative entries, which weigh nothing logically and cost a block each. It is enforced ONCE per

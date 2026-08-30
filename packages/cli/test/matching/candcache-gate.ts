@@ -19,9 +19,13 @@
 // any more — the namespace measures what the command reads instead of being told — so all three
 // now compile through a live `verify` cache against the default store, and a disagreement fails
 // the run for real. MEASURED, those three files against an empty private store: 1 namespace,
-// 142 stored keys, 0 mismatches (it was 0 keys before, `OFF_CACHE`). So this is a REAL gate over those three files plus a self-test, and still
-// forward defence for the toolchains path; what would make it a gate over the whole suite is
-// threading the cache through `@asmlift/toolchains`.
+// 142 stored keys, 0 mismatches (it was 0 keys before, `OFF_CACHE`). So this is a REAL gate over
+// those three files plus a self-test, and still forward defence for the toolchains path; what
+// would make it a gate over the whole suite is threading the cache through `@asmlift/toolchains`.
+//
+// SAY THE OTHER HALF TOO, because "the gate" overstates what the repo's wiring delivers:
+// `pnpm test:matching` is in NEITHER CI NOR THE BENCHMARK. This file fires on a developer's
+// machine when someone runs it explicitly, and nowhere else. It is a gate, not a guard rail.
 //
 // `ASMLIFT_CANDCACHE=0` still bypasses everything, which is the documented escape hatch.
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
