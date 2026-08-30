@@ -61,8 +61,8 @@
 // Rows one and two are DECIDABLE by the carrier's own readers: a `zext_w` read by a `sext_w` is the
 // write-back truncation followed by the declaration's own sign extension, and no cast on a wide
 // local writes that pair. Rows three and four are the same IR in this pass's READER vocabulary —
-// same single extension, same raw in-edges, opposite answers — and for a long time this file
-// refused both and called the difference "the branch shape agbcc chose", i.e. the score's business.
+// same single extension, same raw in-edges, opposite answers — so nothing the carrier reads decides
+// them.
 //
 // THE BRANCH SHAPE IS EVIDENCE THIS PASS CAN READ, and it decides rows three and four. Compiled
 // with this benchmark's own agbcc, `u16 v` leaves a DIAMOND of 14 instructions and `s32 v` +
@@ -121,12 +121,9 @@
 //   edge-reader 28 · edge-extends 40 (zext 30 / sext 10) · ACCEPT 60 (sext 51 / zext 9)
 //   flipped carriers: 0        of the 40 refusals: diamond 28, diamond AND arms hoistable 0
 //
-// AND THAT IS THE HONEST HEADLINE: over every corpus anything here has measured, this rule's ONLY
+// AND THAT IS THE HONEST HEADLINE: over every corpus anything here has measured, this rule's only
 // inhabitant is the row that motivated it. Say it plainly rather than let a census number imply
-// breadth. An earlier, looser pair re-decided ONE sa3 carrier and the audit showed that one was a
-// misclassification — an empty forwarding block the frontend cut at a label, in a function that
-// loud-fails anyway (`sub_80B6198`, `ASMLIFT_ERROR` in both configurations). With the head test it
-// is refused, and the count is 0 rather than 1-that-was-wrong.
+// breadth.
 //
 // Over the benchmark's own 930 base rows, decompiled twice — the conjunct as shipped and cleared —
 // exactly ONE row's emitted SOURCE BYTES change and it is `synthetic:mergeu16:agbcc`
@@ -143,13 +140,11 @@
 // that changes what a function COMPUTES would show up; the rows above are where a widening that
 // only changes the SPELLING shows up.
 //
-// WHAT PRICING THE SA3 POPULATION BY SCORE WOULD TAKE, measured rather than assumed: the sa3
-// functions a looser form of this rule flipped all fail to produce a scorable candidate outside the
-// project — every one references external symbols, and grafting sa3's own generated `ctx.c` in still
-// leaves per-function gaps (a callee used as a value, an arity mismatch), because that context is
-// generated per translation unit. So a score for that population needs a per-function context
-// harness this repo does not have — which is why the arm clause is priced by AUTHORED rows
-// (`mergeldcast`, `mergepool`) instead, where it costs 6 and 1.
+// AND THE SA3 POPULATION CANNOT BE PRICED BY SCORE AT ALL: every one of those functions references
+// external symbols, and grafting sa3's own generated `ctx.c` in still leaves per-function gaps
+// because that context is per translation unit. A score there needs a per-function context harness
+// this repo does not have, which is why the arm clause is priced by AUTHORED rows (`mergeldcast`,
+// `mergepool`) instead, where it costs 6 and 1.
 //
 // NO LOOP GATE, deliberately, AND THAT SENTENCE IS ABOUT THE SOUND RULES ONLY. The extension is
 // what states the width, and it states it whether or not the block is a loop header — the loop is
@@ -183,7 +178,7 @@ import { type Gate, firstRejection } from '../l3/gates';
  *
  *  Everything else here is a claim about C: an extension states a width, and a second reader of the
  *  raw carrier observes bits a narrow declaration drops — true of every compiler. The join clause of
- *  `edge-extends` is NOT of that kind, and the file used to say it was. Its claim is "gcc 2.x's
+ *  `edge-extends` is NOT of that kind: its claim is "gcc 2.x's
  *  `jump_optimize` would have collapsed this diamond and did not", which names one compiler's
  *  optimizer, and `docs/level-tower.md` is explicit that such a fact is `TargetDescription.
  *  compilerBehaviors` data rather than an ungated default — the more so because it is a compiler
@@ -455,11 +450,11 @@ function armIsOneSet(b: Block): boolean {
  *
  *    • this pass itself. It deletes an extension and re-enumerates, so an arm whose `lsl/asr/add`
  *      a SIBLING carrier's narrowing just shortened to `add` would re-read as one SET.
- *    • the pre-recovery passes AHEAD of it. `raise/shortcircuit.ts` MANUFACTURES two-armed
- *      single-SET diamonds out of condition trees the ROM never merged (18 sa3 blocks gain
- *      `hoistable`, e.g. `IsWorldPtActive` block 3, false at lift and true after
- *      branch-shortcircuit), `raise/divpow2.ts` deletes a block, and the `dce` after nine of the
- *      passes changes arm op counts.
+ *    • the twelve pre-recovery passes AHEAD of it, eight of them followed by `dce`.
+ *      `raise/shortcircuit.ts` MANUFACTURES two-armed single-SET diamonds out of condition trees
+ *      the ROM never merged: over sa3, 20 blocks gain `diamond` and 10 gain `hoistable` between
+ *      lift and narrowlocal's turn, and `branch-shortcircuit` accounts for all 10
+ *      (`IsWorldPtActive`, `IsScreenPtActive`, `sub_802C0D4`, `sub_802C1F8`, …).
  *
  *  So `runPreRecovery` calls this ONCE before the first pass and threads the map down
  *  (`PreRecoveryFacts`), and `narrowBlockLocals` reads that map rather than recomputing. A block

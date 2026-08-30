@@ -2855,8 +2855,8 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { mergeu16: { returnsVoid: true } },
   },
   {
-    // THE FOURTH CELL of the 2x2 in raise/narrowlocal.ts's header, and the only one the benchmark
-    // did not carry — which is why forcing `edge-extends` off used to read as a pure trade. It is
+    // THE FOURTH CELL of the 2x2 in raise/narrowlocal.ts's header, and the one that stops the
+    // unsigned column being won by a gate that simply always narrows. It is
     // `mergecast`'s twin at the other signedness and `mergeu16`'s at the other spelling: same
     // merge, same single `zext16` reader, same raw in-edges, and it must stay REFUSED because
     // agbcc really did hoist the else arm here.

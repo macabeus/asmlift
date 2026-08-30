@@ -599,11 +599,10 @@ describe('the join shape is recorded as evidence', () => {
   });
 
   test('a rotated loop header is a two-armed merge and is still not this evidence', () => {
-    // The file used to claim a loop header fails the diamond test "for the same reason" a hoisted
-    // join does — the header branching to the latch that branches back. That is only true of a
-    // SELF-loop, which is what NARROW_COUNTER is. Here the latch is its own block, neither
-    // predecessor branches to the other, and the old clause admitted it. The head test is what
-    // refuses it: the preheader's sole predecessor is not the latch's.
+    // A rotated loop's preheader and latch are distinct blocks, so "neither predecessor branches to
+    // the other" holds here and is not what refuses it — that clause only ever caught the SELF-loop
+    // NARROW_COUNTER is. The head test refuses it: the preheader's sole predecessor is not the
+    // latch's.
     const armless = LOOP_HEADER_DIAMOND;
     expect(diamonds(armless)).toEqual([false, false]);
     expect(run(armless).n).toBe(0);
