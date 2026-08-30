@@ -346,8 +346,8 @@ describe.each([
   // hole in `edge-reader`'s `edgeArgsObservedNarrow` or `raw-reader`'s operand-only counting is
   // therefore MASKED by a rule whose own author calls it a spelling choice — and any future
   // widening of that rule converts the hole into C that compiles and computes different numbers.
-  // `bench diff` structurally cannot see it: the 37 sa3 functions carrying these carriers hold no
-  // benchmark row.
+  // `bench diff` structurally cannot see it: the sa3 functions carrying these carriers hold no
+  // benchmark row (40 `edge-extends` refusals over 2288 sa3 sources, 0 of them a row).
   //
   // So the mask comes off HERE, where the oracle is the program's behaviour rather than a score.
   // The full ablation is a strict SUPERSET of anything a narrower `edge-extends` can admit, which

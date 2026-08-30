@@ -216,7 +216,8 @@ const MERGE_HOISTED_ARM = `fn f {
  *  be ONE insn holding ONE SET, and that guard fails for a big arm whatever the local's width — so
  *  here the surviving diamond says nothing about the declaration, and the carrier must stay refused
  *  rather than narrowed on evidence that is not evidence. Measured over the sa3 corpus, this is 23
- *  of the 32 carriers the join shape alone would re-decide. */
+ *  the arm-SIZE reading of the guard already refuses; MERGE_DIAMOND_LOAD_ARMS and
+ *  MERGE_DIAMOND_POOL_ARM are the two it did not, and each is a lost byte-match. */
 const MERGE_DIAMOND_BIG_ARM = `fn f {
 ^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
   %4: unk32 = const {value=0}
@@ -344,6 +345,54 @@ const MERGE_FORWARDED_ARM = `fn f {
 /** ONE PREDECESSOR REACHING THE JOIN TWICE. `predecessorsOf` deduplicates, so this is a ONE-armed
  *  join and not a diamond; `ir/core.ts`'s `predecessors` lists a block once per EDGE and would
  *  report two. The two models are not interchangeable and this fixture is what says so. */
+/** THE SAME ARM WITH A SYMBOL MAP. Without one an absolute pool word lifts to `const`; with one it
+ *  is promoted to `gaddr`. An arm test that exempted constants therefore flipped on the MAP and not
+ *  on the program — the same ROM getting a different local depending on whether `--elf` was passed,
+ *  and the real tier runs map-FUL on every row while the synthetic tier runs map-less, so no gate
+ *  saw it. Counting every value-producing op makes the two spellings identical (and the load beside
+ *  them is unspeculatable either way); this fixture is MERGE_DIAMOND_MAPLESS's twin and the two must
+ *  agree. */
+const MERGE_DIAMOND_MAPFUL = `fn f {
+^bb0(%2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %14: unk32 = gaddr {sym=gTable}
+  %6: unk32 = load %14 {off=0, signed=true, width=4}
+  br ^bb3(%6)
+^bb2():
+  %15: unk32 = gaddr {sym=gTable}
+  %7: unk32 = load %15 {off=4, signed=true, width=4}
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** …and the map-LESS spelling of it: the pool word as a bare `const`. */
+const MERGE_DIAMOND_MAPLESS = `fn f {
+^bb0(%2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %14: unk32 = const {value=134221824}
+  %6: unk32 = load %14 {off=0, signed=true, width=4}
+  br ^bb3(%6)
+^bb2():
+  %15: unk32 = const {value=134221824}
+  %7: unk32 = load %15 {off=4, signed=true, width=4}
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
 const MERGE_DOUBLE_EDGE = `fn f {
 ^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
   %6: unk32 = add %0, %1
@@ -449,8 +498,9 @@ describe('the join shape is recorded as evidence', () => {
   test('a diamond gcc could not have hoisted is not evidence, and is refused', () => {
     // The mechanism is `jump.c`'s guard and the guard is about the ARM, so reading only the join
     // reads half of it. An arm too big for ONE SET keeps its diamond whatever the local's width,
-    // and narrowing there would be a spelling guess dressed as evidence — 23 of the 32 sa3 carriers
-    // the join shape alone re-decides are this shape.
+    // and narrowing there would be a spelling guess dressed as evidence. Measured over 2288 sa3
+    // functions, 28 of the 40 `edge-extends` refusals are diamonds and NONE of them has arms gcc
+    // could have collapsed.
     expect(diamonds(MERGE_DIAMOND_BIG_ARM).at(-1)).toBe(true);
     expect(hoistable(MERGE_DIAMOND_BIG_ARM).at(-1)).toBe(false);
     expect(run(MERGE_DIAMOND_BIG_ARM).n).toBe(0);
@@ -502,6 +552,19 @@ describe('the join shape is recorded as evidence', () => {
     expect(hoistable(MERGE_FORWARDED_ARM).at(-1)).toBe(false);
     expect(run(MERGE_FORWARDED_ARM).n).toBe(0);
     expect(reasons(MERGE_FORWARDED_ARM).at(-1)).toBe('edge-extends');
+  });
+
+  test('the same ROM gets the same local with and without a symbol map', () => {
+    // A DECOMPILER ANSWER THAT DEPENDS ON `--elf` IS NOT A PROPERTY OF THE PROGRAM. The pool word
+    // lifts to `const` map-less and to `gaddr` map-ful, so exempting constants from the arm's op
+    // budget made the verdict a function of the invocation. The real tier is map-FUL on 252/252
+    // rows and the synthetic tier is map-less, so this asymmetry was structurally invisible to
+    // `bench diff`.
+    expect(diamonds(MERGE_DIAMOND_MAPFUL).at(-1)).toBe(diamonds(MERGE_DIAMOND_MAPLESS).at(-1));
+    expect(hoistable(MERGE_DIAMOND_MAPFUL).at(-1)).toBe(hoistable(MERGE_DIAMOND_MAPLESS).at(-1));
+    expect(hoistable(MERGE_DIAMOND_MAPFUL).at(-1)).toBe(false);
+    expect(run(MERGE_DIAMOND_MAPFUL).n).toBe(run(MERGE_DIAMOND_MAPLESS).n);
+    expect(run(MERGE_DIAMOND_MAPFUL).n).toBe(0);
   });
 
   test('a block reached twice from one predecessor is ONE arm', () => {

@@ -84,13 +84,15 @@
 // other half and it is most of the rule's reach. A diamond over arms too big for ONE SET, or over
 // an arm holding a load, a call or a store, survives whatever the local's width and carries no
 // information at all; narrowing there would be a spelling guess wearing the evidence's clothes.
-// THREE SHAPES COST A REAL MATCH THAT WAY AND EACH IS NOW A ROW: `mergeldcast` (both arms one
-// load — one SET by op count, never speculatable, `gcc/jump.c:482`), `mergepool` (an arm whose
-// immediate needs a literal-pool load, so one C assignment is two insns) and the empty forwarding
-// arm a frontend label-cut invents, which has no insn to be a `single_set` at all. The predicate
-// is therefore EXACTLY one value-producing op per arm (constants counted), no op that may not be
-// speculated, and the arms sharing one `cond_br` head — see `mergeArms` and `armIsOneSet`.
-// Over-refusal is free: it returns the carrier to the wide-local-plus-cast spelling.
+// THREE SHAPES COST A REAL MATCH THAT WAY AND TWO ARE NOW ROWS: `mergeldcast` (both arms one
+// load — one SET by op count, never speculatable, `gcc/jump.c:482`) and `mergepool` (an arm whose
+// immediate needs a literal-pool load, so one C assignment is two insns), each MATCH at base and
+// 6 / 1 under an arm test that read only the op count. The third is the empty forwarding arm a
+// frontend label-cut invents, which has no insn to be a `single_set` at all and no row because the
+// function carrying it declines. The predicate is therefore EXACTLY one value-producing op per arm
+// (constants counted), no op that may not be speculated, and the arms sharing one `cond_br` head —
+// see `mergeArms` and `armIsOneSet`. Over-refusal is free: it returns the carrier to the
+// wide-local-plus-cast spelling this pass emitted before the rule existed.
 //
 // PHRASED AS POSITIVE EVIDENCE, DELIBERATELY. `!mergeDiamond` and not `hoistedJoin`: the negation
 // of a hoist is not evidence of a declaration, so a rule that refused only what is provably hoisted
@@ -98,21 +100,34 @@
 //
 // ITS PRICE IS MEASURED OVER THE SET IT REFUSES, never over the set it admits — a gate priced on
 // its own accepts cannot show a cost. Over 2288 per-function sa3 sources (1742 lift, 546 decline at
-// the frontend) the table before the join clause was `entry-param 1228 · reader-is-extension 2114 ·
-// param-typed 33 · raw-reader 13 · forwarded 7 · edge-reader 28 · edge-extends 40 · ACCEPT 60`,
-// with the 40 splitting `zext 30 / sext 10` and living in 37 functions, none among the 42 sa3 rows
-// the benchmark carries. 32 of the 40 are diamonds, but only ONE of those has arms gcc could have
-// collapsed, so the shipped pair moves exactly that one and leaves `edge-extends 39 · ACCEPT 61`.
-// Over the benchmark's own 930 rows (732 lift map-less) exactly one carrier is re-decided and it is
-// `synthetic:mergeu16:agbcc`. That `bench diff` can see one of two is the whole reason the `merge*`
-// rows in apps/benchmark/dataset/synthetic.ts exist, and the reason the behavioural oracle for this
-// rule is the ablated arm of narrowlocal-fuzz.test.ts rather than any score.
+// the frontend) the table is IDENTICAL with the conjunct and without it:
 //
-// WHAT PRICING BY SCORE WOULD TAKE, measured rather than assumed: all 29 flipped sa3 functions
-// fail to produce a scorable candidate outside the project — every one references external symbols,
-// and grafting sa3's own generated `ctx.c` in still leaves per-function gaps (a callee used as a
-// value, an arity mismatch), because that context is generated per translation unit. So a score for
-// this population needs a per-function context harness this repo does not have.
+//   entry-param 1228 · reader-is-extension 2114 · param-typed 33 · raw-reader 13 · forwarded 7 ·
+//   edge-reader 28 · edge-extends 40 (zext 30 / sext 10) · ACCEPT 60 (sext 51 / zext 9)
+//   flipped carriers: 0        of the 40 refusals: diamond 28, diamond AND arms hoistable 0
+//
+// AND THAT IS THE HONEST HEADLINE: over every corpus anything here has measured, this rule's ONLY
+// inhabitant is the row that motivated it. Say it plainly rather than let a census number imply
+// breadth. An earlier, looser pair re-decided ONE sa3 carrier and the audit showed that one was a
+// misclassification — an empty forwarding block the frontend cut at a label, in a function that
+// loud-fails anyway (`sub_80B6198`, `ASMLIFT_ERROR` in both configurations). With the head test it
+// is refused, and the count is 0 rather than 1-that-was-wrong.
+//
+// Over the benchmark's own 930 base rows, decompiled twice — the conjunct as shipped and cleared —
+// exactly ONE row's emitted SOURCE BYTES change and it is `synthetic:mergeu16:agbcc`
+// (`45b1755f7fc7 -> c528e2a30ab2`, gapCountChanged 0 over all 930). That a score-level `bench diff`
+// can see one of the rows this decides is the whole reason the `merge*` rows in
+// apps/benchmark/dataset/synthetic.ts exist — four cells of the 2x2 plus `mergeldcast` and
+// `mergepool` for the arm clause — and the reason the behavioural oracle for the rule is the
+// ablated arm of narrowlocal-fuzz.test.ts rather than any score.
+//
+// WHAT PRICING THE SA3 POPULATION BY SCORE WOULD TAKE, measured rather than assumed: the sa3
+// functions a looser form of this rule flipped all fail to produce a scorable candidate outside the
+// project — every one references external symbols, and grafting sa3's own generated `ctx.c` in still
+// leaves per-function gaps (a callee used as a value, an arity mismatch), because that context is
+// generated per translation unit. So a score for that population needs a per-function context
+// harness this repo does not have — which is why the arm clause is priced by AUTHORED rows
+// (`mergeldcast`, `mergepool`) instead, where it costs 6 and 1.
 //
 // NO LOOP GATE, deliberately: the extension is what states the width, and it states it whether or
 // not the block is a loop header. The loop is where the width is worth something, not where it
