@@ -148,8 +148,9 @@ export interface TargetDescription {
     // `:471-502`). The ONE reader is raise/narrowlocal.ts's `edge-extends`, which uses it
     // BACKWARDS: a diamond this compiler would have collapsed and did not is evidence the source
     // DECLARED the local narrow, because `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared
-    // assignment past one SET. Absent ⇒ false, and the clause never admits — the only reader
-    // that is NOT threaded through StructureOptions, because it is consumed before structuring.
+    // assignment past one SET. Absent ⇒ false, and the clause never admits. `structureOptionsFor`
+    // spreads it onto StructureOptions like every other field here, but NO structurer code reads
+    // it: its reader is a pre-recovery pass, threaded from `runPreRecovery`'s own `target`.
     //
     // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored. NOT
     // set on MIPS_GCC despite it being the same compiler family: nothing has measured the pair
