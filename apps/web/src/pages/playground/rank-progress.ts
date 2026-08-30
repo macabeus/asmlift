@@ -70,3 +70,26 @@ export function throttleProgress(
     emit(p);
   };
 }
+
+/** Wrap a poster so it goes silent once `isCurrent()` stops holding — the RATE half of the
+ *  stale-guard, and only the rate half.
+ *
+ *  `self.onmessage` is async, so a second request is dequeued at the first `await` of the first and
+ *  the two runs interleave: a superseded run keeps scoring, and keeps emitting, for the rest of its
+ *  natural life. Measured (2026-08-30): bumping the reqId 9.9 s into an 800-candidate run left the
+ *  abandoned run posting 286 further ticks over 78 s, every one waking the main thread to be thrown
+ *  away. The throttle bounds ONE run to ~10 msg/s; nothing bounded the number of live superseded
+ *  runs, so the aggregate rate scaled with edits-during-a-run.
+ *
+ *  This may only ever DROP. The H1 stale-guard stays on the main thread as the sole authority over
+ *  what is DISPLAYED (`applyRankMessage`), and dropping more here cannot route around it: the
+ *  worker learns of a new id only from the message the main thread posted after adopting it, so
+ *  everything suppressed here would have been dropped there. */
+export function whileCurrent(isCurrent: () => boolean, post: (p: RankProgress) => void): (p: RankProgress) => void {
+  return (p) => {
+    if (!isCurrent()) {
+      return;
+    }
+    post(p);
+  };
+}

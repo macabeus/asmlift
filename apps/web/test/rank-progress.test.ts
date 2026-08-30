@@ -10,7 +10,7 @@
 // or sit on a stale phase for a whole tail.
 import { describe, expect, test } from 'vitest';
 
-import { type RankProgress, throttleProgress } from '../src/pages/playground/rank-progress';
+import { type RankProgress, throttleProgress, whileCurrent } from '../src/pages/playground/rank-progress';
 import type { BrowserRanking, RankMessage } from '../src/pages/playground/score-wasm';
 import { type Ranking, applyRankMessage } from '../src/pages/playground/useRanking';
 
@@ -60,6 +60,45 @@ describe('throttleProgress', () => {
     advance(1);
     emit({ phase: 'scoring', done: 3, total: 3 }); // done === total: exempt from the throttle
     expect(seen.at(-1)).toEqual({ phase: 'scoring', done: 3, total: 3 });
+  });
+});
+
+describe('whileCurrent', () => {
+  test('a superseded run stops posting entirely — it does not merely get its ticks dropped later', () => {
+    // The worker's onmessage is async, so two runs interleave: before this, an abandoned 800-
+    // candidate run posted 286 ticks over 78 s after being superseded, every one a main-thread
+    // wake-up for a message `applyRankMessage` would discard.
+    let current = true;
+    const seen: RankProgress[] = [];
+    const post = whileCurrent(
+      () => current,
+      (p) => seen.push(p),
+    );
+    post({ phase: 'assembling' });
+    current = false;
+    for (let i = 0; i < 100; i++) {
+      post({ phase: 'scoring', done: i, total: 100 });
+    }
+    post({ phase: 'ranking' }); // not even a phase change survives supersession
+    expect(seen).toEqual([{ phase: 'assembling' }]);
+  });
+
+  test('composed under the throttle it changes nothing while the run IS current', () => {
+    let t = 0;
+    const seen: RankProgress[] = [];
+    const emit = throttleProgress(
+      whileCurrent(
+        () => true,
+        (p) => seen.push(p),
+      ),
+      () => t,
+      100,
+    );
+    emit({ phase: 'scoring', done: 0, total: 3 });
+    t += 1;
+    emit({ phase: 'scoring', done: 1, total: 3 }); // throttled, as before
+    emit({ phase: 'ranking' }); // a phase change is still exempt
+    expect(seen).toEqual([{ phase: 'scoring', done: 0, total: 3 }, { phase: 'ranking' }]);
   });
 });
 
