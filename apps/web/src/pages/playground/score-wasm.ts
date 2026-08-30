@@ -44,15 +44,17 @@ export interface RankRequest {
    *  objects); absent ⇒ the plain raw-globals-only enumeration */
   symbols?: SymbolMap;
 }
-/** A name the candidate's tree references that asmlift REFUSED to declare (core's R1/R2/R4) —
- *  surfaced so the UI can say which `'x' undeclared` was asmlift's own decision. */
+/** A name the candidate's tree references that asmlift REFUSED to declare
+ *  (core `RefusedDeclarationReason`) — surfaced so the UI can say which `'x' undeclared` was
+ *  asmlift's own decision. */
 export interface RefusedDeclaration {
   name: string;
   reason: RefusedDeclarationReason;
 }
 /** The browser ranking: core's ranked result plus the declaration refusals this enumeration
- *  made. Kept local to the webapp rather than widened into core's `RankedResult` — the refusals
- *  are a property of the ENUMERATION, which the cli reports through its own `[ranked]` line. */
+ *  made. Kept local to the webapp rather than widened into core's `RankedResult` — this is the
+ *  only consumer core's callback has, and the cli reports the fact it needs (how many
+ *  declarations were synthesized) as a count on its own `[ranked]` line. */
 export type BrowserRanking = RankedResult<MatchScore> & { refused: RefusedDeclaration[] };
 export type RankResponse =
   { reqId: number; ok: true; result: BrowserRanking } | { reqId: number; ok: false; error: string };
@@ -193,9 +195,9 @@ export async function scoreObjectBytes(
  *  candidates (no project headers), so the probe arbitration is unnecessary here: this scorer is
  *  ALWAYS the self-declared world, and a name with no declaration is a hard error.
  *
- *  A synthesized declaration is FITTED to the asm being scored (its width and signedness come
- *  out of the same bytes), so it cannot lose score — which is why the UI shows the block beside
- *  the ranked source and the refusals come back with the result instead of being swallowed.
+ *  A synthesized declaration is FITTED to the asm being scored (declare.ts's module note), so it
+ *  cannot lose score — which is why the block comes back with the result for the UI to show, and
+ *  the refusals with it.
  *
  *  Ranking always uses `cBackend` regardless of the UI backend selector — choosing cpp/pascal
  *  turns ranking off (it is gated to the agbcc target + C backend in Playground.tsx). */
@@ -205,9 +207,9 @@ export async function rankCandidatesInBrowser(
   target: TargetDescription,
   symbols?: SymbolMap,
 ): Promise<BrowserRanking> {
-  // A refused declaration is a name asmlift DECIDED not to declare (a reloc name, a reserved
-  // name, one the tree binds as a local). Collected here so the UI can attribute the
-  // `'x' undeclared` the compile then fails with, instead of leaving the user to guess.
+  // A refused declaration is a name asmlift DECIDED not to declare. Collected here so the UI can
+  // attribute an undeclared name to that decision instead of leaving the user to guess — and,
+  // for `emitter-name`, so a row that produced NO candidate at all says which symbol collided.
   const refused: RefusedDeclaration[] = [];
   const candidates = enumerateCandidates(name, asm, target, {
     backend: cBackend,

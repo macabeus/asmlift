@@ -513,29 +513,33 @@ function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boo
   return out;
 }
 
-/** Names a synthesized declaration must never claim, because `extern u32 <name>;` is not a
- *  declaration of `<name>` at all for them. Four groups, and only the first two are guessed:
+/** Names a declaration must never claim, because `extern u32 <name>;` is not a declaration of
+ *  `<name>` at all for them. Four groups, and only the first two are guessed:
  *
- *    1. the candidate prelude's own typedef names, derived FROM `C_TYPEDEFS` rather than
- *       re-listed (a prelude that grows a name grows this set with it) — `extern u32 u16;`
- *       redefines the type the declaration is written in;
+ *    1. the prelude's own typedef names, derived FROM `C_TYPEDEFS` rather than re-listed (a
+ *       prelude that grows a name grows this set) — `extern u32 u16;` redefines the type the
+ *       declaration is written in;
  *    2. the C89 keywords;
  *    3. the gnu89 keywords gcc-2.9 REJECTS in this position, and the two library objects it
- *       refuses to have redeclared. MEASURED against the pinned agbcc, not reasoned about — 72
- *       plausible pool names compiled as `extern u32 <name>;` at file scope, 18 exited non-zero:
- *       `syntax error before 'asm'` for the keyword class, and ``'exit' redeclared as different
- *       kind of symbol`` for the two built-ins;
- *    4. the gnu89 declaration SPECIFIERS that parse — `inline`, `__const`, `__volatile__`, … —
- *       and thereby declare NOTHING: gcc-2.9 takes them as `warning: useless keyword or type
- *       name in empty declaration`, exit 0, and the name the block was written for is still
- *       undeclared. Refusing is honest about that; emitting the line would be a declaration
- *       that is not one.
+ *       refuses to have redeclared. MEASURED against the pinned agbcc — 72 plausible pool names
+ *       compiled as `extern u32 <name>;` at file scope, 18 exited non-zero: `syntax error before
+ *       'asm'` for the keyword class, ``'exit' redeclared as different kind of symbol`` for the
+ *       two built-ins;
+ *    4. the gnu89 declaration SPECIFIERS that PARSE and thereby declare nothing — `inline`,
+ *       `__const`, `__volatile__`, … are `warning: useless keyword or type name in empty
+ *       declaration`, exit 0, and the name is still undeclared. Emitting the line would be a
+ *       declaration that is not one.
  *
- *  Group 3 is the one that matters for the failure mode: a hard error in the declaration block
- *  fails the candidate's whole translation unit, so the candidate dies for a name it merely
- *  mentioned. (It is ONE candidate's TU — every candidate compiles alone, with its own block —
- *  so this poisons the spelling, not its siblings.) Refusing leaves the name undeclared, which
- *  is the loud outcome: the compile fails with `'<name>' undeclared`, naming it. */
+ *  WHAT REFUSING BUYS is less than a plain `'<name>' undeclared`, and the difference is the
+ *  reason the refusal is REPORTED rather than trusted to the compiler. A hard error in the block
+ *  kills that candidate's whole TU (its own — every candidate compiles alone) for a name it
+ *  merely mentioned, so refusing is right. But for a KEYWORD the body spells the same token
+ *  anyway and the candidate still fails: the refusal only moves the diagnostic. And for the two
+ *  BUILT-INS nothing fails — agbcc reads `&exit` as the address of its own builtin, exit 0 with
+ *  `warning: built-in function 'exit' used without declaration`, where the declaration would have
+ *  been exit 1. There the refusal trades a candidate that cannot build for one that builds
+ *  against the wrong object, which is the better half of a bad choice only because a target
+ *  naming a global `exit` has no honest spelling either way. */
 const DECL_RESERVED = new Set<string>([
   ...[...C_TYPEDEFS.matchAll(/(\w+)\s*;/g)].map((m) => m[1]),
   ...(
@@ -554,19 +558,40 @@ const DECL_RESERVED = new Set<string>([
   ).split(' '),
 ]);
 
-/** Why a name the candidate's tree references got NO synthesized declaration. Each value names
- *  one of the refusals on `bareGlobalSymbols`/`refsOf` — reported rather than silently applied,
- *  because an undeclared name and a REFUSED one produce the same `'x' undeclared` from the
- *  compiler and only the second one is asmlift's own decision. Same argument as `onLeverError`
- *  one screen down: a refusal nobody can see is indistinguishable from a capability that was
- *  never there. */
-export type RefusedDeclarationReason =
-  | 'not-an-identifier' // R1 — a relocation name like `$L1` / `.rodata.str1`
-  | 'reserved' // R2 — a name `extern u32 <name>;` cannot declare (DECL_RESERVED)
-  | 'shadowed'; // R4 — the emitted tree binds the same name as a local or parameter
+/** The emitter's own NAME GRAMMAR for storage it invents: parameters `a0, a1, …` (structure.ts
+ *  names them positionally, so no rename can move one) and coalesced/temp locals `v0…`/`t0…`
+ *  (structure.ts's `localNames` accepts exactly `/^[vt]\d+$/`). A pool or map symbol with one of
+ *  these names cannot be declared beside the C that spells it — see the refusal in `refsOf`, which
+ *  is the one that kills the spelling rather than the line.
+ *
+ *  Checked as a grammar IN ADDITION to the tree's own bound names, because the collision that
+ *  matters is the one the tree cannot show: `localNames` DROPS a local whose name a written
+ *  global already claims, so where the global is stored `tree.locals` is silent about it. The
+ *  price is refusing a real global that happens to be named `v3` in a function that never mints
+ *  one — measured at zero: over the 930 benchmark rows, in each row's own symbol world, no
+ *  candidate references such a name, and none of the six vendored symbol maps contains one
+ *  (184163 names, 0 matches). */
+const EMITTER_NAME = /^[avt]\d+$/;
 
-/** The globals a MAP-LESS candidate names, as name-only `SymbolInfo`s — the declaration-synthesis
- *  input where there is no symbol map to supply one.
+/** Why a name the candidate's tree references got NO declaration. Reported rather than silently
+ *  applied, because an undeclared name and a REFUSED one produce the same `'x' undeclared` from
+ *  the compiler and only the second one is asmlift's own decision. Same argument as `onLeverError`
+ *  one screen down: a refusal nobody can see is indistinguishable from a capability that was
+ *  never there.
+ *
+ *  ALL FIVE ARE DECIDED AT ONE POINT (`refsOf`), over the names the collector actually returns
+ *  and AFTER the map/pool union — so the report and the rendered block are one list read two
+ *  ways. A test applied where a name ENTERS can be undone by the other half of the union, and
+ *  then the report contradicts the block beside it. */
+export type RefusedDeclarationReason =
+  | 'not-an-identifier' // a relocation name like `$L1` / `.rodata.str1`
+  | 'reserved' // a name `extern u32 <name>;` cannot declare (DECL_RESERVED)
+  | 'call-target' // the name is some call's target: `void F(void);` hard-errors over args
+  | 'self-name' // the function's own name — its definition already declares it
+  | 'emitter-name'; // a name the emitted C uses for its OWN locals and parameters
+
+/** The globals a candidate names because its own asm named them, as name-only `SymbolInfo`s —
+ *  half of the declaration-synthesis dictionary (the symbol map, where there is one, is the other).
  *
  *  asmlift does not need a map to EMIT a symbol name: the Thumb frontend reads it out of the
  *  `.s` file's own literal pool (`.word gBgTilemapBufs` → `gaddr`, thumb.ts's pool grammar) and
@@ -580,61 +605,21 @@ export type RefusedDeclarationReason =
  *  and it does not need to. structure() spells a `code`-less `gaddr` as `&Name`, and `&Name`
  *  under `extern u32 Name;` is the relocated address whatever Name really is.
  *
- *  REFUSALS — each leaves the name UNDECLARED, so the candidate fails to compile LOUDLY and the
- *  ranker drops it; none of them substitutes a guess, and each is REPORTED
- *  (`EnumerateOptions.onRefusedDeclaration`) so a consumer can say WHY a name is undeclared
- *  instead of showing a bare `'x' undeclared` the user must attribute themselves:
- *    R1 a name that is not a C identifier (frontend/mips.ts takes `sym` from a relocation, which
- *       can name `$L1` or `.rodata.str1`; `extern u32 $L1;` is a syntax error, and it fails the
- *       candidate's OWN translation unit — every candidate compiles alone with its own block, so
- *       the poisoning is per spelling, not across siblings),
- *    R2 a name `extern u32 <name>;` cannot declare (DECL_RESERVED — measured against agbcc),
- *    R3 a call target or the function's OWN name — refused one level up inside
- *       `collectSymbolRefs`, for reasons that were never map-dependent,
- *    R4 a name the emitted TREE also binds (a local or a parameter) — refused at the
- *       consumption point in `refsOf`, where the tree is, because that is where the collision is
- *       visible. The local SHADOWS the extern, so the declaration would be inert rather than
- *       wrong: the candidate's `&name` takes a stack address and it is scored against the wrong
- *       object. Emitting an inert line would state a fact about a global the source does not
- *       actually reference.
+ *  NOTHING IS REFUSED HERE, deliberately: a name this walk drops is a name the union above it
+ *  could put straight back. Every refusal is decided once, over the collector's output, in
+ *  `refsOf` (see `RefusedDeclarationReason`).
  *
- *  THE GUESS THAT REMAINS, and it is not the harmless one the first draft of this comment
- *  claimed: with no bare off-0 access fact declare.ts renders the `extern u32` cell (address-
- *  identical for every `&name` spelling core emits), but WITH one the width and signedness are
- *  read out of the candidate's own IR — that is, out of the very asm the candidate is scored
- *  against. Such a declaration cannot LOSE score; it can only manufacture agreement. It is
- *  marked `synthesized` on the ref for exactly that reason, and a consumer that publishes a
- *  match must show the block alongside the source (the playground does). Priced against the
- *  benchmark's own vendored maps, which this path never sees: of 28 fitted NARROW declarations
- *  over the 126 rankable agbcc rows, 26 agree with the project's real declaration and 2 do not
- *  (both `gUnk_03005220`, a 100-byte struct read bare at offset 0 — map-less nothing in the
- *  function distinguishes that from a narrow scalar). By the weaker test of the offset-0 ACCESS
- *  WIDTH the declaration actually produces — same load, different name for the object — 27 of
- *  those 28 agree, and 52 of all 55 fitted declarations do (1 disagrees, 2 name symbols the
- *  project's own map does not know either). */
-function bareGlobalSymbols(
-  fn: Fn,
-  onRefused?: (name: string, reason: RefusedDeclarationReason) => void,
-): Map<string, SymbolInfo> {
+ *  A declaration built from this half is a HYPOTHESIS, and where `bareGlobalAccessFacts` gives it
+ *  a width that width came out of the asm the candidate is scored against. The marker is
+ *  `SymbolRef.synthesized`; the argument, and its price against the vendored maps, is declare.ts's
+ *  module note. */
+function bareGlobalSymbols(fn: Fn): Map<string, SymbolInfo> {
   const out = new Map<string, SymbolInfo>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      if (op.opcode !== 'gaddr') {
-        continue;
+      if (op.opcode === 'gaddr' && typeof op.attrs.sym === 'string') {
+        out.set(op.attrs.sym, { name: op.attrs.sym, kind: 'data' });
       }
-      const sym = op.attrs.sym;
-      if (typeof sym !== 'string') {
-        continue;
-      }
-      if (!/^[A-Za-z_]\w*$/.test(sym)) {
-        onRefused?.(sym, 'not-an-identifier');
-        continue;
-      }
-      if (DECL_RESERVED.has(sym)) {
-        onRefused?.(sym, 'reserved');
-        continue;
-      }
-      out.set(sym, { name: sym, kind: 'data' });
     }
   }
   return out;
@@ -683,9 +668,9 @@ export interface Candidate {
    *  EVERY spelling variant that names such symbols — including '/raw-globals', whose tree still
    *  names pool/reloc-derived globals (it only drops the map's shaped SPELLINGS).
    *
-   *  PRESENT WITHOUT A MAP TOO, and this is the correction that made the playground work: a name
-   *  is read out of the asm's own literal pool or relocation, so "a candidate only names symbols
-   *  the map knows" was never true. Where a map DOES know the name its facts win; the rest are
+   *  PRESENT WITHOUT A MAP TOO: a name is read out of the asm's own literal pool or relocation,
+   *  so "a candidate only names symbols the map knows" is false. Where a map DOES know the name
+   *  its facts win; the rest are
    *  synthesized name-only symbols (`bareGlobalSymbols`) and carry `synthesized: true` — a
    *  consumer publishing a byte-exact verdict must show those declarations, because they were
    *  fitted to the same asm the verdict is about (see SymbolRef.synthesized). */
@@ -1015,25 +1000,51 @@ export function enumerateCandidates(
   };
   // The names the tree spells are read out of the asm's own literal pool / relocations and
   // synthesized as name-only symbols (`bareGlobalSymbols`); where a symbol MAP knows a name, the
-  // map's facts WIN. A UNION rather than an either/or, because a PARTIAL map is the normal case
-  // for a real project — a `.map`/symtab paste covers some pool names and not others — and the
-  // per-CALL fallback this replaced meant supplying more information made the tool strictly
-  // worse: one map entry switched the synthesis off for every OTHER name in the function and put
-  // the row straight back into the undeclared-symbol bug.
+  // map's facts WIN. A UNION rather than an either/or: the per-CALL fallback it replaced
+  // (`opts.symbols ?? bareGlobalSymbols(...)`) let ONE map entry switch the synthesis off for
+  // every OTHER name in the function, so supplying more information made the tool strictly
+  // worse. A union cannot — each name is declared by whichever half knows more about it.
   // SCOPE: `declSymbols` is used ONLY here. It must never reach `opts.symbols`/`baseOpts.symbols`
   // or `frontend.lift` — feeding it to the lift would turn on pool promotion, interior
   // attribution and the `/raw-globals` variant, which is a different (and source-moving) change.
   const mapSymbols = baseOpts.symbols;
-  const declSymbols = new Map([...bareGlobalSymbols(probe, refuse), ...(mapSymbols ?? [])]);
+  const declSymbols = new Map([...bareGlobalSymbols(probe), ...(mapSymbols ?? [])]);
   const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
-    // R4 — the names THIS tree binds. A local or parameter of the same name shadows the extern,
-    // so a declaration for it would be inert (`&name` takes the stack slot) and the block would
-    // claim a reference the source does not make. Computed per tree because the emitter mints
-    // local names per spelling.
+    // The names THIS tree binds. Computed per tree because the emitter mints local names per
+    // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
     const bound = new Set<string>([...tree.params.map((p) => p.name), ...tree.locals.map((l) => l.name)]);
-    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name).flatMap((r) => {
-      if (bound.has(r.name)) {
-        refuse(r.name, 'shadowed');
+    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, refuse).flatMap((r) => {
+      // THE ONE REFUSAL THAT IS NOT A REFUSAL — a name the emitted C uses for its OWN storage
+      // kills the SPELLING, because no declaration makes that candidate right and no declaration
+      // makes it fail either. Two shapes, and the second is why the test is the emitter's whole
+      // NAME GRAMMAR rather than this tree's bound set:
+      //   READ — the tree binds `v0` and also spells `&v0` for the pool global. The local
+      //     shadows the extern, so the candidate takes a stack address where the asm takes a
+      //     relocated one. Withholding the declaration does not stop it compiling: its SIBLING
+      //     names still get theirs, and the TU builds.
+      //   WRITE — structure.ts drops a local whose name a WRITTEN global already claims
+      //     (`localNames`, filtered by `globalNames`), so the collision is INVISIBLE in
+      //     `tree.locals`: every use of the emitter's local binds the extern instead, and the
+      //     loop pointer it was holding becomes a store to that global once per iteration.
+      // Both compile, both are wrong, and a compiling wrong answer is the one outcome this
+      // project trades nothing for — so the spelling dies here and `fanOut`'s catch reports it.
+      // If every spelling of every tree dies, the row declines LOUDLY naming the collision.
+      if (bound.has(r.name) || EMITTER_NAME.test(r.name)) {
+        refuse(r.name, 'emitter-name');
+        throw new Error(
+          `cannot spell '${tree.name}': the target names a global '${r.name}', which is a name the ` +
+            `emitted C uses for its own locals and parameters — no declaration can bind it`,
+        );
+      }
+      // Applied to the UNION, not to the pool half on its way in: a map can supply `$LC0` or
+      // `abort` as readily as a relocation can, and `extern u32 abort;` is the same hard error
+      // whichever half it came from.
+      if (!/^[A-Za-z_]\w*$/.test(r.name)) {
+        refuse(r.name, 'not-an-identifier');
+        return [];
+      }
+      if (DECL_RESERVED.has(r.name)) {
+        refuse(r.name, 'reserved');
         return [];
       }
       // name-only symbols carry the IR-derived access facts — the width authority

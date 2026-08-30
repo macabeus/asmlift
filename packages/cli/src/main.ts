@@ -463,9 +463,15 @@ export async function runCli(
       // one; the stamp makes a run against different SOURCES distinguishable from both, which no
       // part of the log used to be (provenance.ts). On the same line as the score deliberately: the
       // doc tells readers to quote this one line, so a stamp anywhere else is a stamp nobody pastes.
+      //
+      // SYNTHESIZED is the fourth count, and it is here for the same reason as the other three:
+      // the `[declared]` block below is CONDITIONAL, so "this score rests on no declaration
+      // asmlift invented" would otherwise be spelled as an absent line — and a `(match)` whose
+      // declaration block was fitted to the target asm would be publishable by pasting exactly
+      // the one line the doc asks for. The count travels with the score; the block stays below.
       const summary =
         `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
-        `${ranked.withheld.length} withheld, ` +
+        `${ranked.withheld.length} withheld, ${declared === '' ? 0 : assumed.length} synthesized, ` +
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
         `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {

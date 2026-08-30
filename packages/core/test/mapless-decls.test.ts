@@ -11,8 +11,12 @@
 // rendered `extern <T> name;` for symtab-only map projects since the self-declaring round. What
 // is new is that a map-LESS reference reaches it at all, that a PARTIAL map unions with the
 // synthesis instead of switching it off, and the REFUSALS that keep the synthesis from claiming
-// a name it cannot declare (a non-identifier reloc name, a name no `extern` can bind, a call
-// target, the function's own name, a name the emitted tree binds as a local).
+// a name it cannot declare.
+//
+// All five refusals are decided at ONE point, over the names the collector returns and AFTER the
+// map/pool union — which is what the last two tests in the refusal block are for. Deciding them
+// where a name ENTERS lets the report contradict the block beside it: a reserved name the map
+// re-admitted was declared and reported refused in the same breath.
 //
 // Everything here drives the PUBLIC entry point (`enumerateCandidates`), never a hand-built `Fn`:
 // the refusals are only worth pinning on the path the playground actually takes.
@@ -136,15 +140,19 @@ describe('the width authority is the candidate\u2019s own IR, map or no map', ()
 });
 
 describe('the refusals — a name a declaration cannot claim is left undeclared, and REPORTED', () => {
-  const refusalsFor = (name: string, asm: string, target = MIPS_IDO) => {
+  const refusalsFor = (name: string, asm: string, target = MIPS_IDO, expectThrow = false) => {
     const refused: { name: string; reason: RefusedDeclarationReason }[] = [];
-    const cands = enumerateCandidates(name, asm, target, {
-      onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
-    });
-    return { cands, refused };
+    const opts = {
+      onRefusedDeclaration: (n: string, reason: RefusedDeclarationReason) => refused.push({ name: n, reason }),
+    };
+    if (expectThrow) {
+      expect(() => enumerateCandidates(name, asm, target, opts)).toThrow(/no spellable candidate/);
+      return { cands: [], refused };
+    }
+    return { cands: enumerateCandidates(name, asm, target, opts), refused };
   };
 
-  test('R1 — a relocation name that is not a C identifier (`$LC0`, `.rodata`)', () => {
+  test('a relocation name that is not a C identifier (`$LC0`, `.rodata`)', () => {
     // frontend/mips.ts takes `sym` straight from an object relocation, which can name `$LC0` or
     // `.rodata.str1`; `extern u32 $LC0;` is a syntax error that fails that candidate's whole
     // translation unit (each candidate compiles alone, with its own block — so the poisoning is
@@ -157,7 +165,7 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
     }
   });
 
-  test('R2 — a name `extern u32 <name>;` cannot declare (keyword, prelude typedef, built-in)', () => {
+  test('a name `extern u32 <name>;` cannot declare (keyword, prelude typedef, built-in)', () => {
     // MEASURED against the pinned agbcc, not assumed: `asm`/`typeof`/`__attribute__` are syntax
     // errors, `exit`/`abort` are "redeclared as different kind of symbol", `u32` redefines the
     // type the block is written in, and `inline` parses as an EMPTY declaration that declares
@@ -169,50 +177,91 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
     }
   });
 
-  test('R2 — an ordinary name beside them is still declared (the refusal is not a blanket)', () => {
+  test('an ordinary name beside them is still declared (the refusal is not a blanket)', () => {
     const { cands, refused } = refusalsFor('getGlobal', mipsRef('D_800A2884'));
     expect((cands[0].symbolRefs ?? []).map((r) => r.name)).toEqual(['D_800A2884']);
     expect(refused).toEqual([]);
   });
 
-  test('R3 — a call target and the function\u2019s own name stay undeclared', () => {
-    // Both refusals live in collectSymbolRefs and are NOT relaxed by the map-less fallback:
+  test('a call target and the function\u2019s own name stay undeclared — and are REPORTED', () => {
     // `void F(void);` over a call with args is a gcc-2.9 hard error, and a declaration of the
-    // function's own name conflicts with its definition.
+    // function's own name conflicts with its definition. Both exclusions live in
+    // collectSymbolRefs; the report is what makes them the same kind of fact as the other three,
+    // instead of two silent ones the UI's refusal list could never be complete without.
     const body =
       '\tpush\t{lr}\n\tldr\tr0, .L1\n\tbl\tDoThing\n\tldr\tr0, .L1+0x4\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L1:\n\t.word\tDoThing\n\t.word\tf\n';
-    const cands = enumerateCandidates('f', `f:\n${body}`, ARMV4T_AGBCC);
+    const { cands, refused } = refusalsFor('f', `f:\n${body}`, ARMV4T_AGBCC);
     expect(cands.length).toBeGreaterThan(0);
+    expect(cands[0].source).toContain('DoThing(&DoThing)'); // both names really are spelled
     for (const c of cands) {
-      const names = (c.symbolRefs ?? []).map((r) => r.name);
-      expect(names).not.toContain('DoThing');
-      expect(names).not.toContain('f');
+      expect(c.symbolRefs ?? []).toEqual([]);
     }
+    expect(refused).toEqual([
+      { name: 'DoThing', reason: 'call-target' },
+      { name: 'f', reason: 'self-name' },
+    ]);
   });
 
-  test('R4 — a name the emitted tree BINDS is refused: the extern would be inert, not wrong', () => {
+  test('a global named like the emitter\u2019s own storage kills the SPELLING, not the line', () => {
     // The reported row's own asm with one pool global renamed to the emitter's parameter name.
-    // A local/parameter of the same name shadows a file-scope extern, so the declaration would
-    // change nothing (`&a0` takes the stack slot either way) while claiming a reference the
-    // source does not make. It cannot false-match — a stack address is never a relocated one —
-    // so the honest handling is to declare nothing and SAY so.
+    // The local shadows the file-scope extern, so the candidate takes a stack address where the
+    // asm takes a relocated one — and withholding the declaration does NOT stop it compiling,
+    // because its sibling names still get theirs: all 4 candidates of this row built and scored
+    // while the refusal was reported. Nothing about such a candidate is publishable, so it is
+    // never emitted; with every tree colliding, the row declines loudly and names the symbol.
     const asm = corpus('agbcc-mapless-globals.s').replace(/gUnk_08116880/g, 'a0');
-    const { cands, refused } = refusalsFor('UpdateWorldMapNodeTile', asm, ARMV4T_AGBCC);
-    expect(cands[0].source).toContain('&a0'); // the collision is real: the tree spells it
-    expect((cands[0].symbolRefs ?? []).map((r) => r.name)).toEqual(['gBgTilemapBufs', 'gUnk_08116748']);
-    expect(refused).toEqual([{ name: 'a0', reason: 'shadowed' }]);
+    const refused: { name: string; reason: RefusedDeclarationReason }[] = [];
+    expect(() =>
+      enumerateCandidates('UpdateWorldMapNodeTile', asm, ARMV4T_AGBCC, {
+        onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
+      }),
+    ).toThrow(/no spellable candidate .*names a global 'a0'.*emitted C uses for its own locals/s);
+    expect(refused).toEqual([{ name: 'a0', reason: 'emitter-name' }]);
   });
 
-  test('R4 — the emitter already avoids the collision where it MINTS the name', () => {
-    // Renaming the same global to `p0` (a pointer local the emitter would otherwise mint) does
-    // NOT collide: basecse names its base local around the global, so the declaration stands and
-    // nothing is refused. The refusal above is the residue — a PARAMETER name, which is
-    // positional and cannot move.
+  test('\u2026and the WRITE direction too, where the collision is invisible in `tree.locals`', () => {
+    // The shape a bound-names test cannot see and the reason the refusal is a NAME GRAMMAR:
+    // structure.ts's `localNames` drops a local whose name a WRITTEN global already claims, so
+    // the emitter's `v0` is not in `tree.locals` at all — every use of it binds the extern
+    // instead. Before the grammar test, this function — which stores the global twice — emitted
+    // a body storing it once per loop iteration, and all 24 of its candidates compiled.
+    const asm = corpus('agbcc-mapless-globalwrite.s').replace(/gCounter/g, 'v0');
+    const { refused } = refusalsFor('f', asm, ARMV4T_AGBCC, /* expectThrow */ true);
+    expect(refused).toEqual([{ name: 'v0', reason: 'emitter-name' }]);
+  });
+
+  test('the emitter already avoids the collision where a LEVER mints the name', () => {
+    // Renaming the same global to `p0` (a pointer local l3/basecse.ts would otherwise mint) does
+    // NOT collide: it names its base local around the global, so the declaration stands and
+    // nothing is refused. `p0` is outside the grammar for exactly that reason — the refusal
+    // covers the names that CANNOT move, `a0`-style parameters (positional) and `v0`/`t0`-style
+    // locals (structure.ts's `localNames` accepts no other shape).
     const asm = corpus('agbcc-mapless-globals.s').replace(/gUnk_08116880/g, 'p0');
     const { cands, refused } = refusalsFor('UpdateWorldMapNodeTile', asm, ARMV4T_AGBCC);
     expect((cands[0].symbolRefs ?? []).map((r) => r.name)).toContain('p0');
     expect(refused).toEqual([]);
+  });
+
+  test('a RESERVED name the map supplies is refused too — the union has one filter, not two', () => {
+    // The refusals are applied to the collector's output, after the union, so a name a map
+    // re-admits cannot slip past a test that ran on the pool half. Applied on the way IN, this
+    // rendered `extern u8 abort[];` while reporting `abort` refused, and agbcc answered
+    // "`abort' redeclared as different kind of symbol" — the hard error DECL_RESERVED was
+    // measured to prevent, under a report claiming the name was left undeclared.
+    const asm = corpus('agbcc-mapless-globals.s').replace(/gUnk_08116880/g, 'abort');
+    const map: SymbolMap = new Map([
+      [0x08116880, [{ name: 'abort', kind: 'data' as const, shape: 'array' as const, elemSize: 1 }]],
+    ]);
+    for (const symbols of [undefined, map]) {
+      const refused: { name: string; reason: RefusedDeclarationReason }[] = [];
+      const cands = enumerateCandidates('UpdateWorldMapNodeTile', asm, ARMV4T_AGBCC, {
+        ...(symbols ? { symbols } : {}),
+        onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
+      });
+      expect(renderDeclarations(cands[0].symbolRefs ?? [])).not.toContain('abort');
+      expect(refused).toEqual([{ name: 'abort', reason: 'reserved' }]);
+    }
   });
 
   test('a refusal is reported ONCE per (name, reason), not once per candidate', () => {

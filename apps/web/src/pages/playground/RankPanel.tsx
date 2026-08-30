@@ -19,7 +19,9 @@ function synthesizedCount(ranking: Ranking): number {
 const REFUSAL_TEXT: Record<RefusedDeclaration['reason'], string> = {
   'not-an-identifier': 'not a C identifier (a relocation/label name)',
   reserved: 'a name a declaration cannot claim (keyword, prelude typedef, or built-in)',
-  shadowed: 'shadowed by a local or parameter of the same name in the emitted C',
+  'call-target': 'called here — declaring its arity would be a guess, so it stays implicit',
+  'self-name': 'the function being decompiled — its own definition declares it',
+  'emitter-name': 'a name the emitted C uses for its own locals; every spelling of it was dropped',
 };
 
 /** The verdict strip shown above the emitted Source. Null when ranking is off (non-agbcc target
@@ -68,13 +70,11 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
 
 /** The declaration block the winning candidate was COMPILED WITH, under the verdict strip.
  *
- *  Nothing else in the playground shows it, and without it the Source view is only half of what
- *  was scored: agbcc-wasm compiles candidates with no project headers, so every global the source
- *  names is declared by this block. Where the block is SYNTHESIZED (no symbol map knows the name)
- *  its width and signedness were read out of the pasted asm itself — the same bytes the verdict is
- *  about — so a fitted declaration cannot lose score and a hidden one would turn a hypothesis into
- *  a claim. Shown, it is exactly what it is: the assumption the user has to check against their
- *  own headers, and the other half of a source they can paste and reproduce. */
+ *  Without it the Source view is half of what was scored: agbcc-wasm compiles candidates with no
+ *  project headers, so every global the source names is declared here. Where a declaration is
+ *  SYNTHESIZED its width and signedness came out of the pasted asm itself — the same bytes the
+ *  verdict is about — so it cannot lose score, and hiding it would turn a hypothesis into a
+ *  claim. Shown, it is the assumption the user checks against their own headers. */
 export function RankDeclarations({ ranking }: { ranking: Ranking }) {
   if (ranking.status !== 'ok') {
     return null;
@@ -178,10 +178,12 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
       )}
       {/* A name asmlift REFUSED to declare and one it never saw fail identically ("`x' undeclared"),
           and only the first is asmlift's own decision — so the refusals are named here rather than
-          left for the user to attribute. */}
+          left for the user to attribute. The heading says UNDECLARED and nothing about compiling:
+          two of these reasons leave a candidate that builds anyway (an implicit call, a local that
+          shadows the name), and one of them leaves no candidate at all. */}
       {refused.length > 0 && (
         <div className="mt-2 text-[10px] leading-relaxed text-amber-400/80">
-          <p>{refused.length} symbol(s) left UNDECLARED on purpose — a candidate naming one cannot compile here:</p>
+          <p>{refused.length} symbol(s) left UNDECLARED on purpose:</p>
           <ul className="mt-0.5 space-y-0.5 font-mono">
             {refused.map((r) => (
               <li key={`${r.name}:${r.reason}`}>

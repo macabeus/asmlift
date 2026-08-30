@@ -7,7 +7,9 @@
 // the caller's, and rank.ts hands it a symbol map UNIONED with the names read straight out of
 // the asm's own literal pool / relocations (`bareGlobalSymbols`), so a candidate compiled
 // outside project headers declares what it spells even with no map at all. The map's facts win
-// per NAME where it has them; the rest come back marked `synthesized`. It is a pure tree query with no pipeline state: the enumeration
+// per NAME where it has them; the rest come back marked `synthesized`.
+//
+// It is a pure tree query with no pipeline state: the enumeration
 // layer (rank.ts) calls it exactly once per candidate, on the tree the candidate's source was
 // emitted from, at the moment the candidate is finalized. There is deliberately NO cached
 // `symbolRefs` field on `SFn` — a carried field would oblige every future l3 pass to remember
@@ -44,8 +46,17 @@ export interface SymbolRef {
  *  behavior (the one honest option without arity knowledge). The function's OWN name
  *  (`selfName`) is excluded too — the candidate's definition IS its declaration, and a
  *  synthesized `void F(void);` above `s32 F(...)` is a conflicting-types hard error (a
- *  self-address reference resolves against the definition itself). */
-export function collectSymbolRefs(body: Stmt[], symbols: Map<string, SymbolInfo>, selfName: string): SymbolRef[] {
+ *  self-address reference resolves against the definition itself).
+ *
+ *  Both exclusions are REPORTED through `onRefused`, on the caller's own refusal channel: they
+ *  leave a name undeclared for asmlift's own reason, and a consumer's list of those reasons is
+ *  incomplete without them. */
+export function collectSymbolRefs(
+  body: Stmt[],
+  symbols: Map<string, SymbolInfo>,
+  selfName: string,
+  onRefused?: (name: string, reason: 'call-target' | 'self-name') => void,
+): SymbolRef[] {
   const called = new Set<string>();
   const valueRefs = new Set<string>();
   const visitExpr = (e: Expr): void => {
@@ -67,7 +78,17 @@ export function collectSymbolRefs(body: Stmt[], symbols: Map<string, SymbolInfo>
   };
   body.forEach(visitStmt);
   return [...valueRefs]
-    .filter((n) => !called.has(n) && n !== selfName)
     .sort()
+    .filter((n) => {
+      if (called.has(n)) {
+        onRefused?.(n, 'call-target');
+        return false;
+      }
+      if (n === selfName) {
+        onRefused?.(n, 'self-name');
+        return false;
+      }
+      return true;
+    })
     .map((n) => ({ name: n, info: symbols.get(n)! }));
 }

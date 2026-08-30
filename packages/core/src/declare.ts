@@ -31,18 +31,23 @@
 //     (`extern u32 name;` — see the default case): required to reproduce symtab-only map
 //     rows outside project headers.
 //
-// WHERE THE ONLY-LOSES-SCORE ARGUMENT STOPS, because it was over-stated once already. It rests
-// on the target bytes coming from the project's own TRUTH declarations, so a divergent decl
-// compiles to different bytes and simply scores worse. That holds for every MAP-derived ref. It
-// does NOT hold for a ref marked `synthesized` (rank.ts bareGlobalSymbols): there the name came
-// out of the candidate's own asm and — through `access` — so did its width and signedness, so
-// the declaration is FITTED to the bytes it is scored against and can only manufacture
-// agreement. That is a sound artifact (decls + source really do compile to those bytes) and an
-// unsound CLAIM if the decls are hidden, so a consumer publishing a verdict must show the block
-// beside the source. Measured against the benchmark's own vendored maps, which this path never
-// sees: of 28 fitted NARROW declarations over the 126 rankable agbcc rows, 26 agree with the
-// project's real declaration and 2 do not (27 of 28 agree on the offset-0 ACCESS WIDTH the
-// declaration produces, which is the weaker question of whether the same load is emitted).
+// WHERE THE ONLY-LOSES-SCORE ARGUMENT STOPS. It rests on the target bytes coming from the
+// project's own TRUTH declarations, so a divergent decl compiles to different bytes and simply
+// scores worse. The line is not map-derived vs. synthesized, it is whether the ref carries
+// `access`: that field is read out of the candidate's own IR — the very asm it is then scored
+// against — so a declaration wearing it is FITTED and can only manufacture agreement. Every
+// `synthesized` ref can wear it, and so can a MAP-KNOWN name whose map entry has no shape
+// (symtab-only projects), which is the one fitted case `synthesized` does not mark. Measured
+// over the 252 real benchmark rows with their vendored maps: fitted-and-marked 2, fitted-but-
+// unmarked 0 — so the marker covers today's population, and a symtab-only project is where it
+// would stop.
+//
+// A fitted declaration is a sound ARTIFACT (decls + source really do compile to those bytes) and
+// an unsound CLAIM if the decls are hidden, so a consumer publishing a verdict must show the
+// block beside the source. Its price, against the benchmark's own vendored maps: of 28 fitted
+// NARROW declarations over the 126 rankable agbcc rows, 26 agree with the project's real
+// declaration and 2 do not (27 of 28 agree on the offset-0 ACCESS WIDTH the declaration
+// produces, which is the weaker question of whether the same load is emitted).
 import { type StructFieldDecl, renderStructDecl } from './backend/cfamily';
 import { T } from './ir/types';
 import type { SymbolRef } from './l3/symbol-refs';
