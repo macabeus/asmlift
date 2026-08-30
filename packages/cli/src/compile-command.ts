@@ -471,8 +471,8 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       }
       if ((budget.bytes -= st.size) < 0) {
         throw new MeasurementTooLarge(
-          `refusing to measure ${p}: over 512MiB under one compile input — see above, an ` +
-            `incomplete namespace is a stale object, so nothing is cached`,
+          `refusing to measure ${p}: over 512MiB under one compile input. An incomplete ` +
+            `namespace is a stale object, so nothing is cached`,
         );
       }
       h.update(tag);
