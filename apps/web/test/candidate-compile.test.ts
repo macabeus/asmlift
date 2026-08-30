@@ -1,8 +1,8 @@
-// The playground's candidate-compile path, in the two halves a node test can run: the
-// TRANSLATION UNIT a candidate is compiled in (typedef prelude + synthesized declarations) and
-// the ONE LINE of a failed tool's stderr the UI shows. Both live in
-// src/pages/playground/candidate-compile.ts because score-wasm.ts itself cannot be imported here
-// — it pulls in the `agbcc` package, whose `lib/config.json` import fails under vitest's ESM
+// The playground's candidate-compile path, in the two halves a node test can run: the ONE LINE of
+// a failed tool's stderr the UI shows (src/pages/playground/candidate-compile.ts) and the
+// TRANSLATION UNIT a candidate is compiled in (core's `selfDeclaredContextFor`, which the cli's
+// compile seam composes with too). They are tested here rather than through score-wasm.ts because
+// that file pulls in the `agbcc` package, whose `lib/config.json` import fails under vitest's ESM
 // loader ('needs an import attribute of "type: json"') and whose wasm has no fetch in node.
 //
 // THE ACCEPTANCE TEST IS THE BUG REPORT: `kleod:UpdateWorldMapNodeTile:agbcc`, opened from the
@@ -10,6 +10,8 @@
 // "ranking unavailable — no scorable candidate ... in.i: In function `UpdateWorldMapNodeTile':".
 // Two bugs made that line: the candidates named three pool globals nobody declared (core, fixed
 // in rank.ts), and the reported stderr line was the useless header instead of the diagnosis.
+import { cBackend } from '@asmlift/core/backend/c';
+import { renderDeclarations, selfDeclaredContextFor } from '@asmlift/core/declare';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import { ARMV4T_AGBCC, C_TYPEDEFS } from '@asmlift/core/target';
 import { readFileSync } from 'node:fs';
@@ -17,7 +19,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { canOpenInPlayground, playgroundShare } from '../src/pages/benchmark/lib/playground';
-import { candidateContext, firstDiagnosticLine } from '../src/pages/playground/candidate-compile';
+import { NO_DIAGNOSTIC, firstDiagnosticLine, toolFailureLine } from '../src/pages/playground/candidate-compile';
 
 // gcc 2.9 (the pinned agbcc), VERBATIM, compiling the very candidate the bug report names — the
 // stderr of `agbcc in.i -mthumb-interwork -Wimplicit -Wparentheses -O2 -fhex-asm
@@ -62,6 +64,23 @@ describe('the one stderr line the UI shows', () => {
     expect(firstDiagnosticLine(s)).toBe("x.i:9: `g' undeclared");
   });
 
+  test('an UNLOCATED fatal outranks a warning that happens to carry a line number', () => {
+    // gcc's driver prints its own fatals with no `file:line:` prefix. A "first LOCATED line"
+    // rule ranked the warning above them, which is worse than the useless header it replaced:
+    // under wasm a heap exhaustion is a live failure mode and the warning is not why the compile
+    // died. The banner test is what the order rests on now, not the presence of a line number.
+    expect(
+      firstDiagnosticLine('in.i:3: warning: suggest parentheses\ncc1: out of memory allocating 4064 bytes\n'),
+    ).toBe('cc1: out of memory allocating 4064 bytes');
+    expect(
+      firstDiagnosticLine(
+        ["in.i: In function `f':", 'in.i:3: warning: suggest parentheses', 'agbcc: virtual memory exhausted'].join(
+          '\n',
+        ),
+      ),
+    ).toBe('agbcc: virtual memory exhausted');
+  });
+
   test('warnings-only output still reports a line, not the header', () => {
     const s = ["x.i: In function `f':", 'x.i:3: warning: suggest parentheses'].join('\n');
     expect(firstDiagnosticLine(s)).toBe('x.i:3: warning: suggest parentheses');
@@ -76,13 +95,27 @@ describe('the one stderr line the UI shows', () => {
     expect(firstDiagnosticLine('')).toBe('');
     expect(firstDiagnosticLine('\n\n  \nlast resort\n')).toBe('last resort');
   });
+
+  test('a failure with NO stderr says so, instead of ending in a colon', () => {
+    // The residual of the reported bug's SHAPE: "agbcc could not compile candidate 'x': " with
+    // nothing after the colon. Same message, different cause — the tool printed nothing at all.
+    expect(toolFailureLine('')).toBe(NO_DIAGNOSTIC);
+    expect(toolFailureLine('   \n\n')).toBe(NO_DIAGNOSTIC);
+    expect(toolFailureLine(GNU_AS_ERRORS)).toBe(firstDiagnosticLine(GNU_AS_ERRORS));
+  });
 });
 
 describe('the reported row ranks: kleod:UpdateWorldMapNodeTile:agbcc, opened in the playground', () => {
   const results = JSON.parse(
     readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8'),
   ) as { results: { id: string }[] };
-  const row = results.results.find((r) => r.id === 'kleod:UpdateWorldMapNodeTile:agbcc')!;
+  const row = results.results.find((r) => r.id === 'kleod:UpdateWorldMapNodeTile:agbcc');
+
+  test('the row the bug report names is in the shipped dataset', () => {
+    // Pinned by id inside a file every bench round regenerates: without this, a dataset change
+    // turns the acceptance test into an opaque TypeError instead of a sentence.
+    expect(row, 'kleod:UpdateWorldMapNodeTile:agbcc present in the shipped results.json').toBeTruthy();
+  });
 
   test('every candidate compiles in a TU that declares the globals its source spells', () => {
     // The exact hand-off the Benchmark view performs, then the exact enumeration + context the
@@ -91,22 +124,37 @@ describe('the reported row ranks: kleod:UpdateWorldMapNodeTile:agbcc, opened in 
     const share = playgroundShare(row as never)!;
     expect(share.target).toBe('agbcc'); // ranking is gated to the agbcc target (Playground.tsx)
     expect(share.name).toBe('UpdateWorldMapNodeTile'); // the row's symbol, carried by the hand-off
-    const cands = enumerateCandidates(share.name!, share.asm, ARMV4T_AGBCC);
+    // `backend: cBackend` exactly as the scorer passes it, so the hand-off this test claims to
+    // reproduce is the scorer's by construction rather than by today's default.
+    const cands = enumerateCandidates(share.name!, share.asm, ARMV4T_AGBCC, { backend: cBackend });
     expect(cands.length).toBeGreaterThan(0);
     for (const c of cands) {
-      const tu = candidateContext(c) + c.source;
+      const tu = selfDeclaredContextFor(c.symbolRefs) + c.source;
       expect(tu.startsWith(C_TYPEDEFS)).toBe(true);
       for (const name of c.source.match(/\bg[A-Za-z_]\w*/g) ?? []) {
         expect(tu).toContain(`extern u32 ${name};`);
       }
     }
     // the three the bug report names, from this row's own literal pool
-    expect(candidateContext(cands[0])).toContain('extern u32 gUnk_08116880;');
-    expect(candidateContext(cands[0])).toContain('extern u32 gBgTilemapBufs;');
-    expect(candidateContext(cands[0])).toContain('extern u32 gUnk_08116748;');
+    const ctx = selfDeclaredContextFor(cands[0].symbolRefs);
+    expect(ctx).toContain('extern u32 gUnk_08116880;');
+    expect(ctx).toContain('extern u32 gBgTilemapBufs;');
+    expect(ctx).toContain('extern u32 gUnk_08116748;');
+  });
+
+  test('the block the UI shows is the block the candidate was COMPILED with', () => {
+    // RankDeclarations renders `renderDeclarations(best.symbolRefs)`; the scorer compiles with
+    // `selfDeclaredContextFor(best.symbolRefs)`. They must be the same text or the playground is
+    // showing a declaration block that is not the one the verdict is about.
+    const share = playgroundShare(row as never)!;
+    const best = enumerateCandidates(share.name!, share.asm, ARMV4T_AGBCC, { backend: cBackend })[0];
+    expect(selfDeclaredContextFor(best.symbolRefs)).toContain(renderDeclarations(best.symbolRefs!));
+    // and every one of them is a HYPOTHESIS read out of the pasted asm — the reason the UI shows
+    // the block at all and qualifies the byte-exact badge with a count
+    expect((best.symbolRefs ?? []).every((r) => r.synthesized)).toBe(true);
   });
 
   test('a candidate that names no symbol gets the bare prelude (no empty declaration block)', () => {
-    expect(candidateContext({ source: '', label: 'x' } as never)).toBe(C_TYPEDEFS);
+    expect(selfDeclaredContextFor(undefined)).toBe(C_TYPEDEFS);
   });
 });

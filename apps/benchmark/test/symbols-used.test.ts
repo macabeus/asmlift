@@ -139,6 +139,19 @@ describe('symbolShape formatting (pinned)', () => {
     expect(symbolShape(info)).toBe(want);
   });
 
+  test('a SYNTHESIZED ref is not a symbolsUsed row — the field answers a MAP question', () => {
+    // Since the map-less declaration round a candidate's refs are the union of the map's symbols
+    // and the names read out of the asm's own pool (core rank.ts); the synthesized ones carry
+    // `synthesized: true`. This field is the symbolMap A/B's provenance — "which MAP symbols did
+    // the winner use" — so a name the map never knew must not appear under it. Measured: 9 of the
+    // 252 real rows name a pool symbol their project's map does not know.
+    const used = symbolsUsedFrom([
+      { name: 'gAlpha', info: COUNTER },
+      { name: 'gPoolOnly', info: { name: 'gPoolOnly', kind: 'data' }, synthesized: true },
+    ]);
+    expect(used).toEqual([{ name: 'gAlpha', shape: 'scalar u16' }]);
+  });
+
   test('symbolsUsedFrom sorts by name and omits absent shapes', () => {
     const used = symbolsUsedFrom([
       { name: 'gZeta', info: { name: 'gZeta', kind: 'data' } },

@@ -124,6 +124,22 @@ test('headers world: the declaration block drops WITH the prelude (headers own e
   expect(written).toContain('return gMmio;');
 });
 
+test('the probed WORLD is reported, so the caller can say what a score rested on', () => {
+  // A ranked run publishes declarations it SYNTHESIZED (a name-only global whose width came out
+  // of the target asm) — but only in the self-declared world; in the headers world the block is
+  // dropped and the project's own declarations did the work. Only the probe knows which, and
+  // main.ts's `[declared]` line asks it. Undefined before the first compile: the probe has not
+  // run, and guessing a world would be the same claim the probe exists to stop.
+  const self = compilersFromCommand('cp {{inputPath}} {{outputPath}}');
+  expect(self.selfDeclared()).toBeUndefined();
+  self.compile('int f(void) { return 0; }\n', 'f', 'c');
+  expect(self.selfDeclared()).toBe(true);
+
+  const headers = compilersFromCommand('! grep -q typedef {{inputPath}} && cp {{inputPath}} {{outputPath}}');
+  headers.compile('int f(void) { return 0; }\n', 'f', 'c');
+  expect(headers.selfDeclared()).toBe(false);
+});
+
 test('the probe itself carries a representative decl block (struct/volatile/const/prototype vocabulary)', () => {
   // capture every input the template sees: the probe must exercise the same declaration
   // vocabulary synthesis emits, so a world that accepts the probe accepts any real block —
