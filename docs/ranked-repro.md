@@ -97,9 +97,11 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
 reason=object-is-not-a-pure-function-of-its-input` is what `ido7.1` gets, because it writes the
   absolute path of its input `.c` into the object — and when the command runs a CONTAINER, whose
   image is named by a tag no measurement here can pin (`reason=stamp-threw`).
-- **What is still NOT measured, said out loud.** A wrapper script that reads a config DIRECTORY
-  (the chain follows what a script EXECS, not what it OPENS — though editing the script itself
-  does move the namespace); `-B /opt/tc/arm-` used as a filename PREFIX rather than a directory;
+- **What is still NOT measured, said out loud.** A path the command itself COMPUTES
+  (`H=in; cat ${H}c/k.h`), which no token scan can resolve; a wrapper script that reads a config
+  DIRECTORY (the chain follows what a script EXECS, not what it OPENS — though editing the script
+  itself does move the namespace); `-B /opt/tc/arm-` used as a filename PREFIX rather than a
+  directory;
   a candidate's assembler `.include`/`.incbin` (the per-key refusal tests the C preprocessor's
   `#include`, and asmlift's emitter emits object-like `#define` only — measured 0 of 66,816 on
   LoadBGTilemapData); and the compiler's own built-in search directories, which every corpus
