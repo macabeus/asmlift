@@ -211,3 +211,28 @@ describe('a directory a compile flag names is MEASURED, whatever the operand loo
     ).toBe(1);
   });
 });
+
+describe('a search path the ENVIRONMENT names is measured too — the same hole, one token wide', () => {
+  // `CPATH` is `-I` spelled as an environment variable, and gcc honours it even under
+  // `-nostdinc`. `COMPILE_ENV` already put its VALUE in the namespace; the value is only half an
+  // answer, because what the compile actually reads is the directory it points AT.
+  test('editing a file inside CPATH re-namespaces', async () => {
+    const p = project();
+    // No flag at all: the template names `inc` nowhere. The environment is the only route in.
+    const template = templateWith('-Wall');
+    const saved = process.env.CPATH;
+    process.env.CPATH = `/nonexistent-a:${join(p.cwd, 'inc')}`;
+    try {
+      const r = await acrossAnEdit(p, template);
+      expect(r.first).toContain('#define K 3');
+      expect(r.second, 'CPATH names the directory; its contents moved').toContain('#define K 999');
+      expect(r.namespaces).toBe(2);
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CPATH;
+      } else {
+        process.env.CPATH = saved;
+      }
+    }
+  });
+});

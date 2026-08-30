@@ -135,6 +135,97 @@ const safe = (value: string, what: string): string => {
   return value;
 };
 
+/**
+ * Flags whose OPERAND names a path the compile reads — a directory for most of them, a file for
+ * the last three.
+ *
+ * MEASURED, on klonoa's own `tools.asmlift.compiler` template: the namespace's token scan only
+ * ever tried a token as a path when the token itself contained `/` or `.`, so
+ *
+ *     -I tools/agbcc/include   ->  hashed, recursively, no declaration needed
+ *     -iquote include          ->  a BARE WORD, invisible to the namespace
+ *
+ * The gate was the operand's SPELLING, not the flag: `-I inc` was as much a hole as
+ * `-iquote inc`, and `-B inc/` — one trailing slash — was already covered. This table moves the
+ * gate onto the flag, which is the token that actually says "what follows is a path".
+ *
+ * Generous on purpose, and the asymmetry is what licenses it: OVER-hashing costs a cold start,
+ * UNDER-hashing serves a stale object. A flag here whose operand is not a path costs one failed
+ * `statSync` and contributes NOTHING to the digest — `hashPath` updates only on success.
+ *
+ * Longest match first, so `-isystem` is not read as `-I` with the operand `system`.
+ */
+const PATH_FLAGS: readonly string[] = [
+  '-iwithprefixbefore',
+  '-iwithprefix',
+  '-idirafter',
+  '-isysroot',
+  '--sysroot',
+  '-isystem',
+  '-include',
+  '-imacros',
+  '-iprefix',
+  '-iquote',
+  '-specs',
+  '-I',
+  '-B',
+  '-L',
+  '-F',
+].sort((a, b) => b.length - a.length);
+
+/** Every token of a compile template that a path flag could be attached to, in order. A comma
+ *  list (`-Wa,-Iinc`, `-Wp,-I,inc`) is a nested argv the driver forwards, so its pieces are
+ *  tokens too; a token is kept as well as split, because `--sysroot=a,b` is one path. */
+export function flagScanTokens(template: string): string[] {
+  const out: string[] = [];
+  for (const tok of template.split(/[\s"'<>|;()]+/)) {
+    if (!tok || tok.startsWith('{{') || tok.length > 300) {
+      continue;
+    }
+    out.push(tok);
+    if (tok.includes(',')) {
+      for (const piece of tok.split(',')) {
+        if (piece && piece.length <= 300) {
+          out.push(piece);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** The path operands a compile template names through its flags, in token order and de-duplicated
+ *  by spelling. `@file` is included: a response file holds compile flags, and nothing else in the
+ *  scan would look at it. */
+export function pathFlagOperands(template: string): string[] {
+  const toks = flagScanTokens(template);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const take = (operand: string | undefined): void => {
+    if (!operand || operand.startsWith('{{') || operand.startsWith('-') || seen.has(operand)) {
+      return;
+    }
+    seen.add(operand);
+    out.push(operand);
+  };
+  for (let i = 0; i < toks.length; i++) {
+    const tok = toks[i];
+    if (tok.startsWith('@') && tok.length > 1) {
+      take(tok.slice(1));
+      continue;
+    }
+    const flag = PATH_FLAGS.find((f) => tok.startsWith(f));
+    if (flag === undefined) {
+      continue;
+    }
+    const rest = tok.slice(flag.length);
+    // Exactly the flag: the operand is the next token (`-iquote inc`). Otherwise it is attached,
+    // with or without the `=` the long spellings use (`-Iinc`, `--sysroot=inc`, `-specs=x.specs`).
+    take(rest === '' ? toks[i + 1] : rest.startsWith('=') ? rest.slice(1) : rest);
+  }
+  return out;
+}
+
 /** Build a CandidateCompiler from a `decomp.yaml` command template. `{{inputPath}}` and
  *  `{{outputPath}}` are REQUIRED placeholders (substituted with absolute paths);
  *  `{{symbol}}` is optional. The placeholder style matches other decomp tools' `compiler`
@@ -320,13 +411,26 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       return false;
     }
   };
+  /** A directory measurement is unbounded by nature: `--sysroot /` names a filesystem, and a
+   *  namespace that walks it is a hang rather than a cold start. The budget makes running out
+   *  LOUD — it throws, `candCache` turns the throw into a refusal, and the run compiles uncached.
+   *  Truncating the walk instead would be the other thing, and the other thing is a stale
+   *  object. */
+  class MeasurementTooLarge extends Error {}
+  const budget = { entries: 20000, bytes: 512 * 1024 * 1024 };
   const hashPath = (h: ReturnType<typeof createHash>, tag: string, p: string): boolean => {
     try {
       const st = statSync(p);
+      if (--budget.entries < 0) {
+        throw new MeasurementTooLarge(
+          `refusing to measure ${p}: over 20000 files under one compile input. A namespace that ` +
+            `stops walking is an incomplete namespace, which is a stale object — so nothing is cached`,
+        );
+      }
       if (st.isDirectory()) {
-        // A DECLARED directory is hashed by its whole contents, recursively and in sorted order:
-        // that is the entire point of the declaration (`-I ./inc` reaches `inc/k.h`, which no
-        // token set and no probe TU can see).
+        // A directory is hashed by its whole contents, recursively and in sorted order: that is
+        // the entire point of measuring it (`-I ./inc` reaches `inc/k.h`, which no token set and
+        // no probe TU can see).
         h.update('dir:' + tag);
         for (const e of readdirSync(p, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
           hashPath(h, tag + '/' + e.name, join(p, e.name));
@@ -336,10 +440,19 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       if (!st.isFile()) {
         return false;
       }
+      if ((budget.bytes -= st.size) < 0) {
+        throw new MeasurementTooLarge(
+          `refusing to measure ${p}: over 512MiB under one compile input — see above, an ` +
+            `incomplete namespace is a stale object, so nothing is cached`,
+        );
+      }
       h.update(tag);
       h.update(sha256(readFileSync(p)));
       return true;
-    } catch {
+    } catch (e) {
+      if (e instanceof MeasurementTooLarge) {
+        throw e;
+      }
       return false;
     }
   };
@@ -445,10 +558,42 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
         }
       }
     }
+    // (2b) every path a compile FLAG names, hashed by content — recursively for a directory.
+    // This is the one input a token scan structurally could not see and a probe TU structurally
+    // could not either: `-iquote include` reaches `include/global.h`, which is not a token, and
+    // the fixed probe never includes anything. It used to need a hand-written declaration
+    // (`tools.asmlift.cacheInputs`); a declaration a project can get INCOMPLETE is a silent stale
+    // object, so it is measured instead — the namespace is a MEASUREMENT of the toolchain, not a
+    // list of it.
+    //
+    // Tagged by BASENAME, never by absolute path, for the same reason the delegate chain is: two
+    // worktrees of this repo hold byte-identical toolchains at different paths, and keying on the
+    // path gives each its own namespace, so every parallel round cold-starts.
+    const seenOperand = new Set<string>();
+    for (const operand of pathFlagOperands(template)) {
+      const asPath = isAbsolute(operand) ? operand : resolve(cwd, operand);
+      if (seenOperand.has(asPath)) {
+        continue;
+      }
+      seenOperand.add(asPath);
+      // An operand that is not there contributes nothing and needs no MISSING marker: the
+      // template TEXT is hashed unconditionally, so absent -> present still moves the namespace
+      // and two different absent operands cannot collide.
+      hashPath(h, 'flag:' + basename(operand), asPath);
+    }
     // (3b) the compile ENVIRONMENT gcc/cpp read whether or not the template mentions it — the one
-    // list, shared with the bench's agbcc pipeline (candcache.ts `COMPILE_ENV`).
+    // list, shared with the bench's agbcc pipeline (candcache.ts `COMPILE_ENV`). The VALUE is the
+    // answer for `SOURCE_DATE_EPOCH`; for the search-path variables it is only half of one —
+    // `CPATH=inc` reaches `inc/k.h` exactly as `-I inc` does, and gcc honours it even under
+    // `-nostdinc`. So each `:`-separated segment is hashed as a path too.
     for (const v of COMPILE_ENV) {
-      h.update(`compileenv:${v}=${process.env[v] ?? ''}`);
+      const val = process.env[v] ?? '';
+      h.update(`compileenv:${v}=${val}`);
+      for (const seg of val.split(':')) {
+        if (seg) {
+          hashPath(h, `compileenv:${v}:` + basename(seg), isAbsolute(seg) ? seg : resolve(cwd, seg));
+        }
+      }
     }
     for (const m of template.matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
       const v = m[1];
