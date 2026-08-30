@@ -62,9 +62,9 @@ const say = (msg: string): void => {
 
 // ---------------------------------------------------------------------------------------------
 // MODE. The parse is deliberately closed: an unrecognised value is OFF and LOUD, never "on".
-// `ASMLIFT_CANDCACHE=VERIFY` used to mean SERVE — the audit mode lost to a capitalisation, and a
-// Gate-E run typed that way reported `{"hit":…}` and looked clean. `false` and `no` are the two
-// spellings a person reaches for to disable it, and both used to enable it.
+// The two ways an open parse goes wrong are both silent: `VERIFY` falling through to SERVE loses
+// the audit mode to a capitalisation and reports `{"hit":…}` looking clean, and `false`/`no` — the
+// two spellings a person reaches for to disable it — enabling it.
 const OFF_WORDS = new Set(['', '0', 'off', 'false', 'no', 'n', 'disable', 'disabled']);
 const ON_WORDS = new Set(['1', 'on', 'true', 'yes', 'y', 'enable', 'enabled']);
 const RAW = (process.env.ASMLIFT_CANDCACHE ?? '').trim();
@@ -721,8 +721,8 @@ function pruneOnce(keepNs: string): void {
       }
     }
     if (cost > CAP_BYTES) {
-      // Say which of the two reasons actually applied. The message used to assert BOTH about a
-      // store where neither was true, which is a report nobody can act on.
+      // Say which reason actually applied. A message that asserts a reason it did not measure is
+      // a report nobody can act on.
       const why = [
         keepHeld ? 'another process holds the namespace this run is using' : '',
         heldBack > 0 ? `${heldBack} other namespace(s) held by a live process` : '',
@@ -763,7 +763,7 @@ export interface CandCache {
   verify(key: string, symbol: string, objPath: string): void;
   /** verify mode only, fresh compile was a DETERMINISTIC REJECTION: a stored OBJECT for this key
    *  is a mismatch — it would have been scored as a candidate that no longer compiles. This is
-   *  the half of the store (77% of served answers) that verify mode used to never look at. */
+   *  the half of the store that is 77% of what a warm run is served. */
   verifyFail(key: string, symbol: string, message: string): void;
 }
 

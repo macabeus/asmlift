@@ -40,8 +40,9 @@ import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 
 // The `[candcache]` line, and — when a stored answer disagreed with a fresh compile — the loud
-// second line that turns a verify run into a FAILING one. Nothing used to fail on a mismatch: the
-// counters printed, the run exited 0, and Gate E's "0 differing" rested on a human's grep.
+// second line that turns a verify run into a FAILING one. A counter that only prints cannot stop
+// anything: a verify pass writes one line among sixteen shard logs, so the mismatch has to reach
+// the exit status.
 const candCacheLine = (): string => {
   if (cacheMode() === 'off') {
     return '';

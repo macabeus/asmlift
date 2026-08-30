@@ -34,9 +34,8 @@ import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
  * The distinction is read off the SPAWN RESULT, never off the message. `status !== 0` is also true
  * when `status === null` because the process was KILLED BY A SIGNAL — an OOM kill, a stray
  * `pkill`, a shard reaped under load — and `util.ts run()` only throws for `error` (ENOENT and the
- * 120 s timeout). Measured before this guard: a SIGKILLed agbcc produced literally
- * `"agbcc failed: "`, which the negative-entry guard matched, and the next healthy run served that
- * rejection for a TU that compiles.
+ * 120 s timeout). A SIGKILLed agbcc produces literally `"agbcc failed: "` — a message with the
+ * shape of a rejection and no verdict in it, which is why the SPAWN RESULT is what decides.
  */
 export function stepFailed(
   tool: 'cpp' | 'agbcc' | 'as',
@@ -153,7 +152,7 @@ export function candCacheStaticStamp(files: readonly string[] = candCacheNamespa
   // 'bench-agbcc/v2' is FORMAT SALT, not a version lever, and it must never be bumped as one:
   // this function lives inside agbcc.ts, whose own bytes it hashes, so a change to the pipeline
   // re-namespaces by MEASUREMENT already. Bumping a constant instead of adding the missing input
-  // to candCacheNamespaceFiles() is the whole class of bug this round closed. Change it only if
+  // to candCacheNamespaceFiles() is the whole class of bug it hides. Change it only if
   // the digest's LAYOUT changes and old entries must be abandoned wholesale.
   h.update('bench-agbcc/v2');
   h.update(TOOLCHAIN.agbccFlags.join(' '));
@@ -199,8 +198,8 @@ const cache = candCache('bench-agbcc', () => {
 });
 
 /** The message shape a DETERMINISTIC rejection has, and nothing else does. `\\S` is not
- *  decoration: a SIGKILLed compiler used to produce exactly `"agbcc failed: "`, which the older
- *  `/^(cpp|agbcc|as) failed: /` matched. `stepFailed` is the real guard; this is the second one. */
+ *  decoration: a SIGKILLed compiler produces exactly `"agbcc failed: "`, and `/^(cpp|agbcc|as)
+ *  failed: /` matches it. `stepFailed` is the real guard; this is the second one. */
 export const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
 
 export const agbccReal: RealCompile = {

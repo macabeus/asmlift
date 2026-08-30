@@ -17,13 +17,11 @@
 // except `candcache-verify.test.ts`, which brings its own `ASMLIFT_CANDCACHE_DIR`. So this is
 // FORWARD DEFENCE plus a self-test, not a gate over the suite's match assertions: it guarantees
 // that IF a matching test ever compiles through a cached seam, it is audited and a disagreement
-// stops the run. Calling it "verify mode wired into pnpm test:matching" overstates it, and the
-// thing that would make it a real gate is threading the cache through `@asmlift/toolchains` —
-// which is a capability this round did not build.
+// stops the run. Calling it "verify mode wired into pnpm test:matching" overstates it; what would
+// make it a real gate is threading the cache through `@asmlift/toolchains`.
 //
 // `ASMLIFT_CANDCACHE=0` still bypasses everything, which is the documented escape hatch.
-import { existsSync, statSync } from 'node:fs';
-import { closeSync, openSync, readSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 

@@ -154,9 +154,8 @@ switch (command) {
         if (Object.keys(stats).length > 0) {
           console.log(`[candcache] ${cacheMode()} ${JSON.stringify(stats)}`);
         }
-        // A mismatch FAILS THE SHARD. Printing it was not enough: a verify pass wrote one line
-        // among sixteen shard logs and exited 0, so Gate E's zero-mismatch result rested on a
-        // manual grep rather than on anything that could stop a run.
+        // A mismatch FAILS THE SHARD. Printing is not enough: one line among sixteen shard logs
+        // and a zero exit makes a "0 differing" result rest on a human's grep.
         if (cacheMismatches() > 0) {
           throw new Error(
             `[candcache] ${cacheMismatches()} stored answer(s) disagreed with a fresh compile — the store is ` +

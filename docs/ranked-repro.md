@@ -100,11 +100,14 @@ reason=object-is-not-a-pure-function-of-its-input` is what `ido7.1` gets, becaus
   checks by itself is the SHAPE of the declaration — a scalar where a list was meant (`cacheInputs:
 gen`) is now a loud load error, because a string iterates per character and used to turn the
   cache on having measured nothing at all. If in doubt, leave the key out: no key, no cache.
-- **The store is not bounded in practice — delete it by hand.** `ASMLIFT_CANDCACHE_MAX_MB`
-  (default 4096) counts the distinct object bytes plus one allocation block per stored key, but it
-  only ever evicts a namespace no live process holds and nothing has touched for an hour, so on a
-  single-toolchain machine it can go a long time without firing. `rm -rf "$TMPDIR/asmlift-candcache"`
-  is the reliable reset, and it is also how you make the next run cold on purpose.
+- **The store is bounded, but only between runs.** `ASMLIFT_CANDCACHE_MAX_MB` (default 4096)
+  counts the distinct object bytes plus one allocation block per stored key — 77% of a warm store
+  is negative entries, which weigh nothing logically and cost a block each. It is enforced ONCE per
+  process, at the first namespace resolution and before any candidate compiles: whole namespaces no
+  live process holds go first, then the oldest-written keys of the namespace this run is about to
+  use. A namespace another process holds is never touched, so under `pnpm bench run`'s 8–16 shards
+  the second shard onward prunes nothing. `rm -rf "$TMPDIR/asmlift-candcache"` is the reliable
+  reset, and it is also how you make the next run cold on purpose.
 - **`verify` audits the OUTCOME, not only the bytes.** A stored object whose TU no longer compiles,
   and a stored rejection whose TU now does, are both mismatches — the second is the one that
   silently drops a spelling from a row's fan, and it is 77% of what a warm store serves. Any

@@ -97,7 +97,7 @@ function readConfig(path: string): LoadedConfig {
  * than a preference, so it is validated at the seam and not only in the type: `parsed as
  * DecompConfig` is a compile-time claim about a file a project wrote.
  *
- * MEASURED before this existed: `cacheInputs: gen` (a YAML scalar where a list was meant) reached
+ * MEASURED: `cacheInputs: gen` (a YAML scalar where a list was meant) reaches
  * `compile-command.ts`, which iterates the declaration — a string iterates PER CHARACTER, so
  * `"gen"` hashed as three MISSING entries, the digest was identical to `["g","e","n"]`, the cache
  * turned ON having measured nothing the project declared, and editing the declared input served a
