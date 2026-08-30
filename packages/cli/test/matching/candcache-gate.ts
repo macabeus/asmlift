@@ -18,7 +18,8 @@
 // pass no `cacheInputs`, so three of them ran with the cache structurally OFF. There is no opt-in
 // any more — the namespace measures what the command reads instead of being told — so all three
 // now compile through a live `verify` cache against the default store, and a disagreement fails
-// the run for real. So this is a REAL gate over those three files plus a self-test, and still
+// the run for real. MEASURED, those three files against an empty private store: 1 namespace,
+// 142 stored keys, 0 mismatches (it was 0 keys before, `OFF_CACHE`). So this is a REAL gate over those three files plus a self-test, and still
 // forward defence for the toolchains path; what would make it a gate over the whole suite is
 // threading the cache through `@asmlift/toolchains`.
 //
