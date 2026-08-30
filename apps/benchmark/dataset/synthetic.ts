@@ -3496,10 +3496,34 @@ export const SYNTHETIC: SynthSpec[] = [
   // function `/regionbase` splits both bases (its emitted source mints `p0/p1/p2` for 0x03004000
   // as well as `p3/p4/p5` for 0x040000D4) and `/livebase-block` binds both at the head, so the
   // region reading has to become per-BASE first — a third degree of freedom neither lever has.
-  // PREDICTION: when the pairing lands `dmapoll` goes 11 -> MATCH and both ablations break it back
-  // to 11 and 12. Falsified by `pnpm bench run --tier synthetic --only dmapoll --serial` reading
-  // anything but MATCH on the commit that ships it. Every number in this block that is not marked
-  // PREDICTION is a compile or a ranked run.
+  // THE PAIRING LANDED AND THE PREDICTION HELD: `dmapoll` is MATCH on
+  // `signed/livebase-block/homesplit-0x40000d4.4s/volatile` (l3/homesplit.ts) — the label names the
+  // WITHHELD key, which is the device base — and the commit before it reads
+  // diff:11 — the one-sided ablation, run rather than argued. `dmaflat` stays MATCH, which is what
+  // the additive posture below buys. Every number in this block that is not marked PREDICTION is a
+  // compile or a ranked run.
+  //
+  // A PER-BASE CHOICE OF REGION RULE IS NOT THE FREEDOM THIS ROW NEEDS, AND THE CENSUS IS WHY. The
+  // obvious reading of "make the region reading per-base" is to let `hoistScopedBases` pick its
+  // `RegionRule` per BASE KEY rather than per function. That choice has a ONE-ELEMENT DOMAIN here:
+  // `SCOPEBASE_GATES`' `repeated-const-offset` is tallied over the KEY's uses, and both of this
+  // function's bases repeat one — 0x03004000 reaches subscript 2 twice, 0x040000D4 reaches 0, 1 and
+  // 2 three times each — so NEITHER key admits under `'whole'` and there is nothing to choose
+  // between. Measured three ways that agree: `hoistScopedBases(sfn, { regions: 'whole' })` serves 0
+  // keys on this row and on `dmaflat`; the ranked fan carries 0 `/scopebase` candidates on either;
+  // and over 80 agbcc trees censused at the plan (11 synthetic — the nine core corpus fixtures plus
+  // these two rows — and the 69 of 182 klonoa functions that lift map-less with no `--asm-data`),
+  // the number of keys served under BOTH region rules is 0. Trees where `/livebase-block` homes two
+  // or more keys, which is the population any pairing can reach: 3 of the 11 and 7 of the 69.
+  //
+  // AND EVEN WITH THAT GATE ABLATED THE PER-KEY READING CANNOT REACH 0, because WHERE the init
+  // sits is a second axis this pass has no knob for. `hoistScopedBases` splices a region's init at
+  // `Math.min(...r.uses.map((u) => u.idx[r.depth]))` — the first statement that uses it — which on
+  // this function is index 1, below `v0 = 0`. The endpoint needs it at index 0, and the difference
+  // is compiled: the composed spelling scores 0 with the 0x03004000 assignment at the very head of
+  // the body and 2 with it one statement lower. `HoistPlacement: 'head'` is where that lives
+  // (rank.ts LIVEBASE_ADMISSIONS), which is the OTHER lever — so the freedom that reaches 0 is not
+  // which RULE a key gets, it is which key the head hoist WITHHOLDS.
   //
   // WHAT ASMLIFT DOES TODAY, AND WHAT EACH LEVER IS WORTH HERE — one ranked run of the row's own
   // target per cell. The instrument is a reversible source edit at the ONE site that produces the
@@ -3559,6 +3583,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // more candidate in the fan, the composed spelling loses 13 to 0 and the MATCH survives: a green
   // `dmaflat` is NOT evidence a pairing did not over-fire. The row is live against a pairing
   // implemented as a REWRITE, or one that wins an equal-score tie, and against nothing else.
+  //
+  // WHAT THE PAIRING COSTS, AND WHERE. It is enumerated per ADMITTED KEY that survives the per-key
+  // table (which key the source homed is not derivable), on the FIRST roster row binding those
+  // bases at that placement — so the ceiling is three withholds, `homesplit-fan-cap`, and the floor
+  // is 0. `synthetic:dmapoll` and `synthetic:dmaflat` sit at the ceiling for two bases: both
+  // withholds admit, 16 of each row's 72 candidates. `synthetic:dmascope` is unmoved at diff:9 but
+  // STOPS BEING a lever-clean control for `/regionbase`: the pairing pipes THROUGH that pass, so 36
+  // of its 260 candidates bind the DMA base three times too — and they ride `/livebase`, not
+  // `/livebase-block`, whose identical census at the same placement makes it the second label on
+  // one program. Of the three bases bound there exactly ONE withhold admits: the region rule splits
+  // neither of the others (`homesplit-no-region`). That is why test/regionbase.test.ts asks about
+  // the PASS rather than the label. `synthetic:dmascope2` (diff:13) stays lever-clean: its census
+  // is one key, so the pairing is degenerate there and contributes no candidate at all.
   //
   // NEIGHBOURS THAT READ LIKE THIS AND ARE NOT. `armhomes` (MATCH) is per-region placement with
   // exactly ONE decision to get right; `sizebound` (8) has two bases but one axis, WHERE one init

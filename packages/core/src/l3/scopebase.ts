@@ -66,7 +66,7 @@ import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs, stmtLists } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
-import { nameAllocator } from './hoist';
+import { nameAllocator, takenNames } from './hoist';
 import { addressableGlobals } from './storage';
 
 /** A base this lever may name: a leaf whose value is a fixed address. */
@@ -137,7 +137,13 @@ function eligible(
 /** The (base, access-shape) key an access shares with its reuse siblings. Width and signedness are
  *  part of it because the hoisted local carries the access's pointer type — two widths through one
  *  base are two different locals, exactly as in basecse. */
-const keyOf = (n: Extract<Expr, { k: 'index' }>): string => `${baseId(n.base as LeafBase)} ${n.width} ${n.signed}`;
+const keyOf = (n: Extract<Expr, { k: 'index' }>): string => scopedBaseKey(n.base as LeafBase, n.width, n.signed);
+
+/** The same key, from a base a DIFFERENT pass is holding. `l3/basecse.ts` spells an `addr` base's
+ *  identity `a:name` where this one spells it `n:name` (it shares that spelling with the bare `var`
+ *  the rank-aware lift produces, which denotes the same cell), so a caller crossing between the two
+ *  translates through this rather than comparing strings that can never match. */
+export const scopedBaseKey = (b: LeafBase, width: number, signed: boolean): string => `${baseId(b)} ${width} ${signed}`;
 
 /** One use, located by its chain of enclosing statement LISTS (outermost first).
  *
@@ -525,22 +531,93 @@ export const REGION_RULES: Record<RegionSelector, RegionRule> = {
 };
 
 /** `regions` picks the region rule and is the only field a caller passes in production
- *  (`'per-region'` is `/regionbase`). The two tables are for ABLATION — the differentials in
- *  test/scopebase.test.ts re-run the real pass with one rule dropped — and default to the pair the
- *  selector implies. */
+ *  (`'per-region'` is `/regionbase`). The other three are for ABLATION and INJECTION — the
+ *  differentials in test/scopebase.test.ts re-run the real pass with one rule dropped, and the
+ *  ownership contract below is shown load-bearing by a `rule` no production caller passes. All
+ *  three default to what the selector implies. */
 export interface ScopeBaseOpts {
   readonly regions?: RegionSelector;
   readonly eligibility?: readonly Gate<AccessCtx>[];
   readonly gates?: readonly Gate<RegionCtx>[];
+  readonly rule?: RegionRule;
 }
 
-/**
- * The re-spelling `regions` asks for — `/scopebase` or `/regionbase` — or null when nothing
- * qualifies (the caller then adds no candidate rather than a duplicate of the primary).
- */
-export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null {
+/** One admitted region, as the applier and a gating caller both read it. `uses` are the ACCESS
+ *  NODES the entry owns — the same set the counting rules were judged over, so the planner and the
+ *  rewrite cannot disagree about them. */
+export interface ScopedBaseEntry {
+  readonly scope: Stmt[];
+  readonly key: string;
+  readonly name: string;
+  readonly type: IrType;
+  readonly base: LeafBase;
+  /** index within `scope` the init is spliced at — the first statement that (transitively) uses it */
+  readonly before: number;
+  readonly uses: readonly Expr[];
+}
+
+/** What the pass DECIDED, before anything is applied. `applyScopedBasePlan` is the other half: a
+ *  caller that has to both COUNT what a key got and rewrite the tree (l3/homesplit.ts) plans once
+ *  and applies that same plan, rather than re-deriving the decision from the applied tree. */
+export interface ScopedBasePlan {
+  /** every eligible key `collect` found, in first-appearance order */
+  readonly keys: readonly string[];
+  readonly entries: readonly ScopedBaseEntry[];
+  /** access node → the local that replaces its base */
+  readonly repoint: ReadonlyMap<Expr, string>;
+  /** for a key NO region admitted, the id of the rule that refused it first — `'shared-node'` for
+   *  the pre-gate refusal `sharedKeys` makes. A key with an entry is absent. */
+  readonly refusals: ReadonlyMap<string, string>;
+  /** the tree holds the `for`-part shape collect and rewrite disagree about: the pass declines */
+  readonly compound: boolean;
+}
+
+/** THE OWNERSHIP CONTRACT, and it is deliberately not a `Gate`: it is a property of the whole plan,
+ *  decided after every `RegionCtx` has been judged, so there is no admission context to attach it
+ *  to — the same reason `sharedKeys` and `compound` are not gates either.
+ *
+ *  Two properties, one failure each, and NEITHER is a compile error downstream:
+ *
+ *    • an access node claimed by two entries. `repoint` is a `Map`, so the second `set` WINS and the
+ *      access is silently repointed at a local whose assignment need not dominate it — C that
+ *      compiles, scores, and names a different variable.
+ *    • a minted name that is not fresh. The applier appends `entries`' names to `sfn.locals`
+ *      wholesale, so a duplicate emits a duplicate declaration — and freshness is `takenNames`'
+ *      reading of it, which is what `nameAllocator` mints against: a name that only shadows a
+ *      PARAMETER, or a body assignment no declaration list carries, is a different variable rather
+ *      than a duplicate declaration, and that is the failure this contract exists for.
+ *
+ *  Both fire ZERO times under either shipped region rule (the partitions are node-disjoint, and
+ *  `nameAllocator` re-derives its taken names from the tree it is handed — including across the
+ *  rank.ts pipe, where the second pass sees the first's mints as taken). They are checks rather
+ *  than arguments because a future rule, or a merge of two independently-planned runs, breaks
+ *  either one without breaking a type. */
+export function assertPlanOwnership(
+  sfn: SFn,
+  entries: readonly { name: string; key: string; uses?: readonly Expr[] }[],
+): void {
+  const taken = takenNames(sfn);
+  const claimed = new Set<Expr>();
+  for (const e of entries) {
+    if (taken.has(e.name)) {
+      throw new Error(`scopebase: the plan mints \`${e.name}\`, a name the tree already carries (key ${e.key})`);
+    }
+    taken.add(e.name);
+    for (const u of e.uses ?? []) {
+      if (claimed.has(u)) {
+        throw new Error(`scopebase: an access is claimed by two plan entries (key ${e.key}, local ${e.name})`);
+      }
+      claimed.add(u);
+    }
+  }
+}
+
+/** What the pass DECIDES for `sfn` under `opts`, with nothing applied. `applyScopedBasePlan` is the
+ *  applier and `hoistScopedBases` the two of them in order; a caller that gates a PAIRING on "how
+ *  many locals did this key get?" reads the plan and applies THAT one (l3/homesplit.ts). */
+export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBasePlan {
   const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
-  const rule = REGION_RULES[opts.regions ?? 'whole'];
+  const rule = opts.rule ?? REGION_RULES[opts.regions ?? 'whole'];
   const gates = opts.gates ?? rule.gates;
   compound = false;
   const globals = addressableGlobals(sfn);
@@ -561,36 +638,42 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   const sharedKeys = new Set<string>();
   collect(sfn.body, globals, found, [], [], [], rules, new Set(), sharedKeys);
   if (compound) {
-    return null;
+    return { keys: [...found.keys()], entries: [], repoint: new Map(), refusals: new Map(), compound: true };
   }
 
   const fresh = nameAllocator(sfn);
   // one entry per (key, admitted region) — several for one key under `'per-region'`
-  const plan: { scope: Stmt[]; key: string; name: string; type: IrType; base: LeafBase; before: number }[] = [];
-  // access node → the local that replaces its base. Built from the SITES a plan entry was judged
-  // on, so the set the planner counted and the set the rewrite repoints are the same set by
-  // construction rather than by a second predicate that could disagree.
-  const repoint = new Map<Expr, string>();
+  const entries: ScopedBaseEntry[] = [];
+  // INSTRUMENTATION, with no production reader (`grep -rn '\.refusals' packages apps` finds only
+  // this constructor): the caller that gates on this pass counts the ENTRIES a key got, and a
+  // decline tells it only `not split`. Recorded because the id separates a region that held too few
+  // uses from a shape the pass refuses outright, which is what a probe of this pass has to know.
+  // `firstRejection` short-circuits, so this is the DECIDING rule.
+  const refusals = new Map<string, string>();
   for (const [key, rec] of found) {
     if (sharedKeys.has(key)) {
-      continue; // one node at two positions — see `sharedKeys`
+      refusals.set(key, 'shared-node'); // one node at two positions — see `sharedKeys`
+      continue;
     }
     const regions = rule.partition(rec.uses, sfn.body);
     const siblingRegions = regions.filter((r) => r.uses.length >= 2).length;
+    let served = false;
     for (const r of regions) {
       // WHICH USES the counting rules are tallied over is the RULE's answer, not a branch here —
       // see `REGION_RULES`. Nothing here tests the base kind: an `addr`/`const` base reaching this
       // pass is one basecse already REFUSED (see the ordering note in the file header).
       const judged = rule.judged(r, rec.uses);
-      if (
-        firstRejection(gates, {
-          uses: judged.length,
-          repeatedConstOffset: repeatsAConstOffset(judged),
-          perIteration: runsPerIteration(r.uses),
-          nestedLoop: underNestedLoop(r.uses, r.depth),
-          siblingRegions,
-        }) !== null
-      ) {
+      const refused = firstRejection(gates, {
+        uses: judged.length,
+        repeatedConstOffset: repeatsAConstOffset(judged),
+        perIteration: runsPerIteration(r.uses),
+        nestedLoop: underNestedLoop(r.uses, r.depth),
+        siblingRegions,
+      });
+      if (refused !== null) {
+        if (!refusals.has(key)) {
+          refusals.set(key, refused);
+        }
         continue;
       }
       const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
@@ -599,13 +682,62 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
       // within path[j]. The region is path[depth-1], so its index is idx[depth] — and idx[0] for
       // the depth-0 body region.
       const before = Math.min(...r.uses.map((u) => u.idx[r.depth]));
-      const name = fresh();
-      r.uses.forEach((u) => repoint.set(u.node, name));
-      plan.push({ scope: r.scope, key, name, type, base: rec.sample.base as LeafBase, before });
+      served = true;
+      entries.push({
+        scope: r.scope,
+        key,
+        name: fresh(),
+        type,
+        base: rec.sample.base as LeafBase,
+        before,
+        uses: r.uses.map((u) => u.node),
+      });
+    }
+    if (served) {
+      refusals.delete(key);
     }
   }
-  if (plan.length === 0) {
+  assertPlanOwnership(sfn, entries);
+  // access node → the local that replaces its base. Built from the SITES a plan entry was judged
+  // on, so the set the planner counted and the set the rewrite repoints are the same set by
+  // construction rather than by a second predicate that could disagree.
+  const repoint = new Map<Expr, string>();
+  for (const e of entries) {
+    e.uses.forEach((u) => repoint.set(u, e.name));
+  }
+  return { keys: [...found.keys()], entries, repoint, refusals, compound: false };
+}
+
+/**
+ * The re-spelling `regions` asks for — `/scopebase` or `/regionbase` — or null when nothing
+ * qualifies (the caller then adds no candidate rather than a duplicate of the primary).
+ */
+export const hoistScopedBases = (sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null =>
+  applyScopedBasePlan(sfn, planScopedBases(sfn, opts));
+
+/**
+ * `plan` applied to the tree it was planned over — null when it decided nothing (the caller then
+ * adds no candidate rather than a duplicate of the primary).
+ *
+ * IDENTITY-BOUND to that tree, and not by the type: `scope` is matched against statement LISTS and
+ * `repoint` against access NODES, both by reference. A plan from a DIFFERENT tree therefore splices
+ * nothing and repoints nothing while still declaring its locals; `assertLocalsWritten` (rank.ts's
+ * `respell`) is what makes that loud rather than a silently wrong candidate.
+ */
+export function applyScopedBasePlan(sfn: SFn, { entries: plan, repoint, compound: bad }: ScopedBasePlan): SFn | null {
+  if (bad || plan.length === 0) {
     return null;
+  }
+  // THE TWO FIELDS MUST AGREE, and they arrive as independent data. `assertPlanOwnership` runs in
+  // the planner, so it cannot see an edit made between plan and apply — which is exactly the seam
+  // exporting this applier opened. A `repoint` naming a local no entry mints is neither declared
+  // nor assigned, and both boundary contracts pass it: `assertResolved` looks for absent names, not
+  // for unwritten ones. Checked here, where the two halves meet.
+  const minted = new Set(plan.map((p) => p.name));
+  for (const name of repoint.values()) {
+    if (!minted.has(name)) {
+      throw new Error(`scopebase: the plan repoints an access to \`${name}\`, which no entry mints`);
+    }
   }
 
   const point = (e: Expr): Expr => {

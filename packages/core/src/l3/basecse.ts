@@ -317,6 +317,23 @@ export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[]): readon
   return admit(sfn, gates).keys;
 }
 
+/** What each key NAMES, for a caller that has to translate a key into another pass's vocabulary —
+ *  `l3/scopebase.ts` spells an `addr` base's identity differently, so a string compare across the
+ *  two would silently never match. Every key the tree holds, admitted or not. */
+export function baseSites(sfn: SFn): ReadonlyMap<string, { base: HoistableBase; width: number; signed: boolean }> {
+  const c: Collected = {
+    count: new Map(),
+    order: [],
+    meta: new Map(),
+    inLoop: new Set(),
+    constOffCount: new Map(),
+    varIndexed: new Set(),
+    operandOff: new Set(),
+  };
+  collect(sfn.body, c, false);
+  return c.meta;
+}
+
 /** The keys `gates` admits, in first-use order, with the census they were judged from. */
 function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys: string[] } {
   const c: Collected = {

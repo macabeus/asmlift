@@ -12,6 +12,7 @@ import { describe, expect, test } from 'vitest';
 import { BASECSE_GATES, BASEFOLD_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
+import { HOMESPLIT_FAN_GATES, HOMESPLIT_GATES, withholdingKey } from '../src/l3/homesplit';
 import { INLINEBASE_GATES } from '../src/l3/inlinebase';
 import { PTR_FIELD_GATES } from '../src/l3/ptrfield';
 import { COUNTDOWN_GATES } from '../src/l3/reindex';
@@ -55,6 +56,13 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
   REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],
+  HOMESPLIT_GATES: HOMESPLIT_GATES as readonly Gate<never>[],
+  HOMESPLIT_FAN_GATES: HOMESPLIT_FAN_GATES as readonly Gate<never>[],
+  // A table COMPOSED at runtime — `withholdingKey` prepends its rejection to a caller's own
+  // admission, so the shipped table is neither of the two consts. Registered over a representative
+  // composition: without it, a `withheld-key` id appearing in the table it wraps is a duplicate
+  // nothing checks, and `without()` would then ablate whichever came first.
+  WITHHELD_KEY_OVER_LIVEBASE_BLOCK: withholdingKey(LIVEBASE_BLOCK_GATES, 'c:0 4 true') as readonly Gate<never>[],
 };
 
 /** Every `test(...)`/`describe(...)` title in the core suite, as one blob to search. */

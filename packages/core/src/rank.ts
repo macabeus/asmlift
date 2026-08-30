@@ -30,6 +30,7 @@ import {
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
+import { homeSplitTag, homeSplitWithholds, splitHomeBases } from './l3/homesplit';
 import { initFirstGuards } from './l3/initfirst';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
@@ -1299,7 +1300,7 @@ export function enumerateCandidates(
         const r = hoist();
         return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
       };
-      return { suffix, hoist, volatiles, pairings };
+      return { suffix, hoist, volatiles, pairings, gates, placement };
     });
     // THE PLACEMENT DIFFERENTIAL, one composition inwards. `respell` re-checks a lever's
     // placement across the statement SHAPES derived onto it; the lever-on-lever products below
@@ -1356,6 +1357,57 @@ export function enumerateCandidates(
         const r = volatiles();
         return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
+    }
+    // The livebase x homesplit PAIRINGS — the fourth sanctioned product kind, and row-demanded
+    // (synthetic:dmapoll): ONE base kept at the head and a SECOND split per region, which neither
+    // lever spells alone because each applies its own policy to every base it binds. Compiled
+    // against that row's own object the reachable cells are 69 with neither hoist, 18 with both
+    // split per region, 11 with both at function scope — and 0 only where the two policies land on
+    // DIFFERENT bases. See l3/homesplit.ts for why it is a PIPE and never a merge.
+    //
+    // WHICH key is withheld is not derivable, so every admitted key is its own candidate, LABELLED
+    // with that key — a label is an identity, and one label over two withholds names two programs.
+    // `HOMESPLIT_FAN_GATES`' `homesplit-fan-cap` is what bounds the product.
+    // ADDITIVE, like every lever here: `/livebase-block`, `/regionbase`, `/scopebase` and the
+    // un-hoisted primary all stay in the list, which is what keeps `synthetic:dmaflat` — where the
+    // composed spelling scores 13 against its own 0 — at MATCH.
+    for (const [i, { suffix, gates, placement }] of paired.entries()) {
+      const bound = census(gates);
+      // The ROSTER's dedup, which `hoist` applies to every other product and this loop has to spell
+      // for itself: a row binding exactly what an earlier row bound at the same placement is that
+      // row's spelling under a second label, and so is every pairing piped from it. Asked over the
+      // PAIRED rows only, so a skip can never drop a withhold no other row enumerates — the earlier
+      // row runs the identical pipe and emits the identical source. Without it both run and `seen`
+      // collapses the pair afterwards, having paid a head hoist, region plan, rewrite and emit for
+      // each.
+      if (paired.slice(0, i).some((p) => p.placement === placement && sameBases(bound, census(p.gates)))) {
+        continue;
+      }
+      // The function-level half of the pairing's admission, asked ONCE over the census: both its
+      // rules read the key count and nothing else, so inside the pipe they would cost that whole
+      // pipe to report a fact this loop already holds.
+      for (const key of homeSplitWithholds(bound)) {
+        const lever = `${suffix}/homesplit-${homeSplitTag(key)}`;
+        const homesplit = (): SFn | null => {
+          const p = splitHomeBases(sfn, {
+            gates,
+            placement,
+            key,
+            ...(target.capabilities.deviceRegisters ? { deviceRegisters: target.capabilities.deviceRegisters } : {}),
+          });
+          return p ? survives(p.homed, p.split) : null;
+        };
+        const homesplitVolatile = (): SFn | null => {
+          const r = homesplit();
+          return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
+        };
+        respell(lever, homesplit);
+        respell(`${lever}/volatile`, homesplitVolatile);
+        respell(`${lever}/volatile/vol-store`, () => {
+          const v = homesplitVolatile();
+          return v ? volStore(v) : null;
+        });
+      }
     }
     // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
     // independent operand's load above the product's mflo/mullw, so def order re-spells a

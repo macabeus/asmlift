@@ -15,11 +15,12 @@
 //   • capabilities.flags → RESERVED, not yet read by any pass (PPC condition regs will).
 //   • capabilities.readOnlyAddressSinks → the Thumb frame-object audit: a frame address stored to
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
-//   • capabilities.deviceRegisters → three readers, and they ask ONE question — "would a source
+//   • capabilities.deviceRegisters → four readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
 //     approximate: the `/vol-store` lever's eligibility (l3/volstore.ts), rank.ts's volatility
-//     tie-break between two byte-identical spellings, and the first half of `/unreduce`'s
-//     disjointness gate (l3/unreduce.ts).
+//     tie-break between two byte-identical spellings, the first half of `/unreduce`'s
+//     disjointness gate (l3/unreduce.ts), and the `/homesplit` pairing's refusal to leave a device
+//     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts).
 //   • capabilities.deviceMemoryWriters → the MEMORY-MODEL question, which is a different one and
 //     may NOT be approximate: "can a write to this register make the DEVICE write ordinary
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
