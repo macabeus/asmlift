@@ -31,7 +31,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
-import { cacheMode, cacheStats } from './candcache';
+import { MISMATCH_LOG, cacheMismatches, cacheMode, cacheStats } from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { renderDeclarations } from './declare';
@@ -39,8 +39,20 @@ import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObjec
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 
-const candCacheLine = (): string =>
-  cacheMode() === 'off' ? '' : `asmlift: [candcache] ${cacheMode()} ${JSON.stringify(cacheStats())}\n`;
+// The `[candcache]` line, and — when a stored answer disagreed with a fresh compile — the loud
+// second line that turns a verify run into a FAILING one. Nothing used to fail on a mismatch: the
+// counters printed, the run exited 0, and Gate E's "0 differing" rested on a human's grep.
+const candCacheLine = (): string => {
+  if (cacheMode() === 'off') {
+    return '';
+  }
+  const line = `asmlift: [candcache] ${cacheMode()} ${JSON.stringify(cacheStats())}\n`;
+  return cacheMismatches() === 0
+    ? line
+    : line +
+        `asmlift: [candcache] ${cacheMismatches()} STORED ANSWER(S) DISAGREED WITH A FRESH COMPILE — ` +
+        `the store is serving objects this toolchain no longer produces. See ${MISMATCH_LOG}\n`;
+};
 
 export { detectName };
 
@@ -479,7 +491,7 @@ export async function runCli(
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
         `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {
-        code: ranked.best.score.match ? 0 : 1,
+        code: ranked.best.score.match && cacheMismatches() === 0 ? 0 : 1,
         stdout: ranked.best.source,
         // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
         // tail stay adjacent.

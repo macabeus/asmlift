@@ -158,7 +158,15 @@ export function scoreViaBenchConfig(
  *  EVERY toolchain (one-shot docker for the pooled pair) — the config `bench target` hands the
  *  reproduction scripts so `asmlift --config decomp.yaml --score-against` can compile with
  *  the benchmark's own toolchain. `elf` (absolute path — symbol-fed rows) lands as
- *  tools.asmlift.elf so the CLI loads the project's symbol map exactly as the benchmark did. */
+ *  tools.asmlift.elf so the CLI loads the project's symbol map exactly as the benchmark did.
+ *
+ *  It deliberately does NOT carry `cacheInputs`, so every published repro script and every
+ *  copy-pasted reproduction compiles uncached. That is a fork from `benchCompilerFor` above, which
+ *  compile/util.ts's `ctxTypedefPrelude` comment warns against in general ("a drift between them
+ *  means the published script grades in a different world than the harness did") — allowed here
+ *  because a cache is a throughput lever and never a result lever: a miss is indistinguishable in
+ *  RESULT from no cache at all, and a repro nobody can time against the harness is better than one
+ *  whose wall depends on a store the reader does not have. */
 export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string, ctxFile?: string): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
   if (elf) {

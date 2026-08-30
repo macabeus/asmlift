@@ -2,11 +2,10 @@
 // target build, the real-tier candidate compile (same steps, shared). Flags come from
 // @asmlift/toolchains; the decomp.yaml candidate command lives in
 // dataset/toolchains/agbcc/decomp.yaml.
-import { NOT_CACHEABLE, candCache } from '@asmlift/cli/candcache';
+import { NOT_CACHEABLE, candCache, candidateCacheRefusal, toolchainFileChain } from '@asmlift/cli/candcache';
 import { TOOLCHAIN } from '@asmlift/toolchains';
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,16 +14,49 @@ import type { BuiltTarget } from '../toolchains';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
+/**
+ * A failed step, thrown so that a DETERMINISTIC rejection and a TRANSIENT one cannot be confused.
+ *
+ * `<tool> failed: <diagnostic>` means the compiler ran and said no — that verdict is a property of
+ * the TU and may be cached. Everything else is this machine having a bad minute and must never be:
+ * a stored transient drops that candidate from every future run under the namespace, which is a
+ * spelling silently missing from the row's fan.
+ *
+ * The distinction is read off the SPAWN RESULT, never off the message. `status !== 0` is also true
+ * when `status === null` because the process was KILLED BY A SIGNAL — an OOM kill, a stray
+ * `pkill`, a shard reaped under load — and `util.ts run()` only throws for `error` (ENOENT and the
+ * 120 s timeout). Measured before this guard: a SIGKILLed agbcc produced literally
+ * `"agbcc failed: "`, which the negative-entry guard matched, and the next healthy run served that
+ * rejection for a TU that compiles.
+ */
+function stepFailed(
+  tool: 'cpp' | 'agbcc' | 'as',
+  r: { status: number | null; signal?: NodeJS.Signals | null; stderr: string },
+): never {
+  if (r.status === null) {
+    throw new Error(
+      `${tool} did not run to completion (killed by ${r.signal ?? 'a signal'}) — transient, not a rejection`,
+    );
+  }
+  const d = compilerDiagnostics(r.stderr);
+  if (d.trim() === '') {
+    // A compiler that exits nonzero and says nothing did not diagnose anything; the precedent is
+    // apps/benchmark/src/cache.ts, which refuses to cache an empty m2c answer for the same reason.
+    throw new Error(`${tool} exited ${r.status} with no diagnostic — transient, not a rejection`);
+  }
+  throw new Error(`${tool} failed: ${d}`);
+}
+
 /** .i → agbcc → .s (asmlift ARM input) with the canonical .text/.align tail → as → .o. */
 function assemble(iPath: string, sPath: string, oPath: string): void {
   const cc = run(TOOLCHAIN.agbcc, [iPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
   if (cc.status !== 0) {
-    throw new Error(`agbcc failed: ${compilerDiagnostics(cc.stderr)}`);
+    stepFailed('agbcc', cc);
   }
   writeFileSync(sPath, readFileSync(sPath, 'utf8') + '\n.text\n\t.align\t2, 0\n');
   const as = run(TOOLCHAIN.as, [...TOOLCHAIN.asFlags, sPath, '-o', oPath]);
   if (as.status !== 0) {
-    throw new Error(`as failed: ${compilerDiagnostics(as.stderr)}`);
+    stepFailed('as', as);
   }
 }
 
@@ -48,7 +80,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), join(HERE, 'util.ts')];
 const CAND_CPP_FLAGS = ['-nostdinc'];
 const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 1; }\n';
-const CANDIDATE_READS_A_FILE = /^[ \t]*#[ \t]*include/m;
 
 /** Run the candidate pipeline on a fixed probe TU in `dir`, returning the object's sha256 — or
  *  null if it did not compile. Its OWN directory, never the slot a candidate shares: a probe
@@ -69,17 +100,6 @@ function stampProbeIn(dir: string): string | null {
   } catch {
     return null;
   }
-}
-
-/** Where a bare command name resolves to on THIS $PATH, or an `UNRESOLVED:` marker. A
- *  `--version` banner is NOT an identity — a wrapper script, a rebuilt binutils and a patched cpp
- *  can all print the same string — so the namespace hashes the resolved file's BYTES instead.
- *  MEASURED before this existed: a shell wrapper in front of `arm-none-eabi-cpp` left the
- *  namespace at 8e0a7dccb4ead3f1, unmoved, three times running. */
-function resolveOnPath(cmd: string): string {
-  const r = spawnSync('sh', ['-c', `command -v ${JSON.stringify(cmd)}`], { encoding: 'utf8' });
-  const p = (r.stdout ?? '').trim();
-  return p === '' ? `UNRESOLVED:${cmd}` : p;
 }
 
 /** Environment variables gcc/cpp read that CHANGE the compile. `CPATH` and `C_INCLUDE_PATH` are
@@ -112,7 +132,18 @@ const COMPILE_ENV = [
  * toolchain served the stale 648-byte object where the truth is 660.
  */
 export function candCacheNamespaceFiles(): string[] {
-  return [TOOLCHAIN.agbcc, resolveOnPath(TOOLCHAIN.as), resolveOnPath('arm-none-eabi-cpp'), ...SHAPING_SOURCES];
+  // `toolchainFileChain` is what makes a bare command name an identity. Hashing the file a name
+  // resolves to STOPS ONE LEVEL SHORT: on the machine this was found on, `cpp` is a 208-byte
+  // `#!/bin/sh` shim that execs Homebrew's `cpp-14`, and `arm-none-eabi-cpp` is a driver binary
+  // that execs `libexec/gcc/arm-none-eabi/14.2.1/cc1` — neither delegate was in the namespace, and
+  // repointing one served a stale object with the outer file byte-identical. The chain follows
+  // both, and REFUSES (throws) where it cannot follow.
+  return [
+    ...toolchainFileChain(TOOLCHAIN.agbcc),
+    ...toolchainFileChain(TOOLCHAIN.as),
+    ...toolchainFileChain('arm-none-eabi-cpp'),
+    ...SHAPING_SOURCES,
+  ];
 }
 
 /**
@@ -147,13 +178,35 @@ const cache = candCache('bench-agbcc', () => {
   // only if it is a pure function of (input bytes, symbol) — which is NOT true of every toolchain
   // (`ido7.1` writes the absolute path of its input .c into the object). So compile one fixed
   // probe TU TWICE, in two DIFFERENT directories, and let the compiler answer.
-  const a = stampProbeIn(mkdtempSync(join(tmpdir(), 'bench-ccstampA-')));
-  const b = stampProbeIn(mkdtempSync(join(tmpdir(), 'bench-ccstampB-')));
+  // Two DIFFERENT directories, and REMOVED afterwards: mkdtemp cleans up nothing, and util.ts's
+  // `scratchSlot` exists precisely because that leak "had accumulated into the millions".
+  const dirA = mkdtempSync(join(tmpdir(), 'bench-ccstampA-'));
+  const dirB = mkdtempSync(join(tmpdir(), 'bench-ccstampB-'));
+  const a = stampProbeIn(dirA);
+  const b = stampProbeIn(dirB);
+  rmSync(dirA, { recursive: true, force: true });
+  rmSync(dirB, { recursive: true, force: true });
   if (a === null || b === null || a !== b) {
     return NOT_CACHEABLE;
   }
   return createHash('sha256').update(candCacheStaticStamp()).update(a).digest('hex');
 });
+
+/** The message shape a DETERMINISTIC rejection has, and nothing else does. `\\S` is not
+ *  decoration: a SIGKILLed compiler used to produce exactly `"agbcc failed: "`, which the older
+ *  `/^(cpp|agbcc|as) failed: /` matched. `stepFailed` is the real guard; this is the second one. */
+const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
+
+/** A per-key refusal is a fact about the emitter, not about this candidate, so it is worth saying
+ *  — once per reason, not 65,280 times. */
+const saidRefusals = new Set<string>();
+function noteKeyRefusal(reason: string): void {
+  if (saidRefusals.has(reason) || cache.mode === 'off') {
+    return;
+  }
+  saidRefusals.add(reason);
+  process.stderr.write(`[candcache] REFUSED-KEY label=bench-agbcc reason=${reason}\n`);
+}
 
 export const agbccReal: RealCompile = {
   buildTarget(iText): BuiltTarget {
@@ -166,13 +219,16 @@ export const agbccReal: RealCompile = {
     return { obj: oPath, asm: readFileSync(sPath, 'utf8') };
   },
   compileCandidate(tu, sym): string {
-    // A candidate TU carrying an `#include` reads a file the namespace cannot see: the path is
-    // in the TU, not in any flag, and the stamp probe does not exercise it. MEASURED on this
-    // path: with `CPATH` pointing at a directory, editing the included header between two
-    // cache-on runs served 7143fac350d6311b where the truth is 7430abf1c6ff95bc. Today no
-    // candidate carries one (0 of 65,281 LBG sources), so this refusal costs nothing and stops
-    // the day an emitter change arms it.
-    if (CANDIDATE_READS_A_FILE.test(tu)) {
+    // A candidate TU whose object is not a function of its own bytes is refused PER KEY, and the
+    // reason is said once. Two shapes: a TU that reads a file (the path is in the TU, not in any
+    // flag, and no probe exercises it — MEASURED: with `CPATH` pointing at a directory, editing
+    // the included header between two cache-on runs served 7143fac350d6311b where the truth is
+    // 7430abf1c6ff95bc), and a TU that bakes its own path or the clock in through `__FILE__` /
+    // `__DATE__`. Today no candidate carries either (0 of 65,281 LBG sources), so the refusal
+    // costs nothing and stops the day an emitter change arms it.
+    const refusal = candidateCacheRefusal(tu);
+    if (refusal) {
+      noteKeyRefusal(refusal);
       return compileCandidateRaw(tu, sym);
     }
     if (cache.mode === 'on') {
@@ -193,13 +249,16 @@ export const agbccReal: RealCompile = {
       }
       return o;
     } catch (e) {
-      // A negative entry is only sound for a DETERMINISTIC rejection — the compiler ran and said
-      // no. `util.ts run()` throws `spawnFailure` for a missing binary or the 120 s timeout, and
-      // caching either of those would silently drop a candidate on every future run (the failure
-      // mode this repo calls a silent wrong answer). Only the three banners a real diagnostic
-      // carries are stored.
+      // A negative entry is only sound for a DETERMINISTIC rejection — the compiler ran, exited
+      // nonzero AND diagnosed something (`stepFailed` above is where that is decided, off the
+      // spawn result rather than off the message). `util.ts run()` throws `spawnFailure` for a
+      // missing binary or the 120 s timeout. Caching any of those would silently drop a candidate
+      // on every future run, the failure mode this repo calls a silent wrong answer.
       const m = (e as Error).message;
-      if (cache.mode === 'on' && /^(cpp|agbcc|as) failed: /.test(m)) {
+      if (cache.mode !== 'off' && DETERMINISTIC_REJECTION.test(m)) {
+        // verifyFail FIRST: under `verify` a stored OBJECT for a TU that no longer compiles is a
+        // mismatch, and it is the direction that was audited by nothing at all.
+        cache.verifyFail(tu, sym, m);
         cache.putFail(tu, sym, m);
       }
       throw e;
@@ -233,7 +292,7 @@ function compileCandidateRaw(tu: string, sym: string): string {
   // candidate TUs are self-contained (typedefs/vendored context inline) — bare -nostdinc cpp
   const cpp = run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, cPath, '-o', iPath]);
   if (cpp.status !== 0) {
-    throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
+    stepFailed('cpp', cpp);
   }
   writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
   assemble(iPath, sPath, oPath);

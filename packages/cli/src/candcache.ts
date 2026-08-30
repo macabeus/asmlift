@@ -8,28 +8,38 @@
 //
 // Everything hard about this module is the word "GIVEN". A stored object served after the
 // toolchain moved is a claim about a compiler that no longer produced it: it compiles, it
-// scores, and it is silently wrong. Two devices keep that from happening, and neither is a
-// version constant:
+// scores, and it is silently wrong. Three devices keep that from happening, and none of them is
+// a version constant:
 //
 //   1. The NAMESPACE, supplied by the caller as a `stamp()` thunk — a MEASUREMENT of the whole
-//      compile pipeline (binary bytes, flags, every file the command names, the harness code
-//      that shapes the compiler's input, and the object bytes the pipeline produces for one
-//      fixed probe TU). Anything the stamp does not see is a hole; `stamp()` may answer
-//      NOT_CACHEABLE and this module then refuses, loudly, for the whole process.
-//   2. `verify` mode — compile anyway, compare stored bytes against fresh, count and report.
-//      It is the byte gate at full scale for the price of one uncached run.
+//      compile pipeline (binary bytes AND WHAT THOSE BINARIES DELEGATE TO, flags, every file the
+//      command names, the harness code that shapes the compiler's input, and the object bytes the
+//      pipeline produces for one fixed probe TU). Anything the stamp does not see is a hole;
+//      `stamp()` may answer NOT_CACHEABLE and this module then refuses, loudly, for the process.
+//   2. A per-KEY refusal for a TU whose object is not a function of its own bytes —
+//      `candidateCacheRefusal` below: a TU that reads a file, or that bakes its own path or the
+//      wall clock into the object.
+//   3. `verify` mode — compile anyway, compare stored against fresh IN BOTH DIRECTIONS (a stored
+//      object against a fresh rejection is as wrong as differing bytes, and it is the direction
+//      that silently drops a candidate), count and report.
 //
-// OFF unless ASMLIFT_CANDCACHE is set. `ASMLIFT_CANDCACHE=1|on` serves; `=verify` compiles and
-// compares; unset / `0` / `off` bypasses the module entirely.
-import { createHash } from 'node:crypto';
+// OFF unless ASMLIFT_CANDCACHE is set. `ASMLIFT_CANDCACHE=1|on|true|yes` serves; `=verify`
+// compiles and compares; unset / `0` / `off` / `false` / `no` bypasses the module entirely; and
+// ANYTHING ELSE is refused out loud rather than quietly treated as "on".
+import { spawnSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   appendFileSync,
+  closeSync,
   copyFileSync,
   existsSync,
   linkSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -37,7 +47,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /** A `stamp()` that returns this is saying: the object this pipeline produces is NOT a pure
  *  function of its input bytes, so NOTHING may be cached for it. `ido7.1` bakes the absolute
@@ -46,8 +56,42 @@ export const NOT_CACHEABLE = ' NOT_CACHEABLE ';
 
 export type CandCacheMode = 'off' | 'on' | 'verify';
 
-const RAW = process.env.ASMLIFT_CANDCACHE ?? '';
-const MODE: CandCacheMode = RAW === 'verify' ? 'verify' : RAW === '' || RAW === '0' || RAW === 'off' ? 'off' : 'on';
+const say = (msg: string): void => {
+  process.stderr.write(`[candcache] ${msg}\n`);
+};
+
+// ---------------------------------------------------------------------------------------------
+// MODE. The parse is deliberately closed: an unrecognised value is OFF and LOUD, never "on".
+// `ASMLIFT_CANDCACHE=VERIFY` used to mean SERVE — the audit mode lost to a capitalisation, and a
+// Gate-E run typed that way reported `{"hit":…}` and looked clean. `false` and `no` are the two
+// spellings a person reaches for to disable it, and both used to enable it.
+const OFF_WORDS = new Set(['', '0', 'off', 'false', 'no', 'n', 'disable', 'disabled']);
+const ON_WORDS = new Set(['1', 'on', 'true', 'yes', 'y', 'enable', 'enabled']);
+const RAW = (process.env.ASMLIFT_CANDCACHE ?? '').trim();
+const LOWER = RAW.toLowerCase();
+// `ASMLIFT_BENCH_CACHE=0` is documented (apps/benchmark/src/cache.ts) as "bypass the benchmark's
+// caches". It has to mean this one too, or a developer bisecting a suspect row bypasses half the
+// caching in the harness and still gets candidate objects off disk.
+const BENCH_CACHE_OFF = process.env.ASMLIFT_BENCH_CACHE === '0';
+const MODE: CandCacheMode = ((): CandCacheMode => {
+  if (LOWER === 'verify') {
+    return BENCH_CACHE_OFF ? 'off' : 'verify';
+  }
+  if (OFF_WORDS.has(LOWER)) {
+    return 'off';
+  }
+  if (ON_WORDS.has(LOWER)) {
+    return BENCH_CACHE_OFF ? 'off' : 'on';
+  }
+  say(
+    `REFUSED reason=unrecognised-mode ASMLIFT_CANDCACHE=${JSON.stringify(RAW)} — the cache is OFF. ` +
+      `Say 0/off to disable, 1/on to serve, verify to audit.`,
+  );
+  return 'off';
+})();
+if (BENCH_CACHE_OFF && LOWER !== '' && !OFF_WORDS.has(LOWER)) {
+  say(`OFF because ASMLIFT_BENCH_CACHE=0 bypasses every cache in the harness, ASMLIFT_CANDCACHE=${RAW} included`);
+}
 
 /** The mode this process is running in — `off` unless ASMLIFT_CANDCACHE says otherwise. */
 export const cacheMode = (): CandCacheMode => MODE;
@@ -57,8 +101,12 @@ const bump = (k: string, n = 1): void => {
   STATS[k] = (STATS[k] ?? 0) + n;
 };
 /** Counters for the run's `[candcache]` line: hit / failHit / miss / stored / failStored /
- *  verified / mismatch / refused / pruned*. Empty object when nothing happened. */
+ *  verified / verifiedFail / mismatch / refused / pruned*. Empty object when nothing happened. */
 export const cacheStats = (): Record<string, number> => ({ ...STATS });
+/** How many stored answers a fresh compile disagreed with, in either direction. A run that ends
+ *  with this nonzero has served (or would have served) bytes the toolchain no longer produces:
+ *  the gate that reads it must FAIL, not print. */
+export const cacheMismatches = (): number => STATS.mismatch ?? 0;
 
 const ROOT = process.env.ASMLIFT_CANDCACHE_DIR ?? join(tmpdir(), 'asmlift-candcache');
 const OBJECTS = join(ROOT, 'objects');
@@ -67,35 +115,233 @@ const OBJECTS = join(ROOT, 'objects');
  *  `pnpm test:matching`'s teardown fails on, and the counters live only in the process that
  *  compiled (vitest runs its tests in a forked worker, its globalSetup in the parent). */
 export const MISMATCH_LOG = join(ROOT, 'MISMATCHES.log');
-/** Distinct-byte cap for the whole store. 65,280 LBG candidate objects are 144.9 MB logical but
- *  only 14,484 distinct = 32.1 MB, so the cap is counted over `objects/` (the distinct bytes) —
- *  the hardlinks in `ns/` cost an inode each, not a copy. */
-const CAP_BYTES = Number(process.env.ASMLIFT_CANDCACHE_MAX_MB ?? 4096) * 1024 * 1024;
+
+// ---------------------------------------------------------------------------------------------
+// The CAP. It bounds what the store COSTS, which is not what `objects/` weighs: 77% of a warm
+// store's entries are cached REJECTIONS, written straight into `ns/`, and on APFS a 200-byte
+// `.fail` costs a whole allocation block. Measured on one full-bench store: `objects/` 7.57 MB
+// against `du -sm` 156 MB — a cap counting only the first sees 4.9% of the cost and fires after
+// roughly 540 bench runs. So the cost is the distinct object bytes PLUS one block per `ns/` entry.
+const BLOCK_BYTES = 4096;
+const RAW_CAP = process.env.ASMLIFT_CANDCACHE_MAX_MB;
+const CAP_MB = ((): number => {
+  if (RAW_CAP === undefined || RAW_CAP.trim() === '') {
+    return 4096;
+  }
+  const n = Number(RAW_CAP);
+  if (!Number.isFinite(n) || n < 0) {
+    // NaN silently disabled BOTH the prune and its own over-cap warning: the store then grew
+    // without bound with no output at all.
+    say(`ignoring ASMLIFT_CANDCACHE_MAX_MB=${JSON.stringify(RAW_CAP)} — want a non-negative number of MB; using 4096`);
+    return 4096;
+  }
+  return n;
+})();
+const CAP_BYTES = CAP_MB * 1024 * 1024;
 
 const sha = (b: Buffer | string): string => createHash('sha256').update(b).digest('hex');
 
-const say = (msg: string): void => {
-  process.stderr.write(`[candcache] ${msg}\n`);
+// ---------------------------------------------------------------------------------------------
+// WHAT A KEY MAY NOT COVER — the per-candidate refusal.
+//
+// The namespace measures the pipeline. It cannot measure an input the CANDIDATE names: a header
+// the TU includes, or the TU's own path baked in by `__FILE__`. Those are refused per key, so the
+// cache stays on for every other candidate.
+//
+// The `#include` test runs on RAW TU text, and the preprocessor gets there first: translation
+// phase 2 splices backslash-newlines and phase 3 replaces comments, so `#in\<newline>clude`,
+// `#/*c*/include`, a form feed before the `#`, and `#import` are all real includes that a
+// `/^[ \t]*#[ \t]*include/m` never sees. Six such spellings were demonstrated. Normalise the way
+// the preprocessor does, then look.
+const PATH_OR_CLOCK_MACRO = /\b(__FILE__|__BASE_FILE__|__DATE__|__TIME__|__TIMESTAMP__|__INCLUDE_LEVEL__)\b/;
+
+/** The reason this TU may not be cached under a pipeline namespace, or undefined. */
+export function candidateCacheRefusal(tu: string): string | undefined {
+  // phase 1: the trigraph for `#` (only under -trigraphs, but refuse rather than reason about flags)
+  let t = tu.replaceAll('??=', '#');
+  // phase 2: splice line continuations
+  t = t.replace(/\\[ \t]*\r?\n/g, '');
+  // phase 3: comments become one space each, KEEPING newlines so line starts survive
+  t = t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+  if (/(^|[\r\n])[ \t\f\v]*#[ \t\f\v]*(include|include_next|import)\b/.test(t)) {
+    return 'the-TU-reads-a-file';
+  }
+  // A TU using __FILE__/__DATE__ is not a pure function of its own bytes: the object carries the
+  // scratch path or the wall clock. MEASURED: three uncached compiles of one such TU produced
+  // three different 836-byte objects through the very namespace the bench uses, and the stamp
+  // probe — one fixed TU that uses neither — certified the pipeline pure.
+  if (PATH_OR_CLOCK_MACRO.test(t)) {
+    return 'the-TU-bakes-its-path-or-the-clock-into-the-object';
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------------------------
+// WHAT A NAMESPACE MUST FOLLOW — the delegate chain.
+//
+// Hashing "the file a command name resolves to" stops one level short. On the machine this was
+// found on, `cpp` resolves to a 208-byte `#!/bin/sh` shim that `exec`s Homebrew's `cpp-14`; the
+// namespace hashed the shim, and repointing the Cellar symlink served a stale object while the
+// shim stayed byte-identical. `arm-none-eabi-cpp` is the same shape one level down: a driver
+// binary that execs `libexec/gcc/arm-none-eabi/14.2.1/cc1`.
+//
+// So an executable is expanded into the CHAIN of files that actually run, and where the chain
+// cannot be followed the cache REFUSES rather than hashing a stand-in:
+//   • a script is hashed AND followed — its interpreter, and every token naming a file or
+//     resolving on $PATH;
+//   • a script that COMPUTES its delegate (`$(...)`, backticks, `eval`) is a refusal;
+//   • a gcc-style driver is asked where its sub-program is (`-print-prog-name=cc1`);
+//   • too deep, or too wide, is a refusal.
+const SCRIPT_COMPUTES_ITS_DELEGATE = /\$\(|`|(^|[\s;&|])eval[\s]/;
+const GCC_DRIVER = /(^|[-/])(cpp|gcc|cc|g\+\+)(-[\d.]+)?$/;
+const CHAIN_MAX_DEPTH = 8;
+const CHAIN_MAX_FILES = 64;
+
+const looksBinary = (p: string): boolean => {
+  const fd = openSync(p, 'r');
+  try {
+    const buf = Buffer.alloc(8192);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    return buf.subarray(0, n).includes(0);
+  } finally {
+    closeSync(fd);
+  }
 };
 
+const resolveOnPath = (cmd: string): string | undefined => {
+  const r = spawnSync('sh', ['-c', `command -v ${JSON.stringify(cmd)}`], { encoding: 'utf8' });
+  const p = (r.stdout ?? '').trim();
+  return p !== '' && isAbsolute(p) && existsSync(p) ? p : undefined;
+};
+
+/** Ask a gcc-style driver for the sub-program it execs. Only absolute, existing answers count;
+ *  only names that look like a driver are asked at all (agbcc is cc1 itself and takes no such
+ *  flag), stdin is closed and the probe is bounded, so a wrong guess costs a spawn. */
+const driverSubprograms = (p: string): string[] => {
+  if (!GCC_DRIVER.test(basename(p))) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const what of ['cc1', 'as', 'cpp']) {
+    const r = spawnSync(p, [`-print-prog-name=${what}`], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 20_000,
+    });
+    const ans = (r.stdout ?? '').trim();
+    if (isAbsolute(ans) && existsSync(ans)) {
+      out.push(ans);
+    }
+  }
+  return out;
+};
+
+function expandExecutable(p: string, out: Set<string>, depth: number): void {
+  let real: string;
+  try {
+    real = realpathSync(p);
+  } catch {
+    throw new Error(`namespace input cannot be resolved: ${p}`);
+  }
+  if (out.has(real)) {
+    return;
+  }
+  if (depth > CHAIN_MAX_DEPTH) {
+    throw new Error(`namespace delegate chain deeper than ${CHAIN_MAX_DEPTH} at ${real}`);
+  }
+  out.add(real);
+  if (out.size > CHAIN_MAX_FILES) {
+    throw new Error(`namespace delegate chain wider than ${CHAIN_MAX_FILES} files at ${real}`);
+  }
+  if (looksBinary(real)) {
+    for (const sub of driverSubprograms(real)) {
+      expandExecutable(sub, out, depth + 1);
+    }
+    return;
+  }
+  // A text executable is a script: what it EXECS is the compiler, and the script's own bytes are
+  // not that compiler.
+  const text = readFileSync(real, 'utf8');
+  if (SCRIPT_COMPUTES_ITS_DELEGATE.test(text)) {
+    throw new Error(
+      `${real} computes the program it runs (a command substitution or eval), so its delegate ` +
+        `cannot be hashed — the cache refuses rather than hash a stand-in`,
+    );
+  }
+  const first = text.split('\n', 1)[0] ?? '';
+  const tokens = text.split(/[\s"'<>|;&()=]+/);
+  if (first.startsWith('#!')) {
+    tokens.unshift(first.slice(2).trim().split(/\s+/)[0] ?? '');
+  }
+  for (const tok of tokens) {
+    if (!tok || tok.length > 300) {
+      continue;
+    }
+    if (isAbsolute(tok)) {
+      if (existsSync(tok) && statSync(tok).isFile()) {
+        expandExecutable(tok, out, depth + 1);
+      }
+      continue;
+    }
+    if (/^[A-Za-z][\w.+-]*$/.test(tok)) {
+      const r = resolveOnPath(tok);
+      if (r) {
+        expandExecutable(r, out, depth + 1);
+      }
+    }
+  }
+}
+
+/**
+ * Every FILE that actually runs when `cmd` is invoked — the resolved program, whatever it
+ * delegates to, and so on. `cmd` may be a path or a bare name resolved on `$PATH`.
+ *
+ * Returns a single `UNRESOLVED:<cmd>` marker when the command is not on this `$PATH` at all
+ * (that IS the measurement), and THROWS when the chain cannot be followed. A throw reaches
+ * `candCache` as a loud refusal, which is the only sound answer: a namespace that guesses at a
+ * delegate it cannot read is a namespace that serves stale objects.
+ */
+export function toolchainFileChain(cmd: string): string[] {
+  const out = new Set<string>();
+  let start: string | undefined;
+  if (cmd.includes('/')) {
+    start = existsSync(cmd) ? resolve(cmd) : undefined;
+  } else {
+    start = resolveOnPath(cmd);
+  }
+  if (start === undefined) {
+    return [`UNRESOLVED:${cmd}`];
+  }
+  expandExecutable(start, out, 0);
+  return [...out];
+}
+
+// ---------------------------------------------------------------------------------------------
 // The store:
 //
 //   objects/<ab>/<sha256 of the object bytes>   content-addressed, immutable, deduped
 //   ns/<ns16>/<ab>/<key>.o                      a HARDLINK to the object above
 //   ns/<ns16>/<ab>/<key>.fail                   a negative entry (the diagnostic text)
+//   ns/<ns16>/.live/<pid>-<rand>                a LEASE: this namespace has a live reader
 //
 // Two levels because the redundancy is 4.51x on LBG and 2.53x on the bench: the same object is
 // reached by many keys. Hardlinks make the second level free, and let a prune that deletes one
 // key's link leave every other key's answer intact.
 
 function writeAtomic(path: string, data: Buffer | string): void {
-  const tmp = `${path}.tmp${process.pid}`;
+  const tmp = `${path}.tmp${process.pid}.${(seq += 1)}`;
   writeFileSync(tmp, data);
   renameSync(tmp, path);
 }
+let seq = 0;
 
 /** Put the bytes into `objects/` (deduping) and hardlink them at `dest`. Falls back to a copy
  *  when the link cannot be made (EXDEV / EMLINK) — correctness never depends on the link.
+ *
+ *  The replacement is ATOMIC — link to a temp name, rename over `dest`. The obvious spelling
+ *  (`rmSync(dest)` then `linkSync`) DELETES THE ANSWER before replacing it, and a sibling process
+ *  reading that path in the window gets ENOENT on a key that is permanently in the store: 13
+ *  throws and 34 failed reads in 15,000 concurrent lookups, measured.
  *
  *  `distrustExisting` re-writes the content-addressed file even when one is already there. The
  *  store's whole economy rests on `objects/<sha>` holding the bytes it is named after, so on the
@@ -112,17 +358,96 @@ function linkInto(objBytes: Buffer, dest: string, distrustExisting = false): voi
     writeAtomic(objPath, objBytes);
   }
   mkdirSync(dirname(dest), { recursive: true });
-  rmSync(dest, { force: true });
+  const tmp = `${dest}.link${process.pid}.${(seq += 1)}`;
   try {
-    linkSync(objPath, dest);
-  } catch {
-    copyFileSync(objPath, dest);
+    try {
+      linkSync(objPath, tmp);
+    } catch {
+      copyFileSync(objPath, tmp);
+    }
+    renameSync(tmp, dest);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// LIVENESS. A prune runs in ONE process and deletes files EVERY process can be reading: `put`
+// hands the caller a path in `ns/` that the scorer opens later, and `pnpm bench run` forks 8–16
+// shards over one store (the default ROOT is one directory shared by every asmlift process on the
+// box). A wall-clock grace window alone is not liveness — a run longer than the window, and the
+// `/match-function` ladder is hours, is unprotected. So a process CLAIMS the namespace it is
+// about to use with a lease file, and a pruner treats a namespace with a live lease as untouchable.
+const LEASE = `${process.pid}-${randomBytes(4).toString('hex')}`;
+const PRUNE_GRACE_MS = 60 * 60 * 1000;
+const leases: string[] = [];
+let leaseCleanupInstalled = false;
+
+const pidAlive = (pid: number): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+function claimNamespace(nsDir: string): void {
+  const live = join(nsDir, '.live');
+  mkdirSync(live, { recursive: true });
+  const p = join(live, LEASE);
+  writeFileSync(p, `${process.pid}\n`);
+  leases.push(p);
+  if (!leaseCleanupInstalled) {
+    leaseCleanupInstalled = true;
+    process.on('exit', () => {
+      for (const l of leases) {
+        try {
+          rmSync(l, { force: true });
+        } catch {
+          /* a lease left behind is reclaimed by the next pruner's pid check */
+        }
+      }
+    });
+  }
+}
+
+/** Is any process still holding this namespace? A lease whose pid is gone is swept. */
+function namespaceIsLive(nsDir: string, ignoreOwn = false): boolean {
+  const live = join(nsDir, '.live');
+  let names: string[];
+  try {
+    names = readdirSync(live);
+  } catch {
+    return false;
+  }
+  let anyLive = false;
+  for (const n of names) {
+    if (ignoreOwn && n === LEASE) {
+      continue;
+    }
+    if (pidAlive(Number(n.split('-')[0]))) {
+      anyLive = true;
+      continue;
+    }
+    try {
+      rmSync(join(live, n), { force: true });
+    } catch {
+      /* someone else swept it first */
+    }
+  }
+  return anyLive;
+}
+
 /** Delete every `objects/` entry no key links to any more, and return the surviving byte total.
- *  Hardlinks mean deleting an `ns/` link alone frees nothing: `nlink === 1` is the test. */
-function reapUnlinked(): number {
+ *  Hardlinks mean deleting an `ns/` link alone frees nothing: `nlink === 1` is the test — but a
+ *  `put` in ANOTHER process writes `objects/<sha>` and links it a moment later, so an object
+ *  younger than the grace window is left alone rather than reaped out of that window. */
+function reapUnlinked(cutoff: number): number {
   let total = 0;
   for (const ab of readdirSync(OBJECTS, { withFileTypes: true })) {
     if (!ab.isDirectory()) {
@@ -130,8 +455,11 @@ function reapUnlinked(): number {
     }
     for (const f of readdirSync(join(OBJECTS, ab.name))) {
       const p = join(OBJECTS, ab.name, f);
-      const st = statSync(p);
-      if (st.nlink === 1) {
+      const st = statSync(p, { throwIfNoEntry: false });
+      if (st === undefined) {
+        continue;
+      }
+      if (st.nlink === 1 && st.mtimeMs < cutoff) {
         rmSync(p, { force: true });
         bump('prunedObjects');
       } else {
@@ -142,19 +470,67 @@ function reapUnlinked(): number {
   return total;
 }
 
-// Run ONCE per process, at the first namespace resolution, and NEVER while candidates are in
-// flight: a served object is handed out BY PATH and read later by the scorer, so a concurrent
-// prune would delete a file out from under a live reader. The unit is a NAMESPACE — one
-// namespace is exactly one toolchain configuration, and a namespace nobody touched is dead
-// weight in full.
-//
-// `keepNs` alone is not enough, because the store is SHARED ACROSS PROCESSES: `pnpm bench run`
-// forks 8-16 shards, and a shard compiling for agbcc must not evict the namespace a sibling shard
-// compiling for another toolchain is reading objects out of by path. So a namespace touched
-// within the grace window is treated as possibly live and is never evicted. An hour is long
-// enough to cover any run this repo has (the longest measured is ~15 min) and short enough that
-// yesterday's namespaces are still reclaimable.
-const PRUNE_GRACE_MS = 60 * 60 * 1000;
+/** What the store costs on disk: the distinct object bytes plus one allocation block per `ns/`
+ *  entry. The `.fail` half is 77% of all entries and weighs nothing logically — it is inodes and
+ *  blocks, and that is what runs a disk out. */
+function storeCost(): { bytes: number; entries: number } {
+  let bytes = 0;
+  let entries = 0;
+  try {
+    for (const ab of readdirSync(OBJECTS, { withFileTypes: true })) {
+      if (!ab.isDirectory()) {
+        continue;
+      }
+      for (const f of readdirSync(join(OBJECTS, ab.name))) {
+        bytes += statSync(join(OBJECTS, ab.name, f), { throwIfNoEntry: false })?.size ?? 0;
+      }
+    }
+  } catch {
+    /* no objects yet */
+  }
+  try {
+    for (const ns of readdirSync(join(ROOT, 'ns'), { withFileTypes: true })) {
+      if (!ns.isDirectory()) {
+        continue;
+      }
+      for (const ab of readdirSync(join(ROOT, 'ns', ns.name), { withFileTypes: true })) {
+        if (!ab.isDirectory() || ab.name.startsWith('.')) {
+          continue;
+        }
+        entries += readdirSync(join(ROOT, 'ns', ns.name, ab.name)).length;
+      }
+    }
+  } catch {
+    /* no namespaces yet */
+  }
+  return { bytes: bytes + entries * BLOCK_BYTES, entries };
+}
+
+/** Every key file in a namespace, oldest first. */
+function keysOf(nsDir: string): { path: string; at: number }[] {
+  const out: { path: string; at: number }[] = [];
+  for (const ab of readdirSync(nsDir, { withFileTypes: true })) {
+    if (!ab.isDirectory() || ab.name.startsWith('.')) {
+      continue;
+    }
+    for (const f of readdirSync(join(nsDir, ab.name))) {
+      const p = join(nsDir, ab.name, f);
+      const st = statSync(p, { throwIfNoEntry: false });
+      if (st) {
+        out.push({ path: p, at: st.mtimeMs });
+      }
+    }
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+
+// Run ONCE per process, at the first namespace resolution and BEFORE this process claims its
+// lease, and NEVER while candidates are in flight. The unit is a NAMESPACE — one namespace is
+// exactly one toolchain configuration, and a namespace nobody holds is dead weight in full. When
+// the only namespace left is the one this process is about to use, the cap falls back to evicting
+// that namespace's OLDEST KEYS, which is the only way it can ever fire on a single-toolchain
+// machine — and only when no other process holds a lease on it and nobody has resolved it within
+// the grace window.
 let pruned = false;
 function pruneOnce(keepNs: string): void {
   if (pruned) {
@@ -162,16 +538,8 @@ function pruneOnce(keepNs: string): void {
   }
   pruned = true;
   try {
-    let distinct = 0;
-    for (const ab of readdirSync(OBJECTS, { withFileTypes: true })) {
-      if (!ab.isDirectory()) {
-        continue;
-      }
-      for (const f of readdirSync(join(OBJECTS, ab.name))) {
-        distinct += statSync(join(OBJECTS, ab.name, f)).size;
-      }
-    }
-    if (distinct <= CAP_BYTES) {
+    let cost = storeCost().bytes;
+    if (cost <= CAP_BYTES) {
       return;
     }
     const nsRoot = join(ROOT, 'ns');
@@ -179,19 +547,40 @@ function pruneOnce(keepNs: string): void {
     const namespaces = readdirSync(nsRoot, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name !== keepNs)
       .map((d) => ({ name: d.name, at: statSync(join(nsRoot, d.name)).mtimeMs }))
-      .filter((d) => d.at < cutoff)
+      .filter((d) => d.at < cutoff && !namespaceIsLive(join(nsRoot, d.name)))
       .sort((a, b) => a.at - b.at);
     for (const ns of namespaces) {
-      if (distinct <= CAP_BYTES * 0.8) {
+      if (cost <= CAP_BYTES * 0.8) {
         break;
       }
       rmSync(join(nsRoot, ns.name), { recursive: true, force: true });
       bump('prunedNamespaces');
-      distinct = reapUnlinked();
+      cost = reapUnlinked(cutoff) + storeCost().entries * BLOCK_BYTES;
     }
-    if (distinct > CAP_BYTES) {
+    const keepDir = join(nsRoot, keepNs);
+    if (
+      cost > CAP_BYTES * 0.8 &&
+      existsSync(keepDir) &&
+      !namespaceIsLive(keepDir, true) &&
+      statSync(keepDir).mtimeMs < cutoff
+    ) {
+      const keys = keysOf(keepDir);
+      let i = 0;
+      while (cost > CAP_BYTES * 0.8 && i < keys.length) {
+        rmSync(keys[i].path, { force: true });
+        bump('prunedKeys');
+        i += 1;
+        if (i % 512 === 0) {
+          cost = reapUnlinked(cutoff) + storeCost().entries * BLOCK_BYTES;
+        }
+      }
+      cost = reapUnlinked(cutoff) + storeCost().entries * BLOCK_BYTES;
+    }
+    if (cost > CAP_BYTES) {
       say(
-        `store holds ${(distinct / 1048576).toFixed(0)} MB of distinct bytes over a ${CAP_BYTES / 1048576} MB cap, and every namespace left is either in use or younger than the ${PRUNE_GRACE_MS / 60000}-minute grace window — not pruning it`,
+        `store costs ${(cost / 1048576).toFixed(0)} MB over a ${CAP_MB} MB cap, and everything left is either ` +
+          `held by a live process or younger than the ${PRUNE_GRACE_MS / 60000}-minute grace window — not pruning it. ` +
+          `Drop it by hand with: rm -rf ${ROOT}`,
       );
     }
   } catch {
@@ -208,17 +597,22 @@ export interface CandCache {
    *  object. That exact ordering poisoned 8 keys and flipped 2 benchmark rows once already. */
   warm(): void;
   /** The stored answer: an object PATH, an Error (a stored deterministic rejection), or
-   *  undefined for a miss. */
+   *  undefined for a miss. A store racing with another process is a MISS, never a throw. */
   get(key: string, symbol: string): string | Error | undefined;
   /** Store `objPath`'s bytes and return the path to serve — the STORE's path, so a warm run and
    *  a cold run hand the caller the same kind of stable read-only path. */
   put(key: string, symbol: string, objPath: string): string;
-  /** Store a DETERMINISTIC rejection (the compiler ran and said no). Never a spawn failure or a
-   *  timeout: a transient stored as a rejection would drop that candidate on every future run. */
+  /** Store a DETERMINISTIC rejection (the compiler ran and said no). Never a spawn failure, a
+   *  timeout or a signal: a transient stored as a rejection drops that candidate on every future
+   *  run. */
   putFail(key: string, symbol: string, message: string): void;
-  /** verify mode only: compare the stored bytes for this key against the freshly compiled ones
-   *  and count. A mismatch is reported loudly and the fresh bytes win. */
+  /** verify mode only, fresh compile SUCCEEDED: compare the stored answer against it. Differing
+   *  bytes are a mismatch; so is a stored REJECTION, which would have dropped this candidate. */
   verify(key: string, symbol: string, objPath: string): void;
+  /** verify mode only, fresh compile was a DETERMINISTIC REJECTION: a stored OBJECT for this key
+   *  is a mismatch — it would have been scored as a candidate that no longer compiles. This is
+   *  the half of the store (77% of served answers) that verify mode used to never look at. */
+  verifyFail(key: string, symbol: string, message: string): void;
 }
 
 const OFF: CandCache = {
@@ -228,6 +622,7 @@ const OFF: CandCache = {
   put: (_k, _s, o) => o,
   putFail() {},
   verify() {},
+  verifyFail() {},
 };
 
 /**
@@ -270,18 +665,31 @@ export function candCache(label: string, stamp: () => string): CandCache {
     if (process.env.ASMLIFT_CANDCACHE_TRACE) {
       say(`ns label=${label} ns=${ns}`);
     }
-    mkdirSync(join(ROOT, 'ns', ns), { recursive: true });
+    const nsDir = join(ROOT, 'ns', ns);
+    mkdirSync(nsDir, { recursive: true });
     mkdirSync(OBJECTS, { recursive: true });
-    utimesSync(join(ROOT, 'ns', ns), new Date(), new Date());
+    utimesSync(nsDir, new Date(), new Date());
     pruneOnce(ns);
+    claimNamespace(nsDir);
     return ns;
   };
 
   // The key is over the namespace TOO, so a stored answer can never be read under a different
   // toolchain even if the directory layout were tampered with.
   const pathFor = (n: string, key: string, symbol: string, ext: 'o' | 'fail'): string => {
-    const k = sha(`${label} ${n} ${symbol} ${key}`);
+    const k = sha(`${label} ${n} ${symbol} ${key}`);
     return join(ROOT, 'ns', n, k.slice(0, 2), `${k}.${ext}`);
+  };
+
+  const report = (line: string): void => {
+    bump('mismatch');
+    say(line);
+    try {
+      mkdirSync(ROOT, { recursive: true });
+      appendFileSync(MISMATCH_LOG, `${line}\n`);
+    } catch {
+      /* the stderr line is the primary record; an unwritable store must not mask it */
+    }
   };
 
   return {
@@ -296,15 +704,22 @@ export function candCache(label: string, stamp: () => string): CandCache {
       if (n === undefined) {
         return undefined;
       }
-      const o = pathFor(n, key, symbol, 'o');
-      if (existsSync(o) && statSync(o).size > 0) {
-        bump('hit');
-        return o;
+      try {
+        const o = pathFor(n, key, symbol, 'o');
+        const st = statSync(o, { throwIfNoEntry: false });
+        if (st !== undefined && st.isFile() && st.size > 0) {
+          bump('hit');
+          return o;
+        }
+      } catch {
+        /* a store being rewritten under us is a MISS: recompiling is always correct */
       }
-      const f = pathFor(n, key, symbol, 'fail');
-      if (existsSync(f)) {
+      try {
+        const text = readFileSync(pathFor(n, key, symbol, 'fail'), 'utf8');
         bump('failHit');
-        return new Error(readFileSync(f, 'utf8'));
+        return new Error(text);
+      } catch {
+        /* no negative entry, or it vanished — either way, a miss */
       }
       bump('miss');
       return undefined;
@@ -314,12 +729,21 @@ export function candCache(label: string, stamp: () => string): CandCache {
       if (n === undefined) {
         return objPath;
       }
-      const bytes = readFileSync(objPath);
+      let bytes: Buffer;
+      try {
+        bytes = readFileSync(objPath);
+      } catch {
+        return objPath; // the caller's own object is the answer; storing it is best-effort
+      }
       if (bytes.length === 0) {
         return objPath; // an empty object is not an answer; the caller's own guards speak
       }
       const dest = pathFor(n, key, symbol, 'o');
-      linkInto(bytes, dest);
+      try {
+        linkInto(bytes, dest);
+      } catch {
+        return objPath;
+      }
       bump('stored');
       return dest;
     },
@@ -329,9 +753,13 @@ export function candCache(label: string, stamp: () => string): CandCache {
         return;
       }
       const dest = pathFor(n, key, symbol, 'fail');
-      mkdirSync(dirname(dest), { recursive: true });
-      writeAtomic(dest, message);
-      bump('failStored');
+      try {
+        mkdirSync(dirname(dest), { recursive: true });
+        writeAtomic(dest, message);
+        bump('failStored');
+      } catch {
+        /* a store that cannot be written is a cold store */
+      }
     },
     verify(key, symbol, objPath) {
       if (MODE !== 'verify') {
@@ -342,23 +770,62 @@ export function candCache(label: string, stamp: () => string): CandCache {
         return;
       }
       const stored = pathFor(n, key, symbol, 'o');
+      const storedFail = pathFor(n, key, symbol, 'fail');
+      let fresh: Buffer;
+      try {
+        fresh = readFileSync(objPath);
+      } catch {
+        return;
+      }
+      if (existsSync(storedFail)) {
+        // The direction nothing was auditing: the store says this candidate does not compile and
+        // it does. Served under `on`, that spelling is silently dropped from the row's fan.
+        bump('verifiedFail');
+        report(
+          `OUTCOME MISMATCH label=${label} ns=${n} symbol=${symbol} stored=rejection fresh=object:${sha(fresh).slice(0, 16)}:${fresh.length}`,
+        );
+        rmSync(storedFail, { force: true });
+        linkInto(fresh, stored, true);
+        return;
+      }
       if (!existsSync(stored)) {
         return;
       }
       bump('verified');
       const a = readFileSync(stored);
-      const b = readFileSync(objPath);
-      if (!a.equals(b)) {
-        bump('mismatch');
-        const line = `BYTE MISMATCH label=${label} ns=${n} symbol=${symbol} stored=${sha(a).slice(0, 16)}:${a.length} fresh=${sha(b).slice(0, 16)}:${b.length}`;
-        say(line);
-        try {
-          mkdirSync(ROOT, { recursive: true });
-          appendFileSync(MISMATCH_LOG, `${line}\n`);
-        } catch {
-          /* the stderr line is the primary record; an unwritable store must not mask it */
-        }
-        linkInto(b, stored, true); // the fresh bytes are the truth, whatever the store holds
+      if (!a.equals(fresh)) {
+        report(
+          `BYTE MISMATCH label=${label} ns=${n} symbol=${symbol} stored=${sha(a).slice(0, 16)}:${a.length} fresh=${sha(fresh).slice(0, 16)}:${fresh.length}`,
+        );
+        linkInto(fresh, stored, true); // the fresh bytes are the truth, whatever the store holds
+      }
+    },
+    verifyFail(key, symbol, message) {
+      if (MODE !== 'verify') {
+        return;
+      }
+      const n = namespace();
+      if (n === undefined) {
+        return;
+      }
+      const stored = pathFor(n, key, symbol, 'o');
+      const storedFail = pathFor(n, key, symbol, 'fail');
+      if (existsSync(stored)) {
+        // The store holds an OBJECT for a TU that no longer compiles: served under `on` it would
+        // be scored as a candidate the toolchain now rejects.
+        bump('verified');
+        report(
+          `OUTCOME MISMATCH label=${label} ns=${n} symbol=${symbol} stored=object fresh=rejection: ${message.split('\n')[0].slice(0, 120)}`,
+        );
+        rmSync(stored, { force: true });
+        writeAtomic(storedFail, message);
+        return;
+      }
+      if (existsSync(storedFail)) {
+        // The OUTCOME is what is compared, not the diagnostic text: a compiler's message can
+        // carry a scratch path or a line the harness reformats, and neither is the answer the
+        // cache serves. Agreement here is what makes the negative half of the store audited at all.
+        bump('verifiedFail');
       }
     },
   };
