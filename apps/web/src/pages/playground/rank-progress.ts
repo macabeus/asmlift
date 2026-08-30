@@ -1,21 +1,17 @@
-// asmlift webapp — the ranking PROGRESS model: the phases a browser ranking passes through, the
-// emission throttle, and the pure props the UI renders a bar from.
+// asmlift webapp — the ranking PROGRESS model: the phases a browser ranking passes through, and
+// the emission throttle that bounds how often they cross a postMessage boundary. The SENTENCES and
+// the bar geometry are one altitude up, in progress-view.ts — the driver that emits progress must
+// not have to reach through the UI's copy to do it.
 //
-// WHY IT IS ITS OWN MODULE. Two reasons, both load-bearing. (1) score-wasm.ts imports the `agbcc`
+// WHY IT IS ITS OWN MODULE rather than living in score-wasm.ts: score-wasm.ts imports the `agbcc`
 // package, which cannot be imported under vitest (candidate-compile.test.ts's header documents
 // why), and apps/web has no jsdom — so anything that needs a test has to be a plain function
-// outside both. (2) The throttle and the labels are shared by the worker driver and by two views
-// (RankBadge, RankCandidates); one copy is how they cannot drift into saying different things
-// about the same run.
+// outside both.
 //
-// THE HONESTY RULES THIS FILE ENCODES:
-//  • The total does not exist until `enumerateCandidates` has returned, so four of the five
-//    phases are INDETERMINATE and carry no number at all. No estimate, no "0 %" of an unknown
-//    denominator — a fabricated total is a lie the user cannot check.
-//  • A determinate bar is rendered ONLY while scoring, and the scoring phase ends by moving to
-//    `ranking`, not by sitting at done === total. The fill is additionally clamped below 100 so
-//    the pixels never read "finished" while the sort + structured clone + render still run;
-//    `aria-valuenow` keeps the TRUE count, so assistive tech gets the exact number.
+// THE HONESTY RULE THIS FILE ENCODES: the total does not exist until `enumerateCandidates` has
+// returned, so four of the five phases are INDETERMINATE and carry no number at all — no estimate,
+// no "0 %" of an unknown denominator. A fabricated total is a lie the user cannot check, and the
+// type below makes one unspellable rather than merely discouraged.
 
 /** The phases a ranking passes through, in the order they run. Only `scoring` is determinate.
  *
@@ -40,51 +36,6 @@ export type RankPhase = 'queued' | 'assembling' | 'enumerating' | 'scoring' | 'r
 export type RankProgress =
   | { phase: Exclude<RankPhase, 'scoring'>; done?: undefined; total?: undefined }
   | { phase: 'scoring'; done: number; total: number };
-
-const PHASE_TEXT: Record<RankPhase, string> = {
-  queued: 'waiting for the ranking worker…',
-  assembling: 'assembling the target asm…',
-  enumerating: 'enumerating candidate spellings…',
-  scoring: 'scoring candidates with agbcc + objdiff…',
-  ranking: 'ranking scored candidates…',
-};
-
-/** The one sentence both the badge and the Pipeline card show, so they cannot disagree about what
- *  the run is doing. Determinate only when a REAL total is in hand. */
-export function progressLabel(p: RankProgress): string {
-  if (p.phase === 'scoring') {
-    return `scoring ${p.done.toLocaleString()} / ${p.total.toLocaleString()} candidates`;
-  }
-  return PHASE_TEXT[p.phase];
-}
-
-/** The bar's props, also discriminated: `pct`/`valueNow`/`valueMax` exist ONLY on the determinate
- *  arm. They used to be optional fields the indeterminate arm filled with `pct: 0` — a number no
- *  caller read, and the exact "0 % of an unknown denominator" this module's header forbids. */
-export type RankProgressBar =
-  | { determinate: false; label: string }
-  | {
-      determinate: true;
-      /** the EXACT count for `aria-valuenow` (the fill is clamped, this is not). */
-      valueNow: number;
-      valueMax: number;
-      /** the fill WIDTH in percent, clamped to 99 so a full bar never sits over unfinished work. */
-      pct: number;
-      label: string;
-    };
-
-export function progressBar(p: RankProgress): RankProgressBar {
-  const label = progressLabel(p);
-  // A ZERO total is a real emission — an enumeration that produced nothing, which then throws
-  // `no scorable candidate` — and it is NOT determinate: ARIA requires `aria-valuemax` to exceed
-  // `aria-valuemin`, so equal bounds leave the AT-computed percentage undefined. 0/0 has no
-  // percentage on either channel; the label still carries the true counts.
-  if (p.phase !== 'scoring' || p.total === 0) {
-    return { determinate: false, label };
-  }
-  const pct = Math.min(99, Math.round((100 * p.done) / p.total));
-  return { determinate: true, valueNow: p.done, valueMax: p.total, pct, label };
-}
 
 /** Wrap an emitter so it posts at most once per `intervalMs` of WALL TIME.
  *

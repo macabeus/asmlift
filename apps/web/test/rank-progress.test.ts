@@ -1,16 +1,16 @@
-// The playground's ranking PROGRESS, in the parts a node test can run: the emission throttle and
-// the pure view props the badge/pipeline card render from. They live in
-// src/pages/playground/rank-progress.ts rather than in score-wasm.ts for the reason
-// candidate-compile.test.ts documents: score-wasm.ts pulls in the `agbcc` package, which cannot be
-// imported under vitest's ESM loader.
+// The playground's ranking PROGRESS MODEL: the emission throttle (rank-progress.ts), the worker
+// message union, and the H1 stale-guard the ticks answer to. The SENTENCES and the bar geometry are
+// one altitude up and tested in progress-view.test.ts.
 //
-// The rules under test are the ones a lying bar would break:
-//  • the throttle bounds the postMessage rate but NEVER swallows a phase change or the final tick,
-//    so the bar cannot stop short of the end or sit on a stale phase for a whole tail;
-//  • an indeterminate phase has NO total — no fabricated denominator, no "0%".
+// These live outside score-wasm.ts for the reason candidate-compile.test.ts documents: score-wasm.ts
+// pulls in the `agbcc` package, which cannot be imported under vitest's ESM loader.
+//
+// The rule under test here is the one a lying bar would break: the throttle bounds the postMessage
+// rate but NEVER swallows a phase change or the final tick, so the bar cannot stop short of the end
+// or sit on a stale phase for a whole tail.
 import { describe, expect, test } from 'vitest';
 
-import { type RankProgress, progressBar, progressLabel, throttleProgress } from '../src/pages/playground/rank-progress';
+import { type RankProgress, throttleProgress } from '../src/pages/playground/rank-progress';
 import type { BrowserRanking, RankMessage } from '../src/pages/playground/score-wasm';
 import { type Ranking, applyRankMessage } from '../src/pages/playground/useRanking';
 
@@ -60,60 +60,6 @@ describe('throttleProgress', () => {
     advance(1);
     emit({ phase: 'scoring', done: 3, total: 3 }); // done === total: exempt from the throttle
     expect(seen.at(-1)).toEqual({ phase: 'scoring', done: 3, total: 3 });
-  });
-});
-
-describe('progressBar', () => {
-  test('an indeterminate phase carries NO total and no fabricated percentage', () => {
-    for (const phase of ['queued', 'assembling', 'enumerating', 'ranking'] as const) {
-      const bar = progressBar({ phase });
-      expect(bar.determinate).toBe(false);
-      expect('valueNow' in bar).toBe(false); // the ARIA spelling of indeterminate is OMISSION
-      expect('valueMax' in bar).toBe(false);
-      expect(bar.label).not.toMatch(/\d/); // no count, no "0%", no invented denominator
-    }
-  });
-
-  test('a determinate bar reports the exact counts and never fills to 100%', () => {
-    const bar = progressBar({ phase: 'scoring', done: 117760, total: 117760 });
-    if (!bar.determinate) {
-      throw new Error('a scoring tick with a real total must be determinate');
-    }
-    expect(bar.valueNow).toBe(117760); // aria-valuenow stays EXACT
-    expect(bar.valueMax).toBe(117760);
-    expect(bar.pct).toBeLessThanOrEqual(99); // the FILL never reads "finished" while work follows
-    expect(bar.label).toBe('scoring 117,760 / 117,760 candidates'); // grouped, not 117760
-  });
-
-  test('a zero total is indeterminate — no division by zero, and no equal ARIA bounds', () => {
-    // ARIA requires aria-valuemax > aria-valuemin; `0 / 0` on both would leave the AT-computed
-    // percentage undefined. The enumeration that produces it goes on to throw `no scorable
-    // candidate`, so this is a transient state — but it is a REACHABLE one.
-    const bar = progressBar({ phase: 'scoring', done: 0, total: 0 });
-    expect(bar.determinate).toBe(false);
-    expect('pct' in bar).toBe(false); // no "0 % of an unknown denominator" on the indeterminate arm
-  });
-
-  test('the indeterminate arm carries no pct at all — a number nobody may read', () => {
-    expect('pct' in progressBar({ phase: 'enumerating' })).toBe(false);
-  });
-});
-
-describe('progressLabel', () => {
-  test('`queued` is a phase the WORKER never emits — the main thread sets it, and it claims nothing', () => {
-    // The hook cannot observe `assembling`: it only knows it posted. On a busy worker (a superseded
-    // run enumerating for a measured 62.3 s) `assembling` would be false for the whole wait.
-    expect(progressLabel({ phase: 'queued' })).toBe('waiting for the ranking worker…');
-    expect(progressBar({ phase: 'queued' }).determinate).toBe(false);
-  });
-
-  test('every phase has a sentence — the badge is never empty', () => {
-    for (const phase of ['queued', 'assembling', 'enumerating', 'ranking'] as const) {
-      expect(progressLabel({ phase }).length).toBeGreaterThan(0);
-    }
-    // `scoring` is the one phase that CANNOT be spelled without counts — the union says so, and a
-    // count-less scoring tick is now a compile error rather than a defensive branch.
-    expect(progressLabel({ phase: 'scoring', done: 1, total: 2 })).toBe('scoring 1 / 2 candidates');
   });
 });
 

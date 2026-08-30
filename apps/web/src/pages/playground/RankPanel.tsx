@@ -7,7 +7,7 @@
 //    score, best first, plus the declarations asmlift refused to synthesize.
 import { renderDeclarations } from '@asmlift/core/declare';
 
-import { progressBar, progressLabel } from './rank-progress';
+import { progressBar, progressLabel } from './progress-view';
 import type { RefusedDeclaration } from './score-wasm';
 import type { Ranking } from './useRanking';
 

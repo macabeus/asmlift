@@ -29,7 +29,7 @@ import { assemble, compileToObject } from 'agbcc';
 import type * as ObjdiffWasm from 'objdiff-wasm';
 
 import { toolFailureLine } from './candidate-compile';
-import { type RankProgress, throttleProgress } from './rank-progress';
+import type { RankProgress } from './rank-progress';
 
 // ── Web-Worker protocol ──────────────────────────────────────────────────────────────────────
 // Scoring runs in a worker (rank.worker.ts) so the agbcc + objdiff wasm compiles never jank
@@ -212,9 +212,13 @@ export async function scoreObjectBytes(
  *  turns ranking off (it is gated to the agbcc target + C backend in Playground.tsx).
  *
  *  PROGRESS: `onProgress` (optional — the existing 4-arg call sites stay valid) is called with the
- *  phase, and with `done`/`total` once the candidate array exists. It is throttled HERE rather than
- *  in the worker because this is the only place that knows the loop index, and a second driver over
- *  this enumeration would inherit the throttle for free. */
+ *  phase, and with `done`/`total` once the candidate array exists. It is called for EVERY
+ *  candidate and is NOT throttled here: the rate limit is a property of the transport (a
+ *  postMessage per candidate is what would jank the main thread this worker exists to protect), so
+ *  it lives at that boundary, in rank.worker.ts. A closure call per candidate is free next to the
+ *  25-167 ms each one spends in agbcc + objdiff, and a second driver — a test rig, a node harness,
+ *  a future ETA estimator — gets to observe every candidate instead of inheriting a 10 Hz ceiling
+ *  it never asked for and cannot opt out of. */
 export async function rankCandidatesInBrowser(
   name: string,
   asm: string,
@@ -222,7 +226,7 @@ export async function rankCandidatesInBrowser(
   symbols?: SymbolMap,
   onProgress?: (p: RankProgress) => void,
 ): Promise<BrowserRanking> {
-  const emit = onProgress ? throttleProgress(onProgress) : () => {};
+  const emit: (p: RankProgress) => void = onProgress ?? (() => {});
 
   // ASSEMBLE FIRST. This used to run AFTER `enumerateCandidates`, and the ordering cost a measured
   // 62.3 s of discarded work on every pret-dialect `.s`: agbcc's `assemble()` hands the source to
