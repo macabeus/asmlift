@@ -11,6 +11,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { type RankProgress, progressBar, progressLabel, throttleProgress } from '../src/pages/playground/rank-progress';
+import type { RankMessage } from '../src/pages/playground/score-wasm';
 
 /** A hand-cranked clock: the throttle is keyed on elapsed WALL TIME (per-candidate cost was
  *  measured between 25 ms and 167 ms on one function, so a count-keyed throttle posts at wildly
@@ -95,5 +96,36 @@ describe('progressLabel', () => {
     for (const phase of ['assembling', 'enumerating', 'scoring', 'ranking'] as const) {
       expect(progressLabel({ phase }).length).toBeGreaterThan(0);
     }
+  });
+});
+
+// The worker protocol is now a THREE-shape union, so it is read on an explicit `kind` discriminant
+// rather than by sniffing for a property. A structural sniff is how a fourth message shape later
+// gets silently mis-routed — and mis-routing a progress message into the result branch would land
+// it in `{ status: 'error', error: undefined }`, a loud failure traded for a blank one.
+// (`score-wasm` is imported TYPE-ONLY here: the import is erased, so the `agbcc` package it pulls
+// in at runtime is never loaded.)
+function describeMessage(m: RankMessage): string {
+  switch (m.kind) {
+    case 'progress':
+      return `progress:${m.phase}`;
+    case 'result':
+      return m.ok ? `ok:${m.result.candidates.length}` : `error:${m.error}`;
+    default: {
+      const exhaustive: never = m;
+      return exhaustive;
+    }
+  }
+}
+
+describe('RankMessage', () => {
+  test('a progress message is discriminated by kind, never mistaken for a result', () => {
+    const progress: RankMessage = { kind: 'progress', reqId: 7, phase: 'scoring', done: 1, total: 2 };
+    expect(describeMessage(progress)).toBe('progress:scoring');
+    expect('ok' in progress).toBe(false);
+  });
+
+  test('both result shapes still route to the result branch', () => {
+    expect(describeMessage({ kind: 'result', reqId: 1, ok: false, error: 'boom' })).toBe('error:boom');
   });
 });

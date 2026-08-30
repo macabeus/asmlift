@@ -12,7 +12,7 @@ import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { useEffect, useRef, useState } from 'react';
 
-import type { BrowserRanking, RankRequest, RankResponse } from './score-wasm';
+import type { BrowserRanking, RankMessage, RankRequest } from './score-wasm';
 
 export type Ranking =
   | { status: 'off' } // not an agbcc/C run, or no valid input
@@ -42,8 +42,11 @@ export function useRanking(input: RankingInput): Ranking {
   // while its reqId is still the current one.
   useEffect(() => {
     const worker = new Worker(new URL('./rank.worker.ts', import.meta.url), { type: 'module' });
-    worker.onmessage = (e: MessageEvent<RankResponse>) => {
+    worker.onmessage = (e: MessageEvent<RankMessage>) => {
       const res = e.data;
+      if (res.kind !== 'result') {
+        return;
+      } // progress is carried in the next commit; routing it here would settle a run that is running
       if (res.reqId !== currentReqId.current) {
         return;
       } // superseded by a newer input — drop it
