@@ -16,21 +16,32 @@
 // from the tree it is handed, so the second pass cannot re-mint the first's. Merging two runs over
 // ONE input is the shape that would collide, and nothing here does it.
 //
-// WHICH KEY IS WITHHELD IS NOT DERIVABLE, so every admitted key is offered as its own candidate and
-// the differ referees — the same posture `/scopebase` and `/regionbase` take toward each other.
-// The withhold itself is DATA: one rejection prepended to the caller's own admission table, in the
-// `Gate<BaseKey>` type that table already has, so `firstRejection` names it and `ablateHeuristic`
-// can price it.
+// WHICH KEY IS WITHHELD IS NOT DERIVABLE, so every admitted key is offered as its own candidate,
+// LABELLED WITH THAT KEY, and the differ referees — the same posture `/scopebase` and `/regionbase`
+// take toward each other. The label carries `homeSplitTag(key)` because a candidate label is an
+// IDENTITY: `bench diff` and docs/ranked-repro.md compare candidates by it, so one label over two
+// withholds would hide a program swap from both. The withhold itself is DATA: one rejection
+// prepended to the caller's own admission table, in the `Gate<BaseKey>` type that table already
+// has, so `firstRejection` names it and `ablateHeuristic` can price it.
+//
+// EXACTLY ONE KEY IS WITHHELD, and the arity is a claim rather than an oversight. A withhold of two
+// keys is `/regionbase` on both plus a head home for the rest, and the two-key subsets only exist
+// at all where the caller's table binds three (`homesplit-fan-cap` admits no more) — one shape,
+// which `/regionbase` already spells whenever the third key is not hoistable. `l3/volatileptr.ts`'s
+// `volatileSubsetCandidates` enumerates proper subsets under the same cap and pays for it with the
+// full 2^n fan; here that is a doubling of the axis on the largest function it reaches, bought for
+// no row. Widen it when a row demands it, the way that one was.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION — both halves only re-spell where the address of a global
 // is materialized, and each half's own contracts (`placeBaseLocals`' ordering, `assertHoistsDominate`
 // on the region plan) still run. What the pairing can get WRONG is bytes, and one qualifier.
+import { inRange } from './address';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs, stmtLists } from './ast';
 import { type BaseKey, baseSites, hoistBaseLocals } from './basecse';
 import { type Gate, firstRejection } from './gates';
 import type { HoistPlacement } from './hoist';
-import { hoistScopedBases, planScopedBases, scopedBaseKey } from './scopebase';
+import { applyScopedBasePlan, planScopedBases, scopedBaseKey } from './scopebase';
 
 /** `gates` with `key` refused. The withhold goes FIRST so `firstRejection` attributes a refusal to
  *  it rather than to whichever inherited rule would also have fired. */
@@ -44,29 +55,25 @@ export const withholdingKey = (gates: readonly Gate<BaseKey>[], key: string): re
   ...gates,
 ];
 
-/** One candidate PAIRING, as the admission rules see it. */
-export interface HomeSplitCtx {
-  /** how many keys the caller's admission table binds — the pairing needs at least two */
-  readonly hoistableKeys: number;
-  /** the region rule gives the withheld key two or more locals */
-  readonly withheldSplits: boolean;
-  /** the withheld key is a DEVICE address and the piped tree leaves a READ of it inline */
-  readonly inlineDeviceRead: boolean;
+/** The withheld key as a LABEL token: `c:67109076 4 true` → `0x40000d4.4s`. Width and signedness
+ *  ride because they are part of the key — two keys over one address are two different spellings. */
+export function homeSplitTag(key: string): string {
+  const [id = '', width = '', signed = ''] = key.split(' ');
+  const base = id.startsWith('c:') ? `0x${Number(id.slice(2)).toString(16)}` : id.slice(id.indexOf(':') + 1);
+  return `${base}.${width}${signed === 'true' ? 's' : 'u'}`;
 }
 
-/** The pairing's admission. NONE is sound, and none is owed a `sound: true`: withholding a key from
- *  the head hoist and splitting it per region names the SAME ADDRESS in a different place (`keyOf`
- *  folds width and signedness into the key), the two rules that decide MEANING already live in
- *  `SCOPEBASE_ELIGIBILITY`, and a plan over a SUBSET of the keys admits nothing the all-keys plan
- *  did not. What these rules decide is bytes, fan, and one qualifier.
- *
- *  `homesplit-drops-device-volatile` is the one that protects a row rather than the fan.
- *  `/volatile` (l3/volatileptr.ts) qualifies MINTED POINTER LOCALS and `/vol-store` (l3/volstore.ts)
- *  a STORE at a fixed device address; a device READ left inline is reached by neither. Withholding
- *  a key is exactly what can leave one there — the head hoist would have homed it into a local
- *  `/volatile` covers — so the pairing declines rather than publish a spelling that silently drops
- *  a qualifier the spelling it replaces carried. */
-export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
+/** The FUNCTION-level half of the admission: how many keys the caller's table binds on this tree.
+ *  Nothing about one withheld key, which is why it is decided once (see `homeSplitWithholds`). */
+export interface HomeSplitFanCtx {
+  /** how many keys the caller's admission table binds — the pairing needs at least two */
+  readonly hoistableKeys: number;
+}
+
+/** The two rules that read the tree's KEY COUNT and nothing else. Asking them per candidate ran the
+ *  whole pipe — head hoist, region plan, rewrite, census — to be told the function has more than
+ *  three keys, which is a fact the caller holds before any of it. */
+export const HOMESPLIT_FAN_GATES: readonly Gate<HomeSplitFanCtx>[] = [
   {
     id: 'homesplit-degenerate',
     why: 'withholding the only hoistable key is `/regionbase`, and withholding none is `/livebase-block`',
@@ -79,6 +86,31 @@ export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
     sound: false,
     rejects: (c) => c.hoistableKeys > 3,
   },
+];
+
+/** One candidate PAIRING, as the per-key admission rules see it. */
+export interface HomeSplitCtx {
+  /** the region rule gives the withheld key two or more locals */
+  readonly withheldSplits: boolean;
+  /** the withheld key is a DEVICE address and the piped tree leaves a READ of it inline */
+  readonly inlineDeviceRead: boolean;
+}
+
+/** The pairing's PER-KEY admission. NONE is sound, and none is owed a `sound: true`: withholding a
+ *  key from the head hoist and splitting it per region names the SAME ADDRESS in a different place
+ *  (`keyOf` folds width and signedness into the key), the two rules that decide MEANING already
+ *  live in `SCOPEBASE_ELIGIBILITY`, and a plan over a SUBSET of the keys admits nothing the
+ *  all-keys plan did not. What these rules decide is bytes, fan, and one qualifier.
+ *
+ *  `homesplit-drops-device-volatile` is the one that protects a row rather than the fan.
+ *  `/volatile` (l3/volatileptr.ts) qualifies MINTED POINTER LOCALS and `/vol-store` (l3/volstore.ts)
+ *  a STORE at a fixed device address; a device READ left inline is reached by neither. Withholding
+ *  a key is exactly what can leave one there — the head hoist would have homed it into a local
+ *  `/volatile` covers — so the pairing declines rather than publish a spelling that silently drops
+ *  a qualifier the spelling it replaces carried. It asks about an ADDRESS, not about a node kind:
+ *  under a symbol map an absolute pool constant lifts to a `gaddr`, so a rule reading only `const`
+ *  bases would stand down on exactly the arm the benchmark runs (see `HomeSplitOpts.addressOf`). */
+export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
   {
     id: 'homesplit-no-region',
     why: 'a withheld key the region rule declines to split leaves the spelling the primary carries',
@@ -93,28 +125,45 @@ export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
   },
 ];
 
+/** The keys this tree offers as withholds — one candidate each, or none at all. The caller asks
+ *  ONCE per (tree, admission table) and loops over the answer. */
+export function homeSplitWithholds(
+  keys: readonly string[],
+  admission: readonly Gate<HomeSplitFanCtx>[] = HOMESPLIT_FAN_GATES,
+): readonly string[] {
+  return firstRejection(admission, { hoistableKeys: keys.length }) === null ? keys : [];
+}
+
 export interface HomeSplitOpts {
   /** the caller's own admission table — `/livebase-block`'s on the roster row that pairs */
   readonly gates: readonly Gate<BaseKey>[];
   readonly placement: HoistPlacement;
   /** the key withheld from the head hoist, in `l3/basecse.ts` vocabulary */
   readonly key: string;
-  /** how many keys `gates` binds on this tree — the caller already censused it */
-  readonly hoistableKeys: number;
   readonly deviceRegisters?: readonly [number, number];
+  /** the address a NAMED base denotes. A symbol's address is the symbol map's fact and no L3 tree
+   *  carries it, so the caller resolves it; unresolved, the device rule stands down. */
+  readonly addressOf?: (name: string) => number | null;
   readonly admission?: readonly Gate<HomeSplitCtx>[];
 }
 
-/** Every `index`-of-const-base READ in the tree — an access reached anywhere but as a store's own
- *  lvalue. A store's lvalue is what `/vol-store` can still qualify; nothing else is. */
-function constBaseReads(body: Stmt[], out: Set<number>): void {
+/** A leaf deref base's identity, ignoring the access width — `l3/basecse.ts`'s spelling of it. */
+const leafBaseId = (b: Expr): string | null =>
+  b.k === 'const' ? `c:${b.value}` : b.k === 'addr' ? `a:${b.name}` : null;
+
+/** Every leaf-based READ in the tree, by base identity — an access reached anywhere but as a
+ *  store's own lvalue. A store's lvalue is what `/vol-store` can still qualify; nothing else is. */
+function baseReads(body: Stmt[], out: Set<string>): void {
   const visit = (e: Expr): void => {
-    if (e.k === 'index' && e.base.k === 'const') {
-      out.add(e.base.value);
+    if (e.k === 'index') {
+      const id = leafBaseId(e.base);
+      if (id !== null) {
+        out.add(id);
+      }
     }
     childrenOf(e).forEach(visit);
   };
-  for (const s of body) {
+  const walk = (s: Stmt): void => {
     for (const e of stmtExprs(s)) {
       // a store's LVALUE is the one position `/vol-store` reaches, so it is not a read
       if (s.k === 'store' && e === s.lval) {
@@ -123,10 +172,18 @@ function constBaseReads(body: Stmt[], out: Set<number>): void {
       }
       visit(e);
     }
-    for (const child of stmtLists(s)) {
-      constBaseReads(child, out);
+    if (s.k === 'for') {
+      // `init` and `inc` are STATEMENTS, reached by neither `stmtExprs` nor `stmtLists` — the same
+      // walker asymmetry `l3/scopebase.ts`'s `collect` calls out. A read missed here is a device
+      // read the rule below cannot see.
+      walk(s.init);
+      walk(s.inc);
     }
-  }
+    for (const child of stmtLists(s)) {
+      child.forEach(walk);
+    }
+  };
+  body.forEach(walk);
 }
 
 const childrenOf = (e: Expr): Expr[] => {
@@ -147,27 +204,34 @@ const childrenOf = (e: Expr): Expr[] => {
 export function splitHomeBases(sfn: SFn, opts: HomeSplitOpts): { homed: SFn; split: SFn } | null {
   const gates = opts.admission ?? HOMESPLIT_GATES;
   const homed = hoistBaseLocals(sfn, withholdingKey(opts.gates, opts.key), opts.placement);
-  const out = hoistScopedBases(homed, { regions: 'per-region' });
   // The withheld key in the REGION pass's vocabulary. The two passes key on the same address but
   // spell an `addr` base's identity differently, so the translation is explicit — a string compare
   // across them would silently never match for an `addr` base.
   const meta = baseSites(sfn).get(opts.key);
   const scoped = meta ? scopedBaseKey(meta.base, meta.width, meta.signed) : null;
-  const split = planScopedBases(homed, { regions: 'per-region' }).entries.filter((e) => e.key === scoped).length;
+  // ONE plan, then its applier — the count below and the rewrite read the same decision rather than
+  // two runs of the planner that a future rule could make disagree.
+  const plan = planScopedBases(homed, { regions: 'per-region' });
+  const split = plan.entries.filter((e) => e.key === scoped).length;
+  const out = applyScopedBasePlan(homed, plan);
   // Judged on the SPLIT tree, which is the only one that answers the question: an access the region
   // rule repoints into a minted local is one `/volatile` covers, and on `homed` it is still inline.
-  const reads = new Set<number>();
-  constBaseReads((out ?? homed).body, reads);
-  const win = opts.deviceRegisters;
-  const addr = meta?.base.k === 'const' ? meta.base.value : undefined;
+  const reads = new Set<string>();
+  baseReads((out ?? homed).body, reads);
+  const id = meta ? leafBaseId(meta.base) : null;
+  const addr = meta ? (meta.base.k === 'const' ? meta.base.value : (opts.addressOf?.(meta.base.name) ?? null)) : null;
   if (
     firstRejection(gates, {
-      hoistableKeys: opts.hoistableKeys,
       withheldSplits: split >= 2,
-      inlineDeviceRead: win !== undefined && addr !== undefined && addr >= win[0] && addr < win[1] && reads.has(addr),
+      inlineDeviceRead: id !== null && inRange(addr, opts.deviceRegisters) && reads.has(id),
     }) !== null
   ) {
     return null;
   }
-  return out ? { homed, split: out } : null;
+  if (out === null) {
+    // `homesplit-no-region` admitted two or more entries for the withheld key, so the plan is
+    // neither empty nor compound and the applier cannot decline. Loud rather than a silent refusal.
+    throw new Error(`homesplit: the region plan splits ${opts.key} ${split} ways and the applier declined`);
+  }
+  return { homed, split: out };
 }

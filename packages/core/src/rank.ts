@@ -30,7 +30,7 @@ import {
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
-import { splitHomeBases } from './l3/homesplit';
+import { homeSplitTag, homeSplitWithholds, splitHomeBases } from './l3/homesplit';
 import { initFirstGuards } from './l3/initfirst';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
@@ -859,6 +859,17 @@ export function enumerateCandidates(
     const n = deviceVolatileClaims(tree, target.capabilities.deviceRegisters);
     return n > 0 ? { deviceVolatile: n } : {};
   };
+  // A SYMBOL's address, for the device-window questions — which are about an address, and under a
+  // symbol map an absolute pool constant lifts to a `gaddr` whose address only the map carries. A
+  // name at two addresses (an ldscript alias) resolves to NEITHER: the rule asking stands down
+  // rather than qualify a cell it picked between two.
+  const addressOfSymbol = new Map<string, number | null>();
+  for (const [address, infos] of opts.symbols ?? []) {
+    for (const { name } of infos) {
+      addressOfSymbol.set(name, addressOfSymbol.has(name) && addressOfSymbol.get(name) !== address ? null : address);
+    }
+  }
+  const symbolAddress = (name: string): number | null => addressOfSymbol.get(name) ?? null;
   const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     const refs = baseOpts.symbols
       ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
@@ -1365,19 +1376,24 @@ export function enumerateCandidates(
     // split per region, 11 with both at function scope — and 0 only where the two policies land on
     // DIFFERENT bases. See l3/homesplit.ts for why it is a PIPE and never a merge.
     //
-    // WHICH key is withheld is not derivable, so every admitted key is its own candidate and the
-    // differ referees — `HOMESPLIT_GATES`' `homesplit-fan-cap` is what bounds that product.
+    // WHICH key is withheld is not derivable, so every admitted key is its own candidate, LABELLED
+    // with that key — a label is an identity, and one label over two withholds names two programs.
+    // `HOMESPLIT_FAN_GATES`' `homesplit-fan-cap` is what bounds the product.
     // ADDITIVE, like every lever here: `/livebase-block`, `/regionbase`, `/scopebase` and the
     // un-hoisted primary all stay in the list, which is what keeps `synthetic:dmaflat` — where the
     // composed spelling scores 13 against its own 0 — at MATCH.
     for (const { suffix, gates, placement } of paired) {
-      for (const key of census(gates)) {
+      // The function-level half of the pairing's admission, asked ONCE: both its rules read the key
+      // count and nothing else, and asking them per candidate ran the whole pipe — head hoist,
+      // region plan, rewrite, census — to be told the function has more than three keys.
+      for (const key of homeSplitWithholds(census(gates))) {
+        const lever = `${suffix}/homesplit-${homeSplitTag(key)}`;
         const homesplit = (): SFn | null => {
           const p = splitHomeBases(sfn, {
             gates,
             placement,
             key,
-            hoistableKeys: census(gates).length,
+            addressOf: symbolAddress,
             ...(target.capabilities.deviceRegisters ? { deviceRegisters: target.capabilities.deviceRegisters } : {}),
           });
           return p ? survives(p.homed, p.split) : null;
@@ -1386,9 +1402,9 @@ export function enumerateCandidates(
           const r = homesplit();
           return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
         };
-        respell(`${suffix}/homesplit`, homesplit);
-        respell(`${suffix}/homesplit/volatile`, homesplitVolatile);
-        respell(`${suffix}/homesplit/volatile/vol-store`, () => {
+        respell(lever, homesplit);
+        respell(`${lever}/volatile`, homesplitVolatile);
+        respell(`${lever}/volatile/vol-store`, () => {
           const v = homesplitVolatile();
           return v ? volStore(v) : null;
         });
