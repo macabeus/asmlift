@@ -22,7 +22,8 @@
 // dropped entry is an input the cache stops noticing) and `candCacheStaticStamp(files)` is the
 // digest over it (content, not paths). The pipeline's own object bytes are the third half and are
 // measured by the two-directory probe, which needs agbcc and is exercised by the matching suite.
-import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { toolchainFileChain } from '@asmlift/cli/candcache';
+import { chmodSync, copyFileSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -78,14 +79,51 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
 describe('hole 4 — the namespace hashes the BINARIES, not their version banners', () => {
   test('the assembler and the preprocessor are on the list, resolved or explicitly UNRESOLVED', () => {
     const files = candCacheNamespaceFiles();
-    // Entry 0 is agbcc itself; 1 and 2 are the two commands whose bare names hide a binary.
-    expect(files.length).toBe(5);
-    for (const entry of files.slice(1, 3)) {
+    // agbcc, the assembler, the preprocessor AND WHATEVER THOSE DELEGATE TO, then the two shaping
+    // sources. The count is not the claim (a chain is as long as the toolchain makes it); every
+    // entry being a real file or an explicit marker is.
+    expect(files.length).toBeGreaterThanOrEqual(5);
+    for (const entry of files.slice(0, -2)) {
       expect(
         entry.startsWith('/') || entry.startsWith('UNRESOLVED:'),
         `a bare command name must resolve to a file to hash, or say it did not: ${entry}`,
       ).toBe(true);
     }
+    expect(files.slice(-2)).toEqual([join(HARNESS, 'agbcc.ts'), join(HARNESS, 'util.ts')]);
+  });
+
+  test('a DELEGATE is a namespace input: the chain does not stop at the file a name resolves to', () => {
+    // The hole this closes, measured on this machine: `cpp` is a 208-byte `#!/bin/sh` shim that
+    // execs Homebrew's `cpp-14`, and `arm-none-eabi-cpp` is a driver binary that execs
+    // `libexec/gcc/arm-none-eabi/14.2.1/cc1`. Hashing the outer file left the namespace at
+    // cb762832443c2108 while the delegate emitted different code, and the stale object was served.
+    const shimDir = scratch();
+    const delegate = join(shimDir, 'real-tool');
+    writeFileSync(delegate, '#!/bin/sh\nexec /usr/bin/true VERSION-ONE\n');
+    const shim = join(shimDir, 'wrapper');
+    writeFileSync(shim, `#!/bin/sh\nexec ${delegate} "$@"\n`);
+    chmodSync(delegate, 0o755);
+    chmodSync(shim, 0o755);
+
+    // realpath: the chain is de-duplicated by real path, and $TMPDIR on macOS is a symlink.
+    const chain = toolchainFileChain(shim);
+    expect(chain, 'the delegate is IN the chain, not merely mentioned by it').toContain(realpathSync(delegate));
+
+    const before = candCacheStaticStamp(chain);
+    writeFileSync(delegate, '#!/bin/sh\nexec /usr/bin/true VERSION-TWO\n');
+    expect(
+      candCacheStaticStamp(toolchainFileChain(shim)),
+      'editing what the wrapper EXECS must re-namespace, with the wrapper byte-identical',
+    ).not.toBe(before);
+    expect(readFileSync(shim, 'utf8'), 'the wrapper really did not move').toContain(delegate);
+  });
+
+  test('a wrapper that COMPUTES the program it runs is a refusal, never a hashed stand-in', () => {
+    const dir = scratch();
+    const p = join(dir, 'computed');
+    writeFileSync(p, '#!/bin/sh\nexec "$(command -v true)" "$@"\n');
+    chmodSync(p, 0o755);
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
   });
 
   test('a same-named binary with different bytes is a different toolchain', () => {

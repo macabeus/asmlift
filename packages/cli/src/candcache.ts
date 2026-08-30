@@ -214,26 +214,35 @@ const resolveOnPath = (cmd: string): string | undefined => {
   return p !== '' && isAbsolute(p) && existsSync(p) ? p : undefined;
 };
 
-/** Ask a gcc-style driver for the sub-program it execs. Only absolute, existing answers count;
- *  only names that look like a driver are asked at all (agbcc is cc1 itself and takes no such
- *  flag), stdin is closed and the probe is bounded, so a wrong guess costs a spawn. */
+/**
+ * Ask a gcc-style driver where its COMPILER PROPER lives. `arm-none-eabi-cpp` is a driver binary
+ * that execs `libexec/gcc/arm-none-eabi/14.2.1/cc1`; hashing the driver alone stops one level
+ * short of the program that reads the TU.
+ *
+ * `cc1` and only `cc1`, deliberately. A driver also knows an `as` and an `ld`, but it execs them
+ * only in modes this seam's templates do not use — both agbcc templates preprocess with the driver
+ * and name their assembler themselves — and asking for them OVER-reaches into programs that never
+ * run: on this machine `cpp-14 -print-prog-name=as` answers Apple's `/Library/Developer/…/as`, a
+ * zsh script that computes its delegate through `$(realpath)`, which would refuse a whole
+ * namespace over an assembler no candidate compile invokes. THE RESIDUAL, said out loud: a
+ * template that assembles THROUGH the driver (`gcc -c x.c -o x.o`) reaches an assembler this
+ * chain does not name. A project in that shape closes it by listing the assembler in
+ * `tools.asmlift.cacheInputs`, which is what that declaration is for.
+ *
+ * Only absolute, existing answers count; only names that look like a driver are asked at all
+ * (agbcc IS a cc1 and takes no such flag), stdin is closed and the probe is bounded.
+ */
 const driverSubprograms = (p: string): string[] => {
   if (!GCC_DRIVER.test(basename(p))) {
     return [];
   }
-  const out: string[] = [];
-  for (const what of ['cc1', 'as', 'cpp']) {
-    const r = spawnSync(p, [`-print-prog-name=${what}`], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 20_000,
-    });
-    const ans = (r.stdout ?? '').trim();
-    if (isAbsolute(ans) && existsSync(ans)) {
-      out.push(ans);
-    }
-  }
-  return out;
+  const r = spawnSync(p, ['-print-prog-name=cc1'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 20_000,
+  });
+  const ans = (r.stdout ?? '').trim();
+  return isAbsolute(ans) && existsSync(ans) ? [ans] : [];
 };
 
 function expandExecutable(p: string, out: Set<string>, depth: number): void {
@@ -305,12 +314,19 @@ export function toolchainFileChain(cmd: string): string[] {
   const out = new Set<string>();
   let start: string | undefined;
   if (cmd.includes('/')) {
-    start = existsSync(cmd) ? resolve(cmd) : undefined;
+    // A PATH the caller named explicitly and that is not there is a broken configuration, not a
+    // measurement: refuse loudly rather than hash a marker for the compiler nobody can read.
+    if (!existsSync(cmd)) {
+      throw new Error(`namespace input does not exist: ${cmd}`);
+    }
+    start = resolve(cmd);
   } else {
+    // A bare NAME that resolves nowhere on this $PATH IS the measurement: the command is absent,
+    // and it will be absent identically for every candidate this namespace serves.
     start = resolveOnPath(cmd);
-  }
-  if (start === undefined) {
-    return [`UNRESOLVED:${cmd}`];
+    if (start === undefined) {
+      return [`UNRESOLVED:${cmd}`];
+    }
   }
   expandExecutable(start, out, 0);
   return [...out];
@@ -381,8 +397,13 @@ function linkInto(objBytes: Buffer, dest: string, distrustExisting = false): voi
 // about to use with a lease file, and a pruner treats a namespace with a live lease as untouchable.
 const LEASE = `${process.pid}-${randomBytes(4).toString('hex')}`;
 const PRUNE_GRACE_MS = 60 * 60 * 1000;
+/** How long an `objects/` entry is presumed to be mid-`put` in another process. `linkInto` writes
+ *  the content-addressed file and links it a moment later, and in that window the object has
+ *  `nlink === 1` and looks like garbage to a reaper in a sibling shard. Microseconds of exposure,
+ *  five minutes of margin — short enough that a store filled and evicted in the same round still
+ *  reclaims its bytes, which an hour-long window would not. */
+const REAP_GRACE_MS = 5 * 60 * 1000;
 const leases: string[] = [];
-let leaseCleanupInstalled = false;
 
 const pidAlive = (pid: number): boolean => {
   if (!Number.isInteger(pid) || pid <= 0) {
@@ -396,27 +417,26 @@ const pidAlive = (pid: number): boolean => {
   }
 };
 
+/** Claim this namespace for the life of the process, and sweep the leases of processes that are
+ *  gone. There is deliberately NO exit handler: a lease outliving its process is not a leak, it is
+ *  a file whose pid no longer answers, and `namespaceIsLive` reads it that way — which is the same
+ *  test that has to work after a `kill -9`, when no handler would have run anyway. */
 function claimNamespace(nsDir: string): void {
   const live = join(nsDir, '.live');
   mkdirSync(live, { recursive: true });
+  namespaceIsLive(nsDir); // sweeps dead leases; the answer is not the point here
   const p = join(live, LEASE);
   writeFileSync(p, `${process.pid}\n`);
   leases.push(p);
-  if (!leaseCleanupInstalled) {
-    leaseCleanupInstalled = true;
-    process.on('exit', () => {
-      for (const l of leases) {
-        try {
-          rmSync(l, { force: true });
-        } catch {
-          /* a lease left behind is reclaimed by the next pruner's pid check */
-        }
-      }
-    });
-  }
 }
 
-/** Is any process still holding this namespace? A lease whose pid is gone is swept. */
+const heldByUs = (name: string): boolean => leases.some((l) => basename(l) === name);
+
+/** Is any process still holding this namespace? A lease whose pid is gone is swept — and so is a
+ *  lease carrying OUR OWN pid that this module is not actually holding, which is either a recycled
+ *  pid or a previous module registry in the same process (what `vi.resetModules()` produces). Our
+ *  own live leases cover every `candCache` instance in this process, because the module is a
+ *  singleton and they share the list. */
 function namespaceIsLive(nsDir: string, ignoreOwn = false): boolean {
   const live = join(nsDir, '.live');
   let names: string[];
@@ -427,10 +447,14 @@ function namespaceIsLive(nsDir: string, ignoreOwn = false): boolean {
   }
   let anyLive = false;
   for (const n of names) {
-    if (ignoreOwn && n === LEASE) {
+    const mine = heldByUs(n);
+    if (mine) {
+      if (!ignoreOwn) {
+        anyLive = true;
+      }
       continue;
     }
-    if (pidAlive(Number(n.split('-')[0]))) {
+    if (Number(n.split('-')[0]) !== process.pid && pidAlive(Number(n.split('-')[0]))) {
       anyLive = true;
       continue;
     }
@@ -447,7 +471,8 @@ function namespaceIsLive(nsDir: string, ignoreOwn = false): boolean {
  *  Hardlinks mean deleting an `ns/` link alone frees nothing: `nlink === 1` is the test — but a
  *  `put` in ANOTHER process writes `objects/<sha>` and links it a moment later, so an object
  *  younger than the grace window is left alone rather than reaped out of that window. */
-function reapUnlinked(cutoff: number): number {
+function reapUnlinked(): number {
+  const cutoff = Date.now() - REAP_GRACE_MS;
   let total = 0;
   for (const ab of readdirSync(OBJECTS, { withFileTypes: true })) {
     if (!ab.isDirectory()) {
@@ -555,7 +580,7 @@ function pruneOnce(keepNs: string): void {
       }
       rmSync(join(nsRoot, ns.name), { recursive: true, force: true });
       bump('prunedNamespaces');
-      cost = reapUnlinked(cutoff) + storeCost().entries * BLOCK_BYTES;
+      cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
     }
     const keepDir = join(nsRoot, keepNs);
     if (
@@ -571,10 +596,10 @@ function pruneOnce(keepNs: string): void {
         bump('prunedKeys');
         i += 1;
         if (i % 512 === 0) {
-          cost = reapUnlinked(cutoff) + storeCost().entries * BLOCK_BYTES;
+          cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
         }
       }
-      cost = reapUnlinked(cutoff) + storeCost().entries * BLOCK_BYTES;
+      cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
     }
     if (cost > CAP_BYTES) {
       say(

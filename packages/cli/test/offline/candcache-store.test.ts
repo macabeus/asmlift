@@ -62,19 +62,25 @@ const object = (bytes: string): string => {
   writeFileSync(p, bytes);
   return p;
 };
-/** Backdate a namespace past the prune grace window, standing in for "a previous day's run".
- *  Inside the window a namespace is treated as possibly live in a sibling PROCESS — `pnpm bench
- *  run` forks 8-16 shards over one store — and is never evicted. */
-const age = (root: string, ns: string): void => {
-  const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
-  utimesSync(join(root, 'ns', ns.slice(0, 16)), old, old);
-};
-
 const objectsIn = (root: string): string[] => {
   const dir = join(root, 'objects');
   return readdirSync(dir, { withFileTypes: true }).flatMap((ab) =>
     ab.isDirectory() ? readdirSync(join(dir, ab.name)).map((f) => join(dir, ab.name, f)) : [],
   );
+};
+
+/** Backdate a namespace AND the objects it wrote past the two grace windows, standing in for "a
+ *  previous day's run". Inside the namespace window a namespace is treated as possibly live in a
+ *  sibling PROCESS — `pnpm bench run` forks 8-16 shards over one store — and is never evicted;
+ *  inside the shorter object window an unlinked `objects/` entry is presumed to be mid-`put` in
+ *  another process (written, not yet hardlinked) and is not reaped. A previous day's run is past
+ *  both, which is what this stands in for. */
+const age = (root: string, ns: string): void => {
+  const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  utimesSync(join(root, 'ns', ns.slice(0, 16)), old, old);
+  for (const o of objectsIn(root)) {
+    utimesSync(o, old, old);
+  }
 };
 
 describe('the store is content-addressed and hardlinked', () => {
@@ -225,6 +231,28 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
       expect(m.cacheStats().prunedNamespaces).toBeUndefined();
     });
     expect(readdirSync(join(root, 'ns')).sort()).toEqual([NS_A.slice(0, 16), NS_B.slice(0, 16)].sort());
+  });
+
+  test('an object written MOMENTS ago is not reaped — another process may be mid-put', async () => {
+    // `linkInto` writes `objects/<sha>` and hardlinks it a moment later. In that window the object
+    // has nlink === 1 and looks like garbage to a reaper in a sibling shard, which would delete the
+    // answer that process is about to serve BY PATH. Same setup as the eviction test above, minus
+    // the backdating of the objects.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      c.put('k1', 'f', object('A-ONE'));
+      c.put('k2', 'f', object('A-TWO'));
+    });
+    const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    utimesSync(join(root, 'ns', NS_A.slice(0, 16)), old, old); // the NAMESPACE is cold…
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' }, (m) => {
+      const c = m.candCache('t', () => NS_B);
+      c.warm();
+      expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1 });
+      expect(m.cacheStats().prunedObjects, '…but its objects are too young to reap').toBeUndefined();
+    });
+    expect(objectsIn(root).length, 'the bytes survive the window and are reclaimed by a later prune').toBe(2);
   });
 
   test('under the cap: nothing is pruned at all', async () => {

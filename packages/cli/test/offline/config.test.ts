@@ -120,3 +120,55 @@ test('CLI: --score-against with a missing object is exit 66; bad compile templat
   expect(badTemplate.code).toBe(64);
   expect(badTemplate.stderr).toContain('{{inputPath}} and {{outputPath}}');
 });
+
+// `tools.asmlift.cacheInputs` is the one field in this file that is a SOUNDNESS CONTRACT rather
+// than a preference: it is what opts a project into the cross-run candidate-object cache, and the
+// cache's namespace can only measure inputs it can name. `parsed as DecompConfig` is a
+// compile-time claim about a file a project wrote, so the shape is checked at the seam.
+//
+// Reproduced on the shipped code before this check existed: `cacheInputs: gen` (a YAML scalar
+// where a list was meant) reached compile-command.ts, which ITERATES the declaration — a string
+// iterates per CHARACTER, so "gen" hashed as three MISSING entries and produced a namespace
+// byte-identical to `["g","e","n"]`. The cache turned ON having measured nothing the project
+// declared, editing the declared input served a stale object, and no diagnostic was printed
+// anywhere. A one-character YAML mistake re-armed the hole the declaration exists to close.
+test('cacheInputs must be a list of paths — a scalar is a stale-object hole, not a shorthand', () => {
+  const write = (body: string): string => {
+    const root = tmp();
+    writeFileSync(join(root, 'decomp.yaml'), body);
+    return join(root, 'decomp.yaml');
+  };
+  for (const spelling of ['gen', '3', 'true']) {
+    expect(() =>
+      loadDecompConfig(write(`platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs: ${spelling}\n`)),
+    ).toThrow(/cacheInputs must be a list/);
+  }
+  expect(() =>
+    loadDecompConfig(write('platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs:\n      - ""\n')),
+  ).toThrow(/cacheInputs must be a list/);
+});
+
+test('cacheInputs: [] is a DECLARATION and loads; absent is simply absent', () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs: []\n',
+  );
+  expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.cacheInputs).toEqual([]);
+
+  const root2 = tmp();
+  writeFileSync(join(root2, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n');
+  expect(loadDecompConfig(join(root2, 'decomp.yaml'))?.config.tools?.asmlift?.cacheInputs).toBeUndefined();
+});
+
+test('a list of real paths loads unchanged', () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs:\n      - inc\n      - tools/agbcc\n',
+  );
+  expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.cacheInputs).toEqual([
+    'inc',
+    'tools/agbcc',
+  ]);
+});

@@ -98,6 +98,9 @@ function storedKeys(store: string): string[] {
   const walk = (d: string): void => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
+      if (e.name === '.live') {
+        continue; // liveness leases, not answers
+      }
       if (e.isDirectory()) {
         walk(p);
       } else {
@@ -277,5 +280,61 @@ describe('a miss is indistinguishable from no cache, and OFF is the default', ()
       },
     );
     expect(warm).toBe(cold);
+  });
+});
+
+describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
+  // `dropped[].error` is published: rank.ts puts the first line of a failed compile there,
+  // main.ts prints it as `[dropped]` and the benchmark publishes it as `droppedCandidates`. That
+  // first line is `compile command failed (exit N): <the whole command>`, and the command holds
+  // the mkdtemp scratch path — so a stored rejection replayed a directory that no longer exists,
+  // and two runs of the identical failure printed different text. The scratch dir is scrubbed at
+  // the point the message is built, which makes cached and uncached identical AND takes a machine
+  // path out of published output.
+  const REJECTS = 'echo "no." >&2; test -f "{{inputPath}}" && test -n "{{outputPath}}"; exit 1';
+
+  test('the message carries no scratch path, cached or not', async () => {
+    const p = project();
+    const errors = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const compile = compileFromCommand(REJECTS, { cwd: p.cwd, cacheInputs: [] });
+        const out: string[] = [];
+        for (let i = 0; i < 2; i++) {
+          try {
+            compile(CAND, 'f', 'c');
+          } catch (e) {
+            out.push((e as Error).message);
+          }
+        }
+        return out;
+      },
+    );
+    expect(errors.length).toBe(2);
+    const [cold, warm] = errors;
+    expect(warm, 'the second run was served from the store').toBe(cold);
+    expect(cold).toContain('<scratch>');
+    expect(cold, 'no mkdtemp directory reaches a published error').not.toMatch(/asmlift-usercc-/);
+    expect(cold).not.toMatch(/\/var\/folders|\/private\/tmp|\/tmp\//);
+  });
+
+  test('and the uncached spelling is the SAME string — a miss is indistinguishable in RESULT', async () => {
+    const p = project();
+    const uncached = await withCache(
+      { ASMLIFT_CANDCACHE: '0', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const compile = compileFromCommand(REJECTS, { cwd: p.cwd, cacheInputs: [] });
+        const out: string[] = [];
+        for (let i = 0; i < 2; i++) {
+          try {
+            compile(CAND, 'f', 'c');
+          } catch (e) {
+            out.push((e as Error).message);
+          }
+        }
+        return out;
+      },
+    );
+    expect(uncached[0], 'two uncached runs of the identical failure used to differ').toBe(uncached[1]);
   });
 });

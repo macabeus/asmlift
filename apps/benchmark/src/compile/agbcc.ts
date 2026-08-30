@@ -29,7 +29,7 @@ import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
  * `"agbcc failed: "`, which the negative-entry guard matched, and the next healthy run served that
  * rejection for a TU that compiles.
  */
-function stepFailed(
+export function stepFailed(
   tool: 'cpp' | 'agbcc' | 'as',
   r: { status: number | null; signal?: NodeJS.Signals | null; stderr: string },
 ): never {
@@ -195,7 +195,7 @@ const cache = candCache('bench-agbcc', () => {
 /** The message shape a DETERMINISTIC rejection has, and nothing else does. `\\S` is not
  *  decoration: a SIGKILLed compiler used to produce exactly `"agbcc failed: "`, which the older
  *  `/^(cpp|agbcc|as) failed: /` matched. `stepFailed` is the real guard; this is the second one. */
-const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
+export const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
 
 /** A per-key refusal is a fact about the emitter, not about this candidate, so it is worth saying
  *  — once per reason, not 65,280 times. */
