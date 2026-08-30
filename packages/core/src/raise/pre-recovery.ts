@@ -44,7 +44,7 @@ export interface PreRecoveryPass {
   /** run the recognizer; returns a truthy value (a change count, or `true`) iff it CHANGED the IR.
    *  `self` is the prototype the caller supplied for the function being raised — read only by
    *  parameter-width, which checks its inference against a declared width. */
-  run: (fn: Fn, self: FnProto | undefined, opts: PreRecoveryOptions) => number | boolean;
+  run: (fn: Fn, self: FnProto | undefined, opts: PreRecoveryOptions, target: TargetDescription) => number | boolean;
   /** run `dce` after this pass changes the IR (the pass declares it leaves dead ops behind). */
   dce: boolean;
   /** optional target gate (soft-div only fires on a no-hardware-divide target — see raise/softdiv.ts). */
@@ -123,7 +123,15 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // parameter carrying BOTH a `zext` and a `sext` has two readers and is refused.
   // `dce: false` on both — the extension each drops is spliced out in place, and its result has no
   // other reader.
-  { id: 'narrowlocal', run: (fn) => narrowBlockLocals(fn), dce: false },
+  // The `target` argument is read by ONE conjunct of ONE gate — see raise/narrowlocal.ts's
+  // `NarrowLocalOptions`. A whole-pass `gate` would be wrong: the pass's SOUND rules are claims
+  // about C and run everywhere; only the join-shape evidence is a claim about gcc 2.x's optimizer.
+  {
+    id: 'narrowlocal',
+    run: (fn, _self, _opts, target) =>
+      narrowBlockLocals(fn, undefined, { hoistsSingleSetArm: target.compilerBehaviors.hoistsSingleSetArm }),
+    dce: false,
+  },
   { id: 'paramwidth', run: (fn, self) => narrowEntryParams(fn, self), dce: false },
 ];
 
@@ -141,7 +149,7 @@ export function runPreRecovery(
     if (pass.gate && !pass.gate(target)) {
       continue;
     }
-    const result = pass.run(fn, self, opts);
+    const result = pass.run(fn, self, opts, target);
     if (result) {
       if (pass.dce) {
         dce(fn);

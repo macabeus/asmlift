@@ -2879,6 +2879,59 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { mergecastu: { returnsVoid: true } },
   },
   {
+    // THE DIAMOND `gcc/jump.c` COULD NOT HAVE HOISTED, and the reason the arm clause in
+    // raise/narrowlocal.ts is about the ARM'S OPS and not only the arm's SIZE. Both arms are a
+    // single load — one SET each, so an arm-SIZE test admits them — but `gcc/jump.c:482`'s
+    // `! may_trap_p (SET_SRC (temp4))` refuses to speculate a MEM above the compare
+    // (`gcc/rtlanal.c:1770` MEM -> `rtx_addr_can_trap_p`, `:144` a plain pseudo address CAN trap),
+    // so the diamond survives for BOTH spellings and carries no information at all. Narrowing here
+    // spells `u16 v` for a source that wrote `s32 v` + `(u16)v` and loses the match.
+    sym: 'mergeldcast',
+    src:
+      'void mergeldcast(s32 *out, s32 *p, s32 c)\n' +
+      '{\n' +
+      '    s32 v;\n' +
+      '\n' +
+      '    if (c) {\n' +
+      '        v = p[0];\n' +
+      '    } else {\n' +
+      '        v = p[1];\n' +
+      '    }\n' +
+      '    out[0] = (u16)v;\n' +
+      '}',
+    features: ['narrow', 'zero-extend', 'cast', 'branch', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void mergeldcast(s32 *out, s32 *p, s32 c);',
+    proto: { mergeldcast: { returnsVoid: true } },
+  },
+  {
+    // THE SAME REFUSAL FROM THE OTHER DIRECTION: an arm that is one C assignment but not one
+    // THUMB INSN. `v = a + 0x12345` needs a literal-pool load before the add, so the arm is two
+    // insns and `gcc/jump.c:472`'s `single_set` on `prev_active_insn` never matches — the diamond
+    // survives under the CAST spelling too. In the lifted IR the pool word is a `const` feeding an
+    // `add`, which is why the arm clause counts constants: an immediate the target cannot fold is
+    // a second SET, and the IR does not say which is which. The FOLDABLE case (`a + 3`, one
+    // `adds`) needs no such refusal — agbcc really does hoist it, so the join is not a diamond and
+    // the join clause already decides it.
+    sym: 'mergepool',
+    src:
+      'void mergepool(s32 *out, s32 a, s32 b, s32 c)\n' +
+      '{\n' +
+      '    s32 v;\n' +
+      '\n' +
+      '    if (c) {\n' +
+      '        v = a + 0x12345;\n' +
+      '    } else {\n' +
+      '        v = a - b;\n' +
+      '    }\n' +
+      '    out[0] = (u16)v;\n' +
+      '}',
+    features: ['narrow', 'zero-extend', 'cast', 'branch', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void mergepool(s32 *out, s32 a, s32 b, s32 c);',
+    proto: { mergepool: { returnsVoid: true } },
+  },
+  {
     sym: 'widecnt',
     src:
       's32 widecnt(void)\n' +

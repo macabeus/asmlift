@@ -143,6 +143,19 @@ export interface TargetDescription {
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
     // decline path keeps recovery sound either way.
     switchAllowsNeqCase?: boolean;
+    // The compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both
+    // arms are ONE speculatable SET — gcc 2.x's `jump_optimize` (`gcc/jump.c:443-445`, guard at
+    // `:470-501`). The ONE reader is raise/narrowlocal.ts's `edge-extends`, which uses it
+    // BACKWARDS: a diamond this compiler would have collapsed and did not is evidence the source
+    // DECLARED the local narrow, because `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared
+    // assignment past one SET. Absent ⇒ false, and the clause never admits — the only reader
+    // that is NOT threaded through StructureOptions, because it is consumed before structuring.
+    //
+    // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored. NOT
+    // set on MIPS_GCC despite it being the same compiler family: nothing has measured the pair
+    // there, the clause reaches 0 of its benchmark rows, and `docs/level-tower.md`'s rule for an
+    // unmeasured per-compiler default is to claim nothing.
+    hoistsSingleSetArm?: boolean;
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation.
@@ -266,6 +279,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     readsStayWhereWritten: true,
     switchAllowsBoundCase: true,
     switchArmsFollowLayout: true,
+    hoistsSingleSetArm: true,
   },
 };
 

@@ -89,7 +89,7 @@ function generate(seed: number, withLoop: boolean): Fn {
                 results: [r],
                 attrs: { width: rnd() < 0.5 ? 8 : 16 },
               })
-            : mkOp(pick(['add', 'sub']), { operands: [pick(avail), pick(avail)], results: [r] }),
+            : mkOp(pick(['add', 'sub', 'mul', 'shl']), { operands: [pick(avail), pick(avail)], results: [r] }),
       );
       avail.push(r);
     }
@@ -168,6 +168,12 @@ function run(sfn: SFn, seed: number): Event[] {
             return (l + r) | 0;
           case '-':
             return (l - r) | 0;
+          case '*':
+            return Math.imul(l, r);
+          case '<<':
+            // both spellings run through THIS interpreter, so what matters is that the model is
+            // deterministic and width-faithful, not that it reproduces C's UB for r >= 32
+            return (l << (r & 31)) | 0;
           case '<':
             return l < r ? 1 : 0;
           case '>':
@@ -267,7 +273,9 @@ function spellings(
     base = generate(seed, withLoop);
     narrowed = generate(seed, withLoop);
     verify(base);
-    fired = narrowBlockLocals(narrowed, gates);
+    // `hoistsSingleSetArm` ON — the agbcc setting, so the SHIPPED arm below exercises the join
+    // clause of `edge-extends` rather than a version of the rule no target runs.
+    fired = narrowBlockLocals(narrowed, gates, { hoistsSingleSetArm: true });
     verify(narrowed);
     recoverTypes(base);
     recoverTypes(narrowed);
@@ -305,6 +313,11 @@ const differs = (r: { off: Event[]; on: Event[] }): boolean => {
   });
 };
 
+/** How many functions the SHIPPED arm judged, per configuration — read by the ablated arm below,
+ *  which asserts it judges strictly more. Recorded rather than hardcoded so the relation stays the
+ *  assertion when the shipped rule widens or narrows. */
+const judgedByShippedArm = new Map<boolean, number>();
+
 describe.each([
   ['acyclic', false],
   ['loop-bearing', true],
@@ -318,11 +331,12 @@ describe.each([
       judged++;
       if (differs(r)) bad.push(seed);
     }
-    // the sweep is not vacuous: the pass really fires and both trees interpret. At 15000 seeds
-    // that is 373 acyclic and 262 loop-bearing functions; the floor sits well under both, so a
-    // generator tweak cannot turn this green by quietly narrowing nothing.
+    // the sweep is not vacuous: the pass really fires and both trees interpret. The floor sits
+    // well under the observed counts, so a generator tweak cannot turn this green by quietly
+    // narrowing nothing.
     expect(judged).toBeGreaterThan(100);
     expect(bad).toEqual([]);
+    judgedByShippedArm.set(withLoop, judged);
   });
 
   // THE POPULATION THE ONLY UNSOUND GATE MASKS, and the reason this arm exists at all.
@@ -337,8 +351,16 @@ describe.each([
   //
   // So the mask comes off HERE, where the oracle is the program's behaviour rather than a score.
   // The full ablation is a strict SUPERSET of anything a narrower `edge-extends` can admit, which
-  // is what makes this the strongest available form: green here licenses every widening of that one
-  // rule, and red here forbids all of them.
+  // is what makes this the strongest available form.
+  //
+  // AND THE SCOPE OF THAT LICENCE IS THE GENERATOR'S VOCABULARY, not "every widening". `generate`
+  // emits `const`, `sext`, `zext`, `add`, `sub`, `mul`, `shl`, `call`, `icmp_slt`, `cond_br` and
+  // `ret`; there is no `load`, `store`, `aload` or `gaddr`, because the interpreter models no
+  // memory, and its only observables are call arguments and the returned value. So green here says:
+  // over carriers whose producers are pure arithmetic and extensions, no admission `edge-extends`
+  // could make changes what the function computes. A widening whose new admissions are MEMORY
+  // shapes is outside it and owes its own evidence — which is the standing reason the arm clause is
+  // priced by the `mergeldcast`/`mergepool` rows and the sa3 census as well as by this arm.
   test('…and neither does the population `edge-extends` masks', () => {
     const bad: number[] = [];
     let judged = 0;
@@ -349,9 +371,13 @@ describe.each([
       judged++;
       if (differs(r)) bad.push(seed);
     }
-    // strictly MORE functions than the shipped arm above judges — if it were not, the ablation
-    // would be inert and this arm would be asserting nothing about the masked set.
-    expect(judged).toBeGreaterThan(400);
+    // STRICTLY MORE FUNCTIONS THAN THE SHIPPED ARM ABOVE JUDGES — asserted as the RELATION it is,
+    // against the count that arm actually recorded, and not as a hardcoded floor. If the two were
+    // equal the ablation would be inert and this arm would assert nothing about the masked set;
+    // a hardcoded number cannot tell those apart once the shipped rule widens.
+    const shipped = judgedByShippedArm.get(withLoop);
+    expect(shipped).toBeDefined();
+    expect(judged).toBeGreaterThan(shipped as number);
     expect(bad).toEqual([]);
   });
 });
