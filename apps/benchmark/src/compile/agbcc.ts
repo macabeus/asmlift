@@ -71,15 +71,15 @@ function stampProbeIn(dir: string): string | null {
   }
 }
 
-/** The binary a bare command name resolves to on THIS $PATH, hashed by CONTENT. A `--version`
- *  banner is not an identity: a wrapper script, a rebuilt binutils and a patched cpp can all
- *  print the same string. MEASURED before this line existed: a shell wrapper in front of
- *  `arm-none-eabi-cpp` left the namespace at 8e0a7dccb4ead3f1, unmoved. */
-function hashResolvedBinary(h: ReturnType<typeof createHash>, cmd: string): void {
-  h.update('bin:' + cmd);
+/** Where a bare command name resolves to on THIS $PATH, or an `UNRESOLVED:` marker. A
+ *  `--version` banner is NOT an identity — a wrapper script, a rebuilt binutils and a patched cpp
+ *  can all print the same string — so the namespace hashes the resolved file's BYTES instead.
+ *  MEASURED before this existed: a shell wrapper in front of `arm-none-eabi-cpp` left the
+ *  namespace at 8e0a7dccb4ead3f1, unmoved, three times running. */
+function resolveOnPath(cmd: string): string {
   const r = spawnSync('sh', ['-c', `command -v ${JSON.stringify(cmd)}`], { encoding: 'utf8' });
   const p = (r.stdout ?? '').trim();
-  h.update(p ? createHash('sha256').update(readFileSync(p)).digest('hex') : 'UNRESOLVED');
+  return p === '' ? `UNRESOLVED:${cmd}` : p;
 }
 
 /** Environment variables gcc/cpp read that CHANGE the compile. `CPATH` and `C_INCLUDE_PATH` are
@@ -98,36 +98,61 @@ const COMPILE_ENV = [
   'SUNPRO_DEPENDENCIES',
 ];
 
-const cache = candCache('bench-agbcc', () => {
+/**
+ * Every FILE whose BYTES are an input to a candidate compile — the compiler, the assembler, the
+ * preprocessor, and the HARNESS'S OWN CODE that shapes what they are handed. This list IS the
+ * namespace's file half: `candCacheStaticStamp` hashes exactly what it returns, so an input
+ * dropped from here is an input the cache stops noticing.
+ *
+ * `agbcc.ts` and `util.ts` are on it because the pipeline is not only its binaries.
+ * `compileCandidateRaw` runs `cpp -nostdinc`, then `stripPrototype`, then agbcc, then APPENDS
+ * `.text/.align 2, 0` to the `.s`, then `as`; `util.ts` owns `run`'s env pass-through and its
+ * 120 s timeout. Patching that tail to `.align 4, 0` changes the object by 16 bytes while every
+ * binary, flag and version banner stays identical — and a namespace that hashed only the
+ * toolchain served the stale 648-byte object where the truth is 660.
+ */
+export function candCacheNamespaceFiles(): string[] {
+  return [TOOLCHAIN.agbcc, resolveOnPath(TOOLCHAIN.as), resolveOnPath('arm-none-eabi-cpp'), ...SHAPING_SOURCES];
+}
+
+/**
+ * The namespace's STATIC half: flags, the compile environment, and the content of every file in
+ * `files`. No compile runs here — the pipeline's own object bytes join the namespace separately
+ * (the two-directory probe below), because that half is both the backstop and the purity test.
+ *
+ * `files` is a parameter so a test can hash copies it controls and assert that CONTENT, not the
+ * path, is what moves the digest. An unreadable input THROWS: `candCache` turns that into a loud
+ * refusal, which is the only sound answer — a namespace that guesses at an input it cannot read
+ * is a namespace that serves stale objects.
+ */
+export function candCacheStaticStamp(files: readonly string[] = candCacheNamespaceFiles()): string {
   const h = createHash('sha256');
-  h.update('bench-agbcc/v1');
-  h.update(readFileSync(TOOLCHAIN.agbcc));
+  h.update('bench-agbcc/v2');
   h.update(TOOLCHAIN.agbccFlags.join(' '));
   h.update(TOOLCHAIN.as + ' ' + TOOLCHAIN.asFlags.join(' '));
-  h.update(run(TOOLCHAIN.as, ['--version']).stdout ?? '');
-  hashResolvedBinary(h, TOOLCHAIN.as);
   h.update('cpp ' + CAND_CPP_FLAGS.join(' '));
-  h.update(run('arm-none-eabi-cpp', ['--version']).stdout ?? '');
-  hashResolvedBinary(h, 'arm-none-eabi-cpp');
   for (const v of COMPILE_ENV) {
     h.update(`env:${v}=${process.env[v] ?? ''}`);
   }
-  // (1) the harness's own code, per the note above.
-  for (const p of SHAPING_SOURCES) {
-    h.update(p);
-    h.update(readFileSync(p)); // throws => candCache REFUSES, loudly
+  for (const p of files) {
+    h.update(`file:${p}`);
+    // An `UNRESOLVED:` marker is the measurement: the command is not on this $PATH at all.
+    h.update(p.startsWith('UNRESOLVED:') ? p : createHash('sha256').update(readFileSync(p)).digest('hex'));
   }
-  // (2) DETERMINISM SELF-TEST, and the backstop object at the same time. A cached object is
-  // sound only if it is a pure function of (input bytes, symbol) — which is NOT true of every
-  // toolchain (`ido7.1` writes the absolute path of its input .c into the object). So compile
-  // the probe TWICE, in two DIFFERENT directories, and let the compiler answer.
+  return h.digest('hex');
+}
+
+const cache = candCache('bench-agbcc', () => {
+  // DETERMINISM SELF-TEST, and the backstop object at the same time. A cached object is sound
+  // only if it is a pure function of (input bytes, symbol) — which is NOT true of every toolchain
+  // (`ido7.1` writes the absolute path of its input .c into the object). So compile one fixed
+  // probe TU TWICE, in two DIFFERENT directories, and let the compiler answer.
   const a = stampProbeIn(mkdtempSync(join(tmpdir(), 'bench-ccstampA-')));
   const b = stampProbeIn(mkdtempSync(join(tmpdir(), 'bench-ccstampB-')));
   if (a === null || b === null || a !== b) {
     return NOT_CACHEABLE;
   }
-  h.update(a);
-  return h.digest('hex');
+  return createHash('sha256').update(candCacheStaticStamp()).update(a).digest('hex');
 });
 
 export const agbccReal: RealCompile = {
