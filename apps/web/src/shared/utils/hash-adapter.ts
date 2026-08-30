@@ -18,8 +18,8 @@ const listeners = new Set<() => void>();
  *
  *  A `pushState` from code OUTSIDE this adapter stays invisible until the next event — nuqs's own
  *  React adapter behaves identically, which is what its opt-in `enableHistorySync` is for. Nothing
- *  in this app writes history out of band (`grep -rn 'pushState\|replaceState' src/` finds only
- *  `updateUrl` below), and the next write re-syncs rather than clobbers, because
+ *  in this app writes history out of band (`grep -rn 'history\.\(push\|replace\)State' src/`
+ *  finds one line, in `updateUrl`), and the next write re-syncs rather than clobbers, because
  *  `getSearchParamsSnapshot` re-reads the live hash. */
 function subscribe(onStoreChange: () => void): () => void {
   listeners.add(onStoreChange);
@@ -43,7 +43,8 @@ export function useCurrentHash(): string {
 /** nuqs's own adapter also aborts its write queue on `popstate` (`QueueReset` calling
  *  `resetQueues`), which no entry in nuqs's export map reaches. Without it, a Back pressed while an
  *  update is still queued — at most `defaultRateLimit.timeMs`, 50 ms outside Safari — lands that
- *  update on the entry popped to, as a push, discarding the forward stack. */
+ *  update on the entry popped to, taking the forward stack with it if the queued write was a
+ *  push. */
 function updateUrl(search: URLSearchParams, options: Required<unstable_AdapterOptions>): void {
   const url = hashUrl(window.location.href, search);
   (options.history === 'push' ? history.pushState : history.replaceState).call(history, history.state, '', url);
