@@ -24,13 +24,11 @@
 // prepended to the caller's own admission table, in the `Gate<BaseKey>` type that table already
 // has, so `firstRejection` names it and `ablateHeuristic` can price it.
 //
-// EXACTLY ONE KEY IS WITHHELD, and the arity is a claim rather than an oversight. A withhold of two
-// keys is `/regionbase` on both plus a head home for the rest, and the two-key subsets only exist
-// at all where the caller's table binds three (`homesplit-fan-cap` admits no more) — one shape,
-// which `/regionbase` already spells whenever the third key is not hoistable. `l3/volatileptr.ts`'s
-// `volatileSubsetCandidates` enumerates proper subsets under the same cap and pays for it with the
-// full 2^n fan; here that is a doubling of the axis on the largest function it reaches, bought for
-// no row. Widen it when a row demands it, the way that one was.
+// EXACTLY ONE KEY IS WITHHELD, and the arity is a claim rather than an oversight. A two-key withhold
+// exists only where the caller's table binds three — `homesplit-fan-cap` admits no more — so it is
+// three more candidates per axis point on those functions alone, and no row asks for one.
+// `l3/volatileptr.ts`'s `volatileSubsetCandidates` enumerates every proper subset under the same
+// cap; it does that because a row demanded each of them. Widen this the same way, on a row.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION — both halves only re-spell where the address of a global
 // is materialized, and each half's own contracts (`placeBaseLocals`' ordering, `assertHoistsDominate`

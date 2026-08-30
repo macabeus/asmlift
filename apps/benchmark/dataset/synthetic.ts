@@ -3497,7 +3497,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // as well as `p3/p4/p5` for 0x040000D4) and `/livebase-block` binds both at the head, so the
   // region reading has to become per-BASE first — a third degree of freedom neither lever has.
   // THE PAIRING LANDED AND THE PREDICTION HELD: `dmapoll` is MATCH on
-  // `signed/livebase-block/homesplit/volatile` (l3/homesplit.ts), and the commit before it reads
+  // `signed/livebase-block/homesplit-0x40000d4.4s/volatile` (l3/homesplit.ts) — the label names the
+  // WITHHELD key, which is the device base — and the commit before it reads
   // diff:11 — the one-sided ablation, run rather than argued. `dmaflat` stays MATCH, which is what
   // the additive posture below buys. Every number in this block that is not marked PREDICTION is a
   // compile or a ranked run.
