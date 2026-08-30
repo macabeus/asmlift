@@ -153,7 +153,7 @@
 // own rewrites — the passes AHEAD of it in pre-recovery.ts (divpow2 DELETES a block, both
 // short-circuit folds rewrite edges) are answered by the head test, which refuses any join whose
 // two arms do not share one `cond_br` predecessor.
-import { type Block, type Fn, type Op, type Value, replaceAllUsesWith } from '../ir/core';
+import { type Block, type Fn, type Op, type Value, predecessors, replaceAllUsesWith } from '../ir/core';
 import { CAST_WIDTHS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -210,7 +210,12 @@ export interface NarrowLocalCandidate {
    *  `:471-502` requires each arm to be ONE insn holding ONE SET, which `gcc/thumb.h:344`
    *  PROMOTE_MODE forbids for a narrow-DECLARED local (the assignment expands to the arithmetic
    *  plus its truncation pair). So a surviving diamond is evidence FOR a declaration and a hoisted
-   *  join is evidence against one. */
+   *  join is evidence against one.
+   *
+   *  READ BY NO GATE — `armsHoistable` implies it, so a conjunction of the two is the second one.
+   *  It is carried because the two say different things when the answer is NO, and a census that
+   *  cannot separate "not a diamond" from "a diamond over arms gcc could not have collapsed" is
+   *  measuring the wrong refusal. */
   mergeDiamond: boolean;
   /** …and the arms of that merge are ones `gcc/jump.c:471-502` could have collapsed: EXACTLY one
    *  value-producing op each — constants included — and nothing unsafe to SPECULATE above the
@@ -218,9 +223,12 @@ export interface NarrowLocalCandidate {
    *  survives whatever the local's width and carries no information at all. See `armIsOneSet` for
    *  the two ways an op count alone gets this wrong, each of which is a benchmark row.
    *
-   *  ALSO FALSE when the target declares no `hoistsSingleSetArm` — the whole conjunct is a claim
-   *  about one compiler's optimizer, see `NarrowLocalOptions`. */
+   *  IMPLIES `mergeDiamond`: there are no arms to judge without one. */
   armsHoistable: boolean;
+  /** the TARGET's claim, kept apart from the IR facts above because it is not one. `armsHoistable`
+   *  says what the arms are; this says whether this compiler's optimizer would have acted on that.
+   *  Fused into one field the name lies and every census number over it is target-conditioned. */
+  targetHoistsSingleSetArm: boolean;
 }
 
 export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
@@ -320,43 +328,12 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
     // The third conjunct is POSITIVE evidence, deliberately, and not `!hoistedJoin`. The negation
     // of a hoist is not evidence of a declaration: a one-predecessor join, a three-armed one, an
     // irreducible one all say nothing, and phrasing the rule as "refuse only what is provably
-    // hoisted" would newly ADMIT every one of them on no evidence at all. `!mergeDiamond` keeps
-    // every unmeasured shape refused exactly as before, so this widening admits only the shape the
-    // header's 2x2 decides.
-    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation && !(c.mergeDiamond && c.armsHoistable),
+    // hoisted" would newly ADMIT every one of them on no evidence at all. Requiring the shape
+    // POSITIVELY keeps every unmeasured join refused exactly as before, so this widening admits
+    // only the shape the header's 2x2 decides.
+    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation && !(c.armsHoistable && c.targetHoistsSingleSetArm),
   },
 ];
-
-/** The blocks that branch to `blk`, DEDUPLICATED — and the dedup is SEMANTICS, not a micro-
- *  optimisation. `ir/core.ts`'s `predecessors` is not interchangeable with this: it lists a block
- *  once per EDGE, so a `cond_br` whose two successors are the same block reports that block as two
- *  predecessors and reads as a two-armed merge with one arm. Here a predecessor is an ARM, and one
- *  block reaching the join twice is one arm. That dedup is the ONLY behavioural difference between
- *  the two: `verify` (ir/verify.ts:74-103) already guarantees exactly one terminator, last in its
- *  block, and no successors on any other op, so this walk over every op and `successorsOf`'s over
- *  the last one see the same edges. Measured over 2288 sa3 functions the two models disagree on 26
- *  blocks, and on 8 of them `ir/core`'s would have reported the two predecessors this file needs —
- *  so swapping in the shared utility is a silent behaviour change, which
- *  `narrow-local.test.ts: a block reached twice from one predecessor is ONE arm` pins.
- *
- *  Hoisted once per `narrowLocalCandidates` call rather than recomputed per parameter, which keeps
- *  this an O(E) walk of the function and not an O(E * params) one. */
-function predecessorsOf(fn: Fn): Map<Block, Block[]> {
-  const preds = new Map<Block, Block[]>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      for (const s of op.successors) {
-        const list = preds.get(s.block);
-        if (list === undefined) {
-          preds.set(s.block, [b]);
-        } else if (!list.includes(b)) {
-          list.push(b);
-        }
-      }
-    }
-  }
-  return preds;
-}
 
 /** What the join shape says about the source, as ONE record — the two fields are read off the same
  *  walk because the second is a property of the arms the first identifies. */
@@ -388,7 +365,7 @@ export interface MergeShape {
  *    • a FRONTEND-INVENTED join: an empty forwarding block cut at a label is an "arm" with no insn
  *      at all, and `:480`'s `single_set` on a nonexistent insn never matched. Its own predecessor
  *      is another join rather than the head, so the head test refuses it.
- *    • the ENTRY block, whose implicit entry edge `predecessorsOf` cannot see (the trap
+ *    • the ENTRY block, whose implicit entry edge a predecessor map cannot see (the trap
  *      `raise/divpow2.ts:92-98` documents for the same recognizer).
  *
  *  The equivalent walk in `raise/divpow2.ts:99-115` recognizes a ONE-armed diamond (head → bias arm
@@ -414,10 +391,6 @@ function mergeArms(preds: Map<Block, Block[]>, fn: Fn, blk: Block): [Block, Bloc
   }
   const ht = term(hx[0]);
   if (ht === undefined || ht.opcode !== 'cond_br' || ht.successors.length !== 2) {
-    return null;
-  }
-  const succ = ht.successors.map((s) => s.block);
-  if (!((succ[0] === x && succ[1] === y) || (succ[0] === y && succ[1] === x))) {
     return null;
   }
   return [x, y];
@@ -451,15 +424,31 @@ function armIsOneSet(b: Block): boolean {
   );
 }
 
-/** The join shape of every block, read ONCE off the given IR.
+/** The join shape of every block, read ONCE off the IR it is handed.
  *
- *  Exported and passed in by `narrowBlockLocals` because this pass MUTATES: it deletes an
- *  extension, then re-enumerates. Recomputing the arm test after that rewrite would judge a
- *  program agbcc never compiled — an arm whose `lsl/asr/add` this pass just shortened to `add`
- *  would read as one SET because of a SIBLING carrier's narrowing. The evidence is a fact about
- *  the lifted asm, so it is snapshotted before the first rewrite. */
-function mergeShapes(fn: Fn): Map<Block, MergeShape> {
-  const preds = predecessorsOf(fn);
+ *  WHERE it is read is part of the rule, because the shape is a claim about what AGBCC emitted and
+ *  asmlift rewrites the CFG on the way here. Two rewriters move it:
+ *
+ *    • this pass itself. It deletes an extension and re-enumerates, so an arm whose `lsl/asr/add`
+ *      a SIBLING carrier's narrowing just shortened to `add` would re-read as one SET.
+ *    • the pre-recovery passes AHEAD of it. `raise/shortcircuit.ts` MANUFACTURES two-armed
+ *      single-SET diamonds out of condition trees the ROM never merged (18 sa3 blocks gain
+ *      `hoistable`, e.g. `IsWorldPtActive` block 3, false at lift and true after
+ *      branch-shortcircuit), `raise/divpow2.ts` deletes a block, and the `dce` after nine of the
+ *      passes changes arm op counts.
+ *
+ *  So `runPreRecovery` calls this ONCE before the first pass and threads the map down
+ *  (`PreRecoveryFacts`), and `narrowBlockLocals` reads that map rather than recomputing. A block
+ *  a later pass creates is absent from the map and reads as no diamond, which refuses it — the
+ *  over-refusal this rule's header argues is free.
+ *
+ *  IT IS STILL NOT THE ROM. The frontend cuts blocks at labels and `applyIdiomPatterns` folds
+ *  shift pairs into casts before pre-recovery runs, so this is the CFG as it ENTERS pre-recovery,
+ *  which is the earliest point any pass can name. Both of those only ever make an arm SHORTER, so
+ *  they can admit a diamond gcc's guard would have refused — see the `armIsOneSet` note on what
+ *  the final asm does and does not say about the RTL `jump_optimize` judged. */
+export function mergeShapes(fn: Fn): Map<Block, MergeShape> {
+  const preds = predecessors(fn);
   const out = new Map<Block, MergeShape>();
   for (const b of fn.blocks) {
     const arms = mergeArms(preds, fn, b);
@@ -521,8 +510,6 @@ export function narrowLocalCandidates(
   }
   for (const [i, b] of fn.blocks.entries()) {
     const shape = shapes.get(b) ?? { diamond: false, hoistable: false };
-    const diamond = shape.diamond;
-    const hoistable = shape.hoistable && opts.hoistsSingleSetArm === true;
     for (const [pi, p] of b.params.entries()) {
       const { ops, forwarded } = readersOf(fn, p);
       const ext = ops[0];
@@ -578,8 +565,9 @@ export function narrowLocalCandidates(
           edgeArgsObservedNarrow: observedNarrow,
           edgeArgsExtend: argExtends,
           writeBackTruncation,
-          mergeDiamond: diamond,
-          armsHoistable: hoistable,
+          mergeDiamond: shape.diamond,
+          armsHoistable: shape.hoistable,
+          targetHoistsSingleSetArm: opts.hoistsSingleSetArm === true,
         },
         ext,
       });
@@ -594,11 +582,13 @@ export function narrowBlockLocals(
   fn: Fn,
   gates: readonly Gate<NarrowLocalCandidate>[] = NARROW_LOCAL_GATES,
   opts: NarrowLocalOptions = {},
+  // The join shape, read before ANY pre-recovery pass rewrote the CFG — see `mergeShapes` for why
+  // the reading point is part of the rule. Defaulted for callers with no pass list around them
+  // (the tests, which hand this pass IR nothing else has touched). Everything else the gates read
+  // is re-enumerated after every rewrite, deliberately.
+  shapes: Map<Block, MergeShape> = mergeShapes(fn),
 ): number {
   let narrowed = 0;
-  // THE JOIN SHAPE IS READ OFF THE IR AS LIFTED, once, before any rewrite below — see
-  // `mergeShapes`. Everything else the gates read is re-enumerated deliberately.
-  const shapes = mergeShapes(fn);
   // Re-enumerated after each rewrite: narrowing one carrier deletes an op and re-points its
   // readers, which is exactly the evidence the edge rules of a LATER carrier read. `done` is the
   // re-entry guard and nothing else — `param-typed` is the RULE about an already-typed parameter,

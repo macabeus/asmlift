@@ -285,6 +285,30 @@ const MERGE_DIAMOND_POOL_ARM = `fn f {
 }
 `;
 
+/** AN ARM WITH NOTHING IN IT. `^bb1` forwards a value the head already computed, so it holds ZERO
+ *  value-producing ops. `gcc/jump.c:480` runs `single_set` on `next_active_insn (insn)` — the arm's
+ *  JUMP, which is not a SET — so the transform never applied here and the surviving diamond says
+ *  nothing about the declaration. An op budget of AT MOST one admits it; the budget is EXACTLY one.
+ *  This is the shape one side of an `if`/`else` takes when the value on that side was hoisted long
+ *  before `jump_optimize` ran. */
+const MERGE_DIAMOND_EMPTY_ARM = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %6: unk32 = add %0, %1
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  br ^bb3(%6)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
 /** A ROTATED LOOP HEADER, and it IS a two-predecessor join whose predecessors do not branch to each
  *  other — the preheader and the latch are distinct blocks. `gcc/jump.c` never considers a back-edge
  *  merge, so nothing about a declaration follows from this diamond surviving; the head test is what
@@ -491,6 +515,10 @@ describe('the join shape is recorded as evidence', () => {
     const fn = parse(ir);
     return narrowLocalCandidates(fn, undefined, opts).map(({ c }) => c.armsHoistable);
   };
+  const claims = (ir: string, opts: NarrowLocalOptions = AGBCC): boolean[] => {
+    const fn = parse(ir);
+    return narrowLocalCandidates(fn, undefined, opts).map(({ c }) => c.targetHoistsSingleSetArm);
+  };
 
   test('a two-armed merge is a diamond and a hoisted arm is not', () => {
     // every entry parameter is judged too and none of them is a merge; the carrier is last
@@ -560,6 +588,15 @@ describe('the join shape is recorded as evidence', () => {
     expect(reasons(MERGE_DIAMOND_POOL_ARM).at(-1)).toBe('edge-extends');
   });
 
+  test('an arm with no insn in it is not one SET', () => {
+    // The budget is EXACTLY one value-producing op, not at most one. `gcc/jump.c:480` matches
+    // `single_set` against the arm's own insn, and an arm whose only insn is the jump has none.
+    expect(diamonds(MERGE_DIAMOND_EMPTY_ARM).at(-1)).toBe(true);
+    expect(hoistable(MERGE_DIAMOND_EMPTY_ARM).at(-1)).toBe(false);
+    expect(run(MERGE_DIAMOND_EMPTY_ARM).n).toBe(0);
+    expect(reasons(MERGE_DIAMOND_EMPTY_ARM).at(-1)).toBe('edge-extends');
+  });
+
   test('a rotated loop header is a two-armed merge and is still not this evidence', () => {
     // The file used to claim a loop header fails the diamond test "for the same reason" a hoisted
     // join does — the header branching to the latch that branches back. That is only true of a
@@ -621,10 +658,13 @@ describe('the join shape is recorded as evidence', () => {
   test('a target that claims no single-SET hoist gets no join evidence', () => {
     // The join clause is a claim about gcc 2.x's `jump_optimize`, not about C, so it is
     // `TargetDescription.compilerBehaviors.hoistsSingleSetArm` and absent means the target claims
-    // nothing. Same fixture, same IR, the option off: the shape is still a diamond and the
-    // evidence field is false, so the pass behaves exactly as it did before the clause existed.
+    // nothing. Same fixture, same IR: the two IR facts are unchanged — it is still a diamond over
+    // arms that guard could have collapsed — and only the target's claim goes away, which is what
+    // separates "this compiler would not have acted" from "these arms were not collapsible".
     expect(diamonds(MERGE_DIAMOND).at(-1)).toBe(true);
-    expect(hoistable(MERGE_DIAMOND, {}).at(-1)).toBe(false);
+    expect(hoistable(MERGE_DIAMOND, {}).at(-1)).toBe(true);
+    expect(claims(MERGE_DIAMOND, {}).at(-1)).toBe(false);
+    expect(claims(MERGE_DIAMOND).at(-1)).toBe(true);
     expect(run(MERGE_DIAMOND, {}).n).toBe(0);
     expect(reasons(MERGE_DIAMOND, {}).at(-1)).toBe('edge-extends');
   });
