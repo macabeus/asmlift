@@ -352,7 +352,12 @@ function writeAtomic(path: string, data: Buffer | string): void {
 let seq = 0;
 
 /** Put the bytes into `objects/` (deduping) and hardlink them at `dest`. Falls back to a copy
- *  when the link cannot be made (EXDEV / EMLINK) — correctness never depends on the link.
+ *  when the link cannot be made (EXDEV / EMLINK) — correctness never depends on the link. Note
+ *  that `objects/` and `ns/` are both under ROOT, so EXDEV is unreachable and the copy path is
+ *  near-dead code; on a filesystem with no hardlinks at all correctness survives (the `ns/` copy
+ *  serves) but `reapUnlinked`'s `nlink === 1` test then deletes every `objects/` entry at the next
+ *  prune, so dedup silently vanishes and the cap under-counts. Nothing on this machine is such a
+ *  filesystem; if that changes, the cap is what to re-measure first.
  *
  *  The replacement is ATOMIC — link to a temp name, rename over `dest`. The obvious spelling
  *  (`rmSync(dest)` then `linkSync`) DELETES THE ANSWER before replacing it, and a sibling process

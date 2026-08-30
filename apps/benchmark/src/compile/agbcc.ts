@@ -158,6 +158,11 @@ export function candCacheNamespaceFiles(): string[] {
  */
 export function candCacheStaticStamp(files: readonly string[] = candCacheNamespaceFiles()): string {
   const h = createHash('sha256');
+  // 'bench-agbcc/v2' is FORMAT SALT, not a version lever, and it must never be bumped as one:
+  // this function lives inside agbcc.ts, whose own bytes it hashes, so a change to the pipeline
+  // re-namespaces by MEASUREMENT already. Bumping a constant instead of adding the missing input
+  // to candCacheNamespaceFiles() is the whole class of bug this round closed. Change it only if
+  // the digest's LAYOUT changes and old entries must be abandoned wholesale.
   h.update('bench-agbcc/v2');
   h.update(TOOLCHAIN.agbccFlags.join(' '));
   h.update(TOOLCHAIN.as + ' ' + TOOLCHAIN.asFlags.join(' '));
