@@ -73,12 +73,15 @@
 //                                                         ^^^^ the else arm ABOVE the compare
 //
 // `gcc/jump.c:443-445` is the transform: "Simplify `if (...) x = a; else x = b;` by converting it
-// to `x = b; if (...) x = a;` if B is sufficiently simple". Its entry guard at `:895-902` requires
-// the else arm to be ONE insn holding ONE SET — and `gcc/thumb.h:344` PROMOTE_MODE expands a
-// narrow-DECLARED assignment into the arithmetic PLUS its `ashift`/`lshiftrt` truncation pair, five
-// insns in the `.jump` dump, so the hoist is refused for exactly the spelling that declares the
-// local. A join gcc could have hoisted and did not is therefore positive evidence FOR a
-// declaration. `mergeDiamond` reads it off the CFG this pass already walks.
+// to `x = b; if (...) x = a;` if B is sufficiently simple". ITS GUARD IS THE CONJUNCTION AT
+// `:470-501`, not the `:895-907` block that reads similarly and is the conditional-move /
+// store-flag transform beside it. `:471`/`:478` want each arm to be a `single_set` with the
+// condjump immediately before the first, and `:482` wants the moving arm free of side effects and
+// non-trapping — and `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-DECLARED assignment into the
+// arithmetic PLUS its `ashift`/`lshiftrt` truncation pair, five insns in the `.jump` dump, so the
+// hoist is refused for exactly the spelling that declares the local. A join gcc could have hoisted
+// and did not is therefore positive evidence FOR a declaration. `mergeDiamond` reads it off the CFG
+// this pass already walks.
 //
 // THE GUARD IS ABOUT THE ARM, SO READING ONLY THE JOIN READS HALF OF IT — `armsHoistable` is the
 // other half and it is most of the rule's reach. A diamond over arms too big for ONE SET, or over
@@ -129,9 +132,14 @@
 // harness this repo does not have — which is why the arm clause is priced by AUTHORED rows
 // (`mergeldcast`, `mergepool`) instead, where it costs 6 and 1.
 //
-// NO LOOP GATE, deliberately: the extension is what states the width, and it states it whether or
-// not the block is a loop header. The loop is where the width is worth something, not where it
-// becomes true.
+// NO LOOP GATE, deliberately, AND THAT SENTENCE IS ABOUT THE SOUND RULES ONLY. The extension is
+// what states the width, and it states it whether or not the block is a loop header — the loop is
+// where the width is worth something, not where it becomes true. The join clause is different and
+// it does not get the same licence: a rotated loop header IS a two-armed merge, `gcc/jump.c` never
+// considers a back edge, and nothing about a declaration follows from that diamond surviving. It is
+// refused, but by the shape test in `mergeArms` (the two arms do not share a `cond_br` head) rather
+// than by a loop predicate — which matters, because a per-FUNCTION loop question cannot decide a
+// per-SITE one.
 //
 // TARGET-GATED IN ONE CONJUNCT AND NOWHERE ELSE, and the split is the point. The sound rules above
 // are claims about C — an extension states a width; a second reader of the raw carrier observes the
