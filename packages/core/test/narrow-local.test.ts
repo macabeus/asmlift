@@ -199,6 +199,31 @@ const MERGE_HOISTED_ARM = `fn f {
 }
 `;
 
+/** THE SAME DIAMOND WITH AN ARM GCC COULD NOT HAVE HOISTED. `jump.c:895-902` wants the else arm to
+ *  be ONE insn holding ONE SET, and that guard fails for a big arm whatever the local's width — so
+ *  here the surviving diamond says nothing about the declaration, and the carrier must stay refused
+ *  rather than narrowed on evidence that is not evidence. Measured over the sa3 corpus, this is 23
+ *  of the 32 carriers the join shape alone would re-decide. */
+const MERGE_DIAMOND_BIG_ARM = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %6: unk32 = add %0, %1
+  %10: unk32 = mul %6, %0
+  %11: unk32 = add %10, %1
+  br ^bb3(%11)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
 describe('a block parameter extended at its only read is declared at that width', () => {
   test('a sole `sext {16}` types the carrier `s16` and drops the extension', () => {
     const { n, fn, ir } = run(NARROW_COUNTER);
@@ -250,6 +275,7 @@ describe('the join shape is recorded as evidence', () => {
   // hoisted shape fails it because the join's own predecessor is the conditional branch that also
   // targets the other arm.
   const diamonds = (ir: string): boolean[] => narrowLocalCandidates(parse(ir)).map(({ c }) => c.mergeDiamond);
+  const hoistable = (ir: string): boolean[] => narrowLocalCandidates(parse(ir)).map(({ c }) => c.armsHoistable);
 
   test('a two-armed merge is a diamond and a hoisted arm is not', () => {
     // every entry parameter is judged too and none of them is a merge; the carrier is last
@@ -279,6 +305,20 @@ describe('the join shape is recorded as evidence', () => {
     expect(run(MERGE_HOISTED_ARM).n).toBe(0);
     expect(reasons(MERGE_HOISTED_ARM).at(-1)).toBe('edge-extends');
     expect(runWithout(MERGE_HOISTED_ARM, 'edge-extends')).toBe(1);
+  });
+
+  test('a diamond gcc could not have hoisted is not evidence, and is refused', () => {
+    // The mechanism is `jump.c`'s guard and the guard is about the ARM, so reading only the join
+    // reads half of it. An arm too big for ONE SET keeps its diamond whatever the local's width,
+    // and narrowing there would be a spelling guess dressed as evidence — 23 of the 32 sa3 carriers
+    // the join shape alone re-decides are this shape.
+    expect(diamonds(MERGE_DIAMOND_BIG_ARM).at(-1)).toBe(true);
+    expect(hoistable(MERGE_DIAMOND_BIG_ARM).at(-1)).toBe(false);
+    expect(run(MERGE_DIAMOND_BIG_ARM).n).toBe(0);
+    expect(reasons(MERGE_DIAMOND_BIG_ARM).at(-1)).toBe('edge-extends');
+    expect(runWithout(MERGE_DIAMOND_BIG_ARM, 'edge-extends')).toBe(1);
+    // the accepted diamond's own arms are one `add` and one `sub` — exactly what gcc hoists
+    expect(hoistable(MERGE_DIAMOND).at(-1)).toBe(true);
   });
 });
 
@@ -367,8 +407,9 @@ describe('refusals', () => {
     // This fixture is `mergecast`'s cell: one `sext16` over raw in-edges AND a HOISTED join, which
     // is what agbcc leaves when the source cast a wide local. Refusing it costs `mergecast:agbcc`
     // its match, measured. The carrier the join clause re-decides is the DIAMOND above; over 2288
-    // sa3 sources this refusal fell 40 -> 8, and 0 of the 32 re-decided carriers is a benchmark
-    // row, which is why these fixtures and the ablated fuzz arm carry the rule and no score does.
+    // sa3 sources this refusal falls only 40 -> 39, because 31 of its 32 diamonds have arms gcc
+    // could not have collapsed either way — which is why these fixtures and the ablated fuzz arm
+    // carry the rule and no score does.
     expect(run(MERGE_NO_TRUNCATION).n).toBe(0);
     expect(runWithout(MERGE_NO_TRUNCATION, 'edge-extends')).toBe(1);
     // and the same fixture with the truncation SUNK to the join is admitted — the two differ by

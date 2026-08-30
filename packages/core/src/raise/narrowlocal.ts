@@ -80,11 +80,14 @@
 // local. A join gcc could have hoisted and did not is therefore positive evidence FOR a
 // declaration. `mergeDiamond` reads it off the CFG this pass already walks.
 //
-// IT IS EVIDENCE, NOT A PROOF, and the imprecision is worth naming: the one-SET guard also fails
-// for arms that are simply too big, so a diamond can survive under a wide local whose arms are
-// complex. That costs a spelling and never a number — this gate is `sound: false` and both
-// spellings compute the same thing — and the direction is still the right prior, because the
-// evidence is CONSTRUCTIVE where its absence was not.
+// THE GUARD IS ABOUT THE ARM, SO READING ONLY THE JOIN READS HALF OF IT — `armsHoistable` is the
+// other half and it is most of the rule's reach. A diamond over arms too big for ONE SET, or over
+// an arm holding a call or a store, survives whatever the local's width and carries no information
+// at all; narrowing there would be a spelling guess wearing the evidence's clothes. Measured over
+// sa3 the join alone re-decides 32 carriers and the pair re-decides ONE, so 31 of the 32 were the
+// uninformative shape — the loose rule would have changed the spelling of 31 carriers no benchmark
+// row covers, on nothing. Those 31 keep the refusal they already had, and widening to them is its
+// own round with its own measurement.
 //
 // PHRASED AS POSITIVE EVIDENCE, DELIBERATELY. `!mergeDiamond` and not `hoistedJoin`: the negation
 // of a hoist is not evidence of a declaration, so a rule that refused only what is provably hoisted
@@ -95,13 +98,18 @@
 // the frontend) the table before the join clause was `entry-param 1228 · reader-is-extension 2114 ·
 // param-typed 33 · raw-reader 13 · forwarded 7 · edge-reader 28 · edge-extends 40 · ACCEPT 60`,
 // with the 40 splitting `zext 30 / sext 10` and living in 37 functions, none among the 42 sa3 rows
-// the benchmark carries. Reading the JOIN moves 32 of those 40 — 27 zext diamonds and 5 sext ones —
-// into `ACCEPT`, leaving `edge-extends 8 · ACCEPT 92`; the 8 that stay are the genuine hoists (3
-// zext, 5 sext), which is cell four and the `mergecastu` row. Over the benchmark's own 930 rows
-// exactly ONE carrier is re-decided and it is `synthetic:mergeu16:agbcc`. That `bench diff` sees
-// only one of 33 is the whole reason the `merge*` rows in apps/benchmark/dataset/synthetic.ts
-// exist, and the reason the behavioural oracle for this rule is the ablated arm of
-// narrowlocal-fuzz.test.ts rather than any score.
+// the benchmark carries. 32 of the 40 are diamonds, but only ONE of those has arms gcc could have
+// collapsed, so the shipped pair moves exactly that one and leaves `edge-extends 39 · ACCEPT 61`.
+// Over the benchmark's own 930 rows (732 lift map-less) exactly one carrier is re-decided and it is
+// `synthetic:mergeu16:agbcc`. That `bench diff` can see one of two is the whole reason the `merge*`
+// rows in apps/benchmark/dataset/synthetic.ts exist, and the reason the behavioural oracle for this
+// rule is the ablated arm of narrowlocal-fuzz.test.ts rather than any score.
+//
+// WHAT PRICING BY SCORE WOULD TAKE, measured rather than assumed: all 29 flipped sa3 functions
+// fail to produce a scorable candidate outside the project — every one references external symbols,
+// and grafting sa3's own generated `ctx.c` in still leaves per-function gaps (a callee used as a
+// value, an arity mismatch), because that context is generated per translation unit. So a score for
+// this population needs a per-function context harness this repo does not have.
 //
 // NO LOOP GATE, deliberately: the extension is what states the width, and it states it whether or
 // not the block is a loop header. The loop is where the width is worth something, not where it
@@ -110,7 +118,7 @@
 // NOT agbcc-GATED, and not target-gated at all — a C declaration is not a target fact. Over the
 // benchmark's 894 rows the only ones it moves are agbcc's, which is a measurement, not a rule.
 import { type Block, type Fn, type Op, type Value, replaceAllUsesWith } from '../ir/core';
-import { CAST_WIDTHS } from '../ir/opcodes';
+import { CAST_WIDTHS, HOIST_UNSAFE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 
@@ -146,6 +154,12 @@ export interface NarrowLocalCandidate {
    *  plus its truncation pair). So a surviving diamond is evidence FOR a declaration and a hoisted
    *  join is evidence against one. */
   mergeDiamond: boolean;
+  /** …and the arms of that merge are ones `gcc/jump.c:895-902` could have collapsed: at most one
+   *  value-producing non-constant op each, and nothing unsafe to speculate above the compare. The
+   *  guard is about the ARM, so a diamond over arms too big to be ONE SET survives whatever the
+   *  local's width and carries no information at all. An APPROXIMATION of an RTL predicate read off
+   *  the lifted IR — a folded immediate is not a second SET, which is why constants do not count. */
+  armsHoistable: boolean;
 }
 
 export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
@@ -243,7 +257,7 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
     // hoisted" would newly ADMIT every one of them on no evidence at all. `!mergeDiamond` keeps
     // every unmeasured shape refused exactly as before, so this widening admits only the shape the
     // header's 2x2 decides.
-    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation && !c.mergeDiamond,
+    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation && !(c.mergeDiamond && c.armsHoistable),
   },
 ];
 
@@ -272,6 +286,18 @@ function predecessorsOf(fn: Fn): Map<Block, Block[]> {
  *  predecessor of the join AND of the one surviving arm — from the diamond the source's own
  *  `if`/`else` leaves behind. A loop header fails it for the same reason: the header branches to
  *  the latch that branches back. */
+function armsAreHoistable(preds: Map<Block, Block[]>, blk: Block): boolean {
+  const p = preds.get(blk);
+  if (p === undefined) {
+    return false;
+  }
+  return p.every(
+    (b) =>
+      !b.ops.some((op) => HOIST_UNSAFE_OPS.has(op.opcode)) &&
+      b.ops.filter((op) => op.results.length > 0 && op.opcode !== 'const').length <= 1,
+  );
+}
+
 function isMergeDiamond(preds: Map<Block, Block[]>, blk: Block): boolean {
   const p = preds.get(blk);
   if (p === undefined || p.length !== 2) {
@@ -333,6 +359,7 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
   const preds = predecessorsOf(fn);
   for (const [i, b] of fn.blocks.entries()) {
     const diamond = isMergeDiamond(preds, b);
+    const hoistable = armsAreHoistable(preds, b);
     for (const [pi, p] of b.params.entries()) {
       const { ops, forwarded } = readersOf(fn, p);
       const ext = ops[0];
@@ -389,6 +416,7 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
           edgeArgsExtend: argExtends,
           writeBackTruncation,
           mergeDiamond: diamond,
+          armsHoistable: hoistable,
         },
         ext,
       });
