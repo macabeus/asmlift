@@ -265,11 +265,20 @@ describe('the join shape is recorded as evidence', () => {
     expect(diamonds(NARROW_COUNTER)).toEqual([false, false]);
   });
 
-  test('recording it changes no verdict', () => {
-    expect(reasons(MERGE_DIAMOND).at(-1)).toBe('edge-extends');
-    expect(reasons(MERGE_HOISTED_ARM).at(-1)).toBe('edge-extends');
-    expect(run(MERGE_DIAMOND).n).toBe(0);
+  test('a surviving diamond narrows and a hoisted arm does not', () => {
+    // THE 2x2's THIRD AND FOURTH ROWS, decided. Both fixtures present this table with one
+    // `zext16` reader over raw in-edges and no sunk write-back — identical in every other field —
+    // and they are the two spellings the header calls indistinguishable. The join separates them.
+    const { n, fn, ir } = run(MERGE_DIAMOND);
+    expect(n).toBe(1);
+    expect(fn.blocks[3].params[0].type).toEqual({ kind: 'int', width: 16, signed: false });
+    expect(ir).not.toMatch(/zext/);
+
+    // and the hoisted twin — `s32 v; … *out = (u16)v`, the benchmark's `mergecastu` row — is still
+    // refused, by this gate and no other
     expect(run(MERGE_HOISTED_ARM).n).toBe(0);
+    expect(reasons(MERGE_HOISTED_ARM).at(-1)).toBe('edge-extends');
+    expect(runWithout(MERGE_HOISTED_ARM, 'edge-extends')).toBe(1);
   });
 });
 
@@ -355,12 +364,11 @@ describe('refusals', () => {
 
   test('a merge whose in-edges carry no truncation is a cast, not a declaration', () => {
     // EVIDENCE, not soundness — `s32 v` with one `(s16)v` at the use computes the same numbers.
-    // With ONE extension the two spellings are the same IR in this pass's whole vocabulary: `u16 v`
-    // and `s32 v` + `(u16)v` both arrive as a merge carrier read by one `zext16` over raw in-edges,
-    // and they want opposite answers (the file header carries all four compiled round-trips). This
-    // refusal is therefore a CHOICE — keep the wide spelling where the asm does not say — and its
-    // price is 40 of 128 carriers over 2288 sa3 functions, none of them on a benchmark row. The
-    // `mergecast` row in the synthetic dataset is what holds the choice to a score.
+    // This fixture is `mergecast`'s cell: one `sext16` over raw in-edges AND a HOISTED join, which
+    // is what agbcc leaves when the source cast a wide local. Refusing it costs `mergecast:agbcc`
+    // its match, measured. The carrier the join clause re-decides is the DIAMOND above; over 2288
+    // sa3 sources this refusal fell 40 -> 8, and 0 of the 32 re-decided carriers is a benchmark
+    // row, which is why these fixtures and the ablated fuzz arm carry the rule and no score does.
     expect(run(MERGE_NO_TRUNCATION).n).toBe(0);
     expect(runWithout(MERGE_NO_TRUNCATION, 'edge-extends')).toBe(1);
     // and the same fixture with the truncation SUNK to the join is admitted — the two differ by

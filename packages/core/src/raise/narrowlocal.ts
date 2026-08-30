@@ -58,23 +58,50 @@
 //   u16 v; … *out = v;                  zext16                 4     0 MATCH
 //   s32 v; … *out = (u16)v;             zext16             0 MATCH       4
 //
-// Rows one and two are DECIDABLE and are decided: a `zext_w` read by a `sext_w` is the write-back
-// truncation followed by the declaration's own sign extension, and no cast on a wide local writes
-// that pair. Rows three and four are the same IR in this pass's whole vocabulary — same reader,
-// same raw in-edges, opposite answers — and differ only in the branch shape agbcc chose, which is
-// the score's business and not a raise-level gate's. So the gate admits the decidable half and
-// leaves the other refused, and the refusal is a CHOICE this file makes rather than evidence it
-// reads.
+// Rows one and two are DECIDABLE by the carrier's own readers: a `zext_w` read by a `sext_w` is the
+// write-back truncation followed by the declaration's own sign extension, and no cast on a wide
+// local writes that pair. Rows three and four are the same IR in this pass's READER vocabulary —
+// same single extension, same raw in-edges, opposite answers — and for a long time this file
+// refused both and called the difference "the branch shape agbcc chose", i.e. the score's business.
+//
+// THE BRANCH SHAPE IS EVIDENCE THIS PASS CAN READ, and it decides rows three and four. Compiled
+// with this benchmark's own agbcc, `u16 v` leaves a DIAMOND of 14 instructions and `s32 v` +
+// `(u16)v` a HOISTED join of 12:
+//
+//   u16 v;  if (c) v = a+b; else v = a-b;  *out = v;      cmp / beq / adds / b / lsl+lsr / str
+//   s32 v;  if (c) v = a+b; else v = a-b;  *out = (u16)v; subs / cmp / beq / adds / lsl+lsr / str
+//                                                         ^^^^ the else arm ABOVE the compare
+//
+// `gcc/jump.c:443-445` is the transform: "Simplify `if (...) x = a; else x = b;` by converting it
+// to `x = b; if (...) x = a;` if B is sufficiently simple". Its entry guard at `:895-902` requires
+// the else arm to be ONE insn holding ONE SET — and `gcc/thumb.h:344` PROMOTE_MODE expands a
+// narrow-DECLARED assignment into the arithmetic PLUS its `ashift`/`lshiftrt` truncation pair, five
+// insns in the `.jump` dump, so the hoist is refused for exactly the spelling that declares the
+// local. A join gcc could have hoisted and did not is therefore positive evidence FOR a
+// declaration. `mergeDiamond` reads it off the CFG this pass already walks.
+//
+// IT IS EVIDENCE, NOT A PROOF, and the imprecision is worth naming: the one-SET guard also fails
+// for arms that are simply too big, so a diamond can survive under a wide local whose arms are
+// complex. That costs a spelling and never a number — this gate is `sound: false` and both
+// spellings compute the same thing — and the direction is still the right prior, because the
+// evidence is CONSTRUCTIVE where its absence was not.
+//
+// PHRASED AS POSITIVE EVIDENCE, DELIBERATELY. `!mergeDiamond` and not `hoistedJoin`: the negation
+// of a hoist is not evidence of a declaration, so a rule that refused only what is provably hoisted
+// would newly admit every one-predecessor, three-armed and irreducible join on nothing at all.
 //
 // ITS PRICE IS MEASURED OVER THE SET IT REFUSES, never over the set it admits — a gate priced on
-// its own accepts cannot show a cost. Over 2288 per-function sa3 sources, every one lifted, the
-// shipped table is `entry-param 1228 · reader-is-extension 2114 · param-typed 33 · raw-reader 13 ·
-// forwarded 7 · edge-reader 28 · edge-extends 40 · ACCEPT 60`. Reading the sunk write-back moved 9
-// carriers, in 9 functions, out of `edge-extends` and into `ACCEPT`. Of the 40 refusals left, 30
-// are a single `zext` (rows three and four) and 10 a single `sext` (row two), and they live in 37
-// functions, not one of which is among the 42 sa3 rows the benchmark carries — which is why
-// `bench diff` cannot price this gate at all, and why the three `merge*` rows in
-// apps/benchmark/dataset/synthetic.ts exist.
+// its own accepts cannot show a cost. Over 2288 per-function sa3 sources (1742 lift, 546 decline at
+// the frontend) the table before the join clause was `entry-param 1228 · reader-is-extension 2114 ·
+// param-typed 33 · raw-reader 13 · forwarded 7 · edge-reader 28 · edge-extends 40 · ACCEPT 60`,
+// with the 40 splitting `zext 30 / sext 10` and living in 37 functions, none among the 42 sa3 rows
+// the benchmark carries. Reading the JOIN moves 32 of those 40 — 27 zext diamonds and 5 sext ones —
+// into `ACCEPT`, leaving `edge-extends 8 · ACCEPT 92`; the 8 that stay are the genuine hoists (3
+// zext, 5 sext), which is cell four and the `mergecastu` row. Over the benchmark's own 930 rows
+// exactly ONE carrier is re-decided and it is `synthetic:mergeu16:agbcc`. That `bench diff` sees
+// only one of 33 is the whole reason the `merge*` rows in apps/benchmark/dataset/synthetic.ts
+// exist, and the reason the behavioural oracle for this rule is the ablated arm of
+// narrowlocal-fuzz.test.ts rather than any score.
 //
 // NO LOOP GATE, deliberately: the extension is what states the width, and it states it whether or
 // not the block is a loop header. The loop is where the width is worth something, not where it
@@ -202,10 +229,21 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
     // call site of a narrow-declared callee — bytes in other functions, which no per-function
     // differ sees. A block local's width leaves the function's interface alone, so the worst this
     // rule can do is pick the losing spelling of two that compile, and nothing here is wrong.
-    why: 'the write-back truncation is the evidence: no truncation on an in-edge and none sunk to the join',
+    why: 'no truncation on an in-edge, none sunk to the join, and a join gcc would have hoisted',
     sound: false,
     guardedBy: 'narrow-local.test.ts: a merge whose in-edges carry no truncation is a cast, not a declaration',
-    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation,
+    // ONE ENTRY, three conjuncts, and it cannot be split: a gate is a REJECTION, so "refuse unless
+    // some evidence" is one rule — split across rows, each half over-fires alone. The consequence
+    // is that `mergeDiamond` is not independently ablatable by `without`; its price is the fixture
+    // pair above plus the sa3 sweep, never a `without` diff.
+    //
+    // The third conjunct is POSITIVE evidence, deliberately, and not `!hoistedJoin`. The negation
+    // of a hoist is not evidence of a declaration: a one-predecessor join, a three-armed one, an
+    // irreducible one all say nothing, and phrasing the rule as "refuse only what is provably
+    // hoisted" would newly ADMIT every one of them on no evidence at all. `!mergeDiamond` keeps
+    // every unmeasured shape refused exactly as before, so this widening admits only the shape the
+    // header's 2x2 decides.
+    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation && !c.mergeDiamond,
   },
 ];
 
