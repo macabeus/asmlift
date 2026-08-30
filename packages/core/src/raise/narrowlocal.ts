@@ -323,11 +323,13 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
  *  optimisation. `ir/core.ts`'s `predecessors` is not interchangeable with this: it lists a block
  *  once per EDGE, so a `cond_br` whose two successors are the same block reports that block as two
  *  predecessors and reads as a two-armed merge with one arm. Here a predecessor is an ARM, and one
- *  block reaching the join twice is one arm. It also walks every op rather than only the terminator,
- *  because a frontend-lifted block can carry a branch that is not last. Measured over 2288 sa3
- *  functions the two models disagree on 26 blocks, and on 8 of them `ir/core`'s would have reported
- *  the two predecessors this file needs — so swapping in the shared utility is a silent behaviour
- *  change, which `narrow-local.test.ts: a block reached twice from one predecessor is ONE arm` pins.
+ *  block reaching the join twice is one arm. That dedup is the ONLY behavioural difference between
+ *  the two: `verify` (ir/verify.ts:74-103) already guarantees exactly one terminator, last in its
+ *  block, and no successors on any other op, so this walk over every op and `successorsOf`'s over
+ *  the last one see the same edges. Measured over 2288 sa3 functions the two models disagree on 26
+ *  blocks, and on 8 of them `ir/core`'s would have reported the two predecessors this file needs —
+ *  so swapping in the shared utility is a silent behaviour change, which
+ *  `narrow-local.test.ts: a block reached twice from one predecessor is ONE arm` pins.
  *
  *  Hoisted once per `narrowLocalCandidates` call rather than recomputed per parameter, which keeps
  *  this an O(E) walk of the function and not an O(E * params) one. */

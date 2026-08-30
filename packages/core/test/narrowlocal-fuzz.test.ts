@@ -331,8 +331,9 @@ describe.each([
       judged++;
       if (differs(r)) bad.push(seed);
     }
-    // the sweep is not vacuous: the pass really fires and both trees interpret. The floor sits
-    // well under the observed counts, so a generator tweak cannot turn this green by quietly
+    // the sweep is not vacuous: the pass really fires and both trees interpret. At 15000 seeds that
+    // is 373 acyclic and 265 loop-bearing functions (the ablated arm below judges 1461 and 947);
+    // the floor sits well under all four, so a generator tweak cannot turn this green by quietly
     // narrowing nothing.
     expect(judged).toBeGreaterThan(100);
     expect(bad).toEqual([]);
