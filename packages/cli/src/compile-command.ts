@@ -444,46 +444,103 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
    *  namespace that walks it is a hang rather than a cold start. The budget makes running out
    *  LOUD — it throws, `candCache` turns the throw into a refusal, and the run compiles uncached.
    *  Truncating the walk instead would be the other thing, and the other thing is a stale
-   *  object. */
+   *  object.
+   *
+   *  The budget is one running total for the whole STAMP, not per input — so the entry the walk
+   *  dies on is an accident of walk order and is not what a reader can act on. The message names
+   *  the OPERAND the walk started from as well, which is the half that says what to change. */
   class MeasurementTooLarge extends Error {}
+  /** `statSync` said this IS a path, and then the READ of it failed. That is NOT "the token was
+   *  not a path": the compile reads it and the namespace cannot, so the namespace is incomplete,
+   *  and an incomplete namespace is a stale object.
+   *
+   *  MEASURED, and it is why this class exists: an include directory at mode 0311 — searchable,
+   *  not listable, which is exactly what a compile needs and a walk does not — served a stale
+   *  object with no stderr line, because every non-budget error was swallowed into "contributes
+   *  nothing". Worse in the transient case: one `EIO` on one `readdirSync` mints a PERMANENT
+   *  incomplete namespace, which is the same silent-wrong-answer shape `verdict()` below refuses
+   *  to store rejections for. Loud refusal instead. */
+  class MeasurementUnreadable extends Error {}
   const budget = { entries: 20000, bytes: 512 * 1024 * 1024 };
-  const hashPath = (h: ReturnType<typeof createHash>, tag: string, p: string): boolean => {
+  /** `root` is the operand this walk began at — carried down the recursion for the diagnostics
+   *  only. `inDir` says the entry was NAMED by a `readdirSync` we already succeeded at, which
+   *  changes what a failed `statSync` means (below). */
+  const hashPath = (
+    h: ReturnType<typeof createHash>,
+    tag: string,
+    p: string,
+    root: string = p,
+    inDir = false,
+  ): boolean => {
+    let st;
     try {
-      const st = statSync(p);
-      if (--budget.entries < 0) {
-        throw new MeasurementTooLarge(
-          `refusing to measure ${p}: over 20000 files under one compile input. A namespace that ` +
-            `stops walking is an incomplete namespace, which is a stale object — so nothing is cached`,
-        );
-      }
-      if (st.isDirectory()) {
-        // A directory is hashed by its whole contents, recursively and in sorted order: that is
-        // the entire point of measuring it (`-I ./inc` reaches `inc/k.h`, which no token set and
-        // no probe TU can see).
-        h.update('dir:' + tag);
-        for (const e of readdirSync(p, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
-          hashPath(h, tag + '/' + e.name, join(p, e.name));
-        }
-        return true;
-      }
-      if (!st.isFile()) {
+      st = statSync(p);
+    } catch {
+      if (inDir) {
+        // A directory entry the listing named and a stat cannot see: a dangling symlink, or a
+        // file deleted under the walk. Refusing over a dangling symlink would refuse half the
+        // toolchains on earth, so the NAME still joins the digest — strictly more than the old
+        // spelling contributed — and the walk goes on.
+        h.update('unstattable:' + tag);
         return false;
       }
-      if ((budget.bytes -= st.size) < 0) {
-        throw new MeasurementTooLarge(
-          `refusing to measure ${p}: over 512MiB under one compile input. An incomplete ` +
-            `namespace is a stale object, so nothing is cached`,
-        );
-      }
-      h.update(tag);
-      h.update(sha256(readFileSync(p)));
-      return true;
-    } catch (e) {
-      if (e instanceof MeasurementTooLarge) {
-        throw e;
-      }
+      // Not a path HERE: a flag word, a shell builtin, an operand that is simply absent. It
+      // contributes nothing, and needs no MISSING marker — the template TEXT is hashed
+      // unconditionally, so absent -> present still moves the namespace.
       return false;
     }
+    if (--budget.entries < 0) {
+      throw new MeasurementTooLarge(
+        `refusing to measure ${root}: over 20000 files in one namespace stamp (the walk reached ` +
+          `${p}). A namespace that stops walking is an incomplete namespace, which is a stale ` +
+          `object — so nothing is cached`,
+      );
+    }
+    if (st.isDirectory()) {
+      let entries;
+      try {
+        entries = readdirSync(p, { withFileTypes: true });
+      } catch (e) {
+        throw new MeasurementUnreadable(
+          `refusing to measure ${root}: cannot list the directory ${p} ` +
+            `(${e instanceof Error ? e.message : String(e)}). The compile can read what is in ` +
+            `there and this namespace cannot, so nothing is cached`,
+        );
+      }
+      // A directory is hashed by its whole contents, recursively and in sorted order: that is
+      // the entire point of measuring it (`-I ./inc` reaches `inc/k.h`, which no token set and
+      // no probe TU can see).
+      h.update('dir:' + tag);
+      for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+        hashPath(h, tag + '/' + e.name, join(p, e.name), root, true);
+      }
+      return true;
+    }
+    if (!st.isFile()) {
+      return false;
+    }
+    if ((budget.bytes -= st.size) < 0) {
+      throw new MeasurementTooLarge(
+        `refusing to measure ${root}: over 512MiB in one namespace stamp (the walk reached ${p}). ` +
+          `An incomplete namespace is a stale object, so nothing is cached`,
+      );
+    }
+    let bytes;
+    try {
+      bytes = readFileSync(p);
+    } catch (e) {
+      throw new MeasurementUnreadable(
+        `refusing to measure ${root}: cannot read the file ${p} ` +
+          `(${e instanceof Error ? e.message : String(e)}). The compile can read it and this ` +
+          `namespace cannot, so nothing is cached`,
+      );
+    }
+    // Updated only AFTER the read succeeded — so the doc comment on the flag table, which says a
+    // path that cannot be measured contributes NOTHING, is true. The earlier spelling updated
+    // the tag first and was false in both directions.
+    h.update(tag);
+    h.update(sha256(bytes));
+    return true;
   };
   /** One entry of a delegate chain. A measurement entry (`UNRESOLVED:`, `ENV:`) is hashed as the
    *  STRING it is — it is an answer, not a file, and skipping it drops the answer. A file is
