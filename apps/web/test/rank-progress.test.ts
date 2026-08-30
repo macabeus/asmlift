@@ -65,7 +65,7 @@ describe('throttleProgress', () => {
 
 describe('progressBar', () => {
   test('an indeterminate phase carries NO total and no fabricated percentage', () => {
-    for (const phase of ['assembling', 'enumerating', 'ranking'] as const) {
+    for (const phase of ['queued', 'assembling', 'enumerating', 'ranking'] as const) {
       const bar = progressBar({ phase });
       expect(bar.determinate).toBe(false);
       expect(bar.valueNow).toBeUndefined();
@@ -93,8 +93,15 @@ describe('progressBar', () => {
 });
 
 describe('progressLabel', () => {
+  test('`queued` is a phase the WORKER never emits — the main thread sets it, and it claims nothing', () => {
+    // The hook cannot observe `assembling`: it only knows it posted. On a busy worker (a superseded
+    // run enumerating for a measured 62.3 s) `assembling` would be false for the whole wait.
+    expect(progressLabel({ phase: 'queued' })).toBe('waiting for the ranking worker…');
+    expect(progressBar({ phase: 'queued' }).determinate).toBe(false);
+  });
+
   test('every phase has a sentence — the badge is never empty', () => {
-    for (const phase of ['assembling', 'enumerating', 'scoring', 'ranking'] as const) {
+    for (const phase of ['queued', 'assembling', 'enumerating', 'scoring', 'ranking'] as const) {
       expect(progressLabel({ phase }).length).toBeGreaterThan(0);
     }
   });

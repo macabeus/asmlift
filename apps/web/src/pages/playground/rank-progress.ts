@@ -17,11 +17,20 @@
 //    the pixels never read "finished" while the sort + structured clone + render still run;
 //    `aria-valuenow` keeps the TRUE count, so assistive tech gets the exact number.
 
-/** The four phases of `rankCandidatesInBrowser`, in the order they run. Only `scoring` is
- *  determinate. `assembling` runs FIRST (it is milliseconds, and it is the phase that fails on a
- *  pret-dialect `.s`); `enumerating` is synchronous inside core and cannot be subdivided, so it
- *  gets a name and no number. */
-export type RankPhase = 'assembling' | 'enumerating' | 'scoring' | 'ranking';
+/** The phases a ranking passes through, in the order they run. Only `scoring` is determinate.
+ *
+ *  `queued` is the one phase the WORKER NEVER EMITS — it is what the main thread knows between
+ *  `postMessage` and the worker's first tick, and it is a real state rather than a formality: the
+ *  worker is single-threaded and `enumerateCandidates` is synchronous, so a request posted while a
+ *  superseded run is still enumerating cannot even be DEQUEUED for the length of that enumeration
+ *  (62.3 s on one measured run, 2026-08-30). Calling that `assembling` would assert work that has
+ *  not started — the badge asserting a phase nobody observed is the same class of lie as a
+ *  fabricated total, so it gets its own name.
+ *
+ *  `assembling` then runs FIRST inside the worker (it is milliseconds, and it is the phase that
+ *  fails on a pret-dialect `.s`); `enumerating` is synchronous inside core and cannot be
+ *  subdivided, so it gets a name and no number. */
+export type RankPhase = 'queued' | 'assembling' | 'enumerating' | 'scoring' | 'ranking';
 
 /** One progress observation. `done`/`total` exist only once the candidate array does. */
 export interface RankProgress {
@@ -31,6 +40,7 @@ export interface RankProgress {
 }
 
 const PHASE_TEXT: Record<RankPhase, string> = {
+  queued: 'waiting for the ranking worker…',
   assembling: 'assembling the target asm…',
   enumerating: 'enumerating candidate spellings…',
   scoring: 'scoring candidates with agbcc + objdiff…',

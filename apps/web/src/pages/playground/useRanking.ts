@@ -99,9 +99,13 @@ export function useRanking(input: RankingInput): Ranking {
       return;
     }
     const reqId = ++currentReqId.current; // new request supersedes anything in flight
-    // clear any prior result from the view immediately (H1 layer 1) — with a NAMED phase from the
-    // first frame, never an empty message
-    setRanking({ status: 'loading', phase: 'assembling' });
+    // Clear any prior result from the view immediately (H1 layer 1) — with a named phase from the
+    // first frame, never an empty message. The phase is `queued`, the one the worker never sends,
+    // because it is the only thing the MAIN THREAD can honestly claim here: the request has been
+    // handed over and nothing has been observed back. Naming `assembling` would be an assertion,
+    // not an observation, and it is wrong for a measured 62.3 s whenever the worker is still
+    // enumerating a superseded run (its event loop cannot dequeue this message until it returns).
+    setRanking({ status: 'loading', phase: 'queued' });
     workerRef.current?.postMessage({ reqId, name, asm, target, ...(symbols ? { symbols } : {}) } satisfies RankRequest);
   }, [eligible, asm, name, targetId, target, symbols]);
 
