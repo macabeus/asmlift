@@ -137,7 +137,13 @@ function eligible(
 /** The (base, access-shape) key an access shares with its reuse siblings. Width and signedness are
  *  part of it because the hoisted local carries the access's pointer type — two widths through one
  *  base are two different locals, exactly as in basecse. */
-const keyOf = (n: Extract<Expr, { k: 'index' }>): string => `${baseId(n.base as LeafBase)} ${n.width} ${n.signed}`;
+const keyOf = (n: Extract<Expr, { k: 'index' }>): string => scopedBaseKey(n.base as LeafBase, n.width, n.signed);
+
+/** The same key, from a base a DIFFERENT pass is holding. `l3/basecse.ts` spells an `addr` base's
+ *  identity `a:name` where this one spells it `n:name` (it shares that spelling with the bare `var`
+ *  the rank-aware lift produces, which denotes the same cell), so a caller crossing between the two
+ *  translates through this rather than comparing strings that can never match. */
+export const scopedBaseKey = (b: LeafBase, width: number, signed: boolean): string => `${baseId(b)} ${width} ${signed}`;
 
 /** One use, located by its chain of enclosing statement LISTS (outermost first).
  *

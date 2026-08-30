@@ -328,10 +328,14 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     expect(cands.some((c) => c.label.includes('/regionbase/volatile') && !c.label.includes('vol-store'))).toBe(true);
   });
 
-  test('and it is the ONLY label that binds the base three times', () => {
+  test('and every label that binds the base three times is this pass, or a pipe THROUGH it', () => {
+    // `/livebase-block/homesplit` (l3/homesplit.ts) pipes a head hoist into this pass with one key
+    // withheld, so the region reading it applies is this one — which is why the claim is about the
+    // PASS and not about a label. `dmascope` stopped being a lever-clean control for `/regionbase`
+    // the moment that pairing existed; the dataset block comment predicted exactly this.
     const three = cands.filter((c) => dmaLocals(c.source) >= 3);
     expect(three.length).toBeGreaterThan(0);
-    expect(three.every((c) => c.label.includes('/regionbase'))).toBe(true);
+    expect(three.every((c) => /\/regionbase|\/homesplit/.test(c.label))).toBe(true);
   });
 });
 

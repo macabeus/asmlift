@@ -3496,10 +3496,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // function `/regionbase` splits both bases (its emitted source mints `p0/p1/p2` for 0x03004000
   // as well as `p3/p4/p5` for 0x040000D4) and `/livebase-block` binds both at the head, so the
   // region reading has to become per-BASE first — a third degree of freedom neither lever has.
-  // PREDICTION: when the pairing lands `dmapoll` goes 11 -> MATCH and both ablations break it back
-  // to 11 and 12. Falsified by `pnpm bench run --tier synthetic --only dmapoll --serial` reading
-  // anything but MATCH on the commit that ships it. Every number in this block that is not marked
-  // PREDICTION is a compile or a ranked run.
+  // THE PAIRING LANDED AND THE PREDICTION HELD: `dmapoll` is MATCH on
+  // `signed/livebase-block/homesplit/volatile` (l3/homesplit.ts), and the commit before it reads
+  // diff:11 — the one-sided ablation, run rather than argued. `dmaflat` stays MATCH, which is what
+  // the additive posture below buys. Every number in this block that is not marked PREDICTION is a
+  // compile or a ranked run.
   //
   // A PER-BASE CHOICE OF REGION RULE IS NOT THE FREEDOM THIS ROW NEEDS, AND THE CENSUS IS WHY. The
   // obvious reading of "make the region reading per-base" is to let `hoistScopedBases` pick its
@@ -3581,6 +3582,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // more candidate in the fan, the composed spelling loses 13 to 0 and the MATCH survives: a green
   // `dmaflat` is NOT evidence a pairing did not over-fire. The row is live against a pairing
   // implemented as a REWRITE, or one that wins an equal-score tie, and against nothing else.
+  //
+  // WHAT THE PAIRING COSTS, AND WHERE. It is enumerated per ADMITTED KEY (which key the source
+  // homed is not derivable), so one function contributes as many pairings as `/livebase-block`
+  // binds bases, capped at three by `homesplit-fan-cap`. `synthetic:dmascope` and
+  // `synthetic:dmascope2` are unmoved at diff:9 and diff:13 but STOP BEING lever-clean controls
+  // for `/regionbase`: the pairing pipes THROUGH that pass, so its candidates bind the DMA base
+  // three times too — which is the prediction two paragraphs down, now confirmed, and why
+  // test/regionbase.test.ts asks about the PASS rather than the label.
   //
   // NEIGHBOURS THAT READ LIKE THIS AND ARE NOT. `armhomes` (MATCH) is per-region placement with
   // exactly ONE decision to get right; `sizebound` (8) has two bases but one axis, WHERE one init

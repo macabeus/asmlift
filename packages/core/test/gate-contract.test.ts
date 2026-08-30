@@ -12,6 +12,7 @@ import { describe, expect, test } from 'vitest';
 import { BASECSE_GATES, BASEFOLD_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
+import { HOMESPLIT_GATES } from '../src/l3/homesplit';
 import { INLINEBASE_GATES } from '../src/l3/inlinebase';
 import { PTR_FIELD_GATES } from '../src/l3/ptrfield';
 import { COUNTDOWN_GATES } from '../src/l3/reindex';
@@ -55,6 +56,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
   REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],
+  HOMESPLIT_GATES: HOMESPLIT_GATES as readonly Gate<never>[],
 };
 
 /** Every `test(...)`/`describe(...)` title in the core suite, as one blob to search. */

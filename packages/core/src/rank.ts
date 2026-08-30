@@ -30,6 +30,7 @@ import {
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
+import { splitHomeBases } from './l3/homesplit';
 import { initFirstGuards } from './l3/initfirst';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
@@ -1299,7 +1300,7 @@ export function enumerateCandidates(
         const r = hoist();
         return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
       };
-      return { suffix, hoist, volatiles, pairings };
+      return { suffix, hoist, volatiles, pairings, gates, placement };
     });
     // THE PLACEMENT DIFFERENTIAL, one composition inwards. `respell` re-checks a lever's
     // placement across the statement SHAPES derived onto it; the lever-on-lever products below
@@ -1356,6 +1357,42 @@ export function enumerateCandidates(
         const r = volatiles();
         return r ? survives(r, sinkInitsToFirstUse(r)) : null;
       });
+    }
+    // The livebase x homesplit PAIRINGS — the fourth sanctioned product kind, and row-demanded
+    // (synthetic:dmapoll): ONE base kept at the head and a SECOND split per region, which neither
+    // lever spells alone because each applies its own policy to every base it binds. Compiled
+    // against that row's own object the reachable cells are 69 with neither hoist, 18 with both
+    // split per region, 11 with both at function scope — and 0 only where the two policies land on
+    // DIFFERENT bases. See l3/homesplit.ts for why it is a PIPE and never a merge.
+    //
+    // WHICH key is withheld is not derivable, so every admitted key is its own candidate and the
+    // differ referees — `HOMESPLIT_GATES`' `homesplit-fan-cap` is what bounds that product.
+    // ADDITIVE, like every lever here: `/livebase-block`, `/regionbase`, `/scopebase` and the
+    // un-hoisted primary all stay in the list, which is what keeps `synthetic:dmaflat` — where the
+    // composed spelling scores 13 against its own 0 — at MATCH.
+    for (const { suffix, gates, placement } of paired) {
+      for (const key of census(gates)) {
+        const homesplit = (): SFn | null => {
+          const p = splitHomeBases(sfn, {
+            gates,
+            placement,
+            key,
+            hoistableKeys: census(gates).length,
+            ...(target.capabilities.deviceRegisters ? { deviceRegisters: target.capabilities.deviceRegisters } : {}),
+          });
+          return p ? survives(p.homed, p.split) : null;
+        };
+        const homesplitVolatile = (): SFn | null => {
+          const r = homesplit();
+          return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
+        };
+        respell(`${suffix}/homesplit`, homesplit);
+        respell(`${suffix}/homesplit/volatile`, homesplitVolatile);
+        respell(`${suffix}/homesplit/volatile/vol-store`, () => {
+          const v = homesplitVolatile();
+          return v ? volStore(v) : null;
+        });
+      }
     }
     // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
     // independent operand's load above the product's mflo/mullw, so def order re-spells a
