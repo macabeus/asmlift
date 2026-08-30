@@ -41,6 +41,18 @@ module.exports = {
       from: { path: '^src/shared/' },
       to: { path: '^src/pages/' },
     },
+    {
+      name: 'hash-params-stays-pure',
+      comment:
+        'src/shared/utils/hash-params.ts is the pure half of the fragment transport: strings in, ' +
+        'strings out, no location, no history, no React. Keeping it import-free is what lets a ' +
+        'pure page lib (benchmark/lib/explorer-url) reuse it without pulling in hash-adapter.ts, ' +
+        'whose module top level builds a React adapter provider. Put anything that needs an ' +
+        'import in hash-adapter.ts instead.',
+      severity: 'error',
+      from: { path: '^src/shared/utils/hash-params\\.ts$' },
+      to: {},
+    },
   ],
   options: {
     doNotFollow: {

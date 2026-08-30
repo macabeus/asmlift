@@ -3,7 +3,7 @@
 // FunctionDetail — is a shareable link. Defaults are cleared from the URL (nuqs clearOnDefault).
 import { type inferParserType, parseAsArrayOf, parseAsString, parseAsStringLiteral } from 'nuqs';
 
-import { hashToSearchParams } from '../../../shared/utils/hash-adapter';
+import { hashToSearchParams } from '../../../shared/utils/hash-params';
 
 export const TAB_IDS = ['overview', 'explorer', 'gap', 'methodology'] as const;
 export type TabId = (typeof TAB_IDS)[number];

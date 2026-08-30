@@ -2,7 +2,7 @@
 // Everything here is string-level, so it runs in vitest's node environment with no DOM.
 import { expect, test } from 'vitest';
 
-import { hashToSearchParams, hashUrl, pickKeys, searchParamsToHash } from '../src/shared/utils/hash-adapter';
+import { hashToSearchParams, hashUrl, pickKeys } from '../src/shared/utils/hash-params';
 import { encodeShare } from '../src/shared/utils/permalink';
 import { parseAsShareState } from '../src/shared/utils/url-state';
 
@@ -21,7 +21,7 @@ test('a hostile value round-trips through the fragment verbatim', () => {
   const nasty = 'a b+c&d=e%f#g"h<i>j`k/l:m?n';
   const params = new URLSearchParams();
   params.set('x', nasty);
-  expect(hashToSearchParams(searchParamsToHash(params)).get('x')).toBe(nasty);
+  expect(hashToSearchParams(params.toString()).get('x')).toBe(nasty);
 });
 
 test('a real lz-string ShareState whose encoding contains + round-trips through the fragment', () => {
@@ -43,13 +43,12 @@ test('a real lz-string ShareState whose encoding contains + round-trips through 
 
   const params = new URLSearchParams();
   params.set('s', encoded);
-  const back = hashToSearchParams(searchParamsToHash(params)).get('s');
+  const back = hashToSearchParams(params.toString()).get('s');
   expect(back).toBe(encoded);
   expect(parseAsShareState.parse(back!)).toEqual(state);
 });
 
 test('an empty param set makes an empty fragment, and hashUrl then writes no #', () => {
-  expect(searchParamsToHash(new URLSearchParams())).toBe('');
   expect(hashUrl('https://x.test/asmlift/?keep=1#view=benchmark', new URLSearchParams())).toBe(
     'https://x.test/asmlift/?keep=1',
   );
@@ -68,7 +67,7 @@ test('a 200,000-character payload round-trips (the fragment has no transport cei
   const huge = 'A'.repeat(200_000);
   const params = new URLSearchParams();
   params.set('s', huge);
-  expect(hashToSearchParams(searchParamsToHash(params)).get('s')).toBe(huge);
+  expect(hashToSearchParams(params.toString()).get('s')).toBe(huge);
 });
 
 // --- key isolation: nuqs's own filterSearchParams is internal (no hit in any dist/**/*.d.ts),
