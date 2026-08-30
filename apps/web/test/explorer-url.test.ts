@@ -37,16 +37,18 @@ test('every filter key has a URL name and a reset entry, so a preset cannot leav
 
 test('a feature definition is a link, and opening one PRESERVES the filters already set', () => {
   // the drawer sits over whatever tab is showing, so its link must not reset the reader's view
-  const href = featureHref('div-const', '?tab=explorer&feature=loop,table&project=kleod');
+  const href = featureHref('div-const', '#tab=explorer&feature=loop,table&project=kleod');
   const params = new URLSearchParams(href.slice(1));
   expect(params.get(FEATURE_TERM_KEY)).toBe('div-const');
   expect(params.get('tab')).toBe('explorer');
   expect(params.get('feature')).toBe('loop,table');
   expect(params.get('project')).toBe('kleod');
+  // The link is a FRAGMENT: a '?' here would be a real navigation that discards the whole state.
+  expect(href.startsWith('#')).toBe(true);
 });
 
 test('opening a second definition replaces the first rather than appending', () => {
-  const href = featureHref('magic-div', featureHref('div-const', '?tab=explorer').slice(0));
+  const href = featureHref('magic-div', featureHref('div-const', '#tab=explorer').slice(0));
   expect(new URLSearchParams(href.slice(1)).getAll(FEATURE_TERM_KEY)).toEqual(['magic-div']);
 });
 
