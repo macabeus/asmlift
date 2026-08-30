@@ -82,7 +82,26 @@ function readConfig(path: string): LoadedConfig {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`cannot parse ${path}: expected a YAML mapping at the top level`);
   }
-  return { path, config: parsed as DecompConfig };
+  const config = parsed as DecompConfig;
+  noteObsoleteKeys(path, config);
+  return { path, config };
+}
+
+/** `tools.asmlift.cacheInputs` was, for one round, the per-project DECLARATION of every file and
+ *  directory the compile command reads — the gate the cross-run candidate-object cache would not
+ *  start without, because one input class (a directory named by a flag) could not be measured.
+ *  It is measured now, so the key is gone. Loading a config that still carries it is NOT an
+ *  error: an obsolete key is not a broken project, and what replaced it is strictly more complete
+ *  than the declaration ever was. But it is said out loud, once, because silence would leave a
+ *  reader believing a seatbelt is fastened that does not exist any more. */
+function noteObsoleteKeys(path: string, config: DecompConfig): void {
+  if ((config.tools?.asmlift as { cacheInputs?: unknown } | undefined)?.cacheInputs !== undefined) {
+    process.stderr.write(
+      `${path}: tools.asmlift.cacheInputs is obsolete and no longer read — the candidate-object ` +
+        `cache measures what the compile command reads (every path flag's operand, response files, ` +
+        `glob directories, CPATH) instead of being told. You can delete the key.\n`,
+    );
+  }
 }
 
 // decomp_settings platform → asmlift target keys. A platform naming SEVERAL compilers needs

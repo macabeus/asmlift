@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { loadDecompConfig, resolveTarget } from '../../src/config';
 import { runCli } from '../../src/main';
@@ -119,4 +119,30 @@ test('CLI: --score-against with a missing object is exit 66; bad compile templat
   const badTemplate = await runCli([file, '--score-against', target]);
   expect(badTemplate.code).toBe(64);
   expect(badTemplate.stderr).toContain('{{inputPath}} and {{outputPath}}');
+});
+
+// `tools.asmlift.cacheInputs` existed for one round: a per-project DECLARATION of everything the
+// compile command reads, and the gate the candidate-object cache would not start without. It is
+// gone — the namespace measures the command's paths instead of being told them — and a config
+// still carrying it would otherwise be silently ignored, leaving a reader believing a seatbelt is
+// fastened that no longer exists. Loading it must not FAIL (an obsolete key is not a broken
+// project, and the cache is now strictly more complete than the declaration was), but it must say
+// so once.
+test('an obsolete cacheInputs key loads, and says out loud that it does nothing', () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs:\n      - inc\n',
+  );
+  const said: string[] = [];
+  const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+    said.push(typeof c === 'string' ? c : Buffer.from(c).toString());
+    return true;
+  });
+  try {
+    expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.target).toBe('agbcc');
+  } finally {
+    spy.mockRestore();
+  }
+  expect(said.join('')).toMatch(/cacheInputs.*no longer/);
 });
