@@ -3585,11 +3585,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // WHAT THE PAIRING COSTS, AND WHERE. It is enumerated per ADMITTED KEY (which key the source
   // homed is not derivable), so one function contributes as many pairings as `/livebase-block`
-  // binds bases, capped at three by `homesplit-fan-cap`. `synthetic:dmascope` and
-  // `synthetic:dmascope2` are unmoved at diff:9 and diff:13 but STOP BEING lever-clean controls
-  // for `/regionbase`: the pairing pipes THROUGH that pass, so its candidates bind the DMA base
-  // three times too — which is the prediction two paragraphs down, now confirmed, and why
-  // test/regionbase.test.ts asks about the PASS rather than the label.
+  // binds bases, capped at three by `homesplit-fan-cap`. `synthetic:dmascope` is unmoved at diff:9
+  // but STOPS BEING a lever-clean control for `/regionbase`: the pairing pipes THROUGH that pass,
+  // so 36 of its 260 candidates bind the DMA base three times too — which is the prediction two
+  // paragraphs down, now confirmed, and why test/regionbase.test.ts asks about the PASS rather
+  // than the label. `synthetic:dmascope2` (diff:13) is NOT one of them and stays lever-clean: its
+  // census is one key, so the pairing is degenerate there and contributes no candidate at all.
   //
   // NEIGHBOURS THAT READ LIKE THIS AND ARE NOT. `armhomes` (MATCH) is per-region placement with
   // exactly ONE decision to get right; `sizebound` (8) has two bases but one axis, WHERE one init
