@@ -324,6 +324,36 @@ describe.each([
     expect(judged).toBeGreaterThan(100);
     expect(bad).toEqual([]);
   });
+
+  // THE POPULATION THE ONLY UNSOUND GATE MASKS, and the reason this arm exists at all.
+  //
+  // `edge-extends` is the LAST entry, so "first rejection is `edge-extends`" means every SOUND rule
+  // already admitted that carrier and it was then never emitted, never interpreted, never scored. A
+  // hole in `edge-reader`'s `edgeArgsObservedNarrow` or `raw-reader`'s operand-only counting is
+  // therefore MASKED by a rule whose own author calls it a spelling choice — and any future
+  // widening of that rule converts the hole into C that compiles and computes different numbers.
+  // `bench diff` structurally cannot see it: the 37 sa3 functions carrying these carriers hold no
+  // benchmark row.
+  //
+  // So the mask comes off HERE, where the oracle is the program's behaviour rather than a score.
+  // The full ablation is a strict SUPERSET of anything a narrower `edge-extends` can admit, which
+  // is what makes this the strongest available form: green here licenses every widening of that one
+  // rule, and red here forbids all of them.
+  test('…and neither does the population `edge-extends` masks', () => {
+    const bad: number[] = [];
+    let judged = 0;
+    const ablated = without(NARROW_LOCAL_GATES, 'edge-extends');
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const r = spellings(seed, withLoop, ablated as never);
+      if (!r) continue;
+      judged++;
+      if (differs(r)) bad.push(seed);
+    }
+    // strictly MORE functions than the shipped arm above judges — if it were not, the ablation
+    // would be inert and this arm would be asserting nothing about the masked set.
+    expect(judged).toBeGreaterThan(400);
+    expect(bad).toEqual([]);
+  });
 });
 
 // The two sound rules this oracle cannot reach, and why — an exemption is a visible act with a
