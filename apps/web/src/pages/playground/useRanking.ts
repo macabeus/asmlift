@@ -3,8 +3,10 @@
 // H1 (audit CRITICAL): today's decompile is synchronous; ranking is async, so a score can resolve
 // AFTER the user has edited the asm. If the resolved (best) source were then shown against the new
 // asm, the badge would claim "matched (0)" for the wrong input — a false byte-exact match, the
-// cardinal sin. Two layers close it: (1) every input change immediately resets ranking to
-// "loading", clearing any prior result from the view; (2) each request carries a monotonic reqId,
+// cardinal sin. Two layers close it: (1) the view is DERIVED from the input it is about, so a
+// render for a changed input shows `loading` and never the previous input's badge — this used to be
+// a reset inside the posting effect, which lands one commit too late (measured: a 27 ms window with
+// the new function named beside the old run's counts); (2) each request carries a monotonic reqId,
 // the latest is remembered, and the worker's response is ACCEPTED ONLY when its reqId is still the
 // current one — a superseded response is dropped. So the ranked source shown is always for the asm
 // on screen, or nothing.
@@ -66,11 +68,67 @@ export interface RankingInput {
   symbols?: SymbolMap;
 }
 
+/** Do two renders' inputs describe the SAME ranking question? Compared field by field, on exactly
+ *  the fields the request-posting effect depends on — `asm` is compared by reference in the common
+ *  case (same string object), never rebuilt into a key, so this costs nothing at 10 Hz. */
+export function sameRankingInput(a: RankingInput, b: RankingInput): boolean {
+  return (
+    a.eligible === b.eligible &&
+    a.asm === b.asm &&
+    a.name === b.name &&
+    a.targetId === b.targetId &&
+    a.target === b.target &&
+    a.symbols === b.symbols
+  );
+}
+
+/** What to SHOW for `input`, given the state that was last stored and the input that state is
+ *  about. H1 LAYER 1, MOVED OFF THE EFFECT.
+ *
+ *  Resetting to `loading` inside a `useEffect` runs one commit too late: the effect fires AFTER the
+ *  render that already painted the new input, so for that one commit the badge belongs to the
+ *  previous one. Measured in the app on 2026-08-30, switching examples mid-run on an 800-candidate
+ *  fan: the FUNCTION field read the new `half` at t=935 ms while the badge still counted
+ *  `scoring 52 / 800`, and the reset landed at t=962 ms — a 27 ms window, one commit wide. (The
+ *  ~1 s that precedes it is the deliberate 250 ms input debounce, stretched by Chrome's background-
+ *  tab timer clamp; during it the WHOLE pipeline still shows the previous input, which is coherent.
+ *  Only the editor text is ahead.) Derived instead, the window is zero: re-measured after this
+ *  change, the first frame carrying the new function already reads `waiting for the ranking
+ *  worker…`.
+ *
+ *  27 ms is not the point — a scheduled invariant is. The counts this round added are what made the
+ *  mismatch legible at all, and the same window renders a settled VERDICT for an asm no longer on
+ *  screen, which is the cardinal sin H1 exists to prevent. Derived, it cannot lag: state carries
+ *  the input it is about, and anything else renders as the honest `queued`. The reqId guard still
+ *  does its own job on the message side — this closes the window BEFORE a request even exists. */
+export function viewRanking(input: RankingInput, stored: { input: RankingInput; ranking: Ranking }): Ranking {
+  if (!input.eligible || !input.name) {
+    return { status: 'off' };
+  }
+  return sameRankingInput(stored.input, input) ? stored.ranking : { status: 'loading', phase: 'queued' };
+}
+
 export function useRanking(input: RankingInput): Ranking {
   const { eligible, asm, name, targetId, target, symbols } = input;
-  const [ranking, setRanking] = useState<Ranking>({ status: 'off' });
+  // The state carries the INPUT it is about, so a render for a different input cannot show it.
+  const [stored, setStored] = useState<{ input: RankingInput; ranking: Ranking }>({
+    input,
+    ranking: { status: 'off' },
+  });
+  const setRanking = (next: Ranking | ((prev: Ranking) => Ranking)) =>
+    setStored((prev) => ({
+      input: prev.input,
+      ranking: typeof next === 'function' ? next(prev.ranking) : next,
+    }));
   const workerRef = useRef<Worker | null>(null);
   const currentReqId = useRef(0); // the id of the latest posted request — the stale-guard anchor
+  // The last COMMITTED input, for the one writer that is not a reply to a request: `worker.onerror`
+  // fires from a closure created once, and an error stored against a stale input would be derived
+  // away — a loud failure silently swallowed, which is the trade this repo never makes.
+  const latestInput = useRef(input);
+  useEffect(() => {
+    latestInput.current = input;
+  });
 
   // One worker per mounted app. Its onmessage applies the H1 guard: a response is accepted only
   // while its reqId is still the current one.
@@ -87,7 +145,10 @@ export function useRanking(input: RankingInput): Ranking {
       if (currentReqId.current === 0) {
         return;
       }
-      setRanking({ status: 'error', error: e.message || 'the ranking worker failed to load' });
+      setStored({
+        input: latestInput.current,
+        ranking: { status: 'error', error: e.message || 'the ranking worker failed to load' },
+      });
     };
     workerRef.current = worker;
     return () => {
@@ -99,7 +160,7 @@ export function useRanking(input: RankingInput): Ranking {
   useEffect(() => {
     if (!eligible || !name) {
       currentReqId.current++; // invalidate any in-flight response
-      setRanking({ status: 'off' });
+      setStored({ input, ranking: { status: 'off' } });
       return;
     }
     const reqId = ++currentReqId.current; // new request supersedes anything in flight
@@ -109,9 +170,9 @@ export function useRanking(input: RankingInput): Ranking {
     // handed over and nothing has been observed back. Naming `assembling` would be an assertion,
     // not an observation, and it is wrong for a measured 62.3 s (2026-08-30) whenever the worker is still
     // enumerating a superseded run (its event loop cannot dequeue this message until it returns).
-    setRanking({ status: 'loading', phase: 'queued' });
+    setStored({ input, ranking: { status: 'loading', phase: 'queued' } });
     workerRef.current?.postMessage({ reqId, name, asm, target, ...(symbols ? { symbols } : {}) } satisfies RankRequest);
   }, [eligible, asm, name, targetId, target, symbols]);
 
-  return ranking;
+  return viewRanking(input, stored);
 }

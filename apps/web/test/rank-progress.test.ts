@@ -12,7 +12,13 @@ import { describe, expect, test } from 'vitest';
 
 import { type RankProgress, throttleProgress, whileCurrent } from '../src/pages/playground/rank-progress';
 import type { BrowserRanking, RankMessage } from '../src/pages/playground/score-wasm';
-import { type Ranking, applyRankMessage } from '../src/pages/playground/useRanking';
+import {
+  type Ranking,
+  type RankingInput,
+  applyRankMessage,
+  sameRankingInput,
+  viewRanking,
+} from '../src/pages/playground/useRanking';
 
 /** A hand-cranked clock: the throttle is keyed on elapsed WALL TIME (per-candidate cost was
  *  measured between 25 ms and 167 ms on one function, so a count-keyed throttle posts at wildly
@@ -201,6 +207,65 @@ describe('applyRankMessage (H1)', () => {
     for (const next of [ok, err]) {
       expect(next && 'phase' in next).toBe(false);
       expect(next && 'done' in next).toBe(false);
+    }
+  });
+});
+
+// ── H1 LAYER 1, the window the counts made visible ────────────────────────────────────────────
+// Resetting to `loading` inside the posting effect lands one commit AFTER the render that painted
+// the new input. Measured in the app on 2026-08-30, switching examples mid-run on an 800-candidate
+// fan: the FUNCTION field read the new `half` at t=935 ms while the badge still counted
+// `scoring 52 / 800`; the reset landed at t=962 ms. One commit, 27 ms — and the same window renders
+// a settled VERDICT for an asm no longer on screen. `viewRanking` derives the answer instead, so it
+// cannot lag: re-measured after the change, the first frame naming `half` already reads `queued`.
+const INPUT: RankingInput = {
+  eligible: true,
+  asm: 'push {r4}',
+  name: 'f',
+  targetId: 'agbcc',
+  target: {} as RankingInput['target'],
+};
+
+describe('viewRanking (H1 layer 1)', () => {
+  test('state belonging to ANOTHER input renders as queued, never as that input`s badge', () => {
+    const settled: Ranking = { status: 'ok', result: RESULT };
+    const scoring: Ranking = { status: 'loading', phase: 'scoring', done: 38, total: 800 };
+    const edited = { ...INPUT, asm: 'push {r4,r5}' };
+    for (const ranking of [settled, scoring, { status: 'error', error: 'boom' } as Ranking]) {
+      expect(viewRanking(edited, { input: INPUT, ranking })).toEqual({ status: 'loading', phase: 'queued' });
+    }
+  });
+
+  test('state for the SAME input is shown unchanged — the guard costs nothing when it should not fire', () => {
+    const scoring: Ranking = { status: 'loading', phase: 'scoring', done: 38, total: 800 };
+    expect(viewRanking(INPUT, { input: { ...INPUT }, ranking: scoring })).toBe(scoring);
+  });
+
+  test('an ineligible input is `off`, whatever is stored — no spinner over a non-agbcc target', () => {
+    expect(
+      viewRanking({ ...INPUT, eligible: false }, { input: INPUT, ranking: { status: 'ok', result: RESULT } }),
+    ).toEqual({
+      status: 'off',
+    });
+    expect(
+      viewRanking({ ...INPUT, name: undefined }, { input: INPUT, ranking: { status: 'ok', result: RESULT } }),
+    ).toEqual({
+      status: 'off',
+    });
+  });
+
+  test('every field the posting effect depends on is compared — none may be forgotten', () => {
+    const map = new Map() as NonNullable<RankingInput['symbols']>;
+    expect(sameRankingInput(INPUT, { ...INPUT })).toBe(true);
+    for (const changed of [
+      { eligible: false },
+      { asm: 'other' },
+      { name: 'g' },
+      { targetId: 'ido7.1' },
+      { target: {} as RankingInput['target'] },
+      { symbols: map },
+    ]) {
+      expect(sameRankingInput(INPUT, { ...INPUT, ...changed })).toBe(false);
     }
   });
 });
