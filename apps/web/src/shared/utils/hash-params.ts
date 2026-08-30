@@ -46,3 +46,24 @@ export function pickKeys(search: URLSearchParams, keys: string[]): URLSearchPara
   }
   return filtered;
 }
+
+/** The `useSyncExternalStore` snapshot, extracted from the hook so it can be tested in node.
+ *  It compares snapshots with `Object.is` and throws *"The result of getSnapshot should be cached
+ *  to avoid an infinite loop"* on a fresh object each call, so this caches on the serialised
+ *  WATCHED keys. Two load-bearing properties, both pinned in hash-params.test.ts:
+ *    - identity is PRESERVED when only an unwatched key moves (that is key isolation: no render);
+ *    - identity CHANGES when a watched key moves (or the URL would update and the UI would not).
+ *  The key is derived from the content, so a change of `watchKeys` that yields the same params
+ *  correctly keeps the same object. One cache cell per caller — hence a factory. */
+export function createSnapshotCache(): (hash: string, watchKeys: string[]) => URLSearchParams {
+  let cached: { key: string; search: URLSearchParams } | null = null;
+  return (hash, watchKeys) => {
+    const filtered = pickKeys(hashToSearchParams(hash), watchKeys);
+    const key = filtered.toString();
+    if (cached?.key === key) {
+      return cached.search;
+    }
+    cached = { key, search: filtered };
+    return filtered;
+  };
+}

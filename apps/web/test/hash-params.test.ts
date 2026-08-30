@@ -2,7 +2,7 @@
 // Everything here is string-level, so it runs in vitest's node environment with no DOM.
 import { expect, test } from 'vitest';
 
-import { hashToSearchParams, hashUrl, pickKeys } from '../src/shared/utils/hash-params';
+import { createSnapshotCache, hashToSearchParams, hashUrl, pickKeys } from '../src/shared/utils/hash-params';
 import { encodeShare } from '../src/shared/utils/permalink';
 import { parseAsShareState } from '../src/shared/utils/url-state';
 
@@ -100,4 +100,31 @@ test('pickKeys does not mutate its input, and is stable across calls', () => {
 
 test('pickKeys drops a watched key that is absent rather than inventing it', () => {
   expect(pickKeys(explorer(), ['nope']).toString()).toBe('');
+});
+
+// --- the getSnapshot cache: `useSyncExternalStore` compares with Object.is, so these are
+// IDENTITY assertions, not value assertions. They are the two properties that decide whether the
+// app re-renders too much (isolation) or not at all (liveness).
+
+test('createSnapshotCache preserves object identity when only an UNWATCHED key moves', () => {
+  const snap = createSnapshotCache();
+  expect(snap('#view=a&s=1', ['s'])).toBe(snap('#view=b&s=1', ['s']));
+  // ... and when nothing moves at all, which is what stops the infinite-loop warning.
+  expect(snap('#view=b&s=1', ['s'])).toBe(snap('#view=b&s=1', ['s']));
+});
+
+test('createSnapshotCache returns a NEW object when a watched key moves', () => {
+  const snap = createSnapshotCache();
+  expect(snap('#s=1', ['s'])).not.toBe(snap('#s=2', ['s']));
+  expect(snap('#s=2', ['s']).get('s')).toBe('2');
+  // Watching everything (nuqs's empty-keys case) still tracks every key.
+  const all = createSnapshotCache();
+  expect(all('#view=a', [])).not.toBe(all('#view=b', []));
+});
+
+test('createSnapshotCache gives each caller its own cell, and takes the hash with or without #', () => {
+  const a = createSnapshotCache();
+  const b = createSnapshotCache();
+  expect(a('#s=1', ['s'])).not.toBe(b('#s=1', ['s']));
+  expect(a('#s=1', ['s'])).toBe(a('s=1', ['s']));
 });

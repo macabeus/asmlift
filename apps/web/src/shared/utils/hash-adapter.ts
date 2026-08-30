@@ -9,7 +9,7 @@
 import { type unstable_AdapterOptions, unstable_createAdapterProvider } from 'nuqs/adapters/custom';
 import { useRef, useSyncExternalStore } from 'react';
 
-import { hashToSearchParams, hashUrl, pickKeys } from './hash-params';
+import { createSnapshotCache, hashToSearchParams, hashUrl } from './hash-params';
 
 /** `history.pushState` fires NEITHER `popstate` NOR `hashchange`, so this adapter's own writes are
  *  invisible to the DOM. This set is the channel that tells every mounted subscriber about them —
@@ -69,22 +69,9 @@ function getSearchParamsSnapshot(): URLSearchParams {
 }
 
 function useHashAdapter(watchKeys: string[]) {
-  const cache = useRef<{ key: string; search: URLSearchParams } | null>(null);
-  // `useSyncExternalStore` compares snapshots with Object.is and throws "The result of getSnapshot
-  // should be cached to avoid an infinite loop" on a fresh object each call, so cache on the
-  // serialised watched keys — which also turns "the watched values did not change" into "the same
-  // object", i.e. no re-render for a component watching `s` when `tab` moves.
-  const snapshot = (): URLSearchParams => {
-    const filtered = pickKeys(getSearchParamsSnapshot(), watchKeys);
-    const key = filtered.toString();
-    if (cache.current?.key === key) {
-      return cache.current.search;
-    }
-    cache.current = { key, search: filtered };
-    return filtered;
-  };
+  const snapshot = useRef(createSnapshotCache());
   return {
-    searchParams: useSyncExternalStore(subscribe, snapshot),
+    searchParams: useSyncExternalStore(subscribe, () => snapshot.current(window.location.hash, watchKeys)),
     updateUrl,
     getSearchParamsSnapshot,
   };
