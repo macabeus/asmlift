@@ -25,6 +25,16 @@ export interface AsmliftToolConfig {
    *  names from `.symtab`, declaration shapes from the linked-in DWARF types-sidecar when
    *  present. Absent ⇒ no symbol map (today's behavior). */
   elf?: string;
+  /** `off` — this project REFUSES the cross-run candidate-object cache for its `compiler`
+   *  command, whatever `ASMLIFT_CANDCACHE` says. The only value; anything else is an error, so a
+   *  typo cannot silently read as "on".
+   *
+   *  It is deliberately the inverse of the deleted `cacheInputs`: that key ASSERTED what the
+   *  command reads and an incomplete assertion served a stale object, this one only ever turns
+   *  the cache off and an unnecessary one costs a cold start. Declare it when the command runs
+   *  the compiler somewhere nothing here can read it — a container image named by a tag, another
+   *  host, a wrapper that reads a config directory it never names on its command line. */
+  candidateCache?: 'off';
 }
 
 export interface DecompVersion {
@@ -84,6 +94,7 @@ function readConfig(path: string): LoadedConfig {
   }
   const config = parsed as DecompConfig;
   noteObsoleteKeys(path, config);
+  validateAsmliftKeys(path, config);
   return { path, config };
 }
 
@@ -94,6 +105,17 @@ function readConfig(path: string): LoadedConfig {
  *  error: an obsolete key is not a broken project, and what replaced it is strictly more complete
  *  than the declaration ever was. But it is said out loud, once, because silence would leave a
  *  reader believing a seatbelt is fastened that does not exist any more. */
+function validateAsmliftKeys(path: string, config: DecompConfig): void {
+  const cc = config.tools?.asmlift?.candidateCache;
+  if (cc !== undefined && cc !== 'off') {
+    throw new Error(
+      `${path}: tools.asmlift.candidateCache must be 'off' if present (got ${JSON.stringify(cc)}). ` +
+        `It is a refusal, not a switch — there is no value that turns the cache ON, because ` +
+        `ASMLIFT_CANDCACHE already does that and a project cannot know more than the measurement.`,
+    );
+  }
+}
+
 function noteObsoleteKeys(path: string, config: DecompConfig): void {
   if ((config.tools?.asmlift as { cacheInputs?: unknown } | undefined)?.cacheInputs !== undefined) {
     process.stderr.write(

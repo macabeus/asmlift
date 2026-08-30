@@ -64,7 +64,7 @@ function substitutePlaceholders(cmd: string, id: ToolchainId): string {
 interface BenchDoc {
   name: string;
   platform: string;
-  tools: { asmlift: { target: string; compiler?: string; elf?: string } };
+  tools: { asmlift: { target: string; compiler?: string; elf?: string; candidateCache?: 'off' } };
 }
 
 /** The committed config for one toolchain, with placeholders materialized. */
@@ -112,7 +112,9 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
     throw new Error(`benchmark decomp.yaml for ${id} did not resolve to ${id}: ${JSON.stringify(res)}`);
   }
   const toolCfg = loaded!.config.tools!.asmlift!;
-  const compile = toolCfg.compiler ? compileFromCommand(toolCfg.compiler, { cwd: dir }) : undefined;
+  const compile = toolCfg.compiler
+    ? compileFromCommand(toolCfg.compiler, { cwd: dir, candidateCache: toolCfg.candidateCache })
+    : undefined;
   memo.set(id, compile);
   return compile;
 }
