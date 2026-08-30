@@ -6,7 +6,7 @@
 // 144.9 MB logical and only 14,484 distinct = 32.1 MB. Content-addressed bytes under `objects/`,
 // hardlinked per key under `ns/<namespace>/` — so a key costs an inode, not a copy, and evicting
 // one namespace leaves every other namespace's answers intact.
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -62,6 +62,14 @@ const object = (bytes: string): string => {
   writeFileSync(p, bytes);
   return p;
 };
+/** Backdate a namespace past the prune grace window, standing in for "a previous day's run".
+ *  Inside the window a namespace is treated as possibly live in a sibling PROCESS — `pnpm bench
+ *  run` forks 8-16 shards over one store — and is never evicted. */
+const age = (root: string, ns: string): void => {
+  const old = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  utimesSync(join(root, 'ns', ns.slice(0, 16)), old, old);
+};
+
 const objectsIn = (root: string): string[] => {
   const dir = join(root, 'objects');
   return readdirSync(dir, { withFileTypes: true }).flatMap((ab) =>
@@ -139,6 +147,7 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
       c.put('k2', 'f', object('A-TWO'));
     });
     expect(objectsIn(root).length).toBe(2);
+    age(root, NS_A);
 
     // Run two: a new namespace, and a cap of zero. A is cold, B is in use.
     const err = await load(
@@ -178,6 +187,7 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
       m.candCache('t', () => NS_B).put('k2', 'f', object('B-ONE'));
     });
 
+    age(root, NS_B);
     const said = await load(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' },
       (m) => {
@@ -199,8 +209,22 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
         }
       },
     );
-    expect(said).toContain('in the namespace now in use — not pruning it');
+    expect(said).toContain('not pruning it');
     expect(readdirSync(join(root, 'ns'))).toEqual([NS_A.slice(0, 16)]);
+  });
+
+  test('a namespace touched RECENTLY is spared even over the cap — a sibling shard may hold it', async () => {
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
+      m.candCache('t', () => NS_A).put('k1', 'f', object('A-ONE'));
+    });
+    // NOT aged: `pnpm bench run` forks 8-16 shards over one store, and a shard compiling for one
+    // toolchain must not delete the namespace a sibling is reading objects out of BY PATH.
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' }, (m) => {
+      m.candCache('t', () => NS_B).warm();
+      expect(m.cacheStats().prunedNamespaces).toBeUndefined();
+    });
+    expect(readdirSync(join(root, 'ns')).sort()).toEqual([NS_A.slice(0, 16), NS_B.slice(0, 16)].sort());
   });
 
   test('under the cap: nothing is pruned at all', async () => {

@@ -147,6 +147,14 @@ function reapUnlinked(): number {
 // prune would delete a file out from under a live reader. The unit is a NAMESPACE — one
 // namespace is exactly one toolchain configuration, and a namespace nobody touched is dead
 // weight in full.
+//
+// `keepNs` alone is not enough, because the store is SHARED ACROSS PROCESSES: `pnpm bench run`
+// forks 8-16 shards, and a shard compiling for agbcc must not evict the namespace a sibling shard
+// compiling for another toolchain is reading objects out of by path. So a namespace touched
+// within the grace window is treated as possibly live and is never evicted. An hour is long
+// enough to cover any run this repo has (the longest measured is ~15 min) and short enough that
+// yesterday's namespaces are still reclaimable.
+const PRUNE_GRACE_MS = 60 * 60 * 1000;
 let pruned = false;
 function pruneOnce(keepNs: string): void {
   if (pruned) {
@@ -167,9 +175,11 @@ function pruneOnce(keepNs: string): void {
       return;
     }
     const nsRoot = join(ROOT, 'ns');
+    const cutoff = Date.now() - PRUNE_GRACE_MS;
     const namespaces = readdirSync(nsRoot, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name !== keepNs)
       .map((d) => ({ name: d.name, at: statSync(join(nsRoot, d.name)).mtimeMs }))
+      .filter((d) => d.at < cutoff)
       .sort((a, b) => a.at - b.at);
     for (const ns of namespaces) {
       if (distinct <= CAP_BYTES * 0.8) {
@@ -181,7 +191,7 @@ function pruneOnce(keepNs: string): void {
     }
     if (distinct > CAP_BYTES) {
       say(
-        `store holds ${(distinct / 1048576).toFixed(0)} MB of distinct bytes over a ${CAP_BYTES / 1048576} MB cap in the namespace now in use — not pruning it`,
+        `store holds ${(distinct / 1048576).toFixed(0)} MB of distinct bytes over a ${CAP_BYTES / 1048576} MB cap, and every namespace left is either in use or younger than the ${PRUNE_GRACE_MS / 60000}-minute grace window — not pruning it`,
       );
     }
   } catch {
