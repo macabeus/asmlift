@@ -3463,6 +3463,177 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void dmascope(s32 n);',
     proto: { dmascope: { params: ['s32'], returnsVoid: true } },
   },
+  // TWO BASES IN ONE FUNCTION THAT WANT OPPOSITE HOMES: N REGION-LOCAL DEVICE BASES *AND* ONE
+  // FUNCTION-SCOPE BASE THAT OUTLIVES THEM ALL. The two families above each isolate one base and
+  // one policy. `dmascope` (`/regionbase`) says a base declared inside a macro body expanded in N
+  // disjoint regions is N locals, and the COUNT is the discriminator. `mixpoll`
+  // (`/livebase-block`) says one base bound at function scope beside single-cell scalars that must
+  // stay inline, and SELECTIVITY is the discriminator. Real functions carry both at once, and
+  // asmlift's ranker admits a lever x lever product only where a row demands it. This pair is that
+  // row and its over-fire control.
+  //
+  // THE ENDPOINT AND THE LATTICE. Every point below is a real compile of a hand-written spelling
+  // scored against `dmapoll`'s own object with this agbcc (`-O2 -mthumb-interwork -fhex-asm
+  // -fprologue-bugfix`), all FIRST-IN from asmlift's own emitted `/regionbase` candidate so no
+  // number crosses a spelling basin:
+  //
+  //     DMA base \ the 0x03004000 base     LEFT INLINE   ONE function-scope local   PER REGION
+  //     bare cast at every use                  69                  --                  --
+  //     N locals, one per region                41                   0  MATCH           18
+  //     ONE function-scope local                --                  11                  --
+  //
+  // 69 with neither hoist; 18 for `/regionbase`'s reading of the WHOLE function (both bases split
+  // per region); 11 for `/livebase-block`'s reading of the whole function (both bases bound once
+  // at the head); 0 only where the two policies apply to DIFFERENT bases. The composed spelling is
+  // not a third invention: it is asmlift's own `signed/regionbase/volatile` source with exactly one
+  // edit — the three per-region locals for 0x03004000 replaced by the single head-assigned local
+  // `/livebase-block` already mints — and it scores 0. That is the whole claim.
+  //
+  // What asmlift does today, and what each lever is worth HERE:
+  //     baseline                          56 candidates, best signed/livebase-block/volatile: 11
+  //     `/regionbase` ablated             48 candidates, best signed/livebase-block/volatile: 11
+  //     `/livebase-block` ablated         32 candidates, best signed/livebase/volatile/sinkinit: 12
+  //     its `single-cell` gate ablated    32 candidates, best signed/livebase/volatile/sinkinit: 12
+  //     `region-single-use` ablated       56 candidates, best signed/livebase-block/volatile: 11
+  // (`without(gates, id)` / `ablateHeuristic` in `l3/gates.ts` is the instrument; `single-cell` and
+  // the whole `/livebase-block` admission give the identical 32/12 because ablating the gate makes
+  // the admission dedup into `/livebase`'s own table, exactly as `basecse.ts:290` predicts.)
+  //
+  // THE TWO-SIDED ABLATION THIS FAMILY CANNOT HAVE, AND WHY IT IS A THEOREM RATHER THAN AN EXCUSE.
+  // A reader will ask for "ablate each lever, watch the row get worse" on both sides. No row can
+  // supply it before the pairing exists. Ablation only REMOVES candidates; with no candidate
+  // carrying both labels the winner carries at most one, so ablating the OTHER lever leaves the
+  // winner in the fan and `best` is unchanged by construction. Measured four times over, and the
+  // FAN SIZES are what separate this row from the three that already exist:
+  //     dmapoll    `/regionbase` off       56 -> 48 candidates,  best 11 -> 11
+  //     dmascope   `/livebase-block` off  224 -> 224 candidates, best  9 ->  9
+  //     mixpoll    `/regionbase` off       60 -> 60 candidates,  MATCH -> MATCH
+  //     sizebound  `/regionbase` off      800 -> 800 candidates, best  8 ->  8
+  // On the three existing rows the ablation is vacuous by NON-REACH: the other lever emits no
+  // candidate there at all, which is the coverage finding below seen one row at a time. On
+  // `dmapoll` both levers genuinely reach — the fan really loses 8 candidates one way and 24 the
+  // other — and `best` STILL cannot move, because no candidate carries both labels. That is
+  // exactly why this is the composition's row. The obligation this family carries
+  // INSTEAD is the lattice above, which is a compiler fact and needs no lever to exist: the
+  // endpoint is 0, each single-lever reading of the whole function is 18 and 11, and one
+  // substitution turns the first into the second. When the pairing lands, `dmapoll` goes 11 ->
+  // MATCH and BOTH ablations break it back to 11 and 12 — the two-sided gate arrives with the
+  // capability, not before it. That is a PREDICTION; it is falsified by
+  // `pnpm bench run --tier synthetic --only dmapoll --serial` reading anything but MATCH on the
+  // commit that ships the pairing.
+  //
+  // `dmaflat` IS THE OVER-FIRE CONTROL AND IT IS THIS ROW'S MIRROR IMAGE. Same body, same two
+  // bases, same three IWRAM cells — the only change is that the DMA declaration is lifted out of
+  // the macro to function scope, so the source spells ONE device base for the whole function.
+  // agbcc distinguishes the two: 9 pool words with 0x040000d4 twice for `dmapoll`, 8 with it once
+  // for `dmaflat`. Scored across the same three spellings the table inverts exactly —
+  //     both bases at function scope    11 vs dmapoll.o    0 vs dmaflat.o
+  //     composed (DMA per region)        0 vs dmapoll.o   13 vs dmaflat.o
+  //     both bases per region           18 vs dmapoll.o   18 vs dmaflat.o
+  // — and `dmaflat` is MATCH today (`best signed/livebase-block/volatile: 0 (match)`, 56
+  // candidates). A pairing that fires on shape rather than on the source's declaration count, or
+  // one that wins an equal-score tie, must cost it 13 and flip a MATCH off. That is the loudest
+  // signal the harness has, and the reason this family is a PAIR. The repo's standing argument
+  // that a lever cannot over-fire because levers only ADD candidates does not protect a pairing
+  // implemented as a rewrite or one that reorders ties.
+  //
+  // NEIGHBOURS THAT READ LIKE THIS AND ARE NOT. `armhomes` (MATCH) says "per-region homes — a
+  // whole-function home is the wrong placement", which is one clause of what this family claims
+  // and not the same claim: `armhomes` homes a MASK and two loop invariants, one home per arm, and
+  // there is exactly ONE decision to get right. This family's point is that TWO bases in one body
+  // want OPPOSITE answers to that same question, so no whole-function policy — per-region or
+  // function-scope — can spell it; `dmaflat` is the row that makes the disagreement load-bearing
+  // rather than rhetorical. `sizebound` (8) places one base's init at its own scope while a second
+  // base's stays at function top: two bases, but one axis (WHERE one init goes), not two policies.
+  // `dmascope1` (MATCH) is the count-of-one control for the first lever and `onepoll` (MATCH) the
+  // selectivity-of-one control for the second; keep reading them as the single-lever ends of this
+  // pair. And the label warning from the `dmascope` block still applies: `rank.ts:378` gives
+  // `/livebase` and `/livebase-block` the SAME `placement: 'head'`, so "block" is the single-cell
+  // eligibility gate, not a scope.
+  //
+  // NO EXISTING ROW COVERS THIS, measured rather than asserted. Building every agbcc synthetic
+  // row's target and enumerating it: 210 rows enumerate, and the number whose candidate fan
+  // contains BOTH a `/regionbase` and a `/livebase-block` label is ZERO. (8 more decline at
+  // enumeration on unrelated links — overlapping struct fields, do-while pre-update, unmodelled
+  // 64-bit instruction, stack-as-data — and 0 fail to build.) So before these two rows nothing in
+  // the dataset could change outcome when the pairing changes, which is the only definition of
+  // coverage that counts.
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, and expressible there: enumerating all 117760 of its
+  // candidates, `/regionbase` splits 0x040000D4 into >= 2 locals and `/livebase-block` binds two
+  // bases, 0x040000D4 and 0x03003430 — so 0x03003430 is a base the second lever binds and the
+  // first never splits, exactly `dmapoll`'s 0x03004000. Seven of the eight klonoa functions whose
+  // fans inhabit both levers have such a base; `UpdateMenuCursorInput` is the one that does not.
+  // Name the CONFIGURATION whenever those counts are quoted — they are the MAP-LESS enumeration
+  // (9 `/regionbase`, 45 `/livebase-block`, 8 both, none of them benchmark rows), and the harness's
+  // real rows and the canonical ranked command both run MAP-FUL, where strictly more functions
+  // inhabit both. Two of the map-ful inhabitants ARE rows and neither closes this hole:
+  // `kleod:UpdateCameraScroll` is `noncompile` with no `candidateLabel` at all (its whole fan
+  // fails to build, so it can express no winner and gates nothing) and `kleod:UpdateHUDCounterDisplay`
+  // MATCHes on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4` — `/scopebase`,
+  // not `/regionbase`. So the row census this family fills stays 2 / 4 / 0.
+  // The bound the composition must clear on that function is 31, not any larger number quoted
+  // elsewhere: `/regionbase`'s own basin ceiling there is 417 against the 386 winner, and a price
+  // measured in one spelling basin does not cross into another.
+  //
+  // agbcc only, for the `dmascope` family's own reason and for no new one. Every claim above is a
+  // pair of spellings compiled with THIS compiler and scored against THIS compiler's object;
+  // whether ido7.1, gcc2.7.2kmc and mwcc_242_81 allocate N short-lived base pseudos differently
+  // from one long-lived one was NOT measured, so those lanes are left off rather than assumed
+  // (and mwcc_242_81 additionally stays off per the `hipress` hazard policy — a candidate compile
+  // has no timeout). Neither row carries a busy-wait poll, so the branch-likely lift link the
+  // `mixpoll`/`onepoll` block cites is NOT this family's reason; do not repeat it here. What would
+  // earn a lane is the same compiled pair on that toolchain showing the same divergence.
+  //
+  // m2c NONCOMPILES both, on the identical `ctx` and `proto` asmlift receives, and for the reason
+  // every raw-address row in this file records rather than for anything in this family: it types
+  // the address constant as `void *` and reads members off it (`(void *)0x040000D4->unk0 = ...`,
+  // `invalid type argument of '->'`, 1 compile error, 5 markers). It REACHES the construct in both
+  // — loop, both arms and all three IWRAM cells recovered correctly — and it homes NO base at all,
+  // every expansion spelled through the raw constant. The sharpest fact for this pair: m2c's
+  // output for `dmapoll` and for `dmaflat` is the SAME text apart from the function name, so the
+  // spelling distinction that costs agbcc 13 bytes of divergence is one it does not represent.
+  {
+    sym: 'dmapoll',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define gRows (*(u16 *)0x03001048)\n' +
+      '#define gCols (*(u16 *)0x03002048)\n' +
+      '#define gTiles (*(u16 *)0x03003048)\n' +
+      '#define DmaSet(src, dest, control) { vu32 *dmaRegs = (vu32 *)0x040000D4;' +
+      ' dmaRegs[0] = (vu32)(src); dmaRegs[1] = (vu32)(dest); dmaRegs[2] = (vu32)(control); }\n' +
+      'void dmapoll(s32 n){ volatile s32 *st = (volatile s32 *)0x03004000; s32 i; i = 0;\n' +
+      ' do { gRows = gRows + 1; gCols = gCols + 2;\n' +
+      '  if (st[0] != 0) { DmaSet(st[1], st[2], 0x80000020); }\n' +
+      '  else { DmaSet(st[2], st[3], 0x80000040); gTiles = gTiles + 3; }\n' +
+      '  i = i + 1; } while (i < n);\n' +
+      ' DmaSet(st[4], st[5], 0x80000080); }',
+    features: ['value-home', 'pointer', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmapoll(s32 n);',
+    proto: { dmapoll: { params: ['s32'], returnsVoid: true } },
+  },
+  {
+    sym: 'dmaflat',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define gRows (*(u16 *)0x03001048)\n' +
+      '#define gCols (*(u16 *)0x03002048)\n' +
+      '#define gTiles (*(u16 *)0x03003048)\n' +
+      'void dmaflat(s32 n){ volatile s32 *st = (volatile s32 *)0x03004000;' +
+      ' vu32 *dmaRegs = (vu32 *)0x040000D4; s32 i; i = 0;\n' +
+      ' do { gRows = gRows + 1; gCols = gCols + 2;\n' +
+      '  if (st[0] != 0) { dmaRegs[0] = (vu32)st[1]; dmaRegs[1] = (vu32)st[2];' +
+      ' dmaRegs[2] = 0x80000020; }\n' +
+      '  else { dmaRegs[0] = (vu32)st[2]; dmaRegs[1] = (vu32)st[3]; dmaRegs[2] = 0x80000040;' +
+      ' gTiles = gTiles + 3; }\n' +
+      '  i = i + 1; } while (i < n);\n' +
+      ' dmaRegs[0] = (vu32)st[4]; dmaRegs[1] = (vu32)st[5]; dmaRegs[2] = 0x80000080; }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmaflat(s32 n);',
+    proto: { dmaflat: { params: ['s32'], returnsVoid: true } },
+  },
 
   // A DEVICE REGISTER WRITTEN INSIDE A LOOP, WITH NOTHING READING IT BACK. A store to a DMA
   // register is an EVENT: it must happen once per iteration, where the source put it. `volatile`
