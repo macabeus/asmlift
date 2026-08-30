@@ -20,6 +20,14 @@ platform: n64
 tools:
   asmlift:
     target: gcc2.7.2kmc
+    # This compile runs the compiler inside a container IMAGE, which is named by a mutable TAG:
+    # rebuild `the KMC image` tomorrow and it is a different compiler under the same name, invisible
+    # to every token, every environment variable and the candidate cache's stamp probe alike
+    # (the probe compiles THROUGH the container, so it moves only if the image already did). So
+    # this project refuses the cross-run candidate-object cache for itself. asmlift refuses this
+    # shape on its own too, from a list of runtime names — but a list's miss serves a STALE
+    # OBJECT, and saying it here does not depend on asmlift having heard of your runtime.
+    candidateCache: off
     compiler: >-
       "$ASMLIFT_DOCKER" run --rm --platform linux/386
       -v "$ASMLIFT_KMC_DIR":/kmc:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/kmc
