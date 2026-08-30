@@ -197,8 +197,11 @@ const intType = (bytes: number, signed: boolean): string => `${signed ? 's' : 'u
  *  the names read out of the asm's own pool (core rank.ts) — a name the map never knew carries
  *  `synthesized: true`. This field answers "which MAP symbols did the winner use", the question
  *  the symbolMap A/B is about, so a synthesized name would be a different fact under the same
- *  key. Measured: 9 of the 252 real rows name a pool symbol their project's map does not
- *  know. */
+ *  key. Measured by re-enumerating the dataset outside the harness: of the 160 real rows that
+ *  enumerate standalone (the other 92 decline without the harness's asmData/prototypes), 7 name
+ *  a pool symbol their own project's vendored map does not know — 17 distinct names, from
+ *  pokeemerald's `BattleScript_*` labels to sa3's `ewram_end`. Without the filter those would
+ *  appear as map provenance the A/B never granted. */
 export function symbolsUsedFrom(refs: SymbolRef[] | undefined): { name: string; shape?: string }[] {
   return (refs ?? [])
     .filter((r) => !r.synthesized)

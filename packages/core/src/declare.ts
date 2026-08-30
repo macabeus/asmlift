@@ -41,7 +41,8 @@
 // unsound CLAIM if the decls are hidden, so a consumer publishing a verdict must show the block
 // beside the source. Measured against the benchmark's own vendored maps, which this path never
 // sees: of 28 fitted NARROW declarations over the 126 rankable agbcc rows, 26 agree with the
-// project's real declaration and 2 do not.
+// project's real declaration and 2 do not (27 of 28 agree on the offset-0 ACCESS WIDTH the
+// declaration produces, which is the weaker question of whether the same load is emitted).
 import { type StructFieldDecl, renderStructDecl } from './backend/cfamily';
 import { T } from './ir/types';
 import type { SymbolRef } from './l3/symbol-refs';

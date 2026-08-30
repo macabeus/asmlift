@@ -143,8 +143,9 @@ describe('symbolShape formatting (pinned)', () => {
     // Since the map-less declaration round a candidate's refs are the union of the map's symbols
     // and the names read out of the asm's own pool (core rank.ts); the synthesized ones carry
     // `synthesized: true`. This field is the symbolMap A/B's provenance — "which MAP symbols did
-    // the winner use" — so a name the map never knew must not appear under it. Measured: 9 of the
-    // 252 real rows name a pool symbol their project's map does not know.
+    // the winner use" — so a name the map never knew must not appear under it. Measured: of the
+    // 160 real rows that enumerate outside the harness, 7 name a pool symbol their own project's
+    // vendored map does not know (the other 92 decline without asmData/prototypes).
     const used = symbolsUsedFrom([
       { name: 'gAlpha', info: COUNTER },
       { name: 'gPoolOnly', info: { name: 'gPoolOnly', kind: 'data' }, synthesized: true },

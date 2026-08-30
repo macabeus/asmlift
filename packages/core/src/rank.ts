@@ -608,7 +608,10 @@ export type RefusedDeclarationReason =
  *  benchmark's own vendored maps, which this path never sees: of 28 fitted NARROW declarations
  *  over the 126 rankable agbcc rows, 26 agree with the project's real declaration and 2 do not
  *  (both `gUnk_03005220`, a 100-byte struct read bare at offset 0 — map-less nothing in the
- *  function distinguishes that from a narrow scalar). */
+ *  function distinguishes that from a narrow scalar). By the weaker test of the offset-0 ACCESS
+ *  WIDTH the declaration actually produces — same load, different name for the object — 27 of
+ *  those 28 agree, and 52 of all 55 fitted declarations do (1 disagrees, 2 name symbols the
+ *  project's own map does not know either). */
 function bareGlobalSymbols(
   fn: Fn,
   onRefused?: (name: string, reason: RefusedDeclarationReason) => void,
