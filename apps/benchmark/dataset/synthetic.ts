@@ -3592,12 +3592,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // Name the CONFIGURATION whenever those counts are quoted: they are the MAP-LESS enumeration
   // (9 `/regionbase`, 45 `/livebase-block`, 8 both, none of them benchmark rows) over 258 lifting
   // functions, while the harness's real rows and the canonical ranked command run MAP-FUL, where
-  // it is 24 / 49 / 16. Two map-ful inhabitants ARE rows and neither closes the hole:
-  // `kleod:UpdateCameraScroll` is `noncompile` with no `candidateLabel` (its whole fan fails to
-  // build, so it can express no winner) and `kleod:UpdateHUDCounterDisplay` MATCHes on
-  // `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4` — `/scopebase`, not
-  // `/regionbase`. The PRE-EXISTING row census this pair fills stays 2 / 4 / 0; with these two
-  // rows in it the winner-carries counts read 2 `/regionbase` / 6 `/livebase-block` / 0 both.
+  // it is 24 / 49 / 16, and WHICH SET a row inhabits is itself configuration-dependent. Exactly ONE
+  // of the 16 map-ful BOTH inhabitants is a benchmark row — `kleod:UpdateCameraScroll`, `noncompile`
+  // with no `candidateLabel`, its whole fan failing to build, so it can express no winner. The only
+  // other row anywhere in the map-ful census is `kleod:UpdateHUDCounterDisplay`, and it is a
+  // `/regionbase`-ONLY inhabitant there (map-less it is in neither set); it MATCHes on
+  // `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`, so its WINNER carries
+  // `/scopebase` and not `/regionbase` even though its fan holds one. Neither closes the hole. The
+  // PRE-EXISTING row census this pair fills stays 2 / 4 / 0; with these two rows in it the
+  // winner-carries counts read 2 `/regionbase` / 6 `/livebase-block` / 0 both.
   //
   // The number to carry to LBG is a DEFICIT of 31, not a ceiling on available gain: `/regionbase`'s
   // own basin ceiling there is 417 against the 386 winner, so a composition must clear 417 before
