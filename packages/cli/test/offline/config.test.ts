@@ -146,3 +146,30 @@ test('an obsolete cacheInputs key loads, and says out loud that it does nothing'
   }
   expect(said.join('')).toMatch(/cacheInputs.*no longer/);
 });
+
+// `tools.asmlift.candidateCache` is what came back in `cacheInputs`' place, and it is deliberately
+// the OTHER shape: a refusal, never an assertion. `cacheInputs` was wrong in the stale-object
+// direction when a project under-declared; this one is wrong in the cold-start direction when a
+// project over-refuses. There is exactly one value, because there is no value that could turn the
+// cache ON — the environment already does that, and a project cannot know more than the
+// measurement does.
+test("tools.asmlift.candidateCache: off loads as the string 'off', not YAML 1.1's boolean", () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    candidateCache: off\n',
+  );
+  // The `yaml` package parses with the 1.2 core schema, where `off` is a plain string. If that
+  // ever changed under us the key would arrive as `false`, the validator below would throw, and
+  // every project declaring the refusal would fail to load — so pin the parse, not just the use.
+  expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.candidateCache).toBe('off');
+});
+
+test('any other value is a loud error — a typo must never read as "on"', () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    candidateCache: on\n',
+  );
+  expect(() => loadDecompConfig(join(root, 'decomp.yaml'))).toThrow(/candidateCache must be 'off'/);
+});
