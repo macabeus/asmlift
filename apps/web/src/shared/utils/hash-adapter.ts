@@ -23,3 +23,20 @@ export function hashUrl(href: string, search: URLSearchParams): string {
   url.hash = searchParamsToHash(search);
   return url.toString();
 }
+
+/** Key isolation: a COPY of `search` holding only `keys`, so a hook watching `s` does not
+ *  re-render when `tab` moves. nuqs's own `filterSearchParams` is internal (it appears in no
+ *  `.d.ts` it ships), so this is a reimplementation of it with `copy` fixed to true.
+ *  An empty `keys` means "watch everything", which is what nuqs asks for. */
+export function pickKeys(search: URLSearchParams, keys: string[]): URLSearchParams {
+  if (keys.length === 0) {
+    return search;
+  }
+  const filtered = new URLSearchParams(search);
+  for (const key of Array.from(search.keys())) {
+    if (!keys.includes(key)) {
+      filtered.delete(key);
+    }
+  }
+  return filtered;
+}

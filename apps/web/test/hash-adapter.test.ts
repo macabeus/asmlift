@@ -2,7 +2,7 @@
 // Everything here is string-level, so it runs in vitest's node environment with no DOM.
 import { expect, test } from 'vitest';
 
-import { hashToSearchParams, hashUrl, searchParamsToHash } from '../src/shared/utils/hash-adapter';
+import { hashToSearchParams, hashUrl, pickKeys, searchParamsToHash } from '../src/shared/utils/hash-adapter';
 import { encodeShare } from '../src/shared/utils/permalink';
 import { parseAsShareState } from '../src/shared/utils/url-state';
 
@@ -69,4 +69,36 @@ test('a 200,000-character payload round-trips (the fragment has no transport cei
   const params = new URLSearchParams();
   params.set('s', huge);
   expect(hashToSearchParams(searchParamsToHash(params)).get('s')).toBe(huge);
+});
+
+// --- key isolation: nuqs's own filterSearchParams is internal (no hit in any dist/**/*.d.ts),
+// so this is a reimplementation, and these are its tests.
+
+const explorer = () =>
+  new URLSearchParams('view=benchmark&tab=explorer&project=kleod&feature=loop&feature=table&s=xyz');
+
+test('pickKeys keeps only the watched keys, in their original order', () => {
+  expect(pickKeys(explorer(), ['s', 'view']).toString()).toBe('view=benchmark&s=xyz');
+});
+
+test('pickKeys with no keys watches everything (nuqs asks for that on the empty set)', () => {
+  expect(pickKeys(explorer(), []).toString()).toBe(explorer().toString());
+});
+
+test('pickKeys keeps every value of a repeated key', () => {
+  expect(pickKeys(explorer(), ['feature']).getAll('feature')).toEqual(['loop', 'table']);
+});
+
+test('pickKeys does not mutate its input, and is stable across calls', () => {
+  const source = explorer();
+  const before = source.toString();
+  const a = pickKeys(source, ['view']).toString();
+  const b = pickKeys(source, ['view']).toString();
+  // That string IS the getSnapshot cache key, so equal input must give an equal key.
+  expect(a).toBe(b);
+  expect(source.toString()).toBe(before);
+});
+
+test('pickKeys drops a watched key that is absent rather than inventing it', () => {
+  expect(pickKeys(explorer(), ['nope']).toString()).toBe('');
 });
