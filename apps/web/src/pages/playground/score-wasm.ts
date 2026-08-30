@@ -29,6 +29,7 @@ import { assemble, compileToObject } from 'agbcc';
 import type * as ObjdiffWasm from 'objdiff-wasm';
 
 import { toolFailureLine } from './candidate-compile';
+import type { EmittedProgress } from './rank-progress';
 
 // ── Web-Worker protocol ──────────────────────────────────────────────────────────────────────
 // Scoring runs in a worker (rank.worker.ts) so the agbcc + objdiff wasm compiles never jank
@@ -36,6 +37,7 @@ import { toolFailureLine } from './candidate-compile';
 // remembers the latest, and DISCARDS any response whose id is not the current one — so a score
 // computed for a previous asm can never be shown against the asm now on screen.
 export interface RankRequest {
+  kind: 'request';
   reqId: number;
   name: string;
   asm: string;
@@ -44,6 +46,22 @@ export interface RankRequest {
    *  objects); absent ⇒ the plain raw-globals-only enumeration */
   symbols?: SymbolMap;
 }
+/** "I have moved on to `reqId`, and I am not asking for anything." The main thread abandons a run
+ *  WITHOUT starting another one every time ranking becomes ineligible — switching to the Benchmark
+ *  tab, switching the backend to C++, clearing the function name — and a run whose every message
+ *  the H1 guard will discard must stop spending postMessages then too. Without this the worker only
+ *  ever learned a new id from a new REQUEST, so the abandoned run kept waking the main thread for
+ *  its whole life (measured 2026-08-30: 108 further ticks over 11.9 s at 9.1 Hz).
+ *
+ *  It abandons the MESSAGES, not the WORK: there is no abort seam in the scoring loop, so the run
+ *  finishes scoring in the background. Cancelling it is a follow-up. */
+export interface RankSupersede {
+  kind: 'supersede';
+  reqId: number;
+}
+/** Everything the MAIN THREAD can post. Read on `kind` for the reason `RankMessage` is: a shape
+ *  told apart by sniffing for a property is how a third one later gets silently mis-routed. */
+export type RankInbound = RankRequest | RankSupersede;
 /** A name the candidate's tree references that asmlift REFUSED to declare
  *  (core `RefusedDeclarationReason`) — surfaced so the UI can say which `'x' undeclared` was
  *  asmlift's own decision. */
@@ -57,7 +75,16 @@ export interface RefusedDeclaration {
  *  declarations were synthesized) as a count on its own `[ranked]` line. */
 export type BrowserRanking = RankedResult<MatchScore> & { refused: RefusedDeclaration[] };
 export type RankResponse =
-  { reqId: number; ok: true; result: BrowserRanking } | { reqId: number; ok: false; error: string };
+  | { kind: 'result'; reqId: number; ok: true; result: BrowserRanking }
+  | { kind: 'result'; reqId: number; ok: false; error: string };
+/** A phase/count observation from a run in flight. It carries the SAME `reqId` the result echoes,
+ *  because it is subject to the SAME H1 stale-guard: progress for a superseded asm must be dropped,
+ *  not rendered. Built on `EmittedProgress`, so the one phase the worker cannot observe (`queued`)
+ *  is not spellable on the wire. */
+type RankProgressMessage = { kind: 'progress'; reqId: number } & EmittedProgress;
+/** Everything the worker can post. Read on the explicit `kind` discriminant — never by sniffing for
+ *  a property, which is how a fourth shape later gets silently mis-routed. */
+export type RankMessage = RankProgressMessage | RankResponse;
 
 export interface DiffBreakdown {
   insert: number;
@@ -200,27 +227,51 @@ export async function scoreObjectBytes(
  *  the refusals with it.
  *
  *  Ranking always uses `cBackend` regardless of the UI backend selector — choosing cpp/pascal
- *  turns ranking off (it is gated to the agbcc target + C backend in Playground.tsx). */
+ *  turns ranking off (it is gated to the agbcc target + C backend in Playground.tsx).
+ *
+ *  PROGRESS: `onProgress` is called with the phase, and with `done`/`total` once the candidate
+ *  array exists. It is called for EVERY candidate and is NOT throttled here: the rate limit is a
+ *  property of the transport (a postMessage per candidate is what would jank the main thread the
+ *  worker exists to protect), so it lives at that boundary, in rank.worker.ts. A closure call per
+ *  candidate is free next to the 25-167 ms each one spends in agbcc + objdiff, and a second driver
+ *  — a test rig, a node harness, a future ETA estimator — gets to observe every candidate instead
+ *  of inheriting a 10 Hz ceiling it never asked for and cannot opt out of. */
 export async function rankCandidatesInBrowser(
   name: string,
   asm: string,
   target: TargetDescription,
   symbols?: SymbolMap,
+  onProgress?: (p: EmittedProgress) => void,
 ): Promise<BrowserRanking> {
+  const emit: (p: EmittedProgress) => void = onProgress ?? (() => {});
+
+  // ASSEMBLE FIRST, and keep it first. agbcc's `assemble()` hands the source to GNU as AS-IS, which
+  // does not know `thumb_func_start`, so a pret-dialect `.s` dies here on line 1 — with the
+  // enumeration ahead of it that death cost a measured 62.3 s (2026-08-30, `LoadBGTilemapData`,
+  // 117,760 candidates) of work thrown away. `enumerateCandidates` does not consume `t`, so this
+  // order is behaviour-neutral whenever assembly succeeds, and it gives the UI a cheap first phase
+  // to name instead of a minute-long unnamed void. (The pret dialect is a separate gap: asmlift's
+  // own frontend reads it, the in-browser scorer cannot.)
+  emit({ phase: 'assembling' });
+  const t = await assemble(asm);
+  if (!t.ok) {
+    throw new Error(`could not assemble the target asm: ${toolFailureLine(t.stderr)}`);
+  }
+
   // A refused declaration is a name asmlift DECIDED not to declare. Collected here so the UI can
   // attribute an undeclared name to that decision instead of leaving the user to guess — and,
   // for `emitter-name`, so a row that produced NO candidate at all says which symbol collided.
+  //
+  // `enumerateCandidates` is SYNCHRONOUS and returns a finished array (62.3 s of it on that same
+  // function), so there is no honest number to show inside it — the phase is named and carries
+  // none. Subdividing it is a core change and a follow-up, not this round's.
+  emit({ phase: 'enumerating' });
   const refused: RefusedDeclaration[] = [];
   const candidates = enumerateCandidates(name, asm, target, {
     backend: cBackend,
     ...(symbols ? { symbols } : {}),
     onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
   });
-
-  const t = await assemble(asm);
-  if (!t.ok) {
-    throw new Error(`could not assemble the target asm: ${toolFailureLine(t.stderr)}`);
-  }
 
   // Mirrors core's `rankBy` (which this cannot reuse — the wasm scorer is async): a candidate
   // that fails to build is DROPPED rather than allowed to sink a sibling that compiles, and each
@@ -233,7 +284,16 @@ export async function rankCandidatesInBrowser(
   const dropped: DroppedCandidate[] = [];
   const withheld: WithheldCandidate[] = [];
   let lastErr: unknown = null;
+  // The total is only ever `candidates.length` — the number actually returned. No estimate, and no
+  // borrowing the CLI's count for the same function (66,816 with a symbol map, against the
+  // browser's map-less 117,760: a fabricated denominator would have been 76 % wrong).
+  const total = candidates.length;
   for (const [order, c] of candidates.entries()) {
+    // `order` is how many candidates are FINISHED, and the tick is emitted at the top so the
+    // `continue` on a withheld spelling cannot skip it. Iteration 0 is therefore the phase change
+    // itself (`0 / total`, never suppressed by the throttle); an empty enumeration emits nothing
+    // here and is announced by the `done === total` tick below.
+    emit({ phase: 'scoring', done: order, total });
     try {
       const cc = await compileToObject(c.source, { context: selfDeclaredContextFor(c.symbolRefs) });
       if (!cc.ok) {
@@ -254,6 +314,12 @@ export async function rankCandidatesInBrowser(
       dropped.push({ label: c.label, error: e instanceof Error ? toolFailureLine(e.message) : String(e) });
     }
   }
+  emit({ phase: 'scoring', done: total, total });
+  // The scoring phase ends by CHANGING PHASE, never by sitting at done === total: the sort and the
+  // structured clone of a six-figure array back to the main thread are real work, and a bar full
+  // while the tab is still busy is the lie constraint 3 forbids. The UI falls back to an
+  // indeterminate bar with a different label here.
+  emit({ phase: 'ranking' });
   if (results.length === 0) {
     const why = lastErr instanceof Error ? lastErr.message.split('\n')[0] : String(lastErr ?? 'no candidate produced');
     throw new Error(`no scorable candidate for '${name}': ${why}`, { cause: lastErr });
