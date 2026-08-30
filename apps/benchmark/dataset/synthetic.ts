@@ -2774,13 +2774,19 @@ export const SYNTHETIC: SynthSpec[] = [
   //     mergecast    the same merge as `s32 v` + `(s16)v`      MATCH  ADVERSE: a rule that narrows
   //                                                                   on the extension alone spells
   //                                                                   this `s16 v` and scores 6
-  //     mergeu16     `u16 v` across the same if/else               4  UNDECIDABLE, on purpose
-  // `mergeu16` is authored to stay open: `u16 v` and `s32 v` + `(u16)v` reach the pass as the same
-  // IR — one `zext16` over raw in-edges — and want opposite answers, differing only in the branch
-  // shape agbcc chose. asmlift keeps the wide spelling and pays 4 here; m2c takes the narrow one,
-  // MATCHes this row and pays 5 on `mergecast`. Two decompilers on opposite faces of one coin is
-  // the evidence that no DEFAULT settles it: the shape wants an enumerated candidate, which is a
-  // round of its own.
+  //     mergeu16     `u16 v` across the same if/else            MATCH  the DIAMOND half of the
+  //                                                                   unsigned column
+  //     mergecastu   the same merge as `s32 v` + `(u16)v`       —     the HOISTED half; the row
+  //                                                                   the diamond rule must not win
+  // The unsigned column was authored as UNDECIDABLE and it is not. `u16 v` and `s32 v` + `(u16)v`
+  // do reach `raise/narrowlocal.ts` as the same IR — one `zext16` over raw in-edges — but they do
+  // not compile to the same CFG: `gcc/jump.c:443-445` hoists the else arm above the compare for the
+  // cast spelling and cannot for the declared one, because `gcc/thumb.h:344` PROMOTE_MODE makes
+  // that arm five insns and the transform's guard at `:895-902` wants one. asmlift reads the join
+  // shape and takes both cells; m2c takes the narrow spelling unconditionally, so it wins `mergeu16`
+  // and pays on `mergecast`. `mergecastu` is the fourth cell and exists to hold the new rule to a
+  // score: it is the shape a diamond test must keep REFUSED, and without it the whole column can be
+  // won by a gate that simply always narrows.
   //
   // Cut from sa3:PackSaveSector:agbcc (m2c noncompile), and the two levers do not reach it: it is
   // refused for a third reason, a struct carrying constant-offset fields alongside its array members
@@ -2847,6 +2853,30 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'void mergeu16(s32 *out, s32 a, s32 b, s32 c);',
     proto: { mergeu16: { returnsVoid: true } },
+  },
+  {
+    // THE FOURTH CELL of the 2x2 in raise/narrowlocal.ts's header, and the only one the benchmark
+    // did not carry — which is why forcing `edge-extends` off used to read as a pure trade. It is
+    // `mergecast`'s twin at the other signedness and `mergeu16`'s at the other spelling: same
+    // merge, same single `zext16` reader, same raw in-edges, and it must stay REFUSED because
+    // agbcc really did hoist the else arm here.
+    sym: 'mergecastu',
+    src:
+      'void mergecastu(s32 *out, s32 a, s32 b, s32 c)\n' +
+      '{\n' +
+      '    s32 v;\n' +
+      '\n' +
+      '    if (c) {\n' +
+      '        v = a + b;\n' +
+      '    } else {\n' +
+      '        v = a - b;\n' +
+      '    }\n' +
+      '    out[0] = (u16)v;\n' +
+      '}',
+    features: ['narrow', 'zero-extend', 'cast', 'branch', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void mergecastu(s32 *out, s32 a, s32 b, s32 c);',
+    proto: { mergecastu: { returnsVoid: true } },
   },
   {
     sym: 'widecnt',
