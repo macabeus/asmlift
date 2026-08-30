@@ -16,7 +16,7 @@ import { CodeBlock } from '../../shared/components/CodeBlock';
 import { type ShareState, encodeShare } from '../../shared/utils/permalink';
 import { parseAsShareState } from '../../shared/utils/url-state';
 import { Pipeline } from './Pipeline';
-import { RankBadge } from './RankPanel';
+import { RankBadge, RankDeclarations } from './RankPanel';
 import { deriveSpec, parseSpec } from './cpp-spec';
 import { EXAMPLES } from './examples';
 import { parseSymbolsJson } from './symbols-json';
@@ -464,6 +464,10 @@ export function Playground({
             ) : tab === 'source' ? (
               <div className="flex h-full flex-col gap-1.5">
                 <RankBadge ranking={ranking} />
+                {/* The block the winner was COMPILED WITH. The verdict is a fact about
+                    declarations + source, and a synthesized declaration is fitted to the pasted
+                    asm — showing only the source would publish half of it. */}
+                <RankDeclarations ranking={ranking} />
                 <div className="min-h-0 flex-1">
                   <CodeBlock
                     code={shownSource}

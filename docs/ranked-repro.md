@@ -103,12 +103,17 @@ stopped at the list of dirty paths would have called such a bundle current.
   writes:
 
   ```
-  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, best <label>: 531 [asmlift source 7362050]
+  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best <label>: 531 [asmlift source 7362050]
   ```
 
   A score from a run that dropped candidates is not comparable to one that dropped none — and
   "0 dropped" is now something the run SAYS. It used to be spelled as an absent line, so a clean
   run, a truncated log and a killed run left identical evidence.
+
+  `synthesized` counts the declarations asmlift wrote for the winning candidate because no symbol
+  map knew the name — read out of the same asm the score is about, so they cannot lose score, only
+  manufacture agreement. A non-zero count means the artifact is that declaration block plus the
+  source; the block itself is printed on the `asmlift: [declared]` lines just above.
 
   **WITHHELD is a third count and a different fact.** `dropped` means the scorer refused a
   spelling; `withheld` means one compiled, scored, and was refused PUBLICATION because it is

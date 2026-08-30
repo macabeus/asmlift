@@ -8,17 +8,16 @@
 // the latest is remembered, and the worker's response is ACCEPTED ONLY when its reqId is still the
 // current one — a superseded response is dropped. So the ranked source shown is always for the asm
 // on screen, or nothing.
-import type { RankedResult } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { useEffect, useRef, useState } from 'react';
 
-import type { MatchScore, RankRequest, RankResponse } from './score-wasm';
+import type { BrowserRanking, RankRequest, RankResponse } from './score-wasm';
 
 export type Ranking =
   | { status: 'off' } // not an agbcc/C run, or no valid input
   | { status: 'loading' }
-  | { status: 'ok'; result: RankedResult<MatchScore> }
+  | { status: 'ok'; result: BrowserRanking }
   | { status: 'error'; error: string };
 
 export interface RankingInput {

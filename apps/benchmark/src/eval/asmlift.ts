@@ -190,9 +190,21 @@ const intType = (bytes: number, signed: boolean): string => `${signed ? 's' : 'u
 
 /** The winning candidate's map references as the schema's provenance rows — name plus the
  *  pre-formatted shape, sorted by name, uncapped. Absent refs (a '/raw-globals' winner names
- *  nothing) become the honest empty list: the map was in scope, the winner used none of it. */
+ *  nothing) become the honest empty list: the map was in scope, the winner used none of it.
+ *
+ *  SYNTHESIZED refs are excluded, and that is what keeps this field meaning what it says. Since
+ *  the map-less declaration round, `Candidate.symbolRefs` is the union of the map's symbols and
+ *  the names read out of the asm's own pool (core rank.ts) — a name the map never knew carries
+ *  `synthesized: true`. This field answers "which MAP symbols did the winner use", the question
+ *  the symbolMap A/B is about, so a synthesized name would be a different fact under the same
+ *  key. Measured by re-enumerating the dataset outside the harness: of the 160 real rows that
+ *  enumerate standalone (the other 92 decline without the harness's asmData/prototypes), 7 name
+ *  a pool symbol their own project's vendored map does not know — 17 distinct names, from
+ *  pokeemerald's `BattleScript_*` labels to sa3's `ewram_end`. Without the filter those would
+ *  appear as map provenance the A/B never granted. */
 export function symbolsUsedFrom(refs: SymbolRef[] | undefined): { name: string; shape?: string }[] {
   return (refs ?? [])
+    .filter((r) => !r.synthesized)
     .map((r) => {
       const shape = symbolShape(r.info);
       return { name: r.name, ...(shape ? { shape } : {}) };

@@ -12,10 +12,11 @@
 // would mask an alignment bug as a perpetual "closest"). FAIL-CLOSED: nothing here is caught; any
 // engine failure throws, and a row that cannot be displayed can never count as matched.
 import { cBackend } from '@asmlift/core/backend/c';
-import { renderDeclarations } from '@asmlift/core/declare';
+import { selfDeclaredContextFor } from '@asmlift/core/declare';
 import {
   type DroppedCandidate,
   type RankedResult,
+  type RefusedDeclarationReason,
   type Scored,
   type WithheldCandidate,
   compareScored,
@@ -23,9 +24,11 @@ import {
   withheldReason,
 } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
-import { C_TYPEDEFS, type TargetDescription } from '@asmlift/core/target';
+import type { TargetDescription } from '@asmlift/core/target';
 import { assemble, compileToObject } from 'agbcc';
 import type * as ObjdiffWasm from 'objdiff-wasm';
+
+import { toolFailureLine } from './candidate-compile';
 
 // ── Web-Worker protocol ──────────────────────────────────────────────────────────────────────
 // Scoring runs in a worker (rank.worker.ts) so the agbcc + objdiff wasm compiles never jank
@@ -41,8 +44,20 @@ export interface RankRequest {
    *  objects); absent ⇒ the plain raw-globals-only enumeration */
   symbols?: SymbolMap;
 }
+/** A name the candidate's tree references that asmlift REFUSED to declare
+ *  (core `RefusedDeclarationReason`) — surfaced so the UI can say which `'x' undeclared` was
+ *  asmlift's own decision. */
+export interface RefusedDeclaration {
+  name: string;
+  reason: RefusedDeclarationReason;
+}
+/** The browser ranking: core's ranked result plus the declaration refusals this enumeration
+ *  made. Kept local to the webapp rather than widened into core's `RankedResult` — this is the
+ *  only consumer core's callback has, and the cli reports the fact it needs (how many
+ *  declarations were synthesized) as a count on its own `[ranked]` line. */
+export type BrowserRanking = RankedResult<MatchScore> & { refused: RefusedDeclaration[] };
 export type RankResponse =
-  { reqId: number; ok: true; result: RankedResult<MatchScore> } | { reqId: number; ok: false; error: string };
+  { reqId: number; ok: true; result: BrowserRanking } | { reqId: number; ok: false; error: string };
 
 export interface DiffBreakdown {
   insert: number;
@@ -166,25 +181,23 @@ export async function scoreObjectBytes(
   return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
 }
 
-/** The one line of a tool's stderr worth showing. GNU as prefixes everything with an
- *  "in.s: Assembler messages:" banner and puts the real diagnostics after it — preferring the
- *  first `Error:` line over the first non-empty one is what keeps the banner out of the UI. */
-const firstLine = (s: string) => {
-  const lines = (s || '').split('\n');
-  return lines.find((l) => l.includes('Error:')) ?? lines.find((l) => l.trim() !== '') ?? '';
-};
-
 /** The async analog of the cli's `decompileRanked`, agbcc-only: enumerate the distinct candidate
  *  spellings (shared @asmlift/core enumeration), assemble the pasted `.s` ONCE as the target, then
  *  compile + objdiff-score each candidate and rank by score (lowest first). Mirrors
  *  `@asmlift/core/rank`'s `rankBy` semantics — a candidate whose compile/score throws is skipped so
  *  it cannot sink a matching sibling; only if EVERY candidate fails is the failure surfaced.
  *
- *  SELF-DECLARING CANDIDATES: with a symbol map, a candidate that names map symbols carries
- *  their refs (Candidate.symbolRefs) — its synthesized declaration block (the SAME core
- *  renderer the cli scorer uses) is prepended after the typedefs, exactly the cli's
- *  self-declared world (rank.ts). agbcc-wasm compiles bare candidates (no project headers),
- *  so the probe arbitration is unnecessary here: this scorer is ALWAYS the self-declared world.
+ *  SELF-DECLARING CANDIDATES: a candidate that names symbols carries their refs
+ *  (Candidate.symbolRefs) — a UNION, with the map's facts winning per name and every name the
+ *  map does not know read out of the asm's own literal pool (rank.ts bareGlobalSymbols) and
+ *  marked `synthesized`. `selfDeclaredContextFor` (core declare.ts — the SAME composition the
+ *  cli's compile seam uses) prepends the typedefs and that block. agbcc-wasm compiles bare
+ *  candidates (no project headers), so the probe arbitration is unnecessary here: this scorer is
+ *  ALWAYS the self-declared world, and a name with no declaration is a hard error.
+ *
+ *  A synthesized declaration is FITTED to the asm being scored (declare.ts's module note), so it
+ *  cannot lose score — which is why the block comes back with the result for the UI to show, and
+ *  the refusals with it.
  *
  *  Ranking always uses `cBackend` regardless of the UI backend selector — choosing cpp/pascal
  *  turns ranking off (it is gated to the agbcc target + C backend in Playground.tsx). */
@@ -193,12 +206,20 @@ export async function rankCandidatesInBrowser(
   asm: string,
   target: TargetDescription,
   symbols?: SymbolMap,
-): Promise<RankedResult<MatchScore>> {
-  const candidates = enumerateCandidates(name, asm, target, { backend: cBackend, ...(symbols ? { symbols } : {}) });
+): Promise<BrowserRanking> {
+  // A refused declaration is a name asmlift DECIDED not to declare. Collected here so the UI can
+  // attribute an undeclared name to that decision instead of leaving the user to guess — and,
+  // for `emitter-name`, so a row that produced NO candidate at all says which symbol collided.
+  const refused: RefusedDeclaration[] = [];
+  const candidates = enumerateCandidates(name, asm, target, {
+    backend: cBackend,
+    ...(symbols ? { symbols } : {}),
+    onRefusedDeclaration: (n, reason) => refused.push({ name: n, reason }),
+  });
 
   const t = await assemble(asm);
   if (!t.ok) {
-    throw new Error(`could not assemble the target asm: ${firstLine(t.stderr)}`);
+    throw new Error(`could not assemble the target asm: ${toolFailureLine(t.stderr)}`);
   }
 
   // Mirrors core's `rankBy` (which this cannot reuse — the wasm scorer is async): a candidate
@@ -214,10 +235,9 @@ export async function rankCandidatesInBrowser(
   let lastErr: unknown = null;
   for (const [order, c] of candidates.entries()) {
     try {
-      const decls = c.symbolRefs?.length ? renderDeclarations(c.symbolRefs) : '';
-      const cc = await compileToObject(c.source, { context: C_TYPEDEFS + decls });
+      const cc = await compileToObject(c.source, { context: selfDeclaredContextFor(c.symbolRefs) });
       if (!cc.ok) {
-        throw new Error(`agbcc could not compile candidate '${c.label}': ${firstLine(cc.stderr)}`);
+        throw new Error(`agbcc could not compile candidate '${c.label}': ${toolFailureLine(cc.stderr)}`);
       }
       const score = await scoreObjectBytes(t.obj, cc.obj, name);
       // The PUBLICATION rule is imported for the same reason the ordering is: `withheldReason` is
@@ -231,7 +251,7 @@ export async function rankCandidatesInBrowser(
       results.push({ ...c, order, score });
     } catch (e) {
       lastErr = e;
-      dropped.push({ label: c.label, error: e instanceof Error ? firstLine(e.message) : String(e) });
+      dropped.push({ label: c.label, error: e instanceof Error ? toolFailureLine(e.message) : String(e) });
     }
   }
   if (results.length === 0) {
@@ -239,5 +259,5 @@ export async function rankCandidatesInBrowser(
     throw new Error(`no scorable candidate for '${name}': ${why}`, { cause: lastErr });
   }
   results.sort(compareScored);
-  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };
+  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld, refused };
 }

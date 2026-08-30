@@ -33,6 +33,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
+import { renderDeclarations } from './declare';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
@@ -433,6 +434,25 @@ export async function runCli(
         ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
           `${ranked.withheld[0].label} at ${ranked.withheld[0].score}: ${ranked.withheld[0].why}\n`
         : '';
+      // THE ASSUMPTIONS THE SCORE RESTS ON. A candidate names globals the asm's own literal pool
+      // named, and where no symbol map knows them asmlift synthesizes their declarations — width
+      // and signedness read out of the TARGET's own asm (core rank.ts bareGlobalSymbols). Such a
+      // declaration is fitted to the bytes it is scored against: it cannot lose score, only
+      // manufacture agreement, so a published `(match)` that depends on one has to name it. Only
+      // in the SELF-DECLARED world, which is the probe's verdict and nobody else's — in the
+      // headers world the block is dropped and the project's own declarations did the work.
+      const assumed = (ranked.best.symbolRefs ?? []).filter((r) => r.synthesized);
+      const declared =
+        assumed.length > 0 && compilers.selfDeclared() === true
+          ? `asmlift: [declared] ${assumed.length} declaration(s) synthesized from the target asm — no symbol ` +
+            `map knows these names, so the score is about this block plus the source; check it against your ` +
+            `headers:\n` +
+            renderDeclarations(assumed)
+              .split('\n')
+              .filter((l) => l.trim() !== '')
+              .map((l) => `asmlift:   ${l}\n`)
+              .join('')
+          : '';
       // The three counts docs/ranked-repro.md requires beside every ranked score, as ONE line that
       // is always present. They used to be recoverable only as the line count of a 2 MB stderr
       // stream, and "0 dropped" was asserted by the ABSENCE of the `[dropped]` line above — so a
@@ -443,9 +463,15 @@ export async function runCli(
       // one; the stamp makes a run against different SOURCES distinguishable from both, which no
       // part of the log used to be (provenance.ts). On the same line as the score deliberately: the
       // doc tells readers to quote this one line, so a stamp anywhere else is a stamp nobody pastes.
+      //
+      // SYNTHESIZED is the fourth count, and it is here for the same reason as the other three:
+      // the `[declared]` block below is CONDITIONAL, so "this score rests on no declaration
+      // asmlift invented" would otherwise be spelled as an absent line — and a `(match)` whose
+      // declaration block was fitted to the target asm would be publishable by pasting exactly
+      // the one line the doc asks for. The count travels with the score; the block stays below.
       const summary =
         `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
-        `${ranked.withheld.length} withheld, ` +
+        `${ranked.withheld.length} withheld, ${declared === '' ? 0 : assumed.length} synthesized, ` +
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
         `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {
@@ -453,7 +479,7 @@ export async function runCli(
         stdout: ranked.best.source,
         // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
         // tail stay adjacent.
-        stderr: targetTrace + warn + table + drops + held + (clock?.report() ?? '') + summary + protoNote,
+        stderr: targetTrace + warn + table + drops + held + declared + (clock?.report() ?? '') + summary + protoNote,
       };
     } catch (e) {
       const kind = isDecline(e) ? 'declined' : 'internal error';

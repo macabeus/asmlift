@@ -1,10 +1,28 @@
-// asmlift webapp — ranking UI. Two views over the same Ranking state:
+// asmlift webapp — ranking UI. Three views over the same Ranking state:
 //  • RankBadge — a one-line strip above the Source view: the best candidate's verdict (byte-exact
 //    at objdiff score 0, or the closest score). Only ever reflects the CURRENT input (the H1
 //    guard in useRanking).
+//  • RankDeclarations — the block the winning candidate was COMPILED WITH, shown under the badge.
 //  • RankCandidates — the Pipeline tab's final card: every scored candidate with its objdiff
-//    score, best first.
+//    score, best first, plus the declarations asmlift refused to synthesize.
+import { renderDeclarations } from '@asmlift/core/declare';
+
+import type { RefusedDeclaration } from './score-wasm';
 import type { Ranking } from './useRanking';
+
+/** How many of the winning candidate's declarations are HYPOTHESES — names no symbol map knew,
+ *  whose type was read out of the same asm the verdict is about (core SymbolRef.synthesized). */
+function synthesizedCount(ranking: Ranking): number {
+  return ranking.status === 'ok' ? (ranking.result.best.symbolRefs ?? []).filter((r) => r.synthesized).length : 0;
+}
+
+const REFUSAL_TEXT: Record<RefusedDeclaration['reason'], string> = {
+  'not-an-identifier': 'not a C identifier (a relocation/label name)',
+  reserved: 'a name a declaration cannot claim (keyword, prelude typedef, or built-in)',
+  'call-target': 'called here — declaring its arity would be a guess, so it stays implicit',
+  'self-name': 'the function being decompiled — its own definition declares it',
+  'emitter-name': 'a name the emitted C uses for its own locals; every spelling of it was dropped',
+};
 
 /** The verdict strip shown above the emitted Source. Null when ranking is off (non-agbcc target
  *  or C++/Pascal backend) — those keep the plain decompile with no badge. */
@@ -29,14 +47,59 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
     );
   }
   const best = ranking.result.best;
+  // The verdict is about the TRANSLATION UNIT, not the source alone: where a declaration was
+  // synthesized, the block below it is part of what compiled to these bytes, and it was fitted to
+  // this very asm. Saying "byte-exact" without saying that is the silent half of a wrong answer.
+  const assumed = synthesizedCount(ranking);
   return best.score.score === 0 ? (
     <div className={`${base} border border-emerald-800 bg-emerald-950/40 text-emerald-300`}>
       ✓ byte-exact match — objdiff score 0 <span className="text-emerald-500/80">({best.label})</span>
+      {assumed > 0 && (
+        <span className="text-emerald-500/80">
+          {' '}
+          · with {assumed} synthesized declaration{assumed > 1 ? 's' : ''}
+        </span>
+      )}
     </div>
   ) : (
     <div className={`${base} border border-amber-900/60 bg-amber-950/30 text-amber-300`}>
       closest candidate — objdiff score {best.score.score} <span className="text-amber-500/80">({best.label})</span>
     </div>
+  );
+}
+
+/** The declaration block the winning candidate was COMPILED WITH, under the verdict strip.
+ *
+ *  Without it the Source view is half of what was scored: agbcc-wasm compiles candidates with no
+ *  project headers, so every global the source names is declared here. Where a declaration is
+ *  SYNTHESIZED its width and signedness came out of the pasted asm itself — the same bytes the
+ *  verdict is about — so it cannot lose score, and hiding it would turn a hypothesis into a
+ *  claim. Shown, it is the assumption the user checks against their own headers. */
+export function RankDeclarations({ ranking }: { ranking: Ranking }) {
+  if (ranking.status !== 'ok') {
+    return null;
+  }
+  const refs = ranking.result.best.symbolRefs ?? [];
+  if (refs.length === 0) {
+    return null;
+  }
+  const assumed = refs.filter((r) => r.synthesized).length;
+  return (
+    <details className="rounded-md border border-slate-700 bg-slate-900/60 px-2.5 py-1 text-[11px]" open>
+      <summary className="cursor-pointer text-slate-400">
+        compiled with {refs.length} declaration{refs.length > 1 ? 's' : ''}
+        {assumed > 0 && (
+          <span className="text-amber-400/90">
+            {' '}
+            — {assumed} synthesized from this asm (no symbol map knows {assumed > 1 ? 'those names' : 'that name'});
+            check {assumed > 1 ? 'them' : 'it'} against your headers
+          </span>
+        )}
+      </summary>
+      <pre className="mt-1 overflow-x-auto whitespace-pre font-mono text-[11px] leading-relaxed text-slate-300">
+        {renderDeclarations(refs).trimEnd()}
+      </pre>
+    </details>
   );
 }
 
@@ -65,7 +128,7 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
     );
   }
 
-  const { candidates, best, dropped, withheld } = ranking.result;
+  const { candidates, best, dropped, withheld, refused } = ranking.result;
   return (
     <div className="mt-1 rounded-lg border border-slate-700 bg-slate-900/70 p-2.5">
       <p className="mb-2 text-xs font-semibold text-slate-200">
@@ -112,6 +175,23 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
             byte-exact score. `}
           {dropped.length > 0 && `${dropped.length} spelling(s) failed to build.`}
         </p>
+      )}
+      {/* A name asmlift REFUSED to declare and one it never saw fail identically ("`x' undeclared"),
+          and only the first is asmlift's own decision — so the refusals are named here rather than
+          left for the user to attribute. The heading says UNDECLARED and nothing about compiling:
+          two of these reasons leave a candidate that builds anyway (an implicit call, a local that
+          shadows the name), and one of them leaves no candidate at all. */}
+      {refused.length > 0 && (
+        <div className="mt-2 text-[10px] leading-relaxed text-amber-400/80">
+          <p>{refused.length} symbol(s) left UNDECLARED on purpose:</p>
+          <ul className="mt-0.5 space-y-0.5 font-mono">
+            {refused.map((r) => (
+              <li key={`${r.name}:${r.reason}`}>
+                {r.name} — {REFUSAL_TEXT[r.reason]}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
         Score 0 = byte-exact. The differ is the fitness function: signedness and branch-sense are genuinely ambiguous

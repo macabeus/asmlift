@@ -29,7 +29,25 @@
 //     field) can only LOSE score — the target bytes derive from the truth decls, so a
 //     divergent compile can never false-match. Exception two is the NAME-ONLY data symbol
 //     (`extern u32 name;` — see the default case): required to reproduce symtab-only map
-//     rows outside project headers, justified by the same only-loses-score argument.
+//     rows outside project headers.
+//
+// WHERE THE ONLY-LOSES-SCORE ARGUMENT STOPS. It rests on the target bytes coming from the
+// project's own TRUTH declarations, so a divergent decl compiles to different bytes and simply
+// scores worse. The line is not map-derived vs. synthesized, it is whether the ref carries
+// `access`: that field is read out of the candidate's own IR — the very asm it is then scored
+// against — so a declaration wearing it is FITTED and can only manufacture agreement. Every
+// `synthesized` ref can wear it, and so can a MAP-KNOWN name whose map entry has no shape
+// (symtab-only projects), which is the one fitted case `synthesized` does not mark. Measured
+// over the 252 real benchmark rows with their vendored maps: fitted-and-marked 2, fitted-but-
+// unmarked 0 — so the marker covers today's population, and a symtab-only project is where it
+// would stop.
+//
+// A fitted declaration is a sound ARTIFACT (decls + source really do compile to those bytes) and
+// an unsound CLAIM if the decls are hidden, so a consumer publishing a verdict must show the
+// block beside the source. Its price, against the benchmark's own vendored maps: of 28 fitted
+// NARROW declarations over the 126 rankable agbcc rows, 26 agree with the project's real
+// declaration and 2 do not (27 of 28 agree on the offset-0 ACCESS WIDTH the declaration
+// produces, which is the weaker question of whether the same load is emitted).
 import { type StructFieldDecl, renderStructDecl } from './backend/cfamily';
 import { T } from './ir/types';
 import type { SymbolRef } from './l3/symbol-refs';
@@ -42,6 +60,7 @@ import {
   pointeeFields,
   symbolFieldType,
 } from './symbols';
+import { C_TYPEDEFS } from './target';
 
 /** The u8/s8/u16/s16/u32/s32 spelling for a 1/2/4-byte cell, or null (no faithful narrow type). */
 function intType(size: number, signed: boolean): string | null {
@@ -223,9 +242,11 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // tree performed only under a decl of that exact width (`extern u16 g;` is `sh` where
         // a guessed u32 is `sw`). Without a bare off-0 access fact, every core spelling goes
         // through `&name` casts, where any object decl is address-identical — u32 is the
-        // fallback cell. A divergent decl can only LOSE score — the target bytes derive from
-        // the truth decls, so a mis-declared compile can never false-match (same argument as
-        // enumIsSigned).
+        // fallback cell.
+        // For a MAP-derived name-only symbol (symtab-only projects) the only-loses-score
+        // argument applies. For a `synthesized` one it does not — the width came from the
+        // target's own asm, so this line is a hypothesis fitted to the bytes; see the module
+        // note's "WHERE THE ONLY-LOSES-SCORE ARGUMENT STOPS".
         const t = access ? intType(access.width, access.signed) : null;
         lines.push(`extern ${quals(info)}${t ?? 'u32'} ${name};`);
         break;
@@ -248,4 +269,20 @@ export function macroDefinesOf(declarations: string | undefined): string {
   }
   const lines = declarations.split('\n').filter((l) => l.startsWith('#define '));
   return lines.length ? lines.join('\n') + '\n' : '';
+}
+
+/** THE self-declared world's compilation context: asmlift's typedef prelude followed by this
+ *  candidate's declaration block. One composition with two callers — the cli's compile seam
+ *  (compile-command.ts, whose probe decides whether the world is self-declared at all) and the
+ *  webapp's wasm scorer, which is ALWAYS in it — because two hand-rolled copies of
+ *  `C_TYPEDEFS + decls` is exactly how the two scoring worlds come to disagree about what a
+ *  candidate was compiled in. */
+export function selfDeclaredContext(declarations: string | undefined): string {
+  return C_TYPEDEFS + (declarations ?? '');
+}
+
+/** The same context straight from a candidate's refs — what a scorer holding `Candidate`s (the
+ *  webapp) needs, and the one place that decides an empty ref list renders no block at all. */
+export function selfDeclaredContextFor(refs: SymbolRef[] | undefined): string {
+  return selfDeclaredContext(refs?.length ? renderDeclarations(refs) : undefined);
 }
