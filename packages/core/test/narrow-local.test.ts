@@ -150,6 +150,55 @@ const MERGE_SUNK_TRUNCATION = `fn f {
 }
 `;
 
+/** THE JOIN SHAPE, and it is the fact the header's rows three and four turn on. `mergeu16`'s own
+ *  ROM: `u16 v; if (c) { v = a + b; } else { v = a - b; } out[0] = v;` compiled by this benchmark's
+ *  agbcc leaves a DIAMOND — the join has two predecessors and neither of them branches to the
+ *  other. `gcc/jump.c:443-445` collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;`
+ *  only while the else arm is ONE insn holding ONE SET (its guard at `:895-902`), and
+ *  `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared assignment into the arithmetic PLUS its
+ *  truncation pair — five insns, not one SET. So a surviving diamond is positive evidence that the
+ *  source DECLARED the local narrow. Same carrier, same single `zext16` reader, same raw in-edges
+ *  as MERGE_NO_TRUNCATION below; only the shape of the join differs. */
+const MERGE_DIAMOND = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb1()
+^bb1():
+  %6: unk32 = add %0, %1
+  br ^bb3(%6)
+^bb2():
+  %7: unk32 = sub %0, %1
+  br ^bb3(%7)
+^bb3(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
+/** THE OTHER HALF OF THE 2x2 and the sharpest control in this file: `s32 v; … out[0] = (u16)v;`,
+ *  which is the benchmark's `mergecastu` row. Identical to MERGE_DIAMOND in every field the gate
+ *  table reads — one `zext16` reader, raw in-edges, no sunk write-back — and it must stay REFUSED,
+ *  because agbcc really did take `jump.c`'s hoist here: the else arm is computed before the compare
+ *  and the join has the CONDITIONAL BRANCH itself as a predecessor. MERGE_NO_TRUNCATION is the
+ *  `sext` cell of the same column and is this shape too. */
+const MERGE_HOISTED_ARM = `fn f {
+^bb0(%0: unk32, %1: unk32, %2: s32*, %3: unk32):
+  %6: unk32 = sub %0, %1
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(%6), ^bb1()
+^bb1():
+  %7: unk32 = add %0, %1
+  br ^bb2(%7)
+^bb2(%8: unk32):
+  %9: unk32 = zext %8 {width=16}
+  store %2, %9 {off=0, width=4}
+  ret
+}
+`;
+
 describe('a block parameter extended at its only read is declared at that width', () => {
   test('a sole `sext {16}` types the carrier `s16` and drops the extension', () => {
     const { n, fn, ir } = run(NARROW_COUNTER);
@@ -191,6 +240,36 @@ describe('a block parameter extended at its only read is declared at that width'
     expect(at('zext', 16)).toEqual({ kind: 'int', width: 16, signed: false });
     expect(at('sext', 8)).toEqual({ kind: 'int', width: 8, signed: true });
     expect(at('zext', 8)).toEqual({ kind: 'int', width: 8, signed: false });
+  });
+});
+
+describe('the join shape is recorded as evidence', () => {
+  // The FIELD only — no gate reads it in this commit, so every verdict below is the one the table
+  // gave before it existed. What it records is a property of the CFG the pass already walks: a
+  // two-armed merge, i.e. exactly two predecessor blocks with neither branching to the other. The
+  // hoisted shape fails it because the join's own predecessor is the conditional branch that also
+  // targets the other arm.
+  const diamonds = (ir: string): boolean[] => narrowLocalCandidates(parse(ir)).map(({ c }) => c.mergeDiamond);
+
+  test('a two-armed merge is a diamond and a hoisted arm is not', () => {
+    // every entry parameter is judged too and none of them is a merge; the carrier is last
+    expect(diamonds(MERGE_DIAMOND)).toEqual([false, false, false, false, true]);
+    expect(diamonds(MERGE_HOISTED_ARM)).toEqual([false, false, false, false, false]);
+    expect(diamonds(MERGE_DIAMOND).at(-1)).toBe(true);
+    expect(diamonds(MERGE_HOISTED_ARM).at(-1)).toBe(false);
+    // the file's existing merge fixtures are BOTH the hoisted shape — `gcc/jump.c` took the hoist
+    expect(diamonds(MERGE_NO_TRUNCATION).at(-1)).toBe(false);
+    expect(diamonds(MERGE_SUNK_TRUNCATION).at(-1)).toBe(false);
+    // and a loop header is not a two-armed merge either: its in-edges are the preheader and a latch
+    // that the header itself branches to
+    expect(diamonds(NARROW_COUNTER)).toEqual([false, false]);
+  });
+
+  test('recording it changes no verdict', () => {
+    expect(reasons(MERGE_DIAMOND).at(-1)).toBe('edge-extends');
+    expect(reasons(MERGE_HOISTED_ARM).at(-1)).toBe('edge-extends');
+    expect(run(MERGE_DIAMOND).n).toBe(0);
+    expect(run(MERGE_HOISTED_ARM).n).toBe(0);
   });
 });
 

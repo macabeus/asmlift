@@ -110,6 +110,15 @@ export interface NarrowLocalCandidate {
   /** the sole reader is a `zext {w}` whose own sole reader is a `sext {w}` — PROMOTE_MODE's
    *  write-back truncation sunk past a join, then the declaration's own sign extension */
   writeBackTruncation: boolean;
+  /** the carrier's block is a TWO-ARMED MERGE: exactly two predecessor blocks, and neither of them
+   *  branches to the other. `gcc/jump.c:443-445` rewrites `if (…) x = a; else x = b;` into
+   *  `x = b; if (…) x = a;` — collapsing the diamond into the hoisted shape, where the join's own
+   *  predecessor is the conditional branch that also targets the surviving arm. Its guard at
+   *  `:895-902` requires the else arm to be ONE insn holding ONE SET, which `gcc/thumb.h:344`
+   *  PROMOTE_MODE forbids for a narrow-DECLARED local (the assignment expands to the arithmetic
+   *  plus its truncation pair). So a surviving diamond is evidence FOR a declaration and a hoisted
+   *  join is evidence against one. */
+  mergeDiamond: boolean;
 }
 
 export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
@@ -200,6 +209,42 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
   },
 ];
 
+/** The blocks that branch to `blk`, deduplicated — hoisted once per `narrowLocalCandidates` call
+ *  rather than recomputed per parameter, which is what keeps this an O(E) walk of the function and
+ *  not an O(E * params) one. */
+function predecessorsOf(fn: Fn): Map<Block, Block[]> {
+  const preds = new Map<Block, Block[]>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const s of op.successors) {
+        const list = preds.get(s.block);
+        if (list === undefined) {
+          preds.set(s.block, [b]);
+        } else if (!list.includes(b)) {
+          list.push(b);
+        }
+      }
+    }
+  }
+  return preds;
+}
+
+/** A two-armed merge: exactly two predecessors, neither of which branches to the other. The second
+ *  clause is what separates `gcc/jump.c`'s hoisted shape — where the conditional branch itself is a
+ *  predecessor of the join AND of the one surviving arm — from the diamond the source's own
+ *  `if`/`else` leaves behind. A loop header fails it for the same reason: the header branches to
+ *  the latch that branches back. */
+function isMergeDiamond(preds: Map<Block, Block[]>, blk: Block): boolean {
+  const p = preds.get(blk);
+  if (p === undefined || p.length !== 2) {
+    return false;
+  }
+  const [x, y] = p;
+  const branchesToBoth = (from: Block, other: Block): boolean =>
+    from.ops.some((op) => op.successors.some((s) => s.block === blk) && op.successors.some((s) => s.block === other));
+  return !branchesToBoth(x, y) && !branchesToBoth(y, x);
+}
+
 /** Every value arriving at `blk`'s parameter `idx`, over every edge in the function. */
 function incomingArgs(fn: Fn, blk: Block, idx: number): (Value | undefined)[] {
   const args: (Value | undefined)[] = [];
@@ -247,7 +292,9 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
       }
     }
   }
+  const preds = predecessorsOf(fn);
   for (const [i, b] of fn.blocks.entries()) {
+    const diamond = isMergeDiamond(preds, b);
     for (const [pi, p] of b.params.entries()) {
       const { ops, forwarded } = readersOf(fn, p);
       const ext = ops[0];
@@ -303,6 +350,7 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
           edgeArgsObservedNarrow: observedNarrow,
           edgeArgsExtend: argExtends,
           writeBackTruncation,
+          mergeDiamond: diamond,
         },
         ext,
       });
