@@ -22,7 +22,7 @@
     "echarts": "^5.5.1",
     "echarts-for-react": "^3.0.2",
     "lz-string": "^1.5.0",
-    "nuqs": "^2.9.0",
+    "nuqs": "^2.10.1",
     "objdiff-wasm": "3.7.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
