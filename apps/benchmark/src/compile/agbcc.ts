@@ -4,6 +4,7 @@
 // dataset/toolchains/agbcc/decomp.yaml.
 import { NOT_CACHEABLE, candCache } from '@asmlift/cli/candcache';
 import { TOOLCHAIN } from '@asmlift/toolchains';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -47,6 +48,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), join(HERE, 'util.ts')];
 const CAND_CPP_FLAGS = ['-nostdinc'];
 const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 1; }\n';
+const CANDIDATE_READS_A_FILE = /^[ \t]*#[ \t]*include/m;
 
 /** Run the candidate pipeline on a fixed probe TU in `dir`, returning the object's sha256 — or
  *  null if it did not compile. Its OWN directory, never the slot a candidate shares: a probe
@@ -69,6 +71,33 @@ function stampProbeIn(dir: string): string | null {
   }
 }
 
+/** The binary a bare command name resolves to on THIS $PATH, hashed by CONTENT. A `--version`
+ *  banner is not an identity: a wrapper script, a rebuilt binutils and a patched cpp can all
+ *  print the same string. MEASURED before this line existed: a shell wrapper in front of
+ *  `arm-none-eabi-cpp` left the namespace at 8e0a7dccb4ead3f1, unmoved. */
+function hashResolvedBinary(h: ReturnType<typeof createHash>, cmd: string): void {
+  h.update('bin:' + cmd);
+  const r = spawnSync('sh', ['-c', `command -v ${JSON.stringify(cmd)}`], { encoding: 'utf8' });
+  const p = (r.stdout ?? '').trim();
+  h.update(p ? createHash('sha256').update(readFileSync(p)).digest('hex') : 'UNRESOLVED');
+}
+
+/** Environment variables gcc/cpp read that CHANGE the compile. `CPATH` and `C_INCLUDE_PATH` are
+ *  honoured even under `-nostdinc` (MEASURED: `CPATH=inc arm-none-eabi-cpp -nostdinc` resolves
+ *  `#include "g0.h"` and its value reaches the object), so they are inputs to every candidate
+ *  compile even though nothing in the command line names them. */
+const COMPILE_ENV = [
+  'CPATH',
+  'C_INCLUDE_PATH',
+  'CPLUS_INCLUDE_PATH',
+  'GCC_EXEC_PREFIX',
+  'COMPILER_PATH',
+  'LIBRARY_PATH',
+  'SOURCE_DATE_EPOCH',
+  'DEPENDENCIES_OUTPUT',
+  'SUNPRO_DEPENDENCIES',
+];
+
 const cache = candCache('bench-agbcc', () => {
   const h = createHash('sha256');
   h.update('bench-agbcc/v1');
@@ -76,8 +105,13 @@ const cache = candCache('bench-agbcc', () => {
   h.update(TOOLCHAIN.agbccFlags.join(' '));
   h.update(TOOLCHAIN.as + ' ' + TOOLCHAIN.asFlags.join(' '));
   h.update(run(TOOLCHAIN.as, ['--version']).stdout ?? '');
+  hashResolvedBinary(h, TOOLCHAIN.as);
   h.update('cpp ' + CAND_CPP_FLAGS.join(' '));
   h.update(run('arm-none-eabi-cpp', ['--version']).stdout ?? '');
+  hashResolvedBinary(h, 'arm-none-eabi-cpp');
+  for (const v of COMPILE_ENV) {
+    h.update(`env:${v}=${process.env[v] ?? ''}`);
+  }
   // (1) the harness's own code, per the note above.
   for (const p of SHAPING_SOURCES) {
     h.update(p);
@@ -107,6 +141,15 @@ export const agbccReal: RealCompile = {
     return { obj: oPath, asm: readFileSync(sPath, 'utf8') };
   },
   compileCandidate(tu, sym): string {
+    // A candidate TU carrying an `#include` reads a file the namespace cannot see: the path is
+    // in the TU, not in any flag, and the stamp probe does not exercise it. MEASURED on this
+    // path: with `CPATH` pointing at a directory, editing the included header between two
+    // cache-on runs served 7143fac350d6311b where the truth is 7430abf1c6ff95bc. Today no
+    // candidate carries one (0 of 65,281 LBG sources), so this refusal costs nothing and stops
+    // the day an emitter change arms it.
+    if (CANDIDATE_READS_A_FILE.test(tu)) {
+      return compileCandidateRaw(tu, sym);
+    }
     if (cache.mode === 'on') {
       const hit = cache.get(tu, sym);
       if (typeof hit === 'string') {

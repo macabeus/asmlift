@@ -238,12 +238,15 @@ export function candCache(label: string, stamp: () => string): CandCache {
       bump('refused');
       say(
         s === NOT_CACHEABLE
-          ? `REFUSED label=${label} reason=object-is-not-a-pure-function-of-its-input (the stamp probe compiled to different bytes in two directories)`
+          ? `REFUSED label=${label} reason=object-is-not-a-pure-function-of-its-input (the stamp probe failed, or compiled to different bytes in two directories)`
           : `REFUSED label=${label} reason=stamp-is-not-a-digest: ${JSON.stringify(s).slice(0, 80)}`,
       );
       return undefined;
     }
     ns = s.slice(0, 16);
+    if (process.env.ASMLIFT_CANDCACHE_TRACE) {
+      say(`ns label=${label} ns=${ns}`);
+    }
     mkdirSync(join(ROOT, 'ns', ns), { recursive: true });
     mkdirSync(OBJECTS, { recursive: true });
     utimesSync(join(ROOT, 'ns', ns), new Date(), new Date());
