@@ -1,41 +1,35 @@
-// The pure half of the fragment transport: strings in, strings out. No `location`, no `history`,
-// no React, and — enforced by the `hash-params-stays-pure` rule in .dependency-cruiser.cjs — no
-// imports at all. That is what lets a pure page lib (benchmark/lib/explorer-url) reuse the
-// `#`-strip without pulling in hash-adapter.ts, whose module top level builds a React provider.
+// The pure half of the fragment transport: strings in, strings out, and — enforced by the
+// `hash-params-stays-pure` rule in .dependency-cruiser.cjs — no imports at all, so every decision
+// it makes runs in vitest's node environment, the only one apps/web has. React glue: hash-adapter.
 //
-// Why the app's URL state lives in the FRAGMENT: a playground permalink carries a whole `.s` file,
-// and a query string is part of the HTTP request line (GitHub Pages answers 414 above ~8 KiB),
-// while a fragment is never sent to the server at all.
+// Why the FRAGMENT: a playground permalink carries a whole `.s` file, and a query string is part
+// of the HTTP request line — GitHub Pages answers `414 URI Too Long` above ~8,180 characters,
+// while 200,000 characters of fragment come back 200, never having been sent.
 
-/** `''` | `'#'` | `'#a=1'` | `'a=1'` -> params. Strips exactly one leading `#` — handing one to
- *  `URLSearchParams` would make an entry keyed `'#'` (and `'#a=1'` has no key `a` at all). */
+/** Strips exactly one leading `#`: handing one to `URLSearchParams` makes an entry keyed `'#'`,
+ *  and `'#a=1'` then has no key `a` at all. */
 export function hashToSearchParams(hash: string): URLSearchParams {
   return new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
 }
 
-/** href + params -> the URL to hand to `pushState`: same origin and path, the params as the
- *  fragment, and NO query string — this app reads none, so anything there is dead weight a share
- *  link would carry forever (a legacy `?s=` permalink kept re-copying its own dead payload).
+/** The URL to hand to `pushState`: `href` with `search` as its fragment and the rest of it — the
+ *  query string included — untouched. This app reads no query param, and ignoring someone else's
+ *  is not the same as deleting it. `href` is an argument so the write path stays testable.
  *
- *  `search.toString()`, not nuqs's `renderQueryString`: that one returns a `?`-prefixed string
- *  (so the fragment would read `#?view=…`) and calls `warnIfURLIsTooLong`, which measures a
- *  FRAGMENT as a query against `URL_MAX_LENGTH = 2e3` — a permanently false dev warning, firing
- *  exactly while testing the long links this transport exists to allow.
- *
- *  Taking the href as an argument is what keeps the write path testable without a DOM. */
+ *  `search.toString()`, not nuqs's `renderQueryString`: that one returns a `?`-prefixed string (so
+ *  the fragment would read `#?view=…`) and calls `warnIfURLIsTooLong`, which measures a FRAGMENT
+ *  against `URL_MAX_LENGTH = 2e3` — a false dev warning firing on exactly the long links this
+ *  transport exists to allow. */
 export function hashUrl(href: string, search: URLSearchParams): string {
   const url = new URL(href);
-  url.search = '';
   url.hash = search.toString();
   return url.toString();
 }
 
-/** Key isolation: a COPY of `search` holding only `keys`, so a hook watching `s` does not
- *  re-render when `tab` moves. nuqs's own `filterSearchParams` is internal (it appears in no
- *  `.d.ts` it ships), so this is a reimplementation of it with `copy` fixed to true.
- *  An empty `keys` means "watch everything": nuqs asks for that, and — as in nuqs — the input is
- *  then returned ALIASED rather than copied, which is safe only because every caller here passes
- *  a freshly parsed object. */
+/** Key isolation: a COPY of `search` holding only `keys`, so a hook watching `s` does not re-render
+ *  when `tab` moves. nuqs's own `filterSearchParams` is internal (it appears in no `.d.ts` it
+ *  ships), so this reimplements it. Empty `keys` means "watch everything" — nuqs asks for that —
+ *  and then returns the input ALIASED, safe only because every caller passes a fresh parse. */
 export function pickKeys(search: URLSearchParams, keys: string[]): URLSearchParams {
   if (keys.length === 0) {
     return search;
@@ -49,14 +43,11 @@ export function pickKeys(search: URLSearchParams, keys: string[]): URLSearchPara
   return filtered;
 }
 
-/** The `useSyncExternalStore` snapshot, extracted from the hook so it can be tested in node.
- *  It compares snapshots with `Object.is` and throws *"The result of getSnapshot should be cached
- *  to avoid an infinite loop"* on a fresh object each call, so this caches on the serialised
- *  WATCHED keys. Two load-bearing properties, both pinned in hash-params.test.ts:
- *    - identity is PRESERVED when only an unwatched key moves (that is key isolation: no render);
- *    - identity CHANGES when a watched key moves (or the URL would update and the UI would not).
- *  The key is derived from the content, so a change of `watchKeys` that yields the same params
- *  correctly keeps the same object. One cache cell per caller — hence a factory. */
+/** The `useSyncExternalStore` snapshot. That hook compares with `Object.is` and throws *"The result
+ *  of getSnapshot should be cached to avoid an infinite loop"* on a fresh object each call, so this
+ *  caches on the serialised WATCHED keys: identity survives a move of an unwatched key (that is the
+ *  isolation — no render), and changes when a watched one moves (or the URL would update and the UI
+ *  would not). One cell per caller, hence a factory. */
 export function createSnapshotCache(): (hash: string, watchKeys: string[]) => URLSearchParams {
   let cached: { key: string; search: URLSearchParams } | null = null;
   return (hash, watchKeys) => {

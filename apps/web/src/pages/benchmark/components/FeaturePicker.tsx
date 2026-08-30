@@ -5,6 +5,7 @@ import { FEATURES, FEATURE_GROUP_LABEL, GROUP_ORDER } from '@asmlift/bench-schem
 import { useMemo } from 'react';
 
 import { MultiSelect, type MultiSelectOption } from '../../../shared/components/MultiSelect';
+import { useCurrentHash } from '../../../shared/utils/hash-adapter';
 import { DECLINE_CLASSES, OTHER_CLASS } from '../lib/declines';
 import { FEATURE_TERM_KEY, featureHref } from '../lib/explorer-url';
 
@@ -24,6 +25,9 @@ export function FeaturePicker({
   counts: Map<string, number>;
   onOpenFeature: (id: string) => void;
 }) {
+  // Each option's `href` is a permalink to this view with the drawer open, so it has to be rebuilt
+  // when the URL moves; `counts` alone changes a render before the write lands.
+  const hash = useCurrentHash();
   const options = useMemo<MultiSelectOption[]>(() => {
     const rank = new Map(GROUP_ORDER.map((g, i) => [g, i]));
     return [...FEATURES]
@@ -36,9 +40,9 @@ export function FeaturePicker({
         description: f.summary,
         count: counts.get(f.id) ?? 0,
         disabled: (counts.get(f.id) ?? 0) === 0,
-        href: featureHref(f.id),
+        href: featureHref(f.id, hash),
       }));
-  }, [counts]);
+  }, [counts, hash]);
 
   return (
     <MultiSelect

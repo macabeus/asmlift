@@ -61,9 +61,10 @@ export type ExplorerPreset = Partial<Filters>;
 export const FEATURE_TERM_PARSER = parseAsString.withDefault('');
 export const FEATURE_TERM_KEY = 'about';
 
-/** Link that opens the definition drawer for `id`. A real `href`, so middle-click and copy-link
- *  work; built from the CURRENT fragment, so opening one never discards the filters already set. */
-export function featureHref(id: string, hash = typeof window === 'undefined' ? '' : window.location.hash): string {
+/** Link that opens the definition drawer for `id` over the view `hash` describes: a real `href`,
+ *  so middle-click and copy-link work, carrying the filters already set. `hash` has to come from
+ *  `useCurrentHash` — read from `location` here it would be the view BEFORE the last change. */
+export function featureHref(id: string, hash: string): string {
   const params = hashToSearchParams(hash);
   params.set(FEATURE_TERM_KEY, id);
   return `#${params.toString()}`;

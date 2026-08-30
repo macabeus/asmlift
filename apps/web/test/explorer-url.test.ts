@@ -48,7 +48,7 @@ test('a feature definition is a link, and opening one PRESERVES the filters alre
 });
 
 test('opening a second definition replaces the first rather than appending', () => {
-  const href = featureHref('magic-div', featureHref('div-const', '#tab=explorer').slice(0));
+  const href = featureHref('magic-div', featureHref('div-const', '#tab=explorer'));
   expect(new URLSearchParams(href.slice(1)).getAll(FEATURE_TERM_KEY)).toEqual(['magic-div']);
 });
 

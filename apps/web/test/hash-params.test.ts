@@ -38,8 +38,8 @@ test('a real lz-string ShareState whose encoding contains + round-trips through 
     name: 'add1',
     asm: 'add1:\n\tadd r0, r0, #1\n\tbx lr\n',
   };
-  // Grow the payload until the lz-string alphabet actually emits a '+' — that character is the
-  // one the query-string transport used to mangle into a space.
+  // Grow the payload until lz-string's alphabet actually emits a '+': the one character a
+  // transport can silently turn into a space (`new URLSearchParams('x=a+b').get('x')` is 'a b').
   let state = base;
   let encoded = encodeShare(state);
   for (let i = 0; !encoded.includes('+') && i < 500; i++) {
@@ -59,14 +59,14 @@ test('an empty param set makes an empty fragment, and hashUrl then writes no #',
   expect(hashUrl('https://x.test/asmlift/#view=benchmark', new URLSearchParams())).toBe('https://x.test/asmlift/');
 });
 
-test('hashUrl replaces the fragment and DROPS the query — this app reads none', () => {
+test('hashUrl replaces the fragment and touches nothing else in the URL', () => {
   const params = new URLSearchParams();
   params.set('view', 'benchmark');
   params.set('s', 'a+b');
-  // The `?s=` is a dead pre-fragment permalink: without the drop it rides along through every
-  // share, reload and tab switch, and is counted by the Share button's 20k length warning.
-  expect(hashUrl('https://x.test/asmlift/?s=DEAD-LEGACY-PAYLOAD#old=1', params)).toBe(
-    'https://x.test/asmlift/#view=benchmark&s=a%2Bb',
+  // The query is someone else's slot — an analytics tag, or a `?s=` this app ignores. Ignoring is
+  // not deleting, and only one of the two is reversible.
+  expect(hashUrl('https://x.test/asmlift/?utm_source=hn#old=1', params)).toBe(
+    'https://x.test/asmlift/?utm_source=hn#view=benchmark&s=a%2Bb',
   );
 });
 
