@@ -26,6 +26,7 @@
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
 // spawns `run --serial --shard i/N`, which writes `<tier>.part<i>.json` for the stitcher).
 import type { FunctionResult } from '@asmlift/bench-schema';
+import { cacheMode, cacheStats } from '@asmlift/cli/candcache';
 import { macroDefinesUsedBy } from '@asmlift/core/macros';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
@@ -143,6 +144,13 @@ switch (command) {
       }
       if (selected === 0) {
         throw emptySelectionError(opts, untouched);
+      }
+      // What the cross-run candidate-object cache did in THIS shard, when it did anything.
+      // Gate E ("run the whole workload in verify mode and count") reads these lines; a shard
+      // that prints `mismatch` has served bytes a fresh compile disagrees with, and the store's
+      // whole namespace is suspect. Absent when the cache is off, which is the default.
+      if (cacheMode() !== 'off') {
+        console.log(`[candcache] ${cacheMode()} ${JSON.stringify(cacheStats())}`);
       }
     } else {
       const jobs = Number(opts.jobs ?? Math.min(8, cpus().length));

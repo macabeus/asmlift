@@ -53,6 +53,43 @@ every tracked-or-untracked file under `packages/` — so re-editing a file the t
 carrying dirty is staleness like any other. That is the state a perf round runs in, and a check that
 stopped at the list of dirty paths would have called such a bundle current.
 
+## The cache state is part of the number
+
+asmlift can serve a candidate object a previous run already compiled, instead of compiling it
+again (`packages/cli/src/candcache.ts`). **It is OFF unless `ASMLIFT_CANDCACHE` says otherwise**,
+and it changes a run's WALL by several times while changing nothing a run computes. So every wall
+quoted from now on has to say which state it was measured in, in the same breath as the command:
+
+| `ASMLIFT_CANDCACHE`  | what the run does                                                  | when to use it                                                              |
+| -------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| unset, `0`, or `off` | compiles every candidate; touches no disk                          | **the default, and what a published wall should be measured with**          |
+| `1` / `on`           | serves any candidate this toolchain already compiled               | the base-run/lever-run pair inside one round, and the gate ladder's repeats |
+| `verify`             | compiles every candidate AND compares it against the store, loudly | after any change to the cache, or when a stored answer is suspect           |
+
+- **COLD or WARM is a property of the STORE, not of the flag.** The first `ASMLIFT_CANDCACHE=1`
+  run after a toolchain change, a flag change, or a change to the harness code that shapes the
+  compiler's input is COLD by construction — the namespace moved and nothing in the store answers
+  to it. Say `cold` or `warm`, not just `on`. The store lives at `ASMLIFT_CANDCACHE_DIR`
+  (default `$TMPDIR/asmlift-candcache`); deleting it makes the next run cold.
+- **Never compare a warm wall against a cold one and call the difference a code change.** This is
+  the same rule as "never compare numbers made with different flag sets", and it is easier to
+  break because nothing on the command line says which state you were in. The run itself does:
+  with the cache on, an `asmlift: [candcache]` line prints next to `[ranked]` with the mode and
+  the hit/miss/stored counts. **Paste it whenever you paste a wall.**
+- **The cache is a throughput lever and never a result lever.** The `[score]` lines, the winner
+  and the stdout are identical in all three states by construction — a cache miss is
+  indistinguishable in RESULT from no cache at all. If a `[score]` line moves between a cold run
+  and a warm one, the cache is wrong; run the `diff` below, then re-run with `ASMLIFT_CANDCACHE=0`
+  and report it.
+- **On a PROJECT's own `decomp.yaml` command, the cache does nothing unless the project asks.**
+  It stays off until `tools.asmlift.cacheInputs` lists the files and directories that command
+  reads (an empty list is a declaration too — "nothing my template does not already name"). The
+  declaration is the contract: a namespace can only measure inputs it can name, and an input
+  reached through a directory is nameable only there. The cache also refuses, out loud, when the
+  compile is not a pure function of its input — `[candcache] REFUSED label=command
+reason=object-is-not-a-pure-function-of-its-input` is what `ido7.1` gets, because it writes the
+  absolute path of its input `.c` into the object.
+
 ## The flags are part of the number
 
 - **`--proto`, whenever a callee's arity matters.** A callee still written in assembly carries no

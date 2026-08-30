@@ -64,8 +64,28 @@ function substitutePlaceholders(cmd: string, id: ToolchainId): string {
 interface BenchDoc {
   name: string;
   platform: string;
-  tools: { asmlift: { target: string; compiler?: string; elf?: string } };
+  tools: { asmlift: { target: string; compiler?: string; elf?: string; cacheInputs?: string[] } };
 }
+
+/** Which toolchains the benchmark OPTS IN to the cross-run candidate-object cache for, by
+ *  declaring `tools.asmlift.cacheInputs` on the decomp.yaml it generates for its own scoring.
+ *  (The cache is still off unless ASMLIFT_CANDCACHE is set; this only decides whether it MAY run.)
+ *
+ *  An EMPTY list is the declaration these two templates deserve: both run a native binary the
+ *  command already names, so the namespace's token scan hashes every input by content and there is
+ *  nothing reached through a directory for it to miss.
+ *
+ *  `gcc2.7.2` is deliberately NOT here even though it is not pooled. Its command is a one-shot
+ *  `docker run`, and the namespace hashes the image TAG, not the image's content: an image
+ *  rebuilt under the same tag would be a new compiler the token scan cannot see. The stamp probe
+ *  is a real backstop for that — the probe object is compiled through the same `docker run` — but
+ *  a backstop only sees what the probe TU exercises, which is the argument this whole seam is
+ *  built on. Declaring it would need the image digest in the namespace first.
+ *
+ *  `ido7.1` is here and will still REFUSE at run time: it writes the absolute path of its input
+ *  .c into the object, so its two-directory stamp probe disagrees with itself. That refusal is
+ *  the measurement doing its job, and it is worth having it announce itself. */
+const CACHE_DECLARED: ReadonlySet<ToolchainId> = new Set(['agbcc', 'ido7.1']);
 
 /** The committed config for one toolchain, with placeholders materialized. */
 function benchDoc(id: ToolchainId, name: string): BenchDoc {
@@ -98,6 +118,9 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
   if (POOLED.has(id)) {
     delete doc.tools.asmlift.compiler;
   }
+  if (CACHE_DECLARED.has(id)) {
+    doc.tools.asmlift.cacheInputs = [];
+  }
   const dir = join(CONFIG_ROOT, id);
   mkdirSync(dir, { recursive: true });
   const file = join(dir, 'decomp.yaml');
@@ -112,7 +135,9 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
     throw new Error(`benchmark decomp.yaml for ${id} did not resolve to ${id}: ${JSON.stringify(res)}`);
   }
   const toolCfg = loaded!.config.tools!.asmlift!;
-  const compile = toolCfg.compiler ? compileFromCommand(toolCfg.compiler, { cwd: dir }) : undefined;
+  const compile = toolCfg.compiler
+    ? compileFromCommand(toolCfg.compiler, { cwd: dir, cacheInputs: toolCfg.cacheInputs })
+    : undefined;
   memo.set(id, compile);
   return compile;
 }
