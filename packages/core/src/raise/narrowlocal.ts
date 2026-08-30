@@ -291,7 +291,8 @@ export interface MergeShape {
  *  by conjunct off that transform's guard at `:471-502` in the agbcc checkout:
  *
  *    :472/:474  `temp3 = prev_active_insn (insn)` … `single_set (temp3)`   the `x = a;` arm, ONE insn
- *    :490/:491  `temp  = prev_active_insn (temp3)` … `condjump_p (temp)`   the head branches straight to it
+ *    :490/:491  `temp  = prev_active_insn (temp3)` … `condjump_p (temp)`   the arm's own
+ *               predecessor insn IS the conditional jump
  *    :478/:480  `temp2 = next_active_insn (insn)` … `single_set (temp2)`   the `x = b;` arm, ONE insn
  *    :482/:483  `! side_effects_p` … `! may_trap_p (SET_SRC (temp4))`      …and speculatable
  *

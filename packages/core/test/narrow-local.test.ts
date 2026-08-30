@@ -336,8 +336,8 @@ const LOOP_HEADER_DIAMOND = `fn f {
 
 /** AN ARM THE FRONTEND INVENTED. `^bb3` is an empty forwarding block cut at a label whose own
  *  predecessor is another join, not the head — there is no `x = b;` insn for `gcc/jump.c:478`'s
- *  `single_set` to match, so the transform's shape never existed in either direction. This is
- *  `sub_80B6198` in the sa3 checkout's carrier, the ONE corpus carrier the arm-size test admitted. */
+ *  `single_set` to match, so the transform's shape never existed in either direction. The shape is
+ *  a real one: `sub_80B6198`'s carrier in the sa3 checkout. */
 const MERGE_FORWARDED_ARM = `fn f {
 ^bb0(%0: unk32, %2: s32*, %3: unk32):
   %4: unk32 = const {value=0}

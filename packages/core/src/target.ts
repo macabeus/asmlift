@@ -26,8 +26,10 @@
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
 //     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
-//     The exceptions are the two rank.ts reads off the target directly, because their consumers
-//     are L3 levers rather than the structurer: `nearBaseSpan` and `foldsConstAddrOffset`.
+//     Three exceptions are read off the target directly, their consumers not being the
+//     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers) and
+//     `hoistsSingleSetArm` (raise/pre-recovery.ts, a raising pass). The field names are a
+//     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
 // deliberately separate bags: a new compiler must set its behaviors EXPLICITLY instead of
