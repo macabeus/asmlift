@@ -66,7 +66,7 @@ const IDENT = /^[A-Za-z_$][A-Za-z0-9_$.]*$/;
 export function Playground({
   active,
 }: {
-  /** whether the Playground view is the one on screen — gates the ?s= permalink writes so a
+  /** whether the Playground view is the one on screen — gates the #s= permalink writes so a
    *  hidden Playground never rewrites the Benchmark view's URL */
   active: boolean;
 }) {
@@ -83,7 +83,7 @@ export function Playground({
   const [debounced, setDebounced] = useState({ asm, targetId, backendId, nameOverride, specText, symbolsText });
   const [tab, setTab] = useState<Tab>('source');
   const [copied, setCopied] = useState<'idle' | 'copied' | 'huge' | 'failed'>('idle');
-  // The last ?s= WE wrote, encoded — tells external changes apart from our own writes echoing back.
+  // The last #s= WE wrote, encoded — tells external changes apart from our own writes echoing back.
   const lastWritten = useRef<string | null>(initial ? encodeShare(initial) : null);
 
   useEffect(() => {
@@ -91,7 +91,7 @@ export function Playground({
     return () => clearTimeout(t);
   }, [asm, targetId, backendId, nameOverride, specText, symbolsText]);
 
-  // An EXTERNAL ?s= change (Back/Forward, the Benchmark's "Open in playground") loads into the
+  // An EXTERNAL #s= change (Back/Forward, the Benchmark's "Open in playground") loads into the
   // editor. Own writes are skipped via lastWritten, so a debounced (250ms-old) echo can never
   // clobber newer keystrokes.
   useEffect(() => {
@@ -124,7 +124,7 @@ export function Playground({
     });
   }, [urlShare]);
 
-  // The permalink IS the state: keep ?s= in sync with the debounced editor state (nuqs rate-limits
+  // The permalink IS the state: keep #s= in sync with the debounced editor state (nuqs rate-limits
   // the writes, Safari-aware). Gated on `active`: a hidden Playground must not rewrite the
   // Benchmark view's URL.
   useEffect(() => {

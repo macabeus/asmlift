@@ -1,5 +1,5 @@
 // Shareable state-in-URL: the whole playground state lz-string-compressed into one URL param
-// (`?s=`, see url-state.ts), so a permalink IS the repro — no server, nothing stored.
+// (`#s=`, see url-state.ts), so a permalink IS the repro — no server, nothing stored.
 import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from 'lz-string';
 
 export interface ShareState {
