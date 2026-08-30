@@ -120,4 +120,3 @@ test('CLI: --score-against with a missing object is exit 66; bad compile templat
   expect(badTemplate.code).toBe(64);
   expect(badTemplate.stderr).toContain('{{inputPath}} and {{outputPath}}');
 });
-

@@ -112,9 +112,7 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
     throw new Error(`benchmark decomp.yaml for ${id} did not resolve to ${id}: ${JSON.stringify(res)}`);
   }
   const toolCfg = loaded!.config.tools!.asmlift!;
-  const compile = toolCfg.compiler
-    ? compileFromCommand(toolCfg.compiler, { cwd: dir })
-    : undefined;
+  const compile = toolCfg.compiler ? compileFromCommand(toolCfg.compiler, { cwd: dir }) : undefined;
   memo.set(id, compile);
   return compile;
 }
