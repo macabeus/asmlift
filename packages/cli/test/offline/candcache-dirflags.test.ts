@@ -306,3 +306,39 @@ describe('a directory the template reaches through a GLOB is measured as well', 
     expect(r.namespaces).toBe(2);
   });
 });
+
+describe('the operand parser, on the template the hole was measured on', () => {
+  // klonoa's own `tools.asmlift.compiler`, verbatim. `-I tools/agbcc/include` was hashed by the
+  // old token scan (it has a `/`); `-iquote include` is a bare word and was the ONE unhashed
+  // directory operand in the whole corpus — every other checkout has no asmlift compile template
+  // at all.
+  const KLONOA = [
+    'ASM_DIR="$(dirname "{{outputPath}}")"',
+    'PRE_FILE="$ASM_DIR/$BASENAME.i"',
+    'arm-none-eabi-cpp \\',
+    '  -nostdinc -I tools/agbcc/include -iquote include \\',
+    '  "{{inputPath}}" -o "$PRE_FILE"',
+    './tools/agbcc/bin/agbcc \\',
+    '  "$PRE_FILE" -o "$ASM_FILE" -mthumb-interwork -O2 -fhex-asm -fprologue-bugfix',
+    'arm-none-eabi-as -mcpu=arm7tdmi -mthumb-interwork "$ASM_FILE" -o "{{outputPath}}"',
+  ].join('\n');
+
+  test('both include directories are operands, the bare word included', async () => {
+    const { templatePathOperands } = await import('../../src/compile-command');
+    expect(templatePathOperands(KLONOA)).toEqual(['tools/agbcc/include', 'include']);
+  });
+
+  test('a flag is read longest-first, so -isystem is never -I with the operand "system"', async () => {
+    const { templatePathOperands } = await import('../../src/compile-command');
+    expect(templatePathOperands('cc -isystem inc -iwithprefixbefore pre -Iattached x.c')).toEqual([
+      'inc',
+      'pre',
+      'attached',
+    ]);
+  });
+
+  test('a flag whose operand is another flag takes none — and neither do the ordinary ones', async () => {
+    const { templatePathOperands } = await import('../../src/compile-command');
+    expect(templatePathOperands('cc -I -Wall -O2 -fhex-asm -mthumb-interwork -o out.o in.c')).toEqual([]);
+  });
+});
