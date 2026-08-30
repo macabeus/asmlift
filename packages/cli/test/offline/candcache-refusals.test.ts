@@ -9,6 +9,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
+// A BLOCKING-spawnSync suite in a pool whose config says there are none: every case here drives
+// several `spawnSync` compiles, and the file's neighbours in `test:offline` run in parallel worker
+// forks. Under the 5000 ms default the whole candcache family goes red on load alone — measured on
+// one machine at one commit, loadavg ~65: 30 of these tests failed with `Test timed out in 5000ms`
+// and two more cascaded into CONTENT assertions, which reads like a soundness failure and is not.
+// `test:offline` is a CI gate on a shared runner, so the timeout is the honest knob.
+vi.setConfig({ testTimeout: 120_000 });
+
 type CandCacheModule = typeof import('../../src/candcache');
 
 const roots: string[] = [];
