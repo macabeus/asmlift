@@ -56,17 +56,17 @@ test('a real lz-string ShareState whose encoding contains + round-trips through 
 });
 
 test('an empty param set makes an empty fragment, and hashUrl then writes no #', () => {
-  expect(hashUrl('https://x.test/asmlift/?keep=1#view=benchmark', new URLSearchParams())).toBe(
-    'https://x.test/asmlift/?keep=1',
-  );
+  expect(hashUrl('https://x.test/asmlift/#view=benchmark', new URLSearchParams())).toBe('https://x.test/asmlift/');
 });
 
-test('hashUrl changes only the fragment', () => {
+test('hashUrl replaces the fragment and DROPS the query — this app reads none', () => {
   const params = new URLSearchParams();
   params.set('view', 'benchmark');
   params.set('s', 'a+b');
-  expect(hashUrl('https://x.test/asmlift/?keep=1#old=1', params)).toBe(
-    'https://x.test/asmlift/?keep=1#view=benchmark&s=a%2Bb',
+  // The `?s=` is a dead pre-fragment permalink: without the drop it rides along through every
+  // share, reload and tab switch, and is counted by the Share button's 20k length warning.
+  expect(hashUrl('https://x.test/asmlift/?s=DEAD-LEGACY-PAYLOAD#old=1', params)).toBe(
+    'https://x.test/asmlift/#view=benchmark&s=a%2Bb',
   );
 });
 

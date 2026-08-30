@@ -13,8 +13,9 @@ export function hashToSearchParams(hash: string): URLSearchParams {
   return new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
 }
 
-/** href + params -> the URL to hand to `pushState`. Only the fragment changes; origin, path and
- *  any query survive.
+/** href + params -> the URL to hand to `pushState`: same origin and path, the params as the
+ *  fragment, and NO query string — this app reads none, so anything there is dead weight a share
+ *  link would carry forever (a legacy `?s=` permalink kept re-copying its own dead payload).
  *
  *  `search.toString()`, not nuqs's `renderQueryString`: that one returns a `?`-prefixed string
  *  (so the fragment would read `#?view=…`) and calls `warnIfURLIsTooLong`, which measures a
@@ -24,6 +25,7 @@ export function hashToSearchParams(hash: string): URLSearchParams {
  *  Taking the href as an argument is what keeps the write path testable without a DOM. */
 export function hashUrl(href: string, search: URLSearchParams): string {
   const url = new URL(href);
+  url.search = '';
   url.hash = search.toString();
   return url.toString();
 }
