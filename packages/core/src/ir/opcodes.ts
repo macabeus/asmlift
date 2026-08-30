@@ -262,7 +262,7 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *
  *  AND THE EXEMPTION IS NOT TRANSFERABLE, which is worth saying beside it: a second consumer once
  *  read this set to answer "would gcc have SPECULATED this arm above a compare", where nothing
- *  re-guards anything, and admitted single-load arms `gcc/jump.c:482`'s `! may_trap_p` refuses —
+ *  re-guards anything, and admitted single-load arms `gcc/jump.c:483`'s `! may_trap_p` refuses —
  *  two byte-matches (`synthetic:mergeldcast:agbcc`, `synthetic:mergepool:agbcc`). That consumer
  *  is `raise/narrowlocal.ts` and it reads `REEVAL_UNSAFE_OPS` instead. Reach for this set only when
  *  the argument above — a C-level re-guard at the new point — actually holds at your call site. */

@@ -74,10 +74,10 @@
 //
 // `gcc/jump.c:443-445` is the transform: "Simplify `if (...) x = a; else x = b;` by converting it
 // to `x = b; if (...) x = a;` if B is sufficiently simple". ITS GUARD IS THE CONJUNCTION AT
-// `:470-501`, not the `:895-907` block that reads similarly and is the conditional-move /
-// store-flag transform beside it. `:471`/`:478` want each arm to be a `single_set` with the
-// condjump immediately before the first, and `:482` wants the moving arm free of side effects and
-// non-trapping — and `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-DECLARED assignment into the
+// `:471-502`, not the `:895-907` block that reads similarly and is the conditional-move /
+// store-flag transform beside it. `:474`/`:480` want each arm to be a `single_set` with the
+// condjump immediately before the first (`:490-491`), and `:482-483` want the moving arm free of
+// side effects and non-trapping — and `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-DECLARED assignment into the
 // arithmetic PLUS its `ashift`/`lshiftrt` truncation pair, five insns in the `.jump` dump, so the
 // hoist is refused for exactly the spelling that declares the local. A join gcc could have hoisted
 // and did not is therefore positive evidence FOR a declaration. `mergeDiamond` reads it off the CFG
@@ -88,7 +88,7 @@
 // an arm holding a load, a call or a store, survives whatever the local's width and carries no
 // information at all; narrowing there would be a spelling guess wearing the evidence's clothes.
 // THREE SHAPES COST A REAL MATCH THAT WAY AND TWO ARE NOW ROWS: `mergeldcast` (both arms one
-// load — one SET by op count, never speculatable, `gcc/jump.c:482`) and `mergepool` (an arm whose
+// load — one SET by op count, never speculatable, `gcc/jump.c:483`) and `mergepool` (an arm whose
 // immediate needs a literal-pool load, so one C assignment is two insns), each MATCH at base and
 // 6 / 1 under an arm test that read only the op count. The third is the empty forwarding arm a
 // frontend label-cut invents, which has no insn to be a `single_set` at all and no row because the
@@ -175,7 +175,7 @@ import { type Gate, firstRejection } from '../l3/gates';
  *  first MIPS or PPC row it does reach has to be measured before it counts. */
 export interface NarrowLocalOptions {
   /** the compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both arms
-   *  are one speculatable SET (`gcc/jump.c:470-501`). Absent ⇒ false. */
+   *  are one speculatable SET (`gcc/jump.c:471-502`). Absent ⇒ false. */
   hoistsSingleSetArm?: boolean;
 }
 
@@ -207,12 +207,12 @@ export interface NarrowLocalCandidate {
    *  `gcc/jump.c:443-445` rewrites `if (…) x = a; else x = b;` into
    *  `x = b; if (…) x = a;` — collapsing the diamond into the hoisted shape, where the join's own
    *  predecessor is the conditional branch that also targets the surviving arm. Its guard at
-   *  `:470-501` requires each arm to be ONE insn holding ONE SET, which `gcc/thumb.h:344`
+   *  `:471-502` requires each arm to be ONE insn holding ONE SET, which `gcc/thumb.h:344`
    *  PROMOTE_MODE forbids for a narrow-DECLARED local (the assignment expands to the arithmetic
    *  plus its truncation pair). So a surviving diamond is evidence FOR a declaration and a hoisted
    *  join is evidence against one. */
   mergeDiamond: boolean;
-  /** …and the arms of that merge are ones `gcc/jump.c:470-501` could have collapsed: EXACTLY one
+  /** …and the arms of that merge are ones `gcc/jump.c:471-502` could have collapsed: EXACTLY one
    *  value-producing op each — constants included — and nothing unsafe to SPECULATE above the
    *  compare. The guard is about the ARM, so a diamond over arms gcc could not have collapsed
    *  survives whatever the local's width and carries no information at all. See `armIsOneSet` for
@@ -361,7 +361,7 @@ function predecessorsOf(fn: Fn): Map<Block, Block[]> {
 /** What the join shape says about the source, as ONE record — the two fields are read off the same
  *  walk because the second is a property of the arms the first identifies. */
 export interface MergeShape {
-  /** the block is a TWO-ARMED DIAMOND: `gcc/jump.c:470-501`'s input shape. */
+  /** the block is a TWO-ARMED DIAMOND: `gcc/jump.c:471-502`'s input shape. */
   diamond: boolean;
   /** …and both arms are ones that guard could have collapsed. False whenever `diamond` is. */
   hoistable: boolean;
@@ -369,12 +369,12 @@ export interface MergeShape {
 
 /** THE ARMS OF A TWO-ARMED DIAMOND, or `null`. Read against the transform this file's header cites,
  *  `gcc/jump.c:443-445` "Simplify `if (...) x = a; else x = b;` … to `x = b; if (...) x = a;`",
- *  whose guard is the conjunction at `:470-501` of the agbcc checkout:
+ *  whose guard is the conjunction at `:471-502` of the agbcc checkout:
  *
- *    :471  `temp3 = prev_active_insn (insn)`      the `x = a;` arm — ONE insn, since
- *    :489  `temp  = prev_active_insn (temp3)` … `condjump_p (temp)`   the head branches straight to it
- *    :478  `temp2 = next_active_insn (insn)`  … `single_set`          the `x = b;` arm — ONE insn
- *    :482  `! may_trap_p (SET_SRC (temp4))`                            …and speculatable
+ *    :472/:474  `temp3 = prev_active_insn (insn)` … `single_set (temp3)`   the `x = a;` arm, ONE insn
+ *    :490/:491  `temp  = prev_active_insn (temp3)` … `condjump_p (temp)`   the head branches straight to it
+ *    :478/:480  `temp2 = next_active_insn (insn)` … `single_set (temp2)`   the `x = b;` arm, ONE insn
+ *    :482/:483  `! side_effects_p` … `! may_trap_p (SET_SRC (temp4))`      …and speculatable
  *
  *  So the shape is: a join with exactly two arms, each arm ending in a plain `br` to the join, each
  *  arm's SOLE predecessor the same head, and that head ending in a `cond_br` whose two successors
@@ -386,7 +386,7 @@ export interface MergeShape {
  *      considers a back edge, so nothing about a narrow declaration follows from one surviving.
  *      The preheader's sole predecessor is not the latch's, so the head test refuses it.
  *    • a FRONTEND-INVENTED join: an empty forwarding block cut at a label is an "arm" with no insn
- *      at all, and `:472`'s `single_set` on a nonexistent insn never matched. Its own predecessor
+ *      at all, and `:480`'s `single_set` on a nonexistent insn never matched. Its own predecessor
  *      is another join rather than the head, so the head test refuses it.
  *    • the ENTRY block, whose implicit entry edge `predecessorsOf` cannot see (the trap
  *      `raise/divpow2.ts:92-98` documents for the same recognizer).
@@ -423,8 +423,8 @@ function mergeArms(preds: Map<Block, Block[]>, fn: Fn, blk: Block): [Block, Bloc
   return [x, y];
 }
 
-/** ONE INSN HOLDING ONE SET, approximated over the lifted IR — `gcc/jump.c:472`/`:478`'s
- *  `single_set`, and `:482`'s `! may_trap_p` / `! side_effects_p` beside it.
+/** ONE INSN HOLDING ONE SET, approximated over the lifted IR — `gcc/jump.c:474`/`:480`'s
+ *  `single_set`, and `:482`/`:483`'s `! side_effects_p` / `! may_trap_p` beside it.
  *
  *  TWO THINGS THE OP COUNT ALONE GETS WRONG, and both cost a real byte-match (the benchmark rows
  *  `mergeldcast` and `mergepool` are exactly these):

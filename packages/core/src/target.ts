@@ -145,7 +145,7 @@ export interface TargetDescription {
     switchAllowsNeqCase?: boolean;
     // The compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both
     // arms are ONE speculatable SET — gcc 2.x's `jump_optimize` (`gcc/jump.c:443-445`, guard at
-    // `:470-501`). The ONE reader is raise/narrowlocal.ts's `edge-extends`, which uses it
+    // `:471-502`). The ONE reader is raise/narrowlocal.ts's `edge-extends`, which uses it
     // BACKWARDS: a diamond this compiler would have collapsed and did not is evidence the source
     // DECLARED the local narrow, because `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared
     // assignment past one SET. Absent ⇒ false, and the clause never admits — the only reader

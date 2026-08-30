@@ -239,7 +239,7 @@ const MERGE_DIAMOND_BIG_ARM = `fn f {
 `;
 
 /** THE BENCHMARK'S `mergeldcast` ROW: the same diamond with both arms a single LOAD. One SET each
- *  by op count, so an arm-SIZE test admits it — and `gcc/jump.c:482`'s `! may_trap_p` refuses to
+ *  by op count, so an arm-SIZE test admits it — and `gcc/jump.c:483`'s `! may_trap_p` refuses to
  *  speculate a MEM above the compare (`gcc/rtlanal.c:1770` MEM -> `rtx_addr_can_trap_p`, `:144` a
  *  plain pseudo address CAN trap), so agbcc leaves the diamond for the CAST spelling too and it
  *  says nothing. Narrowed, `s32 v; … *out = (u16)v` is spelled `u16 v` and the row scores 6. */
@@ -538,7 +538,7 @@ describe('the join shape is recorded as evidence', () => {
   });
 
   test('an arm gcc could not SPECULATE is not one SET, however few ops it holds', () => {
-    // `gcc/jump.c:482` `! may_trap_p (SET_SRC (temp4))`, and `gcc/rtlanal.c:1770-1771` sends a MEM
+    // `gcc/jump.c:483` `! may_trap_p (SET_SRC (temp4))`, and `gcc/rtlanal.c:1770-1771` sends a MEM
     // to `rtx_addr_can_trap_p` where `:144-147` says a plain pseudo address CAN trap. So a load is
     // one op and never one hoistable SET — the diamond survives under BOTH spellings and carries
     // nothing. Counting ops alone spells `u16 v` for a source that wrote the cast: the benchmark's

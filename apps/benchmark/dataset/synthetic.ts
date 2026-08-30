@@ -2881,7 +2881,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     // THE DIAMOND `gcc/jump.c` COULD NOT HAVE HOISTED, and the reason the arm clause in
     // raise/narrowlocal.ts is about the ARM'S OPS and not only the arm's SIZE. Both arms are a
-    // single load — one SET each, so an arm-SIZE test admits them — but `gcc/jump.c:482`'s
+    // single load — one SET each, so an arm-SIZE test admits them — but `gcc/jump.c:483`'s
     // `! may_trap_p (SET_SRC (temp4))` refuses to speculate a MEM above the compare
     // (`gcc/rtlanal.c:1770` MEM -> `rtx_addr_can_trap_p`, `:144` a plain pseudo address CAN trap),
     // so the diamond survives for BOTH spellings and carries no information at all. Narrowing here
