@@ -22,9 +22,12 @@
 // which is a capability this round did not build.
 //
 // `ASMLIFT_CANDCACHE=0` still bypasses everything, which is the documented escape hatch.
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
+import { closeSync, openSync, readSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { MISMATCH_LOG } from '../../src/candcache';
+import { mismatchLogFor } from '../../src/candcache';
 
 export default function setup(): () => void {
   const asked = process.env.ASMLIFT_CANDCACHE ?? '';
@@ -37,19 +40,32 @@ export default function setup(): () => void {
     }
     process.env.ASMLIFT_CANDCACHE = 'verify';
   }
-  rmSync(MISMATCH_LOG, { force: true });
+  // Read the log by OFFSET; never delete it. The default store is ONE per-user directory shared by
+  // every asmlift process on the box, and this repo's way of working is several worktrees at once:
+  // deleting the log here erased the record a verify bench run in another worktree was writing,
+  // and inherited its lines the other way round. The tail this run appended is the only part that
+  // is this run's answer.
+  const log = mismatchLogFor(process.env.ASMLIFT_CANDCACHE_DIR ?? join(tmpdir(), 'asmlift-candcache'));
+  const startedAt = existsSync(log) ? statSync(log).size : 0;
 
   return function teardown(): void {
-    if (!existsSync(MISMATCH_LOG)) {
+    if (!existsSync(log) || statSync(log).size <= startedAt) {
       return;
     }
-    const lines = readFileSync(MISMATCH_LOG, 'utf8').trim();
-    rmSync(MISMATCH_LOG, { force: true });
+    const fd = openSync(log, 'r');
+    const buf = Buffer.alloc(statSync(log).size - startedAt);
+    try {
+      readSync(fd, buf, 0, buf.length, startedAt);
+    } finally {
+      closeSync(fd);
+    }
+    const lines = buf.toString('utf8').trim();
     if (lines !== '') {
       throw new Error(
         `the candidate-object cache served bytes a fresh compile disagrees with — every stored ` +
           `object under that namespace is suspect:\n${lines}\n` +
-          `Drop the store (ASMLIFT_CANDCACHE_DIR, default $TMPDIR/asmlift-candcache) and find the ` +
+          `The store is shared: these lines may have been written by another process against ` +
+          `${log}. Drop it (ASMLIFT_CANDCACHE_DIR, default $TMPDIR/asmlift-candcache) and find the ` +
           `input the namespace is not measuring.`,
       );
     }

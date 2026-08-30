@@ -101,7 +101,10 @@ const bump = (k: string, n = 1): void => {
   STATS[k] = (STATS[k] ?? 0) + n;
 };
 /** Counters for the run's `[candcache]` line: hit / failHit / miss / stored / failStored /
- *  verified / verifiedFail / mismatch / refused / pruned*. Empty object when nothing happened. */
+ *  verified / verifiedFail / mismatch / refused / refusedKeys / pruned*. `verified` and
+ *  `verifiedFail` count audits that AGREED (a stored object, a stored rejection); a disagreement
+ *  in either direction is `mismatch` and nothing else, so the three never have to be read against
+ *  each other to learn whether the store was right. Empty object when nothing happened. */
 export const cacheStats = (): Record<string, number> => ({ ...STATS });
 /** How many stored answers a fresh compile disagreed with, in either direction. A run that ends
  *  with this nonzero has served (or would have served) bytes the toolchain no longer produces:
@@ -114,7 +117,8 @@ const OBJECTS = join(ROOT, 'objects');
  *  read it. The stderr line is for a human watching a run; this file is what
  *  `pnpm test:matching`'s teardown fails on, and the counters live only in the process that
  *  compiled (vitest runs its tests in a forked worker, its globalSetup in the parent). */
-export const MISMATCH_LOG = join(ROOT, 'MISMATCHES.log');
+export const mismatchLogFor = (root: string): string => join(root, 'MISMATCHES.log');
+export const MISMATCH_LOG = mismatchLogFor(ROOT);
 
 // ---------------------------------------------------------------------------------------------
 // The CAP. It bounds what the store COSTS, which is not what `objects/` weighs: 77% of a warm
@@ -153,6 +157,13 @@ const sha = (b: Buffer | string): string => createHash('sha256').update(b).diges
 // `#/*c*/include`, a form feed before the `#`, and `#import` are all real includes that a
 // `/^[ \t]*#[ \t]*include/m` never sees. Six such spellings were demonstrated. Normalise the way
 // the preprocessor does, then look.
+//
+// A comment becomes ONE SPACE, NEWLINES INCLUDED — phase 3's actual rule, and it decides the
+// multi-line case in both directions. `#/*<newline>*/include "k.h"` is a REAL include: the comment
+// joins the two physical lines into one directive, and `arm-none-eabi-cpp` resolves the header and
+// substitutes its macros (`int f(int x){return x*3;}`). A `#include` written inside a comment that
+// spans lines is not, and disappears with it. Replacing a comment with blanks-and-newlines instead
+// gets the first case backwards, and it is the one a `/^#include/` cannot see either.
 const PATH_OR_CLOCK_MACRO = /\b(__FILE__|__BASE_FILE__|__DATE__|__TIME__|__TIMESTAMP__|__INCLUDE_LEVEL__)\b/;
 
 /** The reason this TU may not be cached under a pipeline namespace, or undefined. */
@@ -161,8 +172,8 @@ export function candidateCacheRefusal(tu: string): string | undefined {
   let t = tu.replaceAll('??=', '#');
   // phase 2: splice line continuations
   t = t.replace(/\\[ \t]*\r?\n/g, '');
-  // phase 3: comments become one space each, KEEPING newlines so line starts survive
-  t = t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '));
+  // phase 3: each comment becomes one space, so a comment spanning a newline joins the lines
+  t = t.replace(/\/\*[\s\S]*?\*\//g, ' ');
   if (/(^|[\r\n])[ \t\f\v]*#[ \t\f\v]*(include|include_next|import)\b/.test(t)) {
     return 'the-TU-reads-a-file';
   }
@@ -175,6 +186,42 @@ export function candidateCacheRefusal(tu: string): string | undefined {
   }
   return undefined;
 }
+
+const saidKeyRefusals = new Set<string>();
+/** Say a per-key refusal ONCE per reason and COUNT every one. The reason is a fact about the
+ *  emitter, not about this candidate, so 65,280 lines would say nothing the first says; but a
+ *  refusal nobody counts is Hole 2's whole protection reporting nothing — a run where an emitter
+ *  change arms `#include` prints one line in one shard's log and no number anywhere. */
+export function noteKeyRefused(label: string, reason: string): void {
+  bump('refusedKeys');
+  const seen = `${label} ${reason}`;
+  if (saidKeyRefusals.has(seen)) {
+    return;
+  }
+  saidKeyRefusals.add(seen);
+  say(`REFUSED-KEY label=${label} reason=${reason}`);
+}
+
+/** The compile ENVIRONMENT gcc/cpp read whether or not a command line names it. `CPATH` and
+ *  `C_INCLUDE_PATH` are honoured even under `-nostdinc` (MEASURED: `CPATH=inc arm-none-eabi-cpp
+ *  -nostdinc` resolves `#include "g0.h"` and its value reaches the object), so every one of these
+ *  is an input to every candidate compile. ONE list: both pipelines compile with the same
+ *  compilers, and two copies of the answer is how the tenth variable gets added to one of them. */
+export const COMPILE_ENV = [
+  'CPATH',
+  'C_INCLUDE_PATH',
+  'CPLUS_INCLUDE_PATH',
+  'GCC_EXEC_PREFIX',
+  'COMPILER_PATH',
+  'LIBRARY_PATH',
+  'SOURCE_DATE_EPOCH',
+  'DEPENDENCIES_OUTPUT',
+  'SUNPRO_DEPENDENCIES',
+];
+
+/** The fixed TU every pipeline's stamp probe compiles — twice, in two different directories, so
+ *  the compiler itself answers whether its object is a pure function of its input. */
+export const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 1; }\n';
 
 // ---------------------------------------------------------------------------------------------
 // WHAT A NAMESPACE MUST FOLLOW — the delegate chain.
@@ -189,10 +236,25 @@ export function candidateCacheRefusal(tu: string): string | undefined {
 // cannot be followed the cache REFUSES rather than hashing a stand-in:
 //   • a script is hashed AND followed — its interpreter, and every token naming a file or
 //     resolving on $PATH;
-//   • a script that COMPUTES its delegate (`$(...)`, backticks, `eval`) is a refusal;
+//   • a script that names its delegate through a VARIABLE (`exec "$MYCPP" "$@"` — the ccache /
+//     distcc / toolchain-wrapper shape, and the commonest one there is) has that variable's VALUE
+//     measured into the chain and followed if it names a file. A syntax list would have to call
+//     `"$MYCPP"` un-followable while calling `$(cat x)` un-followable for the same reason; the
+//     value is the answer to the actual question, and it is one holding two different compilers
+//     apart under a byte-identical wrapper;
+//   • a script that COMPUTES its delegate (`$(...)`, backticks, `eval`) is a refusal — there is no
+//     value to read without running it;
 //   • a gcc-style driver is asked where its sub-program is (`-print-prog-name=cc1`);
 //   • too deep, or too wide, is a refusal.
 const SCRIPT_COMPUTES_ITS_DELEGATE = /\$\(|`|(^|[\s;&|])eval[\s]/;
+/** `$NAME` / `${NAME}`. Positional and special parameters (`$@`, `$1`, `$?`) do not match: they
+ *  carry the caller's arguments, never the program's identity. */
+const SHELL_VAR = /\$\{?([A-Za-z_]\w*)\}?/g;
+/** An entry of a chain that is a MEASUREMENT rather than a file to read: `UNRESOLVED:<cmd>` (the
+ *  command is on no `$PATH` here) and `ENV:<name>=<value>` (a script chooses its delegate through
+ *  that variable). Callers hash the string itself. */
+export const isChainMeasurement = (entry: string): boolean =>
+  entry.startsWith('UNRESOLVED:') || entry.startsWith('ENV:');
 const GCC_DRIVER = /(^|[-/])(cpp|gcc|cc|g\+\+)(-[\d.]+)?$/;
 const CHAIN_MAX_DEPTH = 8;
 const CHAIN_MAX_FILES = 64;
@@ -277,6 +339,28 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
         `cannot be hashed — the cache refuses rather than hash a stand-in`,
     );
   }
+  // A variable the script does not itself assign is an EXTERNAL input choosing what runs. Its
+  // value joins the chain as a measurement, and if it names a file that file is followed —
+  // `exec "$MYCPP" "$@"` under a byte-constant wrapper otherwise reads as one namespace for two
+  // different compilers.
+  const assigned = new Set<string>();
+  for (const m of text.matchAll(/^\s*(?:export\s+)?([A-Za-z_]\w*)=/gm)) {
+    assigned.add(m[1]);
+  }
+  for (const m of text.matchAll(SHELL_VAR)) {
+    const name = m[1];
+    if (assigned.has(name)) {
+      continue;
+    }
+    const val = process.env[name] ?? '';
+    out.add(`ENV:${name}=${val}`);
+    if (out.size > CHAIN_MAX_FILES) {
+      throw new Error(`namespace delegate chain wider than ${CHAIN_MAX_FILES} entries at ${real}`);
+    }
+    if (val && isAbsolute(val) && existsSync(val) && statSync(val).isFile()) {
+      expandExecutable(val, out, depth + 1);
+    }
+  }
   const first = text.split('\n', 1)[0] ?? '';
   const tokens = text.split(/[\s"'<>|;&()=]+/);
   if (first.startsWith('#!')) {
@@ -305,10 +389,11 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
  * Every FILE that actually runs when `cmd` is invoked — the resolved program, whatever it
  * delegates to, and so on. `cmd` may be a path or a bare name resolved on `$PATH`.
  *
- * Returns a single `UNRESOLVED:<cmd>` marker when the command is not on this `$PATH` at all
- * (that IS the measurement), and THROWS when the chain cannot be followed. A throw reaches
- * `candCache` as a loud refusal, which is the only sound answer: a namespace that guesses at a
- * delegate it cannot read is a namespace that serves stale objects.
+ * Entries satisfying `isChainMeasurement` are not paths: `UNRESOLVED:<cmd>` when the command is on
+ * no `$PATH` here, `ENV:<name>=<value>` for a variable a script in the chain reads. Both ARE the
+ * measurement, and a caller hashes the string. THROWS when the chain cannot be followed — a throw
+ * reaches `candCache` as a loud refusal, which is the only sound answer: a namespace that guesses
+ * at a delegate it cannot read is a namespace that serves stale objects.
  */
 export function toolchainFileChain(cmd: string): string[] {
   const out = new Set<string>();
@@ -558,9 +643,17 @@ function keysOf(nsDir: string): { path: string; at: number }[] {
 // lease, and NEVER while candidates are in flight. The unit is a NAMESPACE — one namespace is
 // exactly one toolchain configuration, and a namespace nobody holds is dead weight in full. When
 // the only namespace left is the one this process is about to use, the cap falls back to evicting
-// that namespace's OLDEST KEYS, which is the only way it can ever fire on a single-toolchain
-// machine — and only when no other process holds a lease on it and nobody has resolved it within
-// the grace window.
+// that namespace's OLDEST-WRITTEN KEYS, which is the only way it can ever fire on a
+// single-toolchain machine: the steady state of this repo is ONE agbcc namespace used by every
+// run, growing by ~640 keys a run forever.
+//
+// LEASES are the liveness test there, and the ONLY one. A wall-clock "the namespace has not been
+// resolved for an hour" test cannot work on the namespace this process is about to use, because
+// resolving it is what just touched it — asked that way the branch is dead by construction (it
+// evicted 0 of 300 keys against a 0.5 MB cap while printing that everything left was younger than
+// the window), and a cap that provably cannot fire is the silent half of a loud-failure rule. What
+// makes eviction safe is not age: it is that no OTHER process holds this namespace, that `get` is
+// miss-on-race, and that `reapUnlinked` leaves objects younger than its own grace window alone.
 let pruned = false;
 function pruneOnce(keepNs: string): void {
   if (pruned) {
@@ -574,43 +667,72 @@ function pruneOnce(keepNs: string): void {
     }
     const nsRoot = join(ROOT, 'ns');
     const cutoff = Date.now() - PRUNE_GRACE_MS;
+    let heldBack = 0;
+    let tooYoung = 0;
     const namespaces = readdirSync(nsRoot, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name !== keepNs)
       .map((d) => ({ name: d.name, at: statSync(join(nsRoot, d.name)).mtimeMs }))
-      .filter((d) => d.at < cutoff && !namespaceIsLive(join(nsRoot, d.name)))
+      .filter((d) => {
+        // A namespace resolved within the window may belong to a shard that has not claimed its
+        // lease yet — the only gap the lease cannot cover.
+        if (d.at >= cutoff) {
+          tooYoung += 1;
+          return false;
+        }
+        if (namespaceIsLive(join(nsRoot, d.name))) {
+          heldBack += 1;
+          return false;
+        }
+        return true;
+      })
       .sort((a, b) => a.at - b.at);
     for (const ns of namespaces) {
       if (cost <= CAP_BYTES * 0.8) {
         break;
+      }
+      // Re-asked immediately before the delete, not only in the filter above: the filter runs over
+      // every namespace at once and each delete below re-walks the whole store, so a namespace
+      // claimed in between would otherwise be removed under a live reader.
+      if (namespaceIsLive(join(nsRoot, ns.name))) {
+        heldBack += 1;
+        continue;
       }
       rmSync(join(nsRoot, ns.name), { recursive: true, force: true });
       bump('prunedNamespaces');
       cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
     }
     const keepDir = join(nsRoot, keepNs);
-    if (
-      cost > CAP_BYTES * 0.8 &&
-      existsSync(keepDir) &&
-      !namespaceIsLive(keepDir, true) &&
-      statSync(keepDir).mtimeMs < cutoff
-    ) {
-      const keys = keysOf(keepDir);
-      let i = 0;
-      while (cost > CAP_BYTES * 0.8 && i < keys.length) {
-        rmSync(keys[i].path, { force: true });
-        bump('prunedKeys');
-        i += 1;
-        if (i % 512 === 0) {
-          cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
+    let keepHeld = false;
+    if (cost > CAP_BYTES * 0.8 && existsSync(keepDir)) {
+      if (namespaceIsLive(keepDir, true)) {
+        keepHeld = true;
+      } else {
+        const keys = keysOf(keepDir);
+        let i = 0;
+        while (cost > CAP_BYTES * 0.8 && i < keys.length) {
+          rmSync(keys[i].path, { force: true });
+          bump('prunedKeys');
+          i += 1;
+          if (i % 512 === 0) {
+            cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
+          }
         }
+        cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
       }
-      cost = reapUnlinked() + storeCost().entries * BLOCK_BYTES;
     }
     if (cost > CAP_BYTES) {
+      // Say which of the two reasons actually applied. The message used to assert BOTH about a
+      // store where neither was true, which is a report nobody can act on.
+      const why = [
+        keepHeld ? 'another process holds the namespace this run is using' : '',
+        heldBack > 0 ? `${heldBack} other namespace(s) held by a live process` : '',
+        tooYoung > 0
+          ? `${tooYoung} other namespace(s) resolved within the ${PRUNE_GRACE_MS / 60000}-minute grace window`
+          : '',
+      ].filter(Boolean);
       say(
-        `store costs ${(cost / 1048576).toFixed(0)} MB over a ${CAP_MB} MB cap, and everything left is either ` +
-          `held by a live process or younger than the ${PRUNE_GRACE_MS / 60000}-minute grace window — not pruning it. ` +
-          `Drop it by hand with: rm -rf ${ROOT}`,
+        `store costs ${(cost / 1048576).toFixed(0)} MB over a ${CAP_MB} MB cap and it could not be pruned below it` +
+          `${why.length > 0 ? ' — ' + why.join(', ') : ''}. Drop it by hand with: rm -rf ${ROOT}`,
       );
     }
   } catch {
@@ -645,7 +767,10 @@ export interface CandCache {
   verifyFail(key: string, symbol: string, message: string): void;
 }
 
-const OFF: CandCache = {
+/** The inert cache: every call site tests `mode` first, so this is what a REFUSAL and an opt-out
+ *  both collapse to. Exported because a second hand-written copy of it is a second place for the
+ *  interface to drift. */
+export const OFF: CandCache = {
   mode: 'off',
   warm() {},
   get: () => undefined,
@@ -722,6 +847,29 @@ export function candCache(label: string, stamp: () => string): CandCache {
     }
   };
 
+  /** What the store would SERVE for this key: an object first — and only a non-empty regular file
+   *  counts — a stored rejection second, otherwise nothing. `get` and both halves of `verify` ask
+   *  through this one reader, so verify mode audits the answer a serve would actually get rather
+   *  than the store's raw contents; asked separately, the precedence between an `.o` and a `.fail`
+   *  for one key is outside the audit's reach by construction. */
+  const lookup = (n: string, key: string, symbol: string): { obj: string } | { fail: string } | undefined => {
+    try {
+      const o = pathFor(n, key, symbol, 'o');
+      const st = statSync(o, { throwIfNoEntry: false });
+      if (st !== undefined && st.isFile() && st.size > 0) {
+        return { obj: o };
+      }
+    } catch {
+      /* a store being rewritten under us is a MISS: recompiling is always correct */
+    }
+    try {
+      return { fail: readFileSync(pathFor(n, key, symbol, 'fail'), 'utf8') };
+    } catch {
+      /* no negative entry, or it vanished — either way, a miss */
+    }
+    return undefined;
+  };
+
   return {
     get mode(): CandCacheMode {
       return refused ? 'off' : MODE;
@@ -734,25 +882,17 @@ export function candCache(label: string, stamp: () => string): CandCache {
       if (n === undefined) {
         return undefined;
       }
-      try {
-        const o = pathFor(n, key, symbol, 'o');
-        const st = statSync(o, { throwIfNoEntry: false });
-        if (st !== undefined && st.isFile() && st.size > 0) {
-          bump('hit');
-          return o;
-        }
-      } catch {
-        /* a store being rewritten under us is a MISS: recompiling is always correct */
+      const found = lookup(n, key, symbol);
+      if (found === undefined) {
+        bump('miss');
+        return undefined;
       }
-      try {
-        const text = readFileSync(pathFor(n, key, symbol, 'fail'), 'utf8');
-        bump('failHit');
-        return new Error(text);
-      } catch {
-        /* no negative entry, or it vanished — either way, a miss */
+      if ('obj' in found) {
+        bump('hit');
+        return found.obj;
       }
-      bump('miss');
-      return undefined;
+      bump('failHit');
+      return new Error(found.fail);
     },
     put(key, symbol, objPath) {
       const n = namespace();
@@ -799,36 +939,36 @@ export function candCache(label: string, stamp: () => string): CandCache {
       if (n === undefined) {
         return;
       }
-      const stored = pathFor(n, key, symbol, 'o');
-      const storedFail = pathFor(n, key, symbol, 'fail');
       let fresh: Buffer;
       try {
         fresh = readFileSync(objPath);
       } catch {
         return;
       }
-      if (existsSync(storedFail)) {
+      const found = lookup(n, key, symbol);
+      if (found === undefined) {
+        return;
+      }
+      const stored = pathFor(n, key, symbol, 'o');
+      if ('fail' in found) {
         // The direction nothing was auditing: the store says this candidate does not compile and
         // it does. Served under `on`, that spelling is silently dropped from the row's fan.
-        bump('verifiedFail');
         report(
           `OUTCOME MISMATCH label=${label} ns=${n} symbol=${symbol} stored=rejection fresh=object:${sha(fresh).slice(0, 16)}:${fresh.length}`,
         );
-        rmSync(storedFail, { force: true });
+        rmSync(pathFor(n, key, symbol, 'fail'), { force: true });
         linkInto(fresh, stored, true);
         return;
       }
-      if (!existsSync(stored)) {
-        return;
-      }
-      bump('verified');
-      const a = readFileSync(stored);
+      const a = readFileSync(found.obj);
       if (!a.equals(fresh)) {
         report(
           `BYTE MISMATCH label=${label} ns=${n} symbol=${symbol} stored=${sha(a).slice(0, 16)}:${a.length} fresh=${sha(fresh).slice(0, 16)}:${fresh.length}`,
         );
         linkInto(fresh, stored, true); // the fresh bytes are the truth, whatever the store holds
+        return;
       }
+      bump('verified');
     },
     verifyFail(key, symbol, message) {
       if (MODE !== 'verify') {
@@ -838,25 +978,24 @@ export function candCache(label: string, stamp: () => string): CandCache {
       if (n === undefined) {
         return;
       }
-      const stored = pathFor(n, key, symbol, 'o');
-      const storedFail = pathFor(n, key, symbol, 'fail');
-      if (existsSync(stored)) {
+      const found = lookup(n, key, symbol);
+      if (found === undefined) {
+        return;
+      }
+      if ('obj' in found) {
         // The store holds an OBJECT for a TU that no longer compiles: served under `on` it would
         // be scored as a candidate the toolchain now rejects.
-        bump('verified');
         report(
           `OUTCOME MISMATCH label=${label} ns=${n} symbol=${symbol} stored=object fresh=rejection: ${message.split('\n')[0].slice(0, 120)}`,
         );
-        rmSync(stored, { force: true });
-        writeAtomic(storedFail, message);
+        rmSync(found.obj, { force: true });
+        writeAtomic(pathFor(n, key, symbol, 'fail'), message);
         return;
       }
-      if (existsSync(storedFail)) {
-        // The OUTCOME is what is compared, not the diagnostic text: a compiler's message can
-        // carry a scratch path or a line the harness reformats, and neither is the answer the
-        // cache serves. Agreement here is what makes the negative half of the store audited at all.
-        bump('verifiedFail');
-      }
+      // The OUTCOME is what is compared, not the diagnostic text: a compiler's message can carry
+      // a scratch path or a line the harness reformats, and neither is the answer the cache
+      // serves. Agreement here is what makes the negative half of the store audited at all.
+      bump('verifiedFail');
     },
   };
 }

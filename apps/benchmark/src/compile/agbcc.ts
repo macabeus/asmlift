@@ -2,12 +2,21 @@
 // target build, the real-tier candidate compile (same steps, shared). Flags come from
 // @asmlift/toolchains; the decomp.yaml candidate command lives in
 // dataset/toolchains/agbcc/decomp.yaml.
-import { NOT_CACHEABLE, candCache, candidateCacheRefusal, toolchainFileChain } from '@asmlift/cli/candcache';
+import {
+  COMPILE_ENV,
+  NOT_CACHEABLE,
+  STAMP_PROBE,
+  candCache,
+  candidateCacheRefusal,
+  isChainMeasurement,
+  noteKeyRefused,
+  toolchainFileChain,
+} from '@asmlift/cli/candcache';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { BuiltTarget } from '../toolchains';
@@ -79,7 +88,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /** Every harness module whose text shapes what the compiler is handed, or how it is invoked. */
 const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), join(HERE, 'util.ts')];
 const CAND_CPP_FLAGS = ['-nostdinc'];
-const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 1; }\n';
 
 /** Run the candidate pipeline on a fixed probe TU in `dir`, returning the object's sha256 — or
  *  null if it did not compile. Its OWN directory, never the slot a candidate shares: a probe
@@ -101,22 +109,6 @@ function stampProbeIn(dir: string): string | null {
     return null;
   }
 }
-
-/** Environment variables gcc/cpp read that CHANGE the compile. `CPATH` and `C_INCLUDE_PATH` are
- *  honoured even under `-nostdinc` (MEASURED: `CPATH=inc arm-none-eabi-cpp -nostdinc` resolves
- *  `#include "g0.h"` and its value reaches the object), so they are inputs to every candidate
- *  compile even though nothing in the command line names them. */
-const COMPILE_ENV = [
-  'CPATH',
-  'C_INCLUDE_PATH',
-  'CPLUS_INCLUDE_PATH',
-  'GCC_EXEC_PREFIX',
-  'COMPILER_PATH',
-  'LIBRARY_PATH',
-  'SOURCE_DATE_EPOCH',
-  'DEPENDENCIES_OUTPUT',
-  'SUNPRO_DEPENDENCIES',
-];
 
 /**
  * Every FILE whose BYTES are an input to a candidate compile — the compiler, the assembler, the
@@ -171,9 +163,18 @@ export function candCacheStaticStamp(files: readonly string[] = candCacheNamespa
     h.update(`env:${v}=${process.env[v] ?? ''}`);
   }
   for (const p of files) {
-    h.update(`file:${p}`);
-    // An `UNRESOLVED:` marker is the measurement: the command is not on this $PATH at all.
-    h.update(p.startsWith('UNRESOLVED:') ? p : createHash('sha256').update(readFileSync(p)).digest('hex'));
+    // A measurement entry (`UNRESOLVED:` — the command is on no $PATH here; `ENV:` — a wrapper in
+    // the chain chooses its delegate through that variable) IS the answer, and is hashed as text.
+    // A file is hashed by CONTENT under its BASENAME. Not its absolute path: two worktrees of this
+    // repo hold byte-identical sources and toolchains at different paths, and keying on the path
+    // gave each its own namespace — so every parallel round cold-started and left a second
+    // never-evicted store behind, which is this repo's documented way of working.
+    if (isChainMeasurement(p)) {
+      h.update(`measured:${p}`);
+      continue;
+    }
+    h.update(`file:${basename(p)}`);
+    h.update(createHash('sha256').update(readFileSync(p)).digest('hex'));
   }
   return h.digest('hex');
 }
@@ -202,17 +203,6 @@ const cache = candCache('bench-agbcc', () => {
  *  `/^(cpp|agbcc|as) failed: /` matched. `stepFailed` is the real guard; this is the second one. */
 export const DETERMINISTIC_REJECTION = /^(cpp|agbcc|as) failed: \S/;
 
-/** A per-key refusal is a fact about the emitter, not about this candidate, so it is worth saying
- *  — once per reason, not 65,280 times. */
-const saidRefusals = new Set<string>();
-function noteKeyRefusal(reason: string): void {
-  if (saidRefusals.has(reason) || cache.mode === 'off') {
-    return;
-  }
-  saidRefusals.add(reason);
-  process.stderr.write(`[candcache] REFUSED-KEY label=bench-agbcc reason=${reason}\n`);
-}
-
 export const agbccReal: RealCompile = {
   buildTarget(iText): BuiltTarget {
     const dir = contentDir('arm', iText);
@@ -233,7 +223,9 @@ export const agbccReal: RealCompile = {
     // costs nothing and stops the day an emitter change arms it.
     const refusal = candidateCacheRefusal(tu);
     if (refusal) {
-      noteKeyRefusal(refusal);
+      if (cache.mode !== 'off') {
+        noteKeyRefused('bench-agbcc', refusal);
+      }
       return compileCandidateRaw(tu, sym);
     }
     if (cache.mode === 'on') {

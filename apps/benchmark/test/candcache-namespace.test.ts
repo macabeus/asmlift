@@ -126,6 +126,63 @@ describe('hole 4 — the namespace hashes the BINARIES, not their version banner
     expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
   });
 
+  test('a wrapper that names its delegate through a VARIABLE has that variable MEASURED', () => {
+    // The commonest wrapper spelling there is (ccache / distcc / a toolchain wrapper):
+    // `exec "$MYCPP" "$@"`. A syntax list that refuses `$(...)` and follows a literal path sees
+    // nothing here at all — measured end to end, one byte-constant wrapper and two real compilers
+    // gave ONE namespace and served the first compiler's object for the second.
+    const dir = scratch();
+    const a = join(dir, 'cc-a');
+    const b = join(dir, 'cc-b');
+    writeFileSync(a, '#!/bin/sh\nexec /usr/bin/true VERSION-ONE\n');
+    writeFileSync(b, '#!/bin/sh\nexec /usr/bin/true VERSION-TWO\n');
+    const w = join(dir, 'wrapper-var');
+    writeFileSync(w, '#!/bin/sh\nexec "$ASMLIFT_TEST_DELEGATE" "$@"\n');
+    for (const f of [a, b, w]) {
+      chmodSync(f, 0o755);
+    }
+
+    const chainWith = (v: string): string[] => {
+      process.env.ASMLIFT_TEST_DELEGATE = v;
+      try {
+        return toolchainFileChain(w);
+      } finally {
+        delete process.env.ASMLIFT_TEST_DELEGATE;
+      }
+    };
+    const chainA = chainWith(a);
+    expect(chainA, 'the variable itself is the measurement').toContain(`ENV:ASMLIFT_TEST_DELEGATE=${a}`);
+    expect(chainA, 'and the file it names is followed like any other delegate').toContain(realpathSync(a));
+
+    const stampA = candCacheStaticStamp(chainA);
+    expect(candCacheStaticStamp(chainWith(b)), 'repointing the variable re-namespaces').not.toBe(stampA);
+    expect(candCacheStaticStamp(chainWith(a)), 'and pointing it back is the same toolchain again').toBe(stampA);
+    expect(readFileSync(w, 'utf8'), 'the wrapper really did not move').toBe(
+      '#!/bin/sh\nexec "$ASMLIFT_TEST_DELEGATE" "$@"\n',
+    );
+  });
+
+  test('a variable the script ASSIGNS itself is not an external input', () => {
+    const dir = scratch();
+    const w = join(dir, 'wrapper-selfassign');
+    writeFileSync(w, '#!/bin/sh\nCC=/usr/bin/true\nexec "$CC" "$@"\n');
+    chmodSync(w, 0o755);
+    expect(toolchainFileChain(w).some((e) => e.startsWith('ENV:CC='))).toBe(false);
+  });
+
+  test('the file half is keyed by CONTENT, not by the absolute path it sits at', () => {
+    // Two worktrees of this repo hold byte-identical sources and toolchains at different paths.
+    // Keying the digest on the path gave each its own namespace, so every parallel round
+    // cold-started and left a second store behind that nothing ever evicts.
+    const one = join(scratch(), 'agbcc.ts');
+    const two = join(scratch(), 'agbcc.ts');
+    writeFileSync(one, 'export const x = 1;\n');
+    writeFileSync(two, 'export const x = 1;\n');
+    expect(candCacheStaticStamp([two])).toBe(candCacheStaticStamp([one]));
+    writeFileSync(two, 'export const x = 2;\n');
+    expect(candCacheStaticStamp([two]), 'content still decides').not.toBe(candCacheStaticStamp([one]));
+  });
+
   test('a same-named binary with different bytes is a different toolchain', () => {
     // What a $PATH wrapper does, without touching $PATH: the same list position, other bytes.
     const p = join(scratch(), 'arm-none-eabi-as');

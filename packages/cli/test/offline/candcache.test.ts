@@ -291,7 +291,31 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
   // and two runs of the identical failure printed different text. The scratch dir is scrubbed at
   // the point the message is built, which makes cached and uncached identical AND takes a machine
   // path out of published output.
-  const REJECTS = 'echo "no." >&2; test -f "{{inputPath}}" && test -n "{{outputPath}}"; exit 1';
+  //
+  // Both templates below reject (or die) only for a candidate that ASKS for it. A template that
+  // fails unconditionally fails the stamp probe too, which is NOT_CACHEABLE — the cache then
+  // refuses for the process and every assertion about what the store did is vacuously true.
+  const REJECTS =
+    'echo x >> runs; if grep -q REJECTME "{{inputPath}}"; then echo "no." >&2; exit 1; fi; ' +
+    'cat "{{inputPath}}" > "{{outputPath}}"';
+  const CAND_REJECT = 's32 f(s32 a0) { REJECTME }\n';
+  /** Every negative entry on disk: what `putFail` actually wrote, as opposed to what a message says. */
+  const failEntries = (store: string): string[] => {
+    const out: string[] = [];
+    const walk = (d: string): void => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        if (e.isDirectory()) {
+          walk(join(d, e.name));
+        } else if (e.name.endsWith('.fail')) {
+          out.push(join(d, e.name));
+        }
+      }
+    };
+    if (existsSync(join(store, 'ns'))) {
+      walk(join(store, 'ns'));
+    }
+    return out;
+  };
 
   test('the message carries no scratch path, cached or not', async () => {
     const p = project();
@@ -302,7 +326,7 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
         const out: string[] = [];
         for (let i = 0; i < 2; i++) {
           try {
-            compile(CAND, 'f', 'c');
+            compile(CAND_REJECT, 'f', 'c');
           } catch (e) {
             out.push((e as Error).message);
           }
@@ -311,11 +335,54 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
       },
     );
     expect(errors.length).toBe(2);
+    expect(failEntries(p.store).length, 'the rejection really is in the store').toBe(1);
     const [cold, warm] = errors;
     expect(warm, 'the second run was served from the store').toBe(cold);
     expect(cold).toContain('<scratch>');
     expect(cold, 'no mkdtemp directory reaches a published error').not.toMatch(/asmlift-usercc-/);
     expect(cold).not.toMatch(/\/var\/folders|\/private\/tmp|\/tmp\//);
+  });
+
+  // A compiler this machine KILLED never gave a verdict, and `sh` is what hides that on this
+  // path: the template always runs through `sh -ec`, and a shell reports a killed child as exit
+  // 128+signal. A SIGKILLed compiler arrives as an ordinary `exit 137`, which the message-shape
+  // guard matched and stored FOREVER — the candidate then silently missing from every future
+  // run's fan under that namespace. Reach: candidate compiles have no timeout, an OOM-killed
+  // `docker run` exits 137, and a bench run forks 8-16 shards.
+  const KILLED =
+    'if grep -q KILLME "{{inputPath}}"; then sh -c \'kill -9 $$\'; fi; cat "{{inputPath}}" > "{{outputPath}}"';
+  const CAND_KILL = 's32 f(s32 a0) { KILLME }\n';
+
+  test('a KILLED compile is never stored as a rejection, however ordinary its exit code looks', async () => {
+    const p = project();
+    const message = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        const compile = compileFromCommand(KILLED, { cwd: p.cwd, cacheInputs: [] });
+        try {
+          compile(CAND_KILL, 'f', 'c');
+        } catch (e) {
+          return (e as Error).message;
+        }
+        return 'IT DID NOT FAIL';
+      },
+    );
+    expect(message).toContain('did not run to completion');
+    expect(message).toContain('killed by signal 9');
+    expect(failEntries(p.store), 'a transient stored as a rejection drops the candidate forever').toEqual([]);
+  });
+
+  test('…while a compiler that RAN and said no is stored — the guard is not "never store"', async () => {
+    const p = project();
+    await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+      const compile = compileFromCommand(REJECTS, { cwd: p.cwd, cacheInputs: [] });
+      try {
+        compile(CAND_REJECT, 'f', 'c');
+      } catch {
+        /* expected */
+      }
+    });
+    expect(failEntries(p.store).length).toBe(1);
   });
 
   test('and the uncached spelling is the SAME string — a miss is indistinguishable in RESULT', async () => {
@@ -327,7 +394,7 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
         const out: string[] = [];
         for (let i = 0; i < 2; i++) {
           try {
-            compile(CAND, 'f', 'c');
+            compile(CAND_REJECT, 'f', 'c');
           } catch (e) {
             out.push((e as Error).message);
           }

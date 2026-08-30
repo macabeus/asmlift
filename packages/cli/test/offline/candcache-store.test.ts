@@ -192,9 +192,13 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     expect(err).not.toContain('BYTE MISMATCH');
   });
 
-  test('the namespace IN USE is never evicted, even when the store stays over the cap', async () => {
+  test('the namespace IN USE keeps its DIRECTORY and loses its oldest keys — the cap fires on one toolchain', async () => {
+    // The steady state of this repo is ONE agbcc namespace that every run resolves, growing by
+    // ~640 keys a run forever: 46,197 keys / 155.3 MB after one full bench run. If the only
+    // evictable unit were a whole OTHER namespace, the cap could never fire there at all — which
+    // is what a wall-clock "not resolved for an hour" test on the namespace this run just
+    // resolved amounts to. Its directory and its lease survive; its oldest-written keys do not.
     const root = scratch();
-    // A warm store, then a run that re-uses namespace A while B sits cold and the cap is zero.
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
       m.candCache('t', () => NS_A).put('k1', 'f', object('A-ONE'));
     });
@@ -203,6 +207,30 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     });
 
     age(root, NS_B);
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      c.warm();
+      expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1, prunedKeys: 1 });
+      expect(c.get('k1', 'f'), 'the evicted key is a MISS, which is always a correct answer').toBeUndefined();
+    });
+    expect(readdirSync(join(root, 'ns')), 'the directory the run is using is never removed').toEqual([
+      NS_A.slice(0, 16),
+    ]);
+    expect(objectsIn(root).length, 'and the bytes nothing links to any more are reclaimed').toBe(0);
+  });
+
+  test('…but not while ANOTHER process holds it: a key eviction would delete a path it is about to read', async () => {
+    // `put` hands the caller a path INSIDE the namespace and the scorer opens it later, so key
+    // eviction is safe only because it runs once, before this process compiles anything, and only
+    // when no other process has claimed the namespace. A sibling shard's lease outranks the cap.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
+      m.candCache('t', () => NS_A).put('k1', 'f', object('A-ONE'));
+    });
+    // pid 1 is launchd/init: certainly alive, certainly not us.
+    mkdirSync(join(root, 'ns', NS_A.slice(0, 16), '.live'), { recursive: true });
+    writeFileSync(join(root, 'ns', NS_A.slice(0, 16), '.live', '1-sibling'), '1\n');
+
     const said = await load(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' },
       (m) => {
@@ -214,18 +242,15 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
         try {
           const c = m.candCache('t', () => NS_A);
           c.warm();
-          // The whole point: A's own answers are still there afterwards. Evicting the namespace
-          // a run is USING would delete a file the scorer is about to read by path.
+          expect(m.cacheStats().prunedKeys).toBeUndefined();
           expect(readFileSync(c.get('k1', 'f') as string, 'utf8')).toBe('A-ONE');
-          expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1, hit: 1 });
           return out;
         } finally {
           spy.mockRestore();
         }
       },
     );
-    expect(said).toContain('not pruning it');
-    expect(readdirSync(join(root, 'ns'))).toEqual([NS_A.slice(0, 16)]);
+    expect(said).toContain('another process holds the namespace this run is using');
   });
 
   test('a namespace touched RECENTLY is spared even over the cap — a sibling shard may hold it', async () => {
@@ -390,6 +415,26 @@ describe('every refusal says WHY on stderr, and turns the instance off for the p
 });
 
 describe('verify mode compiles anyway, compares, and lets the FRESH bytes win', () => {
+  test('the audit reads the store through the SERVE path — an object outranks a rejection', async () => {
+    // `verify` used to ask the store its own way (a `.fail` first, then an `.o`), which is the
+    // opposite of what `get` does. So the precedence between the two entries for one key — which
+    // is what a warm run actually serves — was outside the audit's reach by construction, and a
+    // key holding both reported an OUTCOME MISMATCH about an answer nobody would ever be served.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      c.put('k', 'f', object('TRUTH'));
+      c.putFail('k', 'f', 'agbcc failed: stale');
+      expect(readFileSync(c.get('k', 'f') as string, 'utf8'), 'this is what a warm run is served').toBe('TRUTH');
+    });
+    await load({ ASMLIFT_CANDCACHE: 'verify', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      c.verify('k', 'f', object('TRUTH'));
+      expect(m.cacheStats()).toMatchObject({ verified: 1 });
+      expect(m.cacheMismatches(), 'the served answer agreed; there is nothing to report').toBe(0);
+    });
+  });
+
   test('a corrupted entry is reported byte for byte and repaired', async () => {
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
@@ -408,7 +453,10 @@ describe('verify mode compiles anyway, compares, and lets the FRESH bytes win', 
         expect(m.cacheMode()).toBe('verify');
         // The caller compiled fresh and got DIFFERENT bytes: that is the whole point of the mode.
         c.verify('k', 'f', object('NOT-THE-TRUTH'));
-        expect(m.cacheStats()).toMatchObject({ verified: 1, mismatch: 1 });
+        // `verified` counts audits that AGREED. A disagreement is `mismatch` and nothing else, so
+        // the two never have to be read against each other to learn whether the store was right.
+        expect(m.cacheStats()).toMatchObject({ mismatch: 1 });
+        expect(m.cacheStats().verified).toBeUndefined();
         return out;
       } finally {
         spy.mockRestore();
