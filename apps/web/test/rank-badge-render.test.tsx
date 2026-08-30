@@ -41,9 +41,10 @@ describe('RankBadge progress', () => {
     // determinate 33 % fill for the whole 62 s enumeration. It travels under motion-safe, and under
     // prefers-reduced-motion the track is simply empty.
     const out = html({ status: 'loading', phase: 'enumerating' });
-    expect(out).toContain('motion-safe:animate-rank-indeterminate');
-    expect(out).toContain('hidden'); // …and `motion-safe:block` is what un-hides it
-    expect(out).toContain('motion-safe:block');
+    // Matched on the STRIPE's own class list: the track around it carries `overflow-hidden`, so a
+    // bare `toContain('hidden')` passes even with the stripe's `hidden` deleted — i.e. with the
+    // reduced-motion rule this test names broken.
+    expect(out).toMatch(/class="hidden [^"]*motion-safe:block[^"]*motion-safe:animate-rank-indeterminate/);
     expect(out).not.toContain('animate-pulse');
   });
 

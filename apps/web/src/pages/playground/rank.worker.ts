@@ -6,8 +6,8 @@
 // request and echoes its id back.
 import { throttleProgress, whileCurrent } from './rank-progress';
 import {
+  type RankInbound,
   type RankMessage,
-  type RankRequest,
   type RankResponse,
   preloadScorers,
   rankCandidatesInBrowser,
@@ -16,36 +16,36 @@ import {
 // Warm the wasm modules as soon as the worker spawns (the UI spawns it on an agbcc target).
 preloadScorers();
 
-// The newest request this worker has RECEIVED. `self.onmessage` is async, so a second request is
-// dequeued at the first `await` of the first and the two runs interleave — a superseded run keeps
-// scoring for the rest of its natural life. Measured: bumping the reqId 9.9 s into an 800-candidate
-// run left the abandoned run posting 286 further ticks over 78 s, every one waking the main thread
-// to be thrown away. The per-run throttle bounds ONE run to ~10 msg/s; nothing bounded the number
-// of live superseded runs, so the aggregate rate scaled with edits-during-a-run — the precise load
-// the worker exists to prevent.
+// The newest id this worker has been TOLD ABOUT — a RATE policy and nothing else, whose argument
+// and measurement live with `whileCurrent` in rank-progress.ts. It may only ever DROP a message;
+// the H1 stale-guard stays on the main thread as the sole authority over what is displayed, which
+// is why a superseded run's RESULT is still posted.
 //
-// This id is a RATE policy and NOTHING ELSE. It may only ever DROP a message: the H1 stale-guard
-// stays on the main thread, sole authority over what is displayed, and this cannot route around it
-// — the worker learns of id N only from the message the main thread posted after setting its own
-// current id to N, so `latestReqId <= currentReqId` always, and everything suppressed here would
-// have been dropped there. The superseded run's RESULT is still posted for exactly that reason:
-// deciding a verdict is the main thread's job, not this file's.
+// It does NOT stop the abandoned run. Its agbcc + objdiff compiles keep going, and they are the
+// larger cost by far: measured 2026-08-30, a live run scores 52.8 candidates/s alone and 40.6
+// while one abandoned run is still working. Stopping that needs an abort seam the scoring loop
+// does not have, and silencing is not a substitute for it — cancelling is a follow-up.
 let latestReqId = 0;
 
-self.onmessage = async (e: MessageEvent<RankRequest>) => {
-  const { reqId, name, asm, target, symbols } = e.data;
-  latestReqId = reqId;
+self.onmessage = async (e: MessageEvent<RankInbound>) => {
+  const msg = e.data;
+  // BOTH kinds advance the id: the main thread also abandons a run without starting another one,
+  // and a `supersede` is the only way it can say so.
+  latestReqId = msg.reqId;
+  if (msg.kind === 'supersede') {
+    return;
+  }
+  const { reqId, name, asm, target, symbols } = msg;
   try {
     // THE THROTTLE LIVES HERE, at the transport boundary it is a policy about: the driver observes
     // every candidate, and this is what bounds how many of those observations become postMessages
     // (~10/s, whatever the fan shape — 117,760 candidates would otherwise be 117,760 wake-ups of
-    // the main thread the worker exists to protect). A fresh throttle per request, so one run's
-    // clock cannot suppress another's first tick.
+    // the main thread the worker exists to protect). One per request, so one run's clock cannot
+    // suppress another's first tick.
     //
-    // Progress carries the SAME echoed `reqId` as the result, for the same reason: the main
-    // thread's H1 guard drops anything stamped with a superseded id. The worker never decides what
-    // is SHOWN — it stamps, and it declines to spend a postMessage on a run it already knows the
-    // main thread will discard.
+    // Progress carries the SAME echoed `reqId` as the result, because it answers to the same H1
+    // guard. The worker never decides what is SHOWN — it stamps, and it declines to spend a
+    // postMessage on a run it already knows the main thread will discard.
     const post = throttleProgress(
       whileCurrent(
         () => reqId === latestReqId,

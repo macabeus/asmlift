@@ -10,11 +10,12 @@
 //    structured clone and the render still run, while `aria-valuenow` keeps the TRUE count.
 import type { RankPhase, RankProgress } from './rank-progress';
 
-const PHASE_TEXT: Record<RankPhase, string> = {
+// `scoring` has no entry: it is the one phase that cannot be spelled without its counts, so
+// `progressLabel` returns before reaching this table and a sentence here would be unreachable.
+const PHASE_TEXT: Record<Exclude<RankPhase, 'scoring'>, string> = {
   queued: 'waiting for the ranking worker…',
   assembling: 'assembling the target asm…',
   enumerating: 'enumerating candidate spellings…',
-  scoring: 'scoring candidates with agbcc + objdiff…',
   ranking: 'ranking scored candidates…',
 };
 
@@ -28,8 +29,8 @@ export function progressLabel(p: RankProgress): string {
 }
 
 /** The bar's props, also discriminated: `pct`/`valueNow`/`valueMax` exist ONLY on the determinate
- *  arm. They used to be optional fields the indeterminate arm filled with `pct: 0` — a number no
- *  caller read, and the exact "0 % of an unknown denominator" this module's header forbids. */
+ *  arm. As optional fields, the indeterminate arm would carry a `pct: 0` — the exact "0 % of an
+ *  unknown denominator" this module's header forbids, one careless reader away from being drawn. */
 export type RankProgressBar =
   | { determinate: false; label: string }
   | {

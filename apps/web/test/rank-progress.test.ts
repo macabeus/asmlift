@@ -10,12 +10,14 @@
 // or sit on a stale phase for a whole tail.
 import { describe, expect, test } from 'vitest';
 
-import { type RankProgress, throttleProgress, whileCurrent } from '../src/pages/playground/rank-progress';
-import type { BrowserRanking, RankMessage } from '../src/pages/playground/score-wasm';
+import { type EmittedProgress, throttleProgress, whileCurrent } from '../src/pages/playground/rank-progress';
+import type { BrowserRanking, RankInbound, RankMessage } from '../src/pages/playground/score-wasm';
 import {
   type Ranking,
   type RankingInput,
+  type StoredRanking,
   applyRankMessage,
+  applyToStored,
   sameRankingInput,
   viewRanking,
 } from '../src/pages/playground/useRanking';
@@ -25,7 +27,7 @@ import {
  *  different rates), and an injected clock is how that is testable without timers. */
 function rig(intervalMs = 100) {
   let t = 0;
-  const seen: RankProgress[] = [];
+  const seen: EmittedProgress[] = [];
   const emit = throttleProgress(
     (p) => seen.push(p),
     () => t,
@@ -75,7 +77,7 @@ describe('whileCurrent', () => {
     // candidate run posted 286 ticks over 78 s after being superseded, every one a main-thread
     // wake-up for a message `applyRankMessage` would discard.
     let current = true;
-    const seen: RankProgress[] = [];
+    const seen: EmittedProgress[] = [];
     const post = whileCurrent(
       () => current,
       (p) => seen.push(p),
@@ -91,7 +93,7 @@ describe('whileCurrent', () => {
 
   test('composed under the throttle it changes nothing while the run IS current', () => {
     let t = 0;
-    const seen: RankProgress[] = [];
+    const seen: EmittedProgress[] = [];
     const emit = throttleProgress(
       whileCurrent(
         () => true,
@@ -137,6 +139,47 @@ describe('RankMessage', () => {
   test('both result shapes still route to the result branch', () => {
     expect(describeMessage({ kind: 'result', reqId: 1, ok: false, error: 'boom' })).toBe('error:boom');
   });
+
+  test('`queued` is not spellable ON THE WIRE — the worker cannot observe it', () => {
+    // The main thread's own phase, set between postMessage and the first tick. It used to be
+    // forbidden only by prose in a comment; the emitter chain is typed on `EmittedProgress`, so
+    // this line is a compile error and the `@ts-expect-error` is what asserts that it still is.
+    // @ts-expect-error queued is the main thread's phase and is not on the worker's wire
+    const impossible: RankMessage = { kind: 'progress', reqId: 1, phase: 'queued' };
+    expect(impossible.kind).toBe('progress');
+  });
+});
+
+// The INBOUND union — what the main thread posts. `supersede` is the second way a run is abandoned:
+// the reqId advances with no new request behind it (the Benchmark tab, a C++ backend, a cleared
+// function name). Before it, the worker learned a new id only from a new REQUEST, so on that route
+// the abandoned run kept posting for its whole life — measured 2026-08-30 against the shipped
+// worker: 108 ticks over 11.9 s at 9.1 Hz, every one discarded by `applyRankMessage`.
+function adopt(msg: RankInbound): { latest: number; runs: boolean } {
+  switch (msg.kind) {
+    case 'request':
+      return { latest: msg.reqId, runs: true };
+    case 'supersede':
+      return { latest: msg.reqId, runs: false };
+    default: {
+      const exhaustive: never = msg;
+      return exhaustive;
+    }
+  }
+}
+
+describe('RankInbound', () => {
+  test('a supersede advances the id and starts NO run — the rate-guard half of an abandonment', () => {
+    expect(adopt({ kind: 'supersede', reqId: 12 })).toEqual({ latest: 12, runs: false });
+  });
+
+  test('a request advances the same id and runs', () => {
+    const target = {} as RankingInput['target'];
+    expect(adopt({ kind: 'request', reqId: 13, name: 'f', asm: 'push {r4}', target })).toEqual({
+      latest: 13,
+      runs: true,
+    });
+  });
 });
 
 // ── H1, the stale-guard, now with progress under it ──────────────────────────────────────────
@@ -147,6 +190,13 @@ describe('RankMessage', () => {
 // "drop this message" so the hook has no second way to settle state.
 //
 // The existing H1 reasoning had no test at all before this file; case (d) pins it.
+const INPUT: RankingInput = {
+  eligible: true,
+  asm: 'push {r4}',
+  name: 'f',
+  targetId: 'agbcc',
+  target: {} as RankingInput['target'],
+};
 const RESULT = {
   best: { label: 'unsigned', source: '', symbolRefs: [], score: { score: 0 } },
   candidates: [],
@@ -211,6 +261,26 @@ describe('applyRankMessage (H1)', () => {
   });
 });
 
+describe('applyToStored (the React updater)', () => {
+  const stored: StoredRanking = { input: INPUT, ranking: { status: 'loading', phase: 'enumerating' } };
+
+  test('a DROPPED message returns the same object — the bail-out, not a fresh one', () => {
+    // React bails out on `Object.is`, so a rebuilt `{ ...stored }` commits a whole Playground
+    // render for a message that changed nothing. Every tick of an abandoned run is such a message.
+    const stale: RankMessage = { kind: 'progress', reqId: 1, phase: 'scoring', done: 5, total: 9 };
+    expect(applyToStored(stored, stale, 2)).toBe(stored);
+    const settled: StoredRanking = { ...stored, ranking: { status: 'error', error: 'boom' } };
+    expect(applyToStored(settled, { kind: 'progress', reqId: 2, phase: 'ranking' }, 2)).toBe(settled);
+  });
+
+  test('an ACCEPTED message keeps the input the state is about and replaces only the ranking', () => {
+    const next = applyToStored(stored, { kind: 'progress', reqId: 2, phase: 'scoring', done: 5, total: 9 }, 2);
+    expect(next).not.toBe(stored);
+    expect(next.input).toBe(stored.input); // H1 layer 1: the pair still names the input it is about
+    expect(next.ranking).toEqual({ status: 'loading', phase: 'scoring', done: 5, total: 9 });
+  });
+});
+
 // ── H1 LAYER 1, the window the counts made visible ────────────────────────────────────────────
 // Resetting to `loading` inside the posting effect lands one commit AFTER the render that painted
 // the new input. Measured in the app on 2026-08-30, switching examples mid-run on an 800-candidate
@@ -218,14 +288,6 @@ describe('applyRankMessage (H1)', () => {
 // `scoring 52 / 800`; the reset landed at t=962 ms. One commit, 27 ms — and the same window renders
 // a settled VERDICT for an asm no longer on screen. `viewRanking` derives the answer instead, so it
 // cannot lag: re-measured after the change, the first frame naming `half` already reads `queued`.
-const INPUT: RankingInput = {
-  eligible: true,
-  asm: 'push {r4}',
-  name: 'f',
-  targetId: 'agbcc',
-  target: {} as RankingInput['target'],
-};
-
 describe('viewRanking (H1 layer 1)', () => {
   test('state belonging to ANOTHER input renders as queued, never as that input`s badge', () => {
     const settled: Ranking = { status: 'ok', result: RESULT };
@@ -254,7 +316,7 @@ describe('viewRanking (H1 layer 1)', () => {
     });
   });
 
-  test('every field the posting effect depends on is compared — none may be forgotten', () => {
+  test('every field of a ranking question is compared — this is the ONE list, so none may be forgotten', () => {
     const map = new Map() as NonNullable<RankingInput['symbols']>;
     expect(sameRankingInput(INPUT, { ...INPUT })).toBe(true);
     for (const changed of [

@@ -34,21 +34,18 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
 
   const base = 'rounded-md px-2.5 py-1 text-[11px] font-medium';
   if (ranking.status === 'loading') {
-    // A REAL progressbar, and only as determinate as the run actually is. The candidate total does
-    // not exist until `enumerateCandidates` returns — 62.3 s of one run measured 2026-08-30 — so four of the
-    // five phases render with `aria-valuenow` OMITTED, which is the ARIA spelling of
-    // indeterminate; an invented 0 would not be. The phase sentence is visible text either way, so
-    // this is never LESS informative than the bare div it replaces.
+    // A REAL progressbar, and only as determinate as the run actually is: the candidate total does
+    // not exist until `enumerateCandidates` returns (62.3 s on one measured run, 2026-08-30), so
+    // four of the five phases render with `aria-valuenow` OMITTED — the ARIA spelling of
+    // indeterminate, which an invented 0 would not be.
     //
     // THE SENTENCE IS A SIBLING OF THE PROGRESSBAR, NOT ITS CHILD. `progressbar` is a
     // children-presentational role: everything inside it is pruned from the accessibility tree, so
-    // the visible label was being announced by nobody. Outside it, it stays readable text for AT
-    // that ignores `aria-valuetext`. `aria-label` names the widget itself — a `role=` with no
-    // accessible name announces as an unnamed progress bar, and it is the idiom the rest of this
-    // app already follows (MultiSelect pairs every role with an aria-label).
-    //
-    // No `aria-live`: a ~10 Hz live region is a screen-reader flood. `role="progressbar"` plus
-    // `aria-valuetext` is the accessible channel.
+    // a label placed there is announced by nobody. Outside it, it stays readable text for AT that
+    // ignores `aria-valuetext`. `aria-label` names the widget itself — a `role=` with no accessible
+    // name announces as an unnamed progress bar — and it is the idiom the rest of this app follows
+    // (MultiSelect pairs every role with an aria-label). No `aria-live`: a ~10 Hz live region is a
+    // screen-reader flood, and `role="progressbar"` plus `aria-valuetext` is the channel.
     const bar = progressBar(ranking);
     return (
       <div className={`${base} border border-slate-700 bg-slate-900/60 text-slate-400`}>
@@ -63,27 +60,25 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
           className="mt-1 h-1 overflow-hidden rounded bg-slate-800"
         >
           {bar.determinate ? (
-            // `bar.pct` is clamped to 99 while `aria-valuenow` above stays EXACT: the last scoring
-            // tick is followed by the sort and a six-figure structured clone, and a full bar over
-            // that is the lie a bar most easily tells. The phase then changes to `ranking` and this
+            // `bar.pct` is clamped to 99 while `aria-valuenow` stays EXACT: the last scoring tick
+            // is followed by the sort and a six-figure structured clone, and a full bar over that
+            // is the lie a bar most easily tells. The phase then changes to `ranking` and this
             // falls back to the indeterminate stripe.
             <div
               className="h-full rounded bg-teal-500 motion-safe:transition-[width] motion-safe:duration-200"
               style={{ width: `${bar.pct}%` }}
             />
           ) : (
-            // INDETERMINATE = a stripe that TRAVELS, or nothing at all. It used to be
-            // `w-1/3 animate-pulse`: `animate-pulse` animates opacity only, so the stripe parked at
-            // one third of the track and gently faded — pixel-identical to a determinate 33 % bar,
-            // and shown for the whole 62 s enumeration, which is the entire wait anyone has
-            // actually watched. That is precisely the precision the phase does not have. Travel
-            // reads as "unknown"; parked reads as a number.
+            // INDETERMINATE = a stripe that TRAVELS, or nothing at all. Not `animate-pulse`: it
+            // animates opacity only, so the stripe parks at one third of the track and fades —
+            // pixel-identical to a determinate 33 % bar, for the whole 62 s enumeration, claiming
+            // a precision the phase does not have. Travel reads as "unknown"; parked reads as a
+            // number.
             //
             // Under `prefers-reduced-motion` there is no travel to substitute for, so the fill is
-            // simply not rendered — an empty track plus the sentence, which is LESS wrong than a
-            // static third. This is the app's only animation and it is the only place that has to
-            // answer the reduced-motion question; the determinate width transition above is gated
-            // the same way.
+            // simply not rendered — an empty track plus the sentence, which is less wrong than a
+            // static third. This is the app's only animation; the determinate width transition is
+            // gated the same way.
             <div className="hidden h-full w-1/3 rounded bg-slate-600 motion-safe:block motion-safe:animate-rank-indeterminate" />
           )}
         </div>

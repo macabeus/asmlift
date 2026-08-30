@@ -62,21 +62,3 @@ describe('progressLabel', () => {
     expect(progressLabel({ phase: 'scoring', done: 1, total: 2 })).toBe('scoring 1 / 2 candidates');
   });
 });
-
-describe('progressLabel', () => {
-  test('`queued` is a phase the WORKER never emits — the main thread sets it, and it claims nothing', () => {
-    // The hook cannot observe `assembling`: it only knows it posted. On a busy worker (a superseded
-    // run enumerating for a measured 62.3 s) `assembling` would be false for the whole wait.
-    expect(progressLabel({ phase: 'queued' })).toBe('waiting for the ranking worker…');
-    expect(progressBar({ phase: 'queued' }).determinate).toBe(false);
-  });
-
-  test('every phase has a sentence — the badge is never empty', () => {
-    for (const phase of ['queued', 'assembling', 'enumerating', 'ranking'] as const) {
-      expect(progressLabel({ phase }).length).toBeGreaterThan(0);
-    }
-    // `scoring` is the one phase that CANNOT be spelled without counts — the union says so, and a
-    // count-less scoring tick is now a compile error rather than a defensive branch.
-    expect(progressLabel({ phase: 'scoring', done: 1, total: 2 })).toBe('scoring 1 / 2 candidates');
-  });
-});
