@@ -12,7 +12,6 @@
 // would mask an alignment bug as a perpetual "closest"). FAIL-CLOSED: nothing here is caught; any
 // engine failure throws, and a row that cannot be displayed can never count as matched.
 import { cBackend } from '@asmlift/core/backend/c';
-import { renderDeclarations } from '@asmlift/core/declare';
 import {
   type DroppedCandidate,
   type RankedResult,
@@ -23,9 +22,11 @@ import {
   withheldReason,
 } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
-import { C_TYPEDEFS, type TargetDescription } from '@asmlift/core/target';
+import type { TargetDescription } from '@asmlift/core/target';
 import { assemble, compileToObject } from 'agbcc';
 import type * as ObjdiffWasm from 'objdiff-wasm';
+
+import { candidateContext, firstDiagnosticLine } from './candidate-compile';
 
 // ── Web-Worker protocol ──────────────────────────────────────────────────────────────────────
 // Scoring runs in a worker (rank.worker.ts) so the agbcc + objdiff wasm compiles never jank
@@ -166,25 +167,19 @@ export async function scoreObjectBytes(
   return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
 }
 
-/** The one line of a tool's stderr worth showing. GNU as prefixes everything with an
- *  "in.s: Assembler messages:" banner and puts the real diagnostics after it — preferring the
- *  first `Error:` line over the first non-empty one is what keeps the banner out of the UI. */
-const firstLine = (s: string) => {
-  const lines = (s || '').split('\n');
-  return lines.find((l) => l.includes('Error:')) ?? lines.find((l) => l.trim() !== '') ?? '';
-};
-
 /** The async analog of the cli's `decompileRanked`, agbcc-only: enumerate the distinct candidate
  *  spellings (shared @asmlift/core enumeration), assemble the pasted `.s` ONCE as the target, then
  *  compile + objdiff-score each candidate and rank by score (lowest first). Mirrors
  *  `@asmlift/core/rank`'s `rankBy` semantics — a candidate whose compile/score throws is skipped so
  *  it cannot sink a matching sibling; only if EVERY candidate fails is the failure surfaced.
  *
- *  SELF-DECLARING CANDIDATES: with a symbol map, a candidate that names map symbols carries
- *  their refs (Candidate.symbolRefs) — its synthesized declaration block (the SAME core
- *  renderer the cli scorer uses) is prepended after the typedefs, exactly the cli's
- *  self-declared world (rank.ts). agbcc-wasm compiles bare candidates (no project headers),
- *  so the probe arbitration is unnecessary here: this scorer is ALWAYS the self-declared world.
+ *  SELF-DECLARING CANDIDATES: a candidate that names symbols carries their refs
+ *  (Candidate.symbolRefs) — WITH a symbol map, the map's own facts; WITHOUT one, the names read
+ *  out of the asm's literal pool as name-only symbols (rank.ts bareGlobalSymbols). Either way
+ *  `candidateContext` prepends the synthesized declaration block (the SAME core renderer the cli
+ *  scorer uses) after the typedefs, exactly the cli's self-declared world. agbcc-wasm compiles
+ *  bare candidates (no project headers), so the probe arbitration is unnecessary here: this
+ *  scorer is ALWAYS the self-declared world, and a name with no declaration is a hard error.
  *
  *  Ranking always uses `cBackend` regardless of the UI backend selector — choosing cpp/pascal
  *  turns ranking off (it is gated to the agbcc target + C backend in Playground.tsx). */
@@ -198,7 +193,7 @@ export async function rankCandidatesInBrowser(
 
   const t = await assemble(asm);
   if (!t.ok) {
-    throw new Error(`could not assemble the target asm: ${firstLine(t.stderr)}`);
+    throw new Error(`could not assemble the target asm: ${firstDiagnosticLine(t.stderr)}`);
   }
 
   // Mirrors core's `rankBy` (which this cannot reuse — the wasm scorer is async): a candidate
@@ -214,10 +209,9 @@ export async function rankCandidatesInBrowser(
   let lastErr: unknown = null;
   for (const [order, c] of candidates.entries()) {
     try {
-      const decls = c.symbolRefs?.length ? renderDeclarations(c.symbolRefs) : '';
-      const cc = await compileToObject(c.source, { context: C_TYPEDEFS + decls });
+      const cc = await compileToObject(c.source, { context: candidateContext(c) });
       if (!cc.ok) {
-        throw new Error(`agbcc could not compile candidate '${c.label}': ${firstLine(cc.stderr)}`);
+        throw new Error(`agbcc could not compile candidate '${c.label}': ${firstDiagnosticLine(cc.stderr)}`);
       }
       const score = await scoreObjectBytes(t.obj, cc.obj, name);
       // The PUBLICATION rule is imported for the same reason the ordering is: `withheldReason` is
@@ -231,7 +225,7 @@ export async function rankCandidatesInBrowser(
       results.push({ ...c, order, score });
     } catch (e) {
       lastErr = e;
-      dropped.push({ label: c.label, error: e instanceof Error ? firstLine(e.message) : String(e) });
+      dropped.push({ label: c.label, error: e instanceof Error ? firstDiagnosticLine(e.message) : String(e) });
     }
   }
   if (results.length === 0) {
