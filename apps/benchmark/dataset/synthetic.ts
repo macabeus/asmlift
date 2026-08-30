@@ -3464,7 +3464,7 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { dmascope: { params: ['s32'], returnsVoid: true } },
   },
   // TWO BASES IN ONE FUNCTION THAT WANT OPPOSITE HOMES: N REGION-LOCAL DEVICE BASES *AND* ONE
-  // FUNCTION-SCOPE BASE THAT OUTLIVES THEM ALL. The two families above each isolate one base and
+  // FUNCTION-SCOPE BASE THAT OUTLIVES THEM ALL. Two families each isolate one base and
   // one policy — `dmascope` (`/regionbase`) that a base spelled in N disjoint regions is N locals,
   // COUNT being the discriminator; `mixpoll` (`/livebase-block`) that one base bound at function
   // scope sits beside single-cell scalars that must stay inline, SELECTIVITY being the
@@ -3498,14 +3498,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // region reading has to become per-BASE first — a third degree of freedom neither lever has.
   // PREDICTION: when the pairing lands `dmapoll` goes 11 -> MATCH and both ablations break it back
   // to 11 and 12. Falsified by `pnpm bench run --tier synthetic --only dmapoll --serial` reading
-  // anything but MATCH on the commit that ships it. Everything else here is a compile or a ranked
-  // run, except the second prediction marked below.
+  // anything but MATCH on the commit that ships it. Every number in this block that is not marked
+  // PREDICTION is a compile or a ranked run.
   //
   // WHAT ASMLIFT DOES TODAY, AND WHAT EACH LEVER IS WORTH HERE — one ranked run of the row's own
   // target per cell. The instrument is a reversible source edit at the ONE site that produces the
-  // lever (core is browser-pure, so no env switch can live there): `without(gates, id)` /
-  // `ablateHeuristic` from `l3/gates.ts` for the two GATE cells, and the lever's own thunk or
-  // admission row for the other two.
+  // lever (core is browser-pure, so no env switch can live there): the lever's own thunk in
+  // `rank.ts` for `/regionbase`, its admission row for `/livebase-block`, `ablateHeuristic` from
+  // `l3/gates.ts` for `region-single-use`, and a `rejects: () => false` stub for `single-cell`.
   //
   //                                   dmapoll                          dmaflat
   //     baseline                 56 cands, livebase-block/volatile 11   56, 0 MATCH
@@ -3514,13 +3514,18 @@ export const SYNTHETIC: SynthSpec[] = [
   //     its `single-cell` gate   32 cands, 12                          32, 10
   //     `region-single-use` off  56 cands, 11                          56, 0 MATCH
   //
-  // `single-cell` and the whole `/livebase-block` admission give identical numbers because
-  // ablating the gate makes the admission dedup into `/livebase`'s own table (`basecse.ts:290`).
+  // `single-cell` and the whole `/livebase-block` admission give identical numbers, and the site
+  // that makes them identical is the SHADOW at `rank.ts:1293`, not the gate table: neutering the
+  // one gate leaves `LIVEBASE_BLOCK_GATES` binding exactly what `LIVEBASE_GATES` binds, so the
+  // admission is refused before `hoistBaseLocals` runs. Watched with the ablation applied, all 52
+  // of `/livebase-block`'s admission contexts on `dmapoll` report `shadowed=true` and it emits 0
+  // labels, against 0 shadowed / 24 labels at baseline.
+  //
   // The pair's live gate TODAY is the `/livebase-block` half, and it is the MATCH FLIP on
   // `dmaflat` (0 -> 10) rather than the single point on `dmapoll`. The `/regionbase` half is inert
   // on both rows until the pairing exists — nothing here can fail a `bench regression` on it.
   //
-  // THE TWO-SIDED ABLATION THIS FAMILY CANNOT HAVE IS A THEOREM, NOT AN EXCUSE. Ablation only
+  // THE TWO-SIDED ABLATION THIS FAMILY CANNOT HAVE IS A THEOREM. Ablation only
   // REMOVES candidates; with no candidate carrying both labels the winner carries at most one, so
   // ablating the OTHER lever leaves the winner in the fan and `best` cannot move. On `dmapoll`
   // both levers genuinely reach — the fan loses 8 candidates one way and 24 the other — and `best`
@@ -3555,13 +3560,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // `dmaflat` is NOT evidence a pairing did not over-fire. The row is live against a pairing
   // implemented as a REWRITE, or one that wins an equal-score tie, and against nothing else.
   //
-  // NEIGHBOURS THAT READ LIKE THIS AND ARE NOT. `armhomes` (MATCH) homes a MASK and two loop
-  // invariants, one home per arm — per-region placement with exactly ONE decision to get right,
-  // where this family's point is that two bases in one body want OPPOSITE answers to it.
-  // `sizebound` (8) has two bases but one axis, WHERE one init goes, not two policies. `dmascope1`
-  // (MATCH) is the count-of-one control for the first lever, `onepoll` (MATCH) the
-  // selectivity-of-one control for the second. `rank.ts:378` gives `/livebase` and
-  // `/livebase-block` the SAME `placement: 'head'`: "block" is an eligibility gate, not a scope.
+  // NEIGHBOURS THAT READ LIKE THIS AND ARE NOT. `armhomes` (MATCH) is per-region placement with
+  // exactly ONE decision to get right; `sizebound` (8) has two bases but one axis, WHERE one init
+  // goes, not two policies. And `rank.ts:378` gives `/livebase` and `/livebase-block` the SAME
+  // `placement: 'head'`: "block" is an eligibility gate, not a scope.
   //
   // NO EXISTING ROW COVERS THIS, censused at the SITES rather than off the labels. Building every
   // agbcc synthetic row's target and enumerating it: 212 rows enumerate, 8 decline on unrelated
@@ -3570,7 +3572,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // the two failure modes counted apart. Fans carrying BOTH LABELS: 2, these two
   // rows. Rows where BOTH ADMISSIONS BIND: 4 — these two plus `dmascope` and `dmascope2`, where
   // `/livebase-block` is shadowed. So no existing row can change outcome when the pairing changes
-  // TODAY. PREDICTION, the second and last one here: `dmascope`/`dmascope2` are where a product
+  // TODAY. PREDICTION: `dmascope`/`dmascope2` are where a product
   // starts enumerating the moment one exists, so re-run them with the pairing and stop reading
   // either as a lever-clean control after; falsified by their fans carrying no candidate with both
   // labels on the commit that ships it. On the `/regionbase` side the census is already a reach
@@ -3601,20 +3603,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // own basin ceiling there is 417 against the 386 winner, so a composition must clear 417 before
   // it can tie. A price measured in one spelling basin does not cross into another.
   //
-  // agbcc only, for the `dmascope` family's own reason and no new one: every claim above is a
-  // pair of spellings compiled with THIS compiler and scored against THIS compiler's object, and
-  // whether ido7.1, gcc2.7.2kmc and mwcc_242_81 allocate N short-lived base pseudos differently
-  // from one long-lived one was never measured (mwcc_242_81 also stays off per the `hipress`
-  // hazard policy — a candidate compile has no timeout). Neither row carries a busy-wait poll, so
-  // the branch-likely lift link the `mixpoll`/`onepoll` block cites is NOT this family's reason.
+  // agbcc only, for the `dmascope` family's own reason and no new one: whether ido7.1,
+  // gcc2.7.2kmc and mwcc_242_81 allocate N short-lived base pseudos differently from one
+  // long-lived one was never measured (mwcc_242_81 also stays off per the `hipress` hazard policy
+  // — a candidate compile has no timeout). Neither row carries a busy-wait poll, so the
+  // branch-likely lift link the `mixpoll`/`onepoll` block cites is NOT this family's reason.
   //
-  // m2c NONCOMPILES both on the identical `ctx` and `proto`, for the reason every raw-address row
-  // in this file records rather than for anything in this family: it types the address constant as
-  // `void *` and reads members off it (`(void *)0x040000D4->unk0 = ...`, `invalid type argument of
-  // '->'`, 1 compile error, 5 markers). It REACHES the construct in both — loop, both arms, all
-  // three IWRAM cells — and homes NO base at all. The sharpest fact for the pair: its output for
-  // `dmapoll` and for `dmaflat` is the SAME text apart from the function name, so the spelling
-  // distinction costing agbcc 13 bytes of divergence is one m2c does not represent.
+  // m2c NONCOMPILES both on the identical `ctx` and `proto`, for the raw-address reason every such
+  // row in this file records and not for anything in this family: `(void *)0x040000D4->unk0 = ...`
+  // , `invalid type argument of '->'`, 1 compile error, 5 markers. It REACHES the construct in
+  // both and homes NO base at all — and its output for `dmapoll` and for `dmaflat` is the SAME
+  // text apart from the function name, so the distinction costing agbcc 13 bytes is one it does
+  // not represent.
   {
     sym: 'dmapoll',
     src:
