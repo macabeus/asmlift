@@ -4,7 +4,11 @@
 //   • an INDETERMINATE phase emits no `aria-valuenow` (that omission is the ARIA spelling of
 //     indeterminate) and no fabricated denominator anywhere in the markup;
 //   • a determinate bar's `aria-valuenow` is the EXACT count while its fill width never reads 100 %,
-//     because sorting and the structured clone of a six-figure array still follow the last tick.
+//     because sorting and the structured clone of a six-figure array still follow the last tick;
+//   • the widget has an accessible NAME and the visible sentence is not inside it (`progressbar` is
+//     a children-presentational role — anything inside it is pruned from the a11y tree);
+//   • the indeterminate stripe only exists under `motion-safe`, because parked it is pixel-identical
+//     to a determinate 33 % bar.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
 
@@ -21,6 +25,32 @@ describe('RankBadge progress', () => {
     expect(out).not.toContain('aria-valuemax');
     expect(out).toContain('enumerating candidate spellings');
     expect(out).toContain('aria-valuetext="enumerating candidate spellings…"');
+  });
+
+  test('the progressbar has an accessible NAME, and the visible sentence sits OUTSIDE it', () => {
+    // `progressbar` is children-presentational: a label inside it is pruned from the accessibility
+    // tree, leaving an unnamed widget carrying only aria-valuetext. The sentence is a sibling.
+    const out = html({ status: 'loading', phase: 'enumerating' });
+    expect(out).toContain('aria-label="candidate ranking"');
+    expect(out.indexOf('<span>enumerating candidate spellings…</span>')).toBeGreaterThanOrEqual(0);
+    expect(out.indexOf('<span>enumerating')).toBeLessThan(out.indexOf('role="progressbar"'));
+  });
+
+  test('the indeterminate stripe TRAVELS or is not rendered — never a parked third of a track', () => {
+    // animate-pulse fades opacity only, so `w-1/3 animate-pulse` was pixel-identical to a
+    // determinate 33 % fill for the whole 62 s enumeration. It travels under motion-safe, and under
+    // prefers-reduced-motion the track is simply empty.
+    const out = html({ status: 'loading', phase: 'enumerating' });
+    expect(out).toContain('motion-safe:animate-rank-indeterminate');
+    expect(out).toContain('hidden'); // …and `motion-safe:block` is what un-hides it
+    expect(out).toContain('motion-safe:block');
+    expect(out).not.toContain('animate-pulse');
+  });
+
+  test("the determinate width transition is motion-gated too — this is the app's only animation", () => {
+    const out = html({ status: 'loading', phase: 'scoring', done: 5, total: 9 });
+    expect(out).toContain('motion-safe:transition-[width]');
+    expect(out).not.toMatch(/(?<!motion-safe:)transition-\[width\]/); // never ungated
   });
 
   test('scoring with a real total is determinate: exact aria counts, fill below 100%', () => {

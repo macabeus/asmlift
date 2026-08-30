@@ -21,6 +21,25 @@ body {
   background-attachment: fixed;
 }
 
+/* The ranking bar's INDETERMINATE stripe (RankPanel.tsx). A stripe that TRAVELS is what reads as
+   "an unknown amount of work"; a parked one reads as a percentage — Tailwind's `animate-pulse`
+   animates opacity only, so the previous spelling was pixel-identical to a determinate 33 % bar for
+   the whole of a 62 s enumeration. Applied through the `motion-safe:` variant ONLY: under
+   prefers-reduced-motion the element is not rendered at all rather than parked, so the reduced
+   state is an empty track, never a fill implying a fraction. */
+@theme {
+  --animate-rank-indeterminate: rank-indeterminate 1.4s ease-in-out infinite;
+
+  @keyframes rank-indeterminate {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
+}
+
 /* Slim slate scrollbars, app-wide (the family baseline) + the .scroll-slim opt-in. */
 ::-webkit-scrollbar,
 .scroll-slim::-webkit-scrollbar {
