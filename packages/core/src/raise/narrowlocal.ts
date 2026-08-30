@@ -314,6 +314,10 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
 /** Type each block parameter at the width its sole reading extension proves, and drop that
  *  extension. Returns the number of carriers narrowed. */
 export function narrowBlockLocals(fn: Fn, gates: readonly Gate<NarrowLocalCandidate>[] = NARROW_LOCAL_GATES): number {
+  // DEBUG-INSTRUMENTATION (temporary): price `edge-extends` by ablation.
+  if (process.env.ASMLIFT_ABLATE_EDGE_EXTENDS) {
+    gates = gates.filter((g) => g.id !== 'edge-extends');
+  }
   let narrowed = 0;
   // Re-enumerated after each rewrite: narrowing one carrier deletes an op and re-points its
   // readers, which is exactly the evidence the edge rules of a LATER carrier read. `done` is the
@@ -323,6 +327,18 @@ export function narrowBlockLocals(fn: Fn, gates: readonly Gate<NarrowLocalCandid
   for (let again = true; again;) {
     again = false;
     for (const { c, ext } of narrowLocalCandidates(fn)) {
+      // DEBUG-INSTRUMENTATION (temporary)
+      if (process.env.ASMLIFT_DEBUG_NARROW) {
+        const rej = firstRejection(gates, c);
+        process.stderr.write(
+          `[narrowlocal] fn=${fn.name} pos=${fn.blocks.findIndex((b) => b.params.includes(c.param))}:${fn.blocks.flatMap((b) => b.params).indexOf(c.param)} width=${c.width} ` +
+            `entry=${c.isEntryParam} paramType=${c.param.type.kind} reads=${c.operandReads} ` +
+            `readerIsExt=${c.readerIsExtension} extOp=${ext.opcode} forwarded=${c.forwarded} ` +
+            `edgeObservedNarrow=${c.edgeArgsObservedNarrow} edgeArgsExtend=${c.edgeArgsExtend} ` +
+            `writeBackTrunc=${c.writeBackTruncation} done=${done.has(c.param)} ` +
+            `=> ${rej === null ? 'ACCEPT' : 'REJECT:' + rej}\n`,
+        );
+      }
       if (done.has(c.param) || firstRejection(gates, c) !== null) {
         continue;
       }
