@@ -56,12 +56,21 @@ function project(): { cwd: string; store: string; setK: (v: number) => void } {
  *
  *  `FLAGS` is spelled as arguments to `:` — the shell's no-op builtin — so the flags are real
  *  TOKENS of the template (which is all the namespace ever sees) without the offline rig needing
- *  a compiler that understands them. The header itself is reached through a GLOB, deliberately:
- *  `inc/k.h` is not a token any scan can find, so the ONLY way into the namespace is the
- *  directory operand. And it is pulled in only for a candidate that ASKS, so the fixed stamp
- *  probe TU compiles to bytes independent of `k.h` — the probe backstop structurally cannot see
- *  this input. */
+ *  a compiler that understands them.
+ *
+ *  Two properties make this the real hole rather than an easy one. The header's path is BUILT BY
+ *  THE SHELL (`H=in; cat ${H}c/k.h`), so neither `inc` nor `inc/k.h` is a token any scan can
+ *  find and the flag operand is the ONLY route into the namespace — take the flag away and the
+ *  measurement is gone, which the control below pins. And it is pulled in only for a candidate
+ *  that ASKS, so the fixed stamp probe TU compiles to bytes independent of `k.h`: the probe
+ *  backstop structurally cannot see this input either. */
 const templateWith = (flags: string): string =>
+  `: ${flags}; cat "{{inputPath}}" > "{{outputPath}}"; ` +
+  'if grep -q USES_K "{{inputPath}}"; then H=in; cat ${H}c/k.h >> "{{outputPath}}"; fi';
+
+/** The same, reaching the header through a GLOB instead — `inc/*.h` is path-LIKE and is not a
+ *  path, so it too was invisible until the glob's directory was measured. */
+const templateGlob = (flags: string): string =>
   `: ${flags}; cat "{{inputPath}}" > "{{outputPath}}"; ` +
   'if grep -q USES_K "{{inputPath}}"; then cat inc/*.h >> "{{outputPath}}"; fi';
 
@@ -165,6 +174,20 @@ describe('a directory a compile flag names is MEASURED, whatever the operand loo
     expect(r.first).toContain('#define K 3');
     expect(r.second).toContain('#define K 999');
     expect(r.namespaces).toBe(2);
+  });
+
+  test('THE CONTROL: with no flag naming it, the same directory is NOT measured', async () => {
+    // The rig's header path is built by the shell, so take the flag away and nothing in the
+    // template names `inc` — no token, no glob, and the probe TU never asks for it. The stored
+    // object is then served after the directory moved, which is what every case above is
+    // measuring the ABSENCE of. It is also the residual, stated as a test rather than a
+    // sentence: a directory a command reaches through a path IT COMPUTES is beyond this
+    // measurement, and `ASMLIFT_CANDCACHE=verify` is what catches that shape.
+    const p = project();
+    const r = await acrossAnEdit(p, templateWith('-Wall -O2'));
+    expect(r.first).toContain('#define K 3');
+    expect(r.second, 'nothing names the directory, so the namespace cannot move').toContain('#define K 3');
+    expect(r.namespaces, 'one namespace: the store answered from it').toBe(1);
   });
 
   test('the namespace is keyed by CONTENT under BASENAME, never by absolute path', async () => {
@@ -300,7 +323,7 @@ describe('a directory the template reaches through a GLOB is measured as well', 
   test('editing a file the glob would expand to re-namespaces', async () => {
     const p = project();
     // No flag names `inc` anywhere: the glob inside the command is the only mention.
-    const r = await acrossAnEdit(p, templateWith('-Wall'));
+    const r = await acrossAnEdit(p, templateGlob('-Wall'));
     expect(r.first).toContain('#define K 3');
     expect(r.second, 'the glob expands into the directory; its contents moved').toContain('#define K 999');
     expect(r.namespaces).toBe(2);
