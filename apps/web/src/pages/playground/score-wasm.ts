@@ -67,7 +67,6 @@ export type RankProgressMessage = { kind: 'progress'; reqId: number } & RankProg
 /** Everything the worker can post. Read on the explicit `kind` discriminant — never by sniffing for
  *  a property, which is how a fourth shape later gets silently mis-routed. */
 export type RankMessage = RankProgressMessage | RankResponse;
-export type { RankPhase, RankProgress } from './rank-progress';
 
 export interface DiffBreakdown {
   insert: number;

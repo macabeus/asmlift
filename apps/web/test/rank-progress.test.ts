@@ -68,27 +68,34 @@ describe('progressBar', () => {
     for (const phase of ['queued', 'assembling', 'enumerating', 'ranking'] as const) {
       const bar = progressBar({ phase });
       expect(bar.determinate).toBe(false);
-      expect(bar.valueNow).toBeUndefined();
-      expect(bar.valueMax).toBeUndefined();
+      expect('valueNow' in bar).toBe(false); // the ARIA spelling of indeterminate is OMISSION
+      expect('valueMax' in bar).toBe(false);
       expect(bar.label).not.toMatch(/\d/); // no count, no "0%", no invented denominator
     }
   });
 
-  test('scoring before the total exists is still indeterminate', () => {
-    expect(progressBar({ phase: 'scoring' }).determinate).toBe(false);
-  });
-
   test('a determinate bar reports the exact counts and never fills to 100%', () => {
     const bar = progressBar({ phase: 'scoring', done: 117760, total: 117760 });
-    expect(bar.determinate).toBe(true);
+    if (!bar.determinate) {
+      throw new Error('a scoring tick with a real total must be determinate');
+    }
     expect(bar.valueNow).toBe(117760); // aria-valuenow stays EXACT
     expect(bar.valueMax).toBe(117760);
     expect(bar.pct).toBeLessThanOrEqual(99); // the FILL never reads "finished" while work follows
     expect(bar.label).toBe('scoring 117,760 / 117,760 candidates'); // grouped, not 117760
   });
 
-  test('a zero total cannot divide by zero', () => {
-    expect(progressBar({ phase: 'scoring', done: 0, total: 0 }).pct).toBe(0);
+  test('a zero total is indeterminate — no division by zero, and no equal ARIA bounds', () => {
+    // ARIA requires aria-valuemax > aria-valuemin; `0 / 0` on both would leave the AT-computed
+    // percentage undefined. The enumeration that produces it goes on to throw `no scorable
+    // candidate`, so this is a transient state — but it is a REACHABLE one.
+    const bar = progressBar({ phase: 'scoring', done: 0, total: 0 });
+    expect(bar.determinate).toBe(false);
+    expect('pct' in bar).toBe(false); // no "0 % of an unknown denominator" on the indeterminate arm
+  });
+
+  test('the indeterminate arm carries no pct at all — a number nobody may read', () => {
+    expect('pct' in progressBar({ phase: 'enumerating' })).toBe(false);
   });
 });
 
@@ -101,9 +108,12 @@ describe('progressLabel', () => {
   });
 
   test('every phase has a sentence — the badge is never empty', () => {
-    for (const phase of ['queued', 'assembling', 'enumerating', 'scoring', 'ranking'] as const) {
+    for (const phase of ['queued', 'assembling', 'enumerating', 'ranking'] as const) {
       expect(progressLabel({ phase }).length).toBeGreaterThan(0);
     }
+    // `scoring` is the one phase that CANNOT be spelled without counts — the union says so, and a
+    // count-less scoring tick is now a compile error rather than a defensive branch.
+    expect(progressLabel({ phase: 'scoring', done: 1, total: 2 })).toBe('scoring 1 / 2 candidates');
   });
 });
 

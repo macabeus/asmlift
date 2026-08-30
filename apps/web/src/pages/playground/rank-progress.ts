@@ -9,7 +9,7 @@
 // about the same run.
 //
 // THE HONESTY RULES THIS FILE ENCODES:
-//  • The total does not exist until `enumerateCandidates` has returned, so three of the four
+//  • The total does not exist until `enumerateCandidates` has returned, so four of the five
 //    phases are INDETERMINATE and carry no number at all. No estimate, no "0 %" of an unknown
 //    denominator — a fabricated total is a lie the user cannot check.
 //  • A determinate bar is rendered ONLY while scoring, and the scoring phase ends by moving to
@@ -32,12 +32,14 @@
  *  subdivided, so it gets a name and no number. */
 export type RankPhase = 'queued' | 'assembling' | 'enumerating' | 'scoring' | 'ranking';
 
-/** One progress observation. `done`/`total` exist only once the candidate array does. */
-export interface RankProgress {
-  phase: RankPhase;
-  done?: number;
-  total?: number;
-}
+/** One progress observation, DISCRIMINATED on the phase: `done`/`total` exist if and only if the
+ *  phase is `scoring`, because the candidate array is what mints them. As two optional fields on
+ *  one shape the type admitted four states no emitter can produce (`enumerating` with a count,
+ *  `scoring` with only a `done`, …), each of which then needed a defensive branch in the view and
+ *  a test asserting an unreachable state; as a union there is nothing to defend against. */
+export type RankProgress =
+  | { phase: Exclude<RankPhase, 'scoring'>; done?: undefined; total?: undefined }
+  | { phase: 'scoring'; done: number; total: number };
 
 const PHASE_TEXT: Record<RankPhase, string> = {
   queued: 'waiting for the ranking worker…',
@@ -50,30 +52,37 @@ const PHASE_TEXT: Record<RankPhase, string> = {
 /** The one sentence both the badge and the Pipeline card show, so they cannot disagree about what
  *  the run is doing. Determinate only when a REAL total is in hand. */
 export function progressLabel(p: RankProgress): string {
-  if (p.phase === 'scoring' && p.total !== undefined && p.done !== undefined) {
+  if (p.phase === 'scoring') {
     return `scoring ${p.done.toLocaleString()} / ${p.total.toLocaleString()} candidates`;
   }
   return PHASE_TEXT[p.phase];
 }
 
-export interface RankProgressBar {
-  /** true ⇔ a real total exists ⇔ the bar may show a fill and an `aria-valuenow`. */
-  determinate: boolean;
-  /** the EXACT count for `aria-valuenow`; omitted while indeterminate (that omission is the ARIA
-   *  spelling of "indeterminate" — an invented 0 would not be). */
-  valueNow?: number;
-  valueMax?: number;
-  /** the fill WIDTH in percent, clamped to 99 so a full bar never sits over unfinished work. */
-  pct: number;
-  label: string;
-}
+/** The bar's props, also discriminated: `pct`/`valueNow`/`valueMax` exist ONLY on the determinate
+ *  arm. They used to be optional fields the indeterminate arm filled with `pct: 0` — a number no
+ *  caller read, and the exact "0 % of an unknown denominator" this module's header forbids. */
+export type RankProgressBar =
+  | { determinate: false; label: string }
+  | {
+      determinate: true;
+      /** the EXACT count for `aria-valuenow` (the fill is clamped, this is not). */
+      valueNow: number;
+      valueMax: number;
+      /** the fill WIDTH in percent, clamped to 99 so a full bar never sits over unfinished work. */
+      pct: number;
+      label: string;
+    };
 
 export function progressBar(p: RankProgress): RankProgressBar {
   const label = progressLabel(p);
-  if (p.phase !== 'scoring' || p.total === undefined || p.done === undefined) {
-    return { determinate: false, pct: 0, label };
+  // A ZERO total is a real emission — an enumeration that produced nothing, which then throws
+  // `no scorable candidate` — and it is NOT determinate: ARIA requires `aria-valuemax` to exceed
+  // `aria-valuemin`, so equal bounds leave the AT-computed percentage undefined. 0/0 has no
+  // percentage on either channel; the label still carries the true counts.
+  if (p.phase !== 'scoring' || p.total === 0) {
+    return { determinate: false, label };
   }
-  const pct = p.total > 0 ? Math.min(99, Math.round((100 * p.done) / p.total)) : 0;
+  const pct = Math.min(99, Math.round((100 * p.done) / p.total));
   return { determinate: true, valueNow: p.done, valueMax: p.total, pct, label };
 }
 

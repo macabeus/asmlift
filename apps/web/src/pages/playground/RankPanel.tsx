@@ -49,8 +49,8 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
           role="progressbar"
           aria-valuetext={bar.label}
           aria-valuemin={bar.determinate ? 0 : undefined}
-          aria-valuemax={bar.valueMax}
-          aria-valuenow={bar.valueNow}
+          aria-valuemax={bar.determinate ? bar.valueMax : undefined}
+          aria-valuenow={bar.determinate ? bar.valueNow : undefined}
         >
           <span>{bar.label}</span>
           <div className="mt-1 h-1 overflow-hidden rounded bg-slate-800">
