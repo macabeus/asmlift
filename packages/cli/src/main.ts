@@ -31,12 +31,29 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
+import { MISMATCH_LOG, cacheMismatches, cacheMode, cacheStats } from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { renderDeclarations } from './declare';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
+
+// The `[candcache]` line, and — when a stored answer disagreed with a fresh compile — the loud
+// second line that turns a verify run into a FAILING one. A counter that only prints cannot stop
+// anything: a verify pass writes one line among sixteen shard logs, so the mismatch has to reach
+// the exit status.
+const candCacheLine = (): string => {
+  if (cacheMode() === 'off') {
+    return '';
+  }
+  const line = `asmlift: [candcache] ${cacheMode()} ${JSON.stringify(cacheStats())}\n`;
+  return cacheMismatches() === 0
+    ? line
+    : line +
+        `asmlift: [candcache] ${cacheMismatches()} STORED ANSWER(S) DISAGREED WITH A FRESH COMPILE — ` +
+        `the store is serving objects this toolchain no longer produces. See ${MISMATCH_LOG}\n`;
+};
 
 export { detectName };
 
@@ -386,7 +403,7 @@ export async function runCli(
     }
     let compilers: CommandCompilers;
     try {
-      compilers = compilersFromCommand(toolCfg.compiler, { cwd: configDir });
+      compilers = compilersFromCommand(toolCfg.compiler, { cwd: configDir, cacheInputs: toolCfg.cacheInputs });
     } catch (e) {
       return usage(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
     }
@@ -475,11 +492,21 @@ export async function runCli(
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
         `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {
-        code: ranked.best.score.match ? 0 : 1,
+        code: ranked.best.score.match && cacheMismatches() === 0 ? 0 : 1,
         stdout: ranked.best.source,
         // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
         // tail stay adjacent.
-        stderr: targetTrace + warn + table + drops + held + declared + (clock?.report() ?? '') + summary + protoNote,
+        stderr:
+          targetTrace +
+          warn +
+          table +
+          drops +
+          held +
+          declared +
+          (clock?.report() ?? '') +
+          summary +
+          protoNote +
+          candCacheLine(),
       };
     } catch (e) {
       const kind = isDecline(e) ? 'declined' : 'internal error';

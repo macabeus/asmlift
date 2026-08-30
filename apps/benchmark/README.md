@@ -191,6 +191,16 @@ key derivation is in `src/cache.ts`; the m2c side fails closed on a dirty m2c ch
 `ASMLIFT_DOCKER_POOL=0` disables the persistent container pool (the docker-cost A/B switch, see
 `packages/toolchains/src/compile.ts`).
 
+A SECOND cache sits a level below that one and is **off by default**: `ASMLIFT_CANDCACHE=1` serves
+the candidate objects a previous run of the same toolchain already compiled
+(`packages/cli/src/candcache.ts`). It changes no result — the same rows, the same scores — and on a
+compile-dominated run it is the difference between minutes and tens of minutes, so it is worth
+turning on for the base-run/lever-run pair inside one round and for the gate ladder's repeats. It
+is not a historical archive: hit rate decays as the axes accumulate. `ASMLIFT_CANDCACHE=verify`
+compiles everything anyway and audits the store against it, failing the run on any disagreement,
+and `ASMLIFT_BENCH_CACHE=0` bypasses this cache too. The flag table, the cold-vs-warm rule and what
+a project must declare before the cache runs on its own `decomp.yaml` are in `docs/ranked-repro.md`.
+
 ### Environment
 
 Harness path defaults live in `src/config.ts`, following the sibling-checkout WORKSPACE

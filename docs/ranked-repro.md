@@ -53,6 +53,67 @@ every tracked-or-untracked file under `packages/` — so re-editing a file the t
 carrying dirty is staleness like any other. That is the state a perf round runs in, and a check that
 stopped at the list of dirty paths would have called such a bundle current.
 
+## The cache state is part of the number
+
+asmlift can serve a candidate object a previous run already compiled, instead of compiling it
+again (`packages/cli/src/candcache.ts`). **It is OFF unless `ASMLIFT_CANDCACHE` says otherwise**,
+and it changes a run's WALL by several times while changing nothing a run computes. So every wall
+quoted from now on has to say which state it was measured in, in the same breath as the command:
+
+| `ASMLIFT_CANDCACHE`              | what the run does                                                      | when to use it                                                              |
+| -------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| unset, `0`, `off`, `false`, `no` | compiles every candidate; touches no disk                              | **the default, and what a published wall should be measured with**          |
+| `1` / `on` / `true` / `yes`      | serves any candidate this toolchain already compiled                   | the base-run/lever-run pair inside one round, and the gate ladder's repeats |
+| `verify` (any capitalisation)    | compiles every candidate AND audits the store against it, loudly       | after any change to the cache, or when a stored answer is suspect           |
+| anything else                    | **OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr** | never on purpose — the parse is closed so a typo cannot silently SERVE      |
+
+`ASMLIFT_BENCH_CACHE=0` turns this cache off too: "bypass the benchmark's caches" has to mean all
+of them, or bisecting a suspect row still reads candidate objects off disk.
+
+- **COLD or WARM is a property of the STORE, not of the flag.** The first `ASMLIFT_CANDCACHE=1`
+  run after a toolchain change, a flag change, or a change to the harness code that shapes the
+  compiler's input is COLD by construction — the namespace moved and nothing in the store answers
+  to it. Say `cold` or `warm`, not just `on`. The store lives at `ASMLIFT_CANDCACHE_DIR`
+  (default `$TMPDIR/asmlift-candcache`); deleting it makes the next run cold.
+- **Never compare a warm wall against a cold one and call the difference a code change.** This is
+  the same rule as "never compare numbers made with different flag sets", and it is easier to
+  break because nothing on the command line says which state you were in. The run itself does:
+  with the cache on, an `asmlift: [candcache]` line prints next to `[ranked]` with the mode and
+  the hit/miss/stored counts. **Paste it whenever you paste a wall.**
+- **The cache is a throughput lever and never a result lever.** The `[score]` lines, the winner
+  and the stdout are identical in all three states by construction — a cache miss is
+  indistinguishable in RESULT from no cache at all. If a `[score]` line moves between a cold run
+  and a warm one, the cache is wrong; run the `diff` below, then re-run with `ASMLIFT_CANDCACHE=0`
+  and report it.
+- **On a PROJECT's own `decomp.yaml` command, the cache does nothing unless the project asks.**
+  It stays off until `tools.asmlift.cacheInputs` lists the files and directories that command
+  reads (an empty list is a declaration too — "nothing my template does not already name"). The
+  declaration is the contract: a namespace can only measure inputs it can name, and an input
+  reached through a directory is nameable only there. The cache also refuses, out loud, when the
+  compile is not a pure function of its input — `[candcache] REFUSED label=command
+reason=object-is-not-a-pure-function-of-its-input` is what `ido7.1` gets, because it writes the
+  absolute path of its input `.c` into the object.
+- **An INCOMPLETE declaration is a silent stale object, and nothing verifies it for you.** The
+  declaration is a promise, not a proof: `cacheInputs: []` on a template that reaches a file
+  through a script serves the stale object for that file, measured. List every file and directory
+  the command reads, including anything a wrapper script of yours opens. The one shape asmlift
+  checks by itself is the SHAPE of the declaration — a scalar where a list was meant (`cacheInputs:
+gen`) is a loud load error, because a string iterates per character, and three `MISSING`
+  characters hash exactly like three declared files that are not there — the cache on, the
+  declaration measured, and nothing of the project in the namespace. If in doubt, leave the key out: no key, no cache.
+- **The store is bounded, but only between runs.** `ASMLIFT_CANDCACHE_MAX_MB` (default 4096)
+  counts the distinct object bytes plus one allocation block per stored key — 77% of a warm store
+  is negative entries, which weigh nothing logically and cost a block each. It is enforced ONCE per
+  process, at the first namespace resolution and before any candidate compiles: whole namespaces no
+  live process holds go first, then the oldest-written keys of the namespace this run is about to
+  use. A namespace another process holds is never touched, so under `pnpm bench run`'s 8–16 shards
+  the second shard onward prunes nothing. `rm -rf "$TMPDIR/asmlift-candcache"` is the reliable
+  reset, and it is also how you make the next run cold on purpose.
+- **`verify` audits the OUTCOME, not only the bytes.** A stored object whose TU no longer compiles,
+  and a stored rejection whose TU now does, are both mismatches — the second is the one that
+  silently drops a spelling from a row's fan, and it is 77% of what a warm store serves. Any
+  mismatch fails the run (nonzero exit) and is written to `MISMATCHES.log` in the store.
+
 ## The flags are part of the number
 
 - **`--proto`, whenever a callee's arity matters.** A callee still written in assembly carries no

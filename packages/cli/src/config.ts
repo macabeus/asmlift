@@ -21,6 +21,11 @@ export interface AsmliftToolConfig {
   compiler?: string;
   /** host objdump binary for object-file input (overrides the built-in per-target choice) */
   objdump?: string;
+  /** every file and directory the `compiler` command reads, relative to this decomp.yaml.
+   *  DECLARING them is what opts this project into the cross-run candidate-object cache: the
+   *  cache's namespace can only measure inputs it can name, and an input reached through a
+   *  directory (`-I ./inc`) is nameable only here. Absent: no candidate caching, ever. */
+  cacheInputs?: string[];
   /** the project's built ELF (relative to this decomp.yaml) — the address→symbol source:
    *  names from `.symtab`, declaration shapes from the linked-in DWARF types-sidecar when
    *  present. Absent ⇒ no symbol map (today's behavior). */
@@ -82,7 +87,38 @@ function readConfig(path: string): LoadedConfig {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`cannot parse ${path}: expected a YAML mapping at the top level`);
   }
-  return { path, config: parsed as DecompConfig };
+  const config = parsed as DecompConfig;
+  validateCacheInputs(path, config);
+  return { path, config };
+}
+
+/**
+ * `tools.asmlift.cacheInputs` is the ONE field in this file that is a soundness contract rather
+ * than a preference, so it is validated at the seam and not only in the type: `parsed as
+ * DecompConfig` is a compile-time claim about a file a project wrote.
+ *
+ * MEASURED: `cacheInputs: gen` (a YAML scalar where a list was meant) reaches
+ * `compile-command.ts`, which iterates the declaration — a string iterates PER CHARACTER, so
+ * `"gen"` hashed as three MISSING entries, the digest was identical to `["g","e","n"]`, the cache
+ * turned ON having measured nothing the project declared, and editing the declared input served a
+ * stale object with no diagnostic anywhere. A one-character YAML mistake re-armed the hole the
+ * declaration exists to close, so this throws and names the field.
+ */
+function validateCacheInputs(path: string, config: DecompConfig): void {
+  const declared = config.tools?.asmlift?.cacheInputs;
+  if (declared === undefined) {
+    return;
+  }
+  const bad =
+    !Array.isArray(declared) || declared.some((d) => typeof d !== 'string' || d.trim() === '') ? declared : undefined;
+  if (bad !== undefined) {
+    throw new Error(
+      `${path}: tools.asmlift.cacheInputs must be a list of non-empty paths (got ${JSON.stringify(bad)}). ` +
+        `It is the candidate-object cache's contract — every file and directory the compile command reads, ` +
+        `relative to this decomp.yaml. An empty list ([]) is a valid declaration; omitting the key turns the ` +
+        `cache off for this project.`,
+    );
+  }
 }
 
 // decomp_settings platform → asmlift target keys. A platform naming SEVERAL compilers needs

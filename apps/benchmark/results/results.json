@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-30T17:35:13.881Z",
+    "generatedAt": "2026-08-30T18:39:03.533Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "13536c2b1359ad32efef64d4fd8c922bf66629a7",
+      "commit": "38af8a22e7250461c19385de1303e7abcec260e2",
       "dirty": false
     },
     "m2c": {
@@ -74230,8 +74230,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:5: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:5: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -74393,8 +74393,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 6: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 8: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 6: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 8: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,

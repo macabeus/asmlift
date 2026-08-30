@@ -6,7 +6,17 @@
 // Delete the directory to drop the cache; ASMLIFT_BENCH_CACHE=0 bypasses it.
 // Values are written tmp-then-rename so a concurrent reader never sees a torn file.
 //
-// Deliberately NOT cached: asmlift's own decompile/score work — that is the thing under test.
+// Deliberately NOT cached HERE: asmlift's own decompile/score work — that is the thing under test.
+//
+// There is a SECOND cache in the harness, at a different level and with a different keying
+// philosophy: packages/cli/src/candcache.ts, the cross-run candidate-OBJECT cache. It caches the
+// compiler's output for one candidate TU, which is an input to every objdiff score — so the
+// sentence above is only true of asmlift's own work, not of the compiles underneath it. The
+// boundary: this file caches DATA-keyed results of harness computations with a manual `v` lever
+// for the code inside them; candcache caches one toolchain's object bytes under a namespace that
+// MEASURES the toolchain, and it is off unless ASMLIFT_CANDCACHE is set. `ASMLIFT_BENCH_CACHE=0`
+// bypasses both (candcache.ts reads it), because "bypass the benchmark's caches" has to mean all
+// of them or bisecting a suspect row still reads candidate objects off disk.
 import type { DecompilerResult } from '@asmlift/bench-schema';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
