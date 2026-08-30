@@ -311,11 +311,10 @@ const MERGE_DIAMOND_EMPTY_ARM = `fn f {
 
 /** A ROTATED LOOP HEADER, and it IS a two-predecessor join whose predecessors do not branch to each
  *  other — the preheader and the latch are distinct blocks. `gcc/jump.c` never considers a back-edge
- *  merge, so nothing about a declaration follows from this diamond surviving; the head test is what
- *  refuses it (the preheader's sole predecessor is not the latch's). NARROW_COUNTER is NOT a witness
- *  for this: it is a SELF-loop, where the header's own latch is the header, and the old
- *  "neither predecessor branches to the other" clause refused it for a reason that does not
- *  generalise to two blocks. */
+ *  merge, so nothing about a declaration follows from this diamond surviving, and the head test is
+ *  what refuses it: the preheader's sole predecessor is not the latch's. NARROW_COUNTER cannot
+ *  witness this — it is a SELF-loop, whose latch IS the header, so it is refused for a reason that
+ *  does not generalise to two blocks. */
 const LOOP_HEADER_DIAMOND = `fn f {
 ^bb0(%1: s32*):
   %2: unk32 = const {value=0}
@@ -503,11 +502,11 @@ describe('a block parameter extended at its only read is declared at that width'
 });
 
 describe('the join shape is recorded as evidence', () => {
-  // The FIELD only — no gate reads it in this commit, so every verdict below is the one the table
-  // gave before it existed. What it records is a property of the CFG the pass already walks: a
-  // two-armed merge, i.e. exactly two predecessor blocks with neither branching to the other. The
-  // hoisted shape fails it because the join's own predecessor is the conditional branch that also
-  // targets the other arm.
+  // Three fields, and only two of them are IR facts. `mergeDiamond` is a two-armed merge — both
+  // arms' SOLE predecessor being one `cond_br` head — and `armsHoistable` is that merge over arms
+  // `gcc/jump.c:471-502` could have collapsed; `targetHoistsSingleSetArm` is the target's claim
+  // beside them. The hoisted shape fails the first because the join's own predecessor is the
+  // conditional branch that also targets the surviving arm.
   const diamonds = (ir: string): boolean[] => {
     const fn = parse(ir);
     return narrowLocalCandidates(fn, undefined, AGBCC).map(({ c }) => c.mergeDiamond);
@@ -530,8 +529,8 @@ describe('the join shape is recorded as evidence', () => {
     // the file's existing merge fixtures are BOTH the hoisted shape — `gcc/jump.c` took the hoist
     expect(diamonds(MERGE_NO_TRUNCATION).at(-1)).toBe(false);
     expect(diamonds(MERGE_SUNK_TRUNCATION).at(-1)).toBe(false);
-    // and a loop header is not a two-armed merge either: its in-edges are the preheader and a latch
-    // that the header itself branches to
+    // and a self-loop header is not one either: its two in-edges come from the entry and from
+    // itself, so the arms have no common `cond_br` head
     expect(diamonds(NARROW_COUNTER)).toEqual([false, false]);
   });
 
@@ -599,10 +598,9 @@ describe('the join shape is recorded as evidence', () => {
   });
 
   test('a rotated loop header is a two-armed merge and is still not this evidence', () => {
-    // A rotated loop's preheader and latch are distinct blocks, so "neither predecessor branches to
-    // the other" holds here and is not what refuses it — that clause only ever caught the SELF-loop
-    // NARROW_COUNTER is. The head test refuses it: the preheader's sole predecessor is not the
-    // latch's.
+    // A rotated loop's preheader and latch are distinct blocks and neither branches to the other,
+    // so only the head test refuses this: the preheader's sole predecessor is not the latch's.
+    // NARROW_COUNTER, a SELF-loop, is a weaker shape and cannot stand in for it.
     const armless = LOOP_HEADER_DIAMOND;
     expect(diamonds(armless)).toEqual([false, false]);
     expect(run(armless).n).toBe(0);

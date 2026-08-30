@@ -41,8 +41,8 @@ export interface PreRecoveryOptions {
 /** CFG facts read off the function ONCE, before the first pass below rewrites it.
  *
  *  A pass that judges the SHAPE agbcc emitted cannot read that shape off `fn` when its turn comes:
- *  by then divpow2 has deleted a block, both short-circuit folds have rewritten edges, and nine
- *  `dce`s have changed op counts. So the driver reads it here and hands it down. */
+ *  by then divpow2 has deleted a block, both short-circuit folds have rewritten edges, and the
+ *  eight `dce: true` passes have changed op counts. So the driver reads it here and hands it down. */
 export interface PreRecoveryFacts {
   /** the join shape of every block, for raise/narrowlocal.ts's `edge-extends`. Blocks a later pass
    *  creates are absent, and absent reads as "no diamond" — the refusing direction. */
