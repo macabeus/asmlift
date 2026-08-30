@@ -173,6 +173,34 @@ const PATH_FLAGS: readonly string[] = [
   '-F',
 ].sort((a, b) => b.length - a.length);
 
+/** Container runtimes. A command that runs one is a command whose compiler lives in an IMAGE,
+ *  and an image is named by a TAG: `i386/ubuntu:bionic` rebuilt tomorrow is a different compiler
+ *  under the same name, invisible to every token, every environment variable and the stamp probe
+ *  alike (the probe compiles THROUGH the container, so it moves only if the image already did).
+ *  Naming the image would take its DIGEST — `docker image inspect --format '{{.Id}}'` — which
+ *  this stamp does not do, so the answer is a refusal. That is precisely the guard the deleted
+ *  `tools.asmlift.cacheInputs` opt-in was providing by omission for the benchmark's `gcc2.7.2`
+ *  row, and it must not fall out silently with the option. */
+const CONTAINER_RUNTIMES = new Set(['docker', 'podman', 'nerdctl', 'ctr', 'apptainer', 'singularity']);
+
+/** The container runtime a template runs, if it runs one — checked on the BASENAME, so
+ *  `tools/dockerize` is not `docker`, and through a variable, because every dockerized template
+ *  in this repo spells it `"$ASMLIFT_DOCKER"`. */
+export function containerRuntimeNamedBy(template: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const word = (w: string): string | undefined => (CONTAINER_RUNTIMES.has(basename(w.trim())) ? w.trim() : undefined);
+  for (const tok of template.split(/[\s"'<>|;()]+/)) {
+    if (!tok) {
+      continue;
+    }
+    const m = /^\$\{?([A-Za-z_]\w*)\}?$/.exec(tok);
+    const hit = m ? word(env[m[1]] ?? '') : word(tok);
+    if (hit !== undefined) {
+      return hit;
+    }
+  }
+  return undefined;
+}
+
 /** Every token of a compile template that a path flag could be attached to, in order. A comma
  *  list (`-Wa,-Iinc`, `-Wp,-I,inc`) is a nested argv the driver forwards, so its pieces are
  *  tokens too; a token is kept as well as split, because `--sysroot=a,b` is one path. */
@@ -489,6 +517,16 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   const stamp = (): string => {
     const h = createHash('sha256');
     const cwd = resolve(opts.cwd ?? process.cwd());
+    // Checked FIRST: a refusal here saves two probe compiles, and through a container those are
+    // two `docker run`s.
+    const runtime = containerRuntimeNamedBy(template);
+    if (runtime !== undefined) {
+      throw new Error(
+        `the compile command runs a container (${runtime}) and an image is named by a TAG, whose ` +
+          `content nothing in this namespace measures — an image rebuilt under the same tag is a ` +
+          `new compiler serving old objects. Refusing rather than hashing a stand-in`,
+      );
+    }
     h.update('command/v1');
     h.update(template);
     h.update(cwd);

@@ -236,3 +236,72 @@ describe('a search path the ENVIRONMENT names is measured too — the same hole,
     }
   });
 });
+
+describe('an input that CANNOT be named is refused out loud, not hashed as a stand-in', () => {
+  const stderrOf = async (fn: () => Promise<void> | void): Promise<string> => {
+    let out = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      out += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString();
+      return true;
+    });
+    try {
+      await fn();
+    } finally {
+      spy.mockRestore();
+    }
+    return out;
+  };
+
+  // The benchmark's `gcc2.7.2` command is a one-shot `docker run … "$ASMLIFT_GCC272_IMAGE" …`.
+  // Every token of it is measurable except the one that decides which compiler runs: an image is
+  // named by a TAG, and an image rebuilt under the same tag is a new compiler nothing in the
+  // namespace can see. Until the image DIGEST is in the stamp, the answer is a refusal — which is
+  // what the deleted `tools.asmlift.cacheInputs` opt-in was silently providing by omission.
+  test('a container runtime in the command refuses the whole pipeline', async () => {
+    const p = project();
+    const err = await stderrOf(async () => {
+      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+        const compile = compileFromCommand(templateWith('docker run i386/ubuntu:bionic gcc'), {
+          cwd: p.cwd,
+          cacheInputs: [],
+        });
+        // A refusal is not a failure: the compile still happens and still answers.
+        expect(readFileSync(compile(CAND_K, 'f', 'c'), 'utf8')).toContain('#define K 3');
+      });
+    });
+    expect(err).toContain('[candcache] REFUSED label=command reason=stamp-threw');
+    expect(err).toContain('image');
+    expect(existsSync(join(p.store, 'ns')), 'a refused pipeline stores nothing at all').toBe(false);
+  });
+
+  test('…and a variable HOLDING the runtime name is refused too', async () => {
+    const p = project();
+    const saved = process.env.ASMLIFT_TEST_DOCKER;
+    process.env.ASMLIFT_TEST_DOCKER = '/usr/local/bin/podman';
+    try {
+      const err = await stderrOf(async () => {
+        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+          compileFromCommand(templateWith('$ASMLIFT_TEST_DOCKER run img'), { cwd: p.cwd, cacheInputs: [] })(
+            CAND_K,
+            'f',
+            'c',
+          );
+        });
+      });
+      expect(err).toContain('reason=stamp-threw');
+    } finally {
+      if (saved === undefined) {
+        delete process.env.ASMLIFT_TEST_DOCKER;
+      } else {
+        process.env.ASMLIFT_TEST_DOCKER = saved;
+      }
+    }
+  });
+
+  test('a token that merely CONTAINS the word still caches — the refusal is on the basename', async () => {
+    const p = project();
+    const r = await acrossAnEdit(p, templateWith('-iquote inc tools/dockerize'));
+    expect(r.second).toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+});
