@@ -11,7 +11,8 @@
 import { describe, expect, test } from 'vitest';
 
 import { type RankProgress, progressBar, progressLabel, throttleProgress } from '../src/pages/playground/rank-progress';
-import type { RankMessage } from '../src/pages/playground/score-wasm';
+import type { BrowserRanking, RankMessage } from '../src/pages/playground/score-wasm';
+import { type Ranking, applyRankMessage } from '../src/pages/playground/useRanking';
 
 /** A hand-cranked clock: the throttle is keyed on elapsed WALL TIME (per-candidate cost was
  *  measured between 25 ms and 167 ms on one function, so a count-keyed throttle posts at wildly
@@ -127,5 +128,65 @@ describe('RankMessage', () => {
 
   test('both result shapes still route to the result branch', () => {
     expect(describeMessage({ kind: 'result', reqId: 1, ok: false, error: 'boom' })).toBe('error:boom');
+  });
+});
+
+// ── H1, the stale-guard, now with progress under it ──────────────────────────────────────────
+// useRanking.ts's whole file comment is about H1 (an audit CRITICAL): ranking is async, so a score
+// can resolve AFTER the user has edited the asm, and showing it would claim a byte-exact match for
+// the wrong input. A PROGRESS message is a message from the worker and is subject to exactly the
+// same guard. `applyRankMessage` is the one pure place both rules live, and it returns null for
+// "drop this message" so the hook has no second way to settle state.
+//
+// The existing H1 reasoning had no test at all before this file; case (d) pins it.
+const RESULT = {
+  best: { label: 'unsigned', source: '', symbolRefs: [], score: { score: 0 } },
+  candidates: [],
+  dropped: [],
+  withheld: [],
+  refused: [],
+} as unknown as BrowserRanking;
+
+describe('applyRankMessage (H1)', () => {
+  test('(a) a PROGRESS message from a superseded request is dropped', () => {
+    const prev: Ranking = { status: 'loading', phase: 'enumerating' };
+    expect(applyRankMessage(prev, { kind: 'progress', reqId: 1, phase: 'scoring', done: 5, total: 9 }, 2)).toBeNull();
+  });
+
+  test('(b) a progress tick that arrives after its own result cannot resurrect the spinner', () => {
+    const settled: Ranking = { status: 'ok', result: RESULT };
+    expect(
+      applyRankMessage(settled, { kind: 'progress', reqId: 3, phase: 'scoring', done: 5, total: 9 }, 3),
+    ).toBeNull();
+    const failed: Ranking = { status: 'error', error: 'boom' };
+    expect(applyRankMessage(failed, { kind: 'progress', reqId: 3, phase: 'ranking' }, 3)).toBeNull();
+  });
+
+  test('(c) a current-reqId progress message yields loading with the phase and counts', () => {
+    const prev: Ranking = { status: 'loading', phase: 'assembling' };
+    expect(applyRankMessage(prev, { kind: 'progress', reqId: 4, phase: 'scoring', done: 5, total: 9 }, 4)).toEqual({
+      status: 'loading',
+      phase: 'scoring',
+      done: 5,
+      total: 9,
+    });
+  });
+
+  test('(d) a superseded RESULT is still dropped — ok and error alike', () => {
+    const prev: Ranking = { status: 'loading', phase: 'scoring', done: 1, total: 2 };
+    expect(applyRankMessage(prev, { kind: 'result', reqId: 1, ok: true, result: RESULT }, 2)).toBeNull();
+    expect(applyRankMessage(prev, { kind: 'result', reqId: 1, ok: false, error: 'stale' }, 2)).toBeNull();
+  });
+
+  test('(e) progress does not leak into ok or error', () => {
+    const prev: Ranking = { status: 'loading', phase: 'scoring', done: 8, total: 9 };
+    const ok = applyRankMessage(prev, { kind: 'result', reqId: 5, ok: true, result: RESULT }, 5);
+    expect(ok).toEqual({ status: 'ok', result: RESULT });
+    const err = applyRankMessage(prev, { kind: 'result', reqId: 5, ok: false, error: 'no scorable candidate' }, 5);
+    expect(err).toEqual({ status: 'error', error: 'no scorable candidate' });
+    for (const next of [ok, err]) {
+      expect(next && 'phase' in next).toBe(false);
+      expect(next && 'done' in next).toBe(false);
+    }
   });
 });
