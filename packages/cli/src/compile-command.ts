@@ -292,7 +292,11 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       return false;
     }
   };
+  // ABSENT and EMPTY are different answers. `cacheInputs: []` is a project SAYING "this template
+  // reads nothing my tokens do not already name"; no key at all is a project that has not been
+  // asked. Only the second turns the cache off.
   const declared = opts.cacheInputs ?? [];
+  const declaredCompileInputs = opts.cacheInputs !== undefined;
   const stamp = (): string => {
     const h = createHash('sha256');
     const cwd = resolve(opts.cwd ?? process.cwd());
@@ -370,7 +374,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   };
   // OPT-IN, per project. A cache on the path every published score comes from is only as sound
   // as the list of inputs it was told about, so the declaration IS the contract: no
-  // `tools.asmlift.cacheInputs`, no cache here.
+  // `tools.asmlift.cacheInputs` key, no cache here — but an EMPTY list is still a declaration.
   const CACHE_OFF = {
     mode: 'off' as const,
     warm() {},
@@ -379,7 +383,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     putFail() {},
     verify() {},
   };
-  const cache = declared.length > 0 ? candCache('command', stamp) : CACHE_OFF;
+  const cache = declaredCompileInputs ? candCache('command', stamp) : CACHE_OFF;
   // A negative entry is only sound for a DETERMINISTIC rejection: the template RAN and exited
   // nonzero. `compile command failed to start` (a missing shell, a fork failure) and a killed
   // process must never be stored: a transient would then drop that candidate on every future
