@@ -10,15 +10,17 @@
 //      a forked worker and this file runs in the parent, so the counters are out of reach. The
 //      cache writes each disagreement to `MISMATCH_LOG` as well, and teardown reads it.
 //
-// WHAT THIS IS AND IS NOT, measured rather than assumed. Essentially every test in the suite
-// compiles through `@asmlift/toolchains` (`scoreC`, `compileTargetAsm`, `compileMipsTarget`), which
-// contains ZERO references to this cache — so on a normal run the default store stays empty and
-// nothing is audited. The four files that go through `compileFromCommand` pass no `cacheInputs`
-// except `candcache-verify.test.ts`, which brings its own `ASMLIFT_CANDCACHE_DIR`. So this is
-// FORWARD DEFENCE plus a self-test, not a gate over the suite's match assertions: it guarantees
-// that IF a matching test ever compiles through a cached seam, it is audited and a disagreement
-// stops the run. Calling it "verify mode wired into pnpm test:matching" overstates it; what would
-// make it a real gate is threading the cache through `@asmlift/toolchains`.
+// WHAT THIS IS AND IS NOT, RE-measured after `tools.asmlift.cacheInputs` was deleted. Essentially
+// every test in the suite compiles through `@asmlift/toolchains` (`scoreC`, `compileTargetAsm`,
+// `compileMipsTarget`), which contains ZERO references to this cache — so those are still not
+// audited. What CHANGED is the rest: four files reach `compileFromCommand`
+// (`ranked-parallel`, `self-declared-ab`, `decl-scope-axis`, `candcache-verify`), and they used to
+// pass no `cacheInputs`, so three of them ran with the cache structurally OFF. There is no opt-in
+// any more — the namespace measures what the command reads instead of being told — so all three
+// now compile through a live `verify` cache against the default store, and a disagreement fails
+// the run for real. So this is a REAL gate over those three files plus a self-test, and still
+// forward defence for the toolchains path; what would make it a gate over the whole suite is
+// threading the cache through `@asmlift/toolchains`.
 //
 // `ASMLIFT_CANDCACHE=0` still bypasses everything, which is the documented escape hatch.
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';

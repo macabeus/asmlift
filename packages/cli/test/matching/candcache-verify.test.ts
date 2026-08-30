@@ -84,7 +84,7 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     const cwd = scratch('candcache-e2e-proj-');
 
     const cold = await withCache('1', store, ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd, cacheInputs: [] });
+      const compile = compileFromCommand(TEMPLATE, { cwd });
       return CANDIDATES.map((c) => readFileSync(compile(c, 'f', 'c')).toString('hex'));
     });
     // The probe answered "pure", so the store exists at all — that is hole 3's measurement
@@ -93,13 +93,13 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     expect(new Set(cold).size, 'the fixtures must be distinct objects, or this proves nothing').toBe(CANDIDATES.length);
 
     const warm = await withCache('1', store, ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd, cacheInputs: [] });
+      const compile = compileFromCommand(TEMPLATE, { cwd });
       return CANDIDATES.map((c) => readFileSync(compile(c, 'f', 'c')).toString('hex'));
     });
     expect(warm).toEqual(cold);
 
     const stats = await withCache('verify', store, async ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd, cacheInputs: [] });
+      const compile = compileFromCommand(TEMPLATE, { cwd });
       for (const c of CANDIDATES) {
         compile(c, 'f', 'c');
       }
@@ -115,7 +115,7 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     const one = CANDIDATES[0];
 
     const served = await withCache('1', store, ({ compileFromCommand }) =>
-      compileFromCommand(TEMPLATE, { cwd, cacheInputs: [] })(one, 'f', 'c'),
+      compileFromCommand(TEMPLATE, { cwd })(one, 'f', 'c'),
     );
     // What a namespace hole looks like on disk: a well-formed object of the wrong toolchain.
     // Write THROUGH the hardlink so the content-addressed copy moves with it.
@@ -126,7 +126,7 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     expect(statSync(served).size).toBe(truth.length);
 
     const { stats, log } = await withCache('verify', store, async ({ compileFromCommand }) => {
-      compileFromCommand(TEMPLATE, { cwd, cacheInputs: [] })(one, 'f', 'c');
+      compileFromCommand(TEMPLATE, { cwd })(one, 'f', 'c');
       const cc = await import('../../src/candcache');
       return { stats: cc.cacheStats(), log: readFileSync(cc.MISMATCH_LOG, 'utf8') };
     });
@@ -136,7 +136,7 @@ describe('the candidate cache, verified against real agbcc objects', () => {
 
     // and the fresh bytes won
     const repaired = await withCache('1', store, ({ compileFromCommand }) =>
-      readFileSync(compileFromCommand(TEMPLATE, { cwd, cacheInputs: [] })(one, 'f', 'c')),
+      readFileSync(compileFromCommand(TEMPLATE, { cwd })(one, 'f', 'c')),
     );
     expect(repaired.equals(truth)).toBe(true);
   });
@@ -149,8 +149,8 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     expect(o1).not.toBe(TEMPLATE);
 
     const [a, b] = await withCache('1', store, ({ compileFromCommand }) => [
-      readFileSync(compileFromCommand(TEMPLATE, { cwd, cacheInputs: [] })(one, 'f', 'c')).toString('hex'),
-      readFileSync(compileFromCommand(o1, { cwd, cacheInputs: [] })(one, 'f', 'c')).toString('hex'),
+      readFileSync(compileFromCommand(TEMPLATE, { cwd })(one, 'f', 'c')).toString('hex'),
+      readFileSync(compileFromCommand(o1, { cwd })(one, 'f', 'c')).toString('hex'),
     ]);
     expect(b, 'the second compile must be its own object, not the first one served back').not.toBe(a);
     expect(readdirSync(join(store, 'ns')).length).toBe(2);

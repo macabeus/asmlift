@@ -11,7 +11,8 @@
 // and the gate was the OPERAND'S SPELLING, not the flag: `-I inc` was as much a hole as
 // `-iquote inc`, while `-B inc/` (one trailing slash) was already covered. Closing it by hand
 // needed `tools.asmlift.cacheInputs`, a config key whose incompleteness is a silent stale
-// object; measuring it instead is what deletes that key.
+// object; measuring it instead is what DELETED that key, and is why the cache now runs on a
+// project's own command with no declaration at all.
 //
 // The asymmetry that licenses hashing generously: OVER-hashing costs a cold start, UNDER-hashing
 // serves a stale object.
@@ -100,12 +101,9 @@ async function acrossAnEdit(
   template: string,
 ): Promise<{ first: string; second: string; namespaces: number }> {
   const seen = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-    const first = readFileSync(compileFromCommand(template, { cwd: p.cwd, cacheInputs: [] })(CAND_K, 'f', 'c'), 'utf8');
+    const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
     p.setK(999);
-    const second = readFileSync(
-      compileFromCommand(template, { cwd: p.cwd, cacheInputs: [] })(CAND_K, 'f', 'c'),
-      'utf8',
-    );
+    const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
     return { first, second };
   });
   const ns = join(p.store, 'ns');
@@ -190,16 +188,10 @@ describe('a directory a compile flag names is MEASURED, whatever the operand loo
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
       ({ compileFromCommand }) => {
         symlinkSync(a, join(p.cwd, 'inc'));
-        const first = readFileSync(
-          compileFromCommand(template, { cwd: p.cwd, cacheInputs: [] })(CAND_K, 'f', 'c'),
-          'utf8',
-        );
+        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         rmSync(join(p.cwd, 'inc'));
         symlinkSync(b, join(p.cwd, 'inc'));
-        const second = readFileSync(
-          compileFromCommand(template, { cwd: p.cwd, cacheInputs: [] })(CAND_K, 'f', 'c'),
-          'utf8',
-        );
+        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         return { first, second };
       },
     );
@@ -261,10 +253,7 @@ describe('an input that CANNOT be named is refused out loud, not hashed as a sta
     const p = project();
     const err = await stderrOf(async () => {
       await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-        const compile = compileFromCommand(templateWith('docker run i386/ubuntu:bionic gcc'), {
-          cwd: p.cwd,
-          cacheInputs: [],
-        });
+        const compile = compileFromCommand(templateWith('docker run i386/ubuntu:bionic gcc'), { cwd: p.cwd });
         // A refusal is not a failure: the compile still happens and still answers.
         expect(readFileSync(compile(CAND_K, 'f', 'c'), 'utf8')).toContain('#define K 3');
       });
@@ -281,11 +270,7 @@ describe('an input that CANNOT be named is refused out loud, not hashed as a sta
     try {
       const err = await stderrOf(async () => {
         await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-          compileFromCommand(templateWith('$ASMLIFT_TEST_DOCKER run img'), { cwd: p.cwd, cacheInputs: [] })(
-            CAND_K,
-            'f',
-            'c',
-          );
+          compileFromCommand(templateWith('$ASMLIFT_TEST_DOCKER run img'), { cwd: p.cwd })(CAND_K, 'f', 'c');
         });
       });
       expect(err).toContain('reason=stamp-threw');
@@ -302,6 +287,22 @@ describe('an input that CANNOT be named is refused out loud, not hashed as a sta
     const p = project();
     const r = await acrossAnEdit(p, templateWith('-iquote inc tools/dockerize'));
     expect(r.second).toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+});
+
+describe('a directory the template reaches through a GLOB is measured as well', () => {
+  // `cat inc/*.h` names the directory in a way `statSync` cannot follow: `inc/*.h` is path-LIKE
+  // (it has a `/` and a `.`) yet it is not a path, so the token scan tried it and failed. This is
+  // the shape the offline rig for the old declaration deliberately used, precisely because
+  // nothing else could see it. Hashing the glob's DIRECTORY closes it; over-hashing costs a cold
+  // start.
+  test('editing a file the glob would expand to re-namespaces', async () => {
+    const p = project();
+    // No flag names `inc` anywhere: the glob inside the command is the only mention.
+    const r = await acrossAnEdit(p, templateWith('-Wall'));
+    expect(r.first).toContain('#define K 3');
+    expect(r.second, 'the glob expands into the directory; its contents moved').toContain('#define K 999');
     expect(r.namespaces).toBe(2);
   });
 });

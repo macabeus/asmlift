@@ -28,7 +28,6 @@ import { fileURLToPath } from 'node:url';
 import {
   COMPILE_ENV,
   NOT_CACHEABLE,
-  OFF as OFF_CACHE,
   STAMP_PROBE,
   candCache,
   candidateCacheRefusal,
@@ -111,15 +110,6 @@ export interface CompileCommandOptions {
   /** Working directory for the command — the decomp.yaml's directory, so project-relative
    *  paths (`./tools/agbcc/bin/agbcc`) resolve regardless of where asmlift was invoked. */
   cwd?: string;
-  /** `tools.asmlift.cacheInputs` — the project's DECLARATION of every file and directory its
-   *  compile command reads. It is the contract that lets the cross-run candidate-object cache
-   *  run on this template AT ALL: absent, the cache stays off here, however fast it would be.
-   *
-   *  A namespace can only measure inputs it can name. Files the template names as TOKENS are
-   *  found automatically; an input reached through a DIRECTORY (`-I ./inc` plus a candidate's
-   *  `#include "k.h"`) is in no token set and no probe TU exercises it — editing `k.h` between
-   *  two runs served a stale object. Declaring the directory is what makes it visible. */
-  cacheInputs?: readonly string[];
 }
 
 // Substituted values are injected RAW so the template owns its quoting (a natural template
@@ -222,10 +212,12 @@ export function flagScanTokens(template: string): string[] {
   return out;
 }
 
-/** The path operands a compile template names through its flags, in token order and de-duplicated
- *  by spelling. `@file` is included: a response file holds compile flags, and nothing else in the
- *  scan would look at it. */
-export function pathFlagOperands(template: string): string[] {
+/** The paths a compile template names, in token order and de-duplicated by spelling: every path
+ *  flag's operand, `@response` files (they hold compile flags, and nothing else in the scan looks
+ *  at them), and the DIRECTORY of any glob. A glob is path-LIKE and is not a path — `inc/*.h` has
+ *  both a `/` and a `.`, so the old token scan tried it, failed, and measured nothing — yet what
+ *  it expands to is read by the compile as surely as an `-I` operand is. */
+export function templatePathOperands(template: string): string[] {
   const toks = flagScanTokens(template);
   const out: string[] = [];
   const seen = new Set<string>();
@@ -238,6 +230,13 @@ export function pathFlagOperands(template: string): string[] {
   };
   for (let i = 0; i < toks.length; i++) {
     const tok = toks[i];
+    if (/[*?[]/.test(tok)) {
+      // Only the directory: the pattern itself cannot be stat'ed, and hashing the whole directory
+      // is the over-hashing side of the asymmetry, which costs a cold start.
+      const dir = tok.slice(0, tok.lastIndexOf('/') + 1);
+      take(dir === '' ? undefined : dir.replace(/\/+$/, '') || '/');
+      continue;
+    }
     if (tok.startsWith('@') && tok.length > 1) {
       take(tok.slice(1));
       continue;
@@ -419,10 +418,12 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   // everything so the first real candidate fails with the template's own loud diagnostics.
   // Exit-code-only: no error-message parsing (gcc-2.9/IDO/mwcc all format differently).
   // The cross-run candidate-object cache on the project-template path (candcache.ts). OFF unless
-  // ASMLIFT_CANDCACHE, and OFF unless the project DECLARED `tools.asmlift.cacheInputs`.
+  // ASMLIFT_CANDCACHE; ON for any project's own command otherwise, because everything the
+  // command reads is now MEASURED rather than declared.
   //
   // The NAMESPACE is a measurement, not a version constant: the template text, the cwd, the
-  // content hash of every DECLARED input, of every existing file the template names
+  // content hash of every directory a path FLAG names (`-iquote include`, recursively), of every
+  // existing file the template names
   // (`./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`), of every command it
   // resolves on $PATH, the value of every environment variable it reads, and, decisively, the
   // OBJECT BYTES this very template produces for one fixed probe TU, compiled twice in two
@@ -496,24 +497,6 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     }
     hashPath(h, tok + '>' + basename(entry), entry);
   };
-  // ABSENT and EMPTY are different answers. `cacheInputs: []` is a project SAYING "this template
-  // reads nothing my tokens do not already name"; no key at all is a project that has not been
-  // asked. Only the second turns the cache off.
-  if (
-    opts.cacheInputs !== undefined &&
-    (!Array.isArray(opts.cacheInputs) || opts.cacheInputs.some((d) => typeof d !== 'string' || d.trim() === ''))
-  ) {
-    // The same contract `config.ts` enforces on the YAML, enforced again at the API: a STRING
-    // reaching this list iterates per character, and three `MISSING` characters hash to the same
-    // digest as three declared files that are not there — the cache on, the declaration measured,
-    // and nothing of the project actually in the namespace.
-    throw new Error(
-      `cacheInputs must be an array of non-empty path strings, got ${JSON.stringify(opts.cacheInputs)} — ` +
-        `it is the candidate-object cache's contract, not a hint`,
-    );
-  }
-  const declared = opts.cacheInputs ?? [];
-  const declaredCompileInputs = opts.cacheInputs !== undefined;
   const stamp = (): string => {
     const h = createHash('sha256');
     const cwd = resolve(opts.cwd ?? process.cwd());
@@ -540,20 +523,6 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     // `compile/util.ts`, which has been in a namespace all along.
     h.update('self:');
     h.update(sha256(readFileSync(fileURLToPath(import.meta.url))));
-    // (0) every DECLARED input, by content: files and whole directory trees.
-    for (const d of declared) {
-      const p = isAbsolute(d) ? d : resolve(cwd, d);
-      h.update('declared:' + d);
-      if (!hashPath(h, 'declared:' + d, p)) {
-        // A declared input that is not there means the project's contract is STALE. It is still
-        // hashed as MISSING (so the namespace moves the day it appears), but silence here is how
-        // a declaration stops describing the compile it is the contract for.
-        h.update('MISSING');
-        process.stderr.write(
-          `[candcache] declared cacheInputs entry does not exist: ${d} (resolved ${p}) — the declaration is the contract, and this one names nothing\n`,
-        );
-      }
-    }
     // (1) every template token that names an existing FILE: the project's own
     //     `./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`, hashed by content.
     // (2) every remaining token that RESOLVES ON $PATH: `arm-none-eabi-cpp`, `arm-none-eabi-as`,
@@ -596,19 +565,20 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
         }
       }
     }
-    // (2b) every path a compile FLAG names, hashed by content — recursively for a directory.
+    // (2b) every path the template NAMES — a flag's operand, a response file, a glob's directory —
+    // hashed by content, recursively for a directory.
     // This is the one input a token scan structurally could not see and a probe TU structurally
     // could not either: `-iquote include` reaches `include/global.h`, which is not a token, and
     // the fixed probe never includes anything. It used to need a hand-written declaration
-    // (`tools.asmlift.cacheInputs`); a declaration a project can get INCOMPLETE is a silent stale
-    // object, so it is measured instead — the namespace is a MEASUREMENT of the toolchain, not a
-    // list of it.
+    // (`tools.asmlift.cacheInputs`, now deleted); a declaration a project can get INCOMPLETE is a
+    // silent stale object, so it is measured instead — the namespace is a MEASUREMENT of the
+    // toolchain, not a list of it.
     //
     // Tagged by BASENAME, never by absolute path, for the same reason the delegate chain is: two
     // worktrees of this repo hold byte-identical toolchains at different paths, and keying on the
     // path gives each its own namespace, so every parallel round cold-starts.
     const seenOperand = new Set<string>();
-    for (const operand of pathFlagOperands(template)) {
+    for (const operand of templatePathOperands(template)) {
       const asPath = isAbsolute(operand) ? operand : resolve(cwd, operand);
       if (seenOperand.has(asPath)) {
         continue;
@@ -672,10 +642,14 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     rmSync(d2, { recursive: true, force: true });
     return answer;
   };
-  // OPT-IN, per project. A cache on the path every published score comes from is only as sound
-  // as the list of inputs it was told about, so the declaration IS the contract: no
-  // `tools.asmlift.cacheInputs` key, no cache here — but an EMPTY list is still a declaration.
-  const cache = declaredCompileInputs ? candCache('command', stamp) : OFF_CACHE;
+  // ON, for any project's own command, whenever ASMLIFT_CANDCACHE says so. There used to be a
+  // second gate here — `tools.asmlift.cacheInputs`, a per-project DECLARATION of everything the
+  // command reads — because one input class was unmeasurable: a directory named by a flag. That
+  // class is measured now (`pathFlagOperands` above), so the declaration's REASON is gone, and a
+  // contract a project can silently get incomplete is itself a stale-object hole. What the
+  // opt-in was also providing by omission — a containerized compiler, whose image is named by a
+  // tag — is now an explicit refusal at the top of `stamp()` instead.
+  const cache = candCache('command', stamp);
   // A negative entry is only sound for a DETERMINISTIC rejection: the template RAN and exited
   // nonzero. `compile command failed to start` (a missing shell, a fork failure) and a killed
   // process must never be stored: a transient would then drop that candidate on every future

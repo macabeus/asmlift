@@ -85,22 +85,27 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
   indistinguishable in RESULT from no cache at all. If a `[score]` line moves between a cold run
   and a warm one, the cache is wrong; run the `diff` below, then re-run with `ASMLIFT_CANDCACHE=0`
   and report it.
-- **On a PROJECT's own `decomp.yaml` command, the cache does nothing unless the project asks.**
-  It stays off until `tools.asmlift.cacheInputs` lists the files and directories that command
-  reads (an empty list is a declaration too — "nothing my template does not already name"). The
-  declaration is the contract: a namespace can only measure inputs it can name, and an input
-  reached through a directory is nameable only there. The cache also refuses, out loud, when the
-  compile is not a pure function of its input — `[candcache] REFUSED label=command
+- **On a PROJECT's own `decomp.yaml` command, the cache runs — there is nothing to declare.**
+  There used to be an opt-in (`tools.asmlift.cacheInputs`), because one input class could not be
+  measured: a directory named by a flag. `-I tools/agbcc/include` was hashed by content already;
+  `-iquote include` — klonoa's own template — was a bare word nothing looked at. Both are measured
+  now, along with every other path flag (separated and attached), `@response` files, the DIRECTORY
+  of any glob the command expands, and what `CPATH` and friends point AT. A declaration a project
+  could get incomplete was itself a stale-object hole, so it is gone: the namespace measures the
+  toolchain rather than listing it. The cache still refuses, out loud, when the compile is not a
+  pure function of its input — `[candcache] REFUSED label=command
 reason=object-is-not-a-pure-function-of-its-input` is what `ido7.1` gets, because it writes the
-  absolute path of its input `.c` into the object.
-- **An INCOMPLETE declaration is a silent stale object, and nothing verifies it for you.** The
-  declaration is a promise, not a proof: `cacheInputs: []` on a template that reaches a file
-  through a script serves the stale object for that file, measured. List every file and directory
-  the command reads, including anything a wrapper script of yours opens. The one shape asmlift
-  checks by itself is the SHAPE of the declaration — a scalar where a list was meant (`cacheInputs:
-gen`) is a loud load error, because a string iterates per character, and three `MISSING`
-  characters hash exactly like three declared files that are not there — the cache on, the
-  declaration measured, and nothing of the project in the namespace. If in doubt, leave the key out: no key, no cache.
+  absolute path of its input `.c` into the object — and when the command runs a CONTAINER, whose
+  image is named by a tag no measurement here can pin (`reason=stamp-threw`).
+- **What is still NOT measured, said out loud.** A wrapper script that reads a config DIRECTORY
+  (the chain follows what a script EXECS, not what it OPENS — though editing the script itself
+  does move the namespace); `-B /opt/tc/arm-` used as a filename PREFIX rather than a directory;
+  a candidate's assembler `.include`/`.incbin` (the per-key refusal tests the C preprocessor's
+  `#include`, and asmlift's emitter emits object-like `#define` only — measured 0 of 66,816 on
+  LoadBGTilemapData); and the compiler's own built-in search directories, which every corpus
+  template puts out of reach with `-nostdinc`. If your command reads something in one of those
+  shapes, run with `ASMLIFT_CANDCACHE=verify` — it compiles anyway and fails on any disagreement —
+  or `ASMLIFT_CANDCACHE=0`.
 - **The store is bounded, but only between runs.** `ASMLIFT_CANDCACHE_MAX_MB` (default 4096)
   counts the distinct object bytes plus one allocation block per stored key — 77% of a warm store
   is negative entries, which weigh nothing logically and cost a block each. It is enforced ONCE per

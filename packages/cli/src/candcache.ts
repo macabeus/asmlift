@@ -288,8 +288,8 @@ const resolveOnPath = (cmd: string): string | undefined => {
  * zsh script that computes its delegate through `$(realpath)`, which would refuse a whole
  * namespace over an assembler no candidate compile invokes. THE RESIDUAL, said out loud: a
  * template that assembles THROUGH the driver (`gcc -c x.c -o x.o`) reaches an assembler this
- * chain does not name. A project in that shape closes it by listing the assembler in
- * `tools.asmlift.cacheInputs`, which is what that declaration is for.
+ * chain does not name — unless a `-B` prefix points at it, which the compile template's path-flag
+ * scan hashes by content.
  *
  * Only absolute, existing answers count; only names that look like a driver are asked at all
  * (agbcc IS a cc1 and takes no such flag), stdin is closed and the probe is bounded.

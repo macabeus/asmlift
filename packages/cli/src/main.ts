@@ -403,7 +403,7 @@ export async function runCli(
     }
     let compilers: CommandCompilers;
     try {
-      compilers = compilersFromCommand(toolCfg.compiler, { cwd: configDir, cacheInputs: toolCfg.cacheInputs });
+      compilers = compilersFromCommand(toolCfg.compiler, { cwd: configDir });
     } catch (e) {
       return usage(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
     }
