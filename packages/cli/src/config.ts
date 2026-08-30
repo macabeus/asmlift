@@ -21,6 +21,11 @@ export interface AsmliftToolConfig {
   compiler?: string;
   /** host objdump binary for object-file input (overrides the built-in per-target choice) */
   objdump?: string;
+  /** every file and directory the `compiler` command reads, relative to this decomp.yaml.
+   *  DECLARING them is what opts this project into the cross-run candidate-object cache: the
+   *  cache's namespace can only measure inputs it can name, and an input reached through a
+   *  directory (`-I ./inc`) is nameable only here. Absent: no candidate caching, ever. */
+  cacheInputs?: string[];
   /** the project's built ELF (relative to this decomp.yaml) — the address→symbol source:
    *  names from `.symtab`, declaration shapes from the linked-in DWARF types-sidecar when
    *  present. Absent ⇒ no symbol map (today's behavior). */

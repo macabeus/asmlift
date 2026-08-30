@@ -31,12 +31,16 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
+import { cacheMode, cacheStats } from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { renderDeclarations } from './declare';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
+
+const candCacheLine = (): string =>
+  cacheMode() === 'off' ? '' : `asmlift: [candcache] ${cacheMode()} ${JSON.stringify(cacheStats())}\n`;
 
 export { detectName };
 
@@ -386,7 +390,7 @@ export async function runCli(
     }
     let compilers: CommandCompilers;
     try {
-      compilers = compilersFromCommand(toolCfg.compiler, { cwd: configDir });
+      compilers = compilersFromCommand(toolCfg.compiler, { cwd: configDir, cacheInputs: toolCfg.cacheInputs });
     } catch (e) {
       return usage(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
     }
@@ -479,7 +483,17 @@ export async function runCli(
         stdout: ranked.best.source,
         // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
         // tail stay adjacent.
-        stderr: targetTrace + warn + table + drops + held + declared + (clock?.report() ?? '') + summary + protoNote,
+        stderr:
+          targetTrace +
+          warn +
+          table +
+          drops +
+          held +
+          declared +
+          (clock?.report() ?? '') +
+          summary +
+          protoNote +
+          candCacheLine(),
       };
     } catch (e) {
       const kind = isDecline(e) ? 'declined' : 'internal error';
