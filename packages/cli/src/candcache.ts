@@ -23,6 +23,7 @@
 // compares; unset / `0` / `off` bypasses the module entirely.
 import { createHash } from 'node:crypto';
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   linkSync,
@@ -61,6 +62,11 @@ export const cacheStats = (): Record<string, number> => ({ ...STATS });
 
 const ROOT = process.env.ASMLIFT_CANDCACHE_DIR ?? join(tmpdir(), 'asmlift-candcache');
 const OBJECTS = join(ROOT, 'objects');
+/** Where `verify` mode records a stored-vs-fresh disagreement, so a GATE IN ANOTHER PROCESS can
+ *  read it. The stderr line is for a human watching a run; this file is what
+ *  `pnpm test:matching`'s teardown fails on, and the counters live only in the process that
+ *  compiled (vitest runs its tests in a forked worker, its globalSetup in the parent). */
+export const MISMATCH_LOG = join(ROOT, 'MISMATCHES.log');
 /** Distinct-byte cap for the whole store. 65,280 LBG candidate objects are 144.9 MB logical but
  *  only 14,484 distinct = 32.1 MB, so the cap is counted over `objects/` (the distinct bytes) —
  *  the hardlinks in `ns/` cost an inode each, not a copy. */
@@ -89,13 +95,20 @@ function writeAtomic(path: string, data: Buffer | string): void {
 }
 
 /** Put the bytes into `objects/` (deduping) and hardlink them at `dest`. Falls back to a copy
- *  when the link cannot be made (EXDEV / EMLINK) — correctness never depends on the link. */
-function linkInto(objBytes: Buffer, dest: string): void {
+ *  when the link cannot be made (EXDEV / EMLINK) — correctness never depends on the link.
+ *
+ *  `distrustExisting` re-writes the content-addressed file even when one is already there. The
+ *  store's whole economy rests on `objects/<sha>` holding the bytes it is named after, so on the
+ *  hot path existence IS the answer and a read per put would be 65,280 reads per LBG run. But an
+ *  entry can be wrong — a disk error, an external edit, or a write THROUGH one of its hardlinks —
+ *  and then EVERY key that dedups onto it serves those bytes. `verify` mode is the one place that
+ *  knows the truth, so its repair does not trust what is there. */
+function linkInto(objBytes: Buffer, dest: string, distrustExisting = false): void {
   const h = sha(objBytes);
   const objDir = join(OBJECTS, h.slice(0, 2));
   const objPath = join(objDir, h);
   mkdirSync(objDir, { recursive: true });
-  if (!existsSync(objPath)) {
+  if (distrustExisting || !existsSync(objPath)) {
     writeAtomic(objPath, objBytes);
   }
   mkdirSync(dirname(dest), { recursive: true });
@@ -327,10 +340,15 @@ export function candCache(label: string, stamp: () => string): CandCache {
       const b = readFileSync(objPath);
       if (!a.equals(b)) {
         bump('mismatch');
-        say(
-          `BYTE MISMATCH label=${label} ns=${n} symbol=${symbol} stored=${sha(a).slice(0, 16)}:${a.length} fresh=${sha(b).slice(0, 16)}:${b.length}`,
-        );
-        linkInto(b, stored); // the fresh bytes are the truth
+        const line = `BYTE MISMATCH label=${label} ns=${n} symbol=${symbol} stored=${sha(a).slice(0, 16)}:${a.length} fresh=${sha(b).slice(0, 16)}:${b.length}`;
+        say(line);
+        try {
+          mkdirSync(ROOT, { recursive: true });
+          appendFileSync(MISMATCH_LOG, `${line}\n`);
+        } catch {
+          /* the stderr line is the primary record; an unwritable store must not mask it */
+        }
+        linkInto(b, stored, true); // the fresh bytes are the truth, whatever the store holds
       }
     },
   };

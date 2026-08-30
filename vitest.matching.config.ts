@@ -17,7 +17,10 @@ export default defineConfig({
     include: ['packages/cli/test/matching/**/*.test.ts'],
     // refuse loudly (naming the remedy) when the native agbcc/IDO toolchains are absent,
     // instead of failing cryptically once per fixture — see the file's header comment
-    globalSetup: ['packages/cli/test/matching/global-setup.ts'],
+    // + candcache-gate.ts: this suite may never be SERVED a cached candidate object, so it forces
+    // the cross-run cache into `verify` mode (compile anyway, audit the store) and fails the run
+    // on any stored-vs-fresh disagreement.
+    globalSetup: ['packages/cli/test/matching/global-setup.ts', 'packages/cli/test/matching/candcache-gate.ts'],
     fileParallelism: false,
     poolOptions: { forks: { singleFork: true } },
     testTimeout: 240_000,
