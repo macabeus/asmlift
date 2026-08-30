@@ -19,7 +19,10 @@ export default defineConfig({
     // instead of failing cryptically once per fixture — see the file's header comment
     // + candcache-gate.ts: this suite may never be SERVED a cached candidate object, so it forces
     // the cross-run cache into `verify` mode (compile anyway, audit the store) and fails the run
-    // on any stored-vs-fresh disagreement.
+    // on any stored-vs-fresh disagreement. Read that file's header for what it does and does NOT
+    // cover — today the suite compiles almost entirely through @asmlift/toolchains, which does not
+    // use the cache at all, so this is forward defence rather than a gate over the match
+    // assertions.
     globalSetup: ['packages/cli/test/matching/global-setup.ts', 'packages/cli/test/matching/candcache-gate.ts'],
     fileParallelism: false,
     poolOptions: { forks: { singleFork: true } },

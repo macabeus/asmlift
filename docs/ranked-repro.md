@@ -60,11 +60,15 @@ again (`packages/cli/src/candcache.ts`). **It is OFF unless `ASMLIFT_CANDCACHE` 
 and it changes a run's WALL by several times while changing nothing a run computes. So every wall
 quoted from now on has to say which state it was measured in, in the same breath as the command:
 
-| `ASMLIFT_CANDCACHE`  | what the run does                                                  | when to use it                                                              |
-| -------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| unset, `0`, or `off` | compiles every candidate; touches no disk                          | **the default, and what a published wall should be measured with**          |
-| `1` / `on`           | serves any candidate this toolchain already compiled               | the base-run/lever-run pair inside one round, and the gate ladder's repeats |
-| `verify`             | compiles every candidate AND compares it against the store, loudly | after any change to the cache, or when a stored answer is suspect           |
+| `ASMLIFT_CANDCACHE`              | what the run does                                                      | when to use it                                                              |
+| -------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| unset, `0`, `off`, `false`, `no` | compiles every candidate; touches no disk                              | **the default, and what a published wall should be measured with**          |
+| `1` / `on` / `true` / `yes`      | serves any candidate this toolchain already compiled                   | the base-run/lever-run pair inside one round, and the gate ladder's repeats |
+| `verify` (any capitalisation)    | compiles every candidate AND audits the store against it, loudly       | after any change to the cache, or when a stored answer is suspect           |
+| anything else                    | **OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr** | never on purpose — the parse is closed so a typo cannot silently SERVE      |
+
+`ASMLIFT_BENCH_CACHE=0` turns this cache off too: "bypass the benchmark's caches" has to mean all
+of them, or bisecting a suspect row still reads candidate objects off disk.
 
 - **COLD or WARM is a property of the STORE, not of the flag.** The first `ASMLIFT_CANDCACHE=1`
   run after a toolchain change, a flag change, or a change to the harness code that shapes the
@@ -89,6 +93,22 @@ quoted from now on has to say which state it was measured in, in the same breath
   compile is not a pure function of its input — `[candcache] REFUSED label=command
 reason=object-is-not-a-pure-function-of-its-input` is what `ido7.1` gets, because it writes the
   absolute path of its input `.c` into the object.
+- **An INCOMPLETE declaration is a silent stale object, and nothing verifies it for you.** The
+  declaration is a promise, not a proof: `cacheInputs: []` on a template that reaches a file
+  through a script serves the stale object for that file, measured. List every file and directory
+  the command reads, including anything a wrapper script of yours opens. The one shape asmlift
+  checks by itself is the SHAPE of the declaration — a scalar where a list was meant (`cacheInputs:
+gen`) is now a loud load error, because a string iterates per character and used to turn the
+  cache on having measured nothing at all. If in doubt, leave the key out: no key, no cache.
+- **The store is not bounded in practice — delete it by hand.** `ASMLIFT_CANDCACHE_MAX_MB`
+  (default 4096) counts the distinct object bytes plus one allocation block per stored key, but it
+  only ever evicts a namespace no live process holds and nothing has touched for an hour, so on a
+  single-toolchain machine it can go a long time without firing. `rm -rf "$TMPDIR/asmlift-candcache"`
+  is the reliable reset, and it is also how you make the next run cold on purpose.
+- **`verify` audits the OUTCOME, not only the bytes.** A stored object whose TU no longer compiles,
+  and a stored rejection whose TU now does, are both mismatches — the second is the one that
+  silently drops a spelling from a row's fan, and it is 77% of what a warm store serves. Any
+  mismatch fails the run (nonzero exit) and is written to `MISMATCHES.log` in the store.
 
 ## The flags are part of the number
 
