@@ -306,6 +306,23 @@ function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefi
   return !(isStore && (f.const || containerConst));
 }
 
+/** The map member a `field` node NAMES, or null when it names none — THE one resolver for "what
+ *  does the declaration say about this member", for rules that must reason about a member's type
+ *  after the access rules have already spelled it. Both named spellings resolve, through the same
+ *  shared gate their spelling passed: `gSym.member` off a struct global's {@link declaredFields},
+ *  `gPtr->member` off the pointee's ({@link pointeeFields}). A synthesized `field_K` — the
+ *  recovered-struct spelling, which no map declares — resolves to null, and so does any base that
+ *  is not a map-shaped global, which is what makes every caller refuse rather than guess. */
+function declaredMemberOf(x: Expr, sym: SymRenderCtx | undefined): DeclaredField | null {
+  if (x.k !== 'field' || x.base.k !== 'var' || sym === undefined) {
+    return null;
+  }
+  const si = sym.info(x.base.name);
+  const fields =
+    si?.shape === 'struct' ? declaredFields(si.layout) : si?.shape === 'pointer' ? pointeeFields(si.pointee) : null;
+  return fields?.find((f) => f.name === x.name) ?? null;
+}
+
 // WHY THERE IS NO INDEXED `gPtr->arr[i]` SPELLING.
 //
 // Naming a member is only allowed where it is byte-identical to the cast form it replaces, and
@@ -1189,18 +1206,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     ? { info: (n) => symbols.get(n), noteGlobal: (n, t) => shapedGlobalTypes.set(n, t) }
     : undefined;
 
-  /** A bare `gSym` naming a map-declared POINTER global — the VALUE of a pointer cell. Load,
-   *  store and compare of that 4-byte cell are identical for any object-pointer type, so the
-   *  declared pointee never matters to THEM; arithmetic on the loaded value is the opposite case,
-   *  where the pointee's size scales what is added and every stride must therefore be made
+  /** A value the MAP declares a pointer: a bare `gSym` naming a pointer global (the VALUE of a
+   *  pointer cell), or a named MEMBER whose declaration is a pointer (`gSym.pBuf`, `gPtr->pBuf`).
+   *  Load, store and compare of such a 4-byte cell are identical for any object-pointer type, so
+   *  the declared pointee never matters to THEM; arithmetic on the loaded value is the opposite
+   *  case, where the pointee's size scales what is added and every stride must therefore be made
    *  explicit (`(u8 *)gPtr + K`). `ctype` cannot see any of this: it types only params/locals, so
-   *  a pointer global renders `undefined` there. */
-  const isPtrGlobal = (x: Expr): boolean => x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer';
+   *  both spellings render `undefined` there. */
+  const isPtrValue = (x: Expr): boolean =>
+    (x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer') || declaredMemberOf(x, symCtx)?.pointer === true;
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
    *  32-bit integer math on the address, so that is what gets spelled. */
-  const needsIntSpelling = (x: Expr): boolean => ctype(x)?.kind === 'ptr' || x.k === 'addr' || isPtrGlobal(x);
+  const needsIntSpelling = (x: Expr): boolean => ctype(x)?.kind === 'ptr' || x.k === 'addr' || isPtrValue(x);
 
   // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
   const forest = analyzeLoops(fn, dom);
@@ -2505,32 +2524,35 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const intifyAddr = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: T.u(32), e: x } : x);
       l = intifyAddr(l);
       r = intifyAddr(r);
-      // The SAME hazard one level down, for a POINTER-shaped global's VALUE (`gPtr`, isPtrGlobal):
-      // C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized `void *`, but
-      // whatever the PROJECT's header declares (a 0x5C-byte struct, say) in the world a user
-      // actually recompiles in. The asm added BYTES, so the honest spelling makes the stride
-      // explicit: CAST-THEN-ADD, `(u8 *)gPtr + K`, the same address in EVERY world. Add-then-cast
-      // (`(u8 *)(gPtr + K)`, what the backend's deref legalization would otherwise produce) is
-      // byte-correct in exactly one of them — a silent wrongness, the class this project refuses.
+      // The SAME hazard one level down, for a value the MAP declares a pointer (`gPtr`, `gSym.pBuf`
+      // — isPtrValue): C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized
+      // `void *`, but whatever the PROJECT's header declares (a `u16 *` member, a 0x5C-byte
+      // struct) in the world a user actually recompiles in. The asm added BYTES, so the honest
+      // spelling makes the stride explicit: CAST-THEN-ADD, `(u8 *)gPtr + K`, the same address in
+      // EVERY world. Add-then-cast (`(u8 *)(gPtr + K)`, what the backend's deref legalization
+      // would otherwise produce) is byte-correct in exactly one of them — a silent wrongness, the
+      // class this project refuses. A MEMBER is the case with no world in which the raw spelling
+      // is right: the map declares the pointee width, so `bytes + gSym.pBuf` on a `u16 *` scales
+      // the residual a SECOND time and addresses twice the byte the asm did.
       // NOT foldable into the deref index either: `((u8 *)gPtr)[K + off]` re-scales K by the
       // ACCESS width, a different address whenever that width is not 1.
       // Under the non-additive operators C rejects a pointer outright, so there the honest
       // spelling is integer math on the cell — exactly intifyAddr's `(u32)&gSym` rule.
-      const intifyPtrGlobal = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
+      const intifyPtrValue = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
       if (op === '+' || op === '-') {
         // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
         // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer.
-        const bothPtr = isPtrGlobal(l) && isPtrGlobal(r);
-        if (isPtrGlobal(l)) {
+        const bothPtr = isPtrValue(l) && isPtrValue(r);
+        if (isPtrValue(l)) {
           l = bytePtr(l);
         }
-        if (isPtrGlobal(r)) {
-          r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrGlobal(r);
+        if (isPtrValue(r)) {
+          r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
         }
       } else if (op !== '&&' && op !== '||') {
         // (`&&`/`||` take a pointer operand legally — a truth test, no arithmetic.)
-        l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
-        r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
+        l = isPtrValue(l) ? intifyPtrValue(l) : l;
+        r = isPtrValue(r) ? intifyPtrValue(r) : r;
       }
       // (The signedness-carrying pairs stay DISTINCT ops here — `>>>`/`>>` and `/u` `%u`/`/` `%`.
       // Which token a language spells each with, and what cast pins the choice, is a BACKEND
