@@ -40,11 +40,29 @@
 //
 // REFUSAL. `spellOperandMembers` returns `null` when no base was admitted, so a function with no
 // eligible site contributes no candidate and costs nothing. A base with ANY ineligible access is
-// refused WHOLE rather than half-respelled, so the declared struct describes every subscript this
-// pass grouped under that base and never an arbitrary half of them. It does NOT describe every
-// access to the ADDRESS: a struct-array element off the same numeric constant reaches it through
-// a cast, which is a different base expression and a different key, and stays as it was.
+// refused WHOLE rather than half-respelled, and "any access" means EVERY access through that base
+// expression — a variable subscript and a `lead`-prefixed one included, which is what
+// `mixed-access` is for. An earlier version of this pass filtered those out of `collect` before
+// the gates ever saw them, so the seating check judged a partial population and the emitted C
+// carried one address through two contradictory fictional types
+// (`((struct Off0 *)&gEntity)->m12` beside `((u8 *)&gEntity)[a0 * 28 + 17]`). The declaration now
+// describes every subscript through the key it was minted for.
+//
+// It still does NOT describe every access to the ADDRESS: a struct-array element off the same
+// numeric constant reaches it through a cast, which is a different base expression and a different
+// key, and stays as it was.
+//
+// ALL-OR-NOTHING PER FUNCTION, and that is a PRICE rather than a property. Every admitted base is
+// respelled together in one candidate, so a function with two admitted bases where the target
+// folded one and kept the other in the operand has no reachable spelling — the same coverage hole
+// `l3/basecse.ts` states for its two admissions and `l3/ptrfield.ts` measures for its fields. The
+// per-base fork is 2^n and the family's standing price for forking ten refusal sites per site was
+// 1024x, so the subsets stay unreachable until a row demands one. Measured over klonoa's lifting
+// functions, the surplus is real: 36 admitted bases over 25 functions map-less and 25 over 16
+// map-ful, so the multi-base functions are where a missing subset would live.
+import { nextStructIndex } from '../ir/struct-names';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
+import { addrConst, inRange } from './address';
 import type { Expr, SFn, StructType } from './ast';
 import { mapExprChildren, mapStmtExprs, walkExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
@@ -57,6 +75,15 @@ interface Site {
   signed: boolean;
   /** the displacement the instruction carried, when it carried one (l3/ast.ts `operandOff`) */
   operandOff?: number;
+}
+
+/** One base and everything observed through it. `other` counts the accesses this pass has no
+ *  member spelling for — a variable subscript, a `lead`-prefixed one — which are what make the
+ *  base's population partial and so refuse it whole. */
+interface Group {
+  base: Expr;
+  sites: Site[];
+  other: number;
 }
 
 /** The identity of an access's base, for grouping. Leaf bases key by value; everything else keys
@@ -77,6 +104,12 @@ export interface OffmemberBase {
   indexCarriesMore: boolean;
   /** the accesses cannot be declared as a plain C struct seating each at its own offset */
   unspellableLayout: boolean;
+  /** some access through this base is not a constant subscript this pass can spell as a member,
+   *  so the declared struct would describe only part of what the base is read through */
+  mixedAccess: boolean;
+  /** the base, or a cell read through it, lies inside the target's declared device-register
+   *  window */
+  deviceBase: boolean;
 }
 
 export const OFFMEMBER_GATES: readonly Gate<OffmemberBase>[] = [
@@ -85,6 +118,20 @@ export const OFFMEMBER_GATES: readonly Gate<OffmemberBase>[] = [
     why: 'a computed base is already held somewhere, so nothing folded into a literal',
     sound: false,
     rejects: (c) => !c.leafBase,
+  },
+  {
+    id: 'device-base',
+    why: 'a device register is not an object a source declares a struct over, and the member spelling drops the qualifier the cell needs',
+    sound: true,
+    guardedBy: 'offmember.test.ts: device-base: a cell inside the declared device window is refused, ablating admits',
+    rejects: (c) => c.deviceBase,
+  },
+  {
+    id: 'mixed-access',
+    why: 'a base also read through a subscript this pass cannot spell would be described by half a struct',
+    sound: true,
+    guardedBy: 'offmember.test.ts: mixed-access: a variable-subscript sibling refuses the WHOLE base',
+    rejects: (c) => c.mixedAccess,
   },
   {
     id: 'no-operand-off',
@@ -107,9 +154,12 @@ export const OFFMEMBER_GATES: readonly Gate<OffmemberBase>[] = [
   },
 ];
 
-/** The members this base is spelled through: one field per distinct offset, a load's signed view
- *  preferred over a store's. Shared by the seating PREDICATE and the layout BUILDER so the two
- *  cannot judge one field set and declare another. */
+/** The members this base is spelled through: one field per distinct offset. Shared by the seating
+ *  PREDICATE and the layout BUILDER so the two cannot judge one field set and declare another —
+ *  and, since `seatable` now refuses an offset whose views disagree on width OR signedness, every
+ *  surviving offset has exactly one view and the pick below is an identity on an admitted base.
+ *  It is kept because this runs on ABLATED tables too, where the gate is gone and something still
+ *  has to choose; preferring the signed view keeps that choice the widest one. */
 function membersOf(sites: readonly Site[]): Site[] {
   const byOff = new Map<number, Site>();
   for (const s of sites) {
@@ -121,11 +171,23 @@ function membersOf(sites: readonly Site[]): Site[] {
   return [...byOff.values()].sort((a, b) => a.off - b.off);
 }
 
-/** Can plain C seat every member at the offset the asm read it at?
+/** Can plain C seat every member at the offset the asm read it at, AND does the member read the
+ *  same value the access did?
  *
- *  Three ways it cannot, and all three are the same defect — a field the declaration would place
- *  somewhere other than where the access reads: a NEGATIVE offset, which no member has; two views
- *  of ONE offset at different widths (a union); and two offsets whose byte ranges collide.
+ *  FOUR ways it cannot, and the first three are the same defect — a field the declaration would
+ *  place somewhere other than where the access reads: a NEGATIVE offset, which no member has; two
+ *  views of ONE offset at different widths (a union); and two offsets whose byte ranges collide.
+ *
+ *  THE FOURTH IS NOT ABOUT PLACEMENT, and it is the one an earlier version of this predicate
+ *  missed while asserting the list was complete: two views of one offset at one width but
+ *  DIFFERENT SIGNEDNESS (`ldrb` and `ldrsb` at the same address). One member has one type, so
+ *  respelling both through it changes what one of the two READS — `scalarTypeForAccess` honours
+ *  signedness at widths 1 and 2, so an unsigned read becomes sign-extending. That is a value
+ *  change rather than a spelling change, and the differ can referee it only by luck: a masked or
+ *  compared result compiles to the same bytes while the published C says something the asm does
+ *  not. C spells it as a union, which is not a member, so it is refused exactly as the width union
+ *  is. `l3/basecse.ts` keys `(base, width, signedness)` for the same reason, and `l3/typing.ts`
+ *  states the rule in the imperative: signedness counts wherever the access extends.
  *
  *  Natural ALIGNMENT is not among them, and that is an invariant rather than an omission: a
  *  member's offset here is the node's own `idx * width`, so it is a multiple of its width by
@@ -137,13 +199,13 @@ function membersOf(sites: readonly Site[]): Site[] {
  *  than quietly declining beside it. */
 function seatable(sites: readonly Site[]): boolean {
   let cursor = 0;
-  const widths = new Map<number, number>();
+  const views = new Map<number, Site>();
   for (const s of sites) {
-    const w = widths.get(s.off);
-    if (w !== undefined && w !== s.width) {
+    const v = views.get(s.off);
+    if (v !== undefined && (v.width !== s.width || v.signed !== s.signed)) {
       return false;
     }
-    widths.set(s.off, s.width);
+    views.set(s.off, s);
   }
   for (const m of membersOf(sites)) {
     if (m.off < cursor) {
@@ -172,41 +234,69 @@ function layoutFor(name: string, sites: readonly Site[]): StructType {
   return { name, fields };
 }
 
-/** Every constant-subscript `index` access, grouped by base, in first-appearance order. */
-function collect(sfn: SFn): { order: string[]; sites: Map<string, Site[]> } {
+/** EVERY `index` access, grouped by base, in first-appearance order — not only the ones this pass
+ *  can spell. An access with a variable subscript or a `lead` has no member spelling, but it is
+ *  still a read through the base whose layout the declaration claims to describe, so it is
+ *  COUNTED here and refused by `mixed-access` rather than filtered out before the gates run.
+ *  Filtering it out is what let one address be spelled through two contradictory types. */
+function collect(sfn: SFn): { order: string[]; groups: Map<string, Group> } {
   const order: string[] = [];
-  const sites = new Map<string, Site[]>();
+  const groups = new Map<string, Group>();
   for (const e of walkExprs(sfn.body)) {
-    if (e.k !== 'index' || e.idx.k !== 'const' || e.lead !== undefined) {
+    if (e.k !== 'index') {
       continue;
     }
     const k = baseKey(e.base);
-    if (!sites.has(k)) {
+    let g = groups.get(k);
+    if (!g) {
       order.push(k);
-      sites.set(k, []);
+      g = { base: e.base, sites: [], other: 0 };
+      groups.set(k, g);
     }
-    sites.get(k)!.push({ off: e.idx.value * e.width, width: e.width, signed: e.signed, operandOff: e.operandOff });
+    if (e.idx.k !== 'const' || e.lead !== undefined) {
+      g.other++;
+      continue;
+    }
+    g.sites.push({ off: e.idx.value * e.width, width: e.width, signed: e.signed, operandOff: e.operandOff });
   }
-  return { order, sites };
+  return { order, groups };
+}
+
+/** Does this base, or any cell read through it, lie in the target's declared device-register
+ *  window? Both halves are asked because neither implies the other over a 1KB page: a base just
+ *  below it reaches into it through a displacement, and a base inside it can be read at an offset
+ *  past its end.
+ *
+ *  It reads the ADDRESS the base is (`addrConst`, through any pointer cast), which is `inRange`'s
+ *  clientele everywhere else in the tree. A base that reaches L3 as a NAMED global instead of a
+ *  number is invisible to it — a symbol map that names a device register defeats the window, the
+ *  same blind spot `/vol-store` and `/homesplit` have, and not one this gate closes. */
+function touchesDeviceWindow(g: Group, window?: readonly [number, number]): boolean {
+  const a = addrConst(g.base);
+  return a !== null && (inRange(a, window) || g.sites.some((s) => inRange(a + s.off, window)));
 }
 
 /** The keys `gates` admits, with the struct each one is spelled through. */
 function admit(
   sfn: SFn,
+  opts: OffmemberOpts,
   gates: readonly Gate<OffmemberBase>[],
   firstName: number,
 ): Map<string, { struct: StructType; type: IrType }> {
-  const { order, sites } = collect(sfn);
+  const { order, groups } = collect(sfn);
   const out = new Map<string, { struct: StructType; type: IrType }>();
   let n = firstName;
   for (const key of order) {
-    const list = sites.get(key)!;
+    const g = groups.get(key)!;
+    const list = g.sites;
     const rejected = firstRejection(gates, {
       key,
       leafBase: key.startsWith('a:') || key.startsWith('c:'),
-      missingOperandOff: list.some((s) => s.operandOff === undefined),
+      missingOperandOff: list.length === 0 || list.some((s) => s.operandOff === undefined),
       indexCarriesMore: list.some((s) => s.operandOff !== undefined && s.operandOff !== s.off),
       unspellableLayout: !seatable(list),
+      mixedAccess: g.other > 0,
+      deviceBase: touchesDeviceWindow(g, opts.deviceRegisters),
     });
     if (rejected === null) {
       const struct = layoutFor(`Off${n}`, list);
@@ -217,24 +307,34 @@ function admit(
   return out;
 }
 
+/** What the pass needs from the target, plus the gate table an ablation swaps out. Both optional,
+ *  so a caller with neither still gets the shipped behaviour — with the ONE exception that an
+ *  absent `deviceRegisters` is a target that declares no device page, which makes `device-base`
+ *  vacuous exactly as `inRange` does everywhere else. */
+export interface OffmemberOpts {
+  readonly deviceRegisters?: readonly [number, number];
+  readonly gates?: readonly Gate<OffmemberBase>[];
+}
+
 /** The census without the rewrite, for a caller comparing what two tables would admit. */
-export function offmemberBases(sfn: SFn, gates: readonly Gate<OffmemberBase>[] = OFFMEMBER_GATES): readonly string[] {
-  return [...admit(sfn, gates, 0).keys()];
+export function offmemberBases(sfn: SFn, opts: OffmemberOpts = {}): readonly string[] {
+  return [...admit(sfn, opts, opts.gates ?? OFFMEMBER_GATES, 0).keys()];
 }
 
 /** Re-spell every admitted base's constant subscripts as members of a synthesized struct.
  *  `null` when nothing is admitted — the axis then contributes no candidate. */
-export function spellOperandMembers(sfn: SFn, gates: readonly Gate<OffmemberBase>[] = OFFMEMBER_GATES): SFn | null {
-  // Seeded past the names the tree already carries: raise/structs.ts mints `Struct<N>` and
-  // raise/struct-arrays.ts `Elem<N>`, so the prefix alone keeps this pass clear of both — but a
-  // second `/offmember` over one tree would not be, and a collision declares one layout under a
-  // name another access reads.
-  const taken = new Set((sfn.structs ?? []).map((s) => s.name));
-  let seed = 0;
-  while (taken.has(`Off${seed}`)) {
-    seed++;
-  }
-  const admitted = admit(sfn, gates, seed);
+export function spellOperandMembers(sfn: SFn, opts: OffmemberOpts = {}): SFn | null {
+  // Past EVERY `Off<N>` the tree already carries, never the first free one: raise/structs.ts mints
+  // `Struct<N>` and raise/struct-arrays.ts `Elem<N>`, so the prefix alone keeps this pass clear of
+  // both, but a tree carrying `Off0` and `Off2` would stop a first-free walk at 1 and mint a
+  // second `Off2`. A collision declares one layout under a name another access reads, and
+  // `structs` is a list rather than a map, so nothing downstream would say so. The scan is
+  // `ir/struct-names.ts`, shared with the other two minters.
+  const seed = nextStructIndex(
+    (sfn.structs ?? []).map((s) => s.name),
+    'Off',
+  );
+  const admitted = admit(sfn, opts, opts.gates ?? OFFMEMBER_GATES, seed);
   if (admitted.size === 0) {
     return null;
   }

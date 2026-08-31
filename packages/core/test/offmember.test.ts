@@ -98,7 +98,7 @@ describe('every gate is load-bearing', () => {
 
   test('non-leaf-base: a computed base is refused, and ablating it admits', () => {
     expect(offmemberBases(NON_LEAF)).toEqual([]);
-    expect(offmemberBases(NON_LEAF, without(OFFMEMBER_GATES, 'non-leaf-base'))).toHaveLength(1);
+    expect(offmemberBases(NON_LEAF, { gates: without(OFFMEMBER_GATES, 'non-leaf-base') })).toHaveLength(1);
   });
 
   test('no-operand-off: one access without a displacement refuses the WHOLE base', () => {
@@ -106,7 +106,7 @@ describe('every gate is load-bearing', () => {
     // refused whole, so the declared struct is never a partial description of the address.
     const MIXED = fn([ret(idx(cbase(64), 7, 2, { operandOff: 14 })), ret(idx(cbase(64), 4, 2))]);
     expect(offmemberBases(MIXED)).toEqual([]);
-    expect(offmemberBases(MIXED, without(OFFMEMBER_GATES, 'no-operand-off'))).toHaveLength(1);
+    expect(offmemberBases(MIXED, { gates: without(OFFMEMBER_GATES, 'no-operand-off') })).toHaveLength(1);
   });
 
   test('index-carries-more: a subscript wider than the displacement is refused', () => {
@@ -114,7 +114,7 @@ describe('every gate is load-bearing', () => {
     // carried 6, and how that split maps back onto one member is not measured.
     const SPLIT = fn([ret(idx(cbase(64), 5, 2, { operandOff: 6 }))]);
     expect(offmemberBases(SPLIT)).toEqual([]);
-    expect(offmemberBases(SPLIT, without(OFFMEMBER_GATES, 'index-carries-more'))).toHaveLength(1);
+    expect(offmemberBases(SPLIT, { gates: without(OFFMEMBER_GATES, 'index-carries-more') })).toHaveLength(1);
   });
 
   test('a base whose accesses no plain struct can seat is refused', () => {
@@ -124,9 +124,74 @@ describe('every gate is load-bearing', () => {
     // so the declaration seats `m6` at byte 8 while the access still reads `->m6`.
     const OVERLAP = fn([ret(idx(cbase(64), 1, 4, { operandOff: 4 })), ret(idx(cbase(64), 3, 2, { operandOff: 6 }))]);
     expect(offmemberBases(OVERLAP)).toEqual([]);
-    const ablated = spellOperandMembers(OVERLAP, without(OFFMEMBER_GATES, 'unspellable-layout'))!;
+    const ablated = spellOperandMembers(OVERLAP, { gates: without(OFFMEMBER_GATES, 'unspellable-layout') })!;
     expect(ablated.structs![0].fields.map((f) => f.name)).toEqual(['_pad0', 'm4', 'm6']);
     expect(cBackend.emit(ablated)).toContain('->m6');
+  });
+
+  // Two views of ONE offset at ONE width but different SIGNEDNESS. `seatable` used to compare only
+  // widths, so the two collapsed into whichever member `membersOf` preferred and one of the two
+  // reads changed VALUE — `ldrb` respelled through an `s8` sign-extends. A union, which is not a
+  // member, so it is refused exactly as the width union is; ablating shows the collapse rather
+  // than a worse score.
+  const SIGN_UNION = fn([
+    ret(idx(cbase(64), 3, 1, { operandOff: 3 })),
+    ret({ ...(idx(cbase(64), 3, 1, { operandOff: 3 }) as Extract<Expr, { k: 'index' }>), signed: true }),
+  ]);
+
+  test('a signedness union at one offset is refused, and ablating it CHANGES what the C reads', () => {
+    expect(offmemberBases(SIGN_UNION)).toEqual([]);
+    const ablated = spellOperandMembers(SIGN_UNION, { gates: without(OFFMEMBER_GATES, 'unspellable-layout') })!;
+    // one `s8` member, and the UNSIGNED read now goes through it — the value change the gate stops
+    expect(cBackend.emit(ablated)).toMatch(/s8 m3;/);
+    expect(cBackend.emit(ablated).match(/->m3/g)).toHaveLength(2);
+  });
+
+  // `((s32 *)C)[16/4]` beside `((s32 *)C)[a0]`: one address, and only the first has a member
+  // spelling. Respelling just that one emitted a struct declaring bytes 0..20 of the address
+  // beside a sibling striding past them — one address through two contradictory fictional types.
+  const MIXED_ACCESS = fn([
+    ret(idx(cbase(50345232), 4, 4, { operandOff: 16 })),
+    ret({ k: 'index', base: cbase(50345232), idx: { k: 'var', name: 'a0' }, width: 4, signed: false }),
+  ]);
+
+  test('mixed-access: a variable-subscript sibling refuses the WHOLE base', () => {
+    expect(offmemberBases(MIXED_ACCESS)).toEqual([]);
+    const ablated = spellOperandMembers(MIXED_ACCESS, { gates: without(OFFMEMBER_GATES, 'mixed-access') })!;
+    const src = cBackend.emit(ablated);
+    // ablated, BOTH spellings of the one address stand in the emitted C — that is the half-respell
+    expect(src).toContain('((struct Off0 *)50345232)->m16');
+    expect(src).toContain('((s32 *)50345232)[a0]');
+  });
+
+  // 0x040000D4 + 8 is REG_DMA3CNT, inside ARMV4T_AGBCC's declared device page. A struct over the
+  // register file is not an object a source declares, and the member spelling also drops the
+  // `volatile` the tie-break at `compareScored` can only ADD — so the differ would referee it by
+  // luck. Nothing else in the table asks: without this gate the shape is admitted whenever the
+  // function does not also touch the base at displacement 0.
+  const DEVICE = fn([ret(idx(cbase(0x040000d4), 2, 4, { operandOff: 8 }))]);
+  const WINDOW = { deviceRegisters: ARMV4T_AGBCC.capabilities.deviceRegisters };
+
+  test('device-base: a cell inside the declared device window is refused, ablating admits', () => {
+    expect(offmemberBases(DEVICE, WINDOW)).toEqual([]);
+    expect(offmemberBases(DEVICE, { ...WINDOW, gates: without(OFFMEMBER_GATES, 'device-base') })).toHaveLength(1);
+    expect(
+      cBackend.emit(spellOperandMembers(DEVICE, { ...WINDOW, gates: without(OFFMEMBER_GATES, 'device-base') })!),
+    ).toContain('(struct Off0 *)67109076');
+  });
+
+  test('device-base asks the CELL and not only the base: below the window, reading into it', () => {
+    // base 0x03FFFFF8, read at +8 and +12 — the base is EWRAM and both cells are the device page.
+    const BELOW = fn([
+      ret(idx(cbase(0x03fffff8), 2, 4, { operandOff: 8 })),
+      ret(idx(cbase(0x03fffff8), 3, 4, { operandOff: 12 })),
+    ]);
+    expect(offmemberBases(BELOW, WINDOW)).toEqual([]);
+    expect(offmemberBases(BELOW, { ...WINDOW, gates: without(OFFMEMBER_GATES, 'device-base') })).toHaveLength(1);
+  });
+
+  test('a target declaring no device page makes device-base vacuous, never a refusal', () => {
+    expect(offmemberBases(DEVICE)).toHaveLength(1);
   });
 });
 
@@ -158,6 +223,22 @@ describe('the declaration cannot collide with the two passes that already mint s
       structs: [{ name: 'Off0', fields: [{ off: 0, type: T.s(32), name: 'm0' }] }],
     };
     expect(spellOperandMembers(taken)!.structs?.map((s) => s.name)).toEqual(['Off0', 'Off1']);
+  });
+
+  // THE SEED IS MONOTONE, NOT FIRST-FREE. A first-free walk stops at the first GAP, so a tree
+  // carrying Off0 and Off2 would restart at Off1 and mint a second Off2 — one name, two layouts,
+  // and `structs` is a list rather than a map, so nothing downstream would say so.
+  test('a NON-CONTIGUOUS taken set does not wrap back onto a taken name', () => {
+    const gappy: SFn = {
+      ...fn([ret(idx(cbase(64), 7, 2, { operandOff: 14 })), ret(idx(cbase(128), 7, 2, { operandOff: 14 }))]),
+      structs: [
+        { name: 'Off0', fields: [{ off: 0, type: T.s(32), name: 'm0' }] },
+        { name: 'Off2', fields: [{ off: 0, type: T.s(32), name: 'm0' }] },
+      ],
+    };
+    const names = spellOperandMembers(gappy)!.structs!.map((s) => s.name);
+    expect(names).toEqual(['Off0', 'Off2', 'Off3', 'Off4']);
+    expect(new Set(names).size).toBe(names.length);
   });
 });
 

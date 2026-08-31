@@ -18,7 +18,9 @@
 // UNAMBIGUOUS here (the scaled operand is the index, read from the machine code) — the unscaled
 // `add(x, y)` byte form stays out of scope (genuinely ambiguous without types).
 import { Fn, Op, Value, defOpMap, mkOp } from '../ir/core';
+import { nextStructIndex } from '../ir/struct-names';
 import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
+import { collectStructs } from './structs';
 
 interface Scaled {
   base: Value;
@@ -94,6 +96,14 @@ function withPadding(dataFields: StructField[], stride: number): StructField[] {
 export function recognizeStructArrays(fn: Fn): number {
   const defs = defOpMap(fn);
   let count = 0;
+  // The NAME index is not the recognition count: it starts past every `Elem<N>` the graph already
+  // mentions, so a second run over a tree this pass has already touched cannot re-declare a name.
+  // (`count` is this function's return value — how many groups it recognized — and seeding it
+  // would report the wrong number.)
+  let name = nextStructIndex(
+    [...collectStructs(fn)].map((s) => s.name),
+    'Elem',
+  );
 
   // group candidate element pointers by base, tracking each add's own index and stride
   const byBase = new Map<Value, { add: Op; index: Value; stride: number }[]>();
@@ -222,7 +232,7 @@ export function recognizeStructArrays(fn: Fn): number {
       type: scalarTypeForAccess(width, loadSigned ?? width === 4),
       name: `field_${off}`,
     }));
-    const elemStruct = T.struct(`Elem${count}`, withPadding(dataFields, stride), stride);
+    const elemStruct = T.struct(`Elem${name++}`, withPadding(dataFields, stride), stride);
     base.type = T.ptr(elemStruct);
 
     // Rewrite each field load/store into an aload/astore carrying base, ITS elem's index,
