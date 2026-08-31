@@ -221,6 +221,16 @@ find nothing to disagree with and go green having audited nothing.
     sampling on 168.8 s with `{"hit":67653,"sampled":699,"verified":699}` — **699 extra compiles
     (1.02%) for +6.8 s of wall (+4.2%)**. Against the same store cold (675 s), the speedup is
     **4.17x without the audit and 4.00x with it**: 96% of it survives.
+    That pair was SEQUENTIAL, so it prices the audit and the box's own drift together.
+    INTERLEAVED A/B/A/B on the same fan and the same store at a quiet loadavg (6–10) puts the
+    audit far lower: audit off **161 s / 158 s**, audit on **161 s** (`sampled:713`) **/ 160 s**
+    (`sampled:692`) — **+1.0 s on 159.5 s (+0.6%) for 1.02% extra compiles, against a 3 s spread
+    WITHIN each arm**. Same box, same session, cache off: **641 s** — so **4.02x without the audit
+    and 3.99x with it**. The audit is nearly free on a WARM run and not remotely free in `verify`
+    (698 s, every key compiled) for the same reason: a warm run is no longer compile-bound, its
+    wall is enumerate plus 68,352 scores on the main thread, and 700 extra compiles spread over
+    six workers vanish into that. Quote **+0.6% quiet / +4.2% loaded**, never either without its
+    loadavg — the rate is 1% in both.
   - **The seed is on the line and it rotates.** `[candcache] on sample=1%/seed=88dbd665e2876874 {…}`
     — an audited run is distinguishable from an unaudited one, and `sample=off` says so when
     someone turns it off. Sampling is deterministic within a run (so a run is reproducible) and
@@ -232,8 +242,13 @@ find nothing to disagree with and go green having audited nothing.
     keys — is caught in the FIRST run that serves more than a few hundred keys. A staleness in
     exactly ONE key survives on average 100 runs, and is 63% likely to be caught within 100.
     Sampling does not ELIMINATE the residual list; it bounds how long one can live undetected.
-  - **This fan prices only the OBJECT half.** 0 of its 68,352 answers are cached rejections, and a
-    warm bench store is 77% rejections. The negative half is sampled on `pnpm bench run`, not here.
+  - **This fan prices only the OBJECT half, and the negative half is measured on the bench.** 0 of
+    its 68,352 answers are cached rejections. One whole `pnpm bench run` (948 rows, warm real-tier
+    store, 16 shards) served **6,911 objects and 34,800 rejections** — 83% negative — and audited
+    **399 of them (0.95%): 57 objects, 342 rejections, 0 disagreements**. That is the direction
+    nothing was checking before #132 and the one that silently DROPS a spelling, and it is only
+    ever exercised by a bench run. Read it off the per-shard `[candcache]` lines, which is where a
+    reader can check it too.
   - A sampled key is withheld, so its candidate is compiled for real — and is therefore exposed to
     a transient compile failure exactly as an uncached run is. That is the state every wall
     published before the default flipped was measured in, on 100% of keys instead of 1%.
