@@ -22,10 +22,12 @@
 // would make it a gate over the whole suite is threading the cache through `@asmlift/toolchains`.
 //
 // AND IT REFUSES, measured rather than reasoned. Re-run against that same store with every stored
-// object overwritten by a fixed 19-byte string: the 327 tests STILL PASS — verify mode never
-// serves, so no assertion can move — and the run exits 1 from the teardown below with 133
+// object overwritten by a fixed 19-byte string: every test STILL PASSES — verify mode never
+// serves, so no assertion can move — and the run fails from the teardown below with 133
 // disagreements in `MISMATCHES.log`. That is the shape to expect from this gate: it does not
-// change what the suite decides, it decides whether the store was entitled to be believed.
+// change what the suite decides, it decides whether the store was entitled to be believed. The
+// status is vitest's own, not `CACHE_MISMATCH_EXIT`: the teardown runs in the vitest parent, which
+// owns the exit code, while the counters live in the forked worker that compiled.
 //
 // THE STORE IS DELIBERATELY *NOT* ISOLATED HERE, and this is the one place in the repo where that
 // is the right call. `vitest.config.ts` pins the offline/app suites at `ASMLIFT_CANDCACHE=0` and

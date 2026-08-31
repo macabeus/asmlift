@@ -22,7 +22,7 @@ export default defineConfig({
     //   throwaway `sh` "compiler" emits — C source text, and one line of Pascal. Ablated again
     //   with that store POISONED (every stored object replaced by a fixed string), 13 tests in
     //   `compile-command.test.ts` failed on the poison; fenced, against the same poisoned store,
-    //   2160/2160 passed and the store tree came back byte-for-byte identical — no lease, no new
+    //   every one passed and the store tree came back byte-for-byte identical — no lease, no new
     //   entry. A green suite that was green because it read a cache is not a green suite.
     //
     //   SAMPLE — determinism, and this one was a live 1-in-100 flake. `on` mode audits a sampled

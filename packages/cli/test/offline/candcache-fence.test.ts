@@ -25,7 +25,8 @@ const DEFAULT_STORE = join(tmpdir(), 'asmlift-candcache');
 describe('the test fence over the candidate-object cache', () => {
   test('the cache is pinned OFF, so no test can be served a stored object', () => {
     // The correctness half. Ablated, `pnpm test:offline` served a poisoned store into 13 tests in
-    // compile-command.test.ts; fenced, the same poisoned store left 2160/2160 green and untouched.
+    // compile-command.test.ts; fenced, the same poisoned store left the suite green and its own
+    // tree byte-for-byte unchanged — no lease, no new entry.
     expect(process.env.ASMLIFT_CANDCACHE, 'vitest.config.ts must pin ASMLIFT_CANDCACHE=0 — unset now means ON').toBe(
       '0',
     );
