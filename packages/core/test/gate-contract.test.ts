@@ -14,6 +14,7 @@ import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { HOMESPLIT_FAN_GATES, HOMESPLIT_GATES, withholdingKey } from '../src/l3/homesplit';
 import { INLINEBASE_GATES } from '../src/l3/inlinebase';
+import { OFFMEMBER_GATES } from '../src/l3/offmember';
 import { PTR_FIELD_GATES } from '../src/l3/ptrfield';
 import { COUNTDOWN_GATES } from '../src/l3/reindex';
 import { REGIONBASE_GATES, SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES } from '../src/l3/scopebase';
@@ -47,6 +48,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   PARAM_WIDTH_GATES: PARAM_WIDTH_GATES as readonly Gate<never>[],
   NAME_COALESCE_GATES: NAME_COALESCE_GATES as readonly Gate<never>[],
   INLINEBASE_GATES: INLINEBASE_GATES as readonly Gate<never>[],
+  OFFMEMBER_GATES: OFFMEMBER_GATES as readonly Gate<never>[],
   VOL_SLOT_GATES: VOL_SLOT_GATES as readonly Gate<never>[],
   COUNTDOWN_GATES: COUNTDOWN_GATES as readonly Gate<never>[],
   VOL_STORE_GATES: VOL_STORE_GATES as readonly Gate<never>[],

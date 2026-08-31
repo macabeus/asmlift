@@ -35,6 +35,7 @@ import { initFirstGuards } from './l3/initfirst';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
+import { spellOperandMembers } from './l3/offmember';
 import { parkParamsFirst } from './l3/parkfirst';
 import { pollGuards, pollReads } from './l3/pollguard';
 import { pointerFields } from './l3/ptrfield';
@@ -1285,6 +1286,16 @@ export function enumerateCandidates(
     // evidence exactly — but not the compiler's alias analysis, which is what lets a pointer
     // field's load leave a loop an `s32` store pins it inside. Both are enumerated.
     respell('/ptr-field', () => pointerFields(sfn));
+    // `/offmember` — spell a leaf base's constant subscript as a struct MEMBER (l3/offmember.ts),
+    // so the offset stays in the load's displacement instead of folding into the pool literal.
+    // The SECOND source of the shape `/basefold` already reads: that row answers the same
+    // evidence with a named base, this one with an aggregate member, and the two are different C
+    // and different register pressure. Offered only where the target declares the fold — MIPS and
+    // PPC put the addend in the instruction by construction, so nothing there says a member put
+    // it there, exactly as with BASEFOLD_ADMISSIONS above.
+    if (target.compilerBehaviors.foldsConstAddrOffset) {
+      respell('/offmember', () => spellOperandMembers(sfn));
+    }
     // The `/vol-store` × `/unreduce` PAIRING — row-demanded (synthetic:dmafill), and the joint
     // spelling is reachable from neither lever alone: pinning the stores keeps three of them in
     // the loop body, which is what makes the loop's register pressure — and so the placement of
@@ -1873,11 +1884,14 @@ export function enumerateCandidates(
           //
           // The key therefore spans EVIDENCE fields too, `index.operandOff` among them, which
           // `exprEquals` deliberately ignores (l3/ast.ts). The two are right to disagree: two
-          // trees identical but for that flag denote the same cells, so a CSE may collapse them,
+          // trees identical but for that field denote the same cells, so a CSE may collapse them,
           // and they admit different bases under `BASEFOLD_GATES`, so a fan may not. Dropping it
-          // from the key would be the direction the paragraph above rules out. Priced over the
-          // artifact (1140 observations, five toolchains, both symbol-map configurations): the
-          // flag splits 0 keys, so the miss it can cause has no inhabitant.
+          // from the key would be the direction the paragraph above rules out. It carries a
+          // DISPLACEMENT rather than a presence flag, so it can split two trees that print the
+          // same subscript off different addends — re-priced when it widened, over klonoa's
+          // `LoadBGTilemapData` under docs/ranked-repro.md's flags (1024 axis points, 66816
+          // candidates): 66816 either way, and all 66816 `[score]` lines identical. It splits 0
+          // keys, so the miss it can cause has no inhabitant.
           const treeKey = JSON.stringify(sfn);
           if (seenTrees.has(treeKey)) {
             continue;
