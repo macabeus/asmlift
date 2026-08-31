@@ -5,8 +5,11 @@
 //
 // SOUNDNESS — this file is a near-verbatim PORT of packages/cli/src/objdiff.ts. Its
 // `scoreObjectBytes` MUST stay logic-identical to that file, and objdiff-wasm MUST stay pinned to
-// the EXACT same version as packages/cli (3.7.0) — the two copies are a deliberate duplication
-// (apps/web cannot import the Node cli), so they can only be trusted while they agree. In
+// the EXACT same version as packages/cli: two versions align instruction streams differently, so a
+// browser score computed by one is not comparable to a benchmark score computed by the other. The
+// version is deliberately NOT written here — it lives in the two package.json files, and
+// packages/core/test/one-version.test.ts fails when they disagree. The two copies are a deliberate
+// duplication (apps/web cannot import the Node cli), so they can only be trusted while they agree. In
 // particular: match ⇔ `differences === 0` counted over instruction rows (NOT objdiff's rounded
 // matchPercent, which can round 99.96 → 100), and a missing symbol THROWS (never a soft-fail that
 // would mask an alignment bug as a perpetual "closest"). FAIL-CLOSED: nothing here is caught; any
