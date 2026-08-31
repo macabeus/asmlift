@@ -1228,9 +1228,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // `feedsSymbolAddress` (volatileptr.ts:136) is a real second veto, but ablating it ALONE moves
   // no candidate; a lever has to lift both. A synthetic row cannot express any of that:
   // `SynthSpec` at the top of this file has no map or ELF field, only the real-tier manifests
-  // carry one, and with no map asmlift never emits `&gSym` — so every synthetic candidate is
-  // already raw-address and the axis is always available (same minimized shape with the map off:
-  // 36 candidates, 8 of them carrying `/volatile`). The row this wants is REAL-tier, on a project
+  // carry one, and with no map asmlift never emits `&gSym`, so the naming cannot happen here at
+  // all (same minimized shape with the map off: 36 candidates, 8 of them carrying `/volatile`).
+  // That is narrower than "the axis is always available": both vetoes test the NODE KIND, and
+  // `laddr` mints an `addr` node for a proved frame-object address with no map in sight
+  // (`structure/structure.ts`), so a pointer local fed `&aLocal` on one path is refused by the
+  // same two clauses. No row reaches that either — both probes of it decline first in the Thumb
+  // frontend, on the address-taken stack local. The row this wants is REAL-tier, on a project
   // that already builds a symbol map.
   {
     sym: 'dma_burst',
@@ -2428,14 +2432,9 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { rereadctl: { returnsVoid: true } },
   },
 
-  // A BASE THE ARMS SHARE: asmlift mints the local, then RE-SPELLS IT INLINE right beside it.
-  // The struct and the base are LoadBGTilemapData's — a 28-byte `gBgInfo` element at 0x03003430 —
-  // but this is NOT a component of that row's residual and must not be booked as headroom on it.
-  // Measured on its 386 winner: 16 `gBgInfo` accesses are already
-  // `((struct ElemN *)50345008)[vX].field_NN`, one base is parked in a local
-  // (`v7 = (u16 *)((v27 - v0 << 2) + 50345008)`), and the only inline re-spellings OF THAT BASE
-  // ADDRESS left are two `((s32 *)50345008)[15]` at a CONSTANT index — not the variable-index arm
-  // shape below. What does reach that row is one pool word; the LBG note at the end has it.
+  // A BASE THE ARMS SHARE, AND A CONSTANT INDEX THAT NEEDS NONE: one fold, two surfaces, and
+  // asmlift loses a different thing to each. The struct and the base are LoadBGTilemapData's —
+  // a 28-byte `gBgInfo` element at 0x03003430.
   //
   // THE COMPILER FACT, from the pair compiled with the benchmark's agbcc. When an address
   // constant sits in the SAME syntactic PLUS tree as a member's byte offset, agbcc reassociates
@@ -2447,78 +2446,93 @@ export const SYNTHETIC: SynthSpec[] = [
   //   ((u16 *)(i*28 + 0x03003430))[8]; … [9];            -> 11 insns  .word 0x3003440  ldrh [r0]/[r1]
   //   u16 *p = (u16 *)(i*28 + 0x03003430); p[8]; p[9];   ->  9 insns  .word 0x3003430  — back to the ref
   // Parking the base in ANY local breaks the plus tree and restores the displacement, so the
-  // re-cast and the index constants are innocent; only the tree is the discriminator. Compiled
-  // both ways in one session, the pair behaves identically over a named `extern` (9 / 11 / 9
-  // insns, `.word gBgInfo` / `gBgInfo+0x10` / `gBgInfo`) and over the raw address above — which
-  // is what lets these rows use an address macro and still measure the real thing.
+  // re-cast and the index constants are innocent; only the tree is the discriminator. The pair
+  // behaves identically over a named `extern` (9 / 11 / 9 insns, `.word gBgInfo` /
+  // `gBgInfo+0x10` / `gBgInfo`) and over the raw address above — which is what lets these rows
+  // use an address macro and still measure the real thing.
   //
-  // ONE CAUSE, TWO SURFACES — and these four rows exhibit the SECOND, not the pool bake. Grep them
-  // for a baked pool word and there is none: in all four the plain base SURVIVES, because the
-  // shared member is reached off it, so agbcc keeps `.word 0x3003430` on BOTH sides and pays the
-  // reassociation as an `add` on the loaded value instead. `bgshare`, target against winner:
+  // SURFACE 1, THE ADD — `bgshare` and `bgswitch`. Where something else wants the base plain,
+  // agbcc keeps `.word 0x3003430` and pays the reassociation as an `add` on the loaded value.
+  // Grep these two for a baked pool word and there is none on EITHER side: 2 and 3 plain words in
+  // the target, the same 2 and 3 in the winner. On the target side nothing folds at all, because
+  // the reference spells every access as a struct member and the member offset is therefore never
+  // in the address constant's plus tree — which holds for the two MATCH rows equally, and for a
+  // one-member-per-arm shape that shares nothing (`.word 0x3003430` twice, `[r0,#0x10]` and
+  // `[r0,#0xc]`). On the winner side the base stays plain because the local asmlift minted wants
+  // it plain. `bgshare`, target against winner:
   //   target   …  add r0,r0,r1                                     / ldrh r1,[r0,#0x10]
   //   winner   …  add r2,r0,r1 / add r1,r1,#0x10 / … / add r0,r0,r1 / ldrh r1,[r0]
-  // The bake needs a site where nothing else wants the base plain — the middle line of the pair
-  // above, and on the real function a CONSTANT index: `((s32 *)0x03003430)[15]` gives
-  // `.word 0x300346c` + `ldr [r1]` where `s32 *p = (s32 *)0x03003430; p[15]` gives
-  // `.word 0x3003430` + `ldr [r1,#0x3c]`.
   //
-  // WHAT ASMLIFT DOES WITH IT, measured. Where the target emits a member's load ONCE in a block
-  // that more than one arm reaches, the base is live OUT of each arm; asmlift correctly homes it —
-  // `v0 = (u16 *)(a0 * 28 + 50345008);` — and then spells the arm-local access beside it as
-  // `((u16 *)(a0 * 28 + 50345008))[8]` instead of `v0[8]`. Taking asmlift's own printed winner and
-  // changing ONLY those inline re-spellings to read the local it had already minted compiles
-  // BYTE-IDENTICAL to the target (`cmp -l` reports 0 differing bytes) on both gap rows, where the
-  // unmodified winners differ in 237 and 250 bytes. The whole residual is that one choice, and no
-  // axis in the fan reaches it: `bgshare`'s entire fan is 4 candidates scoring 8, 8, 9, 9
-  // (`unsigned`, `signed`, `unsigned/flip-join`, `signed/flip-join`) and `bgswitch`'s is 2, both 8.
+  // SURFACE 2, THE BAKE — `bgfixed`. Where nothing wants the base plain, the folded address
+  // becomes its own pool word. The reference reads `gBgInfo[2].tileRow`, so agbcc folds the
+  // constant ARRAY index and stops there (`.word 0x3003468` + `ldrh [r0,#0xe]`); asmlift emits
+  // `((u16 *)50345064)[7]` and folds the member offset in too (`.word 0x300346c` + `ldrh [r0]`).
+  // The branch is not what makes it fire — the same two accesses straight-line, with no `if` at
+  // all, score 2 by the same divergence. `bg_area`/`bg_mix` cannot cover this surface even though
+  // `bg_mix` reads a fixed element of the same shape: their base is 0x02000000, which agbcc
+  // materializes as `mov #0x80` + `lsl #0x12` and reaches at `add #0x38`, so there is no pool
+  // word for an addend to hide in. A pool-loaded base is a precondition of surface 2.
   //
-  // THE DISCRIMINATOR IS A PROPERTY OF THE TARGET, not of the source. A member named in two arms is
-  // NECESSARY and NOT SUFFICIENT; what decides it is whether agbcc puts that load in a join block,
-  // and the dispatch construct is one of the things that decides THAT:
-  //   two-arm if/else, one member shared   -> 8      `bgshare`    target: `ldrh [r0,#0x12]` once, at `.L5`
-  //   two-arm if/else, members disjoint    -> MATCH  `bgsplit`
-  //   three-arm switch, one member shared  -> 8      `bgswitch`   target: once at `.L8`, case 1 falls in
-  //   three-arm switch, members disjoint   -> MATCH  `bgswsplit`
-  //   three-arm if/else-IF chain, shared   -> 12     no row       target: its own copy in EACH arm
-  // The chain shares `vLength` in the source exactly as `bgswitch` does and the class does NOT
-  // fire: asmlift mints no base local and every arm comes out `((struct ElemN *)…)[a0].field_NN`.
+  // WHAT ASMLIFT DOES WITH SURFACE 1, measured. Where the target emits a member's load ONCE in a
+  // block that more than one arm reaches, the base is live OUT of each arm; asmlift correctly
+  // homes it — `v0 = (u16 *)(a0 * 28 + 50345008);` — and then spells the arm-local access beside
+  // it as `((u16 *)(a0 * 28 + 50345008))[8]` instead of `v0[8]`. Taking asmlift's own printed
+  // winner and changing ONLY those inline re-spellings to read the local it had already minted
+  // compiles BYTE-IDENTICAL to the target (`cmp -l` reports 0 differing bytes) on both gap rows,
+  // where the unmodified winners differ in 237 and 250 bytes. The whole residual is that one
+  // choice, and no axis in the fan reaches it: `bgshare`'s entire fan is 4 candidates scoring
+  // 8, 8, 9, 9 (`unsigned`, `signed`, `unsigned/flip-join`, `signed/flip-join`) and `bgswitch`'s
+  // is 2, both 8. `bgfixed`'s endpoint is byte-exact too, and it is the OPPOSITE edit: re-spell
+  // its one folded site as the fixed element's member and 4 becomes 0 differing bytes, while the
+  // fan's own attempt to home that base — `/livebase`, present at 11 and 13 against the winner's
+  // 4 — is the mint, and loses.
+  //
+  // SURFACE 1'S DISCRIMINATOR IS A PROPERTY OF THE TARGET, not of the source. A member named in
+  // two arms is NECESSARY and NOT SUFFICIENT; what decides it is whether agbcc puts that load in
+  // a join block, and both the dispatch construct and the ORDER of the two reads decide THAT:
+  //   two-arm if/else, shared member read LAST   -> 8      `bgshare`   target: `ldrh [r0,#0x12]` once, at `.L5`
+  //   two-arm if/else, shared member read FIRST  -> MATCH  no row      target: its own copy in EACH arm
+  //   two-arm if/else, members disjoint          -> MATCH  `bgsplit`
+  //   three-arm switch, one member shared        -> 8      `bgswitch`  target: once at `.L8`, case 1 falls in
+  //   three-arm switch, members disjoint         -> MATCH  `bgswsplit`
+  //   three-arm if/else-IF chain, shared         -> 12     no row      target: its own copy in EACH arm
+  // Reading the shared member FIRST shares it in the source exactly as `bgshare` does and the
+  // class does not fire, so do not prune or widen the family on "one member shared" alone.
   // `bgswitch`'s own `default` arm makes the same point from inside a row — it reads `hLength`,
   // which `case 0` also reads, and the target emits that `ldrh [r0,#0x10]` TWICE, once per block;
-  // only `vLength`, shared by the two ADJACENT arms, gets a join block. So the `default` arm is an
-  // in-row control on the target's block structure, not on the source's member set.
+  // only `vLength`, shared by the two ADJACENT arms, gets a join block.
   //
-  // WHAT THE TWO `MATCH` ROWS GUARD, and what nothing here guards. `bgsplit`/`bgswsplit` mint no
-  // base local at all, so they pin the struct-array recovery that already works. They CANNOT
-  // over-fire the lever these rows gate (prefer the already-minted local), because there is no
-  // local to prefer: the family has no over-fire guard and none was available — two shapes whose
-  // target does want the folded form were probed, and in both asmlift spells the already-folded
-  // address directly (`*(s32 *)50345068`) rather than re-spelling a base, so neither would flip.
+  // WHAT THE ROWS GUARD. `bgsplit`/`bgswsplit` mint no base local at all, so they pin the
+  // struct-array recovery that already works and cannot over-fire a lever that prefers a minted
+  // local — there is none there to prefer. `bgbaked` is the family's real over-fire guard, and it
+  // guards the other surface: its target genuinely wants the folded word, asmlift spells it
+  // straight (`*(s32 *)50345068`) and MATCHes, and re-spelling that one site as the fixed
+  // element's member — the edit that takes `bgfixed` to byte-exact — costs it 2. The two gap rows
+  // therefore pull in OPPOSITE directions at the same kind of site, and neither endpoint is safe
+  // as an unconditional default.
   // `bgswsplit` is also not a one-member contrast, and cannot be: changing ONLY `case 1`'s second
   // member of `bgswitch` (`vLength` -> `tileRow`) still scores 8, because the sharing moves to
   // cases 1/`default`. Two arms have to change to remove it, so `bgswsplit`'s MATCH is consistent
   // both with "the sharing is gone" and with "this member set happens to match"; `bgsplit`, where
   // one member changes and nothing else does, carries the clean contrast.
   //
-  // THE STRUCT IS THE REAL FUNCTION'S, NOT A PRECONDITION. Neither property once thought
-  // load-bearing survives measurement: with `pad19[7]` (sizeof 32, a single `lsl #5` scale and no
-  // lsl/sub/lsl chain) `bgshare` still scores 8 with the identical mint-then-respell winner, and
-  // with the arm-local members moved to offsets 0 and 2 — nothing for a displacement to hold — it
-  // scores 10 with the same winner shape. The 28-byte stride and the 0xc–0x16 member offsets are
-  // here because they are `gBgInfo`'s. Do not prune or widen the family on them.
+  // THE STRUCT IS THE REAL FUNCTION'S, NOT A PRECONDITION of surface 1. With `pad19[7]` (sizeof
+  // 32, a single `lsl #5` scale and no lsl/sub/lsl chain) `bgshare` still scores 8 with the
+  // identical mint-then-respell winner, and with the arm-local members moved to offsets 0 and 2 —
+  // nothing for a displacement to hold — it scores 10 with the same winner shape. The 28-byte
+  // stride and the 0xc–0x16 member offsets are here because they are `gBgInfo`'s.
   //
   // ATTRIBUTION, so nothing here is credited to the wrong gap:
-  //  • `bg_area`/`bg_mix` above already pin the STRAIGHT-LINE capability over this same 28-byte
-  //    stride: `bg_area` MATCHes on all four toolchains, `bg_mix` on agbcc/kmc/mwcc and is 1 on
-  //    ido7.1. They are coverage for that, and no row before these four asked what a branch does
-  //    to it.
+  //  • `bg_area`/`bg_mix` above already pin the STRAIGHT-LINE variable-index capability over this
+  //    same 28-byte stride: `bg_area` MATCHes on all four toolchains, `bg_mix` on agbcc/kmc/mwcc
+  //    and is 1 on ido7.1. They are coverage for that, and for neither surface here.
   //  • `armfall` (agbcc, nonmatch 8, `unsigned/merge-names`) is a switch over struct-array members
   //    at this very base and is NOT coverage: its winner spells the base as a pointer induction
   //    variable (`v0 = v0 + 2;`) and reads `*v0`/`v0[1]` — the safe local form, with no inline
-  //    re-spelling anywhere. It is tagged `uninit-local`/`merge-chain`, not this family. `armdef`
-  //    MATCHes.
-  //  • These four carry NEITHER `uninit-local` NOR `merge-chain` on purpose: every local is
-  //    assigned on every path, and the diff is one base's spelling, not a merged value chain.
+  //    re-spelling anywhere. Its 8 is its own `uninit-local`/`merge-chain` axis. `armdef` MATCHes.
+  //  • No `uninit-local`: every local is assigned on every path. `merge-chain` goes on the four
+  //    whose arms decide `a` AND `b`, both computed loads — the tag describes the body, not
+  //    the residual, so the two MATCH rows carry it as well.
   //  • EXCLUDED, with the machinery it belongs to: a clamp over the same base (`a = m[i].hLength;
   //    if (sel) a = 32; b = m[i].vLength;`) scores 22, but its winner uses the struct-member form
   //    throughout and mints no base local — clamp/merge-init, not this.
@@ -2535,13 +2549,20 @@ export const SYNTHETIC: SynthSpec[] = [
   // address macro, codegen-equivalent for the fold (verified above), which leaves the naming
   // question to the real tier and to no row here.
   //
-  // THE LBG NOTE, so the two counts are never added. On `kleod:LoadBGTilemapData:agbcc` the 386
-  // winner's pool holds 20 `.word` against the ROM's 20 `.4byte`, and the one word this family
-  // accounts for is the extra `+0x3c`: the candidate bakes four `gBgInfo` addends (+0x4, +0x3c, +0x48,
-  // +0x4a) where the ROM bakes three (+0x4, +0x48, +0x4a), and carries 8 plain `0x3003430` words
-  // against the ROM's 9. The extra `+0x3c` is the pool word the two `((s32 *)50345008)[15]` sites
-  // share. That is a constant-index bake; the four rows below are the variable-index arm shape and
-  // occur nowhere in that winner. Neither is a count of the other.
+  // THE LBG NOTE, with this family's own share of that row priced rather than assumed away. On
+  // `kleod:LoadBGTilemapData:agbcc` the 386 winner's pool holds 20 `.word` against the ROM's 20
+  // `.4byte`, and it bakes four `gBgInfo` addends (+0x4, +0x3c, +0x48, +0x4a) where the ROM bakes
+  // three (+0x4, +0x48, +0x4a), carrying 8 plain `0x3003430` words against the ROM's 9. The extra
+  // `+0x3c` is the pool word the two `((s32 *)50345008)[15]` sites share — surface 2, `bgfixed`'s.
+  // Taking that winner and parking the base of those two sites in a local scores 383 against its
+  // own 386 and leaves the ROM's 9 plain words with no `+0x3c`; one site alone is 385 either way.
+  // So this family reaches that row and is worth at least 3 of its 386 — but 3 is the whole
+  // respelling including register-allocation churn (104 diff lines, mostly r4/r5 renaming), not a
+  // per-instruction decomposition, and neither row's endpoint produces it. `bgshare`/`bgswitch`
+  // gate preferring an ALREADY-MINTED local, and no local holds that base at either site, so the
+  // change is a mint; `bgfixed` gates the fixed-element member spelling, and applying THAT to the
+  // same two sites scores 386, unmoved, because the ROM reaches the member from the plain base at
+  // `#0x3c` rather than from the element base. Surface 1 occurs nowhere in that winner at all.
   {
     sym: 'bgshare',
     src:
@@ -2552,7 +2573,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '  if (sel) { a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; }\n' +
       '  else     { a = gBgInfo[i].tileCol; b = gBgInfo[i].vLength; }\n' +
       '  return a + b; }',
-    features: ['value-home', 'struct'],
+    features: ['value-home', 'struct', 'merge-chain'],
     toolchains: ['agbcc'],
     ctx: 'int bgshare(int i, int sel);',
   },
@@ -2566,7 +2587,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '  if (sel) { a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; }\n' +
       '  else     { a = gBgInfo[i].tileCol; b = gBgInfo[i].tileRow; }\n' +
       '  return a + b; }',
-    features: ['value-home', 'struct'],
+    features: ['value-home', 'struct', 'merge-chain'],
     toolchains: ['agbcc'],
     ctx: 'int bgsplit(int i, int sel);',
   },
@@ -2585,7 +2606,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n' +
       '    return a + b;\n' +
       '}',
-    features: ['value-home', 'struct'],
+    features: ['value-home', 'struct', 'merge-chain'],
     toolchains: ['agbcc'],
     ctx: 'int bgswitch(int i, int sel);',
   },
@@ -2604,9 +2625,33 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n' +
       '    return a + b;\n' +
       '}',
-    features: ['value-home', 'struct'],
+    features: ['value-home', 'struct', 'merge-chain'],
     toolchains: ['agbcc'],
     ctx: 'int bgswsplit(int i, int sel);',
+  },
+  {
+    sym: 'bgfixed',
+    src:
+      'struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n' +
+      '                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n' +
+      '#define gBgInfo ((struct BgInfo *)0x03003430)\n' +
+      'int bgfixed(int i, int sel) { int a, b;\n' +
+      '  a = gBgInfo[i].hLength;\n' +
+      '  b = gBgInfo[i].vLength;\n' +
+      '  if (sel) return a + gBgInfo[2].tileRow;\n' +
+      '  return b + gBgInfo[2].tileRow; }',
+    features: ['value-home', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'int bgfixed(int i, int sel);',
+  },
+  {
+    sym: 'bgbaked',
+    src:
+      '#define gBgTilemapPtr (*(s32 *)0x0300346c)\n' +
+      'int bgbaked(int m, int n) { return m * gBgTilemapPtr + n * gBgTilemapPtr; }',
+    features: ['value-home', 'global'],
+    toolchains: ['agbcc'],
+    ctx: 'int bgbaked(int m, int n);',
   },
 
   // WHICH of several numeric bases gets the pointer local. The `dma_*` rows above ask whether a
