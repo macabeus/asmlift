@@ -116,6 +116,14 @@ export const OFFMEMBER_GATES: readonly Gate<OffmemberBase>[] = [
   {
     id: 'non-leaf-base',
     why: 'a computed base is already held somewhere, so nothing folded into a literal',
+    // A REACH argument, which is why it claims no soundness and owes no guard. It is NOT the
+    // volatile refusal, and reading it as one is the trap: a `/volatile` base reaches L3 as a
+    // CAST over the constant, so this gate happens to exclude it too, and the natural widening
+    // ("a cast of a leaf const is still a leaf") would drop the qualifier with no test failing.
+    // `device-base` below owns that harm on its own premise and is declared `sound: true`, so the
+    // widening is guarded whether or not this gate keeps excusing it. One consequence worth
+    // stating: because `/volatile` wraps the base in that cast, no `…/volatile/…/offmember`
+    // candidate can exist on a device address — the two are alternatives there, not a pairing.
     sound: false,
     rejects: (c) => !c.leafBase,
   },
