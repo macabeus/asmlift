@@ -163,7 +163,13 @@ const pendingAudits = new Set<Set<string>>();
  *  `sampledStale` — the audit ran and the store had nothing left to compare (a sibling shard's
  *  prune); `sampledAbandoned` — the caller came back empty and took the withheld answer instead;
  *  `sampledPending` — still outstanding at the moment this is read. A gap between the two sides is
- *  a bug in this module, and a test asserts the identity rather than trusting it. */
+ *  a bug in this module, and a test asserts the identity rather than trusting it.
+ *
+ *  IN `on` MODE. `verified`/`verifiedFail`/`mismatch` also count `verify` mode's audit of EVERY
+ *  key, where nothing is withheld and `sampled` is absent. And a store corruption caught on the
+ *  `put` path is `objectCorrupt`, NOT `mismatch`, precisely so that it cannot break this identity:
+ *  it is a disagreement (`cacheMismatches()` counts it, and the run fails) but it is not an audit
+ *  of a withheld key. */
 export const cacheStats = (): Record<string, number> => {
   let pending = 0;
   for (const set of pendingAudits) {
@@ -171,10 +177,12 @@ export const cacheStats = (): Record<string, number> => {
   }
   return pending === 0 ? { ...STATS } : { ...STATS, sampledPending: pending };
 };
-/** How many stored answers a fresh compile disagreed with, in either direction. A run that ends
- *  with this nonzero has served (or would have served) bytes the toolchain no longer produces:
- *  the gate that reads it must FAIL, not print. */
-export const cacheMismatches = (): number => STATS.mismatch ?? 0;
+/** How many stored answers disagreed with the truth — `mismatch` from the sampled/verify AUDIT
+ *  plus `objectCorrupt` from a `put` finding `objects/<sha>` holding bytes it is not named after.
+ *  Both mean the store served (or would have served) bytes the compiler did not produce, and the
+ *  gate that reads this must FAIL rather than print; they are counted apart because only the first
+ *  is an audit, and `sampled` reconciles against the audits alone. */
+export const cacheMismatches = (): number => (STATS.mismatch ?? 0) + (STATS.objectCorrupt ?? 0);
 
 // WHERE THE STORE LIVES. `??` catches only `undefined`, and an empty string is a PATH — a relative
 // one, meaning the CURRENT DIRECTORY. `ASMLIFT_CANDCACHE_DIR=` therefore used to put `ns/`,
@@ -217,8 +225,8 @@ export const MISMATCH_LOG = mismatchLogFor(ROOT);
  *  Module-level rather than per-instance because `linkInto` is the other caller: a
  *  content-addressed entry whose bytes are not the ones it is named after is exactly this fact,
  *  found on the store's hot path rather than inside an audit. */
-function report(line: string): void {
-  bump('mismatch');
+function report(line: string, counter: 'mismatch' | 'objectCorrupt' = 'mismatch'): void {
+  bump(counter);
   say(line);
   try {
     mkdirSync(ROOT, { recursive: true });
@@ -659,6 +667,10 @@ function linkInto(objBytes: Buffer, dest: string, distrustExisting = false): voi
         `OBJECT STORE CORRUPT object=${h.slice(0, 16)} held=${sha(held).slice(0, 16)}:${held.length} ` +
           `truth=${h.slice(0, 16)}:${objBytes.length} — an entry is not the bytes it is named after, ` +
           `so every key that dedups onto it has been served those bytes`,
+        // NOT `mismatch`: this is a disagreement the run must fail on (`cacheMismatches()` counts
+        // it) but it is not an audit of a withheld key, and folding it into `mismatch` would break
+        // the reconciliation `sampled` is read against.
+        'objectCorrupt',
       );
       writeAtomic(objPath, objBytes);
     }

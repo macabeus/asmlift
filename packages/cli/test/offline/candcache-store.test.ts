@@ -519,6 +519,10 @@ describe('EXISTENCE IS NOT CONTENT: a corrupt objects/<sha> entry is caught wher
       expect(readFileSync(obj, 'utf8'), 'and the content-addressed entry is repaired').toBe('TRUTH-BYTES');
       expect(m.cacheMismatches(), 'a store that disagreed with the compiler must FAIL the run').toBe(1);
       expect(readFileSync(m.mismatchLogFor(root), 'utf8')).toContain('OBJECT STORE CORRUPT');
+      // Counted APART from an audit mismatch: it is not an audit of a withheld key, and folding
+      // it in would break the identity `sampled` is read against.
+      expect(m.cacheStats()).toMatchObject({ objectCorrupt: 1 });
+      expect(m.cacheStats().mismatch).toBeUndefined();
     });
   });
 
