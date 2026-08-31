@@ -246,6 +246,26 @@ describe('the element spelling is enumerated as an axis the differ referees', ()
     const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: mapWith(voidOnly) });
     expect(cands.filter((c) => c.label.includes('no-ptr-elem'))).toHaveLength(0);
   });
+
+  test('the axis follows the FUNCTION naming a container, not the map declaring one', () => {
+    // Both halves matter and only the second is new: with the map-wide gate the dedup collapsed
+    // the pair anyway, so the candidate count was already this — what changed is that the
+    // structuring no longer runs twice to reach it, which no assertion here can see (measured in
+    // the commit instead). What this pins is the pair: the axis is absent where the container is,
+    // and PRESENT off the very same map where the function names it.
+    const other: SymbolMap = new Map([
+      [0x03004790, [ptrsInfo()]],
+      [0x03000200, [{ name: 'gCount', kind: 'data', declared: true, shape: 'scalar', size: 4, signed: true }]],
+    ]);
+    const elsewhere =
+      'f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tadd\tr0, #0x1\n\tstr\tr0, [r1]\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x03000200\n';
+    const cands = enumerateCandidates('f', elsewhere, ARMV4T_AGBCC, { symbols: other });
+    expect(cands.filter((c) => c.label.includes('no-ptr-elem'))).toHaveLength(0);
+    // …and the axis IS enumerated for a function that does name it, off the very same map
+    const reaching = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: other });
+    expect(reaching.filter((c) => c.label.includes('no-ptr-elem')).length).toBeGreaterThan(0);
+  });
 });
 
 // ── the ASSIGNMENT side: a pointer value whose type this pass does not own ──────────────────────

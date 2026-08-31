@@ -61,7 +61,7 @@ import {
   hasMergeFeedHome,
 } from './structure/analysis';
 import { hasParamRootedMerge } from './structure/structure';
-import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
+import { type SymbolInfo, type SymbolMap, isPtrField, symbolsByName } from './symbols';
 import { C_TYPEDEFS, type TargetDescription, structureOptionsFor } from './target';
 
 /** The STRUCTURING AXES — the boolean candidate dimensions crossed into every enumeration
@@ -886,27 +886,6 @@ export function enumerateCandidates(
   const bitfieldCands = mapHasBitfields
     ? [...baseSense, ...baseSense.map((s) => ({ ...s, suffix: `${s.suffix}/no-bitfield`, bitfields: false }))]
     : baseSense;
-  // `/no-ptr-elem` — keep the honest byte arithmetic where the map would spell a whole-element
-  // subscript through a pointer MEMBER (`gBg.pMap[i + 157]`). The two are the same address and
-  // DIFFERENT objects — measured against agbcc, they differ in which register the `add` targets at
-  // every constant tested — so which side matches is per-function knowledge the asm does not
-  // carry, and the differ referees it exactly as it referees `/no-bitfield`. Gated on the map
-  // declaring a pointer field the rule could read (a POINTEE WIDTH of 1, 2 or 4 — nothing else is
-  // an element), so the 2x cross is paid by the functions it can help; the dedup collapses every
-  // variant where no element spelling fired.
-  const mapHasSizedPtrFields =
-    opts.symbols !== undefined &&
-    [...opts.symbols.values()].some((infos) =>
-      infos.some((i) =>
-        [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some(
-          (f) =>
-            f.pointer === true && f.size === 4 && (f.pointeeSize === 1 || f.pointeeSize === 2 || f.pointeeSize === 4),
-        ),
-      ),
-    );
-  const ptrElemCands = mapHasSizedPtrFields
-    ? [...bitfieldCands, ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/no-ptr-elem`, ptrElems: false }))]
-    : bitfieldCands;
   // `/connective`'s enumeration gate, read off the pass's OWN refusal rather than from a second
   // copy of its matcher: the fold reports every site where the PAIRWISE comparison-tree refusal is
   // the ONE thing stopping it — asked after `sameArgs` and the negatability check, so a report
@@ -968,6 +947,44 @@ export function enumerateCandidates(
   // to `str` where the target says `strh`. One IR walk; on a function with no `gaddr` at all
   // (every synthetic corpus row) it returns the same empty map the gate used to hand back.
   const accessFacts = bareGlobalAccessFacts(probe);
+  // `/no-ptr-elem` — keep the honest byte arithmetic where the map would spell a whole-element
+  // subscript through a pointer MEMBER (`gBg.pMap[i + 157]`). The two are the same address and
+  // DIFFERENT objects — measured against agbcc, they differ in which register the `add` targets at
+  // every constant tested — so which side matches is per-function knowledge the asm does not
+  // carry, and the differ referees it exactly as it referees `/no-bitfield`.
+  //
+  // THE CROSS IS EXPENSIVE AND THE GATE IS WHAT BOUNDS IT, so the gate is asked of THIS FUNCTION,
+  // not of the map: a pointer member is only ever spelled off a container the function names, and
+  // every named global reaches the IR as a `gaddr`. A map-wide `some` would charge the cross to
+  // every function lifted alongside such a symbol, which is co-occurrence, not reach. The map must
+  // still declare a pointee WIDTH of 1, 2 or 4 — nothing else is an element — and `isPtrField` is
+  // the shared two-fact test, so this gate and the rule it gates cannot disagree about what a
+  // pointer member is.
+  //
+  // (`/no-bitfield` above still asks the map. Its gate predates this branch and its cross is not
+  // measured here; narrowing it is the same edit against a different measurement.)
+  //
+  // Where it DOES reach, the cross is the honest price of an arm the differ has to referee, and on
+  // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` enumerates 17,856
+  // candidates with the axis and 12,096 without (+47.6%), and today its OFF arm wins nothing — no
+  // winning label in the 948-row corpus carries `/no-ptr-elem`. That is a price paid for a
+  // question the asm cannot answer, not a lever earning its keep, and it is stated here so the
+  // next round prices it rather than rediscovers it.
+  const byName = opts.symbols !== undefined ? symbolsByName(opts.symbols) : undefined;
+  const fnHasSizedPtrFields =
+    byName !== undefined &&
+    [...bareGlobalSymbols(probe).keys()].some((n) => {
+      const i = byName.get(n);
+      return (
+        i !== undefined &&
+        [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some(
+          (f) => isPtrField(f) && (f.pointeeSize === 1 || f.pointeeSize === 2 || f.pointeeSize === 4),
+        )
+      );
+    });
+  const ptrElemCands = fnHasSizedPtrFields
+    ? [...bitfieldCands, ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/no-ptr-elem`, ptrElems: false }))]
+    : bitfieldCands;
   // The axis chain, derived from STRUCTURING_AXES: each admitted axis doubles the list, OFF arm
   // first — order is load-bearing for the dropped-primary skip below (every OFF sibling
   // enumerates before its ON twin, so a twin's stripped-key lookup always finds a sibling that
