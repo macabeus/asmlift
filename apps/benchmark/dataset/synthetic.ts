@@ -1212,6 +1212,26 @@ export const SYNTHETIC: SynthSpec[] = [
   // The placement question is universal (MIPS %hi/%lo anchoring, PPC @ha/@l pairs, all four
   // compilers' in-place-update patterns), and where a toolchain's own addressing rules make a
   // shape free, the row is a control there rather than coverage.
+  //
+  // WHAT THESE ROWS DO NOT PIN, recorded here because no synthetic row can. `dma_wait:agbcc`
+  // MATCHes with candidate label `unsigned/livebase/volatile`, so the volatile-base capability
+  // exists and that row pins it. What is NOT pinned is that the same capability is EXCLUDED once
+  // the device base is spelled as a NAMED symbol rather than a numeric address. Measured on
+  // kleod:LoadBGTilemapData with the project's symbol map on: of the 66,816 ranked candidates
+  // 14,592 spell globals by name and 52,224 by raw address; 18,432 of the raw ones carry a
+  // `/volatile*` label and ZERO of the named ones do — counted both from the run's `[score]`
+  // labels and from the 66,816 captured candidate `.c` files, 18,432 of which declare a volatile
+  // pointer local, none in the named basin. Instrumented rather than read: `l3/volatileptr.ts`'s
+  // eligibility prints `verdict=NOT-numericFed` for every pointer local there, and the FIRST veto
+  // is `numericFed` — `rematerializableAddress` (l3/ast.ts:484) reaches `default: ok = false`
+  // (:497) on an `addr` node, so `(s32 *)&REG_DMA3SAD` is not a rematerializable feed.
+  // `feedsSymbolAddress` (volatileptr.ts:136) is a real second veto, but ablating it ALONE moves
+  // no candidate; a lever has to lift both. A synthetic row cannot express any of that:
+  // `SynthSpec` at the top of this file has no map or ELF field, only the real-tier manifests
+  // carry one, and with no map asmlift never emits `&gSym` — so every synthetic candidate is
+  // already raw-address and the axis is always available (same minimized shape with the map off:
+  // 36 candidates, 8 of them carrying `/volatile`). The row this wants is REAL-tier, on a project
+  // that already builds a symbol map.
   {
     sym: 'dma_burst',
     src:
@@ -2406,6 +2426,144 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void rereadctl(u32 k, u32 n);',
     proto: { rereadctl: { returnsVoid: true } },
+  },
+
+  // A BASE THE ARMS SHARE: asmlift mints the local, then RE-SPELLS IT INLINE right beside it.
+  // Cut from kleod:LoadBGTilemapData:agbcc, whose gBgInfo member accesses are exactly this shape.
+  //
+  // THE COMPILER FACT, from the pair compiled with the project's own agbcc. When an address
+  // constant sits in the SAME syntactic PLUS tree as a member's byte offset, agbcc reassociates
+  // the offset ONTO the base — `split_tree` (fold-const.c:1216) accepts the address as the
+  // constant term at :1253, and `associate:` (:4959) rewrites it into `VAR +- (ARG1 +- CON)`
+  // (:5009) — and thumb.h's `LEGITIMIZE_ADDRESS` (thumb.h:926) is EMPTY, so it never comes back.
+  // The offset therefore leaves the load's free `[rN, #imm]` displacement and becomes a baked pool
+  // word plus an extra `add`:
+  //   gBgInfo[i].hLength; gBgInfo[i].vLength;               -> .word gBgInfo    ldrh [r1,#0x10]/[r1,#0x12]
+  //   ((u16 *)(i*28 + (u32)&gBgInfo))[8]; ... [9];          -> .word gBgInfo+0x10  ldrh [r0]/[r1] + add #0x2
+  // Parking the base in ANY local breaks the plus tree and restores the displacement — the
+  // IDENTICAL re-cast with the IDENTICAL index constants, `u16 *p = (u16 *)(i*28 + (u32)&gBgInfo);
+  // p[8]; p[9];`, compiles back to `.word gBgInfo` and `[r1,#0x10]`/`[r1,#0x12]`. So the re-cast
+  // and the index constants are innocent; only the tree is the discriminator. And it is NOT a
+  // named-symbol effect: the same inline form over a raw `0x03003430` bakes `.word 0x3003440`
+  // and the identical eleven instructions. That is what lets these rows be spelled with an
+  // address macro and still measure the real thing.
+  //
+  // WHAT ASMLIFT DOES WITH IT, measured. When one member is read in TWO arms, agbcc emits that
+  // load once in a block both arms reach, so the base is live OUT of each arm. asmlift correctly
+  // homes it — `v0 = (u16 *)(a0 * 28 + 50345008);` — and then spells the arm-local access beside
+  // it as `((u16 *)(a0 * 28 + 50345008))[8]` instead of `v0[8]`. Taking asmlift's own printed
+  // winner and changing ONLY those inline re-spellings to read the local it had already minted
+  // compiles BYTE-IDENTICAL to the target, while the unmodified winner does not (checked on both
+  // gap rows). The whole residual is that one choice, and no axis in the fan reaches it:
+  // `bgshare`'s entire fan is 4 candidates scoring 8, 8, 9, 9 (`unsigned`, `signed`,
+  // `unsigned/flip-join`, `signed/flip-join`) and `bgswitch`'s is 2, both 8.
+  //
+  // THE DISCRIMINATOR IS THE SHARED MEMBER — not the dispatch construct, not the arm count. Four
+  // shapes over the same struct and the same base, measured in one session:
+  //   two-arm if/else, one member shared   -> 8      `bgshare`
+  //   two-arm if/else, members disjoint    -> MATCH  `bgsplit`
+  //   three-arm switch, one member shared  -> 8      `bgswitch`
+  //   three-arm switch, members disjoint   -> MATCH  `bgswsplit`
+  // With disjoint arms nothing is live across a block boundary, asmlift mints no base local at
+  // all, and every access comes out as `((struct Elem0 *)50345008)[a0].field_16` — the form that
+  // keeps the displacement. The two controls are the pair's own bracket: they move only if the
+  // struct-array recovery that already works stops working. `bgswitch`'s `default` arm is a third,
+  // in-row control — asmlift spells THAT arm in struct-member form while regressing cases 0 and 1.
+  //
+  // Two properties of the struct are load-bearing, and a smaller row loses them: the element size
+  // must be NON-power-of-two (28) so the scale is an lsl/sub/lsl chain asmlift sees as a raw byte
+  // offset, and the members must sit at NON-ZERO offsets (0xc/0x10/0x12/0x14/0x16) so an
+  // `[rN, #imm]` displacement is what is at stake.
+  //
+  // ATTRIBUTION, so nothing here is credited to the wrong gap:
+  //  • `bg_area`/`bg_mix` above already pin the STRAIGHT-LINE capability over this same 28-byte
+  //    stride and MATCH on all four toolchains. They are coverage for that, and no row before
+  //    these four asked what a branch does to it.
+  //  • `armfall` (agbcc, nonmatch 8) is a switch over struct-array members at this very base and
+  //    is NOT coverage: its struct is 4 bytes with members at 0 and 2, so there is no
+  //    non-power-of-two scale and no displacement to lose, and its winner spells the base as a
+  //    pointer induction variable (`v0 = v0 + 2;`) with `*v0`/`v0[1]` — the safe local form. Its 8
+  //    belongs to its tagged uninit-local/merge-chain axis. `armdef` MATCHes.
+  //  • These four carry NEITHER `uninit-local` NOR `merge-chain` on purpose: every local is
+  //    assigned on every path, and the diff is one base's spelling, not a merged value chain.
+  //  • EXCLUDED, with the machinery they belong to. A clamp over the same base (`a = m[i].hLength;
+  //    if (sel) a = 32; b = m[i].vLength;`) scores 22 and a loop+clamp 39, but in both the winner
+  //    uses the struct-member form throughout and mints no base local — clamp/merge-init, not
+  //    this. A three-arm if/else-IF chain scores 12 for the same reason: struct-member form in
+  //    every arm, so its 12 is dispatch shape.
+  //
+  // agbcc only, like the `reread` and `arm*` families above: the reassociation, the empty
+  // LEGITIMIZE_ADDRESS and the cross-arm tail sharing are all this compiler's, established by
+  // compiling the pair. WHAT THESE ROWS CANNOT MEASURE, stated because it is the other half of the
+  // question they came from: the NAMED-symbol spelling. A synthetic candidate has no ELF to
+  // synthesize declarations from, so a row relocating against a named `gBgInfo` fails candidate
+  // compilation; these use an address macro, codegen-equivalent for the fold (verified above),
+  // which leaves the naming question to the real tier and to no row here.
+  {
+    sym: 'bgshare',
+    src:
+      'struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n' +
+      '                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n' +
+      '#define gBgInfo ((struct BgInfo *)0x03003430)\n' +
+      'int bgshare(int i, int sel) { int a, b;\n' +
+      '  if (sel) { a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; }\n' +
+      '  else     { a = gBgInfo[i].tileCol; b = gBgInfo[i].vLength; }\n' +
+      '  return a + b; }',
+    features: ['value-home', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'int bgshare(int i, int sel);',
+  },
+  {
+    sym: 'bgsplit',
+    src:
+      'struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n' +
+      '                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n' +
+      '#define gBgInfo ((struct BgInfo *)0x03003430)\n' +
+      'int bgsplit(int i, int sel) { int a, b;\n' +
+      '  if (sel) { a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; }\n' +
+      '  else     { a = gBgInfo[i].tileCol; b = gBgInfo[i].tileRow; }\n' +
+      '  return a + b; }',
+    features: ['value-home', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'int bgsplit(int i, int sel);',
+  },
+  {
+    sym: 'bgswitch',
+    src:
+      'struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n' +
+      '                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n' +
+      '#define gBgInfo ((struct BgInfo *)0x03003430)\n' +
+      'int bgswitch(int i, int sel) {\n' +
+      '    int a, b;\n' +
+      '    switch (sel) {\n' +
+      '    case 0:  a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; break;\n' +
+      '    case 1:  a = gBgInfo[i].tileCol; b = gBgInfo[i].vLength; break;\n' +
+      '    default: a = gBgInfo[i].hLength; b = gBgInfo[i].tileRow; break;\n' +
+      '    }\n' +
+      '    return a + b;\n' +
+      '}',
+    features: ['value-home', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'int bgswitch(int i, int sel);',
+  },
+  {
+    sym: 'bgswsplit',
+    src:
+      'struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n' +
+      '                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n' +
+      '#define gBgInfo ((struct BgInfo *)0x03003430)\n' +
+      'int bgswsplit(int i, int sel) {\n' +
+      '    int a, b;\n' +
+      '    switch (sel) {\n' +
+      '    case 0:  a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; break;\n' +
+      '    case 1:  a = gBgInfo[i].tileCol; b = gBgInfo[i].tileRow; break;\n' +
+      '    default: a = gBgInfo[i].unk14;   b = gBgInfo[i].unk16;   break;\n' +
+      '    }\n' +
+      '    return a + b;\n' +
+      '}',
+    features: ['value-home', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'int bgswsplit(int i, int sel);',
   },
 
   // WHICH of several numeric bases gets the pointer local. The `dma_*` rows above ask whether a
