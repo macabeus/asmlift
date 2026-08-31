@@ -2433,9 +2433,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // but this is NOT a component of that row's residual and must not be booked as headroom on it.
   // Measured on its 386 winner: 16 `gBgInfo` accesses are already
   // `((struct ElemN *)50345008)[vX].field_NN`, one base is parked in a local
-  // (`v7 = (u16 *)((v27 - v0 << 2) + 50345008)`), and the only inline re-spellings left are two
-  // `((s32 *)50345008)[15]` at a CONSTANT index — not the variable-index arm shape below. What
-  // does reach that row is one pool word; the LBG note at the end has it.
+  // (`v7 = (u16 *)((v27 - v0 << 2) + 50345008)`), and the only inline re-spellings OF THAT BASE
+  // ADDRESS left are two `((s32 *)50345008)[15]` at a CONSTANT index — not the variable-index arm
+  // shape below. What does reach that row is one pool word; the LBG note at the end has it.
   //
   // THE COMPILER FACT, from the pair compiled with the benchmark's agbcc. When an address
   // constant sits in the SAME syntactic PLUS tree as a member's byte offset, agbcc reassociates
@@ -2447,9 +2447,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //   ((u16 *)(i*28 + 0x03003430))[8]; … [9];            -> 11 insns  .word 0x3003440  ldrh [r0]/[r1]
   //   u16 *p = (u16 *)(i*28 + 0x03003430); p[8]; p[9];   ->  9 insns  .word 0x3003430  — back to the ref
   // Parking the base in ANY local breaks the plus tree and restores the displacement, so the
-  // re-cast and the index constants are innocent; only the tree is the discriminator. The pair
-  // behaves the same over a raw address as over a named `&gBgInfo`, which is what lets these rows
-  // use an address macro and still measure the real thing.
+  // re-cast and the index constants are innocent; only the tree is the discriminator. Compiled
+  // both ways in one session, the pair behaves identically over a named `extern` (9 / 11 / 9
+  // insns, `.word gBgInfo` / `gBgInfo+0x10` / `gBgInfo`) and over the raw address above — which
+  // is what lets these rows use an address macro and still measure the real thing.
   //
   // ONE CAUSE, TWO SURFACES — and these four rows exhibit the SECOND, not the pool bake. Grep them
   // for a baked pool word and there is none: in all four the plain base SURVIVES, because the
@@ -2479,7 +2480,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //   two-arm if/else, members disjoint    -> MATCH  `bgsplit`
   //   three-arm switch, one member shared  -> 8      `bgswitch`   target: once at `.L8`, case 1 falls in
   //   three-arm switch, members disjoint   -> MATCH  `bgswsplit`
-  //   three-arm if/else-IF chain, shared   -> 12     no row       target: that `ldrh` in EACH arm
+  //   three-arm if/else-IF chain, shared   -> 12     no row       target: its own copy in EACH arm
   // The chain shares `vLength` in the source exactly as `bgswitch` does and the class does NOT
   // fire: asmlift mints no base local and every arm comes out `((struct ElemN *)…)[a0].field_NN`.
   // `bgswitch`'s own `default` arm makes the same point from inside a row — it reads `hLength`,
@@ -2503,8 +2504,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // load-bearing survives measurement: with `pad19[7]` (sizeof 32, a single `lsl #5` scale and no
   // lsl/sub/lsl chain) `bgshare` still scores 8 with the identical mint-then-respell winner, and
   // with the arm-local members moved to offsets 0 and 2 — nothing for a displacement to hold — it
-  // scores 10 with the same winner shape. The 28-byte stride and the 0xc/0x10/0x12/0x14/0x16
-  // offsets are here because they are `gBgInfo`'s. Do not prune or widen the family on them.
+  // scores 10 with the same winner shape. The 28-byte stride and the 0xc–0x16 member offsets are
+  // here because they are `gBgInfo`'s. Do not prune or widen the family on them.
   //
   // ATTRIBUTION, so nothing here is credited to the wrong gap:
   //  • `bg_area`/`bg_mix` above already pin the STRAIGHT-LINE capability over this same 28-byte
@@ -2514,7 +2515,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //  • `armfall` (agbcc, nonmatch 8, `unsigned/merge-names`) is a switch over struct-array members
   //    at this very base and is NOT coverage: its winner spells the base as a pointer induction
   //    variable (`v0 = v0 + 2;`) and reads `*v0`/`v0[1]` — the safe local form, with no inline
-  //    re-spelling anywhere. Its 8 belongs to its tagged uninit-local/merge-chain axis. `armdef`
+  //    re-spelling anywhere. It is tagged `uninit-local`/`merge-chain`, not this family. `armdef`
   //    MATCHes.
   //  • These four carry NEITHER `uninit-local` NOR `merge-chain` on purpose: every local is
   //    assigned on every path, and the diff is one base's spelling, not a merged value chain.
@@ -2524,9 +2525,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // agbcc only, like the `reread` and `arm*` families above — but as a family CONVENTION, not as a
   // tested exclusivity claim. The pair was compiled on agbcc alone, and of the three mechanisms
-  // cited only thumb.h's empty `LEGITIMIZE_ADDRESS` is ARM-Thumb's: `split_tree`/`associate:` is
-  // generic GCC 2.x source the `gcc2.7.2kmc` toolchain shares, and join-block tail sharing is a
-  // generic RTL optimisation. Whether these rows reproduce on the other three is UNTESTED.
+  // cited only thumb.h's empty `LEGITIMIZE_ADDRESS` is ARM-Thumb's: `split_tree`/`associate:` live
+  // in `fold-const.c`, the target-independent folder agbcc inherits from GCC 2.x, and join-block
+  // tail sharing is a target-independent RTL pass. Whether these rows reproduce on the other three
+  // toolchains is UNTESTED — no cross-compiler run was attempted.
   // WHAT THESE ROWS CANNOT MEASURE, stated because it is the other half of the question they came
   // from: the NAMED-symbol spelling. A synthetic candidate has no ELF to synthesize declarations
   // from, so a row relocating against a named `gBgInfo` fails candidate compilation; these use an
@@ -2534,8 +2536,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // question to the real tier and to no row here.
   //
   // THE LBG NOTE, so the two counts are never added. On `kleod:LoadBGTilemapData:agbcc` the 386
-  // winner's pool holds 20 `.word` against the ROM's 20 `.4byte`, and what this family accounts
-  // for there is one of them: the candidate bakes four `gBgInfo` addends (+0x4, +0x3c, +0x48,
+  // winner's pool holds 20 `.word` against the ROM's 20 `.4byte`, and the one word this family
+  // accounts for is the extra `+0x3c`: the candidate bakes four `gBgInfo` addends (+0x4, +0x3c, +0x48,
   // +0x4a) where the ROM bakes three (+0x4, +0x48, +0x4a), and carries 8 plain `0x3003430` words
   // against the ROM's 9. The extra `+0x3c` is the pool word the two `((s32 *)50345008)[15]` sites
   // share. That is a constant-index bake; the four rows below are the variable-index arm shape and
