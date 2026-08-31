@@ -332,8 +332,8 @@ describe('refusals — the honest mask spelling stays', () => {
   test('a CALL between the load and the store refuses, and the MATERIALIZED temp is why', () => {
     // The asm captured the bits BEFORE the call. What refuses is not a rule of this fold: the call
     // forces the load to its own temp at its own position, and a materialized load is one this
-    // fold may not delete. Asserting the temp is what pins the mechanism — a refusal assertion
-    // alone passes for any reason at all.
+    // fold may not delete. Asserting the temp is what pins that mechanism; a bare refusal
+    // assertion passes for any reason at all.
     const withCall =
       'f:\n\tpush\t{r4, r5, r6, lr}\n\tldr\tr5, .L1\n\tlsl\tr6, r0, #30\n\tlsr\tr6, r6, #30\n' +
       '\tldrb\tr2, [r5]\n\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr4, r2\n\tbl\tSideEffect\n' +

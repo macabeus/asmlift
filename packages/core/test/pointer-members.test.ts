@@ -82,7 +82,8 @@ describe('the guard casts for the ADDRESS and casts back for the ASSIGNMENT', ()
     // `gBgPtrs.pMap = (u8 *)gBgPtrs.pMap + 4` is the right address and the wrong TYPE: agbcc says
     // `assignment from incompatible pointer type` and exits 1 under the `-Werror` template this
     // project's own compiler config uses. `void *` is assignment-compatible with any declaration
-    // of the cell, and all three spellings compile to byte-identical objects.
+    // of the cell, and the three spellings — through `void *`, through the map's own pointee, and
+    // the warning-carrying bare one — compile to byte-identical objects.
     const src = run(ADVANCE(4));
     expect(src).toContain('gBgPtrs.pMap = (void *)((u8 *)gBgPtrs.pMap + 4);');
   });
@@ -115,7 +116,7 @@ describe('the guard casts for the ADDRESS and casts back for the ASSIGNMENT', ()
 describe('refusals — anything the map does not declare a pointer keeps its spelling', () => {
   test('a `pointer` flag at a size the DECLARATION does not declare a pointer is not one', () => {
     // isPtrField tests TWO facts. symbolFieldType declares a pointer only at size 4, so a
-    // `pointer` member of size 2 declares `u16 p;` — and trusting the flag alone spelled
+    // `pointer` member of size 2 declares `u16 p;` — and the flag alone would spell
     // `gW.p = (u8 *)gW.p + 4`, pointer arithmetic on a value its own declaration calls an integer.
     const info: SymbolInfo = {
       name: 'gW',
@@ -248,11 +249,10 @@ describe('the element spelling is enumerated as an axis the differ referees', ()
   });
 
   test('the axis follows the FUNCTION naming a container, not the map declaring one', () => {
-    // Both halves matter and only the second is new: with the map-wide gate the dedup collapsed
-    // the pair anyway, so the candidate count was already this — what changed is that the
-    // structuring no longer runs twice to reach it, which no assertion here can see (measured in
-    // the commit instead). What this pins is the pair: the axis is absent where the container is,
-    // and PRESENT off the very same map where the function names it.
+    // What the gate saves is structuring work, which no assertion here can see: the dedup
+    // collapses the pair wherever the axis changed nothing, so the candidate count is the same
+    // either way. What this pins is the pair — absent where the function does not name a
+    // container, PRESENT off the very same map where it does.
     const other: SymbolMap = new Map([
       [0x03004790, [ptrsInfo()]],
       [0x03000200, [{ name: 'gCount', kind: 'data', declared: true, shape: 'scalar', size: 4, signed: true }]],
@@ -346,7 +346,6 @@ describe('a pointer member of a POINTEE is a pointer to the guard too', () => {
     shape: 'pointer',
     size: 4,
     pointee: {
-      name: 'Q',
       structName: 'Q',
       size: 16,
       layout: [

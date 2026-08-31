@@ -209,9 +209,9 @@ interface SymRenderCtx {
   ptrElements: boolean;
   /** The members a symbol's declaration seats — a struct global's own, or a pointer global's
    *  pointee's — MEMOIZED per symbol. `declaredFields` validates every member and returns a fresh
-   *  sorted copy on every call, and `isPtrValue` now asks it for BOTH operands of every binary
-   *  node lowered, so the uncached lookup was an O(n log n) allocation on the hot path of a
-   *  function this project's slowest row scores 9,504 times. */
+   *  sorted copy on every call, and `isPtrValue` asks it for both operands of every binary node
+   *  lowered, so an uncached lookup is an O(n log n) allocation on a hot path — inside a
+   *  `structure()` a ranked run repeats once per candidate, 17,856 times on the largest fan. */
   fieldsOf(name: string): DeclaredField[] | null;
 }
 
@@ -419,11 +419,7 @@ function ptrMemberBase(e: Expr, sym: SymRenderCtx): PtrMemberBase | null {
  *  else — a byte residual inside the base, the instruction's displacement `off` — is converted and
  *  summed into the one subscript, which is where the source put it.
  *
- *  Unlike the indexed member-ARRAY spelling (see the block comment above pointeeAccess), this
- *  moves no constant across an association agbcc will not redo: the address the C computes is the
- *  member's own value plus a single scaled index.
- *
- *  REFUSALS, and they are of TWO kinds, which an earlier version of this note ran together.
+ *  REFUSALS, and they are of TWO kinds.
  *
  *  ADDRESS refusals — no whole-element spelling expresses the address at all: a variable residual
  *  that is not element-scaled, and a constant the element width does not divide. Both address
@@ -431,13 +427,12 @@ function ptrMemberBase(e: Expr, sym: SymRenderCtx): PtrMemberBase | null {
  *
  *  REACH refusals — the address IS expressible and this rule declines anyway: an access of a
  *  DIFFERENT width than the declared element, and a sub-word access whose signedness the declared
- *  pointee does not carry. Neither is soundness, and the note that called them soundness was
- *  measurably wrong: `exprCType` types a `field` node `undefined` (it types params and locals),
- *  so `derefStrideOk` is false for every base this rule produces and the backend ALWAYS emits the
- *  reinterpret cast — `((u16 *)gB.pMap)[i + 157]`, cast included, is what the accepted case
- *  spells. `((s32 *)gB.pMap)[i + K]` would be the same address and the same fill as the byte form
- *  those two clauses fall back to, and the byte form the width clause produces already spells
- *  `((s32 *)…)[157]` itself. What these two clauses actually encode is a REACH judgement — the
+ *  pointee does not carry. Neither is soundness. `exprCType` types a `field` node `undefined` (it
+ *  types params and locals), so `derefStrideOk` is false for every base this rule produces and the
+ *  backend ALWAYS emits the reinterpret cast — `((u16 *)gB.pMap)[i + 157]`, cast included, is what
+ *  the accepted case spells. `((s32 *)gB.pMap)[i + K]` would be the same address and the same fill
+ *  as the byte form those two clauses fall back to, and the byte form the width clause produces
+ *  already spells `((s32 *)…)[157]` itself. What these two clauses encode is a REACH judgement — the
  *  map says this pointer addresses an array of THESE, so the source probably wrote a subscript of
  *  them — and a declaration-shaped access is where that judgement is most likely right. On a
  *  STORE the signedness clause has no premise at all (a store extends nothing), so it withholds
@@ -1055,9 +1050,8 @@ export interface StructureOptions {
   // subscript of it (`gBg.pMap[i + 157]`) rather than as the byte arithmetic it replaces. On by
   // default; rank.ts enumerates the OFF spelling as the `/no-ptr-elem` axis.
   //
-  // IT IS AN AXIS AND NOT A DEFAULT BECAUSE IT IS NOT BYTE-NEUTRAL, which is the bar the block
-  // comment above `spellablePointee` sets for a member spelling and which this rule was shipped
-  // without meeting. Compiled against agbcc (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
+  // IT IS AN AXIS AND NOT A DEFAULT BECAUSE IT IS NOT BYTE-NEUTRAL — the bar the block comment
+  // above `spellablePointee` sets for a member spelling. Compiled against agbcc (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
   // -fprologue-bugfix`), `((u16 *)gB.pMap)[i + K]` and `*(u16 *)((i << 1) + (u8 *)gB.pMap + 2K)`
   // are the same address and the same instruction COUNT at K = 0, 1 and 157 — and different
   // objects at all three, differing in which register the `add` targets. Which side matches is
@@ -2541,8 +2535,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       },
     };
     const maskConst = (v: Value): number | null => constMask(bits, v);
-    /** The one operand of a commutative binary op that is NOT `keep`, with the 1-operand
-     *  immediate form folded into a synthetic answer of `null` (an `imm` mask has no Value). */
+    /** The other operand of a 2-operand commutative op, or null when there is none — a
+     *  1-operand op carries its constant as `attrs.imm`, which is not a Value the caller can
+     *  read a mask off, so the caller falls through to `attrs.imm` itself. */
     const otherOperand = (d: Op, keep: Value): Value | null =>
       d.operands.length === 2 ? (d.operands[0] === keep ? d.operands[1] : d.operands[0]) : null;
 
@@ -3241,10 +3236,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       return value;
     }
     const vt = ctype(value);
-    // BOTH ways a pointer value reaches here. `ctype` sees the guard's own `(u8 *)…` and nothing
-    // else — it types params and locals, so a bare `gSym.pBuf` or a pointer global's value, the
-    // very population the guard was widened to serve, reads `undefined` there and would slip past
-    // a test that asked it alone (`isPtrValue`'s own note says so). An already-`void *` value is
+    // BOTH ways a pointer value reaches here. `ctype` types params and locals, so it sees the
+    // guard's own `(u8 *)…` and nothing else: a bare `gSym.pBuf` or a pointer global's value —
+    // the population this rule exists for — reads `undefined` there. An already-`void *` value is
     // assignable as it stands.
     const isPtr = isPtrValue(value) || (vt?.kind === 'ptr' && vt.to.kind !== 'void');
     return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;

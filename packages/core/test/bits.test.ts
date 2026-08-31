@@ -1,8 +1,8 @@
 // UNIT tests for the shared L2 known-bits analysis (ir/bits.ts) — "how many significant bits can
 // this value have". Hand-built ops, no CFG, no pipeline: the end-to-end consequences stay pinned
 // by the bitfield-member tests, which consult it through the mask-and-insert fold's truncation
-// bound. It is tested here because that is where a wrong answer is CHEAP to see — as a closure
-// inside structure(), it was reachable only through emitted C, and one wrong opcode shipped.
+// bound. It is tested here because that is where a wrong answer is CHEAP to see: reached only
+// through emitted C, one wrong opcode reads as a wrong address in a row nobody is looking at.
 import { describe, expect, test } from 'vitest';
 
 import { type BitsCtx, constMask, provableBits } from '../src/ir/bits';

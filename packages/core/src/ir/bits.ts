@@ -7,9 +7,9 @@
 // same question raise/narrowlocal.ts states for itself as "every value arriving on an in-edge is
 // itself an extension of at most this width, or a constant".
 //
-// It lived as an unexported closure inside `structure()`, reachable only through emitted C and
-// with no test of its own — which is how a wrong answer for ONE opcode shipped as a silent wrong
-// address. Here it is a function over `Fn` that a test can ask directly.
+// It is a function over `Fn` rather than a closure inside a rendering pass so that a test can ask
+// it directly: reachable only through emitted C, a wrong answer for one opcode reads as a silent
+// wrong address in a row nobody is looking at.
 import type { Op, Value } from './core';
 
 /** A materialized def emits its own named temp, so its value is a VARIABLE at every use — never a

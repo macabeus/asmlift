@@ -968,8 +968,7 @@ export function enumerateCandidates(
   // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` enumerates 17,856
   // candidates with the axis and 12,096 without (+47.6%), and today its OFF arm wins nothing — no
   // winning label in the 948-row corpus carries `/no-ptr-elem`. That is a price paid for a
-  // question the asm cannot answer, not a lever earning its keep, and it is stated here so the
-  // next round prices it rather than rediscovers it.
+  // question the asm cannot answer, not a lever earning its keep.
   const byName = opts.symbols !== undefined ? symbolsByName(opts.symbols) : undefined;
   const fnHasSizedPtrFields =
     byName !== undefined &&
