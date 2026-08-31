@@ -2429,76 +2429,117 @@ export const SYNTHETIC: SynthSpec[] = [
   },
 
   // A BASE THE ARMS SHARE: asmlift mints the local, then RE-SPELLS IT INLINE right beside it.
-  // Cut from kleod:LoadBGTilemapData:agbcc, whose gBgInfo member accesses are exactly this shape.
+  // The struct and the base are LoadBGTilemapData's — a 28-byte `gBgInfo` element at 0x03003430 —
+  // but this is NOT a component of that row's residual and must not be booked as headroom on it.
+  // Measured on its 386 winner: 16 `gBgInfo` accesses are already
+  // `((struct ElemN *)50345008)[vX].field_NN`, one base is parked in a local
+  // (`v7 = (u16 *)((v27 - v0 << 2) + 50345008)`), and the only inline re-spellings left are two
+  // `((s32 *)50345008)[15]` at a CONSTANT index — not the variable-index arm shape below. What
+  // does reach that row is one pool word; the LBG note at the end has it.
   //
-  // THE COMPILER FACT, from the pair compiled with the project's own agbcc. When an address
+  // THE COMPILER FACT, from the pair compiled with the benchmark's agbcc. When an address
   // constant sits in the SAME syntactic PLUS tree as a member's byte offset, agbcc reassociates
   // the offset ONTO the base — `split_tree` (fold-const.c:1216) accepts the address as the
   // constant term at :1253, and `associate:` (:4959) rewrites it into `VAR +- (ARG1 +- CON)`
   // (:5009) — and thumb.h's `LEGITIMIZE_ADDRESS` (thumb.h:926) is EMPTY, so it never comes back.
-  // The offset therefore leaves the load's free `[rN, #imm]` displacement and becomes a baked pool
-  // word plus an extra `add`:
-  //   gBgInfo[i].hLength; gBgInfo[i].vLength;               -> .word gBgInfo    ldrh [r1,#0x10]/[r1,#0x12]
-  //   ((u16 *)(i*28 + (u32)&gBgInfo))[8]; ... [9];          -> .word gBgInfo+0x10  ldrh [r0]/[r1] + add #0x2
-  // Parking the base in ANY local breaks the plus tree and restores the displacement — the
-  // IDENTICAL re-cast with the IDENTICAL index constants, `u16 *p = (u16 *)(i*28 + (u32)&gBgInfo);
-  // p[8]; p[9];`, compiles back to `.word gBgInfo` and `[r1,#0x10]`/`[r1,#0x12]`. So the re-cast
-  // and the index constants are innocent; only the tree is the discriminator. And it is NOT a
-  // named-symbol effect: the same inline form over a raw `0x03003430` bakes `.word 0x3003440`
-  // and the identical eleven instructions. That is what lets these rows be spelled with an
-  // address macro and still measure the real thing.
+  // The offset therefore leaves the load's free `[rN, #imm]` displacement:
+  //   int a = m[i].hLength; int b = m[i].vLength;        ->  9 insns  .word 0x3003430  [r1,#0x10]/[r1,#0x12]
+  //   ((u16 *)(i*28 + 0x03003430))[8]; … [9];            -> 11 insns  .word 0x3003440  ldrh [r0]/[r1]
+  //   u16 *p = (u16 *)(i*28 + 0x03003430); p[8]; p[9];   ->  9 insns  .word 0x3003430  — back to the ref
+  // Parking the base in ANY local breaks the plus tree and restores the displacement, so the
+  // re-cast and the index constants are innocent; only the tree is the discriminator. The pair
+  // behaves the same over a raw address as over a named `&gBgInfo`, which is what lets these rows
+  // use an address macro and still measure the real thing.
   //
-  // WHAT ASMLIFT DOES WITH IT, measured. When one member is read in TWO arms, agbcc emits that
-  // load once in a block both arms reach, so the base is live OUT of each arm. asmlift correctly
-  // homes it — `v0 = (u16 *)(a0 * 28 + 50345008);` — and then spells the arm-local access beside
-  // it as `((u16 *)(a0 * 28 + 50345008))[8]` instead of `v0[8]`. Taking asmlift's own printed
-  // winner and changing ONLY those inline re-spellings to read the local it had already minted
-  // compiles BYTE-IDENTICAL to the target, while the unmodified winner does not (checked on both
-  // gap rows). The whole residual is that one choice, and no axis in the fan reaches it:
-  // `bgshare`'s entire fan is 4 candidates scoring 8, 8, 9, 9 (`unsigned`, `signed`,
-  // `unsigned/flip-join`, `signed/flip-join`) and `bgswitch`'s is 2, both 8.
+  // ONE CAUSE, TWO SURFACES — and these four rows exhibit the SECOND, not the pool bake. Grep them
+  // for a baked pool word and there is none: in all four the plain base SURVIVES, because the
+  // shared member is reached off it, so agbcc keeps `.word 0x3003430` on BOTH sides and pays the
+  // reassociation as an `add` on the loaded value instead. `bgshare`, target against winner:
+  //   target   …  add r0,r0,r1                                     / ldrh r1,[r0,#0x10]
+  //   winner   …  add r2,r0,r1 / add r1,r1,#0x10 / … / add r0,r0,r1 / ldrh r1,[r0]
+  // The bake needs a site where nothing else wants the base plain — the middle line of the pair
+  // above, and on the real function a CONSTANT index: `((s32 *)0x03003430)[15]` gives
+  // `.word 0x300346c` + `ldr [r1]` where `s32 *p = (s32 *)0x03003430; p[15]` gives
+  // `.word 0x3003430` + `ldr [r1,#0x3c]`.
   //
-  // THE DISCRIMINATOR IS THE SHARED MEMBER — not the dispatch construct, not the arm count. Four
-  // shapes over the same struct and the same base, measured in one session:
-  //   two-arm if/else, one member shared   -> 8      `bgshare`
+  // WHAT ASMLIFT DOES WITH IT, measured. Where the target emits a member's load ONCE in a block
+  // that more than one arm reaches, the base is live OUT of each arm; asmlift correctly homes it —
+  // `v0 = (u16 *)(a0 * 28 + 50345008);` — and then spells the arm-local access beside it as
+  // `((u16 *)(a0 * 28 + 50345008))[8]` instead of `v0[8]`. Taking asmlift's own printed winner and
+  // changing ONLY those inline re-spellings to read the local it had already minted compiles
+  // BYTE-IDENTICAL to the target (`cmp -l` reports 0 differing bytes) on both gap rows, where the
+  // unmodified winners differ in 237 and 250 bytes. The whole residual is that one choice, and no
+  // axis in the fan reaches it: `bgshare`'s entire fan is 4 candidates scoring 8, 8, 9, 9
+  // (`unsigned`, `signed`, `unsigned/flip-join`, `signed/flip-join`) and `bgswitch`'s is 2, both 8.
+  //
+  // THE DISCRIMINATOR IS A PROPERTY OF THE TARGET, not of the source. A member named in two arms is
+  // NECESSARY and NOT SUFFICIENT; what decides it is whether agbcc puts that load in a join block,
+  // and the dispatch construct is one of the things that decides THAT:
+  //   two-arm if/else, one member shared   -> 8      `bgshare`    target: `ldrh [r0,#0x12]` once, at `.L5`
   //   two-arm if/else, members disjoint    -> MATCH  `bgsplit`
-  //   three-arm switch, one member shared  -> 8      `bgswitch`
+  //   three-arm switch, one member shared  -> 8      `bgswitch`   target: once at `.L8`, case 1 falls in
   //   three-arm switch, members disjoint   -> MATCH  `bgswsplit`
-  // With disjoint arms nothing is live across a block boundary, asmlift mints no base local at
-  // all, and every access comes out as `((struct Elem0 *)50345008)[a0].field_16` — the form that
-  // keeps the displacement. The two controls are the pair's own bracket: they move only if the
-  // struct-array recovery that already works stops working. `bgswitch`'s `default` arm is a third,
-  // in-row control — asmlift spells THAT arm in struct-member form while regressing cases 0 and 1.
+  //   three-arm if/else-IF chain, shared   -> 12     no row       target: that `ldrh` in EACH arm
+  // The chain shares `vLength` in the source exactly as `bgswitch` does and the class does NOT
+  // fire: asmlift mints no base local and every arm comes out `((struct ElemN *)…)[a0].field_NN`.
+  // `bgswitch`'s own `default` arm makes the same point from inside a row — it reads `hLength`,
+  // which `case 0` also reads, and the target emits that `ldrh [r0,#0x10]` TWICE, once per block;
+  // only `vLength`, shared by the two ADJACENT arms, gets a join block. So the `default` arm is an
+  // in-row control on the target's block structure, not on the source's member set.
   //
-  // Two properties of the struct are load-bearing, and a smaller row loses them: the element size
-  // must be NON-power-of-two (28) so the scale is an lsl/sub/lsl chain asmlift sees as a raw byte
-  // offset, and the members must sit at NON-ZERO offsets (0xc/0x10/0x12/0x14/0x16) so an
-  // `[rN, #imm]` displacement is what is at stake.
+  // WHAT THE TWO `MATCH` ROWS GUARD, and what nothing here guards. `bgsplit`/`bgswsplit` mint no
+  // base local at all, so they pin the struct-array recovery that already works. They CANNOT
+  // over-fire the lever these rows gate (prefer the already-minted local), because there is no
+  // local to prefer: the family has no over-fire guard and none was available — two shapes whose
+  // target does want the folded form were probed, and in both asmlift spells the already-folded
+  // address directly (`*(s32 *)50345068`) rather than re-spelling a base, so neither would flip.
+  // `bgswsplit` is also not a one-member contrast, and cannot be: changing ONLY `case 1`'s second
+  // member of `bgswitch` (`vLength` -> `tileRow`) still scores 8, because the sharing moves to
+  // cases 1/`default`. Two arms have to change to remove it, so `bgswsplit`'s MATCH is consistent
+  // both with "the sharing is gone" and with "this member set happens to match"; `bgsplit`, where
+  // one member changes and nothing else does, carries the clean contrast.
+  //
+  // THE STRUCT IS THE REAL FUNCTION'S, NOT A PRECONDITION. Neither property once thought
+  // load-bearing survives measurement: with `pad19[7]` (sizeof 32, a single `lsl #5` scale and no
+  // lsl/sub/lsl chain) `bgshare` still scores 8 with the identical mint-then-respell winner, and
+  // with the arm-local members moved to offsets 0 and 2 — nothing for a displacement to hold — it
+  // scores 10 with the same winner shape. The 28-byte stride and the 0xc/0x10/0x12/0x14/0x16
+  // offsets are here because they are `gBgInfo`'s. Do not prune or widen the family on them.
   //
   // ATTRIBUTION, so nothing here is credited to the wrong gap:
   //  • `bg_area`/`bg_mix` above already pin the STRAIGHT-LINE capability over this same 28-byte
-  //    stride and MATCH on all four toolchains. They are coverage for that, and no row before
-  //    these four asked what a branch does to it.
-  //  • `armfall` (agbcc, nonmatch 8) is a switch over struct-array members at this very base and
-  //    is NOT coverage: its struct is 4 bytes with members at 0 and 2, so there is no
-  //    non-power-of-two scale and no displacement to lose, and its winner spells the base as a
-  //    pointer induction variable (`v0 = v0 + 2;`) with `*v0`/`v0[1]` — the safe local form. Its 8
-  //    belongs to its tagged uninit-local/merge-chain axis. `armdef` MATCHes.
+  //    stride: `bg_area` MATCHes on all four toolchains, `bg_mix` on agbcc/kmc/mwcc and is 1 on
+  //    ido7.1. They are coverage for that, and no row before these four asked what a branch does
+  //    to it.
+  //  • `armfall` (agbcc, nonmatch 8, `unsigned/merge-names`) is a switch over struct-array members
+  //    at this very base and is NOT coverage: its winner spells the base as a pointer induction
+  //    variable (`v0 = v0 + 2;`) and reads `*v0`/`v0[1]` — the safe local form, with no inline
+  //    re-spelling anywhere. Its 8 belongs to its tagged uninit-local/merge-chain axis. `armdef`
+  //    MATCHes.
   //  • These four carry NEITHER `uninit-local` NOR `merge-chain` on purpose: every local is
   //    assigned on every path, and the diff is one base's spelling, not a merged value chain.
-  //  • EXCLUDED, with the machinery they belong to. A clamp over the same base (`a = m[i].hLength;
-  //    if (sel) a = 32; b = m[i].vLength;`) scores 22 and a loop+clamp 39, but in both the winner
-  //    uses the struct-member form throughout and mints no base local — clamp/merge-init, not
-  //    this. A three-arm if/else-IF chain scores 12 for the same reason: struct-member form in
-  //    every arm, so its 12 is dispatch shape.
+  //  • EXCLUDED, with the machinery it belongs to: a clamp over the same base (`a = m[i].hLength;
+  //    if (sel) a = 32; b = m[i].vLength;`) scores 22, but its winner uses the struct-member form
+  //    throughout and mints no base local — clamp/merge-init, not this.
   //
-  // agbcc only, like the `reread` and `arm*` families above: the reassociation, the empty
-  // LEGITIMIZE_ADDRESS and the cross-arm tail sharing are all this compiler's, established by
-  // compiling the pair. WHAT THESE ROWS CANNOT MEASURE, stated because it is the other half of the
-  // question they came from: the NAMED-symbol spelling. A synthetic candidate has no ELF to
-  // synthesize declarations from, so a row relocating against a named `gBgInfo` fails candidate
-  // compilation; these use an address macro, codegen-equivalent for the fold (verified above),
-  // which leaves the naming question to the real tier and to no row here.
+  // agbcc only, like the `reread` and `arm*` families above — but as a family CONVENTION, not as a
+  // tested exclusivity claim. The pair was compiled on agbcc alone, and of the three mechanisms
+  // cited only thumb.h's empty `LEGITIMIZE_ADDRESS` is ARM-Thumb's: `split_tree`/`associate:` is
+  // generic GCC 2.x source the `gcc2.7.2kmc` toolchain shares, and join-block tail sharing is a
+  // generic RTL optimisation. Whether these rows reproduce on the other three is UNTESTED.
+  // WHAT THESE ROWS CANNOT MEASURE, stated because it is the other half of the question they came
+  // from: the NAMED-symbol spelling. A synthetic candidate has no ELF to synthesize declarations
+  // from, so a row relocating against a named `gBgInfo` fails candidate compilation; these use an
+  // address macro, codegen-equivalent for the fold (verified above), which leaves the naming
+  // question to the real tier and to no row here.
+  //
+  // THE LBG NOTE, so the two counts are never added. On `kleod:LoadBGTilemapData:agbcc` the 386
+  // winner's pool holds 20 `.word` against the ROM's 20 `.4byte`, and what this family accounts
+  // for there is one of them: the candidate bakes four `gBgInfo` addends (+0x4, +0x3c, +0x48,
+  // +0x4a) where the ROM bakes three (+0x4, +0x48, +0x4a), and carries 8 plain `0x3003430` words
+  // against the ROM's 9. The extra `+0x3c` is the pool word the two `((s32 *)50345008)[15]` sites
+  // share. That is a constant-index bake; the four rows below are the variable-index arm shape and
+  // occur nowhere in that winner. Neither is a count of the other.
   {
     sym: 'bgshare',
     src:
