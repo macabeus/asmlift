@@ -191,15 +191,44 @@ key derivation is in `src/cache.ts`; the m2c side fails closed on a dirty m2c ch
 `ASMLIFT_DOCKER_POOL=0` disables the persistent container pool (the docker-cost A/B switch, see
 `packages/toolchains/src/compile.ts`).
 
-A SECOND cache sits a level below that one and is **off by default**: `ASMLIFT_CANDCACHE=1` serves
-the candidate objects a previous run of the same toolchain already compiled
-(`packages/cli/src/candcache.ts`). It changes no result — the same rows, the same scores — and on a
-compile-dominated run it is the difference between minutes and tens of minutes, so it is worth
-turning on for the base-run/lever-run pair inside one round and for the gate ladder's repeats. It
-is not a historical archive: hit rate decays as the axes accumulate. `ASMLIFT_CANDCACHE=verify`
-compiles everything anyway and audits the store against it, failing the run on any disagreement,
-and `ASMLIFT_BENCH_CACHE=0` bypasses this cache too. The flag table, the cold-vs-warm rule and what
-a project must declare before the cache runs on its own `decomp.yaml` are in `docs/ranked-repro.md`.
+A SECOND cache sits a level below that one and is **on by default**: it serves the candidate
+objects a previous run of the same toolchain already compiled (`packages/cli/src/candcache.ts`).
+It changes no result — the same rows, the same scores — and on a compile-dominated run it is the
+difference between minutes and tens of minutes. It is not a historical archive: hit rate decays as
+the axes accumulate. `ASMLIFT_CANDCACHE=0` (or `off`, or SET-BUT-EMPTY) bypasses it, so does
+`ASMLIFT_BENCH_CACHE=0`; `ASMLIFT_CANDCACHE=verify` compiles everything anyway and audits the store
+against it, failing the run on any disagreement. Serving mode audits itself too, on a sampled 1% of
+the keys it serves — the `[candcache]` line carries `sample=…%/seed=…`, and a shard that finds a
+disagreement FAILS. The flag table, the cold-vs-warm rule and what a project must declare before the
+cache runs on its own `decomp.yaml` are in `docs/ranked-repro.md`.
+
+**Which bench compiles it actually reaches** — measured per toolchain with a private store
+(`ASMLIFT_CANDCACHE_DIR=<empty> ASMLIFT_CANDCACHE_TRACE=1 pnpm bench run --tier … --toolchain … --serial`),
+because the answer is not what the `decomp.yaml` files suggest:
+
+| tier      | toolchain                           | reaches the cache?                                    | why                                                                                                |
+| --------- | ----------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| synthetic | `agbcc`                             | **yes** — `label=command`, 1 namespace / 15 keys      | the generated `decomp.yaml` command, through `compileFromCommand`                                  |
+| synthetic | `ido7.1`                            | reaches it and is **REFUSED**, 0 keys stored          | the stamp probe finds the object is not a pure function of its input (IDO bakes the input path in) |
+| synthetic | `gcc2.7.2kmc`, `mwcc_242_81`        | **no** — no `[candcache]` line at all                 | POOLED: `decomp-config.ts` deletes `compiler` from the doc, so `compileFromCommand` is never built |
+| synthetic | `gcc2.7.2`                          | n/a                                                   | no synthetic rows                                                                                  |
+| real      | `agbcc`                             | **yes** — `label=bench-agbcc`, 9 keys on one row pair | `compile/agbcc.ts`, the harness's own pipeline — NOT the `decomp.yaml` command                     |
+| real      | `ido7.1`, `gcc2.7.2`, `gcc2.7.2kmc` | **no** — no `[candcache]` line at all                 | `REAL_COMPILERS`; only `compile/agbcc.ts` wires the cache                                          |
+
+Two consequences worth stating plainly. The `tools.asmlift.candidateCache: off` that the three
+dockerized configs declare is **not** what keeps `bench run` off the cache — the pooled pair never
+builds their command, and `gcc2.7.2`'s real tier goes through `REAL_COMPILERS`; that declaration is
+load-bearing for the published REPRODUCTION SCRIPTS, which run the command as written. And the
+real-tier agbcc path is reached under `label=bench-agbcc`, which no `decomp.yaml` key can turn off:
+`ASMLIFT_CANDCACHE=0` is the only switch over it.
+
+The sampled audit is what stands between that and a silently wrong number, and the cost of not
+having it is measurable rather than theoretical. With every object in a warm real-tier store
+replaced by a fixed 19-byte string: at `ASMLIFT_CANDCACHE_SAMPLE=100` the run exits 1 with
+`BYTE MISMATCH label=bench-agbcc` lines; at `ASMLIFT_CANDCACHE_SAMPLE=0` it exits **0** and prints
+`pokeemerald:MathUtil_Mul16:agbcc asmlift=MATCH m2c=diff:3` — the row text byte-identical to the
+clean-store run, off 7 served hits of poison. `bench regression` and `bench diff` compare outcomes,
+so both would have gone green on it.
 
 ### Environment
 

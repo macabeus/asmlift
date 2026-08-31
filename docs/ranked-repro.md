@@ -80,6 +80,18 @@ state as unset: an empty value is both a one-shot bypass someone typed and an un
 `ASMLIFT_BENCH_CACHE=0` turns this cache off too: "bypass the benchmark's caches" has to mean all
 of them, or bisecting a suspect row still reads candidate objects off disk.
 
+**TEST RUNS ARE FENCED, and two of the three pins are not the obvious one.** `vitest.config.ts`
+pins `ASMLIFT_CANDCACHE=0` for every suite it runs (`test:offline`, `apps/benchmark/test`,
+`apps/web/test`) — ablated, `pnpm test:offline` wrote 8 namespaces / 20 keys of a throwaway `sh`
+"compiler"'s output into the shared store, and against a poisoned store 13 tests in
+`compile-command.test.ts` failed on the poison. It also pins `ASMLIFT_CANDCACHE_SAMPLE=0`, because
+the 1% audit under a random per-run seed is a 1-in-100 flake for any test asserting "a hit is an
+execution that did not happen"; and `ASMLIFT_CANDCACHE_DIR` to a per-run throwaway, because the
+candcache suites DELETE the mode pin to exercise the real default and the mode pin therefore cannot
+protect them. `pnpm test:matching` is the deliberate exception: it forces `verify` and audits the
+SHARED store, which is the only thing in the repo that does — pointed at a fresh directory it would
+find nothing to disagree with and go green having audited nothing.
+
 - **COLD or WARM is a property of the STORE, not of the flag.** The first cache-on
   run after a toolchain change, a flag change, or a change to the harness code that shapes the
   compiler's input is COLD by construction — the namespace moved and nothing in the store answers
