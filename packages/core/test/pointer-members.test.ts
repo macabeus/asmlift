@@ -1,12 +1,16 @@
-// POINTER-typed MEMBERS from the symbol map: `gBgPtrs.pMap`, `gPtr->pMap`. A member the map
-// declares a pointer is a POINTER in the emitted C, so every byte the asm added to it is scaled a
-// second time by the declared pointee width — `bytes + gBgPtrs.pMap` on a `u16 *` addresses twice
-// the byte the machine did, and no cast downstream can see it. The guard is the one the pointer
-// GLOBAL rule already uses and states in the same words: CAST THEN ADD.
+// POINTER-typed MEMBERS from the symbol map: `gBgPtrs.pMap`, `gPtr->pBuf`.
 //
-// The refusals are what keep it a declaration fact rather than a guess: a member the map does not
-// declare a pointer, and a synthesized `field_K` no declaration carries at all, keep their
-// spelling byte-for-byte.
+// Two rules, and the first is what makes the second safe. A member the map declares a pointer is a
+// POINTER in the emitted C, so every byte the asm added to it is scaled a second time by the
+// declared pointee width — `bytes + gBgPtrs.pMap` on a `u16 *` addresses twice the byte the
+// machine did, and no cast downstream can see it; the guard is the one the pointer GLOBAL rule
+// already uses and states in the same words, CAST THEN ADD. Where the residual IS a whole number
+// of elements, the source had no byte arithmetic at all: it wrote `gBgPtrs.pMap[i]`, and so does
+// asmlift.
+//
+// The refusals are what keep both declaration facts rather than guesses, so they are what these
+// tests pin hardest: a member the map does not declare a pointer, a member with no declared
+// pointee width, and every offset that does not land on an element boundary.
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
@@ -31,23 +35,23 @@ const ptrsInfo = (over: Partial<SymbolInfo> = {}): SymbolInfo => ({
 });
 const mapWith = (info: SymbolInfo): SymbolMap => new Map([[0x03004790, [info]]]);
 
-// The kleod tilemap-copy shape verbatim: load the member, add a runtime byte offset (`a0 << 1`),
-// then add a constant the load's own immediate cannot hold (`0x9d << 1`), then read a halfword.
-// The trailing constant is what keeps the access on the ARITHMETIC path — a bare `member + index`
-// feeding the load is claimed by the array-index recovery instead, and spells an element.
-const MEMBER_PLUS_BYTES = (off: number) =>
-  `f:\n\tldr\tr1, .L1\n\tldr\tr1, [r1, #${off}]\n\tlsl\tr0, r0, #1\n\tadd\tr0, r0, r1\n` +
-  `\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n\tadd\tr0, r0, r2\n` +
-  `\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
+// The kleod tilemap-copy shape: load the member at `off`, add a runtime offset, then a constant
+// the load's own immediate cannot hold (`0x9d << 1` = 314), then read a halfword. `scale` is the
+// shift the asm applies to the runtime offset — `1` makes it a whole number of `u16` elements,
+// `0` leaves it a raw byte count that lands mid-element for every odd value.
+const MEMBER_WALK = (off: number, scale: 0 | 1 = 1, read = 'ldrh\tr0, [r0]') =>
+  `f:\n\tldr\tr1, .L1\n\tldr\tr1, [r1, #${off}]\n${scale ? `\tlsl\tr0, r0, #${scale}\n` : ''}` +
+  `\tadd\tr0, r0, r1\n\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n\tadd\tr0, r0, r2\n` +
+  `\t${read}\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
 
 const run = (asm: string, info: SymbolInfo = ptrsInfo()) =>
   decompile('f', asm, ARMV4T_AGBCC, { symbols: mapWith(info) }).source;
 
 describe('arithmetic on a pointer-declared member', () => {
   test('a byte offset added to a `u16 *` member casts the MEMBER, not the sum', () => {
-    const src = run(MEMBER_PLUS_BYTES(4));
-    // `(a0 << 1) + (u8 *)gBgPtrs.pMap` is that byte under any declaration; without the cast C
+    // `(a0 + (u8 *)gBgPtrs.pMap) + 314` is that byte under any declaration; without the cast C
     // scales the residual by 2 again and the emitted C reads a different address than the asm.
+    const src = run(MEMBER_WALK(4, 0));
     expect(src).toContain('(u8 *)gBgPtrs.pMap');
     expect(src).not.toMatch(/\+ gBgPtrs\.pMap/);
   });
@@ -55,8 +59,7 @@ describe('arithmetic on a pointer-declared member', () => {
   test("a `void *` member is cast too — the pointee width is the PROJECT's, not the map's guess", () => {
     // the map spells an unsized pointee `void *`, where the project header may declare anything;
     // the cast is what makes the address the same in both worlds
-    const src = run(MEMBER_PLUS_BYTES(0));
-    expect(src).toContain('(u8 *)gBgPtrs.pTiles');
+    expect(run(MEMBER_WALK(0))).toContain('(u8 *)gBgPtrs.pTiles');
   });
 
   test('a pointer member under a NON-ADDITIVE operator spells integer math on the cell', () => {
@@ -71,23 +74,79 @@ describe('arithmetic on a pointer-declared member', () => {
 describe('refusals — anything the map does not declare a pointer keeps its spelling', () => {
   test('a member declared a plain scalar is left alone', () => {
     // `count` is an s32 member: the asm added bytes to an integer, and so does the emitted C
-    const src = run(MEMBER_PLUS_BYTES(8));
+    const src = run(MEMBER_WALK(8, 0));
     expect(src).toContain('gBgPtrs.count');
     expect(src).not.toContain('(u8 *)gBgPtrs.count');
   });
 
   test('a member the layout does not seat is not named, so nothing is cast', () => {
     // an UNSIZED member declines the whole layout (symbols.ts declaredFields), so the access falls
-    // back to the cast forms and there is no member for the pointer rule to resolve
+    // back to the cast forms and there is no member for the pointer rules to resolve
     const layout = LAYOUT.map((f) => (f.name === 'pMap' ? { ...f, size: null } : f));
-    const src = run(MEMBER_PLUS_BYTES(4), ptrsInfo({ layout: layout as SymbolStructField[] }));
+    const src = run(MEMBER_WALK(4, 0), ptrsInfo({ layout: layout as SymbolStructField[] }));
     expect(src).not.toContain('pMap');
     expect(src).not.toContain('(u8 *)');
   });
 
   test('with NO symbol map at all the spelling is byte-identical to today', () => {
-    const src = decompile('f', MEMBER_PLUS_BYTES(4), ARMV4T_AGBCC).source;
+    const src = decompile('f', MEMBER_WALK(4, 0), ARMV4T_AGBCC).source;
     expect(src).not.toContain('gBgPtrs');
     expect(src).not.toContain('(u8 *)');
+  });
+});
+
+// The buffer a pointer member points AT is an ARRAY in the project's own header, so an access of
+// the declared element width at a whole multiple of it is that array's i-th ELEMENT.
+describe('an element-scaled offset through a pointer member is an ELEMENT of it', () => {
+  test('the runtime index and the load displacement fold into ONE subscript', () => {
+    const src = run(MEMBER_WALK(4));
+    expect(src).toContain('((u16 *)gBgPtrs.pMap)[a0 + 157]');
+    expect(src).not.toContain('(u8 *)gBgPtrs.pMap'); // the byte spelling it replaces
+  });
+
+  test('a STORE through the member spells the element too', () => {
+    const asm =
+      'f:\n\tldr\tr2, .L1\n\tldr\tr2, [r2, #0x4]\n\tlsl\tr0, r0, #1\n\tadd\tr0, r0, r2\n' +
+      '\tmov\tr3, #0x9d\n\tlsl\tr3, r3, #1\n\tadd\tr0, r0, r3\n\tstrh\tr1, [r0]\n' +
+      '\tmov\tr0, #0x0\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x03004790\n';
+    expect(run(asm)).toContain('((u16 *)gBgPtrs.pMap)[a0 + 157] = a1;');
+  });
+});
+
+describe('refusals — anything that does not land on an element boundary keeps the byte spelling', () => {
+  test('an access WIDER than the declared element is not an element of it', () => {
+    // a word read through a `u16 *`: `pMap[i]` reads 2 bytes, so no subscript expresses it
+    const src = run(MEMBER_WALK(4, 1, 'ldr\tr0, [r0]'));
+    expect(src).toContain('(u8 *)gBgPtrs.pMap');
+    expect(src).not.toContain('gBgPtrs.pMap)[');
+  });
+
+  test('a residual that is not element-scaled addresses MID-ELEMENT and declines', () => {
+    // the index is added in BYTES, so half of its values land inside an element
+    expect(run(MEMBER_WALK(4, 0))).not.toContain('gBgPtrs.pMap)[');
+  });
+
+  test('an ODD constant addresses MID-ELEMENT and declines', () => {
+    const asm = MEMBER_WALK(4).replace('\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n', '\tmov\tr2, #0x9d\n');
+    const src = run(asm);
+    expect(src).toContain('(u8 *)gBgPtrs.pMap');
+    expect(src).not.toContain('gBgPtrs.pMap)[');
+  });
+
+  test('a member with NO declared pointee width is never indexed — `void *` sizes nothing', () => {
+    const src = run(MEMBER_WALK(0));
+    expect(src).toContain('(u8 *)gBgPtrs.pTiles');
+    expect(src).not.toContain('gBgPtrs.pTiles)[');
+  });
+
+  test('a SIGNED sub-word access does not read a member declared to point at an unsigned one', () => {
+    // the subscript carries no cast of its own in the source spelling, so the declared pointee is
+    // the only thing saying how a sub-word read fills — the argument bareArrayLead makes
+    const asm =
+      'f:\n\tldr\tr1, .L1\n\tldr\tr1, [r1, #0x4]\n\tlsl\tr0, r0, #1\n\tadd\tr0, r0, r1\n' +
+      '\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n\tadd\tr0, r0, r2\n\tmov\tr3, #0x0\n' +
+      '\tldrsh\tr0, [r0, r3]\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n';
+    expect(run(asm)).not.toContain('gBgPtrs.pMap)[');
   });
 });

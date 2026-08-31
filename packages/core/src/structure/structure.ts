@@ -323,6 +323,115 @@ function declaredMemberOf(x: Expr, sym: SymRenderCtx | undefined): DeclaredField
   return fields?.find((f) => f.name === x.name) ?? null;
 }
 
+/** A map-declared POINTER MEMBER as the additive lowering renders its VALUE: the bare `gSym.pBuf`,
+ *  or that member wearing the byte-pointer / u32 cast the arithmetic guard adds. Both denote the
+ *  same address and add BYTES to it, so both fold here; a cast to any OTHER pointer type is not
+ *  looked through — it would re-scale everything added after it. */
+function ptrMemberValue(x: Expr, sym: SymRenderCtx): { expr: Expr; field: DeclaredField } | null {
+  let bare = x;
+  if (x.k === 'cast') {
+    const t = x.to;
+    const isBytePtr = t.kind === 'ptr' && t.to.kind === 'int' && t.to.width === 8;
+    if (!isBytePtr && !(t.kind === 'int' && t.width === 32)) {
+      return null;
+    }
+    bare = x.e;
+  }
+  const f = declaredMemberOf(bare, sym);
+  return f?.pointer === true ? { expr: bare, field: f } : null;
+}
+
+/** Decompose an access base into "the VALUE of a map-declared POINTER MEMBER + a constant byte
+ *  offset + at most ONE variable term" — the same decomposition {@link ptrGlobalBase} makes one
+ *  indirection up, declining on the same conditions (two variable terms, no such member, a
+ *  non-`+` operator), because only a single residual can be read as one element index. */
+interface PtrMemberBase {
+  value: Expr;
+  field: DeclaredField;
+  byte: number;
+  idx: Expr | null;
+}
+function ptrMemberBase(e: Expr, sym: SymRenderCtx): PtrMemberBase | null {
+  const hits: { expr: Expr; field: DeclaredField }[] = [];
+  let byte = 0;
+  let idx: Expr | null = null;
+  let ok = true;
+  const visit = (x: Expr): void => {
+    if (!ok) {
+      return;
+    }
+    if (x.k === 'bin' && x.op === '+') {
+      visit(x.l);
+      visit(x.r);
+      return;
+    }
+    const m = hits.length === 0 ? ptrMemberValue(x, sym) : null;
+    if (m !== null) {
+      hits.push(m);
+      return;
+    }
+    if (x.k === 'const') {
+      byte += x.value;
+      return;
+    }
+    if (idx !== null) {
+      ok = false;
+      return;
+    }
+    idx = x;
+  };
+  visit(e);
+  return ok && hits.length === 1 ? { value: hits[0].expr, field: hits[0].field, byte, idx } : null;
+}
+
+/** `gSym.pBuf[i]` for an access through a POINTER MEMBER's VALUE — the spelling the project's own
+ *  header makes available, where the byte arithmetic it replaces is the same address written the
+ *  machine's way. The DECLARATION is what licenses it: `pointeeSize` says how wide an element is,
+ *  so an access of exactly that width at a whole multiple of it IS the i-th element, and the
+ *  reinterpret cast the backend adds strides by the same amount under any header.
+ *
+ *  `carried` is an ELEMENT index the access already holds (an `aload`'s own index); everything
+ *  else — a byte residual inside the base, the instruction's displacement `off` — is converted and
+ *  summed into the one subscript, which is where the source put it.
+ *
+ *  Unlike the indexed member-ARRAY spelling (see the block comment above pointeeAccess), this
+ *  moves no constant across an association agbcc will not redo: the address the C computes is the
+ *  member's own value plus a single scaled index.
+ *
+ *  REFUSALS, each because no whole-element spelling expresses the address: a member with no
+ *  declared pointee width (`void *` sizes nothing), an access of a DIFFERENT width than the
+ *  element, a sub-word access whose signedness the declared pointee does not carry (the bare
+ *  subscript has no cast, so the declaration is the only thing saying how it fills — the same
+ *  argument bareArrayLead makes), a variable residual that is not element-scaled, and a constant
+ *  the element width does not divide. All fall through to the honest byte forms. */
+function ptrMemberElement(
+  baseExpr: Expr,
+  carried: Expr | null,
+  off: number,
+  width: number,
+  signed: boolean,
+  sym: SymRenderCtx,
+): Extract<Expr, { k: 'index' }> | null {
+  const pm = ptrMemberBase(baseExpr, sym);
+  if (!pm || pm.field.pointeeSize !== width || (width < 4 && (pm.field.pointeeSigned ?? false) !== signed)) {
+    return null;
+  }
+  const varIdx = pm.idx === null ? null : elementIndex(pm.idx, width); // THE one copy of that rule
+  const total = pm.byte + off;
+  if ((pm.idx !== null && varIdx === null) || total % width !== 0) {
+    return null;
+  }
+  // Variable terms first, constant last — the `idxVal + off / width` order every other indexed
+  // spelling in this file uses, and the one the source's own subscript is written in.
+  const terms = [varIdx, carried].filter((t): t is Expr => t !== null);
+  const k = total / width;
+  if (k !== 0 || terms.length === 0) {
+    terms.push({ k: 'const', value: k });
+  }
+  const idx = terms.reduce((l, r) => ({ k: 'bin', op: '+', l, r }));
+  return { k: 'index', base: pm.value, idx, width, signed };
+}
+
 // WHY THERE IS NO INDEXED `gPtr->arr[i]` SPELLING.
 //
 // Naming a member is only allowed where it is byte-identical to the cast form it replaces, and
@@ -432,6 +541,12 @@ function memAccess(
   // named field (`gSym.field` — the source spelling a folded literal can never match); an ARRAY
   // global indexes its BARE name (`gSym[i]`, see below). Exact field match only (offset AND
   // width) — anything else falls through to the honest cast forms, never a guessed field.
+  // The constant offset this access reached through the instruction's MEMORY OPERAND. The two
+  // facts are separate at L2 — `off` is the load/store's own immediate, any addend the address
+  // carried is already inside `baseExpr` — and folding them into one subscript below
+  // (`idxVal + off / width`) is what makes the two indistinguishable at L3, so the displacement
+  // is recorded before the fold destroys it (see the `operandOff` note in l3/ast.ts).
+  const fromOperand = off !== 0 ? ({ operandOff: off } as const) : {};
   if (sym) {
     const gb = globalConstByte(baseExpr, off);
     const si = gb ? sym.info(gb.name) : undefined;
@@ -460,13 +575,13 @@ function memAccess(
         return spelled;
       }
     }
+    // …and one step further out: an access through a POINTER MEMBER's value is an ELEMENT of the
+    // buffer that member points AT (see ptrMemberElement).
+    const elem = ptrMemberElement(baseExpr, null, off, width, signed, sym);
+    if (elem) {
+      return { ...elem, ...fromOperand };
+    }
   }
-  // The constant offset this access reached through the instruction's MEMORY OPERAND. The two
-  // facts are separate at L2 — `off` is the load/store's own immediate, any addend the address
-  // carried is already inside `baseExpr` — and folding them into one subscript below
-  // (`idxVal + off / width`) is what makes the two indistinguishable at L3, so the displacement
-  // is recorded before the fold destroys it (see the `operandOff` note in l3/ast.ts).
-  const fromOperand = off !== 0 ? ({ operandOff: off } as const) : {};
   const g = globalOf(baseExpr, width);
   if (g) {
     const idxVal = g.idx;
@@ -532,6 +647,16 @@ function arrayAccess(
   ctype: (e: Expr) => IrType | undefined,
   sym?: SymRenderCtx,
 ): Expr {
+  // An indexed access through a POINTER MEMBER's value is an ELEMENT of what it points at, exactly
+  // as in memAccess — the index the aload already carries is the subscript, and any byte residual
+  // in the base is converted and summed into it. A fieldOff/memberOff access selects an interior
+  // of a STRUCT element instead, which this spelling has no place to put, so it is left alone.
+  if (sym && fieldOff === undefined && memberOff === undefined) {
+    const elem = ptrMemberElement(baseExpr, idxExpr, 0, elemSize, signed, sym);
+    if (elem) {
+      return elem;
+    }
+  }
   // A variable-index access off a global's address indexes the ADDRESS `&gSym` (the cast form
   // `((T *)&gSym)[i]` — valid for a struct global too, unlike casting the bare value). A
   // struct-array-of-globals (fieldOff) or a member array (memberOff) through `&gSym` falls through:
