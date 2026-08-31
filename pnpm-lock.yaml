@@ -97,8 +97,8 @@ importers:
         specifier: ^2.10.1
         version: 2.10.1(react@19.2.7)
       objdiff-wasm:
-        specifier: 3.7.0
-        version: 3.7.0
+        specifier: 3.8.1
+        version: 3.8.1
       react:
         specifier: ^19.0.0
         version: 19.2.7
@@ -145,8 +145,8 @@ importers:
         specifier: ^0.5.0
         version: 0.5.0
       objdiff-wasm:
-        specifier: 3.7.3
-        version: 3.7.3
+        specifier: 3.8.1
+        version: 3.8.1
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -1612,11 +1612,8 @@ packages:
       react-router-dom:
         optional: true
 
-  objdiff-wasm@3.7.0:
-    resolution: {integrity: sha512-7rNUrzQ9O3F0wvZCWWkqBdowZZih87BeGqSBa8kGOcA49nXqFOAdBIlp9BihU3NTVPVjf+05y//lcM0OJjeJwQ==}
-
-  objdiff-wasm@3.7.3:
-    resolution: {integrity: sha512-o7HwsojvSSaAqQw45/vEql0ywn6MZbbxeq+YksPYuhF1AmpCf9J4zyhEbrJfy9UnrqOMAJqtTTCDFAmI9q+tRQ==}
+  objdiff-wasm@3.8.1:
+    resolution: {integrity: sha512-qrPEvEltuYtvjqkCT3YbttzUFPfKqPJw4xNMQLwuyKNwpNxV0i9RJLbozzJ0LDJ5HEocmkoqHchSrGHszS+KUw==}
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -3278,9 +3275,7 @@ snapshots:
       '@standard-schema/spec': 1.1.0
       react: 19.2.7
 
-  objdiff-wasm@3.7.0: {}
-
-  objdiff-wasm@3.7.3: {}
+  objdiff-wasm@3.8.1: {}
 
   optionator@0.9.4:
     dependencies:
