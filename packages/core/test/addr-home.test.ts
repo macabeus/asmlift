@@ -341,11 +341,11 @@ test('a loop-header class fed from memory is in scope and still homes nothing', 
   expect(emit(LOOP_CHASE, true)).toBe(emit(LOOP_CHASE, false));
 });
 
-// THE ESCAPE IS KEPT OUT BY THE `otherUse` SWEEP, and by nothing else. `sharedBaseClasses` used to
-// carry a clause excusing a base-slot use when the same op used the value again as data
-// (`store p, p`) — measured over 1487 lifted corpus functions, the shape occurs at 10 sites and
-// the clause changed the predicate's answer at none of them, because the j>0 pass over the same
-// operand list already puts the value in `otherUse`. The clause is gone; this is what replaces it.
+// THE ESCAPE IS KEPT OUT BY THE `otherUse` SWEEP, and by nothing else. `store p, p` — the address
+// written as its own data — needs no clause of its own in `sharedBaseClasses`: the j>0 pass over
+// the same operand list puts the value into `otherUse`, which disqualifies its whole class. The
+// shape occurs at 10 sites over 1487 lifted corpus functions and a base-slot excuse for it changes
+// the predicate's answer at none of them, so this test is the only thing standing behind it.
 const STORE_SELF = `fn escape {
 ^bb0(%0: u32):
   %1: s32 = const {value=2}

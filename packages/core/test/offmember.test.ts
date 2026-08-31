@@ -130,11 +130,10 @@ describe('every gate is load-bearing', () => {
     expect(cBackend.emit(ablated)).toContain('->m6');
   });
 
-  // Two views of ONE offset at ONE width but different SIGNEDNESS. `seatable` used to compare only
-  // widths, so the two collapsed into whichever member `membersOf` preferred and one of the two
-  // reads changed VALUE — `ldrb` respelled through an `s8` sign-extends. A union, which is not a
-  // member, so it is refused exactly as the width union is; ablating shows the collapse rather
-  // than a worse score.
+  // Two views of ONE offset at ONE width but different SIGNEDNESS — a union, which is not a
+  // member, so it is refused exactly as the width union is. Ablating shows a changed VALUE rather
+  // than a worse score: the two collapse into whichever member `membersOf` prefers, and `ldrb`
+  // respelled through an `s8` sign-extends.
   const SIGN_UNION = fn([
     ret(idx(cbase(64), 3, 1, { operandOff: 3 })),
     ret({ ...(idx(cbase(64), 3, 1, { operandOff: 3 }) as Extract<Expr, { k: 'index' }>), signed: true }),
@@ -151,10 +150,9 @@ describe('every gate is load-bearing', () => {
   // THE PRICE OF HAVING NO DEVICE-REGISTER REFUSAL, on real compiled asm rather than a hand-built
   // tree, so it stays true when the lift changes. 0x040000D4 + 8 is REG_DMA3CNT: this pass admits
   // the register file like any other leaf base and declares a struct over it, carrying no
-  // qualifier. That is the shipped behaviour and the header states the three measurements that
-  // settled it — chiefly that the refusal which used to sit here removed ZERO bases corpus-wide
-  // and was switched off entirely by a symbol map, which turns the address into a named `addr` no
-  // numeric window can read.
+  // qualifier. The header states the three measurements behind that — chiefly that a window
+  // refusal removes ZERO bases corpus-wide, and that a symbol map switches one off entirely by
+  // turning the address into a named `addr` no numeric window can read.
   //
   // WHAT ACTUALLY REFEREES IT is the differ, and this asm is the case where nothing else does:
   // the benchmark's own agbcc command compiles

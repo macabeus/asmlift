@@ -148,12 +148,13 @@ function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
  *  The SECOND is what stands there whatever the scope rule says, and it is NOT one of those two:
  *  the third scope's own `!multiBlockHeaders.has(b)` seat refusal, which predates this widening
  *  and refuses to materialize AT a multi-block loop header regardless of which class the value is
- *  in. It is load-bearing and measurable: replace that clause with `true` and re-structure the
- *  corpus and marioparty3 `func_8010923C_18E46C_cosmic_coaster` throws the `carriesPreUpdate`
- *  StructureError this paragraph is about (and two inert functions start changing their source).
- *  The hazard is real, it is just answered by WHERE the home may sit rather than by WHICH class
- *  may have one — which is why a second refusal over the class would have been the third copy of
- *  an answer, not the first. Note what that implies about the enumeration gate: it deliberately
+ *  in. It is load-bearing and measurable: replace that clause with `true` and marioparty3
+ *  `func_8010923C_18E46C_cosmic_coaster` stops structuring at all — it throws the
+ *  `carriesPreUpdate` StructureError this paragraph is about — while `func_80033910_34510` and
+ *  `func_80033970_34570` go from axis-inert to changing their source. So the hazard is real; it is
+ *  answered by WHERE a home may sit rather than by WHICH class may have one, which is a refusal
+ *  the widening does not touch and the plan's class guard would have restated. Note what that
+ *  implies about the enumeration gate: it deliberately
  *  omits the seat refusal (see `hasHomeableSharedAddress`), which is safe only because the seat
  *  refusal is applied HERE, in the scope, on every candidate the gate enumerates. */
 export function sharedBaseClasses(fn: Fn, ignoreRet: boolean): Set<Value> {

@@ -27,29 +27,32 @@
 // `/addr-home`'s (structure/analysis.ts). It is a GATE rather than a collection filter so the
 // refusal is attributable: `firstRejection` names it.
 //
-// NO DEVICE-REGISTER REFUSAL, and the price is stated rather than hidden. A base inside the
-// target's declared `deviceRegisters` window is admitted like any other, so on a function that
-// reads MMIO through a constant displacement this pass will offer `((struct Off0 *)&REG_DMA3SAD)
-// ->m8` — a struct declared over the register file, carrying no qualifier. Three measurements
-// say the refusal that used to sit here bought nothing for that price. (1) It removed ZERO bases
-// over all four checkouts in BOTH symbol-map configurations (1417 structured functions map-less,
-// 398 map-ful): every base it named was one `no-operand-off` refuses too, because the DMA idiom
-// writes offset 0 as well as offset 8. (2) Its premise was false of its own input. It claimed the
-// member spelling drops a qualifier, and the tree this pass is handed carries none in either
-// configuration — `/volatile` wraps the base in a CAST, which `non-leaf-base` refuses, so the two
-// levers do not compose and never did (over LoadBGTilemapData's 68352-candidate fan, 18432
-// candidates carry `/volatile`, 1536 carry `/offmember`, and none carries both). Nor is a
-// tie-break lost: `deviceVolatileClaims` counts only trees that already assert a qualifier, so
-// both siblings count zero. (3) It was CONFIGURATION-DEPENDENT, which is the defect that settled
-// it: the window is read off `addrConst`, and a symbol map turns a device address into a named
-// `addr` no numeric range can see, so the same function was refused map-less and admitted map-ful
-// — on the gate's own witness asm. A refusal that a symbol map switches off is not a refusal.
-// What is left in its place is the differ. On that witness (a DMACNT spin loop compiled with the
-// benchmark's own agbcc command, `offmember.test.ts`) the shape is offered and LOSES: 52
-// candidates, best `unsigned/derived-home/livebase/volatile: 4`, best `/offmember` 5 — the
-// qualified spelling it would have to beat is already in the fan and already wins. The test pins
-// that price on real asm. A row where the member spelling WINS over MMIO is what would earn the
-// gate back, together with a window reading that survives a symbol map.
+// NO DEVICE-REGISTER REFUSAL, which is a priced decision and not an omission. A base inside the
+// target's declared `deviceRegisters` window is admitted like any other, so this pass will offer
+// `((struct Off0 *)&REG_DMA3SAD)->m8` — a struct declared over the register file, carrying no
+// qualifier. Three measurements say a refusal there buys nothing for that price.
+//
+//   REACH. Every device-window base reaching this table is already refused by `no-operand-off`
+//   (49 of them map-less, 2 map-ful, over all four checkouts — 1417 structured functions map-less,
+//   398 map-ful): the DMA idiom writes offset 0 as well as offset 8, and offset 0 leaves no
+//   displacement. A window refusal removes ZERO further bases in either configuration.
+//
+//   PREMISE. It would be refusing a dropped qualifier, and there is none to drop: `/volatile`
+//   wraps the base in a CAST that `non-leaf-base` refuses, so the two levers cannot compose and
+//   the tree this pass is handed is unqualified in both configurations. Nor is a tie-break lost —
+//   `deviceVolatileClaims` counts only qualifiers a tree already asserts, so an unqualified tree
+//   scores zero whichever way it is spelled.
+//
+//   CONFIGURATION. A numeric window is read through `addrConst`, and a symbol map turns a device
+//   address into a named `addr` no range can see. So such a refusal fires map-less and not
+//   map-ful on the SAME function — and the real tier runs map-ful. A refusal a symbol map
+//   switches off is not a refusal.
+//
+// What referees it instead is the differ, and `offmember.test.ts` pins the price on real compiled
+// asm: on a DMACNT spin that never touches DMASAD — the one shape `no-operand-off` does not cover
+// — the member spelling is offered and LOSES, 52 candidates, best
+// `unsigned/derived-home/livebase/volatile: 4` against `/offmember`'s 5. A row where it WINS over
+// MMIO is what would earn a gate here, together with a window reading that survives a symbol map.
 //
 // NOT AN EXTENSION OF raise/struct-arrays.ts. That pass mints an element struct off the `mul`/`shl`
 // STRIDE idiom in the machine code, and this shape has no scale at all — the subscript is a
@@ -65,9 +68,8 @@
 // REFUSAL. `spellOperandMembers` returns `null` when no base was admitted, so a function with no
 // eligible site contributes no candidate and costs nothing.
 //
-// WHAT THE DECLARATION GOVERNS, stated exactly, because an earlier version of this header claimed
-// more than the code does ("a base with ANY ineligible access is refused WHOLE"). It governs the
-// CONSTANT SUBSCRIPTS this pass grouped under one base expression, and nothing else. A sibling
+// WHAT THE DECLARATION GOVERNS, and it is narrower than it looks: the CONSTANT SUBSCRIPTS this
+// pass grouped under one base expression, and nothing else. A sibling
 // access through the same address that this pass has no member spelling for — a variable
 // subscript, a `lead`-prefixed one — is left exactly as it was, keeping its own cast, and a
 // struct-array element off the same numeric constant reaches the address through a different base
@@ -75,17 +77,17 @@
 // ways, and `offmember.test.ts` emits exactly this pair rather than describing it:
 // `((struct Off0 *)50345232)->m16` beside `((s32 *)50345232)[a0]`.
 //
-// THAT IS UGLY AND IT IS NOT UNSOUND, and the distinction is the whole reason it stayed. Every
+// THAT IS UGLY AND IT IS NOT UNSOUND, and only the second half is a gate's business. Every
 // access carries its own cast, so no access reads a byte it did not read before; the seating check
 // below judges the accesses the declaration is built FROM, which are exactly the accesses
 // respelled through it, so its argument is over a total population of what it governs. The
 // contradiction is between two FICTIONAL TYPES over one address, which is a readability claim —
 // `quality`'s clientele, not a gate's.
 //
-// PRICED, because the refusal was built and measured before it was dropped. Refusing a base whose
-// siblings it cannot spell removes `a:gCallbackQueue` from `kleod:ProcessInputAndUpdateEntities`
-// and costs that row 284 → 306; over the 948-row bench it protects no row at all. A gate needs a
-// row it protects, and this one had one row it costs and none it saves.
+// AND THE TIGHTER RULE IS PRICED, so it is not re-derived from scratch: refusing a base whose
+// siblings this pass cannot spell removes `a:gCallbackQueue` from
+// `kleod:ProcessInputAndUpdateEntities` and costs that row 284 → 306, while protecting no row on
+// the 948-row bench. A gate needs a row it protects.
 //
 // ALL-OR-NOTHING PER FUNCTION, and that is a PRICE rather than a property. Every admitted base is
 // respelled together in one candidate, so a function with two admitted bases where the target
@@ -95,11 +97,9 @@
 // 1024x, so the subsets stay unreachable until a row demands one. Measured over klonoa's 69
 // lifting functions (lift → idioms → raise → structure, one pass per configuration): 36 admitted
 // bases over 25 functions map-less and 38 over 24 map-ful, so the multi-base functions really are
-// the majority of the surplus and a missing subset has somewhere to live. (An earlier round
-// reported 25 bases over 16 functions for the map-ful arm; re-run here it is 38 over 24, and the
-// map-less arm reproduces exactly, so the disagreement is in that round's method rather than in
-// this one's admission rule.) The other three checkouts admit 32 bases over 32 functions (af),
-// 10 over 10 (marioparty3) and 2 over 2 (snowboardkids2), all map-less.
+// the majority of the surplus and a missing subset has somewhere to live. The other three
+// checkouts admit 32 bases over 32 functions (af), 10 over 10 (marioparty3) and 2 over 2
+// (snowboardkids2), all map-less.
 import { nextStructIndex } from '../ir/struct-names';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, StructType } from './ast';
@@ -196,8 +196,8 @@ function membersOf(sites: readonly Site[]): Site[] {
  *  place somewhere other than where the access reads: a NEGATIVE offset, which no member has; two
  *  views of ONE offset at different widths (a union); and two offsets whose byte ranges collide.
  *
- *  THE FOURTH IS NOT ABOUT PLACEMENT, and it is the one an earlier version of this predicate
- *  missed while asserting the list was complete: two views of one offset at one width but
+ *  THE FOURTH IS NOT ABOUT PLACEMENT, and it is the easy one to leave out: two views of one
+ *  offset at one width but
  *  DIFFERENT SIGNEDNESS (`ldrb` and `ldrsb` at the same address). One member has one type, so
  *  respelling both through it changes what one of the two READS — `scalarTypeForAccess` honours
  *  signedness at widths 1 and 2, so an unsigned read becomes sign-extending. That is a value
