@@ -207,6 +207,17 @@ export function isArrayField(f: SymbolStructField): boolean {
   return f.elemSize !== undefined;
 }
 
+/** THE one test for "is this field a POINTER", and it is a test of TWO facts. The flag alone is
+ *  not enough: {@link symbolFieldType} declares a pointer only at `size === 4`, so a `pointer`
+ *  member of any other size declares as a scalar cell or a byte array — and a consumer trusting
+ *  the flag alone would spell pointer arithmetic on a value the very declaration beside it calls a
+ *  `u16`. The two answers must be the SAME answer, for the same reason declaredFields and the
+ *  synthesis must: core reasoning about a member as something the declaration does not declare is
+ *  non-compiling C. */
+export function isPtrField(f: SymbolStructField): boolean {
+  return f.pointer === true && f.size === 4;
+}
+
 /** THE one test for "is this field a bitfield" — the PRESENCE of `bitWidth` (see the field doc).
  *  The exact (offset,size) scalar-field rules must exclude these: a 7-bit field whose bits span
  *  2 bytes carries `size: 2` and would otherwise match a plain u16 read at its offset. */

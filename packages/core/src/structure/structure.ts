@@ -37,6 +37,7 @@
 // whose exit copies would clobber, switch fall-through, and mixed-entry self-loops (a guarded
 // header also entered by a plain br).
 import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
+import { type BitsCtx, constMask, provableBits } from '../ir/bits';
 import { Block, Fn, Op, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
@@ -66,6 +67,7 @@ import {
   declaredFields,
   isArrayField,
   isBitfieldField,
+  isPtrField,
   isScalarCellSize,
   pointeeFields,
   scalarCellType,
@@ -202,6 +204,15 @@ function elementIndex(residual: Expr, elemSize: number): Expr | null {
 interface SymRenderCtx {
   info(name: string): SymbolInfo | undefined;
   noteGlobal(name: string, type: IrType): void;
+  /** may {@link ptrMemberElement} spell a whole-element subscript through a pointer member — the
+   *  `/no-ptr-elem` arm's OFF switch, off the `spellPtrMemberElements` structure option. */
+  ptrElements: boolean;
+  /** The members a symbol's declaration seats — a struct global's own, or a pointer global's
+   *  pointee's — MEMOIZED per symbol. `declaredFields` validates every member and returns a fresh
+   *  sorted copy on every call, and `isPtrValue` asks it for both operands of every binary node
+   *  lowered, so an uncached lookup is an O(n log n) allocation on a hot path — inside a
+   *  `structure()` a ranked run repeats once per candidate, 17,856 times on the largest fan. */
+  fieldsOf(name: string): DeclaredField[] | null;
 }
 
 // ── interior spelling through a POINTER-shaped global ────────────────────────────────────────
@@ -304,6 +315,161 @@ function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefi
     return false;
   }
   return !(isStore && (f.const || containerConst));
+}
+
+/** The map member a `field` node NAMES, or null when it names none — THE one resolver for "what
+ *  does the declaration say about this member", for rules that must reason about a member's type
+ *  after the access rules have already spelled it. Both named spellings resolve, through the same
+ *  shared gate their spelling passed: `gSym.member` off a struct global's {@link declaredFields},
+ *  `gPtr->member` off the pointee's ({@link pointeeFields}). A synthesized `field_K` — the
+ *  recovered-struct spelling, which no map declares — resolves to null, and so does any base that
+ *  is not a map-shaped global, which is what makes every caller refuse rather than guess.
+ *
+ *  The pointee arm reaches only what the MAP lets it: `pointeeAccess` gates every `gPtr->member`
+ *  spelling on `spellsAccessType(f.signed, …)`, so a pointer field declaring no signedness — which
+ *  is every one in the corpus's vendored maps — is never named, and a pointer read one indirection
+ *  down spells `((s32 *)gQ)[1]`. That is a fact about those maps, not about this code: `SymbolMap`
+ *  is a caller-supplied input, and one field flips it (`signed: true` on a 4-byte pointer member
+ *  of a pointee yields `(u8 *)gQ->pInner`, cast and all, pinned in pointer-members.test.ts). So
+ *  the arm is live and tested, and the byte-arithmetic rule that reads this answer is correct for
+ *  it — where resolving a pointee member to null would reopen the double-scaling hole silently. */
+function declaredMemberOf(x: Expr, sym: SymRenderCtx | undefined): DeclaredField | null {
+  if (x.k !== 'field' || x.base.k !== 'var' || sym === undefined) {
+    return null;
+  }
+  return sym.fieldsOf(x.base.name)?.find((f) => f.name === x.name) ?? null;
+}
+
+/** The map member a `field` node names when the declaration makes it a POINTER — {@link
+ *  isPtrField} being the shared two-fact test, so this and the synthesized declaration cannot
+ *  disagree about what a member is. */
+function ptrMemberDecl(x: Expr, sym: SymRenderCtx | undefined): DeclaredField | null {
+  const f = declaredMemberOf(x, sym);
+  return f !== null && isPtrField(f) ? f : null;
+}
+
+/** A map-declared POINTER MEMBER as the additive lowering renders its VALUE: the bare `gSym.pBuf`,
+ *  or that member wearing the byte-pointer / u32 cast the arithmetic guard adds. Both denote the
+ *  same address and add BYTES to it, so both fold here; a cast to any OTHER pointer type is not
+ *  looked through — it would re-scale everything added after it. */
+function ptrMemberValue(x: Expr, sym: SymRenderCtx): { expr: Expr; field: DeclaredField } | null {
+  let bare = x;
+  if (x.k === 'cast') {
+    const t = x.to;
+    const isBytePtr = t.kind === 'ptr' && t.to.kind === 'int' && t.to.width === 8;
+    if (!isBytePtr && !(t.kind === 'int' && t.width === 32)) {
+      return null;
+    }
+    bare = x.e;
+  }
+  const f = ptrMemberDecl(bare, sym);
+  return f !== null ? { expr: bare, field: f } : null;
+}
+
+/** Decompose an access base into "the VALUE of a map-declared POINTER MEMBER + a constant byte
+ *  offset + at most ONE variable term" — the same decomposition {@link ptrGlobalBase} makes one
+ *  indirection up, declining on the same conditions (two variable terms, no such member, a
+ *  non-`+` operator), because only a single residual can be read as one element index. */
+interface PtrMemberBase {
+  value: Expr;
+  field: DeclaredField;
+  byte: number;
+  idx: Expr | null;
+}
+function ptrMemberBase(e: Expr, sym: SymRenderCtx): PtrMemberBase | null {
+  const hits: { expr: Expr; field: DeclaredField }[] = [];
+  let byte = 0;
+  let idx: Expr | null = null;
+  let ok = true;
+  const visit = (x: Expr): void => {
+    if (!ok) {
+      return;
+    }
+    if (x.k === 'bin' && x.op === '+') {
+      visit(x.l);
+      visit(x.r);
+      return;
+    }
+    const m = hits.length === 0 ? ptrMemberValue(x, sym) : null;
+    if (m !== null) {
+      hits.push(m);
+      return;
+    }
+    if (x.k === 'const') {
+      byte += x.value;
+      return;
+    }
+    if (idx !== null) {
+      ok = false;
+      return;
+    }
+    idx = x;
+  };
+  visit(e);
+  return ok && hits.length === 1 ? { value: hits[0].expr, field: hits[0].field, byte, idx } : null;
+}
+
+/** `gSym.pBuf[i]` for an access through a POINTER MEMBER's VALUE — the spelling the project's own
+ *  header makes available, where the byte arithmetic it replaces is the same address written the
+ *  machine's way. The DECLARATION is what licenses it: `pointeeSize` says how wide an element is,
+ *  so an access of exactly that width at a whole multiple of it IS the i-th element, and the
+ *  reinterpret cast the backend adds strides by the same amount under any header.
+ *
+ *  `carried` is an ELEMENT index the access already holds (an `aload`'s own index); everything
+ *  else — a byte residual inside the base, the instruction's displacement `off` — is converted and
+ *  summed into the one subscript, which is where the source put it.
+ *
+ *  REFUSALS, and they are of TWO kinds.
+ *
+ *  ADDRESS refusals — no whole-element spelling expresses the address at all: a variable residual
+ *  that is not element-scaled, and a constant the element width does not divide. Both address
+ *  MID-ELEMENT, so they fall through to the honest byte forms and must.
+ *
+ *  REACH refusals — the address IS expressible and this rule declines anyway: an access of a
+ *  DIFFERENT width than the declared element, and a sub-word access whose signedness the declared
+ *  pointee does not carry. Neither is soundness. `exprCType` types a `field` node `undefined` (it
+ *  types params and locals), so `derefStrideOk` is false for every base this rule produces and the
+ *  backend ALWAYS emits the reinterpret cast — `((u16 *)gB.pMap)[i + 157]`, cast included, is what
+ *  the accepted case spells. `((s32 *)gB.pMap)[i + K]` would be the same address and the same fill
+ *  as the byte form those two clauses fall back to, and the byte form the width clause produces
+ *  already spells `((s32 *)…)[157]` itself. What these two clauses encode is a REACH judgement — the
+ *  map says this pointer addresses an array of THESE, so the source probably wrote a subscript of
+ *  them — and a declaration-shaped access is where that judgement is most likely right. On a
+ *  STORE the signedness clause has no premise at all (a store extends nothing), so it withholds
+ *  the spelling from every `s8 *` / `s16 *` member store; that is left in place deliberately
+ *  rather than widened, because this rule is not byte-neutral (see `spellPtrMemberElements`) and
+ *  widening a non-neutral spelling's reach is a separate question a row has to ask.
+ *
+ *  And the whole rule refuses when `/no-ptr-elem` turns it off — the axis, not a preference. */
+function ptrMemberElement(
+  baseExpr: Expr,
+  carried: Expr | null,
+  off: number,
+  width: number,
+  signed: boolean,
+  sym: SymRenderCtx,
+): Extract<Expr, { k: 'index' }> | null {
+  if (!sym.ptrElements) {
+    return null;
+  }
+  const pm = ptrMemberBase(baseExpr, sym);
+  if (!pm || pm.field.pointeeSize !== width || (width < 4 && (pm.field.pointeeSigned ?? false) !== signed)) {
+    return null;
+  }
+  const varIdx = pm.idx === null ? null : elementIndex(pm.idx, width); // THE one copy of that rule
+  const total = pm.byte + off;
+  if ((pm.idx !== null && varIdx === null) || total % width !== 0) {
+    return null;
+  }
+  // Variable terms first, constant last — the `idxVal + off / width` order every other indexed
+  // spelling in this file uses, and the one the source's own subscript is written in.
+  const terms = [varIdx, carried].filter((t): t is Expr => t !== null);
+  const k = total / width;
+  if (k !== 0 || terms.length === 0) {
+    terms.push({ k: 'const', value: k });
+  }
+  const idx = terms.reduce((l, r) => ({ k: 'bin', op: '+', l, r }));
+  return { k: 'index', base: pm.value, idx, width, signed };
 }
 
 // WHY THERE IS NO INDEXED `gPtr->arr[i]` SPELLING.
@@ -415,6 +581,12 @@ function memAccess(
   // named field (`gSym.field` — the source spelling a folded literal can never match); an ARRAY
   // global indexes its BARE name (`gSym[i]`, see below). Exact field match only (offset AND
   // width) — anything else falls through to the honest cast forms, never a guessed field.
+  // The constant offset this access reached through the instruction's MEMORY OPERAND. The two
+  // facts are separate at L2 — `off` is the load/store's own immediate, any addend the address
+  // carried is already inside `baseExpr` — and folding them into one subscript below
+  // (`idxVal + off / width`) is what makes the two indistinguishable at L3, so the displacement
+  // is recorded before the fold destroys it (see the `operandOff` note in l3/ast.ts).
+  const fromOperand = off !== 0 ? ({ operandOff: off } as const) : {};
   if (sym) {
     const gb = globalConstByte(baseExpr, off);
     const si = gb ? sym.info(gb.name) : undefined;
@@ -443,13 +615,13 @@ function memAccess(
         return spelled;
       }
     }
+    // …and one step further out: an access through a POINTER MEMBER's value is an ELEMENT of the
+    // buffer that member points AT (see ptrMemberElement).
+    const elem = ptrMemberElement(baseExpr, null, off, width, signed, sym);
+    if (elem) {
+      return { ...elem, ...fromOperand };
+    }
   }
-  // The constant offset this access reached through the instruction's MEMORY OPERAND. The two
-  // facts are separate at L2 — `off` is the load/store's own immediate, any addend the address
-  // carried is already inside `baseExpr` — and folding them into one subscript below
-  // (`idxVal + off / width`) is what makes the two indistinguishable at L3, so the displacement
-  // is recorded before the fold destroys it (see the `operandOff` note in l3/ast.ts).
-  const fromOperand = off !== 0 ? ({ operandOff: off } as const) : {};
   const g = globalOf(baseExpr, width);
   if (g) {
     const idxVal = g.idx;
@@ -515,6 +687,16 @@ function arrayAccess(
   ctype: (e: Expr) => IrType | undefined,
   sym?: SymRenderCtx,
 ): Expr {
+  // An indexed access through a POINTER MEMBER's value is an ELEMENT of what it points at, exactly
+  // as in memAccess — the index the aload already carries is the subscript, and any byte residual
+  // in the base is converted and summed into it. A fieldOff/memberOff access selects an interior
+  // of a STRUCT element instead, which this spelling has no place to put, so it is left alone.
+  if (sym && fieldOff === undefined && memberOff === undefined) {
+    const elem = ptrMemberElement(baseExpr, idxExpr, 0, elemSize, signed, sym);
+    if (elem) {
+      return elem;
+    }
+  }
   // A variable-index access off a global's address indexes the ADDRESS `&gSym` (the cast form
   // `((T *)&gSym)[i]` — valid for a struct global too, unlike casting the bare value). A
   // struct-array-of-globals (fieldOff) or a member array (memberOff) through `&gSym` falls through:
@@ -864,6 +1046,18 @@ export interface StructureOptions {
   // width the honest shift spelling is the one that matches, and the differ referees. Only the map
   // carries the names, so with no `symbols` this is normalized to false whatever a caller passes.
   spellBitfieldMembers?: boolean;
+  // Spell an element-scaled offset through a map-declared POINTER MEMBER as a whole-element
+  // subscript of it (`gBg.pMap[i + 157]`) rather than as the byte arithmetic it replaces. On by
+  // default; rank.ts enumerates the OFF spelling as the `/no-ptr-elem` axis.
+  //
+  // IT IS AN AXIS AND NOT A DEFAULT BECAUSE IT IS NOT BYTE-NEUTRAL — the bar the block comment
+  // above `spellablePointee` sets for a member spelling. Compiled against agbcc (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
+  // -fprologue-bugfix`), `((u16 *)gB.pMap)[i + K]` and `*(u16 *)((i << 1) + (u8 *)gB.pMap + 2K)`
+  // are the same address and the same instruction COUNT at K = 0, 1 and 157 — and different
+  // objects at all three, differing in which register the `add` targets. Which side matches is
+  // per-function knowledge the asm does not carry, so both are emitted and the differ referees.
+  // Only the map declares a pointee width, so with no `symbols` this is normalized to false.
+  spellPtrMemberElements?: boolean;
   // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
   // (a store to a different named global), instead of caching it in a local. Off by default;
   // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
@@ -991,6 +1185,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     anchorLoopEntryConsts = false,
     littleEndian = true,
     spellBitfieldMembers: bitfieldSpellingWanted = true,
+    spellPtrMemberElements: ptrElementSpellingWanted = true,
     rereadGlobals = false,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
@@ -1185,22 +1380,44 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // Symbol-map rendering context (memAccess/arrayAccess): shape lookups + the env registry for
   // array-shaped globals actually referenced (they surface as SFn.globals — typed, undeclared).
   const shapedGlobalTypes = new Map<string, IrType>();
+  const declaredFieldCache = new Map<string, DeclaredField[] | null>();
   const symCtx: SymRenderCtx | undefined = symbols
-    ? { info: (n) => symbols.get(n), noteGlobal: (n, t) => shapedGlobalTypes.set(n, t) }
+    ? {
+        info: (n) => symbols.get(n),
+        noteGlobal: (n, t) => shapedGlobalTypes.set(n, t),
+        ptrElements: ptrElementSpellingWanted,
+        fieldsOf: (n) => {
+          const hit = declaredFieldCache.get(n);
+          if (hit !== undefined) {
+            return hit;
+          }
+          const si = symbols.get(n);
+          const fields =
+            si?.shape === 'struct'
+              ? declaredFields(si.layout)
+              : si?.shape === 'pointer'
+                ? pointeeFields(si.pointee)
+                : null;
+          declaredFieldCache.set(n, fields);
+          return fields;
+        },
+      }
     : undefined;
 
-  /** A bare `gSym` naming a map-declared POINTER global — the VALUE of a pointer cell. Load,
-   *  store and compare of that 4-byte cell are identical for any object-pointer type, so the
-   *  declared pointee never matters to THEM; arithmetic on the loaded value is the opposite case,
-   *  where the pointee's size scales what is added and every stride must therefore be made
+  /** A value the MAP declares a pointer: a bare `gSym` naming a pointer global (the VALUE of a
+   *  pointer cell), or a named MEMBER whose declaration is a pointer (`gSym.pBuf`, `gPtr->pBuf`).
+   *  Load, store and compare of such a 4-byte cell are identical for any object-pointer type, so
+   *  the declared pointee never matters to THEM; arithmetic on the loaded value is the opposite
+   *  case, where the pointee's size scales what is added and every stride must therefore be made
    *  explicit (`(u8 *)gPtr + K`). `ctype` cannot see any of this: it types only params/locals, so
-   *  a pointer global renders `undefined` there. */
-  const isPtrGlobal = (x: Expr): boolean => x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer';
+   *  both spellings render `undefined` there. */
+  const isPtrValue = (x: Expr): boolean =>
+    (x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer') || ptrMemberDecl(x, symCtx) !== null;
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
    *  32-bit integer math on the address, so that is what gets spelled. */
-  const needsIntSpelling = (x: Expr): boolean => ctype(x)?.kind === 'ptr' || x.k === 'addr' || isPtrGlobal(x);
+  const needsIntSpelling = (x: Expr): boolean => ctype(x)?.kind === 'ptr' || x.k === 'addr' || isPtrValue(x);
 
   // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
   const forest = analyzeLoops(fn, dom);
@@ -1475,7 +1692,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const vtEnv = (n: string): IrType | undefined => varType.get(n);
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, vtEnv);
 
-  /** `&gSym` assigned to a `T *` local: the address of an AGGREGATE is not a pointer to its
+  /** A value assigned into a TEMP THIS PASS DECLARES, spelled so the assignment is legal against
+   *  that declaration. Two inhabitants, one argument: the value's type comes from somewhere this
+   *  pass does not control, and the temp's comes from here.
+   *
+   *  `&gSym` assigned to a `T *` local: the address of an AGGREGATE is not a pointer to its
    *  element. `&gArr` is `T (*)[n]`, `&gStruct` is `struct S *`, and neither is assignable to
    *  `T *` — yet the IR's `gaddr` value legitimately has type `T *`, because that is what the asm
    *  loaded. The bare spelling therefore states a type the project's own header contradicts.
@@ -1496,9 +1717,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  `T *` the older comment here claimed. So the default is to CAST, and the cast is omitted only
    *  where the declared cell type is known and matches exactly. Byte-identical either way, so the
    *  cost of casting one time too many is a redundant `(T *)`, never a wrong address. */
-  const castAggregateAddr = (name: string, value: Expr): Expr => {
+  const intoDeclaredTemp = (name: string, value: Expr): Expr => {
     const t = varType.get(name);
-    if (t?.kind !== 'ptr' || value.k !== 'addr') {
+    if (t === undefined) {
+      return value;
+    }
+    // ── the MAP's pointer values, whose type this side of the program does not own ──────────────
+    // A `gaddr` at least states a type the IR knows. `gSym.pBuf` and a pointer global's own value
+    // state one only the MAP knows, and `ctype` — which types params and locals — reads them as
+    // `undefined`, so the test above cannot see them at all. Assigning one bare declares that the
+    // temp's type and the project's declaration of that pointer are the same type, which nothing
+    // here established: the project's header says `struct Unk_03005284 *` where the recovered temp
+    // says `struct Struct0 *`, and `-Werror` makes the mismatch fatal in the tree the source is
+    // pasted into. The destination's type is the one this pass DID choose, so unlike the
+    // map-declared cells below it can be named exactly rather than defused through `void *`. That
+    // holds for an INTEGER temp too, and there the diagnostic is the mirror one, `assignment makes
+    // integer from pointer without a cast` — same site, same argument, same `(T)` answer.
+    if (isPtrValue(value)) {
+      return { k: 'cast', to: t, e: value };
+    }
+    if (t.kind !== 'ptr' || value.k !== 'addr') {
       return value;
     }
     // The only provably-redundant case: a NON-VOLATILE scalar cell whose DECLARED type is the
@@ -2172,6 +2410,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // address order but executing between load and render on the taken path — fn.blocks order is
   // address order, not topological order.
   const bitfieldSpelling = new Map<Op, { global: string; field: string }>();
+  // …and the WRITE side: a store the mask-and-insert idiom recognized (see the block below), with
+  // the value the source assigned. THE SECOND inhabitant of "a precomputed member spelling", which
+  // is what makes the shape shared rather than anticipated.
+  const bitfieldStore = new Map<Op, { global: string; field: string; value: Value }>();
   const absorbedLoads = new Set<Op>();
   if (symCtx && littleEndian && spellBitfieldMembers) {
     // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
@@ -2244,6 +2486,155 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         );
       if (absorbed) {
         absorbedLoads.add(load);
+      }
+    }
+
+    // ── BITFIELD member WRITES: the mask-and-insert idiom ───────────────────────────────────
+    // `store(A, or(and(load(A), ~W), v << lo))` over a struct global's cell IS an assignment to
+    // the declared bitfield at bits W — `gSym.field = v;`, one statement where the recovered
+    // spelling is a read, a mask, a shift, an or and a store.
+    //
+    // EXACT, never approximate. The cleared bits must be exactly one declared field's window; the
+    // load must address the SAME cell at the same width; the insert must be that value shifted to
+    // the window's own position; and the load, the mask, the `and` and the `or` must each be
+    // single-use and unmaterialized, because the fold DELETES all of them — a second reader would
+    // keep the temp and the emitted C would do the work twice.
+    //
+    // TRUNCATION is what makes an UNMASKED insert legal, and only sometimes: C truncates the
+    // assigned value to the field width, while the asm's `or` writes every bit of `v << lo` that
+    // the STORE keeps. The two agree when the field ends the stored cell — bits above it are
+    // dropped by the store either way — or when `v` provably has no more bits than the field.
+    // Anything else keeps the honest mask spelling.
+    //
+    // ORDERING is NOT this fold's to police, and the difference from the read fold above is the
+    // reason. That fold MOVES a read: its extract renders at the consumer, so a write in between
+    // changes what the extract sees. This one moves nothing — the spelling it replaces is a single
+    // statement AT THE STORE (`*(u8 *)&gS = v | *(u8 *)&gS & ~W;`), which reads the cell in exactly
+    // the position `gS.field = v` does. What keeps that read honest is the MATERIALIZATION model,
+    // and it is byte-granular where a symbol-wide alias query is not: a call, or a store this load
+    // may alias, forces the load to its own temp at its own position, and `!materialize.has(load)`
+    // below then refuses. A store to a DISJOINT byte of the same cell's symbol materializes
+    // nothing, and refusing there bought no ordering — it only spelled the same read as arithmetic.
+
+    // THE KNOWN-BITS QUESTION IS L2 AND LIVES THERE (ir/bits.ts) — this fold only supplies the
+    // one fact that layer cannot see: a bitfield READ this pass has already recognized, whose
+    // bound comes from the DECLARATION. And it supplies it signedness-first, because a signed
+    // field's read is sign-extended and carries all 32 bits however few bits the declaration
+    // allots it — bounding one by its own `bitWidth` folds `gS.dest = gS.delta` over a value whose
+    // high bits the asm's `or` writes and C's truncation does not.
+    const bits: BitsCtx = {
+      defs,
+      materialize,
+      bound: (d) => {
+        const bf = bitfieldSpelling.get(d);
+        if (!bf) {
+          return null;
+        }
+        const f = symCtx.fieldsOf(bf.global)?.find((x) => x.name === bf.field);
+        return f?.signed === false ? (f.bitWidth ?? 32) : 32;
+      },
+    };
+    const maskConst = (v: Value): number | null => constMask(bits, v);
+    /** The other operand of a 2-operand commutative op, or null when there is none — a
+     *  1-operand op carries its constant as `attrs.imm`, which is not a Value the caller can
+     *  read a mask off, so the caller falls through to `attrs.imm` itself. */
+    const otherOperand = (d: Op, keep: Value): Value | null =>
+      d.operands.length === 2 ? (d.operands[0] === keep ? d.operands[1] : d.operands[0]) : null;
+
+    for (const blk of fn.blocks) {
+      for (const op of blk.ops) {
+        if (op.opcode !== 'store') {
+          continue;
+        }
+        const width = op.attrs.width as number;
+        const cell = globalCellOf(defs, op.operands[0], op.attrs.off as number);
+        const si = cell ? symCtx.info(cell.name) : undefined;
+        const orOp = defs.get(op.operands[1]);
+        if (
+          !cell ||
+          si?.shape !== 'struct' ||
+          si.volatile ||
+          orOp?.opcode !== 'or' ||
+          orOp.operands.length !== 2 ||
+          materialize.has(orOp) ||
+          (useSitesOf.get(orOp.results[0]) ?? []).length !== 1
+        ) {
+          continue;
+        }
+        const cellBits = width * 8;
+        const cellMask = width >= 4 ? -1 : (1 << cellBits) - 1;
+        for (const [keepV, insV] of [
+          [orOp.operands[0], orOp.operands[1]],
+          [orOp.operands[1], orOp.operands[0]],
+        ] as const) {
+          const andOp = defs.get(keepV);
+          if (
+            andOp?.opcode !== 'and' ||
+            materialize.has(andOp) ||
+            (useSitesOf.get(andOp.results[0]) ?? []).length !== 1
+          ) {
+            continue;
+          }
+          // `and` is commutative and may carry its constant as an immediate: find the operand that
+          // is the SAME cell's load, and read the mask off whatever is left.
+          const loadV = andOp.operands.find((o) => {
+            const l = defs.get(o);
+            const c = l?.opcode === 'load' ? globalCellOf(defs, l.operands[0], l.attrs.off as number) : null;
+            return c !== null && c.name === cell.name && c.byte === cell.byte && l!.attrs.width === width;
+          });
+          const load = loadV === undefined ? undefined : defs.get(loadV)!;
+          const maskV = loadV === undefined ? null : otherOperand(andOp, loadV);
+          const mask =
+            maskV !== null
+              ? maskConst(maskV)
+              : typeof andOp.attrs.imm === 'number'
+                ? (andOp.attrs.imm as number) | 0
+                : null;
+          if (
+            load === undefined ||
+            mask === null ||
+            materialize.has(load) ||
+            (useSitesOf.get(load.results[0]) ?? []).length !== 1
+          ) {
+            continue;
+          }
+          // The cleared bits must be ONE contiguous window inside the stored cell.
+          const clear = ~mask & cellMask;
+          if (clear === 0) {
+            continue;
+          }
+          const lo = 31 - Math.clz32(clear & -clear);
+          const w = 32 - Math.clz32(clear >>> lo);
+          if ((((w >= 32 ? -1 : (1 << w) - 1) << lo) & cellMask) !== clear) {
+            continue;
+          }
+          // …and the insert must be exactly that value seated at `lo`.
+          const shifted = defs.get(insV);
+          const value =
+            lo === 0
+              ? insV
+              : shifted?.opcode === 'shl' && shifted.operands.length === 1 && shifted.attrs.imm === lo
+                ? shifted.operands[0]
+                : null;
+          if (
+            value === null ||
+            (lo !== 0 && (materialize.has(shifted!) || (useSitesOf.get(insV) ?? []).length !== 1))
+          ) {
+            continue;
+          }
+          if (lo + w !== cellBits && provableBits(bits, value) > w) {
+            continue; // C would truncate bits the asm's `or` writes
+          }
+          const fld = symCtx
+            .fieldsOf(cell.name)
+            ?.find(
+              (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === cell.byte * 8 + lo && f.signed !== undefined,
+            );
+          if (fld && memberQualsAllow(fld, si.const, true)) {
+            bitfieldStore.set(op, { global: cell.name, field: fld.name, value });
+          }
+          break;
+        }
       }
     }
   }
@@ -2505,32 +2896,35 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const intifyAddr = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: T.u(32), e: x } : x);
       l = intifyAddr(l);
       r = intifyAddr(r);
-      // The SAME hazard one level down, for a POINTER-shaped global's VALUE (`gPtr`, isPtrGlobal):
-      // C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized `void *`, but
-      // whatever the PROJECT's header declares (a 0x5C-byte struct, say) in the world a user
-      // actually recompiles in. The asm added BYTES, so the honest spelling makes the stride
-      // explicit: CAST-THEN-ADD, `(u8 *)gPtr + K`, the same address in EVERY world. Add-then-cast
-      // (`(u8 *)(gPtr + K)`, what the backend's deref legalization would otherwise produce) is
-      // byte-correct in exactly one of them — a silent wrongness, the class this project refuses.
+      // The SAME hazard one level down, for a value the MAP declares a pointer (`gPtr`, `gSym.pBuf`
+      // — isPtrValue): C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized
+      // `void *`, but whatever the PROJECT's header declares (a `u16 *` member, a 0x5C-byte
+      // struct) in the world a user actually recompiles in. The asm added BYTES, so the honest
+      // spelling makes the stride explicit: CAST-THEN-ADD, `(u8 *)gPtr + K`, the same address in
+      // EVERY world. Add-then-cast (`(u8 *)(gPtr + K)`, what the backend's deref legalization
+      // would otherwise produce) is byte-correct in exactly one of them — a silent wrongness, the
+      // class this project refuses. A MEMBER is the case with no world in which the raw spelling
+      // is right: the map declares the pointee width, so `bytes + gSym.pBuf` on a `u16 *` scales
+      // the residual a SECOND time and addresses twice the byte the asm did.
       // NOT foldable into the deref index either: `((u8 *)gPtr)[K + off]` re-scales K by the
       // ACCESS width, a different address whenever that width is not 1.
       // Under the non-additive operators C rejects a pointer outright, so there the honest
       // spelling is integer math on the cell — exactly intifyAddr's `(u32)&gSym` rule.
-      const intifyPtrGlobal = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
+      const intifyPtrValue = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
       if (op === '+' || op === '-') {
         // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
         // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer.
-        const bothPtr = isPtrGlobal(l) && isPtrGlobal(r);
-        if (isPtrGlobal(l)) {
+        const bothPtr = isPtrValue(l) && isPtrValue(r);
+        if (isPtrValue(l)) {
           l = bytePtr(l);
         }
-        if (isPtrGlobal(r)) {
-          r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrGlobal(r);
+        if (isPtrValue(r)) {
+          r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
         }
       } else if (op !== '&&' && op !== '||') {
         // (`&&`/`||` take a pointer operand legally — a truth test, no arithmetic.)
-        l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
-        r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
+        l = isPtrValue(l) ? intifyPtrValue(l) : l;
+        r = isPtrValue(r) ? intifyPtrValue(r) : r;
       }
       // (The signedness-carrying pairs stay DISTINCT ops here — `>>>`/`>>` and `/u` `%u`/`/` `%`.
       // Which token a language spells each with, and what cast pins the choice, is a BACKEND
@@ -2785,7 +3179,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         droppedUndefCopies.push({ name, pred });
         return;
       }
-      copies.push({ name, value: castAggregateAddr(name, argExpr(arg)), arg });
+      copies.push({ name, value: intoDeclaredTemp(name, argExpr(arg)), arg });
     });
     // Emit in the order the args are COMPUTED in `pred` — a compiler that lays the defining ops
     // (and thus the copies that read them) out in that order matches with no spurious arg-swap.
@@ -2821,10 +3215,50 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // EFFECTFUL op whose result nothing consumes (a void/discarded call, and an `opaque` standing for
   // an instruction asmlift could not model); and MATERIALIZED defs — a call/load whose value cannot
   // soundly render at its use is assigned to its named temp here, at its own program position.
+  /** A pointer VALUE assigned into a map-declared pointer CELL, spelled so the assignment is legal
+   *  against ANY declaration of that cell. The byte-arithmetic guard renders such a right-hand
+   *  side `(u8 *)gS.pBuf + K` — the right ADDRESS in every world, which is the whole point of it,
+   *  and a `u8 *` where the declaration says `u16 *`. READING one is fine (C converts an object
+   *  pointer freely under a deref, a call argument or a compare); ASSIGNING one is `warning:
+   *  assignment from incompatible pointer type`, and this project's own `-Werror` compiler
+   *  template makes that FATAL — so a source that scores clean here fails to build in the tree a
+   *  user pastes it into, which no score gate can observe.
+   *
+   *  `void *`, NOT the map's declared pointee: it is the one target assignment-compatible with any
+   *  object-pointer declaration, the same "same answer in every world" property the guard that
+   *  made the `u8 *` exists for. Trusting the map's pointee would put the spelling back in one
+   *  world. It costs nothing: agbcc compiles `p = (void *)((u8 *)p + 4)` and the warning-carrying
+   *  `p = (u8 *)p + 4` to BYTE-IDENTICAL objects (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
+   *  -fprologue-bugfix`), so the fix is invisible to the differ and visible to the compiler. */
+  const intoPtrCell = (lval: Expr, value: Expr): Expr => {
+    const cell = lval.k === 'var' ? symCtx?.info(lval.name)?.shape === 'pointer' : ptrMemberDecl(lval, symCtx) !== null;
+    if (!cell) {
+      return value;
+    }
+    const vt = ctype(value);
+    // BOTH ways a pointer value reaches here. `ctype` types params and locals, so it sees the
+    // guard's own `(u8 *)…` and nothing else: a bare `gSym.pBuf` or a pointer global's value —
+    // the population this rule exists for — reads `undefined` there. An already-`void *` value is
+    // assignable as it stands.
+    const isPtr = isPtrValue(value) || (vt?.kind === 'ptr' && vt.to.kind !== 'void');
+    return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
+  };
+
   const sideEffects = (b: Block): Stmt[] => {
     const out: Stmt[] = [];
     for (const op of b.ops) {
       if (op.opcode === 'store') {
+        // a mask-and-insert recognized over the ops (see the precompute above): the member
+        // assignment, not the read-mask-or-store chain
+        const bfs = bitfieldStore.get(op);
+        if (bfs) {
+          out.push({
+            k: 'store',
+            lval: { k: 'field', base: { k: 'var', name: bfs.global }, name: bfs.field, dot: true },
+            value: expr(bfs.value),
+          });
+          continue;
+        }
         // A store whose lvalue is a bare global (`gSym = v`, from an `&gSym` base at off 0) emits
         // as an ASSIGN, not a store — memAccess returns a `var` node for that case.
         const width = op.attrs.width as number;
@@ -2841,12 +3275,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         );
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
-          out.push({ k: 'assign', name: lval0.name, value: expr(op.operands[1]) });
+          out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });
           continue;
         }
         // signedness mirrors recoverTypes' store seed (word ⇒ signed, narrow ⇒ unsigned), so an
         // inserted cast declares the same scalar the recovered pointee would have.
-        out.push({ k: 'store', lval: lval0, value: expr(op.operands[1]) });
+        out.push({ k: 'store', lval: lval0, value: intoPtrCell(lval0, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {
         const elemSize = op.attrs.elemSize as number;
         out.push({
@@ -2882,7 +3316,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
         // here would recompile to a second load the asm does not have)
         const nm = varName.get(op.results[0])!;
-        out.push({ k: 'assign', name: nm, value: castAggregateAddr(nm, lowerDef(op, expr)) });
+        out.push({ k: 'assign', name: nm, value: intoDeclaredTemp(nm, lowerDef(op, expr)) });
       }
       // a merge copy anchored at this const's original position (anchorConstCopies, above)
       for (const a of anchoredAt.get(op) ?? []) {
