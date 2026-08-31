@@ -69,8 +69,15 @@ const say = (msg: string): void => {
 // The two ways an open parse goes wrong are both silent: `VERIFY` falling through to SERVE loses
 // the audit mode to a capitalisation and reports `{"hit":…}` looking clean, and `false`/`no` — the
 // two spellings a person reaches for to disable it — enabling it.
-const OFF_WORDS = new Set(['', '0', 'off', 'false', 'no', 'n', 'disable', 'disabled']);
-const ON_WORDS = new Set(['1', 'on', 'true', 'yes', 'y', 'enable', 'enabled']);
+/** Every spelling that means OFF. Exported because a SECOND copy of this list is how a spelling
+ *  this module calls off gets treated as something else somewhere that matters: the matching
+ *  suite's globalSetup compared against `'0'` and `'off'` alone, and therefore forced `verify` —
+ *  which stores every key and appends to a SHARED `MISMATCHES.log` — for `false`, `no`, and the
+ *  SET-AND-EMPTY state this round invented, all three of which the docs it also wrote describe as
+ *  "touches no disk". Reuse the list; do not restate it. */
+export const OFF_WORDS = new Set(['', '0', 'off', 'false', 'no', 'n', 'disable', 'disabled']);
+/** Every spelling that means SERVE. Same reason. */
+export const ON_WORDS = new Set(['1', 'on', 'true', 'yes', 'y', 'enable', 'enabled']);
 // UNSET and SET-BUT-EMPTY are two different states and mean two different things now.
 //
 //   UNSET is ON. That is this module's default, and the reason is that the variable was set in no

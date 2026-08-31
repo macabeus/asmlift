@@ -45,17 +45,23 @@
 //
 // `ASMLIFT_CANDCACHE=0` still bypasses everything, which is the documented escape hatch.
 import { closeSync, existsSync, openSync, readSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
-import { mismatchLogFor } from '../../src/candcache';
+import { MISMATCH_LOG, OFF_WORDS, ON_WORDS } from '../../src/candcache';
 
 export default function setup(): () => void {
-  const asked = process.env.ASMLIFT_CANDCACHE ?? '';
-  if (asked !== '0' && asked !== 'off') {
-    if (asked === '1' || asked === 'on') {
+  // ASK THE MODULE'S OWN LIST, not a two-element copy of it. `asked !== '0' && asked !== 'off'`
+  // forced `verify` for `false`, `no`, `disable`, and the SET-AND-EMPTY state — every one of which
+  // candcache.ts calls OFF and docs/ranked-repro.md describes as "touches no disk". Under a forced
+  // `verify` such a run stores every key and appends to the SHARED `MISMATCHES.log`, so a
+  // neighbour worktree's lines could then fail the teardown below. UNSET is deliberately NOT off
+  // here: `process.env.ASMLIFT_CANDCACHE` being undefined means the module's default, which is
+  // `on`, and this suite must upgrade that to `verify`.
+  const raw = process.env.ASMLIFT_CANDCACHE;
+  const asked = raw?.trim().toLowerCase() ?? '';
+  if (raw === undefined || !OFF_WORDS.has(asked)) {
+    if (ON_WORDS.has(asked)) {
       process.stderr.write(
-        `[candcache] the matching suite runs in verify mode, not "${asked}": it is the gate that ` +
+        `[candcache] the matching suite runs in verify mode, not "${raw ?? ''}": it is the gate that ` +
           `catches match regressions, so it compiles every candidate and only AUDITS the store.\n`,
       );
     }
@@ -66,7 +72,9 @@ export default function setup(): () => void {
   // deleting the log here erased the record a verify bench run in another worktree was writing,
   // and inherited its lines the other way round. The tail this run appended is the only part that
   // is this run's answer.
-  const log = mismatchLogFor(process.env.ASMLIFT_CANDCACHE_DIR ?? join(tmpdir(), 'asmlift-candcache'));
+  // The module's own answer for where the store is. Recomputing it here re-created the `??` bug
+  // that put an empty ASMLIFT_CANDCACHE_DIR in the CURRENT DIRECTORY, in a second place.
+  const log = MISMATCH_LOG;
   const startedAt = existsSync(log) ? statSync(log).size : 0;
 
   return function teardown(): void {

@@ -501,3 +501,52 @@ describe('a store this process cannot prepare is a COLD store, never a dropped c
     expect(stats.refused).toBe(1);
   });
 });
+
+describe('the matching gate upgrades to verify off ONE list of off-words, never a copy of it', () => {
+  // `pnpm test:matching` is the only thing in this repo that audits the store a developer's real
+  // runs have filled, so its globalSetup forces `verify`. It decided that with
+  // `asked !== '0' && asked !== 'off'` — a two-element copy of a list candcache.ts already owns —
+  // and therefore forced `verify` for `false`, `no`, `disable` and the SET-AND-EMPTY state, every
+  // one of which the module calls OFF and docs/ranked-repro.md describes as "touches no disk".
+  // Under a forced `verify` such a run stores every key and appends to the SHARED
+  // `MISMATCHES.log`, which a neighbour worktree's lines can then fail the teardown on.
+  //
+  // UNSET is the case the obvious fix breaks: `process.env.X ?? ''` puts unset INTO the off-words
+  // (`''` is one), and unset means the module's default, which is `on` — this suite must upgrade
+  // it. The two states have to stay apart here exactly as they do in the module.
+  const modeAfterSetup = async (raw: string | undefined): Promise<string | undefined> => {
+    const saved = process.env.ASMLIFT_CANDCACHE;
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      if (raw === undefined) {
+        delete process.env.ASMLIFT_CANDCACHE;
+      } else {
+        process.env.ASMLIFT_CANDCACHE = raw;
+      }
+      vi.resetModules();
+      (await import('../matching/candcache-gate')).default();
+      return process.env.ASMLIFT_CANDCACHE;
+    } finally {
+      spy.mockRestore();
+      if (saved === undefined) {
+        delete process.env.ASMLIFT_CANDCACHE;
+      } else {
+        process.env.ASMLIFT_CANDCACHE = saved;
+      }
+    }
+  };
+
+  test.each([['0'], ['off'], ['false'], ['no'], ['n'], ['disable'], ['disabled'], [''], ['OFF'], [' off ']])(
+    'ASMLIFT_CANDCACHE=%j is left OFF — a no-disk spelling must not be upgraded to a storing mode',
+    async (raw) => {
+      expect(await modeAfterSetup(raw)).toBe(raw);
+    },
+  );
+
+  test.each([[undefined], ['1'], ['on'], ['true'], ['yes'], ['verify'], ['nonsense']])(
+    'ASMLIFT_CANDCACHE=%j becomes verify — the gate may not be SERVED, and unset means on',
+    async (raw) => {
+      expect(await modeAfterSetup(raw)).toBe('verify');
+    },
+  );
+});

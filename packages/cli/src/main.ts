@@ -45,10 +45,22 @@ import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 // the exit status. The same is true of an `on` run now: its sampled audit fails the run exactly
 // as verify's does.
 //
+// AND IT NEEDS ITS OWN CODE. `ranked.best.score.match && cacheMismatches() === 0 ? 0 : 1` reads
+// as "a mismatch fails the run" and is a NON-DISCRIMINATOR on the runs this project actually
+// publishes: a ranked run that does not match already exits 1, and LoadBGTilemapData has been a
+// nonmatch at 386 for twenty rounds. Measured on the same fan — a clean run and a poisoned run at
+// 100% sampling both exited 1, with byte-identical `[ranked]` lines. So the exit status carried no
+// signal for the dominant case while three phase reports offered it as the proof that a poisoned
+// run does not look like a clean one. `CACHE_MISMATCH_EXIT` is a code "no match" does not already
+// occupy; `bench fidelity` compares against 0/1 and will call a mismatched reproduction a failure,
+// which is the intended reading.
+//
 // `cacheSampleNote()` carries the sampling RATE and the run's SEED, so a reader can tell an
 // audited serve from an unaudited one and replay the exact selection
 // (ASMLIFT_CANDCACHE_SAMPLE_SEED). Without it a run with the audit switched off would print the
 // same line as one with it on.
+/** The exit code a stored-vs-fresh disagreement gets, distinct from 0 (match) and 1 (no match). */
+export const CACHE_MISMATCH_EXIT = 3;
 const candCacheLine = (): string => {
   if (cacheMode() === 'off') {
     return '';
@@ -120,7 +132,8 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --progress       with --score-against: stream a liveness line to stderr while
                    scoring; the [score] table it prints at the end is unchanged
 
-Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 64 usage · 66 unreadable input.
+Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 3 the candidate-object cache served
+            bytes a fresh compile disagrees with · 64 usage · 66 unreadable input.
 Full reference (flags, decomp.yaml integration): the @asmlift/cli README.`;
 
 // A principled decline (the pipeline refusing to guess) vs an internal error (a bug) must be
@@ -501,7 +514,7 @@ export async function runCli(
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
         `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {
-        code: ranked.best.score.match && cacheMismatches() === 0 ? 0 : 1,
+        code: cacheMismatches() > 0 ? CACHE_MISMATCH_EXIT : ranked.best.score.match ? 0 : 1,
         stdout: ranked.best.source,
         // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
         // tail stay adjacent.
@@ -518,11 +531,17 @@ export async function runCli(
           candCacheLine(),
       };
     } catch (e) {
+      // …and the cache line belongs HERE too. A decline or an internal error drops out of the
+      // ranked path before the success-path stderr is assembled, so a reader on this path could
+      // not tell an audited run from an unaudited one — nor that the store had disagreed, even
+      // though `MISMATCHES.log` was already written. The exit code stays 1: the run failed for
+      // its own reason, and relabelling that as a cache mismatch would lose which one it was.
       const kind = isDecline(e) ? 'declined' : 'internal error';
       return {
         code: 1,
         stdout: '',
-        stderr: `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n`,
+        stderr:
+          `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n` + candCacheLine(),
       };
     }
   }
