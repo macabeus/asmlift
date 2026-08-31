@@ -148,7 +148,9 @@ switch (command) {
       // What the cross-run candidate-object cache did in THIS shard, when it did anything.
       // Gate E ("run the whole workload in verify mode and count") reads these lines; a shard
       // that prints `mismatch` has served bytes a fresh compile disagrees with, and the store's
-      // whole namespace is suspect. Absent when the cache is off, which is the default.
+      // whole namespace is suspect. Absent only when the cache is off, which is no longer the
+      // default — an unset ASMLIFT_CANDCACHE now serves, so a shard with no line here was turned
+      // off on purpose (ASMLIFT_CANDCACHE=0/off/empty, ASMLIFT_BENCH_CACHE=0, or a refusal).
       if (cacheMode() !== 'off') {
         const stats = cacheStats();
         if (Object.keys(stats).length > 0) {

@@ -718,8 +718,8 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   // headers collision (drop prelude + decls); failure means the TEMPLATE is broken — keep
   // everything so the first real candidate fails with the template's own loud diagnostics.
   // Exit-code-only: no error-message parsing (gcc-2.9/IDO/mwcc all format differently).
-  // The cross-run candidate-object cache on the project-template path (candcache.ts). OFF unless
-  // ASMLIFT_CANDCACHE; ON for any project's own command otherwise, because everything the
+  // The cross-run candidate-object cache on the project-template path (candcache.ts). ON unless
+  // ASMLIFT_CANDCACHE says otherwise, and ON for any project's own command, because everything the
   // command reads is now MEASURED rather than declared.
   //
   // The NAMESPACE is a measurement, not a version constant: the template text, the cwd, the
@@ -1044,8 +1044,8 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     rmSync(d2, { recursive: true, force: true });
     return answer;
   };
-  // ON, for any project's own command, whenever ASMLIFT_CANDCACHE says so — there is no second,
-  // per-project opt-IN. A project DECLARING what its command reads is wrong in the stale-object
+  // ON, for any project's own command, unless ASMLIFT_CANDCACHE says otherwise — there is no
+  // second, per-project opt-IN. A project DECLARING what its command reads is wrong in the stale-object
   // direction the moment the declaration is incomplete, and nothing verifies it; the namespace
   // measures those inputs instead (`stamp()`).
   //

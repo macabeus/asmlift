@@ -236,14 +236,46 @@ describe('hole 3 — the object must be a PURE FUNCTION of its input, and that i
   });
 });
 
-describe('a miss is indistinguishable from no cache, and OFF is the default', () => {
-  test('ASMLIFT_CANDCACHE unset: nothing is stored — the env variable is the ONLY gate left', async () => {
+describe('a miss is indistinguishable from no cache, and ON is the default', () => {
+  test("ASMLIFT_CANDCACHE UNSET: the cache runs, on a project's own command, with nothing declared", async () => {
+    // This asserted the opposite until the default flipped, and the flip is the whole point: the
+    // variable was set in no shell profile, no `.envrc` and no CI job, so an off-by-default cache
+    // was an inert one. `undefined` here DELETES the variable — `vitest.config.ts` pins it to `0`
+    // for every other suite, and this case is one of the few that must see the real default.
     const p = project();
     await withCache({ ASMLIFT_CANDCACHE: undefined, ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+      const compile = compileFromCommand(TEMPLATE, { cwd: p.cwd });
+      expect(readFileSync(compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
+      const afterFirst = p.runs();
+      expect(readFileSync(compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
+      expect(p.runs(), 'unset means ON, so the second compile is served rather than executed').toBe(afterFirst);
+    });
+    expect(storedKeys(p.store).length).toBeGreaterThan(0);
+  });
+
+  test('ASMLIFT_CANDCACHE set and EMPTY is OFF, and it is not the same state as unset', async () => {
+    // The one state the flip splits in two. `ASMLIFT_CANDCACHE=` is both a deliberate one-shot
+    // bypass and an unexpanded `$SOMETHING`, so it lands on the side whose cost is a cold start.
+    const p = project();
+    await withCache({ ASMLIFT_CANDCACHE: '', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
       const compile = compileFromCommand(TEMPLATE, { cwd: p.cwd });
       compile(CAND, 'f', 'c');
       compile(CAND, 'f', 'c');
     });
+    expect(existsSync(join(p.store, 'ns'))).toBe(false);
+  });
+
+  test('ASMLIFT_BENCH_CACHE=0 turns the NEW default off — the case that had nothing to disable before', async () => {
+    // Before the flip, unset was already off, so the bypass had no work to do here and no test
+    // covered it. Now it is the difference between "bypass the benchmark's caches" and a run that
+    // still reads candidate objects off disk.
+    const p = project();
+    await withCache(
+      { ASMLIFT_CANDCACHE: undefined, ASMLIFT_BENCH_CACHE: '0', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND, 'f', 'c');
+      },
+    );
     expect(existsSync(join(p.store, 'ns'))).toBe(false);
   });
 

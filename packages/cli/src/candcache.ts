@@ -23,9 +23,9 @@
 //      object against a fresh rejection is as wrong as differing bytes, and it is the direction
 //      that silently drops a candidate), count and report.
 //
-// OFF unless ASMLIFT_CANDCACHE is set. `ASMLIFT_CANDCACHE=1|on|true|yes` serves; `=verify`
-// compiles and compares; unset / `0` / `off` / `false` / `no` bypasses the module entirely; and
-// ANYTHING ELSE is refused out loud rather than quietly treated as "on".
+// ON BY DEFAULT: unset means `on`. `ASMLIFT_CANDCACHE=1|on|true|yes` serves too; `=verify`
+// compiles and compares; `0` / `off` / `false` / `no` — and a SET-BUT-EMPTY value — bypass the
+// module entirely; and ANYTHING ELSE is refused out loud rather than quietly treated as "on".
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import {
@@ -67,13 +67,30 @@ const say = (msg: string): void => {
 // two spellings a person reaches for to disable it — enabling it.
 const OFF_WORDS = new Set(['', '0', 'off', 'false', 'no', 'n', 'disable', 'disabled']);
 const ON_WORDS = new Set(['1', 'on', 'true', 'yes', 'y', 'enable', 'enabled']);
-const RAW = (process.env.ASMLIFT_CANDCACHE ?? '').trim();
+// UNSET and SET-BUT-EMPTY are two different states and mean two different things now.
+//
+//   UNSET is ON. That is this module's default, and the reason is that the variable was set in no
+//   shell profile, no `.envrc` and no CI job on any machine this repo is developed on — so the
+//   cache shipped inert for everyone. A default nobody turns on is a default of `off` written the
+//   long way.
+//
+//   SET-BUT-EMPTY is OFF, and it SAYS SO once. `ASMLIFT_CANDCACHE=` arises two ways that point in
+//   opposite directions — a deliberate one-shot bypass, and an unexpanded `$SOMETHING` — so either
+//   reading is a guess. `off` is the guess whose cost is a cold start rather than a served object,
+//   it is what this spelling meant before the flip, and the stderr line makes the surprise loud
+//   instead of leaving a reader to infer it from a missing `[candcache]` line.
+const RAW_ENV = process.env.ASMLIFT_CANDCACHE;
+const UNSET = RAW_ENV === undefined;
+const RAW = (RAW_ENV ?? '').trim();
 const LOWER = RAW.toLowerCase();
 // `ASMLIFT_BENCH_CACHE=0` is documented (apps/benchmark/src/cache.ts) as "bypass the benchmark's
 // caches". It has to mean this one too, or a developer bisecting a suspect row bypasses half the
 // caching in the harness and still gets candidate objects off disk.
 const BENCH_CACHE_OFF = process.env.ASMLIFT_BENCH_CACHE === '0';
 const MODE: CandCacheMode = ((): CandCacheMode => {
+  if (UNSET) {
+    return BENCH_CACHE_OFF ? 'off' : 'on';
+  }
   if (LOWER === 'verify') {
     return BENCH_CACHE_OFF ? 'off' : 'verify';
   }
@@ -89,11 +106,24 @@ const MODE: CandCacheMode = ((): CandCacheMode => {
   );
   return 'off';
 })();
-if (BENCH_CACHE_OFF && LOWER !== '' && !OFF_WORDS.has(LOWER)) {
-  say(`OFF because ASMLIFT_BENCH_CACHE=0 bypasses every cache in the harness, ASMLIFT_CANDCACHE=${RAW} included`);
+if (!UNSET && LOWER === '') {
+  say(
+    `ASMLIFT_CANDCACHE is SET AND EMPTY — the cache is OFF. Unset now means ON, so "set to nothing" ` +
+      `is no longer the same state as "not set"; say 1/on to serve, verify to audit.`,
+  );
+}
+// The bypass is only worth a line where it CHANGED the answer. Before the flip that was "the
+// variable asks for the cache"; now it is also the silent case — an unset variable that would have
+// served, turned off by the other one, with nothing on stderr to say which.
+if (BENCH_CACHE_OFF && (UNSET || (LOWER !== '' && !OFF_WORDS.has(LOWER)))) {
+  say(
+    `OFF because ASMLIFT_BENCH_CACHE=0 bypasses every cache in the harness, ` +
+      `ASMLIFT_CANDCACHE=${UNSET ? '<unset, which means on>' : RAW} included`,
+  );
 }
 
-/** The mode this process is running in — `off` unless ASMLIFT_CANDCACHE says otherwise. */
+/** The mode this process is running in — `on` unless ASMLIFT_CANDCACHE (or ASMLIFT_BENCH_CACHE=0)
+ *  says otherwise. */
 export const cacheMode = (): CandCacheMode => MODE;
 
 const STATS: Record<string, number> = Object.create(null) as Record<string, number>;

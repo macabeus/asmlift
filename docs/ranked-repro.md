@@ -56,21 +56,31 @@ stopped at the list of dirty paths would have called such a bundle current.
 ## The cache state is part of the number
 
 asmlift can serve a candidate object a previous run already compiled, instead of compiling it
-again (`packages/cli/src/candcache.ts`). **It is OFF unless `ASMLIFT_CANDCACHE` says otherwise**,
+again (`packages/cli/src/candcache.ts`). **It is ON unless `ASMLIFT_CANDCACHE` says otherwise**,
 and it changes a run's WALL by several times while changing nothing a run computes. So every wall
 quoted from now on has to say which state it was measured in, in the same breath as the command:
 
-| `ASMLIFT_CANDCACHE`              | what the run does                                                      | when to use it                                                              |
-| -------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| unset, `0`, `off`, `false`, `no` | compiles every candidate; touches no disk                              | **the default, and what a published wall should be measured with**          |
-| `1` / `on` / `true` / `yes`      | serves any candidate this toolchain already compiled                   | the base-run/lever-run pair inside one round, and the gate ladder's repeats |
-| `verify` (any capitalisation)    | compiles every candidate AND audits the store against it, loudly       | after any change to the cache, or when a stored answer is suspect           |
-| anything else                    | **OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr** | never on purpose — the parse is closed so a typo cannot silently SERVE      |
+| `ASMLIFT_CANDCACHE`                         | what the run does                                                      | when to use it                                                                         |
+| ------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| unset, `1`, `on`, `true`, `yes`             | serves any candidate this toolchain already compiled                   | **the default** — say `cold` or `warm`, and paste the `[candcache]` line with the wall |
+| `0`, `off`, `false`, `no`, or SET-AND-EMPTY | compiles every candidate; touches no disk                              | a wall you want comparable with every wall published before the default flipped        |
+| `verify` (any capitalisation)               | compiles every candidate AND audits the store against it, loudly       | after any change to the cache, or when a stored answer is suspect                      |
+| anything else                               | **OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr** | never on purpose — the parse is closed so a typo cannot silently SERVE                 |
+
+**EVERY WALL PUBLISHED IN THIS REPO BEFORE THE DEFAULT FLIPPED WAS MEASURED CACHE-OFF**, because
+the variable was set in no shell profile, no `.envrc` and no CI job — so `unset` and `off` were the
+same run. They are not the same run now. A wall taken today with nothing said about the cache is a
+WARM CACHE wall and is not comparable with any of them; measure with `ASMLIFT_CANDCACHE=0` to
+compare against a published number, and say so.
+
+`ASMLIFT_CANDCACHE=` (set, empty) is OFF and says so on stderr. It is deliberately NOT the same
+state as unset: an empty value is both a one-shot bypass someone typed and an unexpanded
+`$SOMETHING`, so it lands on the side whose cost is a cold start rather than a served object.
 
 `ASMLIFT_BENCH_CACHE=0` turns this cache off too: "bypass the benchmark's caches" has to mean all
 of them, or bisecting a suspect row still reads candidate objects off disk.
 
-- **COLD or WARM is a property of the STORE, not of the flag.** The first `ASMLIFT_CANDCACHE=1`
+- **COLD or WARM is a property of the STORE, not of the flag.** The first cache-on
   run after a toolchain change, a flag change, or a change to the harness code that shapes the
   compiler's input is COLD by construction — the namespace moved and nothing in the store answers
   to it. Say `cold` or `warm`, not just `on`. The store lives at `ASMLIFT_CANDCACHE_DIR`
@@ -86,11 +96,13 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
   and a warm one, the cache is wrong; run the `diff` below, then re-run with `ASMLIFT_CANDCACHE=0`
   and report it.
 - **On a PROJECT's own `decomp.yaml` command, the cache runs — there is nothing to declare.**
-  **THE POSTURE CHANGE, stated where it happens:** before this, `ASMLIFT_CANDCACHE=1` was INERT on
-  a project's own command unless that project also declared `tools.asmlift.cacheInputs`. It is not
-  inert now. If you have that variable exported in a shell profile, an `.envrc` or a CI job, your
-  next run caches your own project's compiles with no further action, and the only signal is one
-  `asmlift: [candcache]` line among the phase output.
+  **THE POSTURE CHANGE, stated where it happens:** two of them, in sequence. First, the cache
+  stopped needing a `tools.asmlift.cacheInputs` declaration, so `ASMLIFT_CANDCACHE=1` stopped being
+  inert on a project's own command. Then the DEFAULT flipped: it is live for everyone now, on every
+  project's own `decomp.yaml` — the path every published score comes from — with no variable set
+  anywhere. Your next run caches your own project's compiles with no further action, and the only
+  signal is one `asmlift: [candcache]` line among the phase output. `ASMLIFT_CANDCACHE=0` is the
+  way back.
   The opt-in existed because one input class could not be measured: a directory named by a flag.
   `-I tools/agbcc/include` was hashed by content already; `-iquote include` — klonoa's own template
   — was a bare word nothing looked at. A declaration a project could get incomplete was itself a

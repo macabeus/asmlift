@@ -150,6 +150,9 @@ describe('a TU whose object is not a function of its own bytes is refused PER KE
 describe('the mode parse is closed: an unrecognised value is OFF and LOUD, never "on"', () => {
   // `ASMLIFT_CANDCACHE=VERIFY` used to mean SERVE. A Gate-E run typed that way was a serve run
   // that printed `{"hit":…}` instead of `{"verified":…}` and reported clean.
+  //
+  // The parse got MORE load-bearing when the default flipped to `on`: every branch below that
+  // lands on `off` is now a branch that has to say no against a default that says yes.
   test.each([
     ['verify', 'verify'],
     ['Verify', 'verify'],
@@ -190,6 +193,45 @@ describe('the mode parse is closed: an unrecognised value is OFF and LOUD, never
     expect(await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_BENCH_CACHE: '0' }, (m) => m.cacheMode())).toBe('off');
     expect(await load({ ASMLIFT_CANDCACHE: 'verify', ASMLIFT_BENCH_CACHE: '0' }, (m) => m.cacheMode())).toBe('off');
     expect(await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode())).toBe('on');
+    // The case the flip CREATED: with unset meaning on, this is the only thing standing between a
+    // developer bisecting a suspect row and a candidate object off disk.
+    expect(
+      await load({ ASMLIFT_CANDCACHE: undefined, ASMLIFT_BENCH_CACHE: '0' }, (m) => m.cacheMode()),
+      'ASMLIFT_BENCH_CACHE=0 must beat the new default, not just an explicit request',
+    ).toBe('off');
+  });
+
+  test('UNSET is ON — the default the flip installed, and the reason the cache was inert before', async () => {
+    expect(await load({ ASMLIFT_CANDCACHE: undefined, ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode())).toBe(
+      'on',
+    );
+  });
+
+  test('SET AND EMPTY is OFF, and it SAYS SO — unset and empty are no longer one state', async () => {
+    // Before the flip both were `''` and both meant off, so nothing had to distinguish them.
+    // `ASMLIFT_CANDCACHE=` now differs from no variable at all, and a reader who cannot see that
+    // from the output would infer it from a missing `[candcache]` line, which is not evidence.
+    let said = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+      said += typeof c === 'string' ? c : Buffer.from(c).toString();
+      return true;
+    });
+    let mode: string;
+    try {
+      mode = await load({ ASMLIFT_CANDCACHE: '', ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode());
+    } finally {
+      spy.mockRestore();
+    }
+    expect(mode).toBe('off');
+    expect(said).toContain('SET AND EMPTY');
+  });
+
+  test('an unrecognised value does NOT inherit the new default — it is refused onto off', async () => {
+    // The silent failure the closed parse exists to prevent, restated for a world where falling
+    // through means SERVING rather than doing nothing.
+    for (const raw of ['maybe', '2', 'ONN', 'verifyy']) {
+      expect(await load({ ASMLIFT_CANDCACHE: raw, ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode())).toBe('off');
+    }
   });
 });
 
