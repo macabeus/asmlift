@@ -50,14 +50,17 @@ export type Expr =
   // still denotes ONE `width`-byte element, so its type, its legalization and its stride contract
   // are unchanged — this is a spelling of the same address, not a new kind of access. Absent for
   // every rank-1 access, which is why it is optional rather than an empty array.
-  // `operandOff` is the one field here that is EVIDENCE rather than spelling: the constant part
-  // of this access's offset arrived in the instruction's MEMORY OPERAND (`ldrb [r0, #0x3]`) and
-  // not in the address the pool word materialized (`.word gSym+0x3`). Both denote the same cell
-  // and print the same subscript, which is why `exprEquals` ignores it — but on a compiler that
-  // folds a constant subscript into the literal, only one C spelling could have put it there, and
-  // `l3/basecse.ts` reads it as the evidence its `unfoldedOffset` rule is about. Absent whenever
-  // the offset was 0 or came from the address expression, so absence is never proof of anything.
-  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: number[]; operandOff?: true }
+  // `operandOff` is the one field here that is EVIDENCE rather than spelling: it is the BYTE
+  // DISPLACEMENT this access's constant offset arrived in through the instruction's MEMORY
+  // OPERAND (`ldrb [r0, #0x3]` records 3), as opposed to through the address the pool word
+  // materialized (`.word gSym+0x3`, which records nothing). Both denote the same cell and print
+  // the same subscript, which is why `exprEquals` ignores it — but on a compiler that folds a
+  // constant subscript into the literal, only one C spelling could have put it there, so
+  // `l3/basecse.ts` reads its PRESENCE as the evidence its `unfoldedOffset` rule is about and
+  // `l3/offmember.ts` reads its VALUE as the member offset to re-spell. Absent whenever the
+  // offset was 0 or came from the address expression, so absence is never proof of anything — and
+  // a displacement can be NEGATIVE, so every reader tests `!== undefined`, never truthiness.
+  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: number[]; operandOff?: number }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
   // Unlike `index`, this carries the field NAME (which encodes the byte offset, `field_<off>`),

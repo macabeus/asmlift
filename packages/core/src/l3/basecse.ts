@@ -144,7 +144,9 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
       } else {
         c.varIndexed.add(k);
       }
-      if (e.operandOff) {
+      // `!== undefined`, never truthiness: the field carries a displacement, and a negative one
+      // is a real access (`lw v0, -8(a1)`).
+      if (e.operandOff !== undefined) {
         c.operandOff.add(k);
       }
     }

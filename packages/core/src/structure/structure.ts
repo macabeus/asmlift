@@ -444,12 +444,12 @@ function memAccess(
       }
     }
   }
-  // Whether the constant offset reached this access through the instruction's MEMORY OPERAND.
-  // The two facts are separate at L2 — `off` is the load/store's own immediate, any addend the
-  // address carried is already inside `baseExpr` — and folding them into one subscript below is
-  // what makes the two indistinguishable at L3, so the discriminator is recorded before the fold
-  // (see the `operandOff` note in l3/ast.ts).
-  const fromOperand = off !== 0 ? ({ operandOff: true } as const) : {};
+  // The constant offset this access reached through the instruction's MEMORY OPERAND. The two
+  // facts are separate at L2 — `off` is the load/store's own immediate, any addend the address
+  // carried is already inside `baseExpr` — and folding them into one subscript below
+  // (`idxVal + off / width`) is what makes the two indistinguishable at L3, so the displacement
+  // is recorded before the fold destroys it (see the `operandOff` note in l3/ast.ts).
+  const fromOperand = off !== 0 ? ({ operandOff: off } as const) : {};
   const g = globalOf(baseExpr, width);
   if (g) {
     const idxVal = g.idx;
