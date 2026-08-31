@@ -22,10 +22,10 @@ import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
-// `fromOperand` marks the access whose offset reached the MEMORY OPERAND — what the structurer
-// records as `index.operandOff` and what `BaseKey.unfoldedOffset` is read off (see the describe
-// block below it and l3/ast.ts).
-const fromOperand = { operandOff: true } as const;
+// `fromOperand` marks the access whose offset reached the MEMORY OPERAND — the DISPLACEMENT the
+// structurer records as `index.operandOff`, which `BaseKey.unfoldedOffset` reads the presence of
+// and `l3/offmember.ts` reads the value of (see the describe block below it and l3/ast.ts).
+const fromOperand = { operandOff: 3 } as const;
 const idx = (name: string, i: Expr, width = 1, evidence: object = {}): Expr => ({
   k: 'index',
   base: { k: 'addr', name },
@@ -86,11 +86,46 @@ describe('where a constant offset came from survives the lift', () => {
   });
 
   test('and are told apart by `operandOff`, which nothing else about the node records', () => {
-    expect(firstIndex(lifted(OPERAND)).operandOff).toBe(true);
+    expect(firstIndex(lifted(OPERAND)).operandOff).toBe(3);
     expect(firstIndex(lifted(ADDEND)).operandOff).toBeUndefined();
-    // …and only by it: strip the flag and the trees are equal key for key
+    // …and only by it: strip the displacement and the trees are equal key for key
     const { operandOff: _drop, ...bare } = firstIndex(lifted(OPERAND));
     expect(bare).toEqual(firstIndex(lifted(ADDEND)));
+  });
+
+  // The recorded number is the INSTRUCTION's own immediate, not the total the subscript folds to:
+  // `idx` already carries `idxVal + off / width`, and re-deriving the displacement from it is
+  // exactly what is impossible once the two have been added together. Here the address carries a
+  // +4 addend and the instruction a +6 displacement, so the subscript prints 5 (10 bytes / width
+  // 2) while the field records 6.
+  const MIXED = `fn f {
+^bb0():
+  %0: u16* = gaddr {sym="gSym"}
+  %1: s32 = const {value=4}
+  %2: u16* = add %0, %1
+  %3: s32 = load %2 {off=6, signed=false, width=2}
+  ret %3
+}
+`;
+
+  test('the number is the instruction immediate, not the folded subscript', () => {
+    expect(cBackend.emit(lifted(MIXED))).toContain('((u16 *)&gSym)[5]');
+    expect(firstIndex(lifted(MIXED)).operandOff).toBe(6);
+  });
+
+  // A NEGATIVE displacement is a real access (`lw v0, -8(a1)` is ordinary MIPS frame/struct code),
+  // and it is the case that makes `!== undefined` load-bearing rather than stylistic: read with a
+  // truthiness test, -8 passes only by luck and 0 would be indistinguishable from absent. Lifted
+  // through the same path as the rest, so the number really does travel.
+  const NEG = `fn f {
+^bb0(%0: u8*):
+  %1: s32 = load %0 {off=-8, signed=false, width=1}
+  ret %1
+}
+`;
+
+  test('a negative displacement is recorded as one, not lost to a truthiness test', () => {
+    expect(firstIndex(lifted(NEG)).operandOff).toBe(-8);
   });
 
   // …and the same on the plain pointer deref, the other spelling memAccess returns.
@@ -102,7 +137,7 @@ describe('where a constant offset came from survives the lift', () => {
 `;
 
   test('an offset of 0 records nothing — there is nothing for a fold to have absorbed', () => {
-    expect(firstIndex(lifted(deref(3))).operandOff).toBe(true);
+    expect(firstIndex(lifted(deref(3))).operandOff).toBe(3);
     expect(firstIndex(lifted(deref(0))).operandOff).toBeUndefined();
   });
 
@@ -116,7 +151,7 @@ describe('where a constant offset came from survives the lift', () => {
     ]);
     const bare = structureChecked(parse(OPERAND), { symbols: arr });
     expect(cBackend.emit(bare)).toContain('gSym[3]');
-    expect(firstIndex(bare).operandOff).toBe(true);
+    expect(firstIndex(bare).operandOff).toBe(3);
   });
 });
 
@@ -321,7 +356,7 @@ describe('leaf-base hoisting', () => {
       // other constant — compiled both ways with the benchmark's own flags, `((s8 *)0)[16]` is
       // `mov r0, #0x10` + `ldrb [r0, #0]` and `s8 *p = (s8 *)0; p[16]` is `mov r0, #0x0` +
       // `ldrb [r0, #0x10]`, the same pair that discriminates at every other base.
-      const evidence = fn([{ k: 'store', lval: cidx(0, c(16), 1, fromOperand), value: c(0) }]);
+      const evidence = fn([{ k: 'store', lval: cidx(0, c(16), 1, { operandOff: 16 }), value: c(0) }]);
       expect(hoistBaseLocals(evidence, BASEFOLD_GATES).locals).toHaveLength(1);
       // …and with no operand offset it is refused, like any other base reached once
       const inline = fn([{ k: 'store', lval: cidx(0, c(16), 1), value: c(0) }]);

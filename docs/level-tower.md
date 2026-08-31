@@ -93,11 +93,20 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
     `decompileRanked` path only. Two populations of them: SPELLING re-writes of one structured
     tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/vol-store`,
-    `/unreduce`, `/ptr-field`, `/mulfirst`, `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
+    `/unreduce`, `/ptr-field`, `/offmember`, `/mulfirst`, `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
     lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
     `/merge-names`, `/fresh-merge`) — plus `/raw-globals`, the signedness pin, `/setup-args` and
     `/connective`, which re-run the lift itself.
     The roster is illustrative; `rank.ts` is the source of truth.
+
+    **A missing degree of freedom the roster makes visible.** `/livebase*`, `/basefold` and
+    `/offmember` are three ALTERNATIVE answers to one question asked of one base — does its
+    constant offset belong in the address the compiler materializes, or in the load's
+    displacement — and every one of them answers it for the WHOLE FUNCTION. Three rows now want a
+    per-BASE assignment instead: `LoadBGTilemapData` wants `/livebase-block` on its `+0x3c` key,
+    `synthetic:bgfixed` wants `/offmember` on its one key, and `synthetic:dmapoll` (booked in
+    PR #124) wants a per-base split of a different pair. It is a CONJUNCTION — shipped additively
+    or it costs the rows each half already wins alone.
     Each emits an _alternative candidate_ rather than replacing the primary, and the differ
     referees — the
     [ranked-candidate idea](asmlift-101.md#26-types-as-ranked-candidates-judged-by-the-differ)
@@ -355,11 +364,21 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   The PRICE of that half is gate duplication. `mergeFeedHomes` is the only one of the four already
   a standalone function with an explicit parameter list, so it is the shape the fold would take —
   and the only one whose enumeration gate (`hasMergeFeedHome`) RUNS the scope instead of
-  re-implementing it. Its three siblings' gates (`hasHomeableSharedAddress`,
-  `hasLoopSharedPureValue`, `hasDerivedReadHome`) each restate their scope's predicate by hand,
-  ~200 lines whose safety rests on every copy staying no stricter than the scope it mirrors, with
-  nothing checking that and nothing in the harness reporting a candidate that was never
-  enumerated.
+  re-implementing it. **`hasHomeableSharedAddress` now does too**, and the shape that paid it is
+  the one the remaining two should follow: the scope became a named export
+  (`sharedBaseClasses(fn, ignoreRet)`), the gate CALLS it, so the SCOPE has one definition. Where
+  the gate stays looser than `analyze` it is loose in TWO places, not one, and only the first is a
+  parameter: `ignoreRet`, because a `ret` operand may be a void phantom the gate cannot know
+  about; and the loop-header SEAT refusal (`multiBlockHeaders`), which the gate omits because it
+  needs the loop model. The second is the one to watch — it is a clause of the axis's third scope
+  rather than an argument to the shared predicate, so calling `sharedBaseClasses` does not carry
+  it, and what makes the omission safe is that the seat refusal is applied in the scope on every
+  candidate the gate enumerates (an over-admitting gate costs one duplicate-collapsed candidate,
+  never a wrong one). So the debt is two, not three: `hasLoopSharedPureValue` and
+  `hasDerivedReadHome` still restate their
+  scope's predicate by hand, whose safety rests on every copy staying no stricter than the scope it
+  mirrors, with nothing checking that and nothing in the harness reporting a candidate that was
+  never enumerated.
 
   `/connective`'s `onTreeOwned` is the SHAPE that blocker wants, one level down: the enumeration
   gate is a callback the pass fires from its own refusal (`raise/shortcircuit.ts`), so there is no

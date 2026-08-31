@@ -45,6 +45,7 @@
 // at an offset natural C alignment could not place it at) is rejected LOUD, as is an
 // overlap/union.
 import { Fn, Op, Value } from '../ir/core';
+import { nextStructIndex } from '../ir/struct-names';
 import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
 import type { StructType } from '../l3/ast';
 import { RaiseUnsupportedError } from './errors';
@@ -243,17 +244,14 @@ export function recognizeStructs(fn: Fn): number {
   return count;
 }
 
-/** The lowest `Struct<N>` index no type in this function's graph already uses — the shared name
- *  allocator for the two passes that synthesize a struct pointee. */
+/** The next `Struct<N>` index past every one this function's graph already uses — the shared name
+ *  allocator for the two passes that synthesize a struct pointee. The scan itself is
+ *  `ir/struct-names.ts`, which the three struct minters share; this names the prefix. */
 export function firstFreeStructIndex(fn: Fn): number {
-  let next = 0;
-  for (const s of collectStructs(fn)) {
-    const m = /^Struct(\d+)$/.exec(s.name);
-    if (m) {
-      next = Math.max(next, Number(m[1]) + 1);
-    }
-  }
-  return next;
+  return nextStructIndex(
+    [...collectStructs(fn)].map((s) => s.name),
+    'Struct',
+  );
 }
 
 /** The distinct struct types this function's L2 GRAPH mentions (unwrapping struct pointers on every

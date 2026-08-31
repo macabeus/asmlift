@@ -143,6 +143,76 @@ export function forwardingTarget(b: Block): Block {
   return cur;
 }
 
+/** THE MERGE CLASSES: every value that rides a branch edge, grouped with the block parameter it
+ *  binds — transitively, so a value forwarded across several merges lands in one class.
+ *
+ *  Functional-form SSA has no phi node: a register merge is spelled as an edge ARGUMENT plus a
+ *  block PARAMETER, two names for the one value a register carried. So a rule that counts what a
+ *  value is USED for reads one merged value as N values with N use counts, and any threshold it
+ *  applies (`structure/analysis.ts`'s "base of 2+ accesses") is measured against the wrong
+ *  denominator. This is the closure that restores it.
+ *
+ *  A value on no edge is its own class and is absent from the map — read it as `get(v) ?? [v]`.
+ *  Member order is definition order (block order, params before results), so a caller that reports
+ *  a class reports it deterministically.
+ *
+ *  A CFG/SSA fact rather than a rule of any one pass, so it lives here beside `dominators`. Two
+ *  callers took it: `structure/analysis.ts`'s shared-base scope, and `structure/structure.ts`'s
+ *  signed-use cone, which had hand-rolled the same arg↔param map.
+ *
+ *  THE THIRD SITE IS NOT THIS RELATION, and saying so is the point of naming it here.
+ *  `raise/recover.ts`'s `propagatePointers` runs its own union-find over the edge relation PLUS
+ *  the const-offset `add`/`sub` (a pointer ± an integer stays the same pointer), which is a
+ *  strictly larger relation and a typing rule of that pass rather than a fact about the CFG.
+ *  Rewriting it to start from this map would make it seed a pass-specific union on top, i.e. give
+ *  a CFG fact a parameter for one caller's extra edges — so it stays where it is, and what this
+ *  paragraph buys is that the next reader looking for a fourth copy knows which of the two the
+ *  third one is. */
+export function mergeClasses(fn: Fn): Map<Value, readonly Value[]> {
+  const parent = new Map<Value, Value>();
+  const find = (v: Value): Value => {
+    let r = v;
+    while ((parent.get(r) ?? r) !== r) {
+      r = parent.get(r)!;
+    }
+    for (let c = v; (parent.get(c) ?? r) !== r;) {
+      const n = parent.get(c)!;
+      parent.set(c, r);
+      c = n;
+    }
+    parent.set(r, r);
+    return r;
+  };
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const s of op.successors) {
+        // `verify` pins arg/param arity, but this also runs on hand-built IR in tests — take the
+        // overlap rather than index past the end.
+        const n = Math.min(s.args.length, s.block.params.length);
+        for (let i = 0; i < n; i++) {
+          parent.set(find(s.args[i]), find(s.block.params[i]));
+        }
+      }
+    }
+  }
+  const byRoot = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    for (const v of [...b.params, ...b.ops.flatMap((op) => op.results)]) {
+      if (parent.has(v)) {
+        const root = find(v);
+        (byRoot.get(root) ?? byRoot.set(root, []).get(root)!).push(v);
+      }
+    }
+  }
+  const out = new Map<Value, readonly Value[]>();
+  for (const members of byRoot.values()) {
+    for (const v of members) {
+      out.set(v, members);
+    }
+  }
+  return out;
+}
+
 /** Every value defined by an op result → its defining op (block params excluded). */
 export function defOpMap(fn: Fn): Map<Value, Op> {
   const m = new Map<Value, Op>();

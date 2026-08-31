@@ -50,14 +50,35 @@ export type Expr =
   // still denotes ONE `width`-byte element, so its type, its legalization and its stride contract
   // are unchanged — this is a spelling of the same address, not a new kind of access. Absent for
   // every rank-1 access, which is why it is optional rather than an empty array.
-  // `operandOff` is the one field here that is EVIDENCE rather than spelling: the constant part
-  // of this access's offset arrived in the instruction's MEMORY OPERAND (`ldrb [r0, #0x3]`) and
-  // not in the address the pool word materialized (`.word gSym+0x3`). Both denote the same cell
-  // and print the same subscript, which is why `exprEquals` ignores it — but on a compiler that
-  // folds a constant subscript into the literal, only one C spelling could have put it there, and
-  // `l3/basecse.ts` reads it as the evidence its `unfoldedOffset` rule is about. Absent whenever
-  // the offset was 0 or came from the address expression, so absence is never proof of anything.
-  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: number[]; operandOff?: true }
+  // `operandOff` is the one field here that is EVIDENCE rather than spelling: it is the BYTE
+  // DISPLACEMENT this access's constant offset arrived in through the instruction's MEMORY
+  // OPERAND (`ldrb [r0, #0x3]` records 3), as opposed to through the address the pool word
+  // materialized (`.word gSym+0x3`, which records nothing). Both denote the same cell and print
+  // the same subscript, which is why `exprEquals` ignores it — but on a compiler that folds a
+  // constant subscript into the literal, only one C spelling could have put it there, so
+  // `l3/basecse.ts` reads its PRESENCE as the evidence its `unfoldedOffset` rule is about and
+  // `l3/offmember.ts` reads its VALUE as the member offset to re-spell. Absent whenever the
+  // offset was 0 or came from the address expression, so absence is never proof of anything — and
+  // a displacement can be NEGATIVE, so every reader tests `!== undefined`, never truthiness.
+  //
+  // THE FIELD IS HALF OF A TWO-PART FACT, and the other half has no field because it needs none.
+  // A displacement that reached the instruction says the compiler did not fold it; WHAT TO DO
+  // about that depends on the BASE'S KIND, which is read off the base expression at each reader:
+  //   • a local (`var`)   — nothing to reassociate into; already right, and no reader fires.
+  //   • a plus tree       — the fold pulls the displacement into the tree, costing an `add` and a
+  //                         register. The repair is to home the base in a local so it becomes a
+  //                         `var`, which is the ADDRESS-HOME axis and lives one level down at L2
+  //                         (`structure/analysis.ts`'s `sharedBaseClasses`) because materializing
+  //                         a value is a structuring decision, not a spelling.
+  //   • a leaf const/addr — the fold bakes the displacement into the literal, changing the `.word`.
+  //                         The repair is a spelling: `/basefold`'s named base or
+  //                         `/offmember`'s aggregate member, both at L3.
+  // The two repairs are deliberately NOT dispatched from one place. They sit at different levels
+  // and partition the space by their own pre-existing predicates (a non-const pure def with no
+  // gaddr in its cone, versus `l3/offmember.ts`'s leaf base), so a shared dispatch would be
+  // scaffolding over two rules that already disagree about what a base is. What the reader needs
+  // is the map, which is this paragraph.
+  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: number[]; operandOff?: number }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
   // Unlike `index`, this carries the field NAME (which encodes the byte offset, `field_<off>`),
