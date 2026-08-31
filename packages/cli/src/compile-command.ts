@@ -140,7 +140,12 @@ const safe = (value: string, what: string): string => {
 const TOKEN_MAX = 4096;
 
 /**
- * A DE-GLUER, and nothing more.
+ * A DE-GLUER, and the key to two small tables below. Three jobs, said plainly because the comment
+ * this replaces claimed one: (1) un-glue an operand from its flag; (2) membership gates
+ * `INJECTED_FILE_FLAGS`, which measures the directory an injected header resolves from; (3)
+ * membership gates `FLAG_FILE_FLAGS`, which reads a `-specs` body. Jobs 2 and 3 are lookups keyed
+ * by a flag NAME, which is a thing the filesystem genuinely cannot answer — but they are why this
+ * table is not purely cosmetic, and a reader who trusts "nothing more" will mis-read the loop.
  *
  * THE MECHANISM IS `hashPath`, not this table. The stamp tries EVERY token as a path and lets
  * `statSync` answer whether it is one; the asymmetry licenses that — OVER-hashing costs a cold
@@ -151,13 +156,19 @@ const TOKEN_MAX = 4096;
  * MEASURED, and this is why the scoping matters. The predecessor of this comment described the
  * table as the mechanism, with a `/[/.]/.test(tok)` guard in front of `hashPath` in the stamp.
  * An ablation on that suite as it then stood, 32 tests — guard deleted, operand scan replaced by
- * `[]` — left `candcache-dirflags.test.ts` at 21 passed / 11 failed: deleting one clause covered every
- * SEPARATED spelling on its own (`-iquote inc`, the klonoa hole itself, and nine more), and the
- * eleven the table earned were the ATTACHED spellings and the glob. Meanwhile a flag NOBODY
+ * `[]` — left `candcache-dirflags.test.ts` at 21 passed / 11 failed: deleting one clause covered
+ * every SEPARATED spelling on its own (`-iquote inc`, the klonoa hole itself, and nine more), and
+ * the eleven the table earned were the ATTACHED spellings and the glob. Meanwhile a flag NOBODY
  * listed — `--include-directory inc`, `-iframework inc`, `-Xpreprocessor -I -Xpreprocessor inc`
  * — served a stale object with the table in place and is measured with the guard gone. A list
  * that is the mechanism has an invisible incompleteness, which is exactly what got
  * `tools.asmlift.cacheInputs` deleted; a list that only un-glues has a visible one.
+ *
+ * Every entry has a legal GLUED or `=` spelling on the compilers this repo drives, which is the
+ * only thing that earns a row here — checked rather than assumed, because a table entry that can
+ * never fire is a branch that cannot be taken: `gcc-14 -imultilibzz -fsyntax-only x.c` and
+ * `arm-none-eabi-gcc -imultilibzz …` both accept it (Apple clang rejects `-imultilib` in EVERY
+ * spelling, since it does not know the flag at all).
  *
  * Longest match first, so `-isystem` is not read as `-I` with the operand `system`.
  */
@@ -199,27 +210,50 @@ const INJECTED_FILE_FLAGS = new Set(['-include', '-imacros']);
 
 /** Flags whose operand is a file holding MORE FLAGS. Measuring the file's bytes is not measuring
  *  what it names: `@opts` containing `-iquote inc` was hashed as a file while `inc/` was not,
- *  which made a response file look SAFER than writing the flag inline. Its contents are scanned
- *  as a template in their own right. */
+ *  which made a response file look SAFER than writing the flag inline. Its contents get BOTH
+ *  halves of the outer mechanism — the de-gluer table, and every token tried as a path — because
+ *  half of it is the half that leaks. */
 const FLAG_FILE_FLAGS = new Set(['-specs']);
 
-/** Runtimes whose invocation puts the compiler somewhere this namespace cannot read it — inside
- *  an IMAGE named by a mutable TAG (`i386/ubuntu:bionic` rebuilt tomorrow is a different compiler
- *  under the same name, invisible to every token, every environment variable and the stamp probe
- *  alike, since the probe compiles THROUGH the container), on ANOTHER HOST, or under a sandbox
- *  root the template never spells. Naming the image would take its DIGEST — `docker image
- *  inspect --format '{{.Id}}'` — which this stamp does not do, so the answer is a refusal.
- *  That is precisely the guard the deleted `tools.asmlift.cacheInputs` opt-in was providing by
- *  omission for the benchmark's `gcc2.7.2` row, and it must not fall out silently with it.
+/** Runtimes that put the compiler's real inputs where this namespace cannot read them. TWO
+ *  classes, and they refuse for different reasons:
+ *
+ *  (1) AN OPAQUE ROOT — a container IMAGE named by a mutable TAG (`i386/ubuntu:bionic` rebuilt
+ *      tomorrow is a different compiler under the same name, invisible to every token, every
+ *      environment variable and the stamp probe alike, since the probe compiles THROUGH the
+ *      container), ANOTHER HOST over `ssh`, or a sandbox root the template never spells. Naming
+ *      the image would take its DIGEST — `docker image inspect --format '{{.Id}}'` — which this
+ *      stamp does not do, so the answer is a refusal. That is precisely the guard the deleted
+ *      `tools.asmlift.cacheInputs` opt-in was providing by omission for the benchmark's
+ *      `gcc2.7.2` row, and it must not fall out silently with it.
+ *
+ *  (2) AN EMULATOR OR BINARY TRANSLATOR — `wine`, `box64`, `qemu-*`. Here the compiler IS named
+ *      on the command line and IS hashed by content; what is not named is the runtime it executes
+ *      against, which is part of the compiler for these purposes: wine's prefix and DLL overrides,
+ *      the guest libraries a qemu/box64 run resolves. Neither is a token, and a `WINEPREFIX`
+ *      rebuilt in place moves neither the template nor any file this stamp reaches.
+ *      SAY THE REACH COST, because it lands on this round's own audience: a GC/Wii or PS1 decomp
+ *      running mwcc or psyq under wine gets no candidate cache and one `REFUSED` line per run.
+ *      The native shim this repo uses for the same job — `wibo` — is measured, cached, and not on
+ *      this list.
  *
  *  SAID PLAINLY, because it is the one place this file uses a list where it should use a
  *  measurement: this is a DENY-LIST, and a deny-list's miss is on the STALE-OBJECT side of the
- *  asymmetry, not the cold-start side. It was widened once already from the six names that
- *  shipped, over twelve measured misses (`docker-compose`, `podman-remote`, `distrobox-enter`,
- *  `toolbox`, `limactl`, `chroot`, `ssh`, `wine`, `qemu-*`, `proot`, `bwrap`, `box64`), and a
- *  thirteenth is always constructible. The GENERAL escape is not another name here: it is
- *  `tools.asmlift.candidateCache: off` in the project's own decomp.yaml — a refusal a project
- *  can spell for itself, whose worst case is a cold start. */
+ *  asymmetry, not the cold-start side. It has been widened twice from the six names that shipped
+ *  — first over twelve measured misses (`docker-compose`, `podman-remote`, `distrobox-enter`,
+ *  `toolbox`, `limactl`, `chroot`, `ssh`, `wine`, `qemu-*`, `proot`, `bwrap`, `box64`), then over
+ *  nine more that were live on this machine or current elsewhere and returned `undefined`
+ *  (`orb`, `container`, `colima`, `udocker`, `crun`, `runc`, `nix-shell`, `multipass`,
+ *  `kubectl`) — and the next one is always constructible. The GENERAL escape is not another name
+ *  here: it is `tools.asmlift.candidateCache: off` in the project's own decomp.yaml — a refusal a
+ *  project can spell for itself, whose worst case is a cold start.
+ *
+ *  THE FALSE-POSITIVE COST, kept on purpose: the check reads EVERY token, not only the word in
+ *  command position, because `env X=1 docker run` and `xargs docker run` are ordinary and a
+ *  command-position rule would miss them silently. So a runtime word inside a QUOTED string
+ *  (`echo "no ssh here"`) refuses the project. That is loud and costs a cold start, which is the
+ *  side of the asymmetry this file always takes. A runtime word in a COMMENT used to do the same
+ *  and no longer does — `stripShellComments` runs first. */
 const OPAQUE_RUNTIMES = new Set([
   'docker',
   'docker-compose',
@@ -250,6 +284,15 @@ const OPAQUE_RUNTIMES = new Set([
   'wine64',
   'box64',
   'box86',
+  'orb',
+  'container',
+  'colima',
+  'udocker',
+  'crun',
+  'runc',
+  'nix-shell',
+  'multipass',
+  'kubectl',
 ]);
 const OPAQUE_RUNTIME_RE = /^qemu-/;
 const isOpaqueRuntime = (name: string): boolean => OPAQUE_RUNTIMES.has(name) || OPAQUE_RUNTIME_RE.test(name);
@@ -261,7 +304,9 @@ const isOpaqueRuntime = (name: string): boolean => OPAQUE_RUNTIMES.has(name) || 
  *  spelling of this check and is the idiom every template in this repo uses for other values). */
 export function containerRuntimeNamedBy(template: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
   const assigned = new Map<string, string>();
-  for (const m of template.matchAll(/(?:^|[\s;&|(])([A-Za-z_]\w*)=("[^"]*"|'[^']*'|[^\s;&|)]*)/g)) {
+  for (const m of stripShellComments(template).matchAll(
+    /(?:^|[\s;&|(])([A-Za-z_]\w*)=("[^"]*"|'[^']*'|[^\s;&|)]*)/g,
+  )) {
     assigned.set(m[1], m[2].replace(/^["']|["']$/g, ''));
   }
   const word = (w: string): string | undefined => (isOpaqueRuntime(basename(w.trim())) ? w.trim() : undefined);
@@ -275,13 +320,62 @@ export function containerRuntimeNamedBy(template: string, env: NodeJS.ProcessEnv
   return undefined;
 }
 
+/** A shell COMMENT is not argv. `sh` drops from an unquoted `#` that begins a word to the end of
+ *  the line, so nothing in there is read, executed or resolved — and a decomp `compiler:` template
+ *  is multi-line shell where a `#` line is ordinary.
+ *
+ *  MEASURED, and it is why this runs before every scan below. `# remember to clean build` put the
+ *  project's OWN OUTPUT TREE in the namespace, so every rebuild was a cold start — the payoff of
+ *  this whole file, spent by a word in a comment. `# see [1] and *.o notes` promoted prose to the
+ *  glob rule. `# our CI also builds this in docker` and `# copy with scp/ssh` each REFUSED the
+ *  project's cache outright, with a message asserting the compile runs through a container that
+ *  it does not.
+ *
+ *  Dropping the text loses no measurement: `stamp()` hashes the template's RAW bytes
+ *  unconditionally, so editing a comment still moves the namespace. Quotes are tracked because
+ *  `-DTAG='#1'` is a `#` that is not a comment, and an UNTERMINATED quote keeps the rest of the
+ *  text — the over-scanning side, which costs a cold start. */
+function stripShellComments(template: string): string {
+  let out = '';
+  let quote: string | undefined;
+  let prev = '';
+  for (let i = 0; i < template.length; i++) {
+    const c = template[i];
+    if (quote !== undefined) {
+      out += c;
+      if (c === quote) {
+        quote = undefined;
+      }
+      prev = c;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      out += c;
+      prev = c;
+      continue;
+    }
+    if (c === '#' && (prev === '' || /[\s;&|(]/.test(prev))) {
+      while (i < template.length && template[i] !== '\n') {
+        i++;
+      }
+      out += '\n';
+      prev = '\n';
+      continue;
+    }
+    out += c;
+    prev = c;
+  }
+  return out;
+}
+
 /** Every token of a compile template that a path flag could be attached to, IN ARGV ORDER — the
  *  list `templatePathOperands` walks positionally, so nothing derived may be interleaved into it.
  *  A comma list (`-Wa,-Iinc`, `-Wp,-I,inc`) is a nested argv the driver forwards, so its pieces
  *  are tokens too; a token is kept as well as split, because `--sysroot=a,b` is one path. */
 function flagScanTokens(template: string): string[] {
   const out: string[] = [];
-  for (const tok of template.split(/[\s"'<>|;()]+/)) {
+  for (const tok of stripShellComments(template).split(/[\s"'<>|;()]+/)) {
     if (!tok || tok.startsWith('{{') || tok.length > TOKEN_MAX) {
       continue;
     }
@@ -308,33 +402,54 @@ function flagScanTokens(template: string): string[] {
  *  - the contents of a QUOTED SPAN (`-iquote "my inc"`) — the splitter treats a quote as a
  *    separator, so a path with a space in it arrives as two tokens that name nothing. */
 function scanTokens(template: string): string[] {
-  const out = flagScanTokens(template);
+  const text = stripShellComments(template);
+  const out = flagScanTokens(text);
   const push = (s: string | undefined): void => {
     if (s && !s.includes('{{') && s.length <= TOKEN_MAX) {
       out.push(s);
     }
   };
-  for (const m of template.matchAll(/(?:^|[\s;&|(])[A-Za-z_]\w*=("[^"]*"|'[^']*'|[^\s;&|)]*)/g)) {
+  for (const m of text.matchAll(/(?:^|[\s;&|(])[A-Za-z_]\w*=("[^"]*"|'[^']*'|[^\s;&|)]*)/g)) {
     push(m[1].replace(/^["']|["']$/g, ''));
   }
-  for (const m of template.matchAll(/"([^"\n]*)"|'([^'\n]*)'/g)) {
+  for (const m of text.matchAll(/"([^"\n]*)"|'([^'\n]*)'/g)) {
     push(m[1] ?? m[2]);
   }
   return out;
 }
 
-/** A glob whose directory part is empty — `cat *.h` — expands in the CURRENT directory, so the
- *  current directory is what it reads. Restricted to a filename-shaped token containing `*` or
- *  `?`: `[` alone would fire on prose (`see [1]`) inside a template comment, and promoting prose
- *  to "measure the whole project" is an expensive way to be wrong. */
-const BARE_GLOB = /^[A-Za-z0-9_.*?+-]*[*?][A-Za-z0-9_.*?+-]*$/;
+/** THE PROJECT ROOT IS NOT A DIRECTORY OPERAND, and synthesizing `.` as one is not the
+ *  over-hashing side of the asymmetry — it is the side that has no cache at all.
+ *
+ *  Two rules here used to mint it: a glob with no directory part (`rm -f *.o` -> `.`) and an
+ *  injected header at the top level (`-include global.h` -> `dirname` -> `.`). Neither operand
+ *  is a word anyone wrote; `.` is the whole checkout, and `hashPath` walks it recursively.
+ *  MEASURED on this box, against a 20 000-entry / 512 MiB stamp budget:
+ *
+ *    pokeemerald 29 126 entries · af 25 901 · a real klonoa dev checkout 47 211  -> over budget,
+ *      so the stamp THROWS and `candCache` refuses the project outright, naming the checkout
+ *      root rather than the flag that put it there;
+ *    marioparty3 19 735 -> 98.7% of the budget, cached today and refused by one `git gc`;
+ *    the depth-0 FILES of a project root are the baserom: pokeemerald 26 files / 131 114 078
+ *      bytes, klonoa 24 / 34 124 942 — a quarter of the byte budget hashed per process, for a
+ *      file no compile reads;
+ *    and where it fits (the bench klonoa checkout, 6 775), the namespace then tracks `build/`
+ *      and `.git/`, so every rebuild is a cold start and the cache never warms.
+ *
+ *  So this is a published RESIDUAL, not a measurement: a glob with no `/` in it, and the quoted
+ *  includes of an injected header that lives at the top level, are read by the compile and not
+ *  seen here. `docs/ranked-repro.md` lists both, and the answers are the same as for every other
+ *  residual — `ASMLIFT_CANDCACHE=verify`, or `tools.asmlift.candidateCache: off`. A subdirectory
+ *  operand (`-include inc/pre.h`, `cat inc/*.h`) is bounded and is still measured. */
 
 /** The paths a compile template names, in token order and de-duplicated by spelling: every path
  *  flag's operand, `@response` files and `-specs` files (they hold compile flags, so their
  *  CONTENTS are scanned too), the directory an injected `-include` file resolves its own quoted
- *  includes from, and the DIRECTORY of any glob. A glob is path-LIKE and is not a path —
+ *  includes from, and the DIRECTORY PART of a glob. A glob is path-LIKE and is not a path —
  *  `inc/*.h` has both a `/` and a `.`, so the old token scan tried it, failed, and measured
- *  nothing — yet what it expands to is read by the compile as surely as an `-I` operand is.
+ *  nothing — yet what it expands to is read by the compile as surely as an `-I` operand is. A
+ *  glob or an injected header with NO directory part names the project root, which is the
+ *  residual documented above and not an operand.
  *
  *  `readDir` turns on the flag-FILE expansion: with it, a response or specs file that exists
  *  under it is read and scanned as a template in its own right. Without it the function stays
@@ -371,6 +486,16 @@ export function templatePathOperands(template: string, readDir?: string, depth =
     for (const nested of templatePathOperands(body, readDir, depth + 1)) {
       take(nested);
     }
+    // AND every token of the body as a path in its own right, which is the same thing `stamp()`
+    // does to the outer template and the reason the `/[/.]/` guard could go. Scanning the body
+    // with the flag table ALONE re-imported "the list is the mechanism" one level down, on the
+    // stale-object side: `@opts` holding `--fake-include-dir inc`, `-Xpreprocessor -I
+    // -Xpreprocessor inc`, or the bare word `inc` served a stored object after `inc/` moved,
+    // while the SAME TEXT written inline was covered. A response file must not be the safer
+    // place to hide an input.
+    for (const tok of scanTokens(body)) {
+      take(tok);
+    }
   };
   for (let i = 0; i < toks.length; i++) {
     const tok = toks[i];
@@ -378,7 +503,7 @@ export function templatePathOperands(template: string, readDir?: string, depth =
       // Only the directory: the pattern itself cannot be stat'ed, and hashing the whole directory
       // is the over-hashing side of the asymmetry, which costs a cold start.
       const dir = tok.slice(0, tok.lastIndexOf('/') + 1);
-      take(dir === '' ? (BARE_GLOB.test(tok) ? '.' : undefined) : dir.replace(/\/+$/, '') || '/');
+      take(dir === '' ? undefined : dir.replace(/\/+$/, '') || '/');
       continue;
     }
     if (tok.startsWith('@') && tok.length > 1) {
@@ -399,7 +524,8 @@ export function templatePathOperands(template: string, readDir?: string, depth =
       continue;
     }
     if (INJECTED_FILE_FLAGS.has(flag)) {
-      take(dirname(operand));
+      const dir = dirname(operand);
+      take(dir === '.' ? undefined : dir);
     }
     if (FLAG_FILE_FLAGS.has(flag)) {
       expandFlagFile(operand);
@@ -416,7 +542,7 @@ export function templatePathOperands(template: string, readDir?: string, depth =
  *  is why `tools.asmlift.candidateCache: off` exists. */
 function cdBases(template: string, cwd: string): string[] {
   const out: string[] = [];
-  for (const m of template.matchAll(/(?:^|[\s;&|(])cd\s+("[^"]*"|'[^']*'|[^\s;&|)]+)/g)) {
+  for (const m of stripShellComments(template).matchAll(/(?:^|[\s;&|(])cd\s+("[^"]*"|'[^']*'|[^\s;&|)]+)/g)) {
     const arg = m[1].replace(/^["']|["']$/g, '');
     if (!arg || arg.includes('$') || arg.includes('{{')) {
       continue;
@@ -715,9 +841,11 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
           `namespace cannot, so nothing is cached`,
       );
     }
-    // Updated only AFTER the read succeeded — so the doc comment on the flag table, which says a
-    // path that cannot be measured contributes NOTHING, is true. The earlier spelling updated
-    // the tag first and was false in both directions.
+    // Both updates run only after the read SUCCEEDED. A file this walk cannot read contributes
+    // nothing here because it never gets here — `MeasurementUnreadable` throws two lines up. That
+    // is not a general claim about the digest: a directory entry `statSync` cannot see joins it as
+    // `unstattable:`, deliberately, because refusing over a dangling symlink would refuse half the
+    // toolchains on earth.
     h.update(tag);
     h.update(sha256(bytes));
     return true;
@@ -780,7 +908,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     //     external input choosing the compiler, so its value (and its content, if it names a
     //     file) joins the stamp.
     const assigned = new Set<string>();
-    for (const m of template.matchAll(/^\s*([A-Za-z_]\w*)=/gm)) {
+    for (const m of stripShellComments(template).matchAll(/^\s*([A-Za-z_]\w*)=/gm)) {
       assigned.add(m[1]);
     }
     // ONE hashPath per resolved path, whichever scan reaches it first. The token scan and the
@@ -884,7 +1012,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
         }
       }
     }
-    for (const m of template.matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
+    for (const m of stripShellComments(template).matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
       const v = m[1];
       if (assigned.has(v) || seenEnv.has(v)) {
         continue;

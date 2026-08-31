@@ -537,7 +537,14 @@ describe('an operand the SHELL spells differently than the scan does', () => {
     expect(typeof homedir()).toBe('string');
   });
 
-  test('`cat *.h` — a glob with no directory part expands in the CURRENT directory', async () => {
+  // THE RESIDUAL, pinned in the direction it actually goes. A glob with no directory part
+  // (`cat *.h`) expands in the PROJECT ROOT, and the project root is not a directory anyone
+  // named: measured on this box, walking it is 29 126 entries at pokeemerald and 47 211 at a real
+  // klonoa dev checkout, both over the 20 000-entry stamp budget, so minting `.` as an operand
+  // REFUSED those projects outright; where it fit, the namespace then tracked `build/` and
+  // `.git/` and no run was ever warm. This test exists so that the residual is a decision with a
+  // number on it rather than an oversight, and so that re-minting `.` goes red here first.
+  test('`cat *.h` — a glob naming the PROJECT ROOT is the published residual, not a measurement', async () => {
     const p = project();
     writeFileSync(join(p.cwd, 'k.h'), '#define K 3\n');
     const template =
@@ -553,7 +560,53 @@ describe('an operand the SHELL spells differently than the scan does', () => {
       },
     );
     expect(served.first).toContain('#define K 3');
-    expect(served.second, 'the glob has no `/`, so its directory is the cwd').toContain('#define K 999');
+    expect(served.second, 'the project root is a residual: `verify` or candidateCache: off is the answer').toContain(
+      '#define K 3',
+    );
+    const { templatePathOperands } = await import('../../src/compile-command');
+    expect(templatePathOperands(template), 'no `.` operand is synthesized').toEqual([]);
+    expect(templatePathOperands(': -include global.h; cc'), 'nor from an injected header at the root').toEqual([
+      'global.h',
+    ]);
+  });
+
+  // A SHELL COMMENT IS NOT ARGV. `#` to end of line is dropped by `sh`, so nothing in it is read
+  // — and a decomp `compiler:` template is multi-line shell where a `#` line is ordinary. Left
+  // scanned, one English word in a comment put the project's own OUTPUT TREE in the namespace and
+  // every rebuild was cold; that is this file's whole payoff, spent silently.
+  test('a directory named only in a COMMENT is not measured, and the comment still moves the namespace', async () => {
+    const p = project();
+    mkdirSync(join(p.cwd, 'build'));
+    writeFileSync(join(p.cwd, 'build/out.o'), 'first\n');
+    const template = ': -nostdinc; cat "{{inputPath}}" > "{{outputPath}}" # remember to clean build';
+    const r = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      ({ compileFromCommand }) => {
+        compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
+        writeFileSync(join(p.cwd, 'build/out.o'), 'second\n');
+        compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
+        const count = (): number => (existsSync(join(p.store, 'ns')) ? readdirSync(join(p.store, 'ns')).length : 0);
+        const sameComment = count();
+        compileFromCommand(template + ' now', { cwd: p.cwd })(CAND_K, 'f', 'c');
+        return { sameComment, edited: count() };
+      },
+    );
+    expect(r.sameComment, 'rewriting the build tree must not move the namespace').toBe(1);
+    expect(r.edited, 'the raw template text is still hashed, so editing the comment does move it').toBe(2);
+  });
+
+  // The same property on the refusal side: `containerRuntimeNamedBy` reads every token, so a
+  // comment word disabled the cache for a whole project with a message asserting the compile runs
+  // through a container it does not run through.
+  test('a runtime word in a COMMENT does not refuse the project', async () => {
+    const { containerRuntimeNamedBy } = await import('../../src/compile-command');
+    expect(containerRuntimeNamedBy('cc a -o b # our CI also builds this in docker', {})).toBeUndefined();
+    expect(containerRuntimeNamedBy('cc a -o b # copy from the server with scp/ssh', {})).toBeUndefined();
+    // …and the comment is the only thing that changed: the same word outside one still refuses.
+    expect(containerRuntimeNamedBy('docker run img cc a -o b', {})).toBe('docker');
+    // …and a `#` inside a QUOTED span does not begin a comment, which is why the strip tracks
+    // quotes rather than cutting at the first `#`.
+    expect(containerRuntimeNamedBy('cc -o b "runs under # docker"', {})).toBe('docker');
   });
 });
 
@@ -567,6 +620,32 @@ describe('a file that holds MORE FLAGS is scanned, not merely hashed', () => {
     const r = await acrossAnEdit(p, templateWith('@opts'));
     expect(r.first).toContain('#define K 3');
     expect(r.second, 'the response file names the directory; its contents moved').toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+
+  // AND with the half the flag table cannot reach. Scanning a response body with the de-gluer
+  // ALONE re-imported "the list is the mechanism" one level down, on the stale-object side: the
+  // SAME TEXT was covered written inline and served a stored object written in the file, which
+  // makes a response file the safer place to hide an input — the exact inversion this whole
+  // mechanism exists to stop. Each case below is a flag the table does not name, or no flag.
+  test.each([
+    ['--fake-include-dir inc', 'a flag nobody listed'],
+    ['-Xpreprocessor -I -Xpreprocessor inc', 'an operand two tokens from its flag'],
+    ['inc', 'no flag at all — a bare word'],
+  ])('`@opts` holding `%s` — %s', async (body) => {
+    const p = project();
+    writeFileSync(join(p.cwd, 'opts'), `-nostdinc ${body}\n`);
+    const r = await acrossAnEdit(p, templateWith('@opts'));
+    expect(r.first).toContain('#define K 3');
+    expect(r.second, 'a response body gets the token scan, not only the flag table').toContain('#define K 999');
+    expect(r.namespaces).toBe(2);
+  });
+
+  test('`-specs=x.specs` whose body names the directory with a flag nobody listed', async () => {
+    const p = project();
+    writeFileSync(join(p.cwd, 'x.specs'), '*cpp:\n+ --fake-include-dir inc\n');
+    const r = await acrossAnEdit(p, templateWith('-specs=x.specs'));
+    expect(r.second, 'the same token scan reaches into a specs body').toContain('#define K 999');
     expect(r.namespaces).toBe(2);
   });
 
