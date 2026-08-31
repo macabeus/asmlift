@@ -2491,8 +2491,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // dropped by the store either way — or when `v` provably has no more bits than the field.
     // Anything else keeps the honest mask spelling.
     //
-    // ORDERING: the named store re-reads the cell at the STORE's position where the asm read it at
-    // the LOAD's, the same hazard the read fold above states, cleared with the same machinery.
+    // ORDERING is NOT this fold's to police, and the difference from the read fold above is the
+    // reason. That fold MOVES a read: its extract renders at the consumer, so a write in between
+    // changes what the extract sees. This one moves nothing — the spelling it replaces is a single
+    // statement AT THE STORE (`*(u8 *)&gS = v | *(u8 *)&gS & ~W;`), which reads the cell in exactly
+    // the position `gS.field = v` does. What keeps that read honest is the MATERIALIZATION model,
+    // and it is byte-granular where a symbol-wide alias query is not: a call, or a store this load
+    // may alias, forces the load to its own temp at its own position, and `!materialize.has(load)`
+    // below then refuses. A store to a DISJOINT byte of the same cell's symbol materializes
+    // nothing, and refusing there bought no ordering — it only spelled the same read as arithmetic.
 
     // THE KNOWN-BITS QUESTION IS L2 AND LIVES THERE (ir/bits.ts) — this fold only supplies the
     // one fact that layer cannot see: a bitfield READ this pass has already recognized, whose
@@ -2602,15 +2609,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           if (lo + w !== cellBits && provableBits(bits, value) > w) {
             continue; // C would truncate bits the asm's `or` writes
           }
-          const fld = declaredFields(si.layout)?.find(
-            (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === cell.byte * 8 + lo && f.signed !== undefined,
-          );
-          const at = { blk, idx: opIndex.get(op)! };
-          if (
-            fld &&
-            memberQualsAllow(fld, si.const, true) &&
-            !memWriteBetween(load, at, mayWriteGlobal(defs, cell.name))
-          ) {
+          const fld = symCtx
+            .fieldsOf(cell.name)
+            ?.find(
+              (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === cell.byte * 8 + lo && f.signed !== undefined,
+            );
+          if (fld && memberQualsAllow(fld, si.const, true)) {
             bitfieldStore.set(op, { global: cell.name, field: fld.name, value });
           }
           break;

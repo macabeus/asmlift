@@ -329,15 +329,46 @@ describe('refusals — the honest mask spelling stays', () => {
     expect(runW(asm)).not.toContain('gState.hearts =');
   });
 
-  test('a CALL between the load and the store refuses — the named store re-reads the cell', () => {
-    // the asm captured the bits BEFORE the call; `gState.hearts = v` reads them after it
+  test('a CALL between the load and the store refuses, and the MATERIALIZED temp is why', () => {
+    // The asm captured the bits BEFORE the call. What refuses is not a rule of this fold: the call
+    // forces the load to its own temp at its own position, and a materialized load is one this
+    // fold may not delete. Asserting the temp is what pins the mechanism — a refusal assertion
+    // alone passes for any reason at all.
     const withCall =
       'f:\n\tpush\t{r4, r5, r6, lr}\n\tldr\tr5, .L1\n\tlsl\tr6, r0, #30\n\tlsr\tr6, r6, #30\n' +
       '\tldrb\tr2, [r5]\n\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr4, r2\n\tbl\tSideEffect\n' +
       '\torr\tr6, r4\n\tstrb\tr6, [r5]\n\tmov\tr0, #0x0\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L1:\n\t.word\t0x03005220\n';
-    expect(runW(withCall)).not.toContain('gState.hearts =');
+    const src = runW(withCall);
+    expect(src).not.toContain('gState.hearts =');
+    expect(src).toMatch(/v\d+ = \*\(u8 \*\)&gState;[\s\S]*SideEffect/);
     // …and the same function without the call DOES fold, so the refusal is the call's
     expect(runW(withCall.replace('\tbl\tSideEffect\n', ''))).toContain('gState.hearts =');
+  });
+
+  test('a store that may ALIAS the cell refuses, by the same materialized temp', () => {
+    // a byte store to the very cell, between the load and the store: the load may not sink past it
+    const alias =
+      'f:\n\tldr\tr1, .L1\n\tlsl\tr0, r0, #30\n\tlsr\tr0, r0, #30\n\tldrb\tr2, [r1]\n' +
+      '\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr4, #0x7\n\tstrb\tr4, [r1]\n' +
+      '\torr\tr0, r2\n\tstrb\tr0, [r1]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const src = runW(alias);
+    expect(src).not.toContain('gState.hearts =');
+    expect(src).toMatch(/v\d+ = \*\(u8 \*\)&gState;/);
+  });
+});
+
+describe('what this fold does NOT police', () => {
+  test('a store to a DISJOINT byte of the same symbol folds — it moves no read', () => {
+    // The spelling this replaces reads the cell inline AT THE STORE, exactly where the named
+    // member assignment reads it, so a write in between that the load may not alias changes
+    // neither one. A symbol-wide alias query would refuse here and buy no ordering.
+    const disjoint =
+      'f:\n\tldr\tr1, .L1\n\tlsl\tr0, r0, #30\n\tlsr\tr0, r0, #30\n\tldrb\tr2, [r1]\n' +
+      '\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr4, #0x7\n\tstrb\tr4, [r1, #0x5]\n' +
+      '\torr\tr0, r2\n\tstrb\tr0, [r1]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const src = runW(disjoint);
+    expect(src).toContain('gState.hearts = (u32)(a0 << 30) >> 30;');
+    expect(src).toContain('((u8 *)&gState)[5] = 7;');
   });
 });
