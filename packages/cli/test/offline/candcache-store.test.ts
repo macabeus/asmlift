@@ -526,17 +526,30 @@ describe('EXISTENCE IS NOT CONTENT: a corrupt objects/<sha> entry is caught wher
     });
   });
 
-  test('the key ALREADY linked to the corrupt object is repaired too, because it is one inode', async () => {
+  test('every key ALREADY linked to the corrupt object is repaired too — the repair goes through the inode', async () => {
+    // The reason the repair is a plain in-place write and not `writeAtomic`. Renaming a new inode
+    // over `objects/<sha>` repairs the NAME: every `ns/` key that deduped onto the old inode keeps
+    // serving the corrupt bytes this very call reported, and a warm run is all hits and never
+    // reaches the comparison again — so the loud line would name a corruption it had left in place
+    // for every key but the one being stored.
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       const c = m.candCache('t', () => NS_A);
       const first = c.put('k1', 'f', object('TRUTH-BYTES'));
+      const second = c.put('k2', 'f', object('TRUTH-BYTES'));
       writeFileSync(objectsIn(root)[0], 'CORRUPT');
       expect(readFileSync(first, 'utf8'), 'the hardlink shows the corruption').toBe('CORRUPT');
-      c.put('k2', 'f', object('TRUTH-BYTES'));
-      expect(readFileSync(first, 'utf8'), 'writeAtomic replaces the NAME, so the old link keeps the old inode').toBe(
-        'CORRUPT',
-      );
+
+      c.put('k3', 'f', object('TRUTH-BYTES'));
+      expect(m.cacheStats()).toMatchObject({ objectCorrupt: 1 });
+      for (const [name, p] of [
+        ['k1', first],
+        ['k2', second],
+      ] as const) {
+        expect(readFileSync(p, 'utf8'), `${name} deduped onto that inode and must be repaired with it`).toBe(
+          'TRUTH-BYTES',
+        );
+      }
     });
   });
 

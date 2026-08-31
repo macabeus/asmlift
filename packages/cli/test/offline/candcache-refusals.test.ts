@@ -201,16 +201,48 @@ describe('the mode parse is closed: an unrecognised value is OFF and LOUD, never
     ).toBe('off');
   });
 
+  test('the ASMLIFT_BENCH_CACHE line fires only where that variable CHANGED the answer', async () => {
+    // Two causes for one state, on adjacent lines, and the wrong one looks actionable: an
+    // unrecognised value is already OFF through the closed parse, so a line saying the bypass
+    // turned it off invites unsetting ASMLIFT_BENCH_CACHE, which will not turn that cache on.
+    const heard = async (env: Record<string, string | undefined>): Promise<string> => {
+      let said = '';
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        said += typeof c === 'string' ? c : Buffer.from(c).toString();
+        return true;
+      });
+      try {
+        await load(env, (m) => m.cacheMode());
+      } finally {
+        spy.mockRestore();
+      }
+      return said;
+    };
+    const typo = await heard({ ASMLIFT_CANDCACHE: 'bogus', ASMLIFT_BENCH_CACHE: '0' });
+    expect(typo).toContain('REFUSED reason=unrecognised-mode');
+    expect(typo, 'the value alone already lands on off; the bypass changed nothing').not.toContain(
+      'ASMLIFT_BENCH_CACHE=0 bypasses',
+    );
+    // …and it still fires on all three states that WOULD have served.
+    for (const raw of [undefined, '1', 'verify']) {
+      expect(await heard({ ASMLIFT_CANDCACHE: raw, ASMLIFT_BENCH_CACHE: '0' })).toContain(
+        'ASMLIFT_BENCH_CACHE=0 bypasses',
+      );
+    }
+    // An explicit `off` is not a surprise and gets no line: both variables agree.
+    expect(await heard({ ASMLIFT_CANDCACHE: 'off', ASMLIFT_BENCH_CACHE: '0' })).not.toContain('ASMLIFT_BENCH_CACHE=0');
+  });
+
   test('UNSET is ON — the default the flip installed, and the reason the cache was inert before', async () => {
     expect(await load({ ASMLIFT_CANDCACHE: undefined, ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode())).toBe(
       'on',
     );
   });
 
-  test('SET AND EMPTY is OFF, and it SAYS SO — unset and empty are no longer one state', async () => {
-    // Before the flip both were `''` and both meant off, so nothing had to distinguish them.
-    // `ASMLIFT_CANDCACHE=` now differs from no variable at all, and a reader who cannot see that
-    // from the output would infer it from a missing `[candcache]` line, which is not evidence.
+  test('SET AND EMPTY is OFF, and it SAYS SO — unset and empty are not one state', async () => {
+    // `ASMLIFT_CANDCACHE=` and no variable at all land on opposite modes, and the difference is
+    // invisible on the command line: a reader who cannot see it in the output would have to infer
+    // it from a MISSING `[candcache]` line, which is not evidence.
     let said = '';
     const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
       said += typeof c === 'string' ? c : Buffer.from(c).toString();

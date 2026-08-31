@@ -5,6 +5,7 @@
 // intra-process async gives no speedup; independent processes each get their own blocking
 // pipeline, and the Docker container pool is shared by name across processes.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
+import { CACHE_MISMATCH_EXIT } from '@asmlift/cli/candcache';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,6 +24,16 @@ export interface OrchestrateOptions {
   project?: string; // real: project name
   toolchain?: string; // synthetic: single-toolchain filter
 }
+
+/**
+ * The status a fan-out exits with once shards have failed. A CACHE MISMATCH KEEPS ITS OWN CODE
+ * THROUGH THE FAN-OUT: the children exit `CACHE_MISMATCH_EXIT` for it, and flattening that back to
+ * 1 here would put it back among the statuses a build failure, an empty selection and a crashed
+ * shard already share. Only when EVERY failing shard says cache — one shard that failed for its own
+ * reason is a run whose headline is that failure, not the store.
+ */
+export const fanExitCode = (failedCodes: number[]): number =>
+  failedCodes.length > 0 && failedCodes.every((c) => c === CACHE_MISMATCH_EXIT) ? CACHE_MISMATCH_EXIT : 1;
 
 export interface ShardOutcome {
   code: number;
@@ -241,6 +252,16 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   }
   if (failedShards > 0) {
     // all tiers stitched (partial results persist for debugging), but the run itself failed
+    const failedCodes = [...outcomes.values()].flat().flatMap((o) => (o.code === 0 ? [] : [o.code]));
+    if (fanExitCode(failedCodes) === CACHE_MISMATCH_EXIT) {
+      console.error(
+        `\n${failedShards} shard(s) exited ${CACHE_MISMATCH_EXIT}: a stored answer disagreed with a fresh ` +
+          `compile. The store is serving objects this toolchain no longer produces — see the [candcache] ` +
+          `lines above, then drop the store (ASMLIFT_CANDCACHE_DIR).`,
+      );
+      process.exitCode = CACHE_MISMATCH_EXIT;
+      return;
+    }
     throw new Error(`${failedShards} shard(s) exited nonzero — see BUILD-FAIL/error lines above`);
   }
   if (selected === 0) {

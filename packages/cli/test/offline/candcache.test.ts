@@ -265,10 +265,9 @@ describe('a miss is indistinguishable from no cache, and ON is the default', () 
     expect(existsSync(join(p.store, 'ns'))).toBe(false);
   });
 
-  test('ASMLIFT_BENCH_CACHE=0 turns the NEW default off — the case that had nothing to disable before', async () => {
-    // Before the flip, unset was already off, so the bypass had no work to do here and no test
-    // covered it. Now it is the difference between "bypass the benchmark's caches" and a run that
-    // still reads candidate objects off disk.
+  test('ASMLIFT_BENCH_CACHE=0 turns the DEFAULT off, not just an explicit request', async () => {
+    // With unset meaning `on`, this is the difference between "bypass the benchmark's caches" and
+    // a developer bisecting a suspect row while candidate objects still come off disk.
     const p = project();
     await withCache(
       { ASMLIFT_CANDCACHE: undefined, ASMLIFT_BENCH_CACHE: '0', ASMLIFT_CANDCACHE_DIR: p.store },

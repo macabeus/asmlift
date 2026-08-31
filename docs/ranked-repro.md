@@ -119,6 +119,12 @@ find nothing to disagree with and go green having audited nothing.
   else held fixed: two LoadBGTilemapData runs off one bundle both resolved
   `ns=82c83810be494b45`; adding a COMMENT to `packages/cli/src/phase.ts` — a file no compile
   reads and that shapes no compiler input — and rebuilding moved it to `ns=a5e72b95f10cea78`.
+  **AND SO DOES COMMITTING.** The build bakes its own commit and dirty flag into the bundle, so a
+  DOC-ONLY commit, and the dirty-to-clean transition of an unchanged tree, both move the namespace
+  as surely as an emitter change does. In this repo's own workflow — commit, rebuild, quote — that
+  makes the first run after every commit cold, and it means **a warm store cannot be carried across
+  one**: a wall quoted as `warm` is only reproducible from the store filled at the same commit, so
+  name that commit beside the wall.
   This is the cold-start direction and therefore sound, but it decides how to pair runs: `docs`
   above tells you to rebuild before any run you intend to quote, so **a base run and a lever run
   with a rebuild between them share nothing** and both are cold. Build once, then run the pair —
@@ -221,13 +227,17 @@ find nothing to disagree with and go green having audited nothing.
   whose object had just been compiled correctly, and the caller was served bytes it had not
   produced. MEASURED: a run in which every key MISSED, every candidate compiled freshly and
   correctly, and the audit ran at 100% published a NONMATCH as a byte-exact MATCH with exit 0 and
-  wrote no `MISMATCHES.log`. Sampling structurally cannot see that — it is reached from the SERVE
-  path, so it only ever looks at a key the store can already answer, and a `put` is a miss by
-  construction. A `put` holds the truth and has already hashed it, so it now compares: a
-  disagreement is an `OBJECT STORE CORRUPT` mismatch like any other, the entry is repaired with the
-  truth, and the run exits 3. Cost, measured at the cold LBG fan's own shape (53,228 dedup-hit puts
-  over 15,124 distinct objects): +1.5 s on a 683-905 s run, and zero on a warm run, which serves
-  and never stores.
+  wrote no `MISMATCHES.log`. What sampling cannot reach is that RUN — it is reached from the SERVE
+  path, so it withholds only keys the store can already ANSWER, and there every key MISSED. (Once
+  such a key can be served, the audit does compare it and does report; the run in which the
+  corruption is first deduped onto is the hole.) A `put` holds the truth and has already hashed it,
+  so it compares: a disagreement is an `OBJECT STORE CORRUPT` mismatch like any other, and the run
+  exits 3. **The repair is written THROUGH THE INODE**, because `objects/<sha>` is hardlinked from
+  every key that deduped onto it — replacing the NAME would repair the key being stored and leave
+  every other one serving the bytes the same line just reported, with a warm run (all hits, no
+  puts) never reaching the comparison again. Cost, measured at the cold LBG fan's own shape (53,228
+  dedup-hit puts over 15,124 distinct objects): +1.5 s on a 683-905 s run, and zero on a warm run,
+  which serves and never stores.
 - **The store is bounded, but only between runs.** `ASMLIFT_CANDCACHE_MAX_MB` (default 4096)
   counts the distinct object bytes plus one allocation block per stored key — 77% of a warm store
   is negative entries, which weigh nothing logically and cost a block each. It is enforced ONCE per
@@ -239,12 +249,19 @@ find nothing to disagree with and go green having audited nothing.
 - **`verify` audits the OUTCOME, not only the bytes.** A stored object whose TU no longer compiles,
   and a stored rejection whose TU now does, are both mismatches — the second is the one that
   silently drops a spelling from a row's fan, and it is 77% of what a warm store serves. Any
-  mismatch fails the run with **exit 3** and is written to `MISMATCHES.log` in the store.
+  mismatch is written to `MISMATCHES.log` in the store and fails the run with **exit 3**, on every
+  path that can produce one: the ranked CLI's success return AND its decline/internal-error return,
+  a `pnpm bench run` shard, and the orchestrator over those shards (which propagates 3 only when
+  EVERY failed shard says cache — one shard that failed for its own reason is a run whose headline
+  is that failure). `bench fidelity` is the exception by design: it pins the cache OFF for its
+  ~1234 reproduction scripts, so nothing there can disagree.
   **3, not 1, and the distinction is the whole point:** a ranked run that does not MATCH exits 1
-  already, so `1` carried no signal for the case this repo actually publishes — LoadBGTilemapData
+  already, so `1` carries no signal for the case this repo actually publishes — LoadBGTilemapData
   has been a nonmatch at 386 for twenty rounds, and a clean run and a poisoned run of it were
-  measured exiting 1 with byte-identical `[ranked]` lines. The `[candcache]` line and
-  `MISMATCHES.log` always discriminated; the exit status did not until now.
+  measured exiting 1 with byte-identical `[ranked]` lines. Measured offline end to end, on one
+  store: the audited run and the unaudited one print the same `[ranked]` line and the same stdout,
+  and the unaudited one publishes the target's own bytes as a byte-exact **MATCH with exit 0**
+  (`packages/cli/test/offline/candcache-sampling.test.ts`).
 - **`on` MODE AUDITS ITSELF, and that is what licenses serving at all.** `bench regression` and
   `bench diff` compare OUTCOMES: a stale object is served identically on the base and on the head,
   so a cache defect makes BOTH GO GREEN. Neither gate is capable of catching one, so serving mode

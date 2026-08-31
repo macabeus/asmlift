@@ -31,7 +31,14 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
-import { MISMATCH_LOG, cacheMismatches, cacheMode, cacheSampleNote, cacheStats } from './candcache';
+import {
+  CACHE_MISMATCH_EXIT,
+  MISMATCH_LOG,
+  cacheMismatches,
+  cacheMode,
+  cacheSampleNote,
+  cacheStats,
+} from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { renderDeclarations } from './declare';
@@ -45,22 +52,22 @@ import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 // the exit status. The same is true of an `on` run now: its sampled audit fails the run exactly
 // as verify's does.
 //
-// AND IT NEEDS ITS OWN CODE. `ranked.best.score.match && cacheMismatches() === 0 ? 0 : 1` reads
-// as "a mismatch fails the run" and is a NON-DISCRIMINATOR on the runs this project actually
-// publishes: a ranked run that does not match already exits 1, and LoadBGTilemapData has been a
-// nonmatch at 386 for twenty rounds. Measured on the same fan — a clean run and a poisoned run at
-// 100% sampling both exited 1, with byte-identical `[ranked]` lines. So the exit status carried no
-// signal for the dominant case while three phase reports offered it as the proof that a poisoned
-// run does not look like a clean one. `CACHE_MISMATCH_EXIT` is a code "no match" does not already
-// occupy; `bench fidelity` compares against 0/1 and will call a mismatched reproduction a failure,
-// which is the intended reading.
-//
 // `cacheSampleNote()` carries the sampling RATE and the run's SEED, so a reader can tell an
 // audited serve from an unaudited one and replay the exact selection
 // (ASMLIFT_CANDCACHE_SAMPLE_SEED). Without it a run with the audit switched off would print the
 // same line as one with it on.
-/** The exit code a stored-vs-fresh disagreement gets, distinct from 0 (match) and 1 (no match). */
-export const CACHE_MISMATCH_EXIT = 3;
+
+/**
+ * The exit status of a ranked run, ON EITHER OF ITS TWO RETURNS — and both is the point.
+ *
+ * A cache mismatch outranks what the run would otherwise say, a decline included: a store that
+ * lied invalidates the fan, while a decline is an ordinary outcome. The failure return needs it
+ * because a mismatch is REACHABLE behind one — the audit runs inside the candidate compiles, so a
+ * run that declines after them has already reported — and a 1 there is indistinguishable from the
+ * decline every wrapper keying on the status expects. Which reason it was is not lost: `[declined]`
+ * / `[internal error]` and the `[candcache]` lines are both in the stderr returned beside the code.
+ */
+export const rankedExitCode = (match: boolean): number => (cacheMismatches() > 0 ? CACHE_MISMATCH_EXIT : match ? 0 : 1);
 const candCacheLine = (): string => {
   if (cacheMode() === 'off') {
     return '';
@@ -514,7 +521,7 @@ export async function runCli(
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
         `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {
-        code: cacheMismatches() > 0 ? CACHE_MISMATCH_EXIT : ranked.best.score.match ? 0 : 1,
+        code: rankedExitCode(ranked.best.score.match),
         stdout: ranked.best.source,
         // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
         // tail stay adjacent.
@@ -534,11 +541,10 @@ export async function runCli(
       // …and the cache line belongs HERE too. A decline or an internal error drops out of the
       // ranked path before the success-path stderr is assembled, so a reader on this path could
       // not tell an audited run from an unaudited one — nor that the store had disagreed, even
-      // though `MISMATCHES.log` was already written. The exit code stays 1: the run failed for
-      // its own reason, and relabelling that as a cache mismatch would lose which one it was.
+      // though `MISMATCHES.log` was already written.
       const kind = isDecline(e) ? 'declined' : 'internal error';
       return {
-        code: 1,
+        code: rankedExitCode(false),
         stdout: '',
         stderr:
           `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n` + candCacheLine(),

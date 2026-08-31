@@ -718,9 +718,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   // headers collision (drop prelude + decls); failure means the TEMPLATE is broken — keep
   // everything so the first real candidate fails with the template's own loud diagnostics.
   // Exit-code-only: no error-message parsing (gcc-2.9/IDO/mwcc all format differently).
-  // The cross-run candidate-object cache on the project-template path (candcache.ts). ON unless
-  // ASMLIFT_CANDCACHE says otherwise, and ON for any project's own command, because everything the
-  // command reads is now MEASURED rather than declared.
+  // The cross-run candidate-object cache on the project-template path (candcache.ts).
   //
   // The NAMESPACE is a measurement, not a version constant: the template text, the cwd, the
   // content hash of every directory a path FLAG names (`-iquote include`, recursively), of every
@@ -1045,9 +1043,9 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     return answer;
   };
   // ON, for any project's own command, unless ASMLIFT_CANDCACHE says otherwise — there is no
-  // second, per-project opt-IN. A project DECLARING what its command reads is wrong in the stale-object
-  // direction the moment the declaration is incomplete, and nothing verifies it; the namespace
-  // measures those inputs instead (`stamp()`).
+  // second, per-project opt-IN. A project DECLARING what its command reads is wrong in the
+  // stale-object direction the moment the declaration is incomplete, and nothing verifies it; the
+  // namespace measures those inputs instead (`stamp()`).
   //
   // `tools.asmlift.candidateCache: off` is the only per-project key, and it is the other shape: a
   // REFUSAL, never an assertion, so getting it wrong costs a cold start. It answers what the
