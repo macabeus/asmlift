@@ -356,7 +356,7 @@ describe('leaf-base hoisting', () => {
       // other constant — compiled both ways with the benchmark's own flags, `((s8 *)0)[16]` is
       // `mov r0, #0x10` + `ldrb [r0, #0]` and `s8 *p = (s8 *)0; p[16]` is `mov r0, #0x0` +
       // `ldrb [r0, #0x10]`, the same pair that discriminates at every other base.
-      const evidence = fn([{ k: 'store', lval: cidx(0, c(16), 1, fromOperand), value: c(0) }]);
+      const evidence = fn([{ k: 'store', lval: cidx(0, c(16), 1, { operandOff: 16 }), value: c(0) }]);
       expect(hoistBaseLocals(evidence, BASEFOLD_GATES).locals).toHaveLength(1);
       // …and with no operand offset it is refused, like any other base reached once
       const inline = fn([{ k: 'store', lval: cidx(0, c(16), 1), value: c(0) }]);

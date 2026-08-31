@@ -156,7 +156,7 @@ export function forwardingTarget(b: Block): Block {
  *  Member order is definition order (block order, params before results), so a caller that reports
  *  a class reports it deterministically.
  *
- *  A CFG/SSA fact with two readers, so it lives here beside `dominators` rather than in either. */
+ *  A CFG/SSA fact rather than a rule of any one pass, so it lives here beside `dominators`. */
 export function mergeClasses(fn: Fn): Map<Value, readonly Value[]> {
   const parent = new Map<Value, Value>();
   const find = (v: Value): Value => {

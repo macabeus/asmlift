@@ -40,8 +40,10 @@
 //
 // REFUSAL. `spellOperandMembers` returns `null` when no base was admitted, so a function with no
 // eligible site contributes no candidate and costs nothing. A base with ANY ineligible access is
-// refused WHOLE rather than half-respelled: the declared struct is then a complete description of
-// every access through that address, which is what makes it self-describing.
+// refused WHOLE rather than half-respelled, so the declared struct describes every subscript this
+// pass grouped under that base and never an arbitrary half of them. It does NOT describe every
+// access to the ADDRESS: a struct-array element off the same numeric constant reaches it through
+// a cast, which is a different base expression and a different key, and stays as it was.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, StructType } from './ast';
 import { mapExprChildren, mapStmtExprs, walkExprs } from './ast';

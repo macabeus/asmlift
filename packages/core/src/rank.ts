@@ -1889,9 +1889,9 @@ export function enumerateCandidates(
           // from the key would be the direction the paragraph above rules out. It carries a
           // DISPLACEMENT rather than a presence flag, so it can split two trees that print the
           // same subscript off different addends — re-priced when it widened, over klonoa's
-          // `LoadBGTilemapData` under docs/ranked-repro.md's flags (1024 axis points, 66816
-          // candidates): 66816 either way, and all 66816 `[score]` lines identical. It splits 0
-          // keys, so the miss it can cause has no inhabitant.
+          // `LoadBGTilemapData` under docs/ranked-repro.md's flags: 66816 candidates either way,
+          // and all 66816 `[score]` lines identical. It splits 0 keys, so the miss it can cause
+          // has no inhabitant.
           const treeKey = JSON.stringify(sfn);
           if (seenTrees.has(treeKey)) {
             continue;

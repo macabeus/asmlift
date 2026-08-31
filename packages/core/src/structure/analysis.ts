@@ -111,8 +111,8 @@ function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
  *
  *  An edge argument is therefore NOT a use that leaves the class — it feeds the parameter beside
  *  it, which `mergeClasses` has already unioned in. Everything else still disqualifies the whole
- *  class: a store's value slot, an `aload` index, arithmetic, a `ret`. The home is justified by
- *  the shared-base reuse alone, as it always was.
+ *  class: a store's value slot, an `aload` index, arithmetic. The home is justified by the
+ *  shared-base reuse alone, as it always was.
  *
  *  `ignoreRet` skips `ret` operands: `analyze` passes its own `returnsVoid` (where a ret operand
  *  is a phantom the use registry already drops), and rank.ts's enumeration gate passes true
