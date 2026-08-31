@@ -147,23 +147,6 @@ describe('every gate is load-bearing', () => {
     expect(cBackend.emit(ablated).match(/->m3/g)).toHaveLength(2);
   });
 
-  // `((s32 *)C)[16/4]` beside `((s32 *)C)[a0]`: one address, and only the first has a member
-  // spelling. Respelling just that one emitted a struct declaring bytes 0..20 of the address
-  // beside a sibling striding past them — one address through two contradictory fictional types.
-  const MIXED_ACCESS = fn([
-    ret(idx(cbase(50345232), 4, 4, { operandOff: 16 })),
-    ret({ k: 'index', base: cbase(50345232), idx: { k: 'var', name: 'a0' }, width: 4, signed: false }),
-  ]);
-
-  test('mixed-access: a variable-subscript sibling refuses the WHOLE base', () => {
-    expect(offmemberBases(MIXED_ACCESS)).toEqual([]);
-    const ablated = spellOperandMembers(MIXED_ACCESS, { gates: without(OFFMEMBER_GATES, 'mixed-access') })!;
-    const src = cBackend.emit(ablated);
-    // ablated, BOTH spellings of the one address stand in the emitted C — that is the half-respell
-    expect(src).toContain('((struct Off0 *)50345232)->m16');
-    expect(src).toContain('((s32 *)50345232)[a0]');
-  });
-
   // 0x040000D4 + 8 is REG_DMA3CNT, inside ARMV4T_AGBCC's declared device page. A struct over the
   // register file is not an object a source declares, and the member spelling also drops the
   // `volatile` the tie-break at `compareScored` can only ADD — so the differ would referee it by
@@ -193,6 +176,38 @@ describe('every gate is load-bearing', () => {
   test('a target declaring no device page makes device-base vacuous, never a refusal', () => {
     expect(offmemberBases(DEVICE)).toHaveLength(1);
   });
+});
+
+// ── what the declaration governs ───────────────────────────────────────────────────────────
+// One address CAN leave here spelled two ways, and that is the shipped behaviour rather than an
+// oversight: the declaration governs the constant subscripts it was built from, and a sibling this
+// pass has no member spelling for keeps its own cast. Pinned because the alternative was built and
+// measured — refusing a base whose siblings it cannot spell costs
+// kleod:ProcessInputAndUpdateEntities 284 → 306 and protects no row on the 948-row bench.
+test('a variable-subscript sibling keeps its own cast beside the respelled member', () => {
+  const MIXED = fn([
+    ret(idx(cbase(50345232), 4, 4, { operandOff: 16 })),
+    ret({ k: 'index', base: cbase(50345232), idx: { k: 'var', name: 'a0' }, width: 4, signed: false }),
+  ]);
+  expect(offmemberBases(MIXED)).toEqual(['c:50345232']);
+  const src = cBackend.emit(spellOperandMembers(MIXED)!);
+  expect(src).toContain('((struct Off0 *)50345232)->m16');
+  // the sibling is untouched — it reads the bytes it always read, through its own cast
+  expect(src).toContain('((s32 *)50345232)[a0]');
+  // and the declaration describes only what it governs: one member, no claim about the sibling
+  expect(
+    spellOperandMembers(MIXED)!
+      .structs!.at(-1)!
+      .fields.map((f) => f.name),
+  ).toEqual(['_pad0', 'm16']);
+});
+
+// A base read ONLY through a variable subscript reaches no site at all, so it is never a key and
+// never a declaration — the `order` walk only ever sees constant subscripts.
+test('a base read only through a variable subscript is not a key', () => {
+  const ONLY_VAR = fn([ret({ k: 'index', base: cbase(64), idx: { k: 'var', name: 'a0' }, width: 4, signed: false })]);
+  expect(offmemberBases(ONLY_VAR)).toEqual([]);
+  expect(spellOperandMembers(ONLY_VAR)).toBeNull();
 });
 
 // ── the synthesized name ───────────────────────────────────────────────────────────────────

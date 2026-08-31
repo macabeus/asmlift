@@ -39,18 +39,28 @@
 // where the asm read it. `unspellable-layout` refuses that, and it is the table's only sound gate.
 //
 // REFUSAL. `spellOperandMembers` returns `null` when no base was admitted, so a function with no
-// eligible site contributes no candidate and costs nothing. A base with ANY ineligible access is
-// refused WHOLE rather than half-respelled, and "any access" means EVERY access through that base
-// expression — a variable subscript and a `lead`-prefixed one included, which is what
-// `mixed-access` is for. An earlier version of this pass filtered those out of `collect` before
-// the gates ever saw them, so the seating check judged a partial population and the emitted C
-// carried one address through two contradictory fictional types
-// (`((struct Off0 *)&gEntity)->m12` beside `((u8 *)&gEntity)[a0 * 28 + 17]`). The declaration now
-// describes every subscript through the key it was minted for.
+// eligible site contributes no candidate and costs nothing.
 //
-// It still does NOT describe every access to the ADDRESS: a struct-array element off the same
-// numeric constant reaches it through a cast, which is a different base expression and a different
-// key, and stays as it was.
+// WHAT THE DECLARATION GOVERNS, stated exactly, because an earlier version of this header claimed
+// more than the code does ("a base with ANY ineligible access is refused WHOLE"). It governs the
+// CONSTANT SUBSCRIPTS this pass grouped under one base expression, and nothing else. A sibling
+// access through the same address that this pass has no member spelling for — a variable
+// subscript, a `lead`-prefixed one — is left exactly as it was, keeping its own cast, and a
+// struct-array element off the same numeric constant reaches the address through a different base
+// expression and so a different key entirely. So one address really can leave here spelled two
+// ways: `((struct Off0 *)&gEntity)->m12` beside `((u8 *)&gEntity)[a0 * 28 + 17]`.
+//
+// THAT IS UGLY AND IT IS NOT UNSOUND, and the distinction is the whole reason it stayed. Every
+// access carries its own cast, so no access reads a byte it did not read before; the seating check
+// below judges the accesses the declaration is built FROM, which are exactly the accesses
+// respelled through it, so its argument is over a total population of what it governs. The
+// contradiction is between two FICTIONAL TYPES over one address, which is a readability claim —
+// `quality`'s clientele, not a gate's.
+//
+// PRICED, because the refusal was built and measured before it was dropped. Refusing a base whose
+// siblings it cannot spell removes `a:gCallbackQueue` from `kleod:ProcessInputAndUpdateEntities`
+// and costs that row 284 → 306; over the 948-row bench it protects no row at all. A gate needs a
+// row it protects, and this one had one row it costs and none it saves.
 //
 // ALL-OR-NOTHING PER FUNCTION, and that is a PRICE rather than a property. Every admitted base is
 // respelled together in one candidate, so a function with two admitted bases where the target
@@ -77,13 +87,10 @@ interface Site {
   operandOff?: number;
 }
 
-/** One base and everything observed through it. `other` counts the accesses this pass has no
- *  member spelling for — a variable subscript, a `lead`-prefixed one — which are what make the
- *  base's population partial and so refuse it whole. */
+/** One base expression and the constant-subscript accesses observed through it. */
 interface Group {
   base: Expr;
   sites: Site[];
-  other: number;
 }
 
 /** The identity of an access's base, for grouping. Leaf bases key by value; everything else keys
@@ -104,9 +111,6 @@ export interface OffmemberBase {
   indexCarriesMore: boolean;
   /** the accesses cannot be declared as a plain C struct seating each at its own offset */
   unspellableLayout: boolean;
-  /** some access through this base is not a constant subscript this pass can spell as a member,
-   *  so the declared struct would describe only part of what the base is read through */
-  mixedAccess: boolean;
   /** the base, or a cell read through it, lies inside the target's declared device-register
    *  window */
   deviceBase: boolean;
@@ -133,13 +137,6 @@ export const OFFMEMBER_GATES: readonly Gate<OffmemberBase>[] = [
     sound: true,
     guardedBy: 'offmember.test.ts: device-base: a cell inside the declared device window is refused, ablating admits',
     rejects: (c) => c.deviceBase,
-  },
-  {
-    id: 'mixed-access',
-    why: 'a base also read through a subscript this pass cannot spell would be described by half a struct',
-    sound: true,
-    guardedBy: 'offmember.test.ts: mixed-access: a variable-subscript sibling refuses the WHOLE base',
-    rejects: (c) => c.mixedAccess,
   },
   {
     id: 'no-operand-off',
@@ -242,28 +239,25 @@ function layoutFor(name: string, sites: readonly Site[]): StructType {
   return { name, fields };
 }
 
-/** EVERY `index` access, grouped by base, in first-appearance order — not only the ones this pass
- *  can spell. An access with a variable subscript or a `lead` has no member spelling, but it is
- *  still a read through the base whose layout the declaration claims to describe, so it is
- *  COUNTED here and refused by `mixed-access` rather than filtered out before the gates run.
- *  Filtering it out is what let one address be spelled through two contradictory types. */
+/** Every CONSTANT-SUBSCRIPT `index` access, grouped by base, in first-appearance order — the
+ *  accesses this pass has a member spelling for, which are exactly the ones the declaration it
+ *  builds will govern. A sibling with a variable subscript or a `lead` is not one of them and is
+ *  not counted: it keeps its own cast and this pass never rewrites it (see the header's
+ *  "WHAT THE DECLARATION GOVERNS"). The base EXPRESSION is kept beside the sites because the
+ *  device-window gate reads the address it is, which a key string cannot answer. */
 function collect(sfn: SFn): { order: string[]; groups: Map<string, Group> } {
   const order: string[] = [];
   const groups = new Map<string, Group>();
   for (const e of walkExprs(sfn.body)) {
-    if (e.k !== 'index') {
+    if (e.k !== 'index' || e.idx.k !== 'const' || e.lead !== undefined) {
       continue;
     }
     const k = baseKey(e.base);
     let g = groups.get(k);
     if (!g) {
       order.push(k);
-      g = { base: e.base, sites: [], other: 0 };
+      g = { base: e.base, sites: [] };
       groups.set(k, g);
-    }
-    if (e.idx.k !== 'const' || e.lead !== undefined) {
-      g.other++;
-      continue;
     }
     g.sites.push({ off: e.idx.value * e.width, width: e.width, signed: e.signed, operandOff: e.operandOff });
   }
@@ -300,10 +294,9 @@ function admit(
     const rejected = firstRejection(gates, {
       key,
       leafBase: key.startsWith('a:') || key.startsWith('c:'),
-      missingOperandOff: list.length === 0 || list.some((s) => s.operandOff === undefined),
+      missingOperandOff: list.some((s) => s.operandOff === undefined),
       indexCarriesMore: list.some((s) => s.operandOff !== undefined && s.operandOff !== s.off),
       unspellableLayout: !seatable(list),
-      mixedAccess: g.other > 0,
       deviceBase: touchesDeviceWindow(g, opts.deviceRegisters),
     });
     if (rejected === null) {
