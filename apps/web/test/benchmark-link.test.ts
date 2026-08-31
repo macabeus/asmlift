@@ -19,7 +19,7 @@ test("a row's share is the exact playground state and round-trips through the pe
     name: 'add1',
     asm: '00000000 <add1>:\n   0:\tjr\tra\n',
   });
-  // The shell hands `share` to the editor and the editor re-encodes it into the `?s=` param — so it
+  // The shell hands `share` to the editor and the editor re-encodes it into the `s=` param — so it
   // must survive an encode/decode round-trip unchanged.
   expect(decodeShare(encodeShare(share))).toEqual(share);
 });

@@ -8,7 +8,7 @@ A **matching decompiler**: assembly in, C / C++ / Pascal out, aiming for source 
 **byte-identical** to the original object. Designed for retro game decompilation.
 
 Check the [playground](https://macabeus.github.io/asmlift/) to see it in action or the
-[benchmark](https://macabeus.github.io/asmlift/?view=benchmark) report to see its current performance.
+[benchmark](https://macabeus.github.io/asmlift/#view=benchmark) report to see its current performance.
 
 <img width="1201" height="984" alt="image" src="https://github.com/user-attachments/assets/df5e28ad-90dc-47bb-9ce6-d6c6a76bcc1a" />
 

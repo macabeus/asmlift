@@ -3,8 +3,9 @@
 // ranking worker stays warm) and the Benchmark (lazy — ECharts + the committed results.json are
 // heavy, so a plain playground visit never downloads them; mounted on first visit, then kept alive
 // and hidden). Because the header, tabs, and container are the shell's, toggling views never shifts
-// the page frame. Navigation state lives in the query string via nuqs: `?view=benchmark` selects
-// the Benchmark (absent = playground, the default), `?s=<lz-string>` is the playground permalink.
+// the page frame. Navigation state lives in the URL FRAGMENT via nuqs (see hash-adapter.ts):
+// `#view=benchmark` selects the Benchmark (absent = playground, the default), `#s=<lz-string>` is
+// the playground permalink.
 //
 // The header follows the shared design system (Mizuchi / Transmuter / gba-kit): a rounded-2xl slate
 // gradient panel with the logo (glow behind), a gradient-clip title, subtitle, right-side content,

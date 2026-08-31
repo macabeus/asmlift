@@ -3,6 +3,8 @@
 // FunctionDetail — is a shareable link. Defaults are cleared from the URL (nuqs clearOnDefault).
 import { type inferParserType, parseAsArrayOf, parseAsString, parseAsStringLiteral } from 'nuqs';
 
+import { hashToSearchParams } from '../../../shared/utils/hash-params';
+
 export const TAB_IDS = ['overview', 'explorer', 'gap', 'methodology'] as const;
 export type TabId = (typeof TAB_IDS)[number];
 export const tabParser = parseAsStringLiteral(TAB_IDS).withDefault('overview');
@@ -59,12 +61,13 @@ export type ExplorerPreset = Partial<Filters>;
 export const FEATURE_TERM_PARSER = parseAsString.withDefault('');
 export const FEATURE_TERM_KEY = 'about';
 
-/** Link that opens the definition drawer for `id`. A real `href`, so middle-click and copy-link
- *  work; built from the CURRENT query, so opening one never discards the filters already set. */
-export function featureHref(id: string, search = typeof window === 'undefined' ? '' : window.location.search): string {
-  const params = new URLSearchParams(search);
+/** Link that opens the definition drawer for `id` over the view `hash` describes: a real `href`,
+ *  so middle-click and copy-link work, carrying the filters already set. `hash` has to come from
+ *  `useCurrentHash` — read from `location` here it would be the view BEFORE the last change. */
+export function featureHref(id: string, hash: string): string {
+  const params = hashToSearchParams(hash);
   params.set(FEATURE_TERM_KEY, id);
-  return `?${params.toString()}`;
+  return `#${params.toString()}`;
 }
 
 /** A preset deep-link REPLACES the whole filter set: spread this under it to reset the rest. */
