@@ -98,11 +98,18 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
   Measured now: **every token that names an existing path**, whether or not anyone listed the flag
   in front of it (`--include-directory inc`, `-iframework inc`, a flag invented after this was
   written); every ATTACHED operand of the flags in the de-gluer table (`-Iinc`, `--sysroot=dir`,
-  `-Wa,-Iinc`); the CONTENTS of a `@response` or `-specs` file, not just its bytes; the directory
-  an injected `-include` header resolves its own quoted includes from; the DIRECTORY of a glob,
-  including one with no `/` in it (`cat *.h` → the cwd); an operand held in a variable the template
-  assigns, quoted with a space in it, or written `~/…`; the base a `cd` in the template moves to;
-  and what `CPATH` and friends point AT.
+  `-Wa,-Iinc`); the CONTENTS of a `@response` or `-specs` file, scanned BOTH ways the outer
+  template is — the de-gluer table and every token tried as a path — because scanning a body with
+  the table alone made a response file the safer place to hide an input; the directory a
+  SUBDIRECTORY-qualified injected `-include` header resolves its own quoted includes from; the
+  DIRECTORY PART of a glob (`cat inc/*.h`); an operand held in a variable the template assigns,
+  quoted with a space in it, or written `~/…`; the base a `cd` in the template moves to; and what
+  `CPATH` and friends point AT.
+  A shell COMMENT is not scanned — `sh` drops from an unquoted `#` to the end of the line, so
+  nothing in it is read, and scanning it put the project's own `build/` tree in the namespace
+  (every rebuild cold) or refused the whole cache over the word `docker` in an English sentence.
+  Editing the comment still moves the namespace: the template's raw bytes are hashed
+  unconditionally.
   The cache still refuses, out loud, when the compile is not a pure function of its input —
   `[candcache] REFUSED label=command reason=object-is-not-a-pure-function-of-its-input` is what
   `ido7.1` gets, because it writes the absolute path of its input `.c` into the object — when a
@@ -129,9 +136,32 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
   LoadBGTilemapData); the compiler's own built-in search directories, which every corpus
   template puts out of reach with `-nostdinc`; and an opaque runtime this build has never heard of
   — the refusal above is a deny-list of process names, and a deny-list's miss is on the
-  stale-object side. If your command reads something in one of those shapes, declare
+  stale-object side.
+  **THE PROJECT ROOT is on this list on purpose, with a number.** A glob with no directory part
+  (`cat *.h`, `rm -f *.o`) expands in the project root, and an injected header spelled without a
+  directory (`-include global.h`) resolves its quoted includes from it — and the project root is
+  the whole checkout, not an include directory anyone named. Measured on one box: 29,126 entries
+  at `pokeemerald`, 25,901 at `af`, 47,211 at a real klonoa dev checkout, all over the
+  20,000-entry stamp budget, so treating `.` as an operand REFUSED those projects outright; its
+  depth-0 files alone are the baserom (26 files / 131,114,078 bytes at `pokeemerald`), a quarter
+  of the 512 MiB budget hashed per process for a file no compile reads; and where it did fit, the
+  namespace tracked `build/` and `.git/`, so every rebuild was a cold start. A glob or an injected
+  header WITH a directory part (`cat inc/*.h`, `-include inc/pre.h`) is bounded and is measured —
+  though only one level: a `#include "../other/k.h"` from inside that header escapes it.
+  One FALSE POSITIVE is kept for the same asymmetry: the container-runtime check reads every
+  token, so a runtime word inside a quoted string (`echo "no ssh here"`) refuses the project's
+  cache. That is loud and costs a cold start, and a command-position-only rule would silently miss
+  `env X=1 docker run`.
+  If your command reads something in one of those shapes, declare
   `tools.asmlift.candidateCache: off`, or run with `ASMLIFT_CANDCACHE=verify` — it compiles anyway
   and fails on any disagreement — or `ASMLIFT_CANDCACHE=0`.
+  **What `verify` can and cannot evidence for this bullet.** A verify run compares stored bytes
+  against fresh for every key it stores — but 0 of 66,816 LoadBGTilemapData candidate TUs carry an
+  `#include`, so the include directory is never read for any key stored, and a clean verify run is
+  zero evidence about the directory measurement specifically. It evidences the toolchain, the
+  environment and the template. The evidence for the directory measurement is the offline poison
+  suite (`packages/cli/test/offline/candcache-dirflags.test.ts`), which drives each shape through
+  a real compile across an edit.
 - **The store is bounded, but only between runs.** `ASMLIFT_CANDCACHE_MAX_MB` (default 4096)
   counts the distinct object bytes plus one allocation block per stored key — 77% of a warm store
   is negative entries, which weigh nothing logically and cost a block each. It is enforced ONCE per
