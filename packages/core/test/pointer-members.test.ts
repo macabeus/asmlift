@@ -71,7 +71,66 @@ describe('arithmetic on a pointer-declared member', () => {
   });
 });
 
+// store the member back into its own cell after advancing it by 4 bytes
+const ADVANCE = (off: number) =>
+  `f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1, #${off}]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1, #${off}]\n` +
+  `\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
+
+describe('the guard casts for the ADDRESS and casts back for the ASSIGNMENT', () => {
+  test('a pointer member advanced by bytes is assigned back through `void *`', () => {
+    // `gBgPtrs.pMap = (u8 *)gBgPtrs.pMap + 4` is the right address and the wrong TYPE: agbcc says
+    // `assignment from incompatible pointer type` and exits 1 under the `-Werror` template this
+    // project's own compiler config uses. `void *` is assignment-compatible with any declaration
+    // of the cell, and all three spellings compile to byte-identical objects.
+    const src = run(ADVANCE(4));
+    expect(src).toContain('gBgPtrs.pMap = (void *)((u8 *)gBgPtrs.pMap + 4);');
+  });
+
+  test('a pointer GLOBAL is restored the same way — one rule, both populations', () => {
+    const info: SymbolInfo = {
+      name: 'gPtr',
+      kind: 'data',
+      declared: true,
+      shape: 'pointer',
+      pointee: { structName: 'Inner', size: 8, volatile: false, const: false, layout: [] },
+    };
+    const asm = `f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1]\n` +
+      `\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
+    expect(decompile('f', asm, ARMV4T_AGBCC, { symbols: mapWith(info) }).source).toContain(
+      'gPtr = (void *)((u8 *)gPtr + 4);',
+    );
+  });
+
+  test('a NON-pointer cell taking the same value is left alone — the cast is the declaration\'s', () => {
+    // `count` is an `s32`: nothing about the assignment is a pointer, so nothing is restored
+    const asm = `f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1, #0x8]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1, #0x8]\n` +
+      `\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
+    expect(run(asm)).not.toContain('void *');
+  });
+});
+
 describe('refusals — anything the map does not declare a pointer keeps its spelling', () => {
+  test('a `pointer` flag at a size the DECLARATION does not declare a pointer is not one', () => {
+    // isPtrField tests TWO facts. symbolFieldType declares a pointer only at size 4, so a
+    // `pointer` member of size 2 declares `u16 p;` — and trusting the flag alone spelled
+    // `gW.p = (u8 *)gW.p + 4`, pointer arithmetic on a value its own declaration calls an integer.
+    const info: SymbolInfo = {
+      name: 'gW',
+      kind: 'data',
+      declared: true,
+      shape: 'struct',
+      structName: 'W',
+      size: 4,
+      layout: [{ name: 'p', offset: 0, size: 2, signed: false, pointer: true, pointeeSize: 2 }],
+    };
+    const asm = `f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tadd\tr0, r0, #0x4\n\tstrh\tr0, [r1]\n` +
+      `\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
+    const src = decompile('f', asm, ARMV4T_AGBCC, { symbols: mapWith(info) }).source;
+    expect(src).toContain('gW.p = gW.p + 4;');
+    expect(src).not.toContain('u8 *');
+  });
+
+
   test('a member declared a plain scalar is left alone', () => {
     // `count` is an s32 member: the asm added bytes to an integer, and so does the emitted C
     const src = run(MEMBER_WALK(8, 0));

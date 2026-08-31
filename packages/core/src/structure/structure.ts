@@ -65,6 +65,7 @@ import {
   arrayInnerExtents,
   declaredFields,
   isArrayField,
+  isPtrField,
   isBitfieldField,
   isScalarCellSize,
   pointeeFields,
@@ -323,6 +324,14 @@ function declaredMemberOf(x: Expr, sym: SymRenderCtx | undefined): DeclaredField
   return fields?.find((f) => f.name === x.name) ?? null;
 }
 
+/** The map member a `field` node names when the declaration makes it a POINTER — {@link
+ *  isPtrField} being the shared two-fact test, so this and the synthesized declaration cannot
+ *  disagree about what a member is. */
+function ptrMemberDecl(x: Expr, sym: SymRenderCtx | undefined): DeclaredField | null {
+  const f = declaredMemberOf(x, sym);
+  return f !== null && isPtrField(f) ? f : null;
+}
+
 /** A map-declared POINTER MEMBER as the additive lowering renders its VALUE: the bare `gSym.pBuf`,
  *  or that member wearing the byte-pointer / u32 cast the arithmetic guard adds. Both denote the
  *  same address and add BYTES to it, so both fold here; a cast to any OTHER pointer type is not
@@ -337,8 +346,8 @@ function ptrMemberValue(x: Expr, sym: SymRenderCtx): { expr: Expr; field: Declar
     }
     bare = x.e;
   }
-  const f = declaredMemberOf(bare, sym);
-  return f?.pointer === true ? { expr: bare, field: f } : null;
+  const f = ptrMemberDecl(bare, sym);
+  return f !== null ? { expr: bare, field: f } : null;
 }
 
 /** Decompose an access base into "the VALUE of a map-declared POINTER MEMBER + a constant byte
@@ -1339,7 +1348,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  explicit (`(u8 *)gPtr + K`). `ctype` cannot see any of this: it types only params/locals, so
    *  both spellings render `undefined` there. */
   const isPtrValue = (x: Expr): boolean =>
-    (x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer') || declaredMemberOf(x, symCtx)?.pointer === true;
+    (x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer') || ptrMemberDecl(x, symCtx) !== null;
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
@@ -3148,6 +3157,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // EFFECTFUL op whose result nothing consumes (a void/discarded call, and an `opaque` standing for
   // an instruction asmlift could not model); and MATERIALIZED defs — a call/load whose value cannot
   // soundly render at its use is assigned to its named temp here, at its own program position.
+  /** A pointer VALUE assigned into a map-declared pointer CELL, spelled so the assignment is legal
+   *  against ANY declaration of that cell. The byte-arithmetic guard renders such a right-hand
+   *  side `(u8 *)gS.pBuf + K` — the right ADDRESS in every world, which is the whole point of it,
+   *  and a `u8 *` where the declaration says `u16 *`. READING one is fine (C converts an object
+   *  pointer freely under a deref, a call argument or a compare); ASSIGNING one is `warning:
+   *  assignment from incompatible pointer type`, and this project's own `-Werror` compiler
+   *  template makes that FATAL — so a source that scores clean here fails to build in the tree a
+   *  user pastes it into, which no score gate can observe.
+   *
+   *  `void *`, NOT the map's declared pointee: it is the one target assignment-compatible with any
+   *  object-pointer declaration, the same "same answer in every world" property the guard that
+   *  made the `u8 *` exists for. Trusting the map's pointee would put the spelling back in one
+   *  world. It costs nothing: agbcc compiles `p = (void *)((u8 *)p + 4)` and the warning-carrying
+   *  `p = (u8 *)p + 4` to BYTE-IDENTICAL objects (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
+   *  -fprologue-bugfix`), so the fix is invisible to the differ and visible to the compiler. */
+  const intoPtrCell = (lval: Expr, value: Expr): Expr => {
+    const cell =
+      lval.k === 'var' ? symCtx?.info(lval.name)?.shape === 'pointer' : ptrMemberDecl(lval, symCtx) !== null;
+    const vt = ctype(value);
+    return cell && vt?.kind === 'ptr' && vt.to.kind !== 'void' ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
+  };
+
   const sideEffects = (b: Block): Stmt[] => {
     const out: Stmt[] = [];
     for (const op of b.ops) {
@@ -3179,12 +3210,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         );
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
-          out.push({ k: 'assign', name: lval0.name, value: expr(op.operands[1]) });
+          out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });
           continue;
         }
         // signedness mirrors recoverTypes' store seed (word ⇒ signed, narrow ⇒ unsigned), so an
         // inserted cast declares the same scalar the recovered pointee would have.
-        out.push({ k: 'store', lval: lval0, value: expr(op.operands[1]) });
+        out.push({ k: 'store', lval: lval0, value: intoPtrCell(lval0, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {
         const elemSize = op.attrs.elemSize as number;
         out.push({
