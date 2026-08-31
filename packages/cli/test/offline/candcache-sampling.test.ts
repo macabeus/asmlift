@@ -16,6 +16,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
+// A BLOCKING-spawnSync suite in a pool whose config says there are none — the same hazard the rest
+// of the candcache family carries the same guard for: the end-to-end cases below drive real `sh`
+// compiles through `compileFromCommand`, and this file's neighbours in `test:offline` run in
+// parallel worker forks. MEASURED here: under a 120 ms timeout two cases fail with `Test timed out`
+// and nothing else, which reads like a soundness failure and is not — this file went red exactly
+// once on a loaded box before the guard was added.
+vi.setConfig({ testTimeout: 120_000 });
+
 type CandCacheModule = typeof import('../../src/candcache');
 
 const roots: string[] = [];
