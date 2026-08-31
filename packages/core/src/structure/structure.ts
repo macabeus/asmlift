@@ -65,8 +65,8 @@ import {
   arrayInnerExtents,
   declaredFields,
   isArrayField,
-  isPtrField,
   isBitfieldField,
+  isPtrField,
   isScalarCellSize,
   pointeeFields,
   scalarCellType,
@@ -203,6 +203,15 @@ function elementIndex(residual: Expr, elemSize: number): Expr | null {
 interface SymRenderCtx {
   info(name: string): SymbolInfo | undefined;
   noteGlobal(name: string, type: IrType): void;
+  /** may {@link ptrMemberElement} spell a whole-element subscript through a pointer member — the
+   *  `/no-ptr-elem` arm's OFF switch, off the `spellPtrMemberElements` structure option. */
+  ptrElements: boolean;
+  /** The members a symbol's declaration seats — a struct global's own, or a pointer global's
+   *  pointee's — MEMOIZED per symbol. `declaredFields` validates every member and returns a fresh
+   *  sorted copy on every call, and `isPtrValue` now asks it for BOTH operands of every binary
+   *  node lowered, so the uncached lookup was an O(n log n) allocation on the hot path of a
+   *  function this project's slowest row scores 9,504 times. */
+  fieldsOf(name: string): DeclaredField[] | null;
 }
 
 // ── interior spelling through a POINTER-shaped global ────────────────────────────────────────
@@ -313,15 +322,21 @@ function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefi
  *  shared gate their spelling passed: `gSym.member` off a struct global's {@link declaredFields},
  *  `gPtr->member` off the pointee's ({@link pointeeFields}). A synthesized `field_K` — the
  *  recovered-struct spelling, which no map declares — resolves to null, and so does any base that
- *  is not a map-shaped global, which is what makes every caller refuse rather than guess. */
+ *  is not a map-shaped global, which is what makes every caller refuse rather than guess.
+ *
+ *  THE POINTEE ARM IS UNREACHABLE TODAY, measured rather than assumed: this resolver's only
+ *  callers want a POINTER member, and `pointeeAccess` gates every `gPtr->member` spelling on
+ *  `spellsAccessType(f.signed, …)`, which returns false for the `signed: undefined` a pointer
+ *  field carries. So no `field` node naming a pointer member of a pointee is ever produced, and
+ *  a pointer read one indirection down still spells `((s32 *)gQ)[1]`. The arm stays because it is
+ *  the GUARD, not the feature: the day `pointeeAccess` learns to spell a pointer member, the
+ *  byte-arithmetic rule that depends on this answer is already correct for it, where deleting it
+ *  would reopen the double-scaling hole silently. */
 function declaredMemberOf(x: Expr, sym: SymRenderCtx | undefined): DeclaredField | null {
   if (x.k !== 'field' || x.base.k !== 'var' || sym === undefined) {
     return null;
   }
-  const si = sym.info(x.base.name);
-  const fields =
-    si?.shape === 'struct' ? declaredFields(si.layout) : si?.shape === 'pointer' ? pointeeFields(si.pointee) : null;
-  return fields?.find((f) => f.name === x.name) ?? null;
+  return sym.fieldsOf(x.base.name)?.find((f) => f.name === x.name) ?? null;
 }
 
 /** The map member a `field` node names when the declaration makes it a POINTER — {@link
@@ -407,12 +422,29 @@ function ptrMemberBase(e: Expr, sym: SymRenderCtx): PtrMemberBase | null {
  *  moves no constant across an association agbcc will not redo: the address the C computes is the
  *  member's own value plus a single scaled index.
  *
- *  REFUSALS, each because no whole-element spelling expresses the address: a member with no
- *  declared pointee width (`void *` sizes nothing), an access of a DIFFERENT width than the
- *  element, a sub-word access whose signedness the declared pointee does not carry (the bare
- *  subscript has no cast, so the declaration is the only thing saying how it fills — the same
- *  argument bareArrayLead makes), a variable residual that is not element-scaled, and a constant
- *  the element width does not divide. All fall through to the honest byte forms. */
+ *  REFUSALS, and they are of TWO kinds, which an earlier version of this note ran together.
+ *
+ *  ADDRESS refusals — no whole-element spelling expresses the address at all: a variable residual
+ *  that is not element-scaled, and a constant the element width does not divide. Both address
+ *  MID-ELEMENT, so they fall through to the honest byte forms and must.
+ *
+ *  REACH refusals — the address IS expressible and this rule declines anyway: an access of a
+ *  DIFFERENT width than the declared element, and a sub-word access whose signedness the declared
+ *  pointee does not carry. Neither is soundness, and the note that called them soundness was
+ *  measurably wrong: `exprCType` types a `field` node `undefined` (it types params and locals),
+ *  so `derefStrideOk` is false for every base this rule produces and the backend ALWAYS emits the
+ *  reinterpret cast — `((u16 *)gB.pMap)[i + 157]`, cast included, is what the accepted case
+ *  spells. `((s32 *)gB.pMap)[i + K]` would be the same address and the same fill as the byte form
+ *  those two clauses fall back to, and the byte form the width clause produces already spells
+ *  `((s32 *)…)[157]` itself. What these two clauses actually encode is a REACH judgement — the
+ *  map says this pointer addresses an array of THESE, so the source probably wrote a subscript of
+ *  them — and a declaration-shaped access is where that judgement is most likely right. On a
+ *  STORE the signedness clause has no premise at all (a store extends nothing), so it withholds
+ *  the spelling from every `s8 *` / `s16 *` member store; that is left in place deliberately
+ *  rather than widened, because this rule is not byte-neutral (see `spellPtrMemberElements`) and
+ *  widening a non-neutral spelling's reach is a separate question a row has to ask.
+ *
+ *  And the whole rule refuses when `/no-ptr-elem` turns it off — the axis, not a preference. */
 function ptrMemberElement(
   baseExpr: Expr,
   carried: Expr | null,
@@ -421,6 +453,9 @@ function ptrMemberElement(
   signed: boolean,
   sym: SymRenderCtx,
 ): Extract<Expr, { k: 'index' }> | null {
+  if (!sym.ptrElements) {
+    return null;
+  }
   const pm = ptrMemberBase(baseExpr, sym);
   if (!pm || pm.field.pointeeSize !== width || (width < 4 && (pm.field.pointeeSigned ?? false) !== signed)) {
     return null;
@@ -1015,6 +1050,19 @@ export interface StructureOptions {
   // width the honest shift spelling is the one that matches, and the differ referees. Only the map
   // carries the names, so with no `symbols` this is normalized to false whatever a caller passes.
   spellBitfieldMembers?: boolean;
+  // Spell an element-scaled offset through a map-declared POINTER MEMBER as a whole-element
+  // subscript of it (`gBg.pMap[i + 157]`) rather than as the byte arithmetic it replaces. On by
+  // default; rank.ts enumerates the OFF spelling as the `/no-ptr-elem` axis.
+  //
+  // IT IS AN AXIS AND NOT A DEFAULT BECAUSE IT IS NOT BYTE-NEUTRAL, which is the bar the block
+  // comment above `spellablePointee` sets for a member spelling and which this rule was shipped
+  // without meeting. Compiled against agbcc (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
+  // -fprologue-bugfix`), `((u16 *)gB.pMap)[i + K]` and `*(u16 *)((i << 1) + (u8 *)gB.pMap + 2K)`
+  // are the same address and the same instruction COUNT at K = 0, 1 and 157 — and different
+  // objects at all three, differing in which register the `add` targets. Which side matches is
+  // per-function knowledge the asm does not carry, so both are emitted and the differ referees.
+  // Only the map declares a pointee width, so with no `symbols` this is normalized to false.
+  spellPtrMemberElements?: boolean;
   // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
   // (a store to a different named global), instead of caching it in a local. Off by default;
   // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
@@ -1142,6 +1190,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     anchorLoopEntryConsts = false,
     littleEndian = true,
     spellBitfieldMembers: bitfieldSpellingWanted = true,
+    spellPtrMemberElements: ptrElementSpellingWanted = true,
     rereadGlobals = false,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
@@ -1336,8 +1385,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // Symbol-map rendering context (memAccess/arrayAccess): shape lookups + the env registry for
   // array-shaped globals actually referenced (they surface as SFn.globals — typed, undeclared).
   const shapedGlobalTypes = new Map<string, IrType>();
+  const declaredFieldCache = new Map<string, DeclaredField[] | null>();
   const symCtx: SymRenderCtx | undefined = symbols
-    ? { info: (n) => symbols.get(n), noteGlobal: (n, t) => shapedGlobalTypes.set(n, t) }
+    ? {
+        info: (n) => symbols.get(n),
+        noteGlobal: (n, t) => shapedGlobalTypes.set(n, t),
+        ptrElements: ptrElementSpellingWanted,
+        fieldsOf: (n) => {
+          const hit = declaredFieldCache.get(n);
+          if (hit !== undefined) {
+            return hit;
+          }
+          const si = symbols.get(n);
+          const fields =
+            si?.shape === 'struct'
+              ? declaredFields(si.layout)
+              : si?.shape === 'pointer'
+                ? pointeeFields(si.pointee)
+                : null;
+          declaredFieldCache.set(n, fields);
+          return fields;
+        },
+      }
     : undefined;
 
   /** A value the MAP declares a pointer: a bare `gSym` naming a pointer global (the VALUE of a
@@ -3173,8 +3242,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  `p = (u8 *)p + 4` to BYTE-IDENTICAL objects (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
    *  -fprologue-bugfix`), so the fix is invisible to the differ and visible to the compiler. */
   const intoPtrCell = (lval: Expr, value: Expr): Expr => {
-    const cell =
-      lval.k === 'var' ? symCtx?.info(lval.name)?.shape === 'pointer' : ptrMemberDecl(lval, symCtx) !== null;
+    const cell = lval.k === 'var' ? symCtx?.info(lval.name)?.shape === 'pointer' : ptrMemberDecl(lval, symCtx) !== null;
     const vt = ctype(value);
     return cell && vt?.kind === 'ptr' && vt.to.kind !== 'void' ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
   };

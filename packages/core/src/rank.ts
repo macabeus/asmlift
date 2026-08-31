@@ -836,12 +836,19 @@ export function enumerateCandidates(
   // 2×2 cross: the fourth point costs another quarter of the whole fan — the anchor dimension
   // multiplies everything below it — and no row has been shown to need it.
   const senseAnchor = [
-    { suffix: '', sense: defSense, anchor: false, entry: false, bitfields: true },
-    { suffix: '/flip-branch', sense: !defSense, anchor: false, entry: false, bitfields: true },
-    { suffix: '/defsite', sense: defSense, anchor: true, entry: false, bitfields: true },
-    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, entry: false, bitfields: true },
-    { suffix: '/defsite/loop-entry', sense: defSense, anchor: true, entry: true, bitfields: true },
-    { suffix: '/flip-branch/defsite/loop-entry', sense: !defSense, anchor: true, entry: true, bitfields: true },
+    { suffix: '', sense: defSense, anchor: false, entry: false, bitfields: true, ptrElems: true },
+    { suffix: '/flip-branch', sense: !defSense, anchor: false, entry: false, bitfields: true, ptrElems: true },
+    { suffix: '/defsite', sense: defSense, anchor: true, entry: false, bitfields: true, ptrElems: true },
+    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, entry: false, bitfields: true, ptrElems: true },
+    { suffix: '/defsite/loop-entry', sense: defSense, anchor: true, entry: true, bitfields: true, ptrElems: true },
+    {
+      suffix: '/flip-branch/defsite/loop-entry',
+      sense: !defSense,
+      anchor: true,
+      entry: true,
+      bitfields: true,
+      ptrElems: true,
+    },
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
@@ -879,6 +886,27 @@ export function enumerateCandidates(
   const bitfieldCands = mapHasBitfields
     ? [...baseSense, ...baseSense.map((s) => ({ ...s, suffix: `${s.suffix}/no-bitfield`, bitfields: false }))]
     : baseSense;
+  // `/no-ptr-elem` — keep the honest byte arithmetic where the map would spell a whole-element
+  // subscript through a pointer MEMBER (`gBg.pMap[i + 157]`). The two are the same address and
+  // DIFFERENT objects — measured against agbcc, they differ in which register the `add` targets at
+  // every constant tested — so which side matches is per-function knowledge the asm does not
+  // carry, and the differ referees it exactly as it referees `/no-bitfield`. Gated on the map
+  // declaring a pointer field the rule could read (a POINTEE WIDTH of 1, 2 or 4 — nothing else is
+  // an element), so the 2x cross is paid by the functions it can help; the dedup collapses every
+  // variant where no element spelling fired.
+  const mapHasSizedPtrFields =
+    opts.symbols !== undefined &&
+    [...opts.symbols.values()].some((infos) =>
+      infos.some((i) =>
+        [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some(
+          (f) =>
+            f.pointer === true && f.size === 4 && (f.pointeeSize === 1 || f.pointeeSize === 2 || f.pointeeSize === 4),
+        ),
+      ),
+    );
+  const ptrElemCands = mapHasSizedPtrFields
+    ? [...bitfieldCands, ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/no-ptr-elem`, ptrElems: false }))]
+    : bitfieldCands;
   // `/connective`'s enumeration gate, read off the pass's OWN refusal rather than from a second
   // copy of its matcher: the fold reports every site where the PAIRWISE comparison-tree refusal is
   // the ONE thing stopping it — asked after `sameArgs` and the negatability check, so a report
@@ -947,8 +975,8 @@ export function enumerateCandidates(
   // arms are always emitted and the differ referees, never a default — the dedup below collapses
   // a pair wherever the axis changed nothing.
   const probeDefs = defOpMap(probe);
-  type AxisCand = (typeof bitfieldCands)[number] & Record<StructuringAxis['flag'], boolean>;
-  let axisCands: AxisCand[] = bitfieldCands.map((s) => ({
+  type AxisCand = (typeof ptrElemCands)[number] & Record<StructuringAxis['flag'], boolean>;
+  let axisCands: AxisCand[] = ptrElemCands.map((s) => ({
     ...s,
     reread: false,
     inplace: false,
@@ -1695,7 +1723,10 @@ export function enumerateCandidates(
     // worth 512 of LoadBGTilemapData's 1536 structurings under docs/ranked-repro.md's flags.
     // Declining is not pruning — same posture as the signedness decline below, and the same
     // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
-    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields);
+    // …and `/no-ptr-elem` names a spelling only the MAP makes available, for the same reason:
+    // structure() normalizes `spellPtrMemberElements` to false without `symbols`, so both arms
+    // structure the identical tree on the raw variant.
+    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields && s.ptrElems);
     const treeOwnedFold = treeOwnedIn(sv.symbols);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
@@ -1846,6 +1877,7 @@ export function enumerateCandidates(
               anchorConstCopies: s.anchor,
               anchorLoopEntryConsts: s.entry,
               spellBitfieldMembers: s.bitfields,
+              spellPtrMemberElements: s.ptrElems,
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
             });
           } catch (e) {
@@ -1854,6 +1886,7 @@ export function enumerateCandidates(
               !s.anchor &&
               !s.join &&
               s.bitfields &&
+              s.ptrElems &&
               STRUCTURING_AXES.every((ax) => !s[ax.flag])
             ) {
               throw e; // the base lift's base axes keep their behavior: a failure aborts the row

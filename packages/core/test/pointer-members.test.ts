@@ -14,6 +14,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { type SymbolInfo, type SymbolMap, type SymbolStructField } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -94,16 +95,18 @@ describe('the guard casts for the ADDRESS and casts back for the ASSIGNMENT', ()
       shape: 'pointer',
       pointee: { structName: 'Inner', size: 8, volatile: false, const: false, layout: [] },
     };
-    const asm = `f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1]\n` +
+    const asm =
+      `f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1]\n` +
       `\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
     expect(decompile('f', asm, ARMV4T_AGBCC, { symbols: mapWith(info) }).source).toContain(
       'gPtr = (void *)((u8 *)gPtr + 4);',
     );
   });
 
-  test('a NON-pointer cell taking the same value is left alone — the cast is the declaration\'s', () => {
+  test("a NON-pointer cell taking the same value is left alone — the cast is the declaration's", () => {
     // `count` is an `s32`: nothing about the assignment is a pointer, so nothing is restored
-    const asm = `f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1, #0x8]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1, #0x8]\n` +
+    const asm =
+      `f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1, #0x8]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1, #0x8]\n` +
       `\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
     expect(run(asm)).not.toContain('void *');
   });
@@ -123,13 +126,13 @@ describe('refusals — anything the map does not declare a pointer keeps its spe
       size: 4,
       layout: [{ name: 'p', offset: 0, size: 2, signed: false, pointer: true, pointeeSize: 2 }],
     };
-    const asm = `f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tadd\tr0, r0, #0x4\n\tstrh\tr0, [r1]\n` +
+    const asm =
+      `f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tadd\tr0, r0, #0x4\n\tstrh\tr0, [r1]\n` +
       `\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n`;
     const src = decompile('f', asm, ARMV4T_AGBCC, { symbols: mapWith(info) }).source;
     expect(src).toContain('gW.p = gW.p + 4;');
     expect(src).not.toContain('u8 *');
   });
-
 
   test('a member declared a plain scalar is left alone', () => {
     // `count` is an s32 member: the asm added bytes to an integer, and so does the emitted C
@@ -207,5 +210,40 @@ describe('refusals — anything that does not land on an element boundary keeps 
       '\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n\tadd\tr0, r0, r2\n\tmov\tr3, #0x0\n' +
       '\tldrsh\tr0, [r0, r3]\n\tbx\tlr\n.L1:\n\t.word\t0x03004790\n';
     expect(run(asm)).not.toContain('gBgPtrs.pMap)[');
+  });
+});
+
+// ── `/no-ptr-elem`: the element spelling is an AXIS, not a default ──────────────────────────────
+// The subscript and the byte arithmetic it replaces are the same address and DIFFERENT objects —
+// compiled against agbcc they differ in which register the `add` targets, at every constant
+// tested. So both are emitted and the differ referees, exactly as `/no-bitfield` does for the
+// member read it names.
+describe('the element spelling is enumerated as an axis the differ referees', () => {
+  const ELEM_WALK =
+    `f:\n\tldr\tr1, .L1\n\tldr\tr1, [r1, #4]\n\tlsl\tr0, r0, #1\n\tadd\tr0, r0, r1\n` +
+    `\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]\n\tbx\tlr\n` +
+    `.L1:\n\t.word\t0x03004790\n`;
+
+  test('both arms are candidates, and they are DIFFERENT sources', () => {
+    const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: mapWith(ptrsInfo()) });
+    const on = cands.find((c) => c.label === 'unsigned');
+    const off = cands.find((c) => c.label === 'unsigned/no-ptr-elem');
+    expect(on?.source).toContain('((u16 *)gBgPtrs.pMap)[a0 + 157]');
+    expect(off?.source).toContain('(u8 *)gBgPtrs.pMap');
+    expect(off?.source).not.toContain('pMap)[a0');
+  });
+
+  test('with NO map the axis has no inhabitant and is not enumerated', () => {
+    // structure() normalizes the option to false without `symbols`, so a second arm would be the
+    // identical tree — the decline is what keeps the fan from doubling for nothing
+    const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, {});
+    expect(cands.filter((c) => c.label.includes('no-ptr-elem'))).toHaveLength(0);
+  });
+
+  test('a map with no SIZED pointer field does not enumerate the axis either', () => {
+    // `void *` sizes no element, so the rule could not fire and the 2x cross would buy nothing
+    const voidOnly = ptrsInfo({ layout: [{ name: 'pTiles', offset: 0, size: 4, pointer: true }] });
+    const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: mapWith(voidOnly) });
+    expect(cands.filter((c) => c.label.includes('no-ptr-elem'))).toHaveLength(0);
   });
 });
