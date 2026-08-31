@@ -237,6 +237,9 @@ const WRITE_LAYOUT: SymbolStructField[] = [
   ...LAYOUT,
   { name: 'low', offset: 8, size: 1, signed: false, bitWidth: 4, bitOffset: 0 },
   { name: 'top', offset: 8, size: 1, signed: false, bitWidth: 4, bitOffset: 4 },
+  // a SIGNED and an UNSIGNED source field of the same width, for the truncation bound below
+  { name: 'sdelta', offset: 9, size: 1, signed: true, bitWidth: 4, bitOffset: 0 },
+  { name: 'udelta', offset: 10, size: 1, signed: false, bitWidth: 4, bitOffset: 0 },
 ];
 const writeInfo = (over: Partial<SymbolInfo> = {}) => stateInfo({ size: 12, layout: WRITE_LAYOUT, ...over });
 const runW = (asm: string, info: SymbolInfo = writeInfo()) => run(asm, info);
@@ -248,6 +251,10 @@ const RMW = (pre: string, keep: string, byte = 0) =>
   `\tstrb\tr0, [r1, #${byte}]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n`;
 const NARROW = '\tlsl\tr0, r0, #30\n\tlsr\tr0, r0, #30\n'; // a provably 2-bit value
 const CLEAR_LOW2 = '\tmov\tr3, #0x3\n\tbic\tr2, r3\n';
+const CLEAR_LOW4 = '\tmov\tr3, #0xf\n\tbic\tr2, r3\n';
+/** the read fold's own 4-bit extract of the field at `byte`, signed (`asr`) or not (`lsr`). */
+const READ4 = (shr: 'lsr' | 'asr', byte: number) =>
+  `\tldrb\tr0, [r1, #${byte}]\n\tlsl\tr0, r0, #28\n\t${shr}\tr0, r0, #28\n`;
 
 describe('the mask-and-insert idiom spells the member assignment', () => {
   test('a provably narrow value inserted at a declared window is one assignment', () => {
@@ -272,6 +279,25 @@ describe('refusals — the honest mask spelling stays', () => {
     const src = runW(RMW('', CLEAR_LOW2));
     expect(src).not.toContain('gState.hearts');
     expect(src).toContain('~3');
+  });
+
+  test('a SIGNED bitfield read does not fit its own width — it is sign-extended to 32 bits', () => {
+    // `s32 sdelta : 4` reading -1 is 0xFFFFFFFF: the asm's `or` writes every bit the byte store
+    // keeps (bits 4-7 of `top` clobbered), where `gState.low = gState.sdelta` truncates to the
+    // 4-bit window and PRESERVES them. Different bytes, plausible C — so the bound refuses it.
+    const src = runW(RMW(READ4('asr', 9), CLEAR_LOW4, 8));
+    expect(src).not.toContain('gState.low =');
+    expect(src).toContain('~15');
+    // …and the identical function reading the UNSIGNED twin DOES fold, so the refusal is the
+    // sign extension's and not the shape's
+    expect(runW(RMW(READ4('lsr', 10), CLEAR_LOW4, 8))).toContain('gState.low = gState.udelta;');
+  });
+
+  test('a SIGNED read into a window that ENDS the cell still folds — the store truncates it', () => {
+    // the bound is only consulted mid-cell: at bits 4-7 the byte store drops everything above the
+    // window on BOTH sides, so sign extension changes nothing
+    const src = runW(RMW(READ4('asr', 9) + '\tlsl\tr0, r0, #4\n', '\tmov\tr3, #0xf\n\tand\tr2, r3\n', 8));
+    expect(src).toContain('gState.top = gState.sdelta;');
   });
 
   test('a mask that clears MORE bits than any declared field refuses', () => {

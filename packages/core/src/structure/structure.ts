@@ -2442,7 +2442,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
       const bf = bitfieldSpelling.get(d);
       if (bf) {
-        return declaredFields(symCtx.info(bf.global)?.layout)?.find((f) => f.name === bf.field)?.bitWidth ?? 32;
+        // …but only an UNSIGNED field bounds anything. The read fold spells a SIGNED field too
+        // (`f.signed === signedRead` over `shr_s`), and a sign-extended read carries all 32 bits:
+        // an `s32 delta : 5` reading -1 is 0xFFFFFFFF, which the asm's `or` writes in full while
+        // C's `dest = gS.delta` truncates to the window. Bounding it by `bitWidth` would fold that
+        // into a plausible assignment addressing DIFFERENT bits — exactly what this bound exists
+        // to refuse.
+        const f = declaredFields(symCtx.info(bf.global)?.layout)?.find((x) => x.name === bf.field);
+        return f?.signed === false ? (f.bitWidth ?? 32) : 32;
       }
       if (d.opcode === 'shr_u' && d.operands.length === 1 && typeof d.attrs.imm === 'number') {
         return 32 - (d.attrs.imm as number);
