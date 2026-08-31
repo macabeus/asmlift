@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-31T03:13:52.404Z",
+    "generatedAt": "2026-08-31T06:47:21.021Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -9,12 +9,12 @@
       "mwcc_242_81"
     ],
     "counts": {
-      "total": 942,
-      "synthetic": 690,
+      "total": 948,
+      "synthetic": 696,
       "real": 252
     },
     "asmlift": {
-      "commit": "d3acf73da199a1fc2f6555b7de8c4e96b3d0fb02",
+      "commit": "fbd7fd080f6d769d4f099cbbc65ff2b181cc7718",
       "dirty": false
     },
     "m2c": {
@@ -51391,6 +51391,482 @@
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bg_mix` — benchmark function synthetic:bg_mix:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel bg_mix\n    mulli   r4,r3,28\n    lis     r3,-32736\n    lhz     r3,74(r3)\n    addis   r4,r4,-32736\n    lhz     r0,16(r4)\n    lwz     r4,0(r4)\n    mullw   r0,r3,r0\n    add     r3,r4,r0\n    blr\nASM_INPUT\n\n# The exact context header the benchmark passed via --context.\n# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is\n# symmetric by construction: these are the same facts asmlift is given as --proto hints, and\n# neither tool is given a project.\ncat > ctx.h <<'CTX_INPUT'\ns32 bg_mix(s32 i);\nCTX_INPUT\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bg_mix       # the symbol to decompile from in.s\n  --context ctx.h         # the prototype header written above\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bg_mix` — benchmark function synthetic:bg_mix:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bg_mix:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <bg_mix>:\n   0:\tmulli   r4,r3,28\n   4:\tlis     r3,-32736\n   8:\tlhz     r3,74(r3)\n   c:\taddis   r4,r4,-32736\n  10:\tlhz     r0,16(r4)\n  14:\tlwz     r4,0(r4)\n  18:\tmullw   r0,r3,r0\n  1c:\tadd     r3,r4,r0\n  20:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000024 bg_mix\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      bg_mix\n\n\nContents of section .text:\n 0000 1c83001c 3c608020 a063004a 3c848020  ....<`. .c.J<.. \n 0010 a0040010 80840000 7c0301d6 7c640214  ........|...|d..\n 0020 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000024 00000000                    ...$....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bg_mix           # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:bgbaked:agbcc",
+      "sym": "bgbaked",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "global"
+      ],
+      "loc": 2,
+      "refSource": "#define gBgTilemapPtr (*(s32 *)0x0300346c)\nint bgbaked(int m, int n) { return m * gBgTilemapPtr + n * gBgTilemapPtr; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgbaked\n\t.type\t bgbaked,function\n\t.thumb_func\nbgbaked:\n\tadd\tr0, r0, r1\n\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tmul\tr0, r0, r1\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x300346c\n.Lfe1:\n\t.size\t bgbaked,.Lfe1-bgbaked\n",
+      "ctx": "int bgbaked(int m, int n);",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "s32 bgbaked(u32 a0, u32 a1) {\n    return (a0 + a1) * *(s32 *)50345068;\n}\n",
+        "score": 0,
+        "maxScore": 7,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 3,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "s32 bgbaked(s32 m, s32 n) {\n    return (m + n) * *(s32 *)0x0300346C;\n}\n",
+        "score": 0,
+        "maxScore": 7,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 3,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 1
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bgbaked` — benchmark function synthetic:bgbaked:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgbaked\n\t.type\t bgbaked,function\n\t.thumb_func\nbgbaked:\n\tadd\tr0, r0, r1\n\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tmul\tr0, r0, r1\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x300346c\n.Lfe1:\n\t.size\t bgbaked,.Lfe1-bgbaked\nASM_INPUT\n\n# The exact context header the benchmark passed via --context.\n# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is\n# symmetric by construction: these are the same facts asmlift is given as --proto hints, and\n# neither tool is given a project.\ncat > ctx.h <<'CTX_INPUT'\nint bgbaked(int m, int n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bgbaked      # the symbol to decompile from in.s\n  --context ctx.h         # the prototype header written above\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bgbaked` — benchmark function synthetic:bgbaked:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bgbaked:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgbaked\n\t.type\t bgbaked,function\n\t.thumb_func\nbgbaked:\n\tadd\tr0, r0, r1\n\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tmul\tr0, r0, r1\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x300346c\n.Lfe1:\n\t.size\t bgbaked,.Lfe1-bgbaked\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bgbaked          # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:bgfixed:agbcc",
+      "sym": "bgfixed",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "struct"
+      ],
+      "loc": 8,
+      "refSource": "struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n#define gBgInfo ((struct BgInfo *)0x03003430)\nint bgfixed(int i, int sel) { int a, b;\n  a = gBgInfo[i].hLength;\n  b = gBgInfo[i].vLength;\n  if (sel) return a + gBgInfo[2].tileRow;\n  return b + gBgInfo[2].tileRow; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgfixed\n\t.type\t bgfixed,function\n\t.thumb_func\nbgfixed:\n\tlsl\tr2, r0, #0x3\n\tsub\tr2, r2, r0\n\tlsl\tr2, r2, #0x2\n\tldr\tr0, .L6\n\tadd\tr2, r2, r0\n\tldrh\tr3, [r2, #0x10]\n\tldrh\tr2, [r2, #0x12]\n\tcmp\tr1, #0\n\tbne\t.L3\t@cond_branch\n\tadd\tr0, r0, #0x38\n\tldrh\tr0, [r0, #0xe]\n\tadd\tr0, r2, r0\n\tb\t.L5\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x3003430\n.L3:\n\tldr\tr0, .L8\n\tldrh\tr0, [r0, #0xe]\n\tadd\tr0, r3, r0\n.L5:\n\tbx\tlr\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003468\n.Lfe1:\n\t.size\t bgfixed,.Lfe1-bgfixed\n",
+      "ctx": "int bgfixed(int i, int sel);",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "nonmatch",
+        "source": "struct Elem0 { u8 _pad0[16]; u16 field_16; u16 field_18; u8 _pad1[8]; };\ns32 bgfixed(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = ((struct Elem0 *)50345008)[a0].field_16;\n    v1 = ((struct Elem0 *)50345008)[a0].field_18;\n    if (a1 == 0) {\n        v2 = v1 + ((u16 *)50345064)[7];\n    } else {\n        v2 = v0 + ((u16 *)50345064)[7];\n    }\n    return v2;\n}\n",
+        "score": 4,
+        "maxScore": 20,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 4
+        },
+        "quality": {
+          "score": 100,
+          "lines": 14,
+          "gotos": 0,
+          "casts": 2,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "s32 bgfixed(s32 i, s32 sel) {\n    void *temp_r2;\n\n    temp_r2 = (i * 0x1C) + 0x03003430;\n    if (sel == 0) {\n        return temp_r2->unk12 + (void *)0x03003468->unkE;\n    }\n    return temp_r2->unk10 + (void *)0x03003468->unkE;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 2,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "<scratch>/cand.c.pp.c:4: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:6: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:6: request for member `unk12' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:6: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:8: warning: dereferencing `void *' pointer"
+        ]
+      },
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 4,
+        "maxScore": 20,
+        "ratio": 0.2,
+        "kinds": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 4
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bgfixed` — benchmark function synthetic:bgfixed:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgfixed\n\t.type\t bgfixed,function\n\t.thumb_func\nbgfixed:\n\tlsl\tr2, r0, #0x3\n\tsub\tr2, r2, r0\n\tlsl\tr2, r2, #0x2\n\tldr\tr0, .L6\n\tadd\tr2, r2, r0\n\tldrh\tr3, [r2, #0x10]\n\tldrh\tr2, [r2, #0x12]\n\tcmp\tr1, #0\n\tbne\t.L3\t@cond_branch\n\tadd\tr0, r0, #0x38\n\tldrh\tr0, [r0, #0xe]\n\tadd\tr0, r2, r0\n\tb\t.L5\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x3003430\n.L3:\n\tldr\tr0, .L8\n\tldrh\tr0, [r0, #0xe]\n\tadd\tr0, r3, r0\n.L5:\n\tbx\tlr\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003468\n.Lfe1:\n\t.size\t bgfixed,.Lfe1-bgfixed\nASM_INPUT\n\n# The exact context header the benchmark passed via --context.\n# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is\n# symmetric by construction: these are the same facts asmlift is given as --proto hints, and\n# neither tool is given a project.\ncat > ctx.h <<'CTX_INPUT'\nint bgfixed(int i, int sel);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bgfixed      # the symbol to decompile from in.s\n  --context ctx.h         # the prototype header written above\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bgfixed` — benchmark function synthetic:bgfixed:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bgfixed:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgfixed\n\t.type\t bgfixed,function\n\t.thumb_func\nbgfixed:\n\tlsl\tr2, r0, #0x3\n\tsub\tr2, r2, r0\n\tlsl\tr2, r2, #0x2\n\tldr\tr0, .L6\n\tadd\tr2, r2, r0\n\tldrh\tr3, [r2, #0x10]\n\tldrh\tr2, [r2, #0x12]\n\tcmp\tr1, #0\n\tbne\t.L3\t@cond_branch\n\tadd\tr0, r0, #0x38\n\tldrh\tr0, [r0, #0xe]\n\tadd\tr0, r2, r0\n\tb\t.L5\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x3003430\n.L3:\n\tldr\tr0, .L8\n\tldrh\tr0, [r0, #0xe]\n\tadd\tr0, r3, r0\n.L5:\n\tbx\tlr\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003468\n.Lfe1:\n\t.size\t bgfixed,.Lfe1-bgfixed\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bgfixed          # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:bgshare:agbcc",
+      "sym": "bgshare",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "struct",
+        "merge-chain"
+      ],
+      "loc": 7,
+      "refSource": "struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n#define gBgInfo ((struct BgInfo *)0x03003430)\nint bgshare(int i, int sel) { int a, b;\n  if (sel) { a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; }\n  else     { a = gBgInfo[i].tileCol; b = gBgInfo[i].vLength; }\n  return a + b; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgshare\n\t.type\t bgshare,function\n\t.thumb_func\nbgshare:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L6\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tb\t.L5\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x3003430\n.L3:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L8\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n.L5:\n\tldrh\tr0, [r0, #0x12]\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgshare,.Lfe1-bgshare\n",
+      "ctx": "int bgshare(int i, int sel);",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "nonmatch",
+        "source": "s32 bgshare(u32 a0, u32 a1) {\n    u16 * v0;\n    s32 v1;\n    if (a1 != 0) {\n        v0 = (u16 *)(a0 * 28 + 50345008);\n        v1 = ((u16 *)(a0 * 28 + 50345008))[8];\n    } else {\n        v0 = (u16 *)(a0 * 28 + 50345008);\n        v1 = ((u16 *)(a0 * 28 + 50345008))[6];\n    }\n    return v1 + v0[9];\n}\n",
+        "score": 8,
+        "maxScore": 24,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 2,
+          "delete": 0,
+          "replace": 3,
+          "opMismatch": 0,
+          "argMismatch": 3
+        },
+        "quality": {
+          "score": 96,
+          "lines": 12,
+          "gotos": 0,
+          "casts": 4,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "s32 bgshare(s32 i, s32 sel) {\n    u16 var_r1;\n    void *var_r0;\n\n    if (sel != 0) {\n        var_r0 = (i * 0x1C) + 0x03003430;\n        var_r1 = var_r0->unk10;\n    } else {\n        var_r0 = (i * 0x1C) + 0x03003430;\n        var_r1 = var_r0->unkC;\n    }\n    return var_r1 + var_r0->unk12;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 100,
+          "lines": 12,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "<scratch>/cand.c.pp.c:6: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:7: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:7: request for member `unk10' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:9: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:10: warning: dereferencing `void *' pointer"
+        ]
+      },
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 8,
+        "maxScore": 24,
+        "ratio": 0.3333333333333333,
+        "kinds": {
+          "insert": 2,
+          "delete": 0,
+          "replace": 3,
+          "opMismatch": 0,
+          "argMismatch": 3
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bgshare` — benchmark function synthetic:bgshare:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgshare\n\t.type\t bgshare,function\n\t.thumb_func\nbgshare:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L6\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tb\t.L5\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x3003430\n.L3:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L8\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n.L5:\n\tldrh\tr0, [r0, #0x12]\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgshare,.Lfe1-bgshare\nASM_INPUT\n\n# The exact context header the benchmark passed via --context.\n# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is\n# symmetric by construction: these are the same facts asmlift is given as --proto hints, and\n# neither tool is given a project.\ncat > ctx.h <<'CTX_INPUT'\nint bgshare(int i, int sel);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bgshare      # the symbol to decompile from in.s\n  --context ctx.h         # the prototype header written above\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bgshare` — benchmark function synthetic:bgshare:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bgshare:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgshare\n\t.type\t bgshare,function\n\t.thumb_func\nbgshare:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L6\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tb\t.L5\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x3003430\n.L3:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L8\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n.L5:\n\tldrh\tr0, [r0, #0x12]\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgshare,.Lfe1-bgshare\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bgshare          # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:bgsplit:agbcc",
+      "sym": "bgsplit",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "struct",
+        "merge-chain"
+      ],
+      "loc": 7,
+      "refSource": "struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n#define gBgInfo ((struct BgInfo *)0x03003430)\nint bgsplit(int i, int sel) { int a, b;\n  if (sel) { a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; }\n  else     { a = gBgInfo[i].tileCol; b = gBgInfo[i].tileRow; }\n  return a + b; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgsplit\n\t.type\t bgsplit,function\n\t.thumb_func\nbgsplit:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L5\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0x12]\n\tb\t.L4\n.L6:\n\t.align\t2, 0\n.L5:\n\t.word\t0x3003430\n.L3:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L7\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n\tldrh\tr0, [r0, #0xe]\n.L4:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L8:\n\t.align\t2, 0\n.L7:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgsplit,.Lfe1-bgsplit\n",
+      "ctx": "int bgsplit(int i, int sel);",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "struct Elem0 { u8 _pad0[16]; u16 field_16; u16 field_18; u8 _pad1[8]; };\nstruct Elem1 { u8 _pad0[12]; u16 field_12; u16 field_14; u8 _pad1[12]; };\ns32 bgsplit(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    if (a1 != 0) {\n        v1 = ((struct Elem0 *)50345008)[a0].field_16;\n        v0 = ((struct Elem0 *)50345008)[a0].field_18;\n    } else {\n        v1 = ((struct Elem1 *)50345008)[a0].field_12;\n        v0 = ((struct Elem1 *)50345008)[a0].field_14;\n    }\n    return v1 + v0;\n}\n",
+        "score": 0,
+        "maxScore": 24,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 14,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "s32 bgsplit(s32 i, s32 sel) {\n    u16 var_r0;\n    u16 var_r1;\n    void *temp_r0;\n    void *temp_r0_2;\n\n    if (sel != 0) {\n        temp_r0 = (i * 0x1C) + 0x03003430;\n        var_r1 = temp_r0->unk10;\n        var_r0 = temp_r0->unk12;\n    } else {\n        temp_r0_2 = (i * 0x1C) + 0x03003430;\n        var_r1 = temp_r0_2->unkC;\n        var_r0 = temp_r0_2->unkE;\n    }\n    return var_r1 + var_r0;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 100,
+          "lines": 16,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "<scratch>/cand.c.pp.c:8: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:9: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:9: request for member `unk10' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:10: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:10: request for member `unk12' in something not a structure or union"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bgsplit` — benchmark function synthetic:bgsplit:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgsplit\n\t.type\t bgsplit,function\n\t.thumb_func\nbgsplit:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L5\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0x12]\n\tb\t.L4\n.L6:\n\t.align\t2, 0\n.L5:\n\t.word\t0x3003430\n.L3:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L7\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n\tldrh\tr0, [r0, #0xe]\n.L4:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L8:\n\t.align\t2, 0\n.L7:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgsplit,.Lfe1-bgsplit\nASM_INPUT\n\n# The exact context header the benchmark passed via --context.\n# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is\n# symmetric by construction: these are the same facts asmlift is given as --proto hints, and\n# neither tool is given a project.\ncat > ctx.h <<'CTX_INPUT'\nint bgsplit(int i, int sel);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bgsplit      # the symbol to decompile from in.s\n  --context ctx.h         # the prototype header written above\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bgsplit` — benchmark function synthetic:bgsplit:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bgsplit:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgsplit\n\t.type\t bgsplit,function\n\t.thumb_func\nbgsplit:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L5\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0x12]\n\tb\t.L4\n.L6:\n\t.align\t2, 0\n.L5:\n\t.word\t0x3003430\n.L3:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L7\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n\tldrh\tr0, [r0, #0xe]\n.L4:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L8:\n\t.align\t2, 0\n.L7:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgsplit,.Lfe1-bgsplit\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bgsplit          # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:bgswitch:agbcc",
+      "sym": "bgswitch",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "struct",
+        "merge-chain",
+        "switch",
+        "comparison-tree"
+      ],
+      "loc": 12,
+      "refSource": "struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n#define gBgInfo ((struct BgInfo *)0x03003430)\nint bgswitch(int i, int sel) {\n    int a, b;\n    switch (sel) {\n    case 0:  a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; break;\n    case 1:  a = gBgInfo[i].tileCol; b = gBgInfo[i].vLength; break;\n    default: a = gBgInfo[i].hLength; b = gBgInfo[i].tileRow; break;\n    }\n    return a + b;\n}",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgswitch\n\t.type\t bgswitch,function\n\t.thumb_func\nbgswitch:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr1, #0x1\n\tbeq\t.L5\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L9\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0xe]\n\tb\t.L3\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\t0x3003430\n.L4:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tb\t.L8\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t0x3003430\n.L5:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L13\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n.L8:\n\tldrh\tr0, [r0, #0x12]\n.L3:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgswitch,.Lfe1-bgswitch\n",
+      "ctx": "int bgswitch(int i, int sel);",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "nonmatch",
+        "source": "struct Elem0 { u8 _pad0[14]; u16 field_14; u16 field_16; u8 _pad1[10]; };\ns32 bgswitch(u32 a0, u32 a1) {\n    u16 * v0;\n    s32 v1;\n    s32 v2;\n    switch (a1) {\n        case 0:\n            v0 = (u16 *)(a0 * 28 + 50345008);\n            v1 = ((u16 *)(a0 * 28 + 50345008))[8];\n            v2 = v0[9];\n            break;\n        case 1:\n            v0 = (u16 *)(a0 * 28 + 50345008);\n            v1 = ((u16 *)(a0 * 28 + 50345008))[6];\n            v2 = v0[9];\n            break;\n        default:\n            v1 = ((struct Elem0 *)50345008)[a0].field_16;\n            v2 = ((struct Elem0 *)50345008)[a0].field_14;\n    }\n    return v1 + v2;\n}\n",
+        "score": 8,
+        "maxScore": 37,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 2,
+          "delete": 0,
+          "replace": 3,
+          "opMismatch": 0,
+          "argMismatch": 3
+        },
+        "quality": {
+          "score": 92,
+          "lines": 22,
+          "gotos": 0,
+          "casts": 4,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "s32 bgswitch(s32 i, s32 sel) {\n    u16 var_r0;\n    u16 var_r1;\n    void *temp_r0;\n    void *var_r0_2;\n\n    if (sel != 0) {\n        if (sel != 1) {\n            temp_r0 = (i * 0x1C) + 0x03003430;\n            var_r1 = temp_r0->unk10;\n            var_r0 = temp_r0->unkE;\n        } else {\n            var_r0_2 = (i * 0x1C) + 0x03003430;\n            var_r1 = var_r0_2->unkC;\n            goto block_5;\n        }\n    } else {\n        var_r0_2 = (i * 0x1C) + 0x03003430;\n        var_r1 = var_r0_2->unk10;\nblock_5:\n        var_r0 = var_r0_2->unk12;\n    }\n    return var_r1 + var_r0;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 88,
+          "lines": 23,
+          "gotos": 1,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "<scratch>/cand.c.pp.c:9: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:10: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:10: request for member `unk10' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:11: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:11: request for member `unkE' in something not a structure or union"
+        ]
+      },
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 8,
+        "maxScore": 37,
+        "ratio": 0.21621621621621623,
+        "kinds": {
+          "insert": 2,
+          "delete": 0,
+          "replace": 3,
+          "opMismatch": 0,
+          "argMismatch": 3
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bgswitch` — benchmark function synthetic:bgswitch:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgswitch\n\t.type\t bgswitch,function\n\t.thumb_func\nbgswitch:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr1, #0x1\n\tbeq\t.L5\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L9\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0xe]\n\tb\t.L3\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\t0x3003430\n.L4:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tb\t.L8\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t0x3003430\n.L5:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L13\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n.L8:\n\tldrh\tr0, [r0, #0x12]\n.L3:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgswitch,.Lfe1-bgswitch\nASM_INPUT\n\n# The exact context header the benchmark passed via --context.\n# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is\n# symmetric by construction: these are the same facts asmlift is given as --proto hints, and\n# neither tool is given a project.\ncat > ctx.h <<'CTX_INPUT'\nint bgswitch(int i, int sel);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bgswitch     # the symbol to decompile from in.s\n  --context ctx.h         # the prototype header written above\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bgswitch` — benchmark function synthetic:bgswitch:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bgswitch:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgswitch\n\t.type\t bgswitch,function\n\t.thumb_func\nbgswitch:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr1, #0x1\n\tbeq\t.L5\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L9\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0xe]\n\tb\t.L3\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\t0x3003430\n.L4:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tb\t.L8\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t0x3003430\n.L5:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L13\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n.L8:\n\tldrh\tr0, [r0, #0x12]\n.L3:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgswitch,.Lfe1-bgswitch\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bgswitch         # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:bgswsplit:agbcc",
+      "sym": "bgswsplit",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "struct",
+        "merge-chain",
+        "switch",
+        "comparison-tree"
+      ],
+      "loc": 12,
+      "refSource": "struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n#define gBgInfo ((struct BgInfo *)0x03003430)\nint bgswsplit(int i, int sel) {\n    int a, b;\n    switch (sel) {\n    case 0:  a = gBgInfo[i].hLength; b = gBgInfo[i].vLength; break;\n    case 1:  a = gBgInfo[i].tileCol; b = gBgInfo[i].tileRow; break;\n    default: a = gBgInfo[i].unk14;   b = gBgInfo[i].unk16;   break;\n    }\n    return a + b;\n}",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgswsplit\n\t.type\t bgswsplit,function\n\t.thumb_func\nbgswsplit:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr1, #0x1\n\tbeq\t.L5\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L8\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x14]\n\tldrh\tr0, [r0, #0x16]\n\tb\t.L3\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003430\n.L4:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L10\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0x12]\n\tb\t.L3\n.L11:\n\t.align\t2, 0\n.L10:\n\t.word\t0x3003430\n.L5:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L12\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n\tldrh\tr0, [r0, #0xe]\n.L3:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgswsplit,.Lfe1-bgswsplit\n",
+      "ctx": "int bgswsplit(int i, int sel);",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "struct Elem0 { u8 _pad0[20]; u16 field_20; u16 field_22; u8 _pad1[4]; };\nstruct Elem1 { u8 _pad0[16]; u16 field_16; u16 field_18; u8 _pad1[8]; };\nstruct Elem2 { u8 _pad0[12]; u16 field_12; u16 field_14; u8 _pad1[12]; };\ns32 bgswsplit(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    switch (a1) {\n        case 0:\n            v1 = ((struct Elem1 *)50345008)[a0].field_16;\n            v0 = ((struct Elem1 *)50345008)[a0].field_18;\n            break;\n        case 1:\n            v1 = ((struct Elem2 *)50345008)[a0].field_12;\n            v0 = ((struct Elem2 *)50345008)[a0].field_14;\n            break;\n        default:\n            v1 = ((struct Elem0 *)50345008)[a0].field_20;\n            v0 = ((struct Elem0 *)50345008)[a0].field_22;\n    }\n    return v1 + v0;\n}\n",
+        "score": 0,
+        "maxScore": 35,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 96,
+          "lines": 21,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "s32 bgswsplit(s32 i, s32 sel) {\n    u16 var_r0;\n    u16 var_r1;\n    void *temp_r0;\n    void *temp_r0_2;\n    void *temp_r0_3;\n\n    if (sel != 0) {\n        if (sel != 1) {\n            temp_r0 = (i * 0x1C) + 0x03003430;\n            var_r1 = temp_r0->unk14;\n            var_r0 = temp_r0->unk16;\n        } else {\n            temp_r0_2 = (i * 0x1C) + 0x03003430;\n            var_r1 = temp_r0_2->unkC;\n            var_r0 = temp_r0_2->unkE;\n        }\n    } else {\n        temp_r0_3 = (i * 0x1C) + 0x03003430;\n        var_r1 = temp_r0_3->unk10;\n        var_r0 = temp_r0_3->unk12;\n    }\n    return var_r1 + var_r0;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 100,
+          "lines": 23,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "<scratch>/cand.c.pp.c:10: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:11: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:11: request for member `unk14' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:12: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:12: request for member `unk16' in something not a structure or union"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bgswsplit` — benchmark function synthetic:bgswsplit:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgswsplit\n\t.type\t bgswsplit,function\n\t.thumb_func\nbgswsplit:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr1, #0x1\n\tbeq\t.L5\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L8\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x14]\n\tldrh\tr0, [r0, #0x16]\n\tb\t.L3\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003430\n.L4:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L10\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0x12]\n\tb\t.L3\n.L11:\n\t.align\t2, 0\n.L10:\n\t.word\t0x3003430\n.L5:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L12\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n\tldrh\tr0, [r0, #0xe]\n.L3:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgswsplit,.Lfe1-bgswsplit\nASM_INPUT\n\n# The exact context header the benchmark passed via --context.\n# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is\n# symmetric by construction: these are the same facts asmlift is given as --proto hints, and\n# neither tool is given a project.\ncat > ctx.h <<'CTX_INPUT'\nint bgswsplit(int i, int sel);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bgswsplit    # the symbol to decompile from in.s\n  --context ctx.h         # the prototype header written above\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bgswsplit` — benchmark function synthetic:bgswsplit:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bgswsplit:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbgswsplit\n\t.type\t bgswsplit,function\n\t.thumb_func\nbgswsplit:\n\tadd\tr2, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr1, #0x1\n\tbeq\t.L5\t@cond_branch\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L8\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x14]\n\tldrh\tr0, [r0, #0x16]\n\tb\t.L3\n.L9:\n\t.align\t2, 0\n.L8:\n\t.word\t0x3003430\n.L4:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L10\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0x10]\n\tldrh\tr0, [r0, #0x12]\n\tb\t.L3\n.L11:\n\t.align\t2, 0\n.L10:\n\t.word\t0x3003430\n.L5:\n\tlsl\tr0, r2, #0x3\n\tsub\tr0, r0, r2\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L12\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0, #0xc]\n\tldrh\tr0, [r0, #0xe]\n.L3:\n\tadd\tr0, r1, r0\n\tbx\tlr\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t bgswsplit,.Lfe1-bgswsplit\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bgswsplit        # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
