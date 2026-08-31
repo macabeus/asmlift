@@ -1698,7 +1698,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const vtEnv = (n: string): IrType | undefined => varType.get(n);
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, vtEnv);
 
-  /** `&gSym` assigned to a `T *` local: the address of an AGGREGATE is not a pointer to its
+  /** A value assigned into a TEMP THIS PASS DECLARES, spelled so the assignment is legal against
+   *  that declaration. Two inhabitants, one argument: the value's type comes from somewhere this
+   *  pass does not control, and the temp's comes from here.
+   *
+   *  `&gSym` assigned to a `T *` local: the address of an AGGREGATE is not a pointer to its
    *  element. `&gArr` is `T (*)[n]`, `&gStruct` is `struct S *`, and neither is assignable to
    *  `T *` — yet the IR's `gaddr` value legitimately has type `T *`, because that is what the asm
    *  loaded. The bare spelling therefore states a type the project's own header contradicts.
@@ -1719,9 +1723,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  `T *` the older comment here claimed. So the default is to CAST, and the cast is omitted only
    *  where the declared cell type is known and matches exactly. Byte-identical either way, so the
    *  cost of casting one time too many is a redundant `(T *)`, never a wrong address. */
-  const castAggregateAddr = (name: string, value: Expr): Expr => {
+  const intoDeclaredTemp = (name: string, value: Expr): Expr => {
     const t = varType.get(name);
-    if (t?.kind !== 'ptr' || value.k !== 'addr') {
+    if (t === undefined) {
+      return value;
+    }
+    // ── the MAP's pointer values, whose type this side of the program does not own ──────────────
+    // A `gaddr` at least states a type the IR knows. `gSym.pBuf` and a pointer global's own value
+    // state one only the MAP knows, and `ctype` — which types params and locals — reads them as
+    // `undefined`, so the test above cannot see them at all. Assigning one bare declares that the
+    // temp's type and the project's declaration of that pointer are the same type, which nothing
+    // here established: the project's header says `struct Unk_03005284 *` where the recovered temp
+    // says `struct Struct0 *`, and `-Werror` makes the mismatch fatal in the tree the source is
+    // pasted into. The destination's type is the one this pass DID choose, so unlike the
+    // map-declared cells below it can be named exactly rather than defused through `void *`. That
+    // holds for an INTEGER temp too, and there the diagnostic is the mirror one, `assignment makes
+    // integer from pointer without a cast` — same site, same argument, same `(T)` answer.
+    if (isPtrValue(value)) {
+      return { k: 'cast', to: t, e: value };
+    }
+    if (t.kind !== 'ptr' || value.k !== 'addr') {
       return value;
     }
     // The only provably-redundant case: a NON-VOLATILE scalar cell whose DECLARED type is the
@@ -3163,7 +3184,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         droppedUndefCopies.push({ name, pred });
         return;
       }
-      copies.push({ name, value: castAggregateAddr(name, argExpr(arg)), arg });
+      copies.push({ name, value: intoDeclaredTemp(name, argExpr(arg)), arg });
     });
     // Emit in the order the args are COMPUTED in `pred` — a compiler that lays the defining ops
     // (and thus the copies that read them) out in that order matches with no spurious arg-swap.
@@ -3216,8 +3237,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  -fprologue-bugfix`), so the fix is invisible to the differ and visible to the compiler. */
   const intoPtrCell = (lval: Expr, value: Expr): Expr => {
     const cell = lval.k === 'var' ? symCtx?.info(lval.name)?.shape === 'pointer' : ptrMemberDecl(lval, symCtx) !== null;
+    if (!cell) {
+      return value;
+    }
     const vt = ctype(value);
-    return cell && vt?.kind === 'ptr' && vt.to.kind !== 'void' ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
+    // BOTH ways a pointer value reaches here. `ctype` sees the guard's own `(u8 *)…` and nothing
+    // else — it types params and locals, so a bare `gSym.pBuf` or a pointer global's value, the
+    // very population the guard was widened to serve, reads `undefined` there and would slip past
+    // a test that asked it alone (`isPtrValue`'s own note says so). An already-`void *` value is
+    // assignable as it stands.
+    const isPtr = isPtrValue(value) || (vt?.kind === 'ptr' && vt.to.kind !== 'void');
+    return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
   };
 
   const sideEffects = (b: Block): Stmt[] => {
@@ -3292,7 +3322,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
         // here would recompile to a second load the asm does not have)
         const nm = varName.get(op.results[0])!;
-        out.push({ k: 'assign', name: nm, value: castAggregateAddr(nm, lowerDef(op, expr)) });
+        out.push({ k: 'assign', name: nm, value: intoDeclaredTemp(nm, lowerDef(op, expr)) });
       }
       // a merge copy anchored at this const's original position (anchorConstCopies, above)
       for (const a of anchoredAt.get(op) ?? []) {

@@ -247,3 +247,71 @@ describe('the element spelling is enumerated as an axis the differ referees', ()
     expect(cands.filter((c) => c.label.includes('no-ptr-elem'))).toHaveLength(0);
   });
 });
+
+// ── the ASSIGNMENT side: a pointer value whose type this pass does not own ──────────────────────
+// The guard casts for the ADDRESS; the assignment has to be legal too. `ctype` types params and
+// locals, so a bare `gBgPtrs.pMap` or a pointer global's own value reads `undefined` there — the
+// very population the guard exists for is the one a ctype-only test cannot see.
+describe('a map-declared pointer VALUE is spelled legally where it is assigned', () => {
+  const gPtrInfo: SymbolInfo = { name: 'gPtr', kind: 'data', declared: true, shape: 'pointer', size: 4 };
+  const twoSyms: SymbolMap = new Map([
+    [0x03004790, [ptrsInfo()]],
+    [0x03000100, [gPtrInfo]],
+  ]);
+  const run2 = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { symbols: twoSyms }).source;
+
+  test('member ← member of a DIFFERENT pointee is defused through `void *`', () => {
+    // `u16 *pMap = <u8 * member>` is `assignment from incompatible pointer type`, fatal under the
+    // project's own -Werror template, in asmlift's declarations AND in the project's
+    const src = run2(
+      'f:\n\tldr\tr1, .L1\n\tldr\tr2, [r1]\n\tstr\tr2, [r1, #0x4]\n\tmov\tr0, #0x0\n\tbx\tlr\n' +
+        '.L1:\n\t.word\t0x03004790\n',
+    );
+    expect(src).toContain('gBgPtrs.pMap = (void *)gBgPtrs.pTiles;');
+  });
+
+  test('a pointer GLOBAL ← a pointer member, and the mirror, are both defused', () => {
+    const intoGlobal = run2(
+      'f:\n\tldr\tr1, .L1\n\tldr\tr3, [r1, #0x4]\n\tldr\tr2, .L2\n\tstr\tr3, [r2]\n\tmov\tr0, #0x0\n\tbx\tlr\n' +
+        '.L1:\n\t.word\t0x03004790\n.L2:\n\t.word\t0x03000100\n',
+    );
+    expect(intoGlobal).toContain('gPtr = (void *)gBgPtrs.pMap;');
+    const intoMember = run2(
+      'f:\n\tldr\tr2, .L2\n\tldr\tr3, [r2]\n\tldr\tr1, .L1\n\tstr\tr3, [r1, #0x4]\n\tmov\tr0, #0x0\n\tbx\tlr\n' +
+        '.L1:\n\t.word\t0x03004790\n.L2:\n\t.word\t0x03000100\n',
+    );
+    expect(intoMember).toContain('gBgPtrs.pMap = (void *)gPtr;');
+  });
+
+  test('into a TEMP the pass declares, the cast NAMES that temp — no defusing needed', () => {
+    // the map says nothing about the pointee, so the recovered `struct Struct0 *` is this pass's
+    // own choice; `(void *)` would be legal too, but the exact type is available here and is not
+    // where the map's declaration and this one can disagree
+    const src = run2(
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tSideEffect\n' +
+        '\tldr\tr0, [r4, #0x18]\n\tldrb\tr1, [r4]\n\tadd\tr0, r0, r1\n\tstr\tr0, [r4, #0x18]\n' +
+        '\tmov\tr0, #0x0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L2:\n\t.word\t0x03000100\n',
+    );
+    expect(src).toContain('v0 = (struct Struct0 *)gPtr;');
+  });
+
+  test('into an INTEGER temp the cast is that integer — the mirror diagnostic, same site', () => {
+    // `assignment makes integer from pointer without a cast`, the other half of the same class:
+    // the temp's type is this pass's own either way, so the answer is the same `(T)`
+    const src = run2(
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tSideEffect\n' +
+        '\tmov\tr0, r4\n\tbl\tSideEffect\n\tmov\tr0, #0x0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.L2:\n\t.word\t0x03000100\n',
+    );
+    expect(src).toMatch(/v\d+ = \(s32\)gPtr;/);
+  });
+
+  test('a value that is NOT a pointer is untouched — this is not a cast-everything rule', () => {
+    const src = run2(
+      'f:\n\tldr\tr1, .L1\n\tldr\tr2, [r1, #0x8]\n\tstr\tr2, [r1, #0x4]\n\tmov\tr0, #0x0\n\tbx\tlr\n' +
+        '.L1:\n\t.word\t0x03004790\n',
+    );
+    expect(src).toContain('gBgPtrs.count;');
+    expect(src).not.toContain('(void *)gBgPtrs.count');
+  });
+});
