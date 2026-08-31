@@ -10,17 +10,15 @@
 //      a forked worker and this file runs in the parent, so the counters are out of reach. The
 //      cache writes each disagreement to `MISMATCH_LOG` as well, and teardown reads it.
 //
-// WHAT THIS IS AND IS NOT, RE-measured after `tools.asmlift.cacheInputs` was deleted. Essentially
-// every test in the suite compiles through `@asmlift/toolchains` (`scoreC`, `compileTargetAsm`,
-// `compileMipsTarget`), which contains ZERO references to this cache — so those are still not
-// audited. What CHANGED is the rest: four files reach `compileFromCommand`
-// (`ranked-parallel`, `self-declared-ab`, `decl-scope-axis`, `candcache-verify`), and they used to
-// pass no `cacheInputs`, so three of them ran with the cache structurally OFF. There is no opt-in
-// any more — the namespace measures what the command reads instead of being told — so all three
-// now compile through a live `verify` cache against the default store, and a disagreement fails
-// the run for real. MEASURED, those three files against an empty private store: 1 namespace,
-// 142 stored keys, 0 mismatches (it was 0 keys before, `OFF_CACHE`). So this is a REAL gate over
-// those three files plus a self-test, and still forward defence for the toolchains path; what
+// WHAT THIS IS AND IS NOT. Essentially every test in the suite compiles through
+// `@asmlift/toolchains` (`scoreC`, `compileTargetAsm`, `compileMipsTarget`), which contains ZERO
+// references to this cache — so those are not audited. Four files reach `compileFromCommand`
+// (`ranked-parallel`, `self-declared-ab`, `decl-scope-axis`, `candcache-verify`); with no
+// per-project opt-in to withhold, all of them compile through a live `verify` cache against the
+// default store, and a disagreement fails the run for real. MEASURED, the whole suite against an
+// empty private store (`ASMLIFT_CANDCACHE_DIR=<empty> pnpm test:matching`): 327 tests passed, 3
+// namespaces holding 2 / 101 / 2 keys, and no `MISMATCHES.log` written at all. So this is a REAL
+// gate over those files plus a self-test, and still forward defence for the toolchains path; what
 // would make it a gate over the whole suite is threading the cache through `@asmlift/toolchains`.
 //
 // SAY THE OTHER HALF TOO, because "the gate" overstates what the repo's wiring delivers:

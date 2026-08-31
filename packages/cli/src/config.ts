@@ -29,11 +29,11 @@ export interface AsmliftToolConfig {
    *  command, whatever `ASMLIFT_CANDCACHE` says. The only value; anything else is an error, so a
    *  typo cannot silently read as "on".
    *
-   *  It is deliberately the inverse of the deleted `cacheInputs`: that key ASSERTED what the
-   *  command reads and an incomplete assertion served a stale object, this one only ever turns
-   *  the cache off and an unnecessary one costs a cold start. Declare it when the command runs
-   *  the compiler somewhere nothing here can read it — a container image named by a tag, another
-   *  host, a wrapper that reads a config directory it never names on its command line. */
+   *  A REFUSAL, never an assertion: a key that asserted what the command reads would serve a
+   *  stale object the moment the assertion was incomplete, while an unnecessary refusal costs a
+   *  cold start. Declare it when the command runs the compiler somewhere nothing here can read it
+   *  — a container image named by a tag, another host, a wrapper that reads a config directory it
+   *  never names on its command line. */
   candidateCache?: 'off';
 }
 
@@ -98,10 +98,10 @@ function readConfig(path: string): LoadedConfig {
   return { path, config };
 }
 
-/** `tools.asmlift.cacheInputs` was, for one round, the per-project DECLARATION of every file and
- *  directory the compile command reads — the gate the cross-run candidate-object cache would not
- *  start without, because one input class (a directory named by a flag) could not be measured.
- *  It is measured now, so the key is gone. Loading a config that still carries it is NOT an
+/** `tools.asmlift.cacheInputs` was the per-project DECLARATION of every file and directory the
+ *  compile command reads — the gate the cross-run candidate-object cache would not start without,
+ *  because one input class (a directory named by a flag) could not be measured. It is measured
+ *  now, so the key is gone. Loading a config that still carries it is NOT an
  *  error: an obsolete key is not a broken project, and what replaced it is strictly more complete
  *  than the declaration ever was. But it is said out loud, once, because silence would leave a
  *  reader believing a seatbelt is fastened that does not exist any more. */

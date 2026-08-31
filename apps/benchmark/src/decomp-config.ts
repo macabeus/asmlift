@@ -137,12 +137,11 @@ export function scoreViaBenchConfig(
  *  the benchmark's own toolchain. `elf` (absolute path — symbol-fed rows) lands as
  *  tools.asmlift.elf so the CLI loads the project's symbol map exactly as the benchmark did.
  *
- *  Nothing here decides whether a reproduction CACHES: the candidate-object cache used to need a
- *  per-project declaration and this function deliberately withheld it, but the declaration is
- *  gone — everything the command reads is measured — so a reader who exports ASMLIFT_CANDCACHE
- *  gets the same store the harness does, and one who does not gets a cold compile. That stays
- *  sound for the reason it always did: a cache is a throughput lever and never a result lever, so
- *  a miss is indistinguishable in RESULT from no cache at all. */
+ *  Nothing here decides whether a reproduction CACHES. The candidate-object cache needs no
+ *  per-project declaration — everything the command reads is measured — so a reader who exports
+ *  ASMLIFT_CANDCACHE gets the same store the harness does, and one who does not gets a cold
+ *  compile. Sound either way: a cache is a throughput lever and never a result lever, so a miss is
+ *  indistinguishable in RESULT from no cache at all. */
 export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string, ctxFile?: string): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
   if (elf) {

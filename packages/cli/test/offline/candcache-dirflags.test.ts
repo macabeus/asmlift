@@ -327,9 +327,8 @@ describe('an input that CANNOT be named is refused out loud, not hashed as a sta
 
 describe('a directory the template reaches through a GLOB is measured as well', () => {
   // `cat inc/*.h` names the directory in a way `statSync` cannot follow: `inc/*.h` is path-LIKE
-  // (it has a `/` and a `.`) yet it is not a path, so the token scan tried it and failed. This is
-  // the shape the offline rig for the old declaration deliberately used, precisely because
-  // nothing else could see it. Hashing the glob's DIRECTORY closes it; over-hashing costs a cold
+  // (it has a `/` and a `.`) yet it is not a path, so the token scan tries it and fails, and no
+  // probe TU reaches it either. Hashing the glob's DIRECTORY closes it; over-hashing costs a cold
   // start.
   test('editing a file the glob would expand to re-namespaces', async () => {
     const p = project();
@@ -378,17 +377,18 @@ describe('the operand parser, on the template the hole was measured on', () => {
 });
 
 // ------------------------------------------------------------------------------------------
-// THE POISON PROBES. Every case below was a MEASURED stale object on the first spelling of this
-// mechanism — a flag table with a `/[/.]/.test(tok)` guard in front of `hashPath` in the stamp.
-// Each one compiles, mutates the header THE SHELL actually reads, compiles again in a fresh
-// module instance, and fails if the second run was served the first run's object.
+// THE POISON PROBES. Every case here is a shape that serves a MEASURED stale object when the
+// mechanism is ablated. Each one compiles, mutates the header THE SHELL actually reads, compiles
+// again in a fresh module instance, and fails if the second run was served the first run's
+// object.
 //
-// The ablation that says which half of the mechanism earns what: with the guard deleted and the
-// operand scan replaced by `[]`, this file AS IT THEN STOOD (32 tests, everything above this
-// block) ran 21 passed / 11 failed — one deleted clause covers every SEPARATED spelling, and the
-// table earns the ten ATTACHED ones and the glob. That is why `PATH_FLAGS` is documented as a DE-GLUER: a list that is the mechanism has an
-// invisible incompleteness, and the shapes in the first block here are exactly what that
-// invisibility cost.
+// The two ablations that say which half earns what, both against this file at 62 tests: with the
+// operand scan replaced by `[]`, 43 passed / 19 failed — the de-gluer table earns the ATTACHED
+// spellings, the flag-file bodies and the glob directory. With a `/[/.]/.test(tok)` path-shape
+// guard put back in front of the token scan, 58 passed / 4 failed — an operand two tokens from
+// its flag, a flag that does not exist yet, an assignment RHS, and a quoted operand with a space.
+// Neither half is the mechanism, and the list's failure mode is the dangerous one because it is
+// invisible.
 // ------------------------------------------------------------------------------------------
 
 describe('a flag NOBODY listed still measures its operand, because the filesystem answers', () => {
@@ -579,18 +579,15 @@ describe('an operand the SHELL spells differently than the scan does', () => {
     mkdirSync(join(p.cwd, 'build'));
     writeFileSync(join(p.cwd, 'build/out.o'), 'first\n');
     const template = ': -nostdinc; cat "{{inputPath}}" > "{{outputPath}}" # remember to clean build';
-    const r = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      ({ compileFromCommand }) => {
-        compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
-        writeFileSync(join(p.cwd, 'build/out.o'), 'second\n');
-        compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
-        const count = (): number => (existsSync(join(p.store, 'ns')) ? readdirSync(join(p.store, 'ns')).length : 0);
-        const sameComment = count();
-        compileFromCommand(template + ' now', { cwd: p.cwd })(CAND_K, 'f', 'c');
-        return { sameComment, edited: count() };
-      },
-    );
+    const r = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+      compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
+      writeFileSync(join(p.cwd, 'build/out.o'), 'second\n');
+      compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
+      const count = (): number => (existsSync(join(p.store, 'ns')) ? readdirSync(join(p.store, 'ns')).length : 0);
+      const sameComment = count();
+      compileFromCommand(template + ' now', { cwd: p.cwd })(CAND_K, 'f', 'c');
+      return { sameComment, edited: count() };
+    });
     expect(r.sameComment, 'rewriting the build tree must not move the namespace').toBe(1);
     expect(r.edited, 'the raw template text is still hashed, so editing the comment does move it').toBe(2);
   });
@@ -702,10 +699,10 @@ describe('a path the walk CANNOT read is a refusal, never a miss', () => {
   };
 
   // Mode 0311 — `--wx--x--x`: SEARCHABLE and not LISTABLE, which is exactly what a compile needs
-  // of an include directory and exactly what a walk does not get. The first spelling swallowed
-  // the EACCES into "contributes nothing" and served a stale object with no stderr line at all.
-  // The transient case is worse than the permanent one: one EIO on one readdirSync would mint a
-  // PERMANENTLY incomplete namespace.
+  // of an include directory and exactly what a walk does not get. Swallowing the EACCES into
+  // "contributes nothing" serves a stale object with no stderr line at all, and the transient
+  // case is worse than the permanent one: one EIO on one readdirSync mints a PERMANENTLY
+  // incomplete namespace.
   test('an include directory that is searchable but not listable refuses out loud', async () => {
     const p = project();
     chmodSync(join(p.cwd, 'inc'), 0o311);
@@ -748,8 +745,8 @@ describe('a path the walk CANNOT read is a refusal, never a miss', () => {
   });
 
   test('an opaque runtime named through a variable the TEMPLATE assigns is refused', async () => {
-    // `DOCKER=docker; $DOCKER run …` defeated the first spelling, which resolved `$VAR` only
-    // through `process.env` — while every template in this repo assigns shell variables.
+    // `DOCKER=docker; $DOCKER run …` is invisible to a check that resolves `$VAR` only through
+    // `process.env` — and every template in this repo assigns shell variables.
     const p = project();
     const err = await stderrCapture(async () => {
       await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
