@@ -325,14 +325,14 @@ function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefi
  *  recovered-struct spelling, which no map declares — resolves to null, and so does any base that
  *  is not a map-shaped global, which is what makes every caller refuse rather than guess.
  *
- *  THE POINTEE ARM IS UNREACHABLE TODAY, measured rather than assumed: this resolver's only
- *  callers want a POINTER member, and `pointeeAccess` gates every `gPtr->member` spelling on
- *  `spellsAccessType(f.signed, …)`, which returns false for the `signed: undefined` a pointer
- *  field carries. So no `field` node naming a pointer member of a pointee is ever produced, and
- *  a pointer read one indirection down still spells `((s32 *)gQ)[1]`. The arm stays because it is
- *  the GUARD, not the feature: the day `pointeeAccess` learns to spell a pointer member, the
- *  byte-arithmetic rule that depends on this answer is already correct for it, where deleting it
- *  would reopen the double-scaling hole silently. */
+ *  The pointee arm reaches only what the MAP lets it: `pointeeAccess` gates every `gPtr->member`
+ *  spelling on `spellsAccessType(f.signed, …)`, so a pointer field declaring no signedness — which
+ *  is every one in the corpus's vendored maps — is never named, and a pointer read one indirection
+ *  down spells `((s32 *)gQ)[1]`. That is a fact about those maps, not about this code: `SymbolMap`
+ *  is a caller-supplied input, and one field flips it (`signed: true` on a 4-byte pointer member
+ *  of a pointee yields `(u8 *)gQ->pInner`, cast and all, pinned in pointer-members.test.ts). So
+ *  the arm is live and tested, and the byte-arithmetic rule that reads this answer is correct for
+ *  it — where resolving a pointee member to null would reopen the double-scaling hole silently. */
 function declaredMemberOf(x: Expr, sym: SymRenderCtx | undefined): DeclaredField | null {
   if (x.k !== 'field' || x.base.k !== 'var' || sym === undefined) {
     return null;

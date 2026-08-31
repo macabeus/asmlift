@@ -335,3 +335,53 @@ describe('a map-declared pointer VALUE is spelled legally where it is assigned',
     expect(src).not.toContain('(void *)gBgPtrs.count');
   });
 });
+
+// The guard's second address arm: the container is not a struct global but a pointer global's
+// POINTEE, and the member it declares is itself a pointer.
+describe('a pointer member of a POINTEE is a pointer to the guard too', () => {
+  const qInfo = (signed?: boolean): SymbolInfo => ({
+    name: 'gQ',
+    kind: 'data',
+    declared: true,
+    shape: 'pointer',
+    size: 4,
+    pointee: {
+      name: 'Q',
+      structName: 'Q',
+      size: 16,
+      layout: [
+        { name: 'a', offset: 0, size: 4, signed: true },
+        {
+          name: 'pInner',
+          offset: 4,
+          size: 4,
+          pointer: true,
+          pointeeSize: 2,
+          ...(signed === undefined ? {} : { signed }),
+        },
+      ],
+    },
+  });
+  // read gQ->pInner, add a runtime byte offset and a constant, deref a halfword
+  const POINTEE_WALK =
+    'f:\n\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tldr\tr1, [r1, #0x4]\n\tadd\tr0, r0, r1\n' +
+    '\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]\n\tbx\tlr\n' +
+    '.L1:\n\t.word\t0x03000100\n';
+  const runQ = (signed?: boolean) =>
+    decompile('f', POINTEE_WALK, ARMV4T_AGBCC, { symbols: new Map([[0x03000100, [qInfo(signed)]]]) }).source;
+
+  test('a NAMED pointer member of a pointee gets the cast-then-add spelling', () => {
+    // the whole point of resolving this arm: without it the byte residual would be added to a
+    // `u16 *` and scaled a second time
+    expect(runQ(true)).toContain('(u8 *)gQ->pInner');
+  });
+
+  test('a pointer member the map gives no signedness is not NAMED, so there is nothing to guard', () => {
+    // `spellsAccessType` refuses the member spelling itself — every pointer field in the corpus's
+    // vendored maps is this case, which is why the arm looks dead there and is not
+    for (const s of [undefined, false] as const) {
+      expect(runQ(s)).toContain('((s32 *)gQ)[1]');
+      expect(runQ(s)).not.toContain('gQ->pInner');
+    }
+  });
+});
