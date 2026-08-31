@@ -14,7 +14,7 @@
 // The generator emits LOOPS by default. Every defect this has caught has been a loop or a
 // mid-block shape, and a fuzz that cannot reach them would be a green test for the thing it exists
 // to check.
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { Block, Fn, Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
@@ -24,6 +24,14 @@ import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { structure } from '../src/structure/structure';
+
+// CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
+// budget. Solo these tests run in 0.9-1.7 s; inside a full `pnpm test:offline` at loadavg ~26 this
+// file and two siblings went red with `Error: Test timed out in 5000ms` and nothing else, which
+// reads like a soundness failure and is not — re-run alone, 11 tests green in under 2 s. A real
+// hang is still loud, just 60 s later. (Not caused by the candidate-object cache: nothing under
+// packages/core imports it, and the test fence's positive control passed in the same red run.)
+vi.setConfig({ testTimeout: 60_000 });
 
 function mulberry32(seed: number): () => number {
   let t = seed >>> 0;
