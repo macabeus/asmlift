@@ -2316,6 +2316,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // address order but executing between load and render on the taken path — fn.blocks order is
   // address order, not topological order.
   const bitfieldSpelling = new Map<Op, { global: string; field: string }>();
+  // …and the WRITE side: a store the mask-and-insert idiom recognized (see the block below), with
+  // the value the source assigned. THE SECOND inhabitant of "a precomputed member spelling", which
+  // is what makes the shape shared rather than anticipated.
+  const bitfieldStore = new Map<Op, { global: string; field: string; value: Value }>();
   const absorbedLoads = new Set<Op>();
   if (symCtx && littleEndian && spellBitfieldMembers) {
     // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
@@ -2388,6 +2392,175 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         );
       if (absorbed) {
         absorbedLoads.add(load);
+      }
+    }
+
+    // ── BITFIELD member WRITES: the mask-and-insert idiom ───────────────────────────────────
+    // `store(A, or(and(load(A), ~W), v << lo))` over a struct global's cell IS an assignment to
+    // the declared bitfield at bits W — `gSym.field = v;`, one statement where the recovered
+    // spelling is a read, a mask, a shift, an or and a store.
+    //
+    // EXACT, never approximate. The cleared bits must be exactly one declared field's window; the
+    // load must address the SAME cell at the same width; the insert must be that value shifted to
+    // the window's own position; and the load, the mask, the `and` and the `or` must each be
+    // single-use and unmaterialized, because the fold DELETES all of them — a second reader would
+    // keep the temp and the emitted C would do the work twice.
+    //
+    // TRUNCATION is what makes an UNMASKED insert legal, and only sometimes: C truncates the
+    // assigned value to the field width, while the asm's `or` writes every bit of `v << lo` that
+    // the STORE keeps. The two agree when the field ends the stored cell — bits above it are
+    // dropped by the store either way — or when `v` provably has no more bits than the field.
+    // Anything else keeps the honest mask spelling.
+    //
+    // ORDERING: the named store re-reads the cell at the STORE's position where the asm read it at
+    // the LOAD's, the same hazard the read fold above states, cleared with the same machinery.
+
+    // The mask as a NUMBER. A thumb `bic` lifts as `and` with `neg`/`not` of a constant, so those
+    // two spellings fold; anything else is not a compile-time mask and refuses the whole idiom.
+    // A materialized def is excluded — it emits its own temp, so it is a variable, not a literal.
+    const maskConst = (v: Value): number | null => {
+      const d = defs.get(v);
+      if (!d || materialize.has(d)) {
+        return null;
+      }
+      if (d.opcode === 'const') {
+        return (d.attrs.value as number) | 0;
+      }
+      if ((d.opcode === 'neg' || d.opcode === 'not') && d.operands.length === 1) {
+        const a = maskConst(d.operands[0]);
+        return a === null ? null : (d.opcode === 'neg' ? -a : ~a) | 0;
+      }
+      return null;
+    };
+    /** An UPPER BOUND on the significant bits of a value, or 32 when nothing bounds it. Every
+     *  answer below 32 comes from a declaration or from the instruction itself — a zero-fill
+     *  shift, a mask, an unsigned load's width, a bitfield read this pass already spelled. */
+    const provableBits = (v: Value): number => {
+      const d = defs.get(v);
+      if (!d) {
+        return 32;
+      }
+      const bf = bitfieldSpelling.get(d);
+      if (bf) {
+        return declaredFields(symCtx.info(bf.global)?.layout)?.find((f) => f.name === bf.field)?.bitWidth ?? 32;
+      }
+      if (d.opcode === 'shr_u' && d.operands.length === 1 && typeof d.attrs.imm === 'number') {
+        return 32 - (d.attrs.imm as number);
+      }
+      if (d.opcode === 'load') {
+        return d.attrs.signed === true ? 32 : (d.attrs.width as number) * 8;
+      }
+      const m =
+        d.opcode === 'const' || d.opcode === 'and'
+          ? d.opcode === 'const'
+            ? maskConst(v)
+            : (d.operands.map(maskConst).find((x) => x !== null) ??
+              (typeof d.attrs.imm === 'number' ? (d.attrs.imm as number) | 0 : null))
+          : null;
+      return m !== null && m >= 0 ? 32 - Math.clz32(m) : 32;
+    };
+    /** The one operand of a commutative binary op that is NOT `keep`, with the 1-operand
+     *  immediate form folded into a synthetic answer of `null` (an `imm` mask has no Value). */
+    const otherOperand = (d: Op, keep: Value): Value | null =>
+      d.operands.length === 2 ? (d.operands[0] === keep ? d.operands[1] : d.operands[0]) : null;
+
+    for (const blk of fn.blocks) {
+      for (const op of blk.ops) {
+        if (op.opcode !== 'store') {
+          continue;
+        }
+        const width = op.attrs.width as number;
+        const cell = globalCellOf(defs, op.operands[0], op.attrs.off as number);
+        const si = cell ? symCtx.info(cell.name) : undefined;
+        const orOp = defs.get(op.operands[1]);
+        if (
+          !cell ||
+          si?.shape !== 'struct' ||
+          si.volatile ||
+          orOp?.opcode !== 'or' ||
+          orOp.operands.length !== 2 ||
+          materialize.has(orOp) ||
+          (useSitesOf.get(orOp.results[0]) ?? []).length !== 1
+        ) {
+          continue;
+        }
+        const cellBits = width * 8;
+        const cellMask = width >= 4 ? -1 : (1 << cellBits) - 1;
+        for (const [keepV, insV] of [
+          [orOp.operands[0], orOp.operands[1]],
+          [orOp.operands[1], orOp.operands[0]],
+        ] as const) {
+          const andOp = defs.get(keepV);
+          if (
+            andOp?.opcode !== 'and' ||
+            materialize.has(andOp) ||
+            (useSitesOf.get(andOp.results[0]) ?? []).length !== 1
+          ) {
+            continue;
+          }
+          // `and` is commutative and may carry its constant as an immediate: find the operand that
+          // is the SAME cell's load, and read the mask off whatever is left.
+          const loadV = andOp.operands.find((o) => {
+            const l = defs.get(o);
+            const c = l?.opcode === 'load' ? globalCellOf(defs, l.operands[0], l.attrs.off as number) : null;
+            return c !== null && c.name === cell.name && c.byte === cell.byte && l!.attrs.width === width;
+          });
+          const load = loadV === undefined ? undefined : defs.get(loadV)!;
+          const maskV = loadV === undefined ? null : otherOperand(andOp, loadV);
+          const mask =
+            maskV !== null
+              ? maskConst(maskV)
+              : typeof andOp.attrs.imm === 'number'
+                ? (andOp.attrs.imm as number) | 0
+                : null;
+          if (
+            load === undefined ||
+            mask === null ||
+            materialize.has(load) ||
+            (useSitesOf.get(load.results[0]) ?? []).length !== 1
+          ) {
+            continue;
+          }
+          // The cleared bits must be ONE contiguous window inside the stored cell.
+          const clear = ~mask & cellMask;
+          if (clear === 0) {
+            continue;
+          }
+          const lo = 31 - Math.clz32(clear & -clear);
+          const w = 32 - Math.clz32(clear >>> lo);
+          if ((((w >= 32 ? -1 : (1 << w) - 1) << lo) & cellMask) !== clear) {
+            continue;
+          }
+          // …and the insert must be exactly that value seated at `lo`.
+          const shifted = defs.get(insV);
+          const value =
+            lo === 0
+              ? insV
+              : shifted?.opcode === 'shl' && shifted.operands.length === 1 && shifted.attrs.imm === lo
+                ? shifted.operands[0]
+                : null;
+          if (
+            value === null ||
+            (lo !== 0 && (materialize.has(shifted!) || (useSitesOf.get(insV) ?? []).length !== 1))
+          ) {
+            continue;
+          }
+          if (lo + w !== cellBits && provableBits(value) > w) {
+            continue; // C would truncate bits the asm's `or` writes
+          }
+          const fld = declaredFields(si.layout)?.find(
+            (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === cell.byte * 8 + lo && f.signed !== undefined,
+          );
+          const at = { blk, idx: opIndex.get(op)! };
+          if (
+            fld &&
+            memberQualsAllow(fld, si.const, true) &&
+            !memWriteBetween(load, at, mayWriteGlobal(defs, cell.name))
+          ) {
+            bitfieldStore.set(op, { global: cell.name, field: fld.name, value });
+          }
+          break;
+        }
       }
     }
   }
@@ -2972,6 +3145,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const out: Stmt[] = [];
     for (const op of b.ops) {
       if (op.opcode === 'store') {
+        // a mask-and-insert recognized over the ops (see the precompute above): the member
+        // assignment, not the read-mask-or-store chain
+        const bfs = bitfieldStore.get(op);
+        if (bfs) {
+          out.push({
+            k: 'store',
+            lval: { k: 'field', base: { k: 'var', name: bfs.global }, name: bfs.field, dot: true },
+            value: expr(bfs.value),
+          });
+          continue;
+        }
         // A store whose lvalue is a bare global (`gSym = v`, from an `&gSym` base at off 0) emits
         // as an ASSIGN, not a store — memAccess returns a `var` node for that case.
         const width = op.attrs.width as number;
