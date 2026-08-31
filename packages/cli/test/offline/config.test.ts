@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { loadDecompConfig, resolveTarget } from '../../src/config';
 import { runCli } from '../../src/main';
@@ -121,54 +121,55 @@ test('CLI: --score-against with a missing object is exit 66; bad compile templat
   expect(badTemplate.stderr).toContain('{{inputPath}} and {{outputPath}}');
 });
 
-// `tools.asmlift.cacheInputs` is the one field in this file that is a SOUNDNESS CONTRACT rather
-// than a preference: it is what opts a project into the cross-run candidate-object cache, and the
-// cache's namespace can only measure inputs it can name. `parsed as DecompConfig` is a
-// compile-time claim about a file a project wrote, so the shape is checked at the seam.
-//
-// Reproduced on the shipped code before this check existed: `cacheInputs: gen` (a YAML scalar
-// where a list was meant) reached compile-command.ts, which ITERATES the declaration — a string
-// iterates per CHARACTER, so "gen" hashed as three MISSING entries and produced a namespace
-// byte-identical to `["g","e","n"]`. The cache turned ON having measured nothing the project
-// declared, editing the declared input served a stale object, and no diagnostic was printed
-// anywhere. A one-character YAML mistake re-armed the hole the declaration exists to close.
-test('cacheInputs must be a list of paths — a scalar is a stale-object hole, not a shorthand', () => {
-  const write = (body: string): string => {
-    const root = tmp();
-    writeFileSync(join(root, 'decomp.yaml'), body);
-    return join(root, 'decomp.yaml');
-  };
-  for (const spelling of ['gen', '3', 'true']) {
-    expect(() =>
-      loadDecompConfig(write(`platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs: ${spelling}\n`)),
-    ).toThrow(/cacheInputs must be a list/);
+// `tools.asmlift.cacheInputs` existed for one round: a per-project DECLARATION of everything the
+// compile command reads, and the gate the candidate-object cache would not start without. It is
+// gone — the namespace measures the command's paths instead of being told them — and a config
+// still carrying it would otherwise be silently ignored, leaving a reader believing a seatbelt is
+// fastened that no longer exists. Loading it must not FAIL (an obsolete key is not a broken
+// project, and the cache is now strictly more complete than the declaration was), but it must say
+// so once.
+test('an obsolete cacheInputs key loads, and says out loud that it does nothing', () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs:\n      - inc\n',
+  );
+  const said: string[] = [];
+  const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+    said.push(typeof c === 'string' ? c : Buffer.from(c).toString());
+    return true;
+  });
+  try {
+    expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.target).toBe('agbcc');
+  } finally {
+    spy.mockRestore();
   }
-  expect(() =>
-    loadDecompConfig(write('platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs:\n      - ""\n')),
-  ).toThrow(/cacheInputs must be a list/);
+  expect(said.join('')).toMatch(/cacheInputs.*no longer/);
 });
 
-test('cacheInputs: [] is a DECLARATION and loads; absent is simply absent', () => {
+// `tools.asmlift.candidateCache` is what came back in `cacheInputs`' place, and it is deliberately
+// the OTHER shape: a refusal, never an assertion. `cacheInputs` was wrong in the stale-object
+// direction when a project under-declared; this one is wrong in the cold-start direction when a
+// project over-refuses. There is exactly one value, because there is no value that could turn the
+// cache ON — the environment already does that, and a project cannot know more than the
+// measurement does.
+test("tools.asmlift.candidateCache: off loads as the string 'off', not YAML 1.1's boolean", () => {
   const root = tmp();
   writeFileSync(
     join(root, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs: []\n',
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    candidateCache: off\n',
   );
-  expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.cacheInputs).toEqual([]);
-
-  const root2 = tmp();
-  writeFileSync(join(root2, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n');
-  expect(loadDecompConfig(join(root2, 'decomp.yaml'))?.config.tools?.asmlift?.cacheInputs).toBeUndefined();
+  // The `yaml` package parses with the 1.2 core schema, where `off` is a plain string. If that
+  // ever changed under us the key would arrive as `false`, the validator below would throw, and
+  // every project declaring the refusal would fail to load — so pin the parse, not just the use.
+  expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.candidateCache).toBe('off');
 });
 
-test('a list of real paths loads unchanged', () => {
+test('any other value is a loud error — a typo must never read as "on"', () => {
   const root = tmp();
   writeFileSync(
     join(root, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs:\n      - inc\n      - tools/agbcc\n',
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    candidateCache: on\n',
   );
-  expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.cacheInputs).toEqual([
-    'inc',
-    'tools/agbcc',
-  ]);
+  expect(() => loadDecompConfig(join(root, 'decomp.yaml'))).toThrow(/candidateCache must be 'off'/);
 });

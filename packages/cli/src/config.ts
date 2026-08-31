@@ -21,15 +21,20 @@ export interface AsmliftToolConfig {
   compiler?: string;
   /** host objdump binary for object-file input (overrides the built-in per-target choice) */
   objdump?: string;
-  /** every file and directory the `compiler` command reads, relative to this decomp.yaml.
-   *  DECLARING them is what opts this project into the cross-run candidate-object cache: the
-   *  cache's namespace can only measure inputs it can name, and an input reached through a
-   *  directory (`-I ./inc`) is nameable only here. Absent: no candidate caching, ever. */
-  cacheInputs?: string[];
   /** the project's built ELF (relative to this decomp.yaml) — the address→symbol source:
    *  names from `.symtab`, declaration shapes from the linked-in DWARF types-sidecar when
    *  present. Absent ⇒ no symbol map (today's behavior). */
   elf?: string;
+  /** `off` — this project REFUSES the cross-run candidate-object cache for its `compiler`
+   *  command, whatever `ASMLIFT_CANDCACHE` says. The only value; anything else is an error, so a
+   *  typo cannot silently read as "on".
+   *
+   *  A REFUSAL, never an assertion: a key that asserted what the command reads would serve a
+   *  stale object the moment the assertion was incomplete, while an unnecessary refusal costs a
+   *  cold start. Declare it when the command runs the compiler somewhere nothing here can read it
+   *  — a container image named by a tag, another host, a wrapper that reads a config directory it
+   *  never names on its command line. */
+  candidateCache?: 'off';
 }
 
 export interface DecompVersion {
@@ -88,35 +93,35 @@ function readConfig(path: string): LoadedConfig {
     throw new Error(`cannot parse ${path}: expected a YAML mapping at the top level`);
   }
   const config = parsed as DecompConfig;
-  validateCacheInputs(path, config);
+  noteObsoleteKeys(path, config);
+  validateAsmliftKeys(path, config);
   return { path, config };
 }
 
-/**
- * `tools.asmlift.cacheInputs` is the ONE field in this file that is a soundness contract rather
- * than a preference, so it is validated at the seam and not only in the type: `parsed as
- * DecompConfig` is a compile-time claim about a file a project wrote.
- *
- * MEASURED: `cacheInputs: gen` (a YAML scalar where a list was meant) reaches
- * `compile-command.ts`, which iterates the declaration — a string iterates PER CHARACTER, so
- * `"gen"` hashed as three MISSING entries, the digest was identical to `["g","e","n"]`, the cache
- * turned ON having measured nothing the project declared, and editing the declared input served a
- * stale object with no diagnostic anywhere. A one-character YAML mistake re-armed the hole the
- * declaration exists to close, so this throws and names the field.
- */
-function validateCacheInputs(path: string, config: DecompConfig): void {
-  const declared = config.tools?.asmlift?.cacheInputs;
-  if (declared === undefined) {
-    return;
-  }
-  const bad =
-    !Array.isArray(declared) || declared.some((d) => typeof d !== 'string' || d.trim() === '') ? declared : undefined;
-  if (bad !== undefined) {
+/** `tools.asmlift.cacheInputs` was the per-project DECLARATION of every file and directory the
+ *  compile command reads — the gate the cross-run candidate-object cache would not start without,
+ *  because one input class (a directory named by a flag) could not be measured. It is measured
+ *  now, so the key is gone. Loading a config that still carries it is NOT an
+ *  error: an obsolete key is not a broken project, and what replaced it is strictly more complete
+ *  than the declaration ever was. But it is said out loud, once, because silence would leave a
+ *  reader believing a seatbelt is fastened that does not exist any more. */
+function validateAsmliftKeys(path: string, config: DecompConfig): void {
+  const cc = config.tools?.asmlift?.candidateCache;
+  if (cc !== undefined && cc !== 'off') {
     throw new Error(
-      `${path}: tools.asmlift.cacheInputs must be a list of non-empty paths (got ${JSON.stringify(bad)}). ` +
-        `It is the candidate-object cache's contract — every file and directory the compile command reads, ` +
-        `relative to this decomp.yaml. An empty list ([]) is a valid declaration; omitting the key turns the ` +
-        `cache off for this project.`,
+      `${path}: tools.asmlift.candidateCache must be 'off' if present (got ${JSON.stringify(cc)}). ` +
+        `It is a refusal, not a switch — there is no value that turns the cache ON, because ` +
+        `ASMLIFT_CANDCACHE already does that and a project cannot know more than the measurement.`,
+    );
+  }
+}
+
+function noteObsoleteKeys(path: string, config: DecompConfig): void {
+  if ((config.tools?.asmlift as { cacheInputs?: unknown } | undefined)?.cacheInputs !== undefined) {
+    process.stderr.write(
+      `${path}: tools.asmlift.cacheInputs is obsolete and no longer read — the candidate-object ` +
+        `cache measures what the compile command reads (every path flag's operand, response files, ` +
+        `glob directories, CPATH) instead of being told. You can delete the key.\n`,
     );
   }
 }

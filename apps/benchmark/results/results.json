@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-30T18:39:03.533Z",
+    "generatedAt": "2026-08-31T01:51:05.995Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "38af8a22e7250461c19385de1303e7abcec260e2",
+      "commit": "70ccd163d8768ca3131e85994c4040790cea3ad6",
       "dirty": false
     },
     "m2c": {
@@ -48409,7 +48409,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: invalid type argument of `unary *'"
+          "<scratch>/cand.c.pp.c:3: invalid type argument of `unary *'"
         ]
       },
       "gapSize": null,
@@ -48547,7 +48547,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 3: Dereferenced a non-pointer."
+          "cfe: Error: <scratch>/cand.c, line 3: Dereferenced a non-pointer."
         ]
       },
       "gapSize": null,
@@ -48692,11 +48692,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:10: `NULL' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:10: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:10: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:19: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:19: request for member `unk0' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:10: `NULL' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:10: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:10: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:19: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:19: request for member `unk0' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -48776,9 +48776,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:8: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:10: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:13: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:8: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:10: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:13: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -48945,11 +48945,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:15: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:15: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -49028,8 +49028,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -49104,8 +49104,8 @@
           "addrDeref": 1
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:8: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:8: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -49326,11 +49326,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 32: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 33: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 34: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 35: Bad operand type for += or -=",
-          "cfe: Error: <tmp>/cand.c, line 37: Unacceptable operand of == or !="
+          "cfe: Error: <scratch>/cand.c, line 32: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 33: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 34: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 35: Bad operand type for += or -=",
+          "cfe: Error: <scratch>/cand.c, line 37: Unacceptable operand of == or !="
         ]
       },
       "gapSize": null,
@@ -50393,7 +50393,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:4: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:4: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -50470,7 +50470,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:11: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:11: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -50639,8 +50639,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 12: Selector requires struct/union as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 12: Selector requires struct/union as left hand side"
         ]
       },
       "gapSize": {
@@ -50810,11 +50810,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:4: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:5: request for member `unk8' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:5: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:6: request for member `unkC' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:3: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:4: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:5: request for member `unk8' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:5: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:6: request for member `unkC' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -50882,11 +50882,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:6: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/cand.c.pp.c:7: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:7: request for member `unk12' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:7: request for member `unk10' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:6: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:7: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:7: request for member `unk12' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:7: request for member `unk10' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -51024,7 +51024,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 8: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 8: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -51164,7 +51164,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:5: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:5: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -51302,7 +51302,7 @@
           "addrDeref": 1
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 6: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 6: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": {
@@ -52918,7 +52918,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: invalid type argument of `unary *'"
+          "<scratch>/cand.c.pp.c:3: invalid type argument of `unary *'"
         ]
       },
       "gapSize": null,
@@ -53054,7 +53054,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 3: Dereferenced a non-pointer."
+          "cfe: Error: <scratch>/cand.c, line 3: Dereferenced a non-pointer."
         ]
       },
       "gapSize": null,
@@ -53792,11 +53792,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 36: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 40: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 44: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 48: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 49: Bad operand type for += or -="
+          "cfe: Error: <scratch>/cand.c, line 36: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 40: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 44: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 48: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 49: Bad operand type for += or -="
         ]
       },
       "gapSize": null,
@@ -55261,11 +55261,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 35: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 43: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 47: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 48: Bad operand type for += or -="
+          "cfe: Error: <scratch>/cand.c, line 35: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 43: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 47: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 48: Bad operand type for += or -="
         ]
       },
       "gapSize": null,
@@ -55928,11 +55928,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 30: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 33: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 36: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 40: Bad operand type for += or -="
+          "cfe: Error: <scratch>/cand.c, line 30: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 33: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 36: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 40: Bad operand type for += or -="
         ]
       },
       "gapSize": null,
@@ -58139,9 +58139,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:4: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:5: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:3: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:4: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:5: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -58538,10 +58538,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:4: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:5: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:3: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:4: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:5: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -58967,11 +58967,11 @@
           "addrDeref": 2
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:12: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:15: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:12: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:15: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -59131,11 +59131,11 @@
           "addrDeref": 3
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:8: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:8: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -59299,11 +59299,11 @@
           "addrDeref": 3
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:8: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:8: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -59486,11 +59486,11 @@
           "addrDeref": 2
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:14: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:17: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:18: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:14: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:17: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:18: invalid type argument of `->'"
         ]
       },
       "gapSize": {
@@ -59581,9 +59581,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:5: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:6: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:5: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:6: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -59662,11 +59662,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:14: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:14: invalid type argument of `->'"
         ]
       },
       "gapSize": {
@@ -59758,11 +59758,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:9: `unksp0' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:9: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:9: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:9: `unksp0' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:9: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:9: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -60067,11 +60067,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 41: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 42: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 43: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 44: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 45: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 41: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 42: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 43: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 44: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 45: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -60513,11 +60513,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:7: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/cand.c.pp.c:8: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:8: request for member `unk1' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:9: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:9: request for member `unk8057ACC' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:7: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:8: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:8: request for member `unk1' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:9: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:9: request for member `unk8057ACC' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -62777,7 +62777,7 @@
           "addrDeref": 2
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -63005,11 +63005,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 31: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 34: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 37: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 40: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 44: Bad operand type for += or -="
+          "cfe: Error: <scratch>/cand.c, line 31: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 34: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 37: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 40: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 44: Bad operand type for += or -="
         ]
       },
       "gapSize": null,
@@ -63731,10 +63731,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:5: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:6: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:7: request for member `unk8' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:5: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:6: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:7: request for member `unk8' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -64675,11 +64675,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:12: request for member `unk2' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:13: request for member `unk3' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:14: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:15: request for member `unk5' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:16: request for member `unk6' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:12: request for member `unk2' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:13: request for member `unk3' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:14: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:15: request for member `unk5' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:16: request for member `unk6' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -64830,11 +64830,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 36: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 37: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 38: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 40: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 36: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 37: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 38: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 40: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -65833,11 +65833,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:8: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:10: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:11: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:12: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:13: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:8: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:10: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:11: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:12: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:13: request for member `unk4' in something not a structure or union"
         ]
       },
       "note": "the guarded arm is far enough that agbcc inverts the branch and puts the shared block behind a long-branch trampoline on each edge. The fold looks through them, and the inverted polarity lands this orientation on the `||` dual — so here the source's own `&&` is `/flip-join`'s spelling, the mirror of `ifand_near`. The SCORE cannot police that: the un-folded spelling tail-duplicates the else arm and agbcc cross-jumps the copies back together, so this row read MATCH before the shape was recovered too — what the orientation is pinned by is a test, not this number",
@@ -65906,11 +65906,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:5: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:6: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:9: request for member `unk0' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:5: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:6: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:9: request for member `unk0' in something not a structure or union"
         ]
       },
       "note": "at this distance the fold lands on the source's own `&&`, so asmlift matches at the default joined sense with no axis. m2c prints the same orientation, and its output is byte-exact once the `->unkN` pointer spelling it declines on is legalised — so the noncompile beside this row is an unrelated defect of its own, not distance from a match",
@@ -66051,11 +66051,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:5: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:6: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:9: request for member `unk0' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:5: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:6: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:9: request for member `unk0' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -68946,8 +68946,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:3: request for member `unk8' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:3: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:3: request for member `unk8' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -69083,7 +69083,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 3: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 3: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -69226,11 +69226,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:7: `saved_reg_r4' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:7: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:7: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:12: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:12: request for member `unk0' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:7: `saved_reg_r4' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:7: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:7: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:12: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:12: request for member `unk0' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -69446,11 +69446,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 35: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 43: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 47: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 48: Bad operand type for += or -="
+          "cfe: Error: <scratch>/cand.c, line 35: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 43: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 47: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 48: Bad operand type for += or -="
         ]
       },
       "gapSize": null,
@@ -69596,10 +69596,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:11: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:11: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:16: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:16: request for member `unk10' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:11: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:11: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:16: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:16: request for member `unk10' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -70276,8 +70276,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:30: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:31: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:30: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:31: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -70357,11 +70357,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:6: `unksp0' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:6: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:6: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:19: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:20: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:6: `unksp0' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:6: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:6: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:19: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:20: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -70883,11 +70883,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 35: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 43: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 47: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 48: Bad operand type for += or -="
+          "cfe: Error: <scratch>/cand.c, line 35: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 39: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 43: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 47: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 48: Bad operand type for += or -="
         ]
       },
       "gapSize": null,
@@ -71522,8 +71522,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 12: Selector requires struct/union as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 12: Selector requires struct/union as left hand side"
         ]
       },
       "gapSize": {
@@ -71853,11 +71853,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 7: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 12: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 13: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 14: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 7: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 12: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 13: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 14: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": {
@@ -72190,11 +72190,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 23: Syntax Error",
-          "cfe: Error: <tmp>/cand.c, line 35: Syntax Error",
-          "cfe: Error: <tmp>/cand.c, line 38: Syntax Error",
-          "cfe: Error: <tmp>/cand.c, line 39: Syntax Error",
-          "cfe: Error: <tmp>/cand.c, line 40: Syntax Error"
+          "cfe: Error: <scratch>/cand.c, line 23: Syntax Error",
+          "cfe: Error: <scratch>/cand.c, line 35: Syntax Error",
+          "cfe: Error: <scratch>/cand.c, line 38: Syntax Error",
+          "cfe: Error: <scratch>/cand.c, line 39: Syntax Error",
+          "cfe: Error: <scratch>/cand.c, line 40: Syntax Error"
         ]
       },
       "gapSize": null,
@@ -72518,10 +72518,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 28: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 29: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 30: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 31: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 28: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 29: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 30: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 31: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -73634,11 +73634,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:8: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:8: request for member `unk18' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:12: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:12: request for member `unk1C' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:16: warning: dereferencing `void *' pointer"
+          "<scratch>/cand.c.pp.c:8: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:8: request for member `unk18' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:12: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:12: request for member `unk1C' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:16: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": null,
@@ -73774,11 +73774,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 18: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 23: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 28: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 36: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 41: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 18: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 23: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 28: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 36: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 41: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -73914,11 +73914,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:5: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:5: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:9: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:9: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:14: warning: dereferencing `void *' pointer"
+          "<scratch>/cand.c.pp.c:5: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:5: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:9: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:9: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:14: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": null,
@@ -74068,10 +74068,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 15: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 21: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 28: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 15: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 21: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 28: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -74711,8 +74711,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 38: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 39: Bad operand type for += or -="
+          "cfe: Error: <scratch>/cand.c, line 38: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 39: Bad operand type for += or -="
         ]
       },
       "gapSize": null,
@@ -76133,11 +76133,11 @@
           "addrDeref": 3
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:12: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:14: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:12: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:14: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -80235,11 +80235,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:8: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:8: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -80615,11 +80615,11 @@
           "addrDeref": 1
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:11: warning: implicit declaration of function `getbuf'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:15: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:16: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:16: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:11: warning: implicit declaration of function `getbuf'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:15: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:16: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:16: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -80708,11 +80708,11 @@
           "addrDeref": 1
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:11: warning: implicit declaration of function `getbuf'",
-          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:15: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:16: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:16: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:11: warning: implicit declaration of function `getbuf'",
+          "<scratch>/cand.c.pp.c:13: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:15: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:16: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:16: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -80810,10 +80810,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:5: warning: implicit declaration of function `getbuf'",
-          "<tmp>/cand.c.pp.c:9: warning: implicit declaration of function `sink'",
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `unary *'",
-          "<tmp>/cand.c.pp.c:13: warning: implicit declaration of function `putbuf'"
+          "<scratch>/cand.c.pp.c:5: warning: implicit declaration of function `getbuf'",
+          "<scratch>/cand.c.pp.c:9: warning: implicit declaration of function `sink'",
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `unary *'",
+          "<scratch>/cand.c.pp.c:13: warning: implicit declaration of function `putbuf'"
         ]
       },
       "gapSize": null,
@@ -80898,9 +80898,9 @@
           "addrDeref": 2
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:6: warning: implicit declaration of function `getbuf'",
-          "<tmp>/cand.c.pp.c:12: invalid type argument of `unary *'",
-          "<tmp>/cand.c.pp.c:17: warning: implicit declaration of function `putbuf'"
+          "<scratch>/cand.c.pp.c:6: warning: implicit declaration of function `getbuf'",
+          "<scratch>/cand.c.pp.c:12: invalid type argument of `unary *'",
+          "<scratch>/cand.c.pp.c:17: warning: implicit declaration of function `putbuf'"
         ]
       },
       "gapSize": {
@@ -80997,11 +80997,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:4: warning: implicit declaration of function `getbuf'",
-          "<tmp>/cand.c.pp.c:4: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/cand.c.pp.c:5: warning: implicit declaration of function `sink'",
-          "<tmp>/cand.c.pp.c:5: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:5: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:4: warning: implicit declaration of function `getbuf'",
+          "<scratch>/cand.c.pp.c:4: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:5: warning: implicit declaration of function `sink'",
+          "<scratch>/cand.c.pp.c:5: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:5: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -81081,11 +81081,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:6: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:8: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:6: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:8: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -81548,11 +81548,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:2: warning: `struct N' declared inside parameter list",
-          "<tmp>/cand.c.pp.c:2: warning: its scope is only this definition or declaration,",
-          "<tmp>/cand.c.pp.c:2: warning: which is probably not what you want.",
-          "<tmp>/cand.c.pp.c:5: arithmetic on pointer to an incomplete type",
-          "<tmp>/cand.c.pp.c:5: warning: assignment from incompatible pointer type"
+          "<scratch>/cand.c.pp.c:2: warning: `struct N' declared inside parameter list",
+          "<scratch>/cand.c.pp.c:2: warning: its scope is only this definition or declaration,",
+          "<scratch>/cand.c.pp.c:2: warning: which is probably not what you want.",
+          "<scratch>/cand.c.pp.c:5: arithmetic on pointer to an incomplete type",
+          "<scratch>/cand.c.pp.c:5: warning: assignment from incompatible pointer type"
         ]
       },
       "note": "the trailing-pointer idiom where the trailing value is DERIVED from the loop variable (`&f->v`) rather than being the variable itself, and is read after the loop has moved on",
@@ -82460,8 +82460,8 @@
           "addrDeref": 1
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:6: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:6: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -82541,9 +82541,9 @@
           "addrDeref": 1
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:5: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:6: warning: implicit declaration of function `decomp'",
-          "<tmp>/cand.c.pp.c:6: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:5: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:6: warning: implicit declaration of function `decomp'",
+          "<scratch>/cand.c.pp.c:6: invalid type argument of `->'"
         ]
       },
       "gapSize": {
@@ -82709,7 +82709,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'"
         ]
       },
       "gapSize": {
@@ -82795,7 +82795,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -83051,7 +83051,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 23: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 23: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": {
@@ -84404,11 +84404,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:2: warning: `struct S' declared inside parameter list",
-          "<tmp>/cand.c.pp.c:2: warning: its scope is only this definition or declaration,",
-          "<tmp>/cand.c.pp.c:2: warning: which is probably not what you want.",
-          "<tmp>/cand.c.pp.c:3: dereferencing pointer to incomplete type",
-          "<tmp>/cand.c.pp.c:4: dereferencing pointer to incomplete type"
+          "<scratch>/cand.c.pp.c:2: warning: `struct S' declared inside parameter list",
+          "<scratch>/cand.c.pp.c:2: warning: its scope is only this definition or declaration,",
+          "<scratch>/cand.c.pp.c:2: warning: which is probably not what you want.",
+          "<scratch>/cand.c.pp.c:3: dereferencing pointer to incomplete type",
+          "<scratch>/cand.c.pp.c:4: dereferencing pointer to incomplete type"
         ]
       },
       "gapSize": null,
@@ -84559,10 +84559,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 3: 'unk0' undefined; reoccurrences will not be reported.",
-          "cfe: Error: <tmp>/cand.c, line 3: member of structure or union required",
-          "cfe: Error: <tmp>/cand.c, line 4: 'unk8' undefined; reoccurrences will not be reported.",
-          "cfe: Error: <tmp>/cand.c, line 4: member of structure or union required"
+          "cfe: Error: <scratch>/cand.c, line 3: 'unk0' undefined; reoccurrences will not be reported.",
+          "cfe: Error: <scratch>/cand.c, line 3: member of structure or union required",
+          "cfe: Error: <scratch>/cand.c, line 4: 'unk8' undefined; reoccurrences will not be reported.",
+          "cfe: Error: <scratch>/cand.c, line 4: member of structure or union required"
         ]
       },
       "gapSize": null,
@@ -84988,8 +84988,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:3: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:3: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:3: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -85125,7 +85125,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 3: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 3: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -86305,10 +86305,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 23: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 25: Selector requires struct/union as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 30: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 32: Selector requires struct/union as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 23: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 25: Selector requires struct/union as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 30: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 32: Selector requires struct/union as left hand side"
         ]
       },
       "gapSize": {
@@ -86791,11 +86791,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:12: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:14: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:12: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:14: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -87172,11 +87172,11 @@
           "addrDeref": 4
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:11: `NULL' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:11: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:11: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:14: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:14: request for member `unk3002000' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:11: `NULL' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:11: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:11: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:14: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:14: request for member `unk3002000' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -87267,11 +87267,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:7: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:8: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:12: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:7: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:8: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:12: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -87339,9 +87339,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:3: request for member `unk2' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:3: request for member `unk4' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:3: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:3: request for member `unk2' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:3: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -87480,7 +87480,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 3: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 3: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -87624,10 +87624,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:2: warning: `struct S' declared inside parameter list",
-          "<tmp>/cand.c.pp.c:2: warning: its scope is only this definition or declaration,",
-          "<tmp>/cand.c.pp.c:2: warning: which is probably not what you want.",
-          "<tmp>/cand.c.pp.c:3: dereferencing pointer to incomplete type"
+          "<scratch>/cand.c.pp.c:2: warning: `struct S' declared inside parameter list",
+          "<scratch>/cand.c.pp.c:2: warning: its scope is only this definition or declaration,",
+          "<scratch>/cand.c.pp.c:2: warning: which is probably not what you want.",
+          "<scratch>/cand.c.pp.c:3: dereferencing pointer to incomplete type"
         ]
       },
       "gapSize": null,
@@ -87777,8 +87777,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 3: 'unk4' undefined; reoccurrences will not be reported.",
-          "cfe: Error: <tmp>/cand.c, line 3: member of structure or union required"
+          "cfe: Error: <scratch>/cand.c, line 3: 'unk4' undefined; reoccurrences will not be reported.",
+          "cfe: Error: <scratch>/cand.c, line 3: member of structure or union required"
         ]
       },
       "gapSize": null,
@@ -87932,11 +87932,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: `unksp0' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:3: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:3: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:3: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:4: warning: implicit declaration of function `use'"
+          "<scratch>/cand.c.pp.c:3: `unksp0' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:3: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:3: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:3: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:4: warning: implicit declaration of function `use'"
         ]
       },
       "gapSize": null,
@@ -88088,11 +88088,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:5: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:6: `unksp0' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:6: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:6: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:7: warning: implicit declaration of function `four'"
+          "<scratch>/cand.c.pp.c:5: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:6: `unksp0' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:6: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:6: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:7: warning: implicit declaration of function `four'"
         ]
       },
       "gapSize": {
@@ -88182,11 +88182,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:4: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/cand.c.pp.c:5: `unksp0' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:5: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:5: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:6: warning: dereferencing `void *' pointer"
+          "<scratch>/cand.c.pp.c:4: warning: assignment makes pointer from integer without a cast",
+          "<scratch>/cand.c.pp.c:5: `unksp0' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:5: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:5: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:6: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": null,
@@ -88712,7 +88712,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 12: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 12: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -89008,7 +89008,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 11: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 11: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -89317,11 +89317,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 32: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 33: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 34: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 35: Bad operand type for += or -=",
-          "cfe: Error: <tmp>/cand.c, line 37: Unacceptable operand of == or !="
+          "cfe: Error: <scratch>/cand.c, line 32: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 33: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 34: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 35: Bad operand type for += or -=",
+          "cfe: Error: <scratch>/cand.c, line 37: Unacceptable operand of == or !="
         ]
       },
       "gapSize": null,
@@ -92716,11 +92716,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:16: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:26: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:31: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:36: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:37: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:16: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:26: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:31: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:36: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:37: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -94615,11 +94615,11 @@
           "addrDeref": 3
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:6: `NULL' undeclared (first use in this function)",
-          "<tmp>/cand.c.pp.c:6: (Each undeclared identifier is reported only once",
-          "<tmp>/cand.c.pp.c:6: for each function it appears in.)",
-          "<tmp>/cand.c.pp.c:9: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:9: request for member `unk3002000' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:6: `NULL' undeclared (first use in this function)",
+          "<scratch>/cand.c.pp.c:6: (Each undeclared identifier is reported only once",
+          "<scratch>/cand.c.pp.c:6: for each function it appears in.)",
+          "<scratch>/cand.c.pp.c:9: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:9: request for member `unk3002000' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -94780,9 +94780,9 @@
           "addrDeref": 4
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 14: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 16: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 25: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 14: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 16: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 25: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -95808,11 +95808,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:3: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:3: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:4: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:4: request for member `unk2' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:3: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:3: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:4: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:4: request for member `unk2' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -95944,8 +95944,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 3: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 4: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 3: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 4: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -97112,11 +97112,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 24: 'sp24' undefined; reoccurrences will not be reported.",
-          "cfe: Error: <tmp>/cand.c, line 26: 'sp0' undefined; reoccurrences will not be reported.",
-          "cfe: Error: <tmp>/cand.c, line 28: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 29: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 30: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 24: 'sp24' undefined; reoccurrences will not be reported.",
+          "cfe: Error: <scratch>/cand.c, line 26: 'sp0' undefined; reoccurrences will not be reported.",
+          "cfe: Error: <scratch>/cand.c, line 28: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 29: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 30: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -97537,11 +97537,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:12: invalid type argument of `->'",
-          "<tmp>/cand.c.pp.c:14: invalid type argument of `->'"
+          "<scratch>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:12: invalid type argument of `->'",
+          "<scratch>/cand.c.pp.c:14: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -97881,11 +97881,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:2: warning: `union E' declared inside parameter list",
-          "<tmp>/cand.c.pp.c:2: warning: its scope is only this definition or declaration,",
-          "<tmp>/cand.c.pp.c:2: warning: which is probably not what you want.",
-          "<tmp>/cand.c.pp.c:4: arithmetic on pointer to an incomplete type",
-          "<tmp>/cand.c.pp.c:4: warning: assignment from incompatible pointer type"
+          "<scratch>/cand.c.pp.c:2: warning: `union E' declared inside parameter list",
+          "<scratch>/cand.c.pp.c:2: warning: its scope is only this definition or declaration,",
+          "<scratch>/cand.c.pp.c:2: warning: which is probably not what you want.",
+          "<scratch>/cand.c.pp.c:4: arithmetic on pointer to an incomplete type",
+          "<scratch>/cand.c.pp.c:4: warning: assignment from incompatible pointer type"
         ]
       },
       "gapSize": null,
@@ -98039,7 +98039,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 5: Unacceptable operand of '+'."
+          "cfe: Error: <scratch>/cand.c, line 5: Unacceptable operand of '+'."
         ]
       },
       "gapSize": {
@@ -98195,11 +98195,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:4: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:7: warning: dereferencing `void *' pointer",
-          "<tmp>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:9: warning: dereferencing `void *' pointer"
+          "<scratch>/cand.c.pp.c:4: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:4: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:7: warning: dereferencing `void *' pointer",
+          "<scratch>/cand.c.pp.c:7: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:9: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": null,
@@ -98336,10 +98336,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "cfe: Error: <tmp>/cand.c, line 5: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 8: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/cand.c, line 12: Selector requires struct/union pointer as left hand side"
+          "cfe: Error: <scratch>/cand.c, line 5: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 8: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 10: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <scratch>/cand.c, line 12: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -99390,9 +99390,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "<tmp>/cand.c.pp.c:7: request for member `unk0' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:8: request for member `unk4' in something not a structure or union",
-          "<tmp>/cand.c.pp.c:9: request for member `unk8' in something not a structure or union"
+          "<scratch>/cand.c.pp.c:7: request for member `unk0' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:8: request for member `unk4' in something not a structure or union",
+          "<scratch>/cand.c.pp.c:9: request for member `unk8' in something not a structure or union"
         ]
       },
       "gapSize": null,
