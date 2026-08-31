@@ -436,3 +436,68 @@ describe('the store survives another process rewriting it under us', () => {
     });
   });
 });
+
+describe('a store this process cannot prepare is a COLD store, never a dropped candidate', () => {
+  // `putFail` and `pruneOnce` both already said it in so many words ("a store that cannot be
+  // written is a cold store", "an unreadable store is a cache miss, never an error"). `namespace()`
+  // did not: `mkdirSync` / `utimesSync` / `claimNamespace` sat outside the try that guards
+  // `stamp()`, so the throw escaped `get`/`put`/`warm` into the candidate compile — where
+  // compile-command.ts and compile/agbcc.ts read ANY exception as "this spelling does not compile"
+  // and delete it from the fan. MEASURED end to end against a read-only store: `1 dropped`, the
+  // published winner moved `unsigned` -> `signed` on the one line docs/ranked-repro.md tells
+  // readers to quote, and the `[candcache]` line still read a clean `{"hit":1}`.
+  const captureAll = async (
+    env: Record<string, string | undefined>,
+    fn: (m: CandCacheModule) => void,
+  ): Promise<{ said: string; stats: Record<string, number> }> => {
+    let said = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+      said += typeof c === 'string' ? c : Buffer.from(c).toString();
+      return true;
+    });
+    try {
+      return await load(env, (m) => {
+        fn(m);
+        return { said, stats: m.cacheStats() };
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  };
+
+  /** A ROOT whose parent is a FILE: `mkdir` answers ENOTDIR on every platform, and unlike `chmod`
+   *  it does not depend on whether the test runs as root (hosted CI containers often do). */
+  const unusableRoot = (): string => {
+    const f = join(scratch(), 'not-a-directory');
+    writeFileSync(f, 'x');
+    return join(f, 'store');
+  };
+
+  test('every entry point answers like a miss and NOTHING throws', async () => {
+    const root = unusableRoot();
+    const { said, stats } = await captureAll({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      const scratchObj = object('FRESHLY-COMPILED');
+      expect(() => c.warm()).not.toThrow();
+      expect(c.get('k', 'f')).toBeUndefined();
+      // put hands back the CALLER'S OWN path, which is the answer it just compiled.
+      expect(c.put('k', 'f', scratchObj)).toBe(scratchObj);
+      expect(() => c.putFail('k2', 'f', 'agbcc failed (exit 1)')).not.toThrow();
+      expect(c.mode, 'and the instance is off for the rest of the process').toBe('off');
+    });
+    expect(said).toContain('REFUSED label=t reason=store-unusable');
+    expect(stats).toMatchObject({ refused: 1 });
+  });
+
+  test('the refusal is said ONCE, not once per candidate', async () => {
+    const root = unusableRoot();
+    const { said, stats } = await captureAll({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      for (let i = 0; i < 20; i++) {
+        c.get(`k${i}`, 'f');
+      }
+    });
+    expect(said.split('store-unusable').length - 1).toBe(1);
+    expect(stats.refused).toBe(1);
+  });
+});

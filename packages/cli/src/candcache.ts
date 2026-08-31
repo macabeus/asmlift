@@ -134,20 +134,66 @@ const STATS: Record<string, number> = Object.create(null) as Record<string, numb
 const bump = (k: string, n = 1): void => {
   STATS[k] = (STATS[k] ?? 0) + n;
 };
+/** Keys `get` withheld for an audit that has not come back yet, one set per live instance. Read
+ *  at report time as `sampledPending`, which is what makes `sampled` RECONCILE — see below. */
+const pendingAudits = new Set<Set<string>>();
+
 /** Counters for the run's `[candcache]` line: hit / failHit / miss / stored / failStored /
- *  sampled / verified / verifiedFail / mismatch / refused / refusedKeys / pruned*. `sampled` is
- *  the number of stored answers `on` mode WITHHELD so the caller would compile them anyway — the
- *  extra compiles the audit costs, and the number the rate is chosen against. `verified` and
+ *  sampled / verified / verifiedFail / mismatch / refused / refusedKeys / pruned*. `verified` and
  *  `verifiedFail` count audits that AGREED (a stored object, a stored rejection); a disagreement
  *  in either direction is `mismatch` and nothing else, so the three never have to be read against
- *  each other to learn whether the store was right. Empty object when nothing happened. */
-export const cacheStats = (): Record<string, number> => ({ ...STATS });
+ *  each other to learn whether the store was right. Empty object when nothing happened.
+ *
+ *  `sampled` COUNTS WITHHOLDINGS, NOT AUDITS, and the difference is not cosmetic: a withheld key
+ *  whose fresh compile never arrives (a spawn failure, the 120 s timeout, a signal — the caller
+ *  then stores nothing, because a transient stored as a rejection would drop that candidate on
+ *  every future run) is a sample that was paid for and never compared. Read alone, `sampled: 700`
+ *  claims 700 audits that did not happen, and the doc's survival arithmetic rests on that number.
+ *  So the withholdings ACCOUNT FOR THEMSELVES, exactly:
+ *
+ *      sampled = verified + verifiedFail + mismatch + sampledStale + sampledAbandoned + sampledPending
+ *
+ *  `sampledStale` — the audit ran and the store had nothing left to compare (a sibling shard's
+ *  prune); `sampledAbandoned` — the caller came back empty and took the withheld answer instead;
+ *  `sampledPending` — still outstanding at the moment this is read. A gap between the two sides is
+ *  a bug in this module, and a test asserts the identity rather than trusting it. */
+export const cacheStats = (): Record<string, number> => {
+  let pending = 0;
+  for (const set of pendingAudits) {
+    pending += set.size;
+  }
+  return pending === 0 ? { ...STATS } : { ...STATS, sampledPending: pending };
+};
 /** How many stored answers a fresh compile disagreed with, in either direction. A run that ends
  *  with this nonzero has served (or would have served) bytes the toolchain no longer produces:
  *  the gate that reads it must FAIL, not print. */
 export const cacheMismatches = (): number => STATS.mismatch ?? 0;
 
-const ROOT = process.env.ASMLIFT_CANDCACHE_DIR ?? join(tmpdir(), 'asmlift-candcache');
+// WHERE THE STORE LIVES. `??` catches only `undefined`, and an empty string is a PATH — a relative
+// one, meaning the CURRENT DIRECTORY. `ASMLIFT_CANDCACHE_DIR=` therefore used to put `ns/`,
+// `objects/` and `MISMATCHES.log` wherever the process happened to be standing, which
+// `docs/ranked-repro.md` tells the reader is their decomp checkout; the pruner then walks and
+// DELETES from a two-level `objects/<dir>/<file>` layout that is a very ordinary build-output
+// shape (measured: a planted 200 KB build artifact removed by one `prunedObjects`). This is the
+// same unexpanded-`$SOMETHING` shape `ASMLIFT_CANDCACHE=` is guarded against nine lines above, and
+// the flip is what armed it — with the old default an empty DIR was inert because the mode was
+// off. A non-empty value is resolved ONCE, here, so a relative store cannot mean two directories
+// in one process.
+const DEFAULT_ROOT = join(tmpdir(), 'asmlift-candcache');
+const RAW_ROOT = process.env.ASMLIFT_CANDCACHE_DIR;
+const ROOT = ((): string => {
+  if (RAW_ROOT === undefined) {
+    return DEFAULT_ROOT;
+  }
+  if (RAW_ROOT.trim() === '') {
+    say(
+      `ASMLIFT_CANDCACHE_DIR is SET AND EMPTY — an empty path is the CURRENT DIRECTORY, which is ` +
+        `never what that means. Using the default store ${DEFAULT_ROOT}; say a path to move it.`,
+    );
+    return DEFAULT_ROOT;
+  }
+  return resolve(RAW_ROOT);
+})();
 const OBJECTS = join(ROOT, 'objects');
 /** Where `verify` mode records a stored-vs-fresh disagreement, so a GATE IN ANOTHER PROCESS can
  *  read it. The stderr line is for a human watching a run; this file is what
@@ -155,6 +201,25 @@ const OBJECTS = join(ROOT, 'objects');
  *  compiled (vitest runs its tests in a forked worker, its globalSetup in the parent). */
 export const mismatchLogFor = (root: string): string => join(root, 'MISMATCHES.log');
 export const MISMATCH_LOG = mismatchLogFor(ROOT);
+
+/** A stored answer disagreed with the truth, in any direction. The loudest thing this module can
+ *  say, and the only record that reaches a GATE IN ANOTHER PROCESS: it bumps `mismatch` (the CLI
+ *  and every bench shard turn a nonzero one into a failing run), writes the stderr line for
+ *  whoever is watching, and appends to `MISMATCH_LOG` for `pnpm test:matching`'s teardown.
+ *
+ *  Module-level rather than per-instance because `linkInto` is the other caller: a
+ *  content-addressed entry whose bytes are not the ones it is named after is exactly this fact,
+ *  found on the store's hot path rather than inside an audit. */
+function report(line: string): void {
+  bump('mismatch');
+  say(line);
+  try {
+    mkdirSync(ROOT, { recursive: true });
+    appendFileSync(MISMATCH_LOG, `${line}\n`);
+  } catch {
+    /* the stderr line is the primary record; an unwritable store must not mask it */
+  }
+}
 
 // ---------------------------------------------------------------------------------------------
 // The CAP. It bounds what the store COSTS, which is not what `objects/` weighs: 77% of a warm
@@ -217,8 +282,22 @@ const SAMPLE_PCT = ((): number => {
  *  hashing the key alone is reproducible but audits the SAME keys forever, so the rest of the
  *  store is never looked at however many runs go by. The seed is PRINTED on the `[candcache]`
  *  line and `ASMLIFT_CANDCACHE_SAMPLE_SEED` replays a run's exact selection. */
-const SAMPLE_SEED = process.env.ASMLIFT_CANDCACHE_SAMPLE_SEED ?? randomBytes(8).toString('hex');
+//  SET AND EMPTY is the failure this guard exists for, and `??` does not catch it: an empty seed
+//  is a perfectly usable string, so `isSampled` degenerates into a pure function of the key and
+//  the SAME fixed 1% of every store is audited in perpetuity — the exact "audits the same keys
+//  forever" design the paragraph above rejects, on every machine, with a trailing `seed=` on the
+//  line as the only tell. Its two siblings (the cap, the rate) both guard it; this one did not.
+const RAW_SEED = process.env.ASMLIFT_CANDCACHE_SAMPLE_SEED;
+const SEED_IS_EMPTY = RAW_SEED !== undefined && RAW_SEED.trim() === '';
+const SAMPLE_SEED = RAW_SEED === undefined || SEED_IS_EMPTY ? randomBytes(8).toString('hex') : RAW_SEED;
 const SAMPLE_THRESHOLD = Math.round((SAMPLE_PCT / 100) * 2 ** 32);
+// Only where it CHANGED the answer: with the audit off there is no selection for a seed to pin.
+if (SEED_IS_EMPTY && MODE === 'on' && SAMPLE_THRESHOLD > 0) {
+  say(
+    `ASMLIFT_CANDCACHE_SAMPLE_SEED is SET AND EMPTY — an empty seed pins the audit to one fixed ` +
+      `subset of every store forever. Using a fresh random seed ${SAMPLE_SEED}.`,
+  );
+}
 const isSampled = (id: string): boolean =>
   SAMPLE_THRESHOLD > 0 && parseInt(sha(`${SAMPLE_SEED} ${id}`).slice(0, 8), 16) < SAMPLE_THRESHOLD;
 
@@ -534,19 +613,48 @@ let seq = 0;
  *  reading that path in the window gets ENOENT on a key that is permanently in the store: 13
  *  throws and 34 failed reads in 15,000 concurrent lookups, measured.
  *
- *  `distrustExisting` re-writes the content-addressed file even when one is already there. The
- *  store's whole economy rests on `objects/<sha>` holding the bytes it is named after, so on the
- *  hot path existence IS the answer and a read per put would be 65,280 reads per LBG run. But an
- *  entry can be wrong — a disk error, an external edit, or a write THROUGH one of its hardlinks —
- *  and then EVERY key that dedups onto it serves those bytes. `verify` mode is the one place that
- *  knows the truth, so its repair does not trust what is there. */
+ *  EXISTENCE IS NOT CONTENT, and treating it as content was a silent wrong answer with no audit
+ *  over it at all. `objects/<sha>` can hold bytes that are not the ones it is named after — a disk
+ *  error, an external edit, a write THROUGH one of its hardlinks, or a store living in a directory
+ *  the project's own build writes to — and then EVERY key that dedups onto it serves those bytes.
+ *  The sampled audit cannot see that: sampling is reached from `get`, so it only ever looks at a
+ *  key the store can already answer, and a `put` is a MISS by construction. MEASURED end to end: a
+ *  run in which every key missed, every candidate compiled freshly and correctly, and the audit was
+ *  at 100% published a NONMATCH as a byte-exact MATCH with exit 0 and wrote no `MISMATCHES.log`.
+ *
+ *  So a `put` compares. It costs one read of a file the dedup path was about to hardlink anyway,
+ *  and only on a key that is being STORED — a key served off the store never reaches here at all.
+ *  MEASURED at the cold LBG fan's own shape (53,228 dedup-hit puts against 15,124 distinct
+ *  objects): stat 267 ms, read-and-compare 1,729 ms, so +1.5 s on a 683-905 s run. A disagreement
+ *  is a `mismatch` like any other: the truth is in hand, so the entry is repaired with it and the
+ *  run FAILS rather than publishing off a store that lied once.
+ *
+ *  `distrustExisting` skips the comparison and rewrites outright: `verify`'s repair has already
+ *  reported its own disagreement and does not need this one to report it again. */
 function linkInto(objBytes: Buffer, dest: string, distrustExisting = false): void {
   const h = sha(objBytes);
   const objDir = join(OBJECTS, h.slice(0, 2));
   const objPath = join(objDir, h);
   mkdirSync(objDir, { recursive: true });
-  if (distrustExisting || !existsSync(objPath)) {
+  if (distrustExisting) {
     writeAtomic(objPath, objBytes);
+  } else {
+    let held: Buffer | undefined;
+    try {
+      held = readFileSync(objPath);
+    } catch {
+      held = undefined; // absent, or reaped between here and now — either way, write it
+    }
+    if (held === undefined) {
+      writeAtomic(objPath, objBytes);
+    } else if (!held.equals(objBytes)) {
+      report(
+        `OBJECT STORE CORRUPT object=${h.slice(0, 16)} held=${sha(held).slice(0, 16)}:${held.length} ` +
+          `truth=${h.slice(0, 16)}:${objBytes.length} — an entry is not the bytes it is named after, ` +
+          `so every key that dedups onto it has been served those bytes`,
+      );
+      writeAtomic(objPath, objBytes);
+    }
   }
   mkdirSync(dirname(dest), { recursive: true });
   const tmp = `${dest}.link${process.pid}.${(seq += 1)}`;
@@ -843,6 +951,17 @@ export interface CandCache {
    *  timeout or a signal: a transient stored as a rejection drops that candidate on every future
    *  run. */
   putFail(key: string, symbol: string, message: string): void;
+  /** The caller got NEITHER an object nor a storable rejection for this key — a spawn failure, a
+   *  timeout, a signal — so there is no fresh answer to audit against. Give back whatever was
+   *  WITHHELD for the audit (an object path, a stored rejection, or undefined for a key that was
+   *  never withheld), and count the abandonment.
+   *
+   *  This exists because sampling must never be worse than not sampling. A warm run had ZERO
+   *  exposure to a transient compile failure — it never compiled — and withholding 1% of keys
+   *  hands that 1% straight back to the hazard, deleting a spelling from the fan under a RANDOM
+   *  per-run seed. Falling back to the stored answer is exactly what an unaudited run would have
+   *  been served, and it is counted so the audit's own shortfall is visible. */
+  abandonAudit(key: string, symbol: string): string | Error | undefined;
   /** verify mode only, fresh compile SUCCEEDED: compare the stored answer against it. Differing
    *  bytes are a mismatch; so is a stored REJECTION, which would have dropped this candidate. */
   verify(key: string, symbol: string, objPath: string): void;
@@ -861,6 +980,7 @@ export const OFF: CandCache = {
   get: () => undefined,
   put: (_k, _s, o) => o,
   putFail() {},
+  abandonAudit: () => undefined,
   verify() {},
   verifyFail() {},
 };
@@ -901,16 +1021,34 @@ export function candCache(label: string, stamp: () => string): CandCache {
       );
       return undefined;
     }
-    ns = s.slice(0, 16);
+    const resolved = s.slice(0, 16);
     if (process.env.ASMLIFT_CANDCACHE_TRACE) {
-      say(`ns label=${label} ns=${ns}`);
+      say(`ns label=${label} ns=${resolved}`);
     }
-    const nsDir = join(ROOT, 'ns', ns);
-    mkdirSync(nsDir, { recursive: true });
-    mkdirSync(OBJECTS, { recursive: true });
-    utimesSync(nsDir, new Date(), new Date());
-    pruneOnce(ns);
-    claimNamespace(nsDir);
+    // A STORE THIS PROCESS CANNOT PREPARE IS A COLD STORE, never a compile failure. `putFail` and
+    // `pruneOnce` both already say that in so many words; this function did not, and the throw
+    // escaped `get`/`put`/`warm` into the candidate compile, where `compile-command.ts` and
+    // `compile/agbcc.ts` read any exception as "this spelling does not compile" and DELETE IT FROM
+    // THE FAN. MEASURED on a read-only store: `1 dropped` and the published winner moved from
+    // `unsigned` to `signed`, on the one line `docs/ranked-repro.md` tells readers to quote, while
+    // the `[candcache]` line still read a clean `{"hit":1}`. The flip is what makes it reachable
+    // for everyone: unset now means the default ROOT under `$TMPDIR`, which on a shared `/tmp` or
+    // a CI runner belongs to whoever ran first — and ENOSPC, a read-only mount and a store copied
+    // with `cp -a` all land here.
+    try {
+      const nsDir = join(ROOT, 'ns', resolved);
+      mkdirSync(nsDir, { recursive: true });
+      mkdirSync(OBJECTS, { recursive: true });
+      utimesSync(nsDir, new Date(), new Date());
+      pruneOnce(resolved);
+      claimNamespace(nsDir);
+    } catch (e) {
+      refused = true;
+      bump('refused');
+      say(`REFUSED label=${label} reason=store-unusable: ${(e as Error).message}`);
+      return undefined;
+    }
+    ns = resolved;
     return ns;
   };
 
@@ -923,21 +1061,13 @@ export function candCache(label: string, stamp: () => string): CandCache {
   };
 
   /** Keys this instance WITHHELD from a serve so the caller would compile them (`auditing`), and
-   *  keys it has already audited in this process (`audited`, so a second lookup of the same key is
-   *  served normally rather than compiled again). Both hold only sampled keys, so both stay small. */
+   *  keys whose audit is FINISHED — done, abandoned or stale (`audited`, so a later lookup of the
+   *  same key is served normally rather than withheld again). Both hold only sampled keys, so both
+   *  stay small. `auditing` is registered module-wide so `cacheStats()` can report what is still
+   *  outstanding; without that, an abandoned withholding is invisible on the `[candcache]` line. */
   const auditing = new Set<string>();
   const audited = new Set<string>();
-
-  const report = (line: string): void => {
-    bump('mismatch');
-    say(line);
-    try {
-      mkdirSync(ROOT, { recursive: true });
-      appendFileSync(MISMATCH_LOG, `${line}\n`);
-    } catch {
-      /* the stderr line is the primary record; an unwritable store must not mask it */
-    }
-  };
+  pendingAudits.add(auditing);
 
   /** What the store would SERVE for this key: an object first — and only a non-empty regular file
    *  counts — a stored rejection second, otherwise nothing. `get` and both halves of `verify` ask
@@ -960,6 +1090,20 @@ export function candCache(label: string, stamp: () => string): CandCache {
       /* no negative entry, or it vanished — either way, a miss */
     }
     return undefined;
+  };
+
+  /** An audit's REPAIR is best-effort; its REPORT is not, and the two must not share a fate. A
+   *  store that has gone unwritable or is being pruned under us would otherwise turn a
+   *  disagreement into a thrown exception, and BOTH call sites read an exception out of a
+   *  candidate compile as "this spelling does not compile" and delete it from the fan — the same
+   *  loud-failure-traded-for-a-silent-wrong-answer shape `namespace()` was fixed for. The
+   *  `mismatch` counter and `MISMATCHES.log` have already been written by the time this runs. */
+  const repair = (what: () => void): void => {
+    try {
+      what();
+    } catch (e) {
+      say(`could not repair a mismatched entry (the mismatch is still reported): ${(e as Error).message}`);
+    }
   };
 
   /** The stored-vs-fresh comparison for a SUCCESSFUL compile, without the mode test — `verify`
@@ -988,16 +1132,23 @@ export function candCache(label: string, stamp: () => string): CandCache {
       report(
         `OUTCOME MISMATCH label=${label} ns=${n} symbol=${symbol} stored=rejection fresh=object:${sha(fresh).slice(0, 16)}:${fresh.length}`,
       );
-      rmSync(pathFor(n, key, symbol, 'fail'), { force: true });
-      linkInto(fresh, stored, true);
+      repair(() => {
+        rmSync(pathFor(n, key, symbol, 'fail'), { force: true });
+        linkInto(fresh, stored, true);
+      });
       return true;
     }
-    const a = readFileSync(found.obj);
+    let a: Buffer;
+    try {
+      a = readFileSync(found.obj);
+    } catch {
+      return false; // the entry vanished between the lookup and the read: a fresh compile is the answer
+    }
     if (!a.equals(fresh)) {
       report(
         `BYTE MISMATCH label=${label} ns=${n} symbol=${symbol} stored=${sha(a).slice(0, 16)}:${a.length} fresh=${sha(fresh).slice(0, 16)}:${fresh.length}`,
       );
-      linkInto(fresh, stored, true); // the fresh bytes are the truth, whatever the store holds
+      repair(() => linkInto(fresh, stored, true)); // the fresh bytes are the truth, whatever the store holds
       return true;
     }
     bump('verified');
@@ -1016,8 +1167,10 @@ export function candCache(label: string, stamp: () => string): CandCache {
       report(
         `OUTCOME MISMATCH label=${label} ns=${n} symbol=${symbol} stored=object fresh=rejection: ${message.split('\n')[0].slice(0, 120)}`,
       );
-      rmSync(found.obj, { force: true });
-      writeAtomic(pathFor(n, key, symbol, 'fail'), message);
+      repair(() => {
+        rmSync(found.obj, { force: true });
+        writeAtomic(pathFor(n, key, symbol, 'fail'), message);
+      });
       return true;
     }
     // The OUTCOME is what is compared, not the diagnostic text: a compiler's message can carry
@@ -1058,13 +1211,15 @@ export function candCache(label: string, stamp: () => string): CandCache {
       // Only a key the store CAN answer is sampled: a miss is already going to be compiled, and
       // there would be nothing to compare the result against.
       const id = keyId(n, key, symbol);
-      if (MODE === 'on' && !audited.has(id) && isSampled(id)) {
-        if (!auditing.has(id)) {
-          // `Set.prototype.add` returns the Set, not a boolean — a `if (auditing.add(id))` guard
-          // is always true and would count one `sampled` per lookup.
-          auditing.add(id);
-          bump('sampled');
-        }
+      // WITHHELD AT MOST ONCE, and this is the fix for a key whose audit never comes back: the
+      // withholding used to be re-asserted on every later lookup (`auditing` is only ever emptied
+      // by `claimAudit`), so one transient compile failure turned a key the store could answer
+      // into a permanent miss for the rest of the process — strictly worse than the uncached run
+      // the doc compares against, which at least has no correct answer sitting on disk.
+      // `Set.prototype.add` returns the Set, not a boolean, so the `has` must be its own test.
+      if (MODE === 'on' && !audited.has(id) && !auditing.has(id) && isSampled(id)) {
+        auditing.add(id);
+        bump('sampled');
         return undefined;
       }
       if ('obj' in found) {
@@ -1083,12 +1238,18 @@ export function candCache(label: string, stamp: () => string): CandCache {
       // first is the hazard that makes sampling worse than nothing: it overwrites the very bytes
       // the sample was withheld to compare against, the mismatch is never reported, and the store
       // heals itself into a clean-looking audit of the defect it exists to find.
-      if (claimAudit(keyId(n, key, symbol)) && auditObject(n, key, symbol, objPath)) {
-        // Serve the STORE's path, exactly as an unsampled put does — `auditObject` has already
-        // repaired it with the fresh bytes wherever the two disagreed, so a sampled key is
-        // indistinguishable downstream from a served one.
-        const dest = pathFor(n, key, symbol, 'o');
-        return existsSync(dest) ? dest : objPath;
+      if (claimAudit(keyId(n, key, symbol))) {
+        if (auditObject(n, key, symbol, objPath)) {
+          // Serve the STORE's path, exactly as an unsampled put does — `auditObject` has already
+          // repaired it with the fresh bytes wherever the two disagreed, so a sampled key is
+          // indistinguishable downstream from a served one.
+          const dest = pathFor(n, key, symbol, 'o');
+          return existsSync(dest) ? dest : objPath;
+        }
+        // The audit was claimed and there was nothing left to compare it against — a sibling
+        // shard pruned the entry between the get and the put. Counted so `sampled` reconciles;
+        // the fresh object still stores normally below.
+        bump('sampledStale');
       }
       let bytes: Buffer;
       try {
@@ -1113,8 +1274,11 @@ export function candCache(label: string, stamp: () => string): CandCache {
       if (n === undefined) {
         return;
       }
-      if (claimAudit(keyId(n, key, symbol)) && auditRejection(n, key, symbol, message)) {
-        return;
+      if (claimAudit(keyId(n, key, symbol))) {
+        if (auditRejection(n, key, symbol, message)) {
+          return;
+        }
+        bump('sampledStale');
       }
       const dest = pathFor(n, key, symbol, 'fail');
       try {
@@ -1124,6 +1288,28 @@ export function candCache(label: string, stamp: () => string): CandCache {
       } catch {
         /* a store that cannot be written is a cold store */
       }
+    },
+    abandonAudit(key, symbol) {
+      const n = namespace();
+      if (n === undefined) {
+        return undefined;
+      }
+      const id = keyId(n, key, symbol);
+      if (!auditing.delete(id)) {
+        return undefined; // this key was never withheld; the caller's failure is its own
+      }
+      audited.add(id);
+      bump('sampledAbandoned');
+      const found = lookup(n, key, symbol);
+      if (found === undefined) {
+        return undefined;
+      }
+      if ('obj' in found) {
+        bump('hit');
+        return found.obj;
+      }
+      bump('failHit');
+      return new Error(found.fail);
     },
     verify(key, symbol, objPath) {
       if (MODE !== 'verify') {

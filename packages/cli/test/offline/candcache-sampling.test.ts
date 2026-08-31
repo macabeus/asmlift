@@ -385,6 +385,51 @@ describe('sampling is deterministic within a run and rotates across runs', () =>
     // forever, so the rest of the store is never looked at however many runs go by.
     expect(b, 'a new run must audit different keys').not.toEqual(a1);
   });
+
+  test('a SET-AND-EMPTY seed is refused out loud — it would pin the audit to one subset forever', async () => {
+    // `??` catches only `undefined`, and '' is a perfectly usable seed: `isSampled` degenerates
+    // into a pure function of the key, so the same fixed 1% of every store is audited in
+    // perpetuity and the other 99% is never compared — the exact failure the seed exists to
+    // prevent, on every machine, with a trailing `seed=` on the line as the only tell. Its two
+    // siblings (ASMLIFT_CANDCACHE_MAX_MB, ASMLIFT_CANDCACHE_SAMPLE) both guard it; this one did
+    // not.
+    const root = scratch();
+    const seen: string[] = [];
+    let said = '';
+    for (let i = 0; i < 2; i++) {
+      const r = await capture(
+        {
+          ASMLIFT_CANDCACHE: '1',
+          ASMLIFT_CANDCACHE_SAMPLE: '1',
+          ASMLIFT_CANDCACHE_SAMPLE_SEED: '',
+          ASMLIFT_CANDCACHE_DIR: root,
+        },
+        (m) => m.cacheSampleNote(),
+      );
+      seen.push(r.value as string);
+      said = r.said;
+    }
+    expect(said).toContain('ASMLIFT_CANDCACHE_SAMPLE_SEED is SET AND EMPTY');
+    expect(seen[0]).not.toBe(seen[1]);
+    for (const note of seen) {
+      expect(note, 'a fresh random seed, printed like any other').toMatch(/ sample=1%\/seed=[0-9a-f]{16}$/);
+    }
+  });
+
+  test('a NON-empty seed is still honoured verbatim, and says nothing', async () => {
+    const root = scratch();
+    const { said, value } = await capture(
+      {
+        ASMLIFT_CANDCACHE: '1',
+        ASMLIFT_CANDCACHE_SAMPLE: '1',
+        ASMLIFT_CANDCACHE_SAMPLE_SEED: 'replay-me',
+        ASMLIFT_CANDCACHE_DIR: root,
+      },
+      (m) => m.cacheSampleNote(),
+    );
+    expect(value).toBe(' sample=1%/seed=replay-me');
+    expect(said).toBe('');
+  });
 });
 
 describe('the rate and the seed are on the [candcache] line, and the rate is a knob with guards', () => {
@@ -466,7 +511,124 @@ describe('the rate and the seed are on the [candcache] line, and the rate is a k
     });
     expect(stats.mismatch).toBeUndefined();
     expect(stats.stored).toBe(1);
+    // …and the withholding is ACCOUNTED FOR rather than vanishing out of `sampled`.
+    expect(stats).toMatchObject({ sampled: 1, sampledStale: 1 });
+    expect(stats.sampledPending).toBeUndefined();
     expect(existsSync(value as string)).toBe(true);
     expect(readFileSync(value as string, 'utf8')).toBe('FRESH');
+  });
+});
+
+describe('a withholding ACCOUNTS FOR ITSELF: `sampled` is not a count of audits', () => {
+  // `sampled` counts keys `get` WITHHELD. An audit only happens if the caller comes back with a
+  // fresh answer, and for a transient — a spawn failure, the 120 s timeout, a `sh`-laundered
+  // SIGKILL — it never does: both call sites deliberately store nothing, because a transient
+  // stored as a rejection would drop that candidate on every future run. So a run could print
+  // `{"sampled":700,"verified":400}` with nothing at all saying that 300 audits did not happen,
+  // and the doc's survival arithmetic reads the first number.
+  //
+  // Two harms, both fixed here. The accounting one is above; the OTHER one is worse and runs the
+  // other way — those keys had a stored answer a serving run would have used, and withholding
+  // them exposed them to a transient the cache had been absorbing entirely.
+  test('a transient after a withholding takes the WITHHELD answer back, and says so', async () => {
+    const root = scratch();
+    await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).put('k', 'f', object('STORED-TRUTH')));
+    const { stats, value } = await capture({ ...ALL, ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      expect(c.get('k', 'f'), 'withheld, so the caller compiles').toBeUndefined();
+      // …and the compile dies transiently: neither put nor putFail is called.
+      return c.abandonAudit('k', 'f');
+    });
+    expect(typeof value, 'the stored answer comes back rather than the candidate being lost').toBe('string');
+    expect(readFileSync(value as string, 'utf8')).toBe('STORED-TRUTH');
+    expect(stats).toMatchObject({ sampled: 1, sampledAbandoned: 1, hit: 1 });
+    expect(stats.sampledPending, 'nothing is left outstanding').toBeUndefined();
+  });
+
+  test('a stored REJECTION comes back the same way', async () => {
+    const root = scratch();
+    await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed (exit 1)'));
+    const { stats, value } = await capture({ ...ALL, ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      expect(c.get('k', 'f')).toBeUndefined();
+      return c.abandonAudit('k', 'f');
+    });
+    expect(value).toBeInstanceOf(Error);
+    expect((value as Error).message).toContain('agbcc failed');
+    expect(stats).toMatchObject({ sampled: 1, sampledAbandoned: 1, failHit: 1 });
+  });
+
+  test('abandoning a key that was never withheld gives back nothing and counts nothing', async () => {
+    const root = scratch();
+    await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).put('k', 'f', object('STORED')));
+    const { stats, value } = await capture(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: root },
+      (m) => m.candCache('t', () => NS_A).abandonAudit('k', 'f'),
+    );
+    expect(value).toBeUndefined();
+    expect(stats.sampledAbandoned).toBeUndefined();
+  });
+
+  test('a withholding the caller NEVER answers is reported as still outstanding', async () => {
+    const root = scratch();
+    await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).put('k', 'f', object('STORED')));
+    const { stats } = await capture({ ...ALL, ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      m.candCache('t', () => NS_A).get('k', 'f');
+    });
+    expect(stats, 'silence here is what let `sampled` overstate the audit').toMatchObject({
+      sampled: 1,
+      sampledPending: 1,
+    });
+  });
+
+  test('the identity holds over a mixed run: every withholding lands in exactly one bucket', async () => {
+    const root = scratch();
+    await load(seedEnv(root), (m) => {
+      const c = m.candCache('t', () => NS_A);
+      c.put('agree', 'f', object('SAME'));
+      c.put('differ', 'f', object('STALE'));
+      c.putFail('failagree', 'f', 'agbcc failed (exit 1)');
+      c.put('abandoned', 'f', object('STORED'));
+      c.put('pending', 'f', object('STORED'));
+      c.put('vanishes', 'f', object('STORED'));
+    });
+    const { stats } = await capture({ ...ALL, ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      for (const k of ['agree', 'differ', 'failagree', 'abandoned', 'pending', 'vanishes']) {
+        expect(c.get(k, 'f'), `${k} must be withheld at SAMPLE=100`).toBeUndefined();
+      }
+      c.put('agree', 'f', object('SAME')); // verified
+      c.put('differ', 'f', object('FRESH')); // mismatch
+      c.putFail('failagree', 'f', 'agbcc failed (exit 1)'); // verifiedFail
+      c.abandonAudit('abandoned', 'f'); // sampledAbandoned
+      return undefined; // 'pending' and 'vanishes' are never answered at all
+    });
+    const audited =
+      (stats.verified ?? 0) +
+      (stats.verifiedFail ?? 0) +
+      (stats.mismatch ?? 0) +
+      (stats.sampledStale ?? 0) +
+      (stats.sampledAbandoned ?? 0) +
+      (stats.sampledPending ?? 0);
+    expect(stats.sampled, 'sampled = verified + verifiedFail + mismatch + stale + abandoned + pending').toBe(audited);
+    expect(stats).toMatchObject({ sampled: 6, verified: 1, verifiedFail: 1, mismatch: 1, sampledAbandoned: 1 });
+    expect(stats.sampledPending, 'two keys were withheld and never answered').toBe(2);
+    expect(stats.sampledStale, 'nothing vanished from the store in this run').toBeUndefined();
+  });
+
+  test('a key withheld once and never audited is SERVED on the next lookup, not withheld again', async () => {
+    // `auditing` is only emptied by an audit, so re-asserting the withholding on every lookup
+    // turned one transient into a permanent miss for the rest of the process — strictly worse
+    // than the uncached run the doc compares against.
+    const root = scratch();
+    await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).put('k', 'f', object('STORED')));
+    const { stats, value } = await capture({ ...ALL, ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      expect(c.get('k', 'f')).toBeUndefined();
+      return c.get('k', 'f');
+    });
+    expect(typeof value).toBe('string');
+    expect(readFileSync(value as string, 'utf8')).toBe('STORED');
+    expect(stats, 'one withholding, not one per lookup').toMatchObject({ sampled: 1, hit: 1 });
   });
 });
