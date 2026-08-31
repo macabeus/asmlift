@@ -133,6 +133,12 @@ Landmarks (not exhaustive — suites are named for what they pin):
 - `contract-invariant` / `contracts` — the loud-fail contract, mutation-proven.
 - `structure-guard` / `structure-soundness` / `audit-regression` — the adversarial-audit repro
   locks.
+- `one-version` — a WORKSPACE-scope invariant, like `offline-list`: every dependency that two or
+  more workspace packages declare must be declared AND resolved at one version. It exists because
+  `packages/cli` scored with `objdiff-wasm` 3.7.3 while `apps/web` scored with 3.7.0, so the
+  playground silently showed 229 where the benchmark published 233 on a byte-identical object
+  pair. Both the package set and the dependency set are derived, so a third consumer is covered
+  without editing the test.
 
 **`test/corpus/` is load-bearing beyond this suite.** The committed disassembly fixtures in
 `test/corpus/` are ALSO imported (via Vite `?raw`) by the playground's example gallery —
