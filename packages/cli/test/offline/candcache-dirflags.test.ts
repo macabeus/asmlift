@@ -723,7 +723,10 @@ describe("a project's own REFUSAL — tools.asmlift.candidateCache: off", () => 
     });
     try {
       await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-        compileFromCommand('docker run img cc; ' + templateWith('-iquote inc'), {
+        // The runtime word is an argument to `:`, the shell's no-op — the template must NAME
+        // docker (which is all `containerRuntimeNamedBy` reads) without this suite ever running
+        // a container. Spelled as a real command it took 467 s and failed with exit 125.
+        compileFromCommand(templateWith('docker run img cc -iquote inc'), {
           cwd: p.cwd,
           candidateCache: 'off',
         })(CAND_K, 'f', 'c');
