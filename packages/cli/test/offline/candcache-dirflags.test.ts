@@ -384,9 +384,9 @@ describe('the operand parser, on the template the hole was measured on', () => {
 // module instance, and fails if the second run was served the first run's object.
 //
 // The ablation that says which half of the mechanism earns what: with the guard deleted and the
-// operand scan replaced by `[]`, the twenty spellings above ran 21 passed / 11 failed — one
-// deleted clause covers every SEPARATED spelling, and the table earns the ATTACHED ones and the
-// glob. That is why `PATH_FLAGS` is documented as a DE-GLUER: a list that is the mechanism has an
+// operand scan replaced by `[]`, this file AS IT THEN STOOD (32 tests, everything above this
+// block) ran 21 passed / 11 failed — one deleted clause covers every SEPARATED spelling, and the
+// table earns the ten ATTACHED ones and the glob. That is why `PATH_FLAGS` is documented as a DE-GLUER: a list that is the mechanism has an
 // invisible incompleteness, and the shapes in the first block here are exactly what that
 // invisibility cost.
 // ------------------------------------------------------------------------------------------

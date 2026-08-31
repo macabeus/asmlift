@@ -150,8 +150,8 @@ const TOKEN_MAX = 4096;
  *
  * MEASURED, and this is why the scoping matters. The predecessor of this comment described the
  * table as the mechanism, with a `/[/.]/.test(tok)` guard in front of `hashPath` in the stamp.
- * An ablation on this branch's own suite — guard deleted, operand scan replaced by `[]` —
- * left `candcache-dirflags.test.ts` at 21 passed / 11 failed: deleting one clause covered every
+ * An ablation on that suite as it then stood, 32 tests — guard deleted, operand scan replaced by
+ * `[]` — left `candcache-dirflags.test.ts` at 21 passed / 11 failed: deleting one clause covered every
  * SEPARATED spelling on its own (`-iquote inc`, the klonoa hole itself, and nine more), and the
  * eleven the table earned were the ATTACHED spellings and the glob. Meanwhile a flag NOBODY
  * listed — `--include-directory inc`, `-iframework inc`, `-Xpreprocessor -I -Xpreprocessor inc`
