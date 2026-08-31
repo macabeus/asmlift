@@ -1292,12 +1292,9 @@ export function enumerateCandidates(
     // evidence with a named base, this one with an aggregate member, and the two are different C
     // and different register pressure. Offered only where the target declares the fold — MIPS and
     // PPC put the addend in the instruction by construction, so nothing there says a member put
-    // it there, exactly as with BASEFOLD_ADMISSIONS above. The target's `deviceRegisters` window
-    // rides along because the pass REFUSES inside it: a hardware register is not an object a
-    // source declares a struct over, and the member spelling would also drop the qualifier the
-    // tie-break at `compareScored` can only ADD — see `device-base` in l3/offmember.ts.
+    // it there, exactly as with BASEFOLD_ADMISSIONS above.
     if (target.compilerBehaviors.foldsConstAddrOffset) {
-      respell('/offmember', () => spellOperandMembers(sfn, { deviceRegisters: target.capabilities.deviceRegisters }));
+      respell('/offmember', () => spellOperandMembers(sfn));
     }
     // The `/vol-store` × `/unreduce` PAIRING — row-demanded (synthetic:dmafill), and the joint
     // spelling is reachable from neither lever alone: pinning the stores keeps three of them in

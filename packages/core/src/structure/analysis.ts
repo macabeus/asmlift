@@ -131,15 +131,31 @@ function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
  *  level ENUMERATION gate is a clean superset over the same corpus, which is why a census taken
  *  at that scope reports no loss; this is the finer one.
  *
- *  NO LOOP-HEADER REFUSAL, AND THAT IS MEASURED TWICE OVER. The scope's plan mandated one — refuse
- *  a class reaching a loop-header PARAMETER. Of the 25+8 functions above exactly one carries such
- *  a class (marioparty3 `func_80112508_523648_filesel`, 2 values, map-less), and neither value is
- *  one the axis could materialize. The reason is structural, and `addr-home.test.ts` pins both
- *  halves: a loop-carried pointer INDUCTION is already refused by its own increment, which is a
- *  non-base use of a class member; and the loop-header class that does survive is one whose back-
- *  edge value is READ FROM MEMORY, where the only def is a `load` and the axis's own enumeration
- *  gate excludes it — so every home the axis mints is still a def's own local and no name spans
- *  two iterations. A guard with no reachable inhabitant is not shipped. */
+ *  NO LOOP-HEADER REFUSAL OF ITS OWN, AND THE REASON IS A GUARD THAT WAS ALREADY THERE. The
+ *  scope's plan mandated one — refuse a class reaching a loop-header PARAMETER, because
+ *  `structure.ts`'s `carriesPreUpdate` makes a loop variable's name denote different values at
+ *  different points. Two things are true and only together do they answer it.
+ *
+ *  The FIRST is about which classes the widening adds. Of the 25+8 functions above exactly one
+ *  carries a class reaching a loop-header parameter (marioparty3
+ *  `func_80112508_523648_filesel`, 2 values, map-less), and neither value is one the axis could
+ *  materialize; `addr-home.test.ts` pins both halves. A loop-carried pointer INDUCTION is refused
+ *  by its own increment, a non-base use of a class member. The loop-header class that does survive
+ *  has a back-edge value READ FROM MEMORY, so its only def is a `load` and the enumeration gate
+ *  excludes it. So the widening adds no loop-header home, and the planned guard has no inhabitant
+ *  among the values it would have been written for.
+ *
+ *  The SECOND is what stands there whatever the scope rule says, and it is NOT one of those two:
+ *  the third scope's own `!multiBlockHeaders.has(b)` seat refusal, which predates this widening
+ *  and refuses to materialize AT a multi-block loop header regardless of which class the value is
+ *  in. It is load-bearing and measurable: replace that clause with `true` and re-structure the
+ *  corpus and marioparty3 `func_8010923C_18E46C_cosmic_coaster` throws the `carriesPreUpdate`
+ *  StructureError this paragraph is about (and two inert functions start changing their source).
+ *  The hazard is real, it is just answered by WHERE the home may sit rather than by WHICH class
+ *  may have one — which is why a second refusal over the class would have been the third copy of
+ *  an answer, not the first. Note what that implies about the enumeration gate: it deliberately
+ *  omits the seat refusal (see `hasHomeableSharedAddress`), which is safe only because the seat
+ *  refusal is applied HERE, in the scope, on every candidate the gate enumerates. */
 export function sharedBaseClasses(fn: Fn, ignoreRet: boolean): Set<Value> {
   const classes = mergeClasses(fn);
   const baseUses = new Map<Value, Set<Op>>();

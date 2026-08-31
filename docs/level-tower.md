@@ -366,10 +366,16 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   and the only one whose enumeration gate (`hasMergeFeedHome`) RUNS the scope instead of
   re-implementing it. **`hasHomeableSharedAddress` now does too**, and the shape that paid it is
   the one the remaining two should follow: the scope became a named export
-  (`sharedBaseClasses(fn, ignoreRet)`), the gate CALLS it, and the one place the gate is
-  deliberately looser than `analyze` — `ignoreRet`, because a `ret` operand may be a void phantom
-  the gate cannot know about — is an explicit PARAMETER rather than a divergence in a copy. So the
-  debt is two, not three: `hasLoopSharedPureValue` and `hasDerivedReadHome` still restate their
+  (`sharedBaseClasses(fn, ignoreRet)`), the gate CALLS it, so the SCOPE has one definition. Where
+  the gate stays looser than `analyze` it is loose in TWO places, not one, and only the first is a
+  parameter: `ignoreRet`, because a `ret` operand may be a void phantom the gate cannot know
+  about; and the loop-header SEAT refusal (`multiBlockHeaders`), which the gate omits because it
+  needs the loop model. The second is the one to watch — it is a clause of the axis's third scope
+  rather than an argument to the shared predicate, so calling `sharedBaseClasses` does not carry
+  it, and what makes the omission safe is that the seat refusal is applied in the scope on every
+  candidate the gate enumerates (an over-admitting gate costs one duplicate-collapsed candidate,
+  never a wrong one). So the debt is two, not three: `hasLoopSharedPureValue` and
+  `hasDerivedReadHome` still restate their
   scope's predicate by hand, whose safety rests on every copy staying no stricter than the scope it
   mirrors, with nothing checking that and nothing in the harness reporting a candidate that was
   never enumerated.

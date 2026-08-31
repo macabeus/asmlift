@@ -96,10 +96,11 @@ function withPadding(dataFields: StructField[], stride: number): StructField[] {
 export function recognizeStructArrays(fn: Fn): number {
   const defs = defOpMap(fn);
   let count = 0;
-  // The NAME index is not the recognition count: it starts past every `Elem<N>` the graph already
-  // mentions, so a second run over a tree this pass has already touched cannot re-declare a name.
-  // (`count` is this function's return value — how many groups it recognized — and seeding it
-  // would report the wrong number.)
+  // The NAME index is not the recognition count: `count` is this function's return value — how
+  // many groups it recognized — and seeding it would report the wrong number. The index starts
+  // past every `Elem<N>` the graph already mentions; over the corpus that scan returns 0 every
+  // time, because this pass runs once per function and nothing else mints the prefix, and
+  // ir/struct-names.ts states why the computed 0 is kept over the assumed one.
   let name = nextStructIndex(
     [...collectStructs(fn)].map((s) => s.name),
     'Elem',

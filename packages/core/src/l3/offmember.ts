@@ -27,6 +27,30 @@
 // `/addr-home`'s (structure/analysis.ts). It is a GATE rather than a collection filter so the
 // refusal is attributable: `firstRejection` names it.
 //
+// NO DEVICE-REGISTER REFUSAL, and the price is stated rather than hidden. A base inside the
+// target's declared `deviceRegisters` window is admitted like any other, so on a function that
+// reads MMIO through a constant displacement this pass will offer `((struct Off0 *)&REG_DMA3SAD)
+// ->m8` — a struct declared over the register file, carrying no qualifier. Three measurements
+// say the refusal that used to sit here bought nothing for that price. (1) It removed ZERO bases
+// over all four checkouts in BOTH symbol-map configurations (1417 structured functions map-less,
+// 398 map-ful): every base it named was one `no-operand-off` refuses too, because the DMA idiom
+// writes offset 0 as well as offset 8. (2) Its premise was false of its own input. It claimed the
+// member spelling drops a qualifier, and the tree this pass is handed carries none in either
+// configuration — `/volatile` wraps the base in a CAST, which `non-leaf-base` refuses, so the two
+// levers do not compose and never did (over LoadBGTilemapData's 68352-candidate fan, 18432
+// candidates carry `/volatile`, 1536 carry `/offmember`, and none carries both). Nor is a
+// tie-break lost: `deviceVolatileClaims` counts only trees that already assert a qualifier, so
+// both siblings count zero. (3) It was CONFIGURATION-DEPENDENT, which is the defect that settled
+// it: the window is read off `addrConst`, and a symbol map turns a device address into a named
+// `addr` no numeric range can see, so the same function was refused map-less and admitted map-ful
+// — on the gate's own witness asm. A refusal that a symbol map switches off is not a refusal.
+// What is left in its place is the differ. On that witness (a DMACNT spin loop compiled with the
+// benchmark's own agbcc command, `offmember.test.ts`) the shape is offered and LOSES: 52
+// candidates, best `unsigned/derived-home/livebase/volatile: 4`, best `/offmember` 5 — the
+// qualified spelling it would have to beat is already in the fan and already wins. The test pins
+// that price on real asm. A row where the member spelling WINS over MMIO is what would earn the
+// gate back, together with a window reading that survives a symbol map.
+//
 // NOT AN EXTENSION OF raise/struct-arrays.ts. That pass mints an element struct off the `mul`/`shl`
 // STRIDE idiom in the machine code, and this shape has no scale at all — the subscript is a
 // constant and the base is a leaf, so there is no stride to read. It is a SPELLING of a tree
@@ -78,7 +102,6 @@
 // 10 over 10 (marioparty3) and 2 over 2 (snowboardkids2), all map-less.
 import { nextStructIndex } from '../ir/struct-names';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
-import { addrConst, inRange } from './address';
 import type { Expr, SFn, StructType } from './ast';
 import { mapExprChildren, mapStmtExprs, walkExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
@@ -91,12 +114,6 @@ interface Site {
   signed: boolean;
   /** the displacement the instruction carried, when it carried one (l3/ast.ts `operandOff`) */
   operandOff?: number;
-}
-
-/** One base expression and the constant-subscript accesses observed through it. */
-interface Group {
-  base: Expr;
-  sites: Site[];
 }
 
 /** The identity of an access's base, for grouping. Leaf bases key by value; everything else keys
@@ -117,51 +134,22 @@ export interface OffmemberBase {
   indexCarriesMore: boolean;
   /** the accesses cannot be declared as a plain C struct seating each at its own offset */
   unspellableLayout: boolean;
-  /** the base, or a cell read through it, lies inside the target's declared device-register
-   *  window */
-  deviceBase: boolean;
 }
 
 export const OFFMEMBER_GATES: readonly Gate<OffmemberBase>[] = [
   {
     id: 'non-leaf-base',
     why: 'a computed base is already held somewhere, so nothing folded into a literal',
-    // A REACH argument, which is why it claims no soundness and owes no guard. It is NOT the
-    // volatile refusal, and reading it as one is the trap: a `/volatile` base reaches L3 as a
-    // CAST over the constant, so this gate happens to exclude it too, and the natural widening
-    // ("a cast of a leaf const is still a leaf") would drop the qualifier with no test failing.
-    // `device-base` below owns that harm on its own premise and is declared `sound: true`, so the
-    // widening is guarded whether or not this gate keeps excusing it. One consequence worth
-    // stating, and measured rather than reasoned: because `/volatile` wraps the base in that
-    // cast, the two levers do not compose. Over LoadBGTilemapData's 68352-candidate fan, 18432
-    // candidates carry `/volatile` and 1536 carry `/offmember`, and NONE carries both.
+    // A REACH argument, which is why it claims no soundness and owes no guard — and it is the
+    // only thing standing between this pass and a dropped qualifier, which the header's
+    // no-device-refusal paragraph is the other half of. A `/volatile` base reaches L3 as a CAST
+    // over the constant, so this gate excludes it as a side effect of excluding every computed
+    // base, and the natural widening ("a cast of a leaf const is still a leaf") would respell a
+    // qualified access as an unqualified member with no test failing. Nothing downstream would
+    // object. So the widening is forbidden HERE, at this gate, and a round that wants it owes a
+    // qualifier-preserving spelling first.
     sound: false,
     rejects: (c) => !c.leafBase,
-  },
-  {
-    id: 'device-base',
-    // REACH, measured both ways because the two numbers disagree and both are true. It NAMES 49
-    // refusals over klonoa map-less and 2 map-ful (`firstRejection` short-circuits, so this is
-    // the gate's own reach); its MARGINAL effect on what is admitted is ZERO over all four
-    // checkouts in both configurations, because every base it refuses there is one
-    // `no-operand-off` would refuse too — the DMA idiom writes offset 0 as well as offset 8.
-    //
-    // THAT REDUNDANCY IS THE REASON IT EXISTS RATHER THAN A REASON IT DOES NOT. A function that
-    // touches DMACNT without also writing DMASAD is admitted the moment the redundancy lapses,
-    // and one exists: `void f(u32 c){ volatile u32 *d=(volatile u32*)0x040000d4; d[2]=c|1<<31;
-    // while(d[2]&1<<31){} }` compiled with the benchmark's own agbcc command emits
-    // `.word 0x40000d4` with `str r0,[r2,#0x8]` and `ldr r0,[r2,#0x8]`, and lifting THAT asm
-    // admits `c:67109076` with this gate ablated, emitting
-    // `struct Off0 { u8 _pad0[8]; s32 m8; };` over the register file with no qualifier.
-    // `offmember.test.ts` runs that asm rather than a hand-built tree.
-    //
-    // The map-ful number is small for a reason worth naming: a symbol map turns a device address
-    // into a named `addr`, which `addrConst` cannot read — the same blind spot `/vol-store` and
-    // `/homesplit` have, and not one this gate closes.
-    why: 'a device register is not an object a source declares a struct over, and the member spelling drops the qualifier the cell needs',
-    sound: true,
-    guardedBy: 'offmember.test.ts: device-base: a cell inside the declared device window is refused, ablating admits',
-    rejects: (c) => c.deviceBase,
   },
   {
     id: 'no-operand-off',
@@ -268,61 +256,43 @@ function layoutFor(name: string, sites: readonly Site[]): StructType {
  *  accesses this pass has a member spelling for, which are exactly the ones the declaration it
  *  builds will govern. A sibling with a variable subscript or a `lead` is not one of them and is
  *  not counted: it keeps its own cast and this pass never rewrites it (see the header's
- *  "WHAT THE DECLARATION GOVERNS"). The base EXPRESSION is kept beside the sites because the
- *  device-window gate reads the address it is, which a key string cannot answer. */
-function collect(sfn: SFn): { order: string[]; groups: Map<string, Group> } {
+ *  "WHAT THE DECLARATION GOVERNS"). */
+function collect(sfn: SFn): { order: string[]; sites: Map<string, Site[]> } {
   const order: string[] = [];
-  const groups = new Map<string, Group>();
+  const sites = new Map<string, Site[]>();
   for (const e of walkExprs(sfn.body)) {
     if (e.k !== 'index' || e.idx.k !== 'const' || e.lead !== undefined) {
       continue;
     }
     const k = baseKey(e.base);
-    let g = groups.get(k);
-    if (!g) {
+    let list = sites.get(k);
+    if (!list) {
       order.push(k);
-      g = { base: e.base, sites: [] };
-      groups.set(k, g);
+      list = [];
+      sites.set(k, list);
     }
-    g.sites.push({ off: e.idx.value * e.width, width: e.width, signed: e.signed, operandOff: e.operandOff });
+    list.push({ off: e.idx.value * e.width, width: e.width, signed: e.signed, operandOff: e.operandOff });
   }
-  return { order, groups };
-}
-
-/** Does this base, or any cell read through it, lie in the target's declared device-register
- *  window? Both halves are asked because neither implies the other over a 1KB page: a base just
- *  below it reaches into it through a displacement, and a base inside it can be read at an offset
- *  past its end.
- *
- *  It reads the ADDRESS the base is (`addrConst`, through any pointer cast), which is `inRange`'s
- *  clientele everywhere else in the tree. A base that reaches L3 as a NAMED global instead of a
- *  number is invisible to it — a symbol map that names a device register defeats the window, the
- *  same blind spot `/vol-store` and `/homesplit` have, and not one this gate closes. */
-function touchesDeviceWindow(g: Group, window?: readonly [number, number]): boolean {
-  const a = addrConst(g.base);
-  return a !== null && (inRange(a, window) || g.sites.some((s) => inRange(a + s.off, window)));
+  return { order, sites };
 }
 
 /** The keys `gates` admits, with the struct each one is spelled through. */
 function admit(
   sfn: SFn,
-  opts: OffmemberOpts,
   gates: readonly Gate<OffmemberBase>[],
   firstName: number,
 ): Map<string, { struct: StructType; type: IrType }> {
-  const { order, groups } = collect(sfn);
+  const { order, sites } = collect(sfn);
   const out = new Map<string, { struct: StructType; type: IrType }>();
   let n = firstName;
   for (const key of order) {
-    const g = groups.get(key)!;
-    const list = g.sites;
+    const list = sites.get(key)!;
     const rejected = firstRejection(gates, {
       key,
       leafBase: key.startsWith('a:') || key.startsWith('c:'),
       missingOperandOff: list.some((s) => s.operandOff === undefined),
       indexCarriesMore: list.some((s) => s.operandOff !== undefined && s.operandOff !== s.off),
       unspellableLayout: !seatable(list),
-      deviceBase: touchesDeviceWindow(g, opts.deviceRegisters),
     });
     if (rejected === null) {
       const struct = layoutFor(`Off${n}`, list);
@@ -333,34 +303,30 @@ function admit(
   return out;
 }
 
-/** What the pass needs from the target, plus the gate table an ablation swaps out. Both optional,
- *  so a caller with neither still gets the shipped behaviour — with the ONE exception that an
- *  absent `deviceRegisters` is a target that declares no device page, which makes `device-base`
- *  vacuous exactly as `inRange` does everywhere else. */
+/** The gate table an ablation swaps out. Optional, so a caller gets the shipped table by default.
+ *  The pass needs nothing else from the target: the fold this exists for is `foldsConstAddrOffset`
+ *  and rank.ts asks that before offering the axis at all. */
 export interface OffmemberOpts {
-  readonly deviceRegisters?: readonly [number, number];
   readonly gates?: readonly Gate<OffmemberBase>[];
 }
 
 /** The census without the rewrite, for a caller comparing what two tables would admit. */
 export function offmemberBases(sfn: SFn, opts: OffmemberOpts = {}): readonly string[] {
-  return [...admit(sfn, opts, opts.gates ?? OFFMEMBER_GATES, 0).keys()];
+  return [...admit(sfn, opts.gates ?? OFFMEMBER_GATES, 0).keys()];
 }
 
 /** Re-spell every admitted base's constant subscripts as members of a synthesized struct.
  *  `null` when nothing is admitted — the axis then contributes no candidate. */
 export function spellOperandMembers(sfn: SFn, opts: OffmemberOpts = {}): SFn | null {
-  // Past EVERY `Off<N>` the tree already carries, never the first free one: raise/structs.ts mints
-  // `Struct<N>` and raise/struct-arrays.ts `Elem<N>`, so the prefix alone keeps this pass clear of
-  // both, but a tree carrying `Off0` and `Off2` would stop a first-free walk at 1 and mint a
-  // second `Off2`. A collision declares one layout under a name another access reads, and
-  // `structs` is a list rather than a map, so nothing downstream would say so. The scan is
-  // `ir/struct-names.ts`, shared with the other two minters.
+  // Past EVERY `Off<N>` the tree already carries, never the first free one (`ir/struct-names.ts`,
+  // shared with the other two minters, which also records that this scan returns 0 on every
+  // corpus function). The prefix is what keeps this pass clear of raise/structs.ts's `Struct<N>`
+  // and raise/struct-arrays.ts's `Elem<N>`; the monotone scan is what keeps it clear of itself.
   const seed = nextStructIndex(
     (sfn.structs ?? []).map((s) => s.name),
     'Off',
   );
-  const admitted = admit(sfn, opts, opts.gates ?? OFFMEMBER_GATES, seed);
+  const admitted = admit(sfn, opts.gates ?? OFFMEMBER_GATES, seed);
   if (admitted.size === 0) {
     return null;
   }

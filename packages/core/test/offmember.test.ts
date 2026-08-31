@@ -148,16 +148,22 @@ describe('every gate is load-bearing', () => {
     expect(cBackend.emit(ablated).match(/->m3/g)).toHaveLength(2);
   });
 
-  // 0x040000D4 + 8 is REG_DMA3CNT, inside ARMV4T_AGBCC's declared device page. A struct over the
-  // register file is not an object a source declares, and the member spelling also drops the
-  // `volatile` the tie-break at `compareScored` can only ADD — so the differ would referee it by
-  // luck. Nothing else in the table asks: without this gate the shape is admitted whenever the
-  // function does not also touch the base at displacement 0.
+  // THE PRICE OF HAVING NO DEVICE-REGISTER REFUSAL, on real compiled asm rather than a hand-built
+  // tree, so it stays true when the lift changes. 0x040000D4 + 8 is REG_DMA3CNT: this pass admits
+  // the register file like any other leaf base and declares a struct over it, carrying no
+  // qualifier. That is the shipped behaviour and the header states the three measurements that
+  // settled it — chiefly that the refusal which used to sit here removed ZERO bases corpus-wide
+  // and was switched off entirely by a symbol map, which turns the address into a named `addr` no
+  // numeric window can read.
   //
-  // THE REAL ASM, not a hand-built tree: this is what the benchmark's own agbcc command emits for
+  // WHAT ACTUALLY REFEREES IT is the differ, and this asm is the case where nothing else does:
+  // the benchmark's own agbcc command compiles
   // `volatile u32 *d = (volatile u32 *)0x040000d4; d[2] = c | 1 << 31; while (d[2] & 1 << 31) {}`
-  // — a spin on DMACNT that never touches DMASAD, so `no-operand-off` does not cover it and this
-  // gate is the only refusal.
+  // to a DMACNT spin that never touches DMASAD, so `no-operand-off` — which covers every device
+  // base in the corpus — does not cover this one. Ranked against its own object the shape LOSES:
+  // 52 candidates, best `unsigned/derived-home/livebase/volatile: 4`, best `/offmember` 5. A row
+  // where it WINS is what would earn a device gate back, together with a window reading that
+  // survives a symbol map.
   const DEVICE_ASM =
     'dmakick:\n' +
     '\tldr\tr2, .L7\n' +
@@ -174,7 +180,7 @@ describe('every gate is load-bearing', () => {
     '.L8:\n\t.align\t2, 0\n' +
     '.L7:\n\t.word\t0x40000d4\n';
 
-  test('device-base: the compiled DMACNT spin loop is refused, and ablating it declares a struct over the register file', () => {
+  test('a device register is admitted like any other leaf base, and the member it declares is unqualified', () => {
     const sfn = structureChecked(
       (() => {
         const f = frontendFor(ARMV4T_AGBCC).lift('dmakick', DEVICE_ASM, ARMV4T_AGBCC, {}, undefined, undefined);
@@ -184,38 +190,14 @@ describe('every gate is load-bearing', () => {
       })(),
       {},
     );
-    const w = { deviceRegisters: ARMV4T_AGBCC.capabilities.deviceRegisters };
-    expect(offmemberBases(sfn, w)).toEqual([]);
-    const ablated = spellOperandMembers(sfn, { ...w, gates: without(OFFMEMBER_GATES, 'device-base') })!;
-    expect(cBackend.emit(ablated)).toContain('struct Off0 { u8 _pad0[8]; s32 m8; };');
-    expect(cBackend.emit(ablated)).toContain('((struct Off0 *)67109076)->m8');
-    // and the spelling it replaced is the one nothing else in the table objects to
-    expect(cBackend.emit(ablated)).not.toContain('volatile');
-  });
-
-  const DEVICE = fn([ret(idx(cbase(0x040000d4), 2, 4, { operandOff: 8 }))]);
-  const WINDOW = { deviceRegisters: ARMV4T_AGBCC.capabilities.deviceRegisters };
-
-  test('device-base: a cell inside the declared device window is refused, ablating admits', () => {
-    expect(offmemberBases(DEVICE, WINDOW)).toEqual([]);
-    expect(offmemberBases(DEVICE, { ...WINDOW, gates: without(OFFMEMBER_GATES, 'device-base') })).toHaveLength(1);
-    expect(
-      cBackend.emit(spellOperandMembers(DEVICE, { ...WINDOW, gates: without(OFFMEMBER_GATES, 'device-base') })!),
-    ).toContain('(struct Off0 *)67109076');
-  });
-
-  test('device-base asks the CELL and not only the base: below the window, reading into it', () => {
-    // base 0x03FFFFF8, read at +8 and +12 — the base is EWRAM and both cells are the device page.
-    const BELOW = fn([
-      ret(idx(cbase(0x03fffff8), 2, 4, { operandOff: 8 })),
-      ret(idx(cbase(0x03fffff8), 3, 4, { operandOff: 12 })),
-    ]);
-    expect(offmemberBases(BELOW, WINDOW)).toEqual([]);
-    expect(offmemberBases(BELOW, { ...WINDOW, gates: without(OFFMEMBER_GATES, 'device-base') })).toHaveLength(1);
-  });
-
-  test('a target declaring no device page makes device-base vacuous, never a refusal', () => {
-    expect(offmemberBases(DEVICE)).toHaveLength(1);
+    expect(offmemberBases(sfn)).toEqual(['c:67109076']);
+    const out = cBackend.emit(spellOperandMembers(sfn)!);
+    expect(out).toContain('struct Off0 { u8 _pad0[8]; s32 m8; };');
+    expect(out).toContain('((struct Off0 *)67109076)->m8');
+    // the cost this pins: the qualifier the cell wants is not in the spelling, and no gate here
+    // objects — `/volatile` is the sibling candidate that carries it, and it never composes with
+    // this one because `non-leaf-base` refuses the cast it wraps the base in
+    expect(out).not.toContain('volatile');
   });
 });
 
