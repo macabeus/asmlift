@@ -26,7 +26,7 @@
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
 // spawns `run --serial --shard i/N`, which writes `<tier>.part<i>.json` for the stitcher).
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { MISMATCH_LOG, cacheMismatches, cacheMode, cacheStats } from '@asmlift/cli/candcache';
+import { MISMATCH_LOG, cacheMismatches, cacheMode, cacheSampleNote, cacheStats } from '@asmlift/cli/candcache';
 import { macroDefinesUsedBy } from '@asmlift/core/macros';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
@@ -148,13 +148,16 @@ switch (command) {
       // What the cross-run candidate-object cache did in THIS shard, when it did anything.
       // Gate E ("run the whole workload in verify mode and count") reads these lines; a shard
       // that prints `mismatch` has served bytes a fresh compile disagrees with, and the store's
-      // whole namespace is suspect. Absent only when the cache is off, which is no longer the
+      // whole namespace is suspect. An `on` shard reports the same way: it compiles a sampled
+      // fraction of the keys it serves anyway and audits them, and the `sample=…%/seed=…` field
+      // says at what rate — a bench run is where the negative half of the store (77% of the
+      // entries, and 0 of the LoadBGTilemapData fan) gets sampled at all. Absent only when the cache is off, which is no longer the
       // default — an unset ASMLIFT_CANDCACHE now serves, so a shard with no line here was turned
       // off on purpose (ASMLIFT_CANDCACHE=0/off/empty, ASMLIFT_BENCH_CACHE=0, or a refusal).
       if (cacheMode() !== 'off') {
         const stats = cacheStats();
         if (Object.keys(stats).length > 0) {
-          console.log(`[candcache] ${cacheMode()} ${JSON.stringify(stats)}`);
+          console.log(`[candcache] ${cacheMode()}${cacheSampleNote()} ${JSON.stringify(stats)}`);
         }
         // A mismatch FAILS THE SHARD. Printing is not enough: one line among sixteen shard logs
         // and a zero exit makes a "0 differing" result rest on a human's grep.

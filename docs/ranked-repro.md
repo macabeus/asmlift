@@ -60,12 +60,12 @@ again (`packages/cli/src/candcache.ts`). **It is ON unless `ASMLIFT_CANDCACHE` s
 and it changes a run's WALL by several times while changing nothing a run computes. So every wall
 quoted from now on has to say which state it was measured in, in the same breath as the command:
 
-| `ASMLIFT_CANDCACHE`                         | what the run does                                                      | when to use it                                                                         |
-| ------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| unset, `1`, `on`, `true`, `yes`             | serves any candidate this toolchain already compiled                   | **the default** — say `cold` or `warm`, and paste the `[candcache]` line with the wall |
-| `0`, `off`, `false`, `no`, or SET-AND-EMPTY | compiles every candidate; touches no disk                              | a wall you want comparable with every wall published before the default flipped        |
-| `verify` (any capitalisation)               | compiles every candidate AND audits the store against it, loudly       | after any change to the cache, or when a stored answer is suspect                      |
-| anything else                               | **OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr** | never on purpose — the parse is closed so a typo cannot silently SERVE                 |
+| `ASMLIFT_CANDCACHE`                         | what the run does                                                                                      | when to use it                                                                         |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| unset, `1`, `on`, `true`, `yes`             | serves any candidate this toolchain already compiled, and AUDITS a sampled 1% by compiling them anyway | **the default** — say `cold` or `warm`, and paste the `[candcache]` line with the wall |
+| `0`, `off`, `false`, `no`, or SET-AND-EMPTY | compiles every candidate; touches no disk                                                              | a wall you want comparable with every wall published before the default flipped        |
+| `verify` (any capitalisation)               | compiles every candidate AND audits the store against it, loudly                                       | after any change to the cache, or when a stored answer is suspect                      |
+| anything else                               | **OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr**                                 | never on purpose — the parse is closed so a typo cannot silently SERVE                 |
 
 **EVERY WALL PUBLISHED IN THIS REPO BEFORE THE DEFAULT FLIPPED WAS MEASURED CACHE-OFF**, because
 the variable was set in no shell profile, no `.envrc` and no CI job — so `unset` and `off` were the
@@ -166,7 +166,9 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
   `env X=1 docker run`.
   If your command reads something in one of those shapes, declare
   `tools.asmlift.candidateCache: off`, or run with `ASMLIFT_CANDCACHE=verify` — it compiles anyway
-  and fails on any disagreement — or `ASMLIFT_CANDCACHE=0`.
+  and fails on any disagreement — or `ASMLIFT_CANDCACHE=0`. Serving mode's own sampled audit is the
+  standing mitigation for this whole list, and it is a bound on how long one survives, not a
+  removal: see the `on` MODE AUDITS ITSELF bullet below.
   **What `verify` can and cannot evidence for this bullet.** A verify run compares stored bytes
   against fresh for every key it stores — but 0 of 66,816 LoadBGTilemapData candidate TUs carry an
   `#include`, so the include directory is never read for any key stored, and a clean verify run is
@@ -186,6 +188,32 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
   and a stored rejection whose TU now does, are both mismatches — the second is the one that
   silently drops a spelling from a row's fan, and it is 77% of what a warm store serves. Any
   mismatch fails the run (nonzero exit) and is written to `MISMATCHES.log` in the store.
+- **`on` MODE AUDITS ITSELF, and that is what licenses serving at all.** `bench regression` and
+  `bench diff` compare OUTCOMES: a stale object is served identically on the base and on the head,
+  so a cache defect makes BOTH GO GREEN. Neither gate is capable of catching one, so serving mode
+  compiles a sampled fraction of the keys it serves anyway and runs them through the exact same
+  two-direction comparison `verify` uses. Same counters, same `MISMATCHES.log`, same nonzero exit.
+  - **The rate is 1%, and it was measured rather than assumed.** On the LoadBGTilemapData fan
+    (68,352 candidates, warm store, one box, one namespace, matched pair): sampling off 162.0 s,
+    sampling on 168.8 s with `{"hit":67653,"sampled":699,"verified":699}` — **699 extra compiles
+    (1.02%) for +6.8 s of wall (+4.2%)**. Against the same store cold (675 s), the speedup is
+    **4.17x without the audit and 4.00x with it**: 96% of it survives.
+  - **The seed is on the line and it rotates.** `[candcache] on sample=1%/seed=88dbd665e2876874 {…}`
+    — an audited run is distinguishable from an unaudited one, and `sample=off` says so when
+    someone turns it off. Sampling is deterministic within a run (so a run is reproducible) and
+    picks DIFFERENT keys next run (so the rest of the store is eventually looked at, which
+    hashing the key alone would never do). `ASMLIFT_CANDCACHE_SAMPLE_SEED=<seed>` replays a run's
+    exact selection; `ASMLIFT_CANDCACHE_SAMPLE=<percent>` changes the rate (`0` turns it off).
+  - **What it catches and how fast.** A systematic staleness — the shape every residual below has,
+    because they are all "the namespace does not measure input X" and X is read by a whole CLASS of
+    keys — is caught in the FIRST run that serves more than a few hundred keys. A staleness in
+    exactly ONE key survives on average 100 runs, and is 63% likely to be caught within 100.
+    Sampling does not ELIMINATE the residual list; it bounds how long one can live undetected.
+  - **This fan prices only the OBJECT half.** 0 of its 68,352 answers are cached rejections, and a
+    warm bench store is 77% rejections. The negative half is sampled on `pnpm bench run`, not here.
+  - A sampled key is withheld, so its candidate is compiled for real — and is therefore exposed to
+    a transient compile failure exactly as an uncached run is. That is the state every wall
+    published before the default flipped was measured in, on 100% of keys instead of 1%.
 
 ## The flags are part of the number
 

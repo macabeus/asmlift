@@ -31,7 +31,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
-import { MISMATCH_LOG, cacheMismatches, cacheMode, cacheStats } from './candcache';
+import { MISMATCH_LOG, cacheMismatches, cacheMode, cacheSampleNote, cacheStats } from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { renderDeclarations } from './declare';
@@ -42,12 +42,18 @@ import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 // The `[candcache]` line, and — when a stored answer disagreed with a fresh compile — the loud
 // second line that turns a verify run into a FAILING one. A counter that only prints cannot stop
 // anything: a verify pass writes one line among sixteen shard logs, so the mismatch has to reach
-// the exit status.
+// the exit status. The same is true of an `on` run now: its sampled audit fails the run exactly
+// as verify's does.
+//
+// `cacheSampleNote()` carries the sampling RATE and the run's SEED, so a reader can tell an
+// audited serve from an unaudited one and replay the exact selection
+// (ASMLIFT_CANDCACHE_SAMPLE_SEED). Without it a run with the audit switched off would print the
+// same line as one with it on.
 const candCacheLine = (): string => {
   if (cacheMode() === 'off') {
     return '';
   }
-  const line = `asmlift: [candcache] ${cacheMode()} ${JSON.stringify(cacheStats())}\n`;
+  const line = `asmlift: [candcache] ${cacheMode()}${cacheSampleNote()} ${JSON.stringify(cacheStats())}\n`;
   return cacheMismatches() === 0
     ? line
     : line +
