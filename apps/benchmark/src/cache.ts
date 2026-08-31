@@ -18,6 +18,7 @@
 // bypasses both (candcache.ts reads it), because "bypass the benchmark's caches" has to mean all
 // of them or bisecting a suspect row still reads candidate objects off disk.
 import type { DecompilerResult } from '@asmlift/bench-schema';
+import { objdiffVersion } from '@asmlift/cli/objdiff-version';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
 import { extractAsmData, mipsObjdumpText, ppcObjdumpText } from '@asmlift/toolchains';
@@ -162,8 +163,8 @@ export interface M2cKeyInputs {
 }
 
 /** The full m2c half of one row (decompile + compile + objdiff score), cached by
- *  (m2c commit, toolchain, symbol, asm, context, target-object bytes, and — for c++ —
- *  language). */
+ *  (m2c commit, objdiff-wasm version, toolchain, symbol, asm, context, target-object bytes, and
+ *  — for c++ — language). */
 export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerResult): DecompilerResult {
   const { tcId, sym, asm, ctx, obj, lang } = inputs;
   const commit = m2cCommit();
@@ -177,11 +178,16 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // v13: assessQuality exempts project-idiom address casts from the casts count.
   // v14: the objdump→GNU-as normalizer carries MIPS REL addends into %hi/%lo (m2c-normalizer.ts)
   //      — the KEY holds the raw disassembly, so a normalizer change is invisible to it.
+  // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
+  // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
+  // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
+  // and a per-row diff reports the bump inert without having scored anything.
   const key = sha(
     JSON.stringify({
       v: 14,
       kind: 'm2c',
       commit,
+      objdiff: objdiffVersion(),
       tc: tcId,
       sym,
       asm,
