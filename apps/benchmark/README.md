@@ -232,6 +232,15 @@ load-bearing for the published REPRODUCTION SCRIPTS, which run the command as wr
 real-tier agbcc path is reached under `label=bench-agbcc`, which no `decomp.yaml` key can turn off:
 `ASMLIFT_CANDCACHE=0` is the only switch over it.
 
+**`bench fidelity` runs every one of those ~1234 scripts with `ASMLIFT_CANDCACHE=0`**, pinned in
+`runScript`. That gate exists to prove a READER who copies a published script reproduces the
+published row, and a reader starts with an empty store. Spawned with an inherited environment the
+scripts ran SERVED off the publishing machine's warm store — the base-versus-head asymmetry the
+sampled audit exists to bound, in the one gate whose entire job is to be the reader. Cache-off and
+cache-on-cold produce the same objects, so the pin is the conservative spelling of a reader's run;
+it also keeps 1234 script re-executions from filling and pruning a developer's shared store. The
+scripts THEMSELVES stay cache-silent, which is what a reader will actually get.
+
 The sampled audit is what stands between that and a silently wrong number, and the cost of not
 having it is measurable rather than theoretical. With every object in a warm real-tier store
 replaced by a fixed 19-byte string: at `ASMLIFT_CANDCACHE_SAMPLE=100` the run exits 1 with

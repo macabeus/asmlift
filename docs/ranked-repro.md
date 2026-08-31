@@ -77,6 +77,21 @@ compare against a published number, and say so.
 state as unset: an empty value is both a one-shot bypass someone typed and an unexpanded
 `$SOMETHING`, so it lands on the side whose cost is a cold start rather than a served object.
 
+**SET-AND-EMPTY is guarded on every one of these variables, and it was not.** An unexpanded
+`$SOMETHING` reaches a variable as the empty STRING, which `??` does not catch — and for the two
+below an empty string is a perfectly usable value, so nothing failed:
+
+- `ASMLIFT_CANDCACHE_DIR=` is a PATH, and the path it is is the CURRENT DIRECTORY. `ns/`,
+  `objects/` and `MISMATCHES.log` landed wherever the process was standing — which the section
+  above tells you is your decomp checkout — and the pruner then deleted from a two-level
+  `objects/<dir>/<file>` layout that is an ordinary build-output shape. It now falls back to the
+  default store and says so; a non-empty value is resolved once, so a relative store cannot mean
+  two directories in one process.
+- `ASMLIFT_CANDCACHE_SAMPLE_SEED=` pinned the audit's selection to one fixed subset of every store
+  forever — the exact "audits the same keys and never the rest" failure the seed exists to prevent
+  — with a trailing `seed=` on the `[candcache]` line as the only tell. It now falls back to a
+  fresh random seed and says so.
+
 `ASMLIFT_BENCH_CACHE=0` turns this cache off too: "bypass the benchmark's caches" has to mean all
 of them, or bisecting a suspect row still reads candidate objects off disk.
 
@@ -199,6 +214,20 @@ find nothing to disagree with and go green having audited nothing.
   environment and the template. The evidence for the directory measurement is the offline poison
   suite (`packages/cli/test/offline/candcache-dirflags.test.ts`), which drives each shape through
   a real compile across an edit.
+- **A `put` does not trust the store either, and that hole had NO audit over it at all.** The
+  store is content-addressed: `objects/<sha>` is deduped and hardlinked per key. Treating the
+  EXISTENCE of that file as proof of its CONTENT meant a corrupted entry — a disk error, an
+  external edit, a store living where the project's own build writes — was hardlinked onto a key
+  whose object had just been compiled correctly, and the caller was served bytes it had not
+  produced. MEASURED: a run in which every key MISSED, every candidate compiled freshly and
+  correctly, and the audit ran at 100% published a NONMATCH as a byte-exact MATCH with exit 0 and
+  wrote no `MISMATCHES.log`. Sampling structurally cannot see that — it is reached from the SERVE
+  path, so it only ever looks at a key the store can already answer, and a `put` is a miss by
+  construction. A `put` holds the truth and has already hashed it, so it now compares: a
+  disagreement is an `OBJECT STORE CORRUPT` mismatch like any other, the entry is repaired with the
+  truth, and the run exits 3. Cost, measured at the cold LBG fan's own shape (53,228 dedup-hit puts
+  over 15,124 distinct objects): +1.5 s on a 683-905 s run, and zero on a warm run, which serves
+  and never stores.
 - **The store is bounded, but only between runs.** `ASMLIFT_CANDCACHE_MAX_MB` (default 4096)
   counts the distinct object bytes plus one allocation block per stored key — 77% of a warm store
   is negative entries, which weigh nothing logically and cost a block each. It is enforced ONCE per
@@ -210,37 +239,66 @@ find nothing to disagree with and go green having audited nothing.
 - **`verify` audits the OUTCOME, not only the bytes.** A stored object whose TU no longer compiles,
   and a stored rejection whose TU now does, are both mismatches — the second is the one that
   silently drops a spelling from a row's fan, and it is 77% of what a warm store serves. Any
-  mismatch fails the run (nonzero exit) and is written to `MISMATCHES.log` in the store.
+  mismatch fails the run with **exit 3** and is written to `MISMATCHES.log` in the store.
+  **3, not 1, and the distinction is the whole point:** a ranked run that does not MATCH exits 1
+  already, so `1` carried no signal for the case this repo actually publishes — LoadBGTilemapData
+  has been a nonmatch at 386 for twenty rounds, and a clean run and a poisoned run of it were
+  measured exiting 1 with byte-identical `[ranked]` lines. The `[candcache]` line and
+  `MISMATCHES.log` always discriminated; the exit status did not until now.
 - **`on` MODE AUDITS ITSELF, and that is what licenses serving at all.** `bench regression` and
   `bench diff` compare OUTCOMES: a stale object is served identically on the base and on the head,
   so a cache defect makes BOTH GO GREEN. Neither gate is capable of catching one, so serving mode
   compiles a sampled fraction of the keys it serves anyway and runs them through the exact same
   two-direction comparison `verify` uses. Same counters, same `MISMATCHES.log`, same nonzero exit.
-  - **The rate is 1%, and it was measured rather than assumed.** On the LoadBGTilemapData fan
-    (68,352 candidates, warm store, one box, one namespace, matched pair): sampling off 162.0 s,
-    sampling on 168.8 s with `{"hit":67653,"sampled":699,"verified":699}` — **699 extra compiles
-    (1.02%) for +6.8 s of wall (+4.2%)**. Against the same store cold (675 s), the speedup is
-    **4.17x without the audit and 4.00x with it**: 96% of it survives.
-    That pair was SEQUENTIAL, so it prices the audit and the box's own drift together.
-    INTERLEAVED A/B/A/B on the same fan and the same store at a quiet loadavg (6–10) puts the
-    audit far lower: audit off **161 s / 158 s**, audit on **161 s** (`sampled:713`) **/ 160 s**
-    (`sampled:692`) — **+1.0 s on 159.5 s (+0.6%) for 1.02% extra compiles, against a 3 s spread
-    WITHIN each arm**. Same box, same session, cache off: **641 s** — so **4.02x without the audit
-    and 3.99x with it**. The audit is nearly free on a WARM run and not remotely free in `verify`
-    (698 s, every key compiled) for the same reason: a warm run is no longer compile-bound, its
-    wall is enumerate plus 68,352 scores on the main thread, and 700 extra compiles spread over
-    six workers vanish into that. Quote **+0.6% quiet / +4.2% loaded**, never either without its
-    loadavg — the rate is 1% in both.
+  - **The rate is 1%, and the rate COMPARISON is a null result — which is the finding, not a
+    hedge.** Three rates were run interleaved on the same warm LoadBGTilemapData store (68,352
+    candidates, one box, one namespace, `A0 B1 C2 A0 B1 C2`, then the same store cache-off):
+
+    | rate      | walls         | mean        | sampled       | speedup vs cache-off |
+    | --------- | ------------- | ----------- | ------------- | -------------------- |
+    | audit off | 162 s / 164 s | **163.0 s** | 0             | **4.04x**            |
+    | 1%        | 167 s / 163 s | **165.0 s** | 688 / 686     | **3.99x**            |
+    | 2%        | 164 s / 161 s | **162.5 s** | 1,426 / 1,393 | **4.06x**            |
+
+    Cache-off on the same store and session: **659 s**; the cold run that filled it: **810 s**.
+    The 2% arm came out FASTER than the no-audit arm. That is not a speedup, it is the measurement
+    saying the three rates are NOT SEPARABLE on this workload: the within-arm spread is 2-3 s and
+    every mean sits inside it. A warm run is no longer compile-bound — its wall is 48 s of
+    enumerate plus 68,352 scores on the main thread — so 700 or 1,400 extra compiles spread over
+    six workers disappear into idle worker time.
+    **So "2% is affordable" is true and says nothing, because so is 0%.** The rate stays at 1%
+    because no measurement moves it, and `ASMLIFT_CANDCACHE_SAMPLE` is there for a reader who
+    wants the survival numbers above halved.
+    **Do not price the audit off the `[phase]` compile column.** It reads
+    off 263.8 s / 267.2 s, 1% 549.3 s / 536.0 s, 2% 541.5 s / 530.8 s of worker time — and 2%
+    costs the SAME as 1% for TWICE the compiles, which no per-compile cost model can produce. That
+    column is counting the queueing every hit does behind a busy worker, not the audit's work; a
+    "cost per sampled compile" or a knee derived from it is an artifact.
+    **A wall here is ordinal, and the loadavgs say why**: a neighbour worktree on the same box ran
+    probes and dockerized compiles throughout, and the 1-minute loadavg before these arms swung
+    between 5.0 and 190.8. The interleave is what makes the comparison survive that; a single
+    sequential pair would not.
+
   - **The seed is on the line and it rotates.** `[candcache] on sample=1%/seed=88dbd665e2876874 {…}`
     — an audited run is distinguishable from an unaudited one, and `sample=off` says so when
     someone turns it off. Sampling is deterministic within a run (so a run is reproducible) and
     picks DIFFERENT keys next run (so the rest of the store is eventually looked at, which
     hashing the key alone would never do). `ASMLIFT_CANDCACHE_SAMPLE_SEED=<seed>` replays a run's
     exact selection; `ASMLIFT_CANDCACHE_SAMPLE=<percent>` changes the rate (`0` turns it off).
-  - **What it catches and how fast.** A systematic staleness — the shape every residual below has,
-    because they are all "the namespace does not measure input X" and X is read by a whole CLASS of
-    keys — is caught in the FIRST run that serves more than a few hundred keys. A staleness in
-    exactly ONE key survives on average 100 runs, and is 63% likely to be caught within 100.
+  - **What it catches and how fast — PER CLASS, because the residuals are not one population.**
+    The catch probability in one run is `1 - (1 - rate)^C` where C is the number of SERVED keys the
+    staleness touches. At 1%: C = 700 is certain (99.9%), C = 100 is 63%, C = 9 is 8.6%, C = 1 is
+    1% (mean 100 runs, 63% within 100). Most of the residuals listed above are "the namespace does
+    not measure input X" where X is read by a whole CLASS — a directory, a wrapper's config, the
+    runtime — and those are caught in the first run that serves a few hundred keys. **One is not:**
+    a candidate's own assembler `.include`/`.incbin` is per-CANDIDATE, and the same list measures
+    it at 0 of 66,816 on LoadBGTilemapData — the sparse regime, where the honest number is the
+    100-run figure, not "the first run".
+    **And the BENCH path is sparser than the ranked one.** One whole `pnpm bench run` serves
+    ~42,110 answers and audits ~399 of them (0.95%), so a staleness confined to ONE ROW's keys
+    (~9 objects on the agbcc real tier) is caught with probability 8.2% per bench run — a mean of
+    about 12 bench runs. The bench is where every published score comes from, so that is the number
+    to quote for a row-local staleness, not the ranked fan's.
     Sampling does not ELIMINATE the residual list; it bounds how long one can live undetected.
   - **This fan prices only the OBJECT half, and the negative half is measured on the bench.** 0 of
     its 68,352 answers are cached rejections. One whole `pnpm bench run` (948 rows, warm real-tier
@@ -249,9 +307,26 @@ find nothing to disagree with and go green having audited nothing.
     nothing was checking before #132 and the one that silently DROPS a spelling, and it is only
     ever exercised by a bench run. Read it off the per-shard `[candcache]` lines, which is where a
     reader can check it too.
+  - **A withholding accounts for itself, so `sampled` cannot overstate the audit.** `sampled`
+    counts keys the cache WITHHELD, not comparisons it made: a withheld key whose compile dies
+    without a verdict is never compared, because a transient must never be stored as a rejection.
+    The counters therefore close:
+    `sampled = verified + verifiedFail + mismatch + sampledStale + sampledAbandoned + sampledPending`
+    — `sampledStale` a key a sibling shard pruned between the get and the put, `sampledAbandoned`
+    a compile that produced no verdict, `sampledPending` still outstanding when the line was
+    printed. Read `sampled` alone and a run that audited 400 keys can claim 700.
   - A sampled key is withheld, so its candidate is compiled for real — and is therefore exposed to
     a transient compile failure exactly as an uncached run is. That is the state every wall
-    published before the default flipped was measured in, on 100% of keys instead of 1%.
+    published before the default flipped was measured in, on 100% of keys instead of 1%. What
+    that no longer costs is the CANDIDATE: when the compile of a withheld key produces neither an
+    object nor a deterministic rejection, the withheld answer is handed back (`sampledAbandoned`),
+    which is what an unaudited run would have been served. Sampling must never be worse than not
+    sampling, and a warm run's exposure to a transient had been zero.
+  - **`bench fidelity` runs its ~1234 reproduction scripts with `ASMLIFT_CANDCACHE=0`,
+    deliberately.** That gate exists to prove a READER who copies a published script reproduces
+    the published row, and that reader starts with an empty store. Inheriting the default would
+    run the gate SERVED off the publishing machine's warm store — the base-versus-head asymmetry
+    the audit exists to bound, in the one gate whose job is to be the reader.
 
 ## The flags are part of the number
 
