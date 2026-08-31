@@ -119,7 +119,27 @@ function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
  *  unconditionally, because it cannot know — see `hasHomeableSharedAddress`.
  *
  *  Block PARAMETERS are members like any other and can qualify here. Neither caller homes one —
- *  both filter by a DEF — but they must be counted, or the join half of every class is invisible. */
+ *  both filter by a DEF — but they must be counted, or the join half of every class is invisible.
+ *
+ *  IT IS NOT A SUPERSET OF THE PER-VALUE RULE IT REPLACED, and that is the price rather than a
+ *  bug: a value whose CLASS MATE escapes is now refused where counting the value alone admitted
+ *  it. Measured by running both predicates over every function in the four checkouts — 1487
+ *  lifting functions, both symbol-map configurations — the widening admits new values in 25
+ *  functions map-less and 8 map-ful, and REMOVES exactly one value from each of four functions
+ *  map-less (kleod `sub_0804EB64`, marioparty3 `func_8010E344_25A994_rockin_raceway`,
+ *  snowboardkids2 `func_8006FDA0_709A0` and `func_8006FDC8_709C8`), none map-ful. The function-
+ *  level ENUMERATION gate is a clean superset over the same corpus, which is why a census taken
+ *  at that scope reports no loss; this is the finer one.
+ *
+ *  NO LOOP-HEADER REFUSAL, AND THAT IS MEASURED TWICE OVER. The scope's plan mandated one — refuse
+ *  a class reaching a loop-header PARAMETER. Of the 25+8 functions above exactly one carries such
+ *  a class (marioparty3 `func_80112508_523648_filesel`, 2 values, map-less), and neither value is
+ *  one the axis could materialize. The reason is structural, and `addr-home.test.ts` pins both
+ *  halves: a loop-carried pointer INDUCTION is already refused by its own increment, which is a
+ *  non-base use of a class member; and the loop-header class that does survive is one whose back-
+ *  edge value is READ FROM MEMORY, where the only def is a `load` and the axis's own enumeration
+ *  gate excludes it — so every home the axis mints is still a def's own local and no name spans
+ *  two iterations. A guard with no reachable inhabitant is not shipped. */
 export function sharedBaseClasses(fn: Fn, ignoreRet: boolean): Set<Value> {
   const classes = mergeClasses(fn);
   const baseUses = new Map<Value, Set<Op>>();
@@ -130,9 +150,15 @@ export function sharedBaseClasses(fn: Fn, ignoreRet: boolean): Set<Value> {
         continue;
       }
       op.operands.forEach((o, i) => {
-        // Base slot only, and only if the value is not ALSO in another slot of the same op
-        // (`store p, p` writes the address as data — that is an escape, not a base use).
-        if (i === 0 && MEM_BASE_OPS.has(op.opcode) && !op.operands.some((x, j) => j > 0 && x === o)) {
+        // BASE SLOT ONLY. `store p, p` — the address written as its own data — needs no clause
+        // here and had one: the j>0 pass over the SAME operand list puts `p` into `otherUse`
+        // regardless, and `otherUse` disqualifies the whole class below, so a base-slot entry for
+        // an escaping value can never be read. Measured before removing it: over 1487 lifted
+        // corpus functions the shape occurs at 10 sites and the predicate's output is identical
+        // with the clause and without it, in both `ignoreRet` senses. What keeps the escape out is
+        // therefore the `otherUse` sweep, and that is what `analysis.test.ts` pins — a clause that
+        // cannot change an answer is not a guard, it is a claim that one exists.
+        if (i === 0 && MEM_BASE_OPS.has(op.opcode)) {
           (baseUses.get(o) ?? baseUses.set(o, new Set()).get(o)!).add(op);
         } else {
           otherUse.add(o);

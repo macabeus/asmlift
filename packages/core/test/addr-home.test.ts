@@ -16,7 +16,7 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
-import { hasHomeableSharedAddress } from '../src/structure/analysis';
+import { hasHomeableSharedAddress, sharedBaseClasses } from '../src/structure/analysis';
 import { structure } from '../src/structure/structure';
 import { type SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -274,4 +274,91 @@ test('mergeClasses unions an edge argument with the parameter it binds, transiti
   expect(new Set(cls)).toEqual(new Set([armBase(bb1), armBase(bb2), bb3.params[0]]));
   // the shift feeding both arms rides no edge, so it is its own class and absent from the map
   expect(classes.get(bb0.ops.find((o) => o.opcode === 'shl')!.results[0])).toBeUndefined();
+});
+
+// ── the two refusals the widened scope rests on, pinned rather than asserted ────────────────
+// The plan for this scope mandated a `loop-header-class` gate — refuse a class that reaches a LOOP
+// HEADER parameter, on the ground that a loop variable's name means different things at different
+// points. It is NOT shipped, and these are the measurements that stand in for it.
+//
+// A corrected census (the shipped one asked only inside functions whose ENUMERATION GATE flipped,
+// which is a strictly smaller population than the functions where a new VALUE is admitted) over
+// the four checkouts, both symbol-map configurations: 1487 lifting functions, 25 with newly
+// admitted values map-less and 8 map-ful; ONE has a class touching a loop-header parameter
+// (marioparty3, 2 values, map-less only), and ZERO of those values are ones the axis could
+// materialize. The two tests below say why that is structural rather than lucky.
+
+// A loop-carried pointer INDUCTION — the shape the guard was written for. The walk's own `+ 4` is
+// a non-base use of a class member, so the class is refused by the rule that was already there.
+const LOOP_WALK = `fn walk {
+^bb0(%0: u32, %1: u32):
+  %2: s32 = const {value=0}
+  br ^bb1(%0, %2)
+^bb1(%3: u32, %4: s32):
+  %5: s32 = load %3 {off=0, signed=false, width=2}
+  %6: s32 = load %3 {off=2, signed=false, width=2}
+  %7: s32 = add %5, %6
+  %8: s32 = add %4, %7
+  %9: s32 = const {value=4}
+  %10: u32 = add %3, %9
+  %11: u32 = icmp_ne %10, %1
+  cond_br %11, ^bb1(%10, %8), ^bb2(%8)
+^bb2(%12: s32):
+  ret %12
+}
+`;
+
+test('a loop-carried pointer induction is refused by its own increment, not by a loop gate', () => {
+  expect(sharedBaseClasses(parse(LOOP_WALK), true).size).toBe(0);
+  expect(hasHomeableSharedAddress(parse(LOOP_WALK))).toBe(false);
+  expect(emit(LOOP_WALK, true)).toBe(emit(LOOP_WALK, false));
+});
+
+// The loop-header class that DOES survive: the back-edge value is read from memory, so no member
+// feeds arithmetic. All three values are in scope — and nothing homes, because the axis only ever
+// materializes a DEF and the only def here is a `load`, which its enumeration gate excludes. A
+// name therefore never spans two iterations: every home the axis mints is a def's own local.
+const LOOP_CHASE = `fn chase {
+^bb0(%0: u32):
+  %1: s32 = const {value=0}
+  br ^bb1(%0, %1)
+^bb1(%2: u32, %3: s32):
+  %4: s32 = load %2 {off=0, signed=false, width=2}
+  %5: s32 = load %2 {off=2, signed=false, width=2}
+  %6: s32 = add %4, %5
+  %7: s32 = add %3, %6
+  %8: u32 = load %2 {off=8, signed=false, width=4}
+  %9: u32 = icmp_ne %7, %1
+  cond_br %9, ^bb1(%8, %7), ^bb2(%7)
+^bb2(%10: s32):
+  ret %10
+}
+`;
+
+test('a loop-header class fed from memory is in scope and still homes nothing', () => {
+  expect(sharedBaseClasses(parse(LOOP_CHASE), true).size).toBe(3);
+  expect(hasHomeableSharedAddress(parse(LOOP_CHASE))).toBe(false);
+  expect(emit(LOOP_CHASE, true)).toBe(emit(LOOP_CHASE, false));
+});
+
+// THE ESCAPE IS KEPT OUT BY THE `otherUse` SWEEP, and by nothing else. `sharedBaseClasses` used to
+// carry a clause excusing a base-slot use when the same op used the value again as data
+// (`store p, p`) — measured over 1487 lifted corpus functions, the shape occurs at 10 sites and
+// the clause changed the predicate's answer at none of them, because the j>0 pass over the same
+// operand list already puts the value in `otherUse`. The clause is gone; this is what replaces it.
+const STORE_SELF = `fn escape {
+^bb0(%0: u32):
+  %1: s32 = const {value=2}
+  %2: u32 = shl %0, %1
+  %3: s32 = const {value=134576640}
+  %4: u32 = add %2, %3
+  %5: s32 = load %4 {off=4, signed=false, width=4}
+  store %4, %4 {off=0, width=4}
+  ret %5
+}
+`;
+
+test('an address stored as its own data escapes the scope', () => {
+  expect(sharedBaseClasses(parse(STORE_SELF), true).size).toBe(0);
+  expect(hasHomeableSharedAddress(parse(STORE_SELF))).toBe(false);
 });

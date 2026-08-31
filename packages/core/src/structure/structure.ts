@@ -37,7 +37,7 @@
 // whose exit copies would clobber, switch fall-through, and mixed-entry self-loops (a guarded
 // header also entered by a plain br).
 import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
-import { Block, Fn, Op, Value, defOpMap, dominators, successorsOf } from '../ir/core';
+import { Block, Fn, Op, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import {
@@ -1932,19 +1932,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // the name even though the arg claims it in neither naming map. Over-tainting only blocks
     // flips: conservative-safe.
     const SIGNED_USE = new Set(['icmp_slt', 'icmp_sle', 'icmp_sgt', 'icmp_sge', 'sdiv', 'smod', 'shr_s']);
-    const edgePeers = new Map<Value, Value[]>();
-    for (const b of fn.blocks) {
-      const term = b.ops[b.ops.length - 1];
-      for (const sx of term?.successors ?? []) {
-        sx.args.forEach((a, i) => {
-          const pv = sx.block.params[i];
-          if (pv !== undefined) {
-            (edgePeers.get(a) ?? edgePeers.set(a, []).get(a)!).push(pv);
-            (edgePeers.get(pv) ?? edgePeers.set(pv, []).get(pv)!).push(a);
-          }
-        });
-      }
-    }
+    // The arg↔param identity is `ir/core.ts`'s `mergeClasses` — a CFG/SSA fact rather than a rule
+    // of this pass, and a hand-rolled copy here is one more thing free to drift from it. The walk
+    // below is transitive, so seeding it with the whole CLASS is the same closure as seeding it
+    // with the direct peers.
+    const edgePeers = mergeClasses(fn);
     const signedEvidence = new Set<Value>();
     const work: Value[] = [];
     for (const b of fn.blocks) {

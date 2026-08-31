@@ -156,7 +156,18 @@ export function forwardingTarget(b: Block): Block {
  *  Member order is definition order (block order, params before results), so a caller that reports
  *  a class reports it deterministically.
  *
- *  A CFG/SSA fact rather than a rule of any one pass, so it lives here beside `dominators`. */
+ *  A CFG/SSA fact rather than a rule of any one pass, so it lives here beside `dominators`. Two
+ *  callers took it: `structure/analysis.ts`'s shared-base scope, and `structure/structure.ts`'s
+ *  signed-use cone, which had hand-rolled the same arg↔param map.
+ *
+ *  THE THIRD SITE IS NOT THIS RELATION, and saying so is the point of naming it here.
+ *  `raise/recover.ts`'s `propagatePointers` runs its own union-find over the edge relation PLUS
+ *  the const-offset `add`/`sub` (a pointer ± an integer stays the same pointer), which is a
+ *  strictly larger relation and a typing rule of that pass rather than a fact about the CFG.
+ *  Rewriting it to start from this map would make it seed a pass-specific union on top, i.e. give
+ *  a CFG fact a parameter for one caller's extra edges — so it stays where it is, and what this
+ *  paragraph buys is that the next reader looking for a fourth copy knows which of the two the
+ *  third one is. */
 export function mergeClasses(fn: Fn): Map<Value, readonly Value[]> {
   const parent = new Map<Value, Value>();
   const find = (v: Value): Value => {
