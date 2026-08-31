@@ -12,12 +12,13 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { assertDerefsTyped, assertLocalsWritten, assertResolved } from '../src/contracts';
+import { frontendFor } from '../src/frontend/registry';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { OFFMEMBER_GATES, offmemberBases, spellOperandMembers } from '../src/l3/offmember';
-import { structureChecked } from '../src/pipeline';
+import { applyIdiomPatterns, raiseRecovered, structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -152,6 +153,46 @@ describe('every gate is load-bearing', () => {
   // `volatile` the tie-break at `compareScored` can only ADD — so the differ would referee it by
   // luck. Nothing else in the table asks: without this gate the shape is admitted whenever the
   // function does not also touch the base at displacement 0.
+  //
+  // THE REAL ASM, not a hand-built tree: this is what the benchmark's own agbcc command emits for
+  // `volatile u32 *d = (volatile u32 *)0x040000d4; d[2] = c | 1 << 31; while (d[2] & 1 << 31) {}`
+  // — a spin on DMACNT that never touches DMASAD, so `no-operand-off` does not cover it and this
+  // gate is the only refusal.
+  const DEVICE_ASM =
+    'dmakick:\n' +
+    '\tldr\tr2, .L7\n' +
+    '\tmov\tr1, #0x80\n' +
+    '\tlsl\tr1, r1, #0x18\n' +
+    '\torr\tr0, r0, r1\n' +
+    '\tstr\tr0, [r2, #0x8]\n' +
+    '.L3:\n' +
+    '\tldr\tr0, [r2, #0x8]\n' +
+    '\tand\tr0, r0, r1\n' +
+    '\tcmp\tr0, #0\n' +
+    '\tbne\t.L3\n' +
+    '\tbx\tlr\n' +
+    '.L8:\n\t.align\t2, 0\n' +
+    '.L7:\n\t.word\t0x40000d4\n';
+
+  test('device-base: the compiled DMACNT spin loop is refused, and ablating it declares a struct over the register file', () => {
+    const sfn = structureChecked(
+      (() => {
+        const f = frontendFor(ARMV4T_AGBCC).lift('dmakick', DEVICE_ASM, ARMV4T_AGBCC, {}, undefined, undefined);
+        applyIdiomPatterns(f, ARMV4T_AGBCC);
+        raiseRecovered(f, ARMV4T_AGBCC, {}, undefined);
+        return f;
+      })(),
+      {},
+    );
+    const w = { deviceRegisters: ARMV4T_AGBCC.capabilities.deviceRegisters };
+    expect(offmemberBases(sfn, w)).toEqual([]);
+    const ablated = spellOperandMembers(sfn, { ...w, gates: without(OFFMEMBER_GATES, 'device-base') })!;
+    expect(cBackend.emit(ablated)).toContain('struct Off0 { u8 _pad0[8]; s32 m8; };');
+    expect(cBackend.emit(ablated)).toContain('((struct Off0 *)67109076)->m8');
+    // and the spelling it replaced is the one nothing else in the table objects to
+    expect(cBackend.emit(ablated)).not.toContain('volatile');
+  });
+
   const DEVICE = fn([ret(idx(cbase(0x040000d4), 2, 4, { operandOff: 8 }))]);
   const WINDOW = { deviceRegisters: ARMV4T_AGBCC.capabilities.deviceRegisters };
 

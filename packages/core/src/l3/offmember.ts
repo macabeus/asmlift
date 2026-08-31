@@ -48,7 +48,8 @@
 // subscript, a `lead`-prefixed one — is left exactly as it was, keeping its own cast, and a
 // struct-array element off the same numeric constant reaches the address through a different base
 // expression and so a different key entirely. So one address really can leave here spelled two
-// ways: `((struct Off0 *)&gEntity)->m12` beside `((u8 *)&gEntity)[a0 * 28 + 17]`.
+// ways, and `offmember.test.ts` emits exactly this pair rather than describing it:
+// `((struct Off0 *)50345232)->m16` beside `((s32 *)50345232)[a0]`.
 //
 // THAT IS UGLY AND IT IS NOT UNSOUND, and the distinction is the whole reason it stayed. Every
 // access carries its own cast, so no access reads a byte it did not read before; the seating check
@@ -67,9 +68,14 @@
 // folded one and kept the other in the operand has no reachable spelling — the same coverage hole
 // `l3/basecse.ts` states for its two admissions and `l3/ptrfield.ts` measures for its fields. The
 // per-base fork is 2^n and the family's standing price for forking ten refusal sites per site was
-// 1024x, so the subsets stay unreachable until a row demands one. Measured over klonoa's lifting
-// functions, the surplus is real: 36 admitted bases over 25 functions map-less and 25 over 16
-// map-ful, so the multi-base functions are where a missing subset would live.
+// 1024x, so the subsets stay unreachable until a row demands one. Measured over klonoa's 69
+// lifting functions (lift → idioms → raise → structure, one pass per configuration): 36 admitted
+// bases over 25 functions map-less and 38 over 24 map-ful, so the multi-base functions really are
+// the majority of the surplus and a missing subset has somewhere to live. (An earlier round
+// reported 25 bases over 16 functions for the map-ful arm; re-run here it is 38 over 24, and the
+// map-less arm reproduces exactly, so the disagreement is in that round's method rather than in
+// this one's admission rule.) The other three checkouts admit 32 bases over 32 functions (af),
+// 10 over 10 (marioparty3) and 2 over 2 (snowboardkids2), all map-less.
 import { nextStructIndex } from '../ir/struct-names';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import { addrConst, inRange } from './address';
@@ -126,13 +132,32 @@ export const OFFMEMBER_GATES: readonly Gate<OffmemberBase>[] = [
     // ("a cast of a leaf const is still a leaf") would drop the qualifier with no test failing.
     // `device-base` below owns that harm on its own premise and is declared `sound: true`, so the
     // widening is guarded whether or not this gate keeps excusing it. One consequence worth
-    // stating: because `/volatile` wraps the base in that cast, no `…/volatile/…/offmember`
-    // candidate can exist on a device address — the two are alternatives there, not a pairing.
+    // stating, and measured rather than reasoned: because `/volatile` wraps the base in that
+    // cast, the two levers do not compose. Over LoadBGTilemapData's 68352-candidate fan, 18432
+    // candidates carry `/volatile` and 1536 carry `/offmember`, and NONE carries both.
     sound: false,
     rejects: (c) => !c.leafBase,
   },
   {
     id: 'device-base',
+    // REACH, measured both ways because the two numbers disagree and both are true. It NAMES 49
+    // refusals over klonoa map-less and 2 map-ful (`firstRejection` short-circuits, so this is
+    // the gate's own reach); its MARGINAL effect on what is admitted is ZERO over all four
+    // checkouts in both configurations, because every base it refuses there is one
+    // `no-operand-off` would refuse too — the DMA idiom writes offset 0 as well as offset 8.
+    //
+    // THAT REDUNDANCY IS THE REASON IT EXISTS RATHER THAN A REASON IT DOES NOT. A function that
+    // touches DMACNT without also writing DMASAD is admitted the moment the redundancy lapses,
+    // and one exists: `void f(u32 c){ volatile u32 *d=(volatile u32*)0x040000d4; d[2]=c|1<<31;
+    // while(d[2]&1<<31){} }` compiled with the benchmark's own agbcc command emits
+    // `.word 0x40000d4` with `str r0,[r2,#0x8]` and `ldr r0,[r2,#0x8]`, and lifting THAT asm
+    // admits `c:67109076` with this gate ablated, emitting
+    // `struct Off0 { u8 _pad0[8]; s32 m8; };` over the register file with no qualifier.
+    // `offmember.test.ts` runs that asm rather than a hand-built tree.
+    //
+    // The map-ful number is small for a reason worth naming: a symbol map turns a device address
+    // into a named `addr`, which `addrConst` cannot read — the same blind spot `/vol-store` and
+    // `/homesplit` have, and not one this gate closes.
     why: 'a device register is not an object a source declares a struct over, and the member spelling drops the qualifier the cell needs',
     sound: true,
     guardedBy: 'offmember.test.ts: device-base: a cell inside the declared device window is refused, ablating admits',
