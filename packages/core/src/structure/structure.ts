@@ -37,6 +37,7 @@
 // whose exit copies would clobber, switch fall-through, and mixed-entry self-loops (a guarded
 // header also entered by a plain br).
 import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
+import { type BitsCtx, constMask, provableBits } from '../ir/bits';
 import { Block, Fn, Op, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
@@ -2493,57 +2494,25 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // ORDERING: the named store re-reads the cell at the STORE's position where the asm read it at
     // the LOAD's, the same hazard the read fold above states, cleared with the same machinery.
 
-    // The mask as a NUMBER. A thumb `bic` lifts as `and` with `neg`/`not` of a constant, so those
-    // two spellings fold; anything else is not a compile-time mask and refuses the whole idiom.
-    // A materialized def is excluded — it emits its own temp, so it is a variable, not a literal.
-    const maskConst = (v: Value): number | null => {
-      const d = defs.get(v);
-      if (!d || materialize.has(d)) {
-        return null;
-      }
-      if (d.opcode === 'const') {
-        return (d.attrs.value as number) | 0;
-      }
-      if ((d.opcode === 'neg' || d.opcode === 'not') && d.operands.length === 1) {
-        const a = maskConst(d.operands[0]);
-        return a === null ? null : (d.opcode === 'neg' ? -a : ~a) | 0;
-      }
-      return null;
-    };
-    /** An UPPER BOUND on the significant bits of a value, or 32 when nothing bounds it. Every
-     *  answer below 32 comes from a declaration or from the instruction itself — a zero-fill
-     *  shift, a mask, an unsigned load's width, a bitfield read this pass already spelled. */
-    const provableBits = (v: Value): number => {
-      const d = defs.get(v);
-      if (!d) {
-        return 32;
-      }
-      const bf = bitfieldSpelling.get(d);
-      if (bf) {
-        // …but only an UNSIGNED field bounds anything. The read fold spells a SIGNED field too
-        // (`f.signed === signedRead` over `shr_s`), and a sign-extended read carries all 32 bits:
-        // an `s32 delta : 5` reading -1 is 0xFFFFFFFF, which the asm's `or` writes in full while
-        // C's `dest = gS.delta` truncates to the window. Bounding it by `bitWidth` would fold that
-        // into a plausible assignment addressing DIFFERENT bits — exactly what this bound exists
-        // to refuse.
-        const f = declaredFields(symCtx.info(bf.global)?.layout)?.find((x) => x.name === bf.field);
+    // THE KNOWN-BITS QUESTION IS L2 AND LIVES THERE (ir/bits.ts) — this fold only supplies the
+    // one fact that layer cannot see: a bitfield READ this pass has already recognized, whose
+    // bound comes from the DECLARATION. And it supplies it signedness-first, because a signed
+    // field's read is sign-extended and carries all 32 bits however few bits the declaration
+    // allots it — bounding one by its own `bitWidth` folds `gS.dest = gS.delta` over a value whose
+    // high bits the asm's `or` writes and C's truncation does not.
+    const bits: BitsCtx = {
+      defs,
+      materialize,
+      bound: (d) => {
+        const bf = bitfieldSpelling.get(d);
+        if (!bf) {
+          return null;
+        }
+        const f = symCtx.fieldsOf(bf.global)?.find((x) => x.name === bf.field);
         return f?.signed === false ? (f.bitWidth ?? 32) : 32;
-      }
-      if (d.opcode === 'shr_u' && d.operands.length === 1 && typeof d.attrs.imm === 'number') {
-        return 32 - (d.attrs.imm as number);
-      }
-      if (d.opcode === 'load') {
-        return d.attrs.signed === true ? 32 : (d.attrs.width as number) * 8;
-      }
-      const m =
-        d.opcode === 'const' || d.opcode === 'and'
-          ? d.opcode === 'const'
-            ? maskConst(v)
-            : (d.operands.map(maskConst).find((x) => x !== null) ??
-              (typeof d.attrs.imm === 'number' ? (d.attrs.imm as number) | 0 : null))
-          : null;
-      return m !== null && m >= 0 ? 32 - Math.clz32(m) : 32;
+      },
     };
+    const maskConst = (v: Value): number | null => constMask(bits, v);
     /** The one operand of a commutative binary op that is NOT `keep`, with the 1-operand
      *  immediate form folded into a synthetic answer of `null` (an `imm` mask has no Value). */
     const otherOperand = (d: Op, keep: Value): Value | null =>
@@ -2630,7 +2599,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           ) {
             continue;
           }
-          if (lo + w !== cellBits && provableBits(value) > w) {
+          if (lo + w !== cellBits && provableBits(bits, value) > w) {
             continue; // C would truncate bits the asm's `or` writes
           }
           const fld = declaredFields(si.layout)?.find(
