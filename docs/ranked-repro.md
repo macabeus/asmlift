@@ -85,6 +85,17 @@ of them, or bisecting a suspect row still reads candidate objects off disk.
   compiler's input is COLD by construction — the namespace moved and nothing in the store answers
   to it. Say `cold` or `warm`, not just `on`. The store lives at `ASMLIFT_CANDCACHE_DIR`
   (default `$TMPDIR/asmlift-candcache`); deleting it makes the next run cold.
+  **AND SO DOES REBUILDING THE BUNDLE, whatever you changed.** That sentence used to say "the
+  harness code that shapes the compiler's input", which is what the namespace INTENDS to measure
+  (`compile-command.ts` hashes its own module file) — but in the shipped bundle that file is
+  `dist/asmlift.mjs`, so the digest covers the whole CLI. MEASURED, on this box, with everything
+  else held fixed: two LoadBGTilemapData runs off one bundle both resolved
+  `ns=82c83810be494b45`; adding a COMMENT to `packages/cli/src/phase.ts` — a file no compile
+  reads and that shapes no compiler input — and rebuilding moved it to `ns=a5e72b95f10cea78`.
+  This is the cold-start direction and therefore sound, but it decides how to pair runs: `docs`
+  above tells you to rebuild before any run you intend to quote, so **a base run and a lever run
+  with a rebuild between them share nothing** and both are cold. Build once, then run the pair —
+  or expect the first of them to pay full price.
 - **Never compare a warm wall against a cold one and call the difference a code change.** This is
   the same rule as "never compare numbers made with different flag sets", and it is easier to
   break because nothing on the command line says which state you were in. The run itself does:
