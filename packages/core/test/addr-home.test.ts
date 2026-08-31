@@ -11,6 +11,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { mergeClasses } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
@@ -191,4 +192,86 @@ test('a symbol map does not blind the raw sibling: /addr-home rides /raw-globals
   const homed = cands.filter((c) => c.label.includes('/addr-home'));
   expect(homed.length).toBeGreaterThan(0);
   expect(homed.every((c) => c.label.includes('/raw-globals'))).toBe(true);
+});
+
+// ── THE MERGE CLASS ────────────────────────────────────────────────────────────────────────
+// The axis's scope counts base uses over the merge class (ir/core.ts `mergeClasses`), not over
+// the SSA value: a base each arm derives and the join then dereferences is one register spelled
+// as N values, and per value none of them reaches the 2-access threshold — while the edge
+// argument that makes it shared is itself a non-memory consumer, so the per-value rule refuses on
+// the very evidence it needs. `synthetic:bgshare` and `synthetic:bgswitch` are the rows.
+const MERGED = `fn armshare {
+^bb0(%0: u32, %1: u32):
+  %2: s32 = const {value=2}
+  %3: u32 = shl %0, %2
+  %4: s32 = const {value=134576640}
+  cond_br %1, ^bb1(), ^bb2()
+^bb1():
+  %5: u32 = add %3, %4
+  %6: s32 = load %5 {off=16, signed=false, width=2}
+  br ^bb3(%5, %6)
+^bb2():
+  %7: u32 = add %3, %4
+  %8: s32 = load %7 {off=12, signed=false, width=2}
+  br ^bb3(%7, %8)
+^bb3(%9: u32, %10: s32):
+  %11: s32 = load %9 {off=18, signed=false, width=2}
+  %12: s32 = add %10, %11
+  ret %12
+}
+`;
+
+test('a base the arms derive and the join dereferences homes over the merge class', () => {
+  expect(hasHomeableSharedAddress(parse(MERGED))).toBe(true);
+  // off, each arm re-derives the address inline at its own deref
+  expect(emit(MERGED, false)).toMatch(/\(\(u16 \*\)\(\(a0 << 2\) \+ 134576640\)\)\[/);
+  // on, every deref in the function reads a name
+  const on = emit(MERGED, true);
+  expect(on).not.toMatch(/\(\(u16 \*\)\(\(a0 << 2\)/);
+  expect(on.match(/\(\(u16 \*\)v\d+\)\[\d+\]/g)?.length).toBe(3);
+});
+
+// ONE member escaping refuses the WHOLE class — here the join parameter, which the per-value rule
+// never looks at (the axis only ever homes a def). The home is justified by shared-base reuse
+// alone, exactly as before the scope widened.
+const MERGED_ESCAPES = MERGED.replace(
+  '  %12: s32 = add %10, %11\n  ret %12',
+  '  %12: s32 = add %10, %11\n  %13: s32 = add %12, %9\n  ret %13',
+);
+
+test('a merge class with one escaping member is not homed', () => {
+  expect(hasHomeableSharedAddress(parse(MERGED_ESCAPES))).toBe(false);
+  expect(emit(MERGED_ESCAPES, true)).toBe(emit(MERGED_ESCAPES, false));
+});
+
+// The 2-access threshold is over the class too, not dissolved by it: one deref through a merged
+// value re-materializes as cheaply as a named local, same as one deref through an unmerged one.
+const MERGED_ONCE = `fn onederef {
+^bb0(%0: u32):
+  %1: s32 = const {value=2}
+  %2: u32 = shl %0, %1
+  %3: s32 = const {value=134576640}
+  %4: u32 = add %2, %3
+  br ^bb1(%4)
+^bb1(%5: u32):
+  %6: s32 = load %5 {off=18, signed=false, width=2}
+  ret %6
+}
+`;
+
+test('a merge class reached at one access is not homed', () => {
+  expect(hasHomeableSharedAddress(parse(MERGED_ONCE))).toBe(false);
+  expect(emit(MERGED_ONCE, true)).toBe(emit(MERGED_ONCE, false));
+});
+
+test('mergeClasses unions an edge argument with the parameter it binds, transitively', () => {
+  const fn = parse(MERGED);
+  const classes = mergeClasses(fn);
+  const [bb0, bb1, bb2, bb3] = fn.blocks;
+  const armBase = (b: (typeof fn.blocks)[number]) => b.ops.find((o) => o.opcode === 'add')!.results[0];
+  const cls = classes.get(armBase(bb1));
+  expect(cls).toBeDefined();
+  expect(new Set(cls)).toEqual(new Set([armBase(bb1), armBase(bb2), bb3.params[0]]));
+  // the shift feeding both arms rides no edge, so it is its own class and absent from the map
+  expect(classes.get(bb0.ops.find((o) => o.opcode === 'shl')!.results[0])).toBeUndefined();
 });

@@ -7,7 +7,18 @@
 //     program position instead of inlining at their use (calls/loads for effect order, plus
 //     the pure defs the homing rules claim).
 import { globalCellOf, mayWriteGlobal } from '../ir/alias';
-import { Block, Fn, Op, Successor, Value, defOpMap, dominators, predecessors, successorsOf } from '../ir/core';
+import {
+  Block,
+  Fn,
+  Op,
+  Successor,
+  Value,
+  defOpMap,
+  dominators,
+  mergeClasses,
+  predecessors,
+  successorsOf,
+} from '../ir/core';
 import { EFFECTFUL_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 
 export interface UseSite {
@@ -86,42 +97,92 @@ function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
   return false;
 }
 
-/** rank.ts's enumeration gate for the `/addr-home` axis: does the function HAVE a value the axis
- *  would home — a non-const pure def consumed only as the base of 2+ memory accesses, with no
- *  gaddr/laddr in its cone? Mirrors the axis's scope rule in `analyze`, minus the loop-header
- *  seat refusal (that needs the loop model; a false positive costs one duplicate-collapsed
- *  candidate, never a wrong one). */
-export function hasHomeableSharedAddress(fn: Fn): boolean {
-  const defOf = defOpMap(fn);
+/** THE ADDRESS-HOME AXIS'S SCOPE: every value whose MERGE CLASS (ir/core.ts `mergeClasses`) is
+ *  used only as the base of memory accesses, and at 2+ of them.
+ *
+ *  WHY THE CLASS AND NOT THE VALUE. The question the axis asks is about a REGISTER — did the
+ *  machine derive one address and dereference it at several sites — and a register that survives a
+ *  branch merge is spelled in functional-form SSA as an edge argument plus a block parameter. So a
+ *  base each arm derives and the join then reads is N+1 SSA values with one base use apiece, none
+ *  of which reaches the 2-access threshold, while the register it describes reaches N+1 of them.
+ *  Counting per value also mis-reads the edge itself: the terminator that carries the argument is
+ *  a consumer that is not a memory access, so the per-value rule refuses on the very edge that
+ *  makes the base shared.
+ *
+ *  An edge argument is therefore NOT a use that leaves the class — it feeds the parameter beside
+ *  it, which `mergeClasses` has already unioned in. Everything else still disqualifies the whole
+ *  class: a store's value slot, an `aload` index, arithmetic, a `ret`. The home is justified by
+ *  the shared-base reuse alone, as it always was.
+ *
+ *  `ignoreRet` skips `ret` operands: `analyze` passes its own `returnsVoid` (where a ret operand
+ *  is a phantom the use registry already drops), and rank.ts's enumeration gate passes true
+ *  unconditionally, because it cannot know — see `hasHomeableSharedAddress`.
+ *
+ *  Block PARAMETERS are members like any other and can qualify here. Neither caller homes one —
+ *  both filter by a DEF — but they must be counted, or the join half of every class is invisible. */
+export function sharedBaseClasses(fn: Fn, ignoreRet: boolean): Set<Value> {
+  const classes = mergeClasses(fn);
   const baseUses = new Map<Value, Set<Op>>();
   const otherUse = new Set<Value>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      if (op.opcode === 'ret') {
-        // A `ret` operand may be a void phantom (analyze() skips it under returnsVoid, which this
-        // gate cannot know) — never a disqualifier here. For a genuinely returned base the axis's
-        // own rule still refuses, costing one duplicate-collapsed candidate — the same trade the
-        // gate's doc names for the loop-header divergence.
+      if (ignoreRet && op.opcode === 'ret') {
         continue;
       }
       op.operands.forEach((o, i) => {
-        if (i === 0 && MEM_BASE_OPS.has(op.opcode)) {
+        // Base slot only, and only if the value is not ALSO in another slot of the same op
+        // (`store p, p` writes the address as data — that is an escape, not a base use).
+        if (i === 0 && MEM_BASE_OPS.has(op.opcode) && !op.operands.some((x, j) => j > 0 && x === o)) {
           (baseUses.get(o) ?? baseUses.set(o, new Set()).get(o)!).add(op);
         } else {
           otherUse.add(o);
         }
       });
       for (const s of op.successors) {
-        for (const a of s.args) {
-          otherUse.add(a);
-        }
+        s.args.forEach((a, i) => {
+          // Class-internal only up to the parameter list: an argument past the end binds nothing,
+          // so `mergeClasses` never unioned it and it escapes like any other use.
+          if (i >= s.block.params.length) {
+            otherUse.add(a);
+          }
+        });
       }
     }
   }
-  for (const [v, users] of baseUses) {
-    if (users.size < 2 || otherUse.has(v)) {
-      continue;
+  const out = new Set<Value>();
+  for (const b of fn.blocks) {
+    for (const v of [...b.params, ...b.ops.flatMap((op) => op.results)]) {
+      const members = classes.get(v) ?? [v];
+      if (members.some((m) => otherUse.has(m))) {
+        continue;
+      }
+      const consumers = new Set<Op>();
+      for (const m of members) {
+        for (const c of baseUses.get(m) ?? []) {
+          consumers.add(c);
+        }
+      }
+      if (consumers.size >= 2) {
+        out.add(v);
+      }
     }
+  }
+  return out;
+}
+
+/** rank.ts's enumeration gate for the `/addr-home` axis: does the function HAVE a value the axis
+ *  would home — a non-const pure def whose merge class is a shared base, with no gaddr/laddr in
+ *  its cone? Mirrors the axis's scope rule in `analyze` (the same `sharedBaseClasses` call), minus
+ *  the loop-header seat refusal (that needs the loop model; a false positive costs one
+ *  duplicate-collapsed candidate, never a wrong one).
+ *
+ *  `ignoreRet` is true here: a `ret` operand may be a void phantom, which `analyze` skips under
+ *  `returnsVoid` and this gate cannot know. For a genuinely returned base the axis's own rule
+ *  still refuses, costing one duplicate-collapsed candidate — the same trade as the loop-header
+ *  divergence. */
+export function hasHomeableSharedAddress(fn: Fn): boolean {
+  const defOf = defOpMap(fn);
+  for (const v of sharedBaseClasses(fn, true)) {
     const d = defOf.get(v);
     if (
       d &&
@@ -616,8 +677,10 @@ export interface AnalyzeOptions {
    *  The two spellings are codegen-visible (the re-derive folds each deref offset into its OWN
    *  pool literal; the home shares one base register across `[rN, #k]` accesses) and which one
    *  the source used is not derivable from asm, so this is a differ-refereed candidate axis,
-   *  never a default. With it on: a non-const pure value consumed ONLY as the base operand of
-   *  2+ memory accesses materializes, and so does a multi-render `load` through such a base.
+   *  never a default. With it on: a non-const pure value whose MERGE CLASS is consumed ONLY as
+   *  the base operand of 2+ memory accesses materializes (`sharedBaseClasses` — the class is what
+   *  makes a base the arms derive and the join dereferences one register rather than three
+   *  single-use values), and so does a multi-render `load` through such a base.
    *  Both rules only ADD materialization, which preserves semantics FOR THE VALUES THE SCOPE
    *  ADMITS — the gaddr/laddr cone refusal is the soundness half of that claim (rendered
    *  standalone, an address cone's value changes: the byte-stride cast lives at the use — see
@@ -1110,10 +1173,16 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  holds the loaded value and the address stays inline at the deref, which is why the load rules
    *  (live-across-a-loop, join feeds, /addr-home's, def-block placement) do not ask it. */
   const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
-  // ── the address-home axis's scope predicate ───────────────────────────────────────────────
-  // A value consumed ONLY as the base (operands[0]) of 2+ distinct memory accesses — the shape
-  // the axis homes. Any other use (a store's value slot, an aload index, arithmetic, a successor
-  // arg) disqualifies it: the home is justified by the shared-base reuse alone.
+  // ── the address-home axis's scope ─────────────────────────────────────────────────────────
+  // Over the MERGE CLASS, so a base the arms derive and the join dereferences counts as the one
+  // register it is — see `sharedBaseClasses`. Computed once, and only under the axis.
+  const sharedBaseClass = homeSharedAddresses ? sharedBaseClasses(fn, returnsVoid) : new Set<Value>();
+  // The same question asked of the VALUE ALONE, which is what the two axes below need: their
+  // "shared bases stay the address-home scope's" exclusion is a hand-off between scopes, and
+  // widening it to the class would make them refuse values the address-home scope only claims
+  // when its own axis is ON — a candidate lost with no candidate gained. Where both axes run the
+  // two scopes may claim one value, which is a no-op: `materialize` is a set and the address-home
+  // scope, running first, is what registers `axisHomedBases`.
   const usedOnlyAsSharedBase = (v: Value): boolean => {
     const sites = useSitesOf.get(v) ?? [];
     const consumers = new Set(sites.map((s) => s.op));
@@ -1376,12 +1445,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there,
           // along with the price the fourth one added to it (the gate duplication).
           // Third scope, under the address-home axis only (see AnalyzeOptions.homeSharedAddresses):
-          // a non-const pure value consumed ONLY as the base of 2+ memory accesses.
+          // a non-const pure value whose MERGE CLASS is used only as the base of 2+ memory
+          // accesses.
           if (
             homeSharedAddresses &&
             op.opcode !== 'const' &&
             pr &&
-            usedOnlyAsSharedBase(pr) &&
+            sharedBaseClass.has(pr) &&
             !addressCone(op) &&
             !multiBlockHeaders.has(b)
           ) {
