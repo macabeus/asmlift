@@ -1104,6 +1104,20 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       // rejections and verify mode never looked at one.
       cache.verifyFail(key, symbol, r.err);
       cache.putFail(key, symbol, r.err);
+      return r;
+    }
+    // NO FRESH ANSWER AT ALL — a spawn failure, the timeout, a signal. If the sampled audit
+    // WITHHELD this key, there is now nothing to compare against, and the withholding has done
+    // pure harm: a warm run had zero exposure to a transient because it never compiled. Take the
+    // answer back rather than letting the audit delete a spelling from the fan.
+    if (cache.mode !== 'off') {
+      const held = cache.abandonAudit(key, symbol);
+      if (typeof held === 'string') {
+        return { ok: true, transient: false, cmd: held, err: '' };
+      }
+      if (held instanceof Error) {
+        return { ok: false, transient: false, cmd: '', err: held.message };
+      }
     }
     return r;
   };
@@ -1138,6 +1152,18 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     if (cache.mode !== 'off' && storableRejection(r)) {
       cache.verifyFail(key, symbol, r.err);
       cache.putFail(key, symbol, r.err);
+      return r;
+    }
+    // Same as `viaCache` above: a withheld key whose compile produced no verdict takes its
+    // withheld answer back.
+    if (cache.mode !== 'off') {
+      const held = cache.abandonAudit(key, symbol);
+      if (typeof held === 'string') {
+        return { ok: true, transient: false, cmd: held, err: '' };
+      }
+      if (held instanceof Error) {
+        return { ok: false, transient: false, cmd: '', err: held.message };
+      }
     }
     return r;
   };

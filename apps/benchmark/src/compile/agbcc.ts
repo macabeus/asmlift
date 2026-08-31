@@ -259,6 +259,20 @@ export const agbccReal: RealCompile = {
         // mismatch, and it is the direction that was audited by nothing at all.
         cache.verifyFail(tu, sym, m);
         cache.putFail(tu, sym, m);
+        throw e;
+      }
+      // A TRANSIENT — exactly the failures the guard above refuses to store. If the sampled audit
+      // withheld this key there is no fresh answer to compare, so the audit is abandoned and the
+      // withheld answer comes back: sampling must never cost a candidate that an unaudited run
+      // would have been served straight off disk.
+      if (cache.mode !== 'off') {
+        const held = cache.abandonAudit(tu, sym);
+        if (typeof held === 'string') {
+          return held;
+        }
+        if (held instanceof Error) {
+          throw held;
+        }
       }
       throw e;
     }

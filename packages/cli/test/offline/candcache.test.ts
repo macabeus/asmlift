@@ -428,3 +428,81 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
     expect(uncached[0], 'two uncached runs of the identical failure used to differ').toBe(uncached[1]);
   });
 });
+
+describe('the sampled audit must never cost a candidate the store could have answered', () => {
+  // A WARM run has zero exposure to a transient compile failure: it never compiles. Withholding
+  // 1% of keys hands exactly that 1% back to the hazard — `util.ts run()`'s 120 s timeout, an
+  // OOM-killed `docker run`, a `sh`-laundered SIGKILL — and both call sites deliberately store
+  // NOTHING for a transient, so the withheld key was simply lost from the fan, under a RANDOM
+  // per-run seed. That is a nondeterministic fan sitting underneath a byte-identical `[score]`
+  // table, and it is strictly worse than the uncached run the doc compares against: an uncached
+  // run at least has no correct answer sitting on disk.
+  //
+  // ONE module load, and the compiler is made flaky mid-load. That is not a shortcut around a
+  // second run — it is the only spelling that holds the NAMESPACE fixed. Every shell variable a
+  // template reads without assigning is hashed INTO the stamp (`compile-command.ts`, "(3) every
+  // shell variable the template READS"), so flipping `$TESTKILL` between two module loads
+  // re-namespaces the store and the second phase is a miss, not a warm serve — measured, and it
+  // is why this file's first attempt at the case was testing nothing. `namespace()` memoizes,
+  // so a mutation AFTER the first compile leaves the namespace exactly where it was.
+  const KILL_ON_DEMAND =
+    'if [ -n "$TESTKILL" ] && grep -q KILLME "{{inputPath}}"; then sh -c \'kill -9 $$\'; fi; ' +
+    'cat "{{inputPath}}" > "{{outputPath}}"';
+  const REJECT_ON_DEMAND =
+    'if [ -n "$TESTKILL" ] && grep -q KILLME "{{inputPath}}"; then echo "no." >&2; exit 1; fi; ' +
+    'cat "{{inputPath}}" > "{{outputPath}}"';
+  const CAND_K9 = 's32 f(s32 a0) { /* KILLME */ return a0 + 1; }\n';
+
+  test('a transient on a WITHHELD key takes the withheld answer back instead of dropping it', async () => {
+    const p = project();
+    const { first, second, stats } = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '100', ASMLIFT_CANDCACHE_DIR: p.store, TESTKILL: undefined },
+      async ({ compileFromCommand }) => {
+        const compile = compileFromCommand(KILL_ON_DEMAND, { cwd: p.cwd });
+        const first = compile(CAND_K9, 'f', 'c'); // a MISS: compiled for real, and stored
+        process.env.TESTKILL = '1'; // …and now every compile of it dies without a verdict
+        const second = compile(CAND_K9, 'f', 'c'); // withheld at 100%, killed, abandoned
+        return { first, second, stats: (await import('../../src/candcache')).cacheStats() };
+      },
+    );
+    expect(readFileSync(first, 'utf8')).toContain('a0 + 1');
+    expect(readFileSync(second, 'utf8'), 'the stored answer, not a lost candidate').toContain('a0 + 1');
+    expect(stats).toMatchObject({ miss: 1, stored: 1, sampled: 1, sampledAbandoned: 1, hit: 1 });
+    expect(stats.sampledPending, 'and nothing is left outstanding').toBeUndefined();
+  });
+
+  test('the control: with the audit OFF the same flaky compiler is never even asked', async () => {
+    const p = project();
+    const stats = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: p.store, TESTKILL: undefined },
+      async ({ compileFromCommand }) => {
+        const compile = compileFromCommand(KILL_ON_DEMAND, { cwd: p.cwd });
+        compile(CAND_K9, 'f', 'c');
+        process.env.TESTKILL = '1';
+        expect(readFileSync(compile(CAND_K9, 'f', 'c'), 'utf8')).toContain('a0 + 1');
+        return (await import('../../src/candcache')).cacheStats();
+      },
+    );
+    expect(stats, 'a served key is a compile that did not happen').toMatchObject({ hit: 1 });
+    expect(stats.sampled).toBeUndefined();
+  });
+
+  test('a DETERMINISTIC rejection on a withheld key is still AUDITED, not abandoned', async () => {
+    // The abandonment must not swallow the case it is not for: a compiler that RAN and said no is
+    // a fresh answer, and it goes to the comparison exactly as before — here the outcome
+    // direction, a stored OBJECT for a TU that no longer compiles.
+    const p = project();
+    const stats = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '100', ASMLIFT_CANDCACHE_DIR: p.store, TESTKILL: undefined },
+      async ({ compileFromCommand }) => {
+        const compile = compileFromCommand(REJECT_ON_DEMAND, { cwd: p.cwd });
+        compile(CAND_K9, 'f', 'c');
+        process.env.TESTKILL = '1';
+        expect(() => compile(CAND_K9, 'f', 'c')).toThrow(/no\./);
+        return (await import('../../src/candcache')).cacheStats();
+      },
+    );
+    expect(stats).toMatchObject({ sampled: 1, mismatch: 1 });
+    expect(stats.sampledAbandoned, 'a verdict is not an abandonment').toBeUndefined();
+  });
+});
