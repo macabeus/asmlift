@@ -2559,8 +2559,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // So this family reaches that row and is worth at least 3 of its 386 — but 3 is the whole
   // respelling including register-allocation churn (104 diff lines, mostly r4/r5 renaming), not a
   // per-instruction decomposition, and neither row's endpoint produces it. `bgshare`/`bgswitch`
-  // gate preferring an ALREADY-MINTED local, and no local holds that base at either site, so the
-  // change is a mint; `bgfixed` gates the fixed-element member spelling, and applying THAT to the
+  // gate preferring an ALREADY-MINTED local — CORRECTED, having been measured since: a local DOES
+  // hold that base in the fan (16,128 of the 68,352 candidates read the cell through one, best 399),
+  // so the missing capability is not a mint but the SELECTION of which keys get one, which is the
+  // `livepark`/`foldpark`/`unfoldpark` family below; `bgfixed` gates the fixed-element member
+  // spelling, and applying THAT to the
   // same two sites scores 386, unmoved, because the ROM reaches the member from the plain base at
   // `#0x3c` rather than from the element base. Surface 1 occurs nowhere in that winner at all.
   {
@@ -4024,6 +4027,157 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void dmaflat(s32 n);',
     proto: { dmaflat: { params: ['s32'], returnsVoid: true } },
+  },
+
+  // WHICH BASE KEYS GET A LOCAL — A PER-KEY QUESTION THE ROSTER ANSWERS PER FUNCTION. l3/basecse.ts
+  // hoists every key its gate table admits, so the two admissions on the roster are two ANSWERS FOR
+  // THE WHOLE FUNCTION: `/livebase` binds every key reached twice, `/livebase-block` binds those
+  // minus the ones read at a single fixed offset (`single-cell`). A source that spelled ONE base as
+  // a pointer local and left a second one inline is between them, and nothing on the roster is
+  // between them. These three rows are that gap and its two boundaries, one admission each.
+  //
+  // THE DISCRIMINATOR ALREADY EXISTS IN THE VOCABULARY AND NO TABLE REQUIRES IT. `BaseKey`
+  // (l3/basecse.ts) carries `unfoldedOffset`: agbcc folds a constant SUBSCRIPT into the literal it
+  // materializes, so an offset that arrived in the MEMORY OPERAND instead got there because
+  // something other than a subscript put it there — a named base local, or an aggregate member.
+  // `((s32 *)0x0300343C)[0]` emits `.word 0x300343c` + `ldr [r0]`; `s32 *p = (s32 *)0x03003400;
+  // p[15]` emits `.word 0x3003400` + `ldr [r0, #0x3c]`. The ONE table that reads the field,
+  // `BASEFOLD_GATES`, reads it as an EXEMPTION to `single-use` (a base reached ONCE) — the opposite
+  // question — and keeps both placement heuristics, so it never reaches a key reached twice inside a
+  // loop. Requiring the field instead of exempting on it is a gate that does not exist.
+  //
+  // THE MATRIX, and it is why there are three rows and not one. Best score per admission over each
+  // row's own fan, agbcc, candidate cache OFF. `/unfolded` is a TEMPORARY roster row — `/livebase`'s
+  // gates plus `rejects: (c) => !c.unfoldedOffset`, head placement, pairings on — added, measured
+  // and reverted; it is NOT in the tree, which is why `unfoldpark` is a nonmatch row today.
+  //         plain  /livebase  /livebase-block  /scopebase  /unfolded
+  //  livepark   30     0             6              3        (shadowed)
+  //  foldpark   37     6             0              6        (shadowed)
+  //  unfoldpark 36     9             9              9           0
+  // Each row is won by a DIFFERENT admission and the third by none of them. `/unfolded` binds
+  // exactly what `/livebase` binds on `livepark` and exactly what `/livebase-block` binds on
+  // `foldpark`, so on both boundary rows it is shadowed by an earlier roster row and adds ZERO
+  // candidates (fan 28 and 34, identical label multisets with the probe on and off) — the over-fire
+  // control, and the reason a third admission cannot cost these two anything.
+  //
+  // WHAT EACH ROW ISOLATES.
+  //   `livepark`   two bases, both wanted as locals, one of them read at a single fixed offset
+  //                through a local (`cur[15]`). `single-cell` refuses that key, so the NARROW
+  //                admission binds only the DMA base and lands at 6. MATCH under `/livebase`.
+  //   `foldpark`   the same function with that cell spelled INLINE at its folded address
+  //                (`*(s32 *)0x0300343C`) — the shape `single-cell` was written for. The WIDE
+  //                admission binds it anyway and lands at 6. MATCH under `/livebase-block`.
+  //   `unfoldpark` `livepark` plus ONE folded single-cell distractor the source left inline
+  //                (`*(s32 *)0x03002040 = *(s32 *)0x03002040 + 1;`). Now the two wanted keys and
+  //                the unwanted one are on opposite sides of no gate the roster has: wide binds all
+  //                three, narrow binds one, and both land at 9. The row is `livepark` plus one line
+  //                — `sed '/0x03002040/d'` on its own source, with the symbol renamed, is
+  //                `livepark`'s source exactly, and that scores 0 today. That is the measurement
+  //                which says the gap is SELECTION and not "bind more".
+  //
+  // NO EXISTING ROW EXERCISES IT, censused rather than argued. Enumerating every agbcc synthetic row
+  // with the probe admission off and on — candidates only, no compiles, comparing the md5 of each
+  // row's sorted distinct-source set — over the 229 rows that existed before these three: 8 decline
+  // on unrelated links (`uhalf`/`utag` overlapping fields, three `preupdate_*`, `lladd`/`llsub`
+  // unmodelled `adc`/`sbc`, `stkarg` stack-as-data), 220 hash IDENTICALLY, and exactly ONE gains
+  // candidates — `dmascope`, 260 → 324 distinct sources, 64 of them probe-labelled. Scored both ways
+  // `dmascope` does not move: 9 on `signed/regionbase/volatile/vol-store/initfirst` either way. So
+  // the capability is effectively untested — zero rows change when it changes — and the one guard
+  // that reads the field, `BASEFOLD_GATES`, never reaches these keys. Re-run with these three rows
+  // in it (232 rows): 8 decline, 222 hash identically, 2 change — `dmascope` and `unfoldpark`. That
+  // `livepark` and `foldpark` are in the identical 222 is the over-fire control by measurement.
+  //
+  // CUT FROM kleod:LoadBGTilemapData:agbcc, where the same three-way split is 399 / 386 / 383 —
+  // `/livebase` parks five bases, `/livebase-block` parks one, and parking exactly the two whose
+  // offsets survived the fold is what a hand-compiled spelling reaches. That row's fan of 68,352
+  // contains ZERO candidates with that base-local set, measured at both dedup sites over all 165,888
+  // generated spellings, and no stack of gate ablations can produce it: `hoistBaseLocals` binds
+  // `admittedBases(sfn, gates)` wholesale and the two tables are a chain, so ablation only ever
+  // widens. `unfoldpark` is that shape at 15 lines.
+  //
+  // agbcc only, and for a reason this family owns rather than the `dmascope` one it inherits:
+  // `unfoldedOffset` is evidence only where the target declares
+  // `compilerBehaviors.foldsConstAddrOffset`, and MIPS and PPC put the addend in the instruction by
+  // construction (`lui`/`%lo`, `lis`/`ori`), so a surviving operand offset carries no information
+  // there and rank.ts offers the row no such admission. The addresses are GBA absolute constants;
+  // mwcc_242_81 also stays off per the `hipress` hazard policy (a candidate compile has no timeout).
+  //
+  // m2c NONCOMPILES all three, on the identical `ctx` and `proto`, for the raw-address reason every
+  // such row in this file records and not for anything in this family: `(void *)0x040000D4->unk0 =`
+  // , `invalid type argument of '->'`, 1 compile error. It does READ the discriminator — the folded
+  // cell comes out as `*(s32 *)0x0300343C` and the unfolded one as `(void *)0x03003400->unk3C` —
+  // and homes NO base at all, so its output for `livepark` and for `unfoldpark` is the same text
+  // apart from the one distractor line, and the distinction costing agbcc 9 bytes is one it does
+  // not represent.
+  {
+    sym: 'livepark',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      'void livepark(s32 n, s32 *out) {\n' +
+      '  s32 i = 0;\n' +
+      '  s32 *cur = (s32 *)0x03003400;\n' +
+      '  vu32 *dmaRegs = (vu32 *)0x040000D4;\n' +
+      '  do {\n' +
+      '    *out = cur[15];\n' +
+      '    if (cur[15] > 0) {\n' +
+      '      dmaRegs[0] = (vu32)cur[15];\n' +
+      '      dmaRegs[1] = (vu32)n;\n' +
+      '      dmaRegs[2] = 32;\n' +
+      '    }\n' +
+      '    i = i + 1;\n' +
+      '  } while (i < n);\n' +
+      '}',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void livepark(s32 n, s32 *out);',
+    proto: { livepark: { params: ['s32', 's32*'], returnsVoid: true } },
+  },
+  {
+    sym: 'foldpark',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      'void foldpark(s32 n, s32 *out) {\n' +
+      '  s32 i = 0;\n' +
+      '  vu32 *dmaRegs = (vu32 *)0x040000D4;\n' +
+      '  do {\n' +
+      '    *(s32 *)0x03002040 = *(s32 *)0x03002040 + 1;\n' +
+      '    *out = *(s32 *)0x0300343C;\n' +
+      '    if (*(s32 *)0x0300343C > 0) {\n' +
+      '      dmaRegs[0] = (vu32)*(s32 *)0x0300343C;\n' +
+      '      dmaRegs[1] = (vu32)n;\n' +
+      '      dmaRegs[2] = 32;\n' +
+      '    }\n' +
+      '    i = i + 1;\n' +
+      '  } while (i < n);\n' +
+      '}',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void foldpark(s32 n, s32 *out);',
+    proto: { foldpark: { params: ['s32', 's32*'], returnsVoid: true } },
+  },
+  {
+    sym: 'unfoldpark',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      'void unfoldpark(s32 n, s32 *out) {\n' +
+      '  s32 i = 0;\n' +
+      '  s32 *cur = (s32 *)0x03003400;\n' +
+      '  vu32 *dmaRegs = (vu32 *)0x040000D4;\n' +
+      '  do {\n' +
+      '    *(s32 *)0x03002040 = *(s32 *)0x03002040 + 1;\n' +
+      '    *out = cur[15];\n' +
+      '    if (cur[15] > 0) {\n' +
+      '      dmaRegs[0] = (vu32)cur[15];\n' +
+      '      dmaRegs[1] = (vu32)n;\n' +
+      '      dmaRegs[2] = 32;\n' +
+      '    }\n' +
+      '    i = i + 1;\n' +
+      '  } while (i < n);\n' +
+      '}',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void unfoldpark(s32 n, s32 *out);',
+    proto: { unfoldpark: { params: ['s32', 's32*'], returnsVoid: true } },
   },
 
   // A DEVICE REGISTER WRITTEN INSIDE A LOOP, WITH NOTHING READING IT BACK. A store to a DMA
