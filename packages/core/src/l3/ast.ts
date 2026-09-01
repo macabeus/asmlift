@@ -47,7 +47,13 @@ export type Expr =
   // `lead` prefixes the LEADING subscripts before `idx` — `g[0][i]` or `g[r][i]` rather than
   // `g[i]`. It exists for exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL
   // array global, where one subscript reaches a row and the element needs the leading dimensions
-  // pinned first. The node still denotes ONE `width`-byte element, so its type, its legalization
+  // pinned first. What that costs and what it buys, measured over the published artifact rather
+  // than carried from the sweep the field was proposed under: 5 of the 948 rows spell a
+  // two-subscript access at all, and the `Expr[]` — the part every generic walk pays for — is
+  // earned by the 2 whose OUTER subscript is not the literal 0 (`ProcessInputAndUpdateEntities`,
+  // `SetupBG3WindowOverlay`; the second is `noncompile`, for an unrelated callee arity, on this
+  // branch and on its base alike). A rank-2 access with a constant row needs `number[]` and no
+  // more. The node still denotes ONE `width`-byte element, so its type, its legalization
   // and its stride contract are unchanged — this is a spelling of the same address, not a new kind
   // of access. Absent for every rank-1 access, which is why it is optional rather than an empty
   // array. A leading subscript is an EXPRESSION because a row index the asm computed is a value,
