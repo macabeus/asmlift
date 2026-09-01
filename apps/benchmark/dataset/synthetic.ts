@@ -4088,11 +4088,27 @@ export const SYNTHETIC: SynthSpec[] = [
   // ABLATION THAT BACKS IT: the 9 that survives is not the bare tree's, it is `/scopebase`'s.
   // Under that ablation the row's whole fan is `9 signed/scopebase`, `9 unsigned/scopebase` and
   // 36 for all six remaining candidates (`signed`, `signed/offmember`, `signed/vol-store` and the
-  // unsigned mirrors), so removing `/scopebase` on top takes the row 9 → 36 and this row IS a
-  // guard on that family — the only published row that gives plain `/scopebase` any reach at all,
-  // which matters because it has been nominated for deletion as reaching nothing. Its two
-  // neighbours are guards on the roster itself and were measured as such, each moved by its own
-  // admission and by neither the other's nor the pair's: `livepark` MATCH → diff:3 with
+  // unsigned mirrors), so removing `/scopebase` ON TOP OF the whole-roster ablation takes the row
+  // 9 → 36.
+  // AND THAT DOES NOT MAKE IT A GUARD ON `/scopebase`, which an earlier version of this paragraph
+  // claimed and which is worth spelling out because it is the shape a deletion round would be
+  // misled by. A deletion only ever REMOVES candidates, so the question is what the row's fan
+  // holds WITHOUT the roster ablation, and there the two `/scopebase` candidates are ties, not
+  // winners: scored at this commit, `unfoldpark`'s fan is 36 candidates, `9 signed/scopebase` and
+  // `9 unsigned/scopebase` among them, and its best over the 34 candidates carrying no `scopebase`
+  // token is 9 as well — its own winner, `signed/livebase-block/volatile/sinkinit`. Deleting plain
+  // `/scopebase` from the tree as it stands moves this row by 0. The guard exists only in a tree
+  // that has already lost the base-admission roster, which is a configuration no round proposes
+  // and `bench diff` cannot run.
+  // NOR IS IT THE ONLY ROW REACHING THE FAMILY, censused rather than asserted: enumerating every
+  // agbcc synthetic row at this commit, FIVE carry a plain `/scopebase` candidate — `dmascope` 12
+  // of 260, `livepark` 2 of 28, `foldpark` 2 of 34, `unfoldpark` 2 of 36, `dmastride` 2 of 18 —
+  // and two of them, `dmascope` and `dmastride`, predate this branch. On every one of the five the
+  // best candidate carrying no `scopebase` token equals the row's own best — `dmascope` 9,
+  // `livepark` 0, `foldpark` 0, `unfoldpark` 9, `dmastride` 0 — so the family is reached in five
+  // published fans and still wins nothing anywhere, which leaves the negative census standing
+  // rather than overturned. Its two neighbours are guards on the ROSTER, and were measured as such, each moved
+  // by its own admission and by neither the other's nor the pair's: `livepark` MATCH → diff:3 with
   // `/livebase` ablated (MATCH without it), `foldpark` MATCH → diff:6 with `/livebase-block`
   // ablated (MATCH without it) — and under the whole-roster ablation both land on `/scopebase`
   // too, at 3 and 6.
