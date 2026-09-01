@@ -43,9 +43,24 @@ export interface EvalSpec {
 // exactly what m2c emitted.
 const M2C_DIALECT_TYPEDEFS = 'typedef float f32;typedef double f64;\n#define NULL ((void *)0)\n';
 
-/** Score plain first; retry with the dialect typedefs only when the plain attempt cannot
- *  compile. Whichever compiles is the measurement. */
-function scoreM2c(
+/** Score plain first; retry with the dialect typedefs, then with the row's map declarations, only
+ *  when the attempt before could not compile. Whichever compiles is the measurement.
+ *
+ *  WHICH FAILURE IS PUBLISHED, when none of them compiles. It used to be rung 0's, on the rule that
+ *  "every retry is best-effort" — right while the only retry ADDED TYPEDEFS the source might not
+ *  need, wrong the moment a rung started adding the DECLARATIONS the row is actually compiled
+ *  against. Measured at the commit that added them: `bfwordread` and `bfwordwrite` published
+ *  ``gPacked' undeclared`` — the pre-fix diagnostic, for a symbol the deciding rung DOES declare —
+ *  while that rung failed with `invalid operands to binary <<` and `invalid operands to binary &`.
+ *  A published error naming a cause the run does not have is a silent wrong answer wearing a
+ *  measurement's clothes, and `errorMarkers` is not among `FIELDS.m2c` in report/diff.ts, so no
+ *  artifact comparison would ever have reported it.
+ *
+ *  So the reported failure is the LAST rung that compiled the source AS EMITTED — rung 0 where
+ *  there are no declarations, rung 2 where there are. The dialect rungs stay unreported for the
+ *  original reason, unchanged: they prepend typedefs, so their failure can be their own. Pinned by
+ *  `m2c-rungs.test.ts`, which is why this function is exported. */
+export function scoreM2c(
   score: Scorer,
   source: string,
   sym: string,
@@ -62,17 +77,17 @@ function scoreM2c(
         ]
       : []),
   ];
-  let first: unknown;
-  for (const [i, rung] of rungs.entries()) {
+  let report: unknown;
+  for (const rung of rungs) {
     try {
       return score(rung.src, sym, obj, rung.decls);
     } catch (e) {
-      if (i === 0) {
-        first = e;
+      if (rung.src === source) {
+        report = e; // the most informed attempt on the source m2c actually emitted
       }
     }
   }
-  throw first; // report the plain attempt's error — every retry is best-effort
+  throw report;
 }
 
 /** THE DECLARATIONS m2c'S OUTPUT IS COMPILED WITH, on a synthetic row whose `ctx` carries a map.
@@ -85,15 +100,33 @@ function scoreM2c(
  *
  *  It stopped being moot the moment `ctx` started carrying a map's declarations. Measured without
  *  this: m2c emits `gPacked = (gPacked & 0xFFFFF01F) | …` — correct, and exactly what it should
- *  emit having been told the symbol — and the compile fails with "`gPacked' undeclared", turning a
- *  MATCH into a noncompile on `bfwordread` and `bfwordwrite`. That is a rig artifact of handing a
- *  tool a context it is then not compiled against, not a capability it lacks, and publishing it
- *  would be a wrong answer dressed as a measurement.
+ *  emit having been told the symbol — and the compile fails with "`gPacked' undeclared". That is a
+ *  rig artifact of handing a tool a context it is then not compiled against, not a capability it
+ *  lacks, and publishing it would be a wrong answer dressed as a measurement.
  *
  *  The real tier needs none of this: there `scorer` is the project-context compile, which already
  *  supplies the headers m2c was given. So this is the synthetic tier's analogue of that, and it is
  *  a RETRY rung rather than an unconditional prelude — a row that already compiles is untouched,
- *  so this can only ever turn a harness-caused failure into a score. */
+ *  so this can only ever turn a harness-caused failure into a score.
+ *
+ *  WHAT THE RUNG DID AND DID NOT DISSOLVE, measured through `evaluate()` with both caches off, and
+ *  stated because an earlier draft of this comment stopped at the sentence above and left the two
+ *  cases indistinguishable. On `sbscope` it dissolves the artifact outright — the row was a DECLINE
+ *  under the prototype-only ctx and scores under the map. On `bfwordread` and `bfwordwrite` it does
+ *  NOT: told the true `struct Packed`, m2c emits `(gPacked << 0x14) >> 0x19` and
+ *  `gPacked = (gPacked & 0xFFFFF01F) | …` — integer arithmetic on a struct — and the rung's compile
+ *  fails with `invalid operands to binary <<` / `invalid operands to binary &`. Both rows go from a
+ *  published m2c MATCH to a noncompile, and that loss is the round's, not a stale artifact's.
+ *
+ *  THE COUNTERFACTUAL, because attributing that to m2c without it would overstate the case: the
+ *  same emitted body compiled against the `extern s32 gPacked;` m2c ITSELF used to emit scores 0
+ *  and MATCHES. Only the declaration changed, so this is not m2c failing to decompile the function
+ *  — it is m2c's output not compiling against the context m2c was given. The harness books that as
+ *  a limit rather than an artifact for one reason, and it is a policy reason: the REAL tier already
+ *  compiles m2c's output against the project's own headers, so letting the synthetic tier fall back
+ *  to a declaration of m2c's choosing would hand it a privilege the real tier denies it and asmlift
+ *  has nowhere — asmlift's own self-declaring arm, `/raw-globals`, is DROPPED on these rows for
+ *  failing to compile, loudly, and is published as a dropped candidate. */
 function m2cDeclarationsFor(spec: EvalSpec): string | undefined {
   if (spec.tier !== 'synthetic' || !spec.symbols) {
     return undefined;
