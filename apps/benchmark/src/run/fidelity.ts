@@ -12,7 +12,7 @@
 //          ctx into the compile command), so drift here means environment skew, not a
 //          documented approximation. Warns are listed one-per-row — visible, never silent —
 //          but do not block publish.
-import type { FunctionResult } from '@asmlift/bench-schema';
+import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { execSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,6 +21,8 @@ import { join } from 'node:path';
 import { enforceCheckoutPin } from '../cases/checkout';
 import { loadManifestsForVendor, resolveProjectRoot } from '../cases/manifests';
 import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
+import { asmliftProvenance } from '../provenance';
+import { checkTierProvenance } from '../report/merge';
 import { asmliftScript, m2cScript } from '../report/repro-scripts';
 import { checkSymbolMapDrift, vendoredMapPath } from './symbol-drift';
 
@@ -33,9 +35,35 @@ interface Verdict {
 
 const SCRIPT_TIMEOUT_MS = 300_000;
 
+/** The tier files, REFUSED when their run-time provenance disagrees with now — the same check, the
+ *  same function, that `bench merge` applies before it will build an artifact out of them.
+ *
+ *  WHAT THIS GATE CAN AND CANNOT SEE, because the difference decided a round. Fidelity compares a
+ *  published SCRIPT against a published ROW. Both come from the same run, so the pair stays
+ *  self-consistent no matter how far either has drifted from the code: measured on tier files
+ *  written at a dangling commit against a DIRTY tree, `bench fidelity --only bfword` reported
+ *  `4 script runs — 4 ok` while running the harness fresh at HEAD gave `m2c=noncompile` on both of
+ *  those rows. Nothing was wrong with the scripts; the rows were from code no commit holds. Merge
+ *  already refused those exact files ("was RUN against a dirty working tree"); this did not, and
+ *  "fidelity 12/12 ok" had been leaned on as evidence that six new rows were really shipped.
+ *
+ *  So the refusal is borrowed rather than re-spelled, and it stays a refusal about PROVENANCE. It
+ *  is still not a code-versus-artifact check — nothing here re-runs the harness — and
+ *  `scripts/check-artifact-provenance.sh` remains the only gate that asks whether a later commit
+ *  moved something the artifact measures. */
+export function tierRows(
+  f: string,
+  raw: string,
+  now: { commit: string; dirty: boolean } | undefined,
+): FunctionResult[] {
+  const out = JSON.parse(raw) as BenchOutput;
+  checkTierProvenance(f, out, now);
+  return out.results;
+}
+
 function loadRows(): FunctionResult[] {
-  const load = (f: string): FunctionResult[] =>
-    (JSON.parse(readFileSync(join(RESULTS_DIR, f), 'utf8')) as { results: FunctionResult[] }).results;
+  const now = asmliftProvenance();
+  const load = (f: string): FunctionResult[] => tierRows(f, readFileSync(join(RESULTS_DIR, f), 'utf8'), now);
   return [...load('synthetic.json'), ...load('real.json')];
 }
 
