@@ -43,6 +43,12 @@ export interface RankOptions {
    *  driver can only separate the compile from the score when `compile` is supplied; reached
    *  through the registry instead, the compile is charged to `score`. */
   clock?: PhaseClock;
+  /** A lever that THREW, rather than declining — core rank.ts's own channel, forwarded so the CLI
+   *  can print it. Core's header states why the distinction matters ("a lever that never fires
+   *  because it always throws is a defect, and without this it looks identical to a lever that
+   *  correctly declined"), and until this was threaded the channel had no consumer outside core:
+   *  a whole pre-fan half of the fan could vanish from a row with nothing printed anywhere. */
+  onLeverError?: (label: string, error: string) => void;
 }
 
 // Self-declaring candidates: a candidate that names map-derived symbols carries their refs
@@ -61,6 +67,7 @@ const enumerate = (name: string, asm: string, target: TargetDescription, opts: R
     prototypes: opts.prototypes,
     asmData: opts.asmData,
     symbols: opts.symbols,
+    ...(opts.onLeverError ? { onLeverError: opts.onLeverError } : {}),
   });
 
 /** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score. */

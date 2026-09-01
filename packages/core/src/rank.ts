@@ -265,6 +265,25 @@ const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
   { suffix: '/pollguard', apply: pollGuards },
   { suffix: '/pollread', apply: pollReads },
 ];
+/** The PRE-FAN products (rank's FOURTH sanctioned product mechanism): a tree rewrite applied
+ *  BEFORE the re-spelling fan, so the whole fan derives from its output instead of composing onto
+ *  it. Same record type as SHAPE_PRODUCTS above, and deliberately so — the only difference is
+ *  WHERE it is applied, and that is the whole admission bar.
+ *
+ *  ADMITTED on one ground: the spelling a row demands needs a downstream lever to run on this
+ *  rewrite's OUTPUT, and the measured pair shows neither order alone reaches it. For `/unmerge`
+ *  (l3/unmerge.ts, the dual of the unconditional `tailmerge`) that measurement is
+ *  `synthetic:dmascope`: the un-merged store has to land inside the arm's own region base
+ *  (`p0[2] = …`), which only a base lever running AFTER the un-merge can spell — hand-compiled,
+ *  that source is byte-exact where the shipped merged spelling is 9, and applying the un-merge to
+ *  the WINNER's tree instead of before it measures 14. Every other lever derives from the base
+ *  tree, so the order can only be had this way.
+ *
+ *  A pre-fan product only ADDS candidates, so it cannot cost a match; its price is a second fan
+ *  on every tree where the rewrite fires, which is why the table is not a place to put a lever
+ *  that would compose perfectly well as a `respell`. */
+const PRE_FAN_PRODUCTS: typeof SHAPE_PRODUCTS = [{ suffix: '/unmerge', apply: unmergeJoins }];
+
 const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
   ...SHAPE_PRODUCTS.map((x) => [x]),
   ...(SHAPE_PRODUCTS.length > 1 ? [SHAPE_PRODUCTS] : []),
@@ -1058,6 +1077,8 @@ export function enumerateCandidates(
 
   const seen = new Map<string, Candidate>();
   const seenTrees = new Set<string>();
+  /** the PRE-FAN products' own tree dedup — see the pre-fan loop for why it is not `seenTrees` */
+  const seenPreFan = new Set<string>();
   const out: Candidate[] = [];
   // The map-derived VALUE references one emitted tree contains, applied at every point a candidate
   // is finalized and derived from the tree that candidate emitted. No pipeline stage carries refs
@@ -1182,7 +1203,10 @@ export function enumerateCandidates(
     // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
     //
     // POLICY: re-spellings derive from the BASE spelling only — levers do not compose by
-    // default. THREE product mechanisms are sanctioned, each with its own admission bar —
+    // default. FOUR product mechanisms are sanctioned, each with its own admission bar — the
+    // three below, which all derive from or compose onto a spelling, plus the PRE-FAN products
+    // (PRE_FAN_PRODUCTS, applied to the TREE before this fan runs over it; its admission bar is
+    // stated at the table) —
     // plus ALTERNATIVE OUTPUTS: one lever whose single application has several legitimate
     // results (which locals a coalesce merges, which pointers /volatile qualifies) emits
     // each as its own candidate via `enumerate`, capped at the lever, with the base spelling
@@ -1990,29 +2014,44 @@ export function enumerateCandidates(
           }
           seenTrees.add(treeKey);
           const spellings = fanOut(sfn);
-          // `/unmerge` — the one PRE-lever: push a join statement back into the arms agbcc
-          // cross-jumped it out of (l3/unmerge.ts, the dual of the unconditional `tailmerge`), then
-          // fan the WHOLE re-spelling set over the result. It is not a `respell` for the reason the
-          // POLICY note admits a pairing on: the spelling a row demands is reachable from neither
-          // side alone. On `synthetic:dmascope` the un-merged store has to land inside the arm's own
-          // region base (`p0[2] = …`), which only a base lever running AFTER the un-merge can spell
-          // — hand-compiled, that source is byte-exact where the shipped merged spelling is 9, and
-          // applying the un-merge to the winner's tree INSTEAD of before it measures 14.
-          // Every other lever derives from the base tree, so the order can only be had this way.
-          // It only ADDS candidates, so it cannot cost a match; its price is a second fan on each
-          // tree where the pass fires, and its gate is the pass's own decline.
-          try {
-            const unmerged = unmergeJoins(sfn);
-            if (unmerged !== null) {
-              assertResolved(unmerged);
-              assertDerefsTyped(unmerged);
-              assertLocalsWritten(unmerged);
-              for (const sp of fanOut(unmerged)) {
-                spellings.push({ ...sp, suffix: `/unmerge${sp.suffix}` });
+          // The PRE-FAN products (PRE_FAN_PRODUCTS, the fourth mechanism the POLICY note names):
+          // rewrite the TREE, then fan the whole re-spelling set over the result, so every lever
+          // below derives from the rewrite instead of composing onto it. The gate is the pass's
+          // own decline; the contracts are `respell`'s three, for `respell`'s reasons.
+          for (const pf of PRE_FAN_PRODUCTS) {
+            try {
+              const made = pf.apply(sfn);
+              if (made === null) {
+                continue;
               }
+              // The SAME tree dedup the primary above gets, and for the same reason: `fanOut` is a
+              // pure function of the tree, so re-fanning one already fanned buys nothing and makes
+              // the row's quoted fan cost a number that is partly duplicates. A SEPARATE set, not
+              // `seenTrees`: adding a rewritten tree there would let it skip a later PRIMARY tree
+              // that happens to equal it, and that primary's own pre-fan output — which nothing
+              // has computed — would go with it.
+              const madeKey = JSON.stringify(made);
+              if (seenPreFan.has(madeKey)) {
+                continue;
+              }
+              seenPreFan.add(madeKey);
+              assertResolved(made);
+              assertDerefsTyped(made);
+              assertLocalsWritten(made);
+              // `fanOut` writes the shared `lastEmitError` when the PRIMARY emit throws, and that
+              // is what the row's "no spellable candidate" refusal reports. A backend refusal on a
+              // REWRITTEN tree is not a refusal of the primary spelling, so it must not be able to
+              // become the row's stated cause — save and restore around the call rather than let
+              // the wrong cause outlive it. The lever channel below still reports it, labelled.
+              const before = lastEmitError;
+              const fanned = fanOut(made);
+              lastEmitError = before;
+              for (const sp of fanned) {
+                spellings.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
+              }
+            } catch (e) {
+              opts.onLeverError?.(`${name}${pf.suffix}`, e instanceof Error ? e.message.split('\n')[0] : String(e));
             }
-          } catch (e) {
-            opts.onLeverError?.(`${name}/unmerge`, e instanceof Error ? e.message.split('\n')[0] : String(e));
           }
           for (const sp of spellings) {
             const source = sp.source;
