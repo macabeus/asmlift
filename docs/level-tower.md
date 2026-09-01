@@ -92,18 +92,20 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     Every path gets these, which is why the boundary contracts run on both sides of them (below).
   - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
     `decompileRanked` path only. Two populations of them: SPELLING re-writes of one structured
-    tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/vol-store`,
+    tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/unfolded`, `/volatile`, `/vol-store`,
     `/unreduce`, `/ptr-field`, `/offmember`, `/mulfirst`, `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
     lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
     `/merge-names`, `/fresh-merge`) — plus `/raw-globals`, the signedness pin, `/setup-args` and
     `/connective`, which re-run the lift itself.
     The roster is illustrative; `rank.ts` is the source of truth.
 
-    **A missing degree of freedom the roster makes visible.** `/livebase*`, `/basefold` and
-    `/offmember` are three ALTERNATIVE answers to one question asked of one base — does its
-    constant offset belong in the address the compiler materializes, or in the load's
-    displacement — and every one of them answers it for the WHOLE FUNCTION. Three rows now want a
-    per-BASE assignment instead: `LoadBGTilemapData` wants `/livebase-block` on its `+0x3c` key,
+    **A missing degree of freedom the roster makes visible.** `/livebase*`, `/basefold`,
+    `/unfolded` and `/offmember` are four ALTERNATIVE answers to one question asked of one base —
+    does its constant offset belong in the address the compiler materializes, or in the load's
+    displacement — and every one of them answers it for the WHOLE FUNCTION. `/unfolded` narrows
+    WHICH bases the answer covers (its table admits only the keys an operand offset was observed
+    on) without making the answer per-base: one table still decides the whole function. Three rows
+    want a per-BASE assignment instead: `LoadBGTilemapData` wants `/livebase-block` on its `+0x3c` key,
     `synthetic:bgfixed` wants `/offmember` on its one key, and `synthetic:dmapoll` (booked in
     PR #124) wants a per-base split of a different pair. It is a CONJUNCTION — shipped additively
     or it costs the rows each half already wins alone.
