@@ -299,6 +299,16 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  because it never SUBTRACTS a candidate: `/livebase` rides beside it, and the differ referees.
  *  Promote it into `BASECSE_GATES` or prune with it and that row pays.
  *
+ *  WHAT IT IS WORTH, since a generator's price is what its own family WINS and not what its
+ *  refusal explains. Ablated — this table made equal to `LIVEBASE_GATES`, at which point
+ *  rank.ts's `sameBases` shadow declines the whole `/livebase-block` family — FOUR matches go:
+ *  `synthetic:dmaflat` MATCH → diff:10, `synthetic:dmapoll` MATCH → diff:12,
+ *  `synthetic:mixpoll` MATCH → diff:10 and `synthetic:foldpark` MATCH → diff:6, and
+ *  `synthetic:sizebound` — the counterexample row above, which the narrow family still helps —
+ *  goes 8 → 16. `synthetic:foldpark` is the row that prices the gate rather than its refusal: it
+ *  is a shape the WIDE admission binds anyway, so it is the narrow one landing at 0 where the
+ *  wide one lands at 6.
+ *
  *  Why the ACCESS SHAPE and not the address: an MMIO register file and the IWRAM halfword beside
  *  it are both numeric constants in the same range. And why the rule is not in `BASECSE_GATES`: it
  *  would reject nothing there, being a strict refinement of `repeated-const-offset` — past

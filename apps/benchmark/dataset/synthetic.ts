@@ -4064,9 +4064,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //   `livepark`   two bases, both wanted as locals, one of them read at a single fixed offset
   //                through a local (`cur[15]`). `single-cell` refuses that key, so the NARROW
   //                admission binds only the DMA base and lands at 6. MATCH under `/livebase`.
-  //   `foldpark`   the same function with that cell spelled INLINE at its folded address
-  //                (`*(s32 *)0x0300343C`) — the shape `single-cell` was written for. The WIDE
-  //                admission binds it anyway and lands at 6. MATCH under `/livebase-block`.
+  //   `foldpark`   `unfoldpark` — NOT `livepark` — with that cell spelled INLINE at its folded
+  //                address (`*(s32 *)0x0300343C`), the shape `single-cell` was written for. It is
+  //                ONE edit from `unfoldpark` and TWO from `livepark`, because it keeps the
+  //                `0x03002040` distractor line `livepark` does not have: asserted by command, not
+  //                by eye — `sed 's/foldpark/unfoldpark/' | diff` against `unfoldpark`'s source
+  //                shows only the fold, and against `livepark`'s it shows the fold AND the
+  //                distractor. The WIDE admission binds the cell anyway and lands at 6. MATCH
+  //                under `/livebase-block`.
   //   `unfoldpark` `livepark` plus ONE folded single-cell distractor the source left inline
   //                (`*(s32 *)0x03002040 = *(s32 *)0x03002040 + 1;`). Now the two wanted keys and
   //                the unwanted one are on opposite sides of no gate the roster has: wide binds all
@@ -4074,6 +4079,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //                — `sed '/0x03002040/d'` on its own source, with the symbol renamed, is
   //                `livepark`'s source exactly, and that scores 0 today. That is the measurement
   //                which says the gap is SELECTION and not "bind more".
+  //
+  // WHAT `unfoldpark` CAN AND CANNOT GATE, because a green row is not automatically a guard.
+  // `unfoldpark` is a GAP MARKER, not a regression guard: ablating the WHOLE base-admission roster
+  // — `/livebase`, `/livebase-block` and the `/basefold` pair together — leaves it at diff:9,
+  // unchanged, so nothing in the tree today can move it and a `9` here is evidence about nothing
+  // until the admission it names exists. Its two neighbours ARE guards and were measured as such,
+  // each moved by its own admission and by neither the other's nor the pair's: `livepark` MATCH →
+  // diff:3 with `/livebase` ablated (MATCH without it), `foldpark` MATCH → diff:6 with
+  // `/livebase-block` ablated (MATCH without it).
   //
   // NO EXISTING ROW EXERCISES IT, censused rather than argued. Enumerating every agbcc synthetic row
   // with the probe admission off and on — candidates only, no compiles, comparing the md5 of each
@@ -4089,11 +4103,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // CUT FROM kleod:LoadBGTilemapData:agbcc, where the same three-way split is 399 / 386 / 383 —
   // `/livebase` parks five bases, `/livebase-block` parks one, and parking exactly the two whose
-  // offsets survived the fold is what a hand-compiled spelling reaches. That row's fan of 68,352
-  // contains ZERO candidates with that base-local set, measured at both dedup sites over all 165,888
-  // generated spellings, and no stack of gate ablations can produce it: `hoistBaseLocals` binds
-  // `admittedBases(sfn, gates)` wholesale and the two tables are a chain, so ablation only ever
-  // widens. `unfoldpark` is that shape at 15 lines.
+  // offsets survived the fold is what a hand-compiled spelling reaches. NAME THE SET FROM THE FILE
+  // AND NOT FROM THE SENTENCE: that hand-compiled 383 is the 386 winner plus one local, so it
+  // carries THREE pointer-base inits — the two parked bases and the winner's own `/addr-home` walk
+  // local — and a filter written from the two-base description measures a different set than the
+  // spelling does. Both were counted, and the fan of 68,352 contains ZERO candidates with EITHER,
+  // measured at both dedup sites over all 165,888 generated spellings. No stack of gate ablations
+  // can produce it: `hoistBaseLocals` binds `admittedBases(sfn, gates)` wholesale and the two
+  // tables are a chain, so ablation only ever widens. `unfoldpark` is that shape at 15 lines.
   //
   // agbcc only, and for a reason this family owns rather than the `dmascope` one it inherits:
   // `unfoldedOffset` is evidence only where the target declares
