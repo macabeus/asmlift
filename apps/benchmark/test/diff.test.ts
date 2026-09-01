@@ -99,3 +99,32 @@ describe('notRegenerated', () => {
     expect(notRegenerated(at('2026-08-22T21:42:27.432Z'), at('2026-08-23T09:01:04.005Z'))).toBe(false);
   });
 });
+
+// THE SECOND POPULATION `diffGate` PRINTS. Rows the branch added are `ADDED` against the branch
+// POINT every time, for as long as the branch lives — so a score on one of them can move in either
+// direction and the published line still reads `0 field change(s), N added`. `regression` sees only
+// OUTCOME, so a score move on an added row was named by nothing at all. The gate narrows the
+// branch's own artifact to those rows and compares them by the same fields; it changes no exit
+// code (an addition already makes the base report not-ok), it supplies the missing names.
+describe('the rows a branch added, compared against the branch own artifact', () => {
+  const base = out(row('a'));
+  const self = out(row('a'), row('b', { score: 0, outcome: 'match' as Outcome }));
+  const addedRows = (b: BenchOutput, s: BenchOutput): BenchOutput => {
+    const ids = new Set(b.results.map((r) => r.id));
+    return { ...s, results: s.results.filter((r) => !ids.has(r.id)) } as BenchOutput;
+  };
+
+  test('a score move on an added row is invisible against the base and named against the branch', () => {
+    const fresh = out(row('a'), row('b', { score: 5, outcome: 'nonmatch' as Outcome }));
+    expect(compareMeasurements(base, fresh).changed).toEqual([]); // the base report: nothing moved
+    const seen = compareMeasurements(addedRows(base, self), fresh);
+    expect(seen.changed.map((c) => c.field).sort()).toEqual(['asmlift.outcome', 'asmlift.score']);
+    expect(seen.changed.every((c) => c.id === 'b')).toBe(true);
+  });
+
+  test('a row in BOTH artifacts is not re-reported here — the base report already named it', () => {
+    const fresh = out(row('a', { score: 99 }), row('b', { score: 0, outcome: 'match' as Outcome }));
+    expect(compareMeasurements(base, fresh).changed.map((c) => c.id)).toEqual(['a']);
+    expect(compareMeasurements(addedRows(base, self), fresh).changed).toEqual([]);
+  });
+});

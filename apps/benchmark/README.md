@@ -178,7 +178,9 @@ pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or v
                                            #   TWICE: once against `--base`, then again over the
                                            #   rows THIS BRANCH added since it (which the first
                                            #   comparison, walking the base's rows, never reaches)
-pnpm bench diff --base origin/main         # gate: exit 1 if ANY compared field moved, row by row
+pnpm bench diff --base origin/main         # gate: exit 1 if ANY compared field moved, row by row --
+                                           #   and then NAMES the field moves on rows this branch
+                                           #   added since `--base`, which are `ADDED` there forever
                                            #   exit 2 if results.json was never regenerated: it is
                                            #   committed, so an unrun gate compares the base with
                                            #   ITSELF and prints a green line having measured nothing

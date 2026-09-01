@@ -170,5 +170,41 @@ export function diffGate(base = 'HEAD'): number {
     `diff vs ${base}: ${report.changed.length} field change(s), ${report.added.length} added, ` +
       `${report.removed.length} removed (${report.baseRows} base rows, ${report.freshRows} fresh rows)`,
   );
+
+  // THE ROWS THIS BRANCH ADDED, compared against the branch's OWN last artifact.
+  //
+  // The report above walks the BASE's rows, so a row the branch added is `ADDED` — every time,
+  // for as long as the branch lives, however many times it republishes. Its score can then move in
+  // either direction with nothing naming a field: `regression` sees only OUTCOME (and, since the
+  // added-row comparison there, only a lost match), and this gate never looked. A round that adds
+  // six rows and then changes the harness can take one from `asmlift 0` to `asmlift 5` and read
+  // `0 field change(s), 6 added` — which is exactly the line it would publish as its neutrality
+  // proof.
+  //
+  // Informational, deliberately: additions already make `report.ok` false, so this section moves no
+  // exit code. It is the missing NAMES, not a new verdict.
+  if (base !== 'HEAD') {
+    let self: BenchOutput | undefined;
+    try {
+      self = readCommitted('HEAD');
+    } catch {
+      console.log(`diff: this branch's own artifact is unreadable — added rows compared against nothing`);
+    }
+    if (self !== undefined) {
+      const baseIds = new Set(committed.results.map((r) => r.id));
+      const added = { ...self, results: self.results.filter((r) => !baseIds.has(r.id)) };
+      const selfReport = compareMeasurements(added, fresh);
+      for (const c of selfReport.changed) {
+        console.log(`CHANGED ${c.id} ${c.field}: ${c.from} → ${c.to}   (row this branch added)`);
+      }
+      for (const id of selfReport.removed) {
+        console.log(`REMOVED ${id} — row this branch added, absent from the fresh run`);
+      }
+      console.log(
+        `diff over rows added since ${base}: ${selfReport.changed.length} field change(s), ` +
+          `${selfReport.removed.length} removed (${added.results.length} such rows)`,
+      );
+    }
+  }
   return report.ok ? 0 : 1;
 }
