@@ -149,6 +149,25 @@ describe('what refuses — each one would read a different value', () => {
     ]);
   });
 
+  // The KIND test that used to stand alone here is not the refusal the header states: an `assign`
+  // whose VALUE is a call IS an intervening call. Without the effect test on the kept statements,
+  // `p = *g` was substituted into a join that landed AFTER `q = Foo();`, so a load the lifted tree
+  // performed before the call was performed after it — a candidate that reads memory at a
+  // different point than the asm does, with no contract downstream that models evaluation order
+  // (`assertEffectsPreserved` does not run on lever trees).
+  test('an intervening assignment whose VALUE is a CALL refuses — the kind test is not the effect test', () => {
+    declines(
+      [
+        iff(
+          [asg('p', deref(v('g'))), asg('q', call('Foo')), asg('x', c(1))],
+          [asg('p', deref(v('h'))), asg('q', call('Foo')), asg('x', c(2))],
+        ),
+        store(v('p'), v('x')),
+      ],
+      ['p', 'x', 'q'],
+    );
+  });
+
   test('a tree with no eligible site DECLINES rather than returning a copy of itself', () => {
     expect(unmergeJoins(fn([store(v('g'), c(0))], []))).toBeNull();
   });

@@ -31,9 +31,12 @@
 //     the join statement, never address-taken — the counts are function-wide, so a second reader
 //     anywhere refuses) nor untouched by both arms (a name the arms DO write and this cannot
 //     substitute would read a different value at the arm's end);
-//   - anything but an assignment stands between the first definition and the arm's end: the
-//     substituted values are evaluated where the copy lands, so an intervening store or call could
-//     answer a load inside one of them differently;
+//   - anything but an EFFECT-FREE assignment stands between the first definition and the arm's
+//     end: the substituted values are evaluated where the copy lands, so an intervening store or
+//     call could answer a load inside one of them differently. Both halves of that are tested,
+//     and the second is why the statement KIND is not enough — `q = Foo();` is an `assign` whose
+//     value is a call, and a load moved past it is a load answered after the call instead of
+//     before it;
 //   - an intervening assignment writes a name one of those values reads — same reason, one level
 //     more precise;
 //   - a definition's value reads another of the merge names (the substitutions would need an order
@@ -101,9 +104,12 @@ function armDefs(arm: Stmt[], names: ReadonlySet<string>): { defs: Map<string, E
     return null;
   }
   const first = Math.min(...at.values());
-  // from the first definition on, nothing but assignments: a store or a call there would run
-  // BEFORE a value this moves to the arm's end, and could answer a load inside it differently
-  if (arm.slice(first).some((s) => s.k !== 'assign')) {
+  // From the first definition on, nothing but EFFECT-FREE assignments: a store or a call there
+  // would run BEFORE a value this moves to the arm's end, and could answer a load inside it
+  // differently. The KIND test alone does not say that — an `assign` whose value is a call is an
+  // intervening call — so the effect test is applied to the kept statements too, not only to the
+  // definition values below.
+  if (arm.slice(first).some((s) => s.k !== 'assign' || exprHasEffect(s.value))) {
     return null;
   }
   const defs = new Map([...at].map(([n, i]) => [n, (arm[i] as Extract<Stmt, { k: 'assign' }>).value] as const));
