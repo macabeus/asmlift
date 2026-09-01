@@ -4081,13 +4081,21 @@ export const SYNTHETIC: SynthSpec[] = [
   //                which says the gap is SELECTION and not "bind more".
   //
   // WHAT `unfoldpark` CAN AND CANNOT GATE, because a green row is not automatically a guard.
-  // `unfoldpark` is a GAP MARKER, not a regression guard: ablating the WHOLE base-admission roster
-  // — `/livebase`, `/livebase-block` and the `/basefold` pair together — leaves it at diff:9,
-  // unchanged, so nothing in the tree today can move it and a `9` here is evidence about nothing
-  // until the admission it names exists. Its two neighbours ARE guards and were measured as such,
-  // each moved by its own admission and by neither the other's nor the pair's: `livepark` MATCH →
-  // diff:3 with `/livebase` ablated (MATCH without it), `foldpark` MATCH → diff:6 with
-  // `/livebase-block` ablated (MATCH without it).
+  // `unfoldpark` is a GAP MARKER for the base-admission roster, not a regression guard on it:
+  // ablating the WHOLE roster — `/livebase`, `/livebase-block` and the `/basefold` pair together —
+  // leaves it at diff:9, unchanged, so no roster row can move it and a `9` here is evidence about
+  // nothing the roster does, until the admission it names exists. SCOPE THAT CLAIM TO THE
+  // ABLATION THAT BACKS IT: the 9 that survives is not the bare tree's, it is `/scopebase`'s.
+  // Under that ablation the row's whole fan is `9 signed/scopebase`, `9 unsigned/scopebase` and
+  // 36 for all six remaining candidates (`signed`, `signed/offmember`, `signed/vol-store` and the
+  // unsigned mirrors), so removing `/scopebase` on top takes the row 9 → 36 and this row IS a
+  // guard on that family — the only published row that gives plain `/scopebase` any reach at all,
+  // which matters because it has been nominated for deletion as reaching nothing. Its two
+  // neighbours are guards on the roster itself and were measured as such, each moved by its own
+  // admission and by neither the other's nor the pair's: `livepark` MATCH → diff:3 with
+  // `/livebase` ablated (MATCH without it), `foldpark` MATCH → diff:6 with `/livebase-block`
+  // ablated (MATCH without it) — and under the whole-roster ablation both land on `/scopebase`
+  // too, at 3 and 6.
   //
   // NO EXISTING ROW EXERCISES IT, censused rather than argued. Enumerating every agbcc synthetic row
   // with the probe admission off and on — candidates only, no compiles, comparing the md5 of each

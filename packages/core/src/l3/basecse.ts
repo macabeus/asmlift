@@ -303,11 +303,17 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  refusal explains. Ablated — this table made equal to `LIVEBASE_GATES`, at which point
  *  rank.ts's `sameBases` shadow declines the whole `/livebase-block` family — FOUR matches go:
  *  `synthetic:dmaflat` MATCH → diff:10, `synthetic:dmapoll` MATCH → diff:12,
- *  `synthetic:mixpoll` MATCH → diff:10 and `synthetic:foldpark` MATCH → diff:6, and
+ *  `synthetic:mixpoll` MATCH → diff:10 and `synthetic:foldpark` MATCH → diff:6.
+ *  AND IT IS A COMPLETE CENSUS, not the synthetic half of one, because the ablation only ever
+ *  REMOVES candidates: a row whose winner does not carry `/livebase-block` cannot move, and the
+ *  artifact holds exactly SEVEN that do. The other three, all re-run rather than reasoned about:
  *  `synthetic:sizebound` — the counterexample row above, which the narrow family still helps —
- *  goes 8 → 16. `synthetic:foldpark` is the row that prices the gate rather than its refusal: it
- *  is a shape the WIDE admission binds anyway, so it is the narrow one landing at 0 where the
- *  wide one lands at 6.
+ *  goes 8 → 16; `sa3:Sio32MultiLoadIntr` 69 → 70, the one REAL-tier row involved and the reason
+ *  this gate is not a synthetic-only concern; and `synthetic:unfoldpark` 9 either way, the row the
+ *  narrow admission wins nothing on. A round promoting this rule into `BASECSE_GATES` prices it
+ *  against all seven. `synthetic:foldpark` is the row that prices the gate rather than its
+ *  refusal: it is a shape the WIDE admission binds anyway, so it is the narrow one landing at 0
+ *  where the wide one lands at 6.
  *
  *  Why the ACCESS SHAPE and not the address: an MMIO register file and the IWRAM halfword beside
  *  it are both numeric constants in the same range. And why the rule is not in `BASECSE_GATES`: it

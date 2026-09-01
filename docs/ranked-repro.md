@@ -327,8 +327,8 @@ find nothing to disagree with and go green having audited nothing.
     is the number to quote for a row-local staleness, not the ranked fan's.
     Sampling does not ELIMINATE the residual list; it bounds how long one can live undetected.
   - **This fan prices only the OBJECT half, and the negative half is measured on the bench.** 0 of
-    its 68,352 answers are cached rejections. The `pnpm bench run` this repo's committed artifact
-    was generated from (948 rows, warm store, 16 shards) served **10,221 objects and 50,583
+    its 68,352 answers are cached rejections. The `pnpm bench run` the artifact
+    was generated from AT THE TIME OF THIS MEASUREMENT (948 rows then, warm store, 16 shards) served **10,221 objects and 50,583
     rejections** — 83% negative — and audited **1,283 of them (2.11% of what it served): 210
     objects, 1,073 rejections, 0 disagreements**, with `sampled` reconciling exactly against the
     audits. A second full run the same day read 84% negative on the same measure, so treat it as
