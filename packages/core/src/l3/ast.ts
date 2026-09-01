@@ -52,7 +52,11 @@ export type Expr =
   // of access. Absent for every rank-1 access, which is why it is optional rather than an empty
   // array. A leading subscript is an EXPRESSION because a row index the asm computed is a value,
   // not a literal (`g[gRow][i]`), so every generic walk descends into it: a name mentioned there
-  // is a real use, and a rewrite that skipped it would rename half an address.
+  // is a real use, and a rewrite that skipped it would rename half an address. `exprChildren` and
+  // `mapExprChildren` below carry it, which is what makes that true for every walk DERIVED from
+  // them; the one walk that is not — l3/mentions.ts, which hand-rolls a traversal to tell an
+  // `index` BASE from every other position — enumerates the positions itself and has to be
+  // extended by hand when one is added here.
   // `operandOff` is the one field here that is EVIDENCE rather than spelling: it is the BYTE
   // DISPLACEMENT this access's constant offset arrived in through the instruction's MEMORY
   // OPERAND (`ldrb [r0, #0x3]` records 3), as opposed to through the address the pool word

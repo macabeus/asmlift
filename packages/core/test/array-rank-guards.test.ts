@@ -12,6 +12,7 @@ import { pascalBackend } from '../src/backend/pascal';
 import { T } from '../src/ir/types';
 import type { Expr, SFn } from '../src/l3/ast';
 import { exprChildren, exprEquals, mapExprChildren } from '../src/l3/ast';
+import { localMentions, readsOf } from '../src/l3/mentions';
 import { decompile } from '../src/pipeline';
 import { compareScored, composeLevers, rankBy, withheldReason } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
@@ -72,6 +73,30 @@ describe('a `lead` is walked like every other sub-expression', () => {
     expect(exprEquals(ixLead(['r']), ixLead(['r']))).toBe(true);
     expect(exprEquals(ixLead(['r']), ixLead(['q']))).toBe(false);
     expect(exprEquals(ixLead(['r']), ixLead([0]))).toBe(false);
+  });
+
+  // …AND THE ONE WALK THAT IS NOT DERIVED FROM THAT VOCABULARY. l3/mentions.ts hand-rolls its own
+  // traversal (it has to tell an `index` BASE from every other position, which `exprChildren`
+  // flattens away), so the three tests above cannot speak for it: pinning the generic helpers is
+  // exactly what let a walker that bypasses them diverge unnoticed. It is asked here, beside them,
+  // because an undercount there does not lose a candidate — it DELETES a local the body still
+  // reads, and `assertResolved` looks for absent names, not for unwritten ones.
+  test('localMentions counts a name used as a leading subscript as a real read', () => {
+    const f: SFn = {
+      ...fnOf(ixLead(['r'])),
+      locals: [
+        { name: 'i', type: T.u(32) },
+        { name: 'r', type: T.u(32) },
+      ],
+    };
+    const m = localMentions(f);
+    expect(readsOf(m.get('r')!)).toBe(1);
+    // …and it is NOT counted as an `index` base: only `g` stands in that position, and the base
+    // levers re-spell exactly that use shape.
+    expect(m.get('r')!.baseUses).toBe(0);
+    expect(m.get('r')!.otherUses).toBe(1);
+    // the sibling positions still count as they always did
+    expect(readsOf(m.get('i')!)).toBe(1);
   });
 });
 

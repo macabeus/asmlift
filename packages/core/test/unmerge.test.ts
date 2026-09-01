@@ -172,3 +172,31 @@ describe('what refuses — each one would read a different value', () => {
     expect(unmergeJoins(fn([store(v('g'), c(0))], []))).toBeNull();
   });
 });
+
+// THE COUNTS THE MERGE-TEMP TEST RESTS ON. `readsOf(m) === 1` above is a FUNCTION-WIDE count from
+// l3/mentions.ts, so a use that walk cannot see is a temp this pass deletes while the body still
+// reads it. `index.lead` — a multidimensional global's leading subscripts — is a position that
+// carries a real value, and it is the position mentions.ts's hand-rolled walk had to be taught.
+describe('a merge temp read from a position the mention count must see', () => {
+  const leadIx = (row: string): Expr => ({
+    k: 'index',
+    base: { k: 'addr', name: 'gRows' },
+    idx: c(7),
+    lead: [v(row)],
+    width: 2,
+    signed: false,
+  });
+
+  test('a second read as a LEADING SUBSCRIPT refuses, like a second read anywhere else', () => {
+    // `p` is assigned once per arm and read by the join — and read again, elsewhere, as the row
+    // subscript of `gRows[p][7]`. Substituting and deleting it would emit C naming an undeclared
+    // `p`; the candidate is then lost at the compiler under whatever diagnostic sorts first.
+    const body: Stmt[] = [...merged(), asg('q', leadIx('p'))];
+    expect(unmergeJoins(fn(body, ['p', 'x', 'q']))).toBeNull();
+  });
+
+  test('the control: the same shape with the extra read in the ORDINARY index position refuses too', () => {
+    const idxIx: Expr = { k: 'index', base: { k: 'addr', name: 'gRows' }, idx: v('p'), width: 2, signed: false };
+    expect(unmergeJoins(fn([...merged(), asg('q', idxIx)], ['p', 'x', 'q']))).toBeNull();
+  });
+});
