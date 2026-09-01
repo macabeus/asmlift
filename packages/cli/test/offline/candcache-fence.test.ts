@@ -33,7 +33,7 @@ describe('the test fence over the candidate-object cache', () => {
   });
 
   test('the sampled audit is pinned OFF, so a run is reproducible', () => {
-    // `on` mode withholds a sampled key so the caller compiles it anyway, at 1% under a random
+    // `on` mode withholds a sampled key so the caller compiles it anyway, at 2% under a random
     // per-run seed. A case that deletes the mode pin to exercise the real default inherits that,
     // and an assertion counting compiles then fails once in a hundred runs. Two such cases exist.
     expect(

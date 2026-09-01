@@ -430,7 +430,7 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
 
 describe('the sampled audit must never cost a candidate the store could have answered', () => {
   // A WARM run has zero exposure to a transient compile failure: it never compiles. Withholding
-  // 1% of keys hands exactly that 1% back to the hazard — `util.ts run()`'s 120 s timeout, an
+  // a fraction of keys hands exactly that fraction back to the hazard — `util.ts run()`'s 120 s timeout, an
   // OOM-killed `docker run`, a `sh`-laundered SIGKILL — and both call sites deliberately store
   // NOTHING for a transient, so the withheld key was simply lost from the fan, under a RANDOM
   // per-run seed. That is a nondeterministic fan sitting underneath a byte-identical `[score]`

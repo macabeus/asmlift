@@ -287,7 +287,17 @@ const sha = (b: Buffer | string): string => createHash('sha256').update(b).diges
 // opaque runtime); it bounds how long one survives. A staleness that touches every key is caught
 // in the FIRST run that serves more than a handful; a staleness that touches exactly one key
 // survives on average 1/rate runs.
-const DEFAULT_SAMPLE_PCT = 1;
+//
+// THE RATE IS 2%, AND A MEASUREMENT PICKED IT — the largest rate whose wall lands INSIDE the
+// audit-off arms' own spread. Nine runs on one warm LoadBGTilemapData store (68,352 candidates,
+// one bundle, interleaved `0 25 0 10 0 5 0 2` so a drifting load cannot be read as a rate): the
+// four audit-off arms ran 167.4 / 173.1 / 176.2 / 192.7 s, 2% ran 186.2 s, and 5% ran 222.6 s —
+// 30 s above the slowest arm it could hide behind. 10% is 238.9 s and 25% is 287.0 s, against
+// 740.9 s for the same command with the cache off. So the audit is not free as a function of
+// rate: read off the separable arms it costs 6-13 ms of wall per sampled compile, falling as the
+// count rises because a warm run's six workers are otherwise idle. Below ~2% on this fan that
+// disappears into the noise, and 95% of the 4.18x survives.
+const DEFAULT_SAMPLE_PCT = 2;
 const RAW_SAMPLE = process.env.ASMLIFT_CANDCACHE_SAMPLE;
 const SAMPLE_PCT = ((): number => {
   if (RAW_SAMPLE === undefined || RAW_SAMPLE.trim() === '') {
@@ -311,7 +321,7 @@ const SAMPLE_PCT = ((): number => {
  *  line and `ASMLIFT_CANDCACHE_SAMPLE_SEED` replays a run's exact selection. */
 //  SET AND EMPTY is the failure this guard exists for, and `??` does not catch it: an empty seed
 //  is a perfectly usable string, so `isSampled` degenerates into a pure function of the key and
-//  the SAME fixed 1% of every store is audited in perpetuity — the exact "audits the same keys
+//  the SAME fixed 2% of every store is audited in perpetuity — the exact "audits the same keys
 //  forever" design the paragraph above rejects, on every machine, with a trailing `seed=` on the
 //  line as the only tell. Its two siblings (the cap, the rate) both guard it; this one did not.
 const RAW_SEED = process.env.ASMLIFT_CANDCACHE_SAMPLE_SEED;
@@ -997,8 +1007,8 @@ export interface CandCache {
    *  never withheld), and count the abandonment.
    *
    *  This exists because sampling must never be worse than not sampling. A warm run had ZERO
-   *  exposure to a transient compile failure — it never compiled — and withholding 1% of keys
-   *  hands that 1% straight back to the hazard, deleting a spelling from the fan under a RANDOM
+   *  exposure to a transient compile failure — it never compiled — and withholding a sampled
+   *  fraction hands that fraction straight back to the hazard, deleting a spelling under a RANDOM
    *  per-run seed. Falling back to the stored answer is exactly what an unaudited run would have
    *  been served, and it is counted so the audit's own shortfall is visible. */
   abandonAudit(key: string, symbol: string): string | Error | undefined;
@@ -1158,7 +1168,7 @@ export function candCache(label: string, stamp: () => string): CandCache {
   };
 
   /** A repair that did not land leaves the entry the audit just PROVED WRONG sitting in the store,
-   *  where the next run serves it and only another 1% draw would look at it again. So drop the
+   *  where the next run serves it and only another sampling draw would look at it again. So drop the
    *  key's own entries: a miss recompiles, which is always correct. Best-effort in turn — the store
    *  may be unwritable, which is one way the repair failed — but `ns/` and `objects/` are separate
    *  directories, so the shape that produced this (an unwritable `objects/` under a writable `ns/`)

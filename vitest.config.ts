@@ -25,8 +25,8 @@ export default defineConfig({
     //   every one passed and the store tree came back byte-for-byte identical — no lease, no new
     //   entry. A green suite that was green because it read a cache is not a green suite.
     //
-    //   SAMPLE — determinism, and this one was a live 1-in-100 flake. `on` mode audits a sampled
-    //   fraction of served keys against a fresh compile, at 1% under a RANDOM per-run seed. The
+    //   SAMPLE — determinism, and this one was a live 1-in-50 flake. `on` mode audits a sampled
+    //   fraction of served keys against a fresh compile, at 2% under a RANDOM per-run seed. The
     //   two cases in `candcache.test.ts` that assert "a hit is an execution that did not happen"
     //   must delete the mode pin to see the real default, and they therefore inherited that
     //   audit: a sampled key is withheld and recompiled, and the assertion counts the compile.

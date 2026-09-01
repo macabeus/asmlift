@@ -62,7 +62,7 @@ quoted from now on has to say which state it was measured in, in the same breath
 
 | `ASMLIFT_CANDCACHE`                         | what the run does                                                                                      | when to use it                                                                         |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
-| unset, `1`, `on`, `true`, `yes`             | serves any candidate this toolchain already compiled, and AUDITS a sampled 1% by compiling them anyway | **the default** — say `cold` or `warm`, and paste the `[candcache]` line with the wall |
+| unset, `1`, `on`, `true`, `yes`             | serves any candidate this toolchain already compiled, and AUDITS a sampled 2% by compiling them anyway | **the default** — say `cold` or `warm`, and paste the `[candcache]` line with the wall |
 | `0`, `off`, `false`, `no`, or SET-AND-EMPTY | compiles every candidate; touches no disk                                                              | a wall you want comparable with every wall published before the default flipped        |
 | `verify` (any capitalisation)               | compiles every candidate AND audits the store against it, loudly                                       | after any change to the cache, or when a stored answer is suspect                      |
 | anything else                               | **OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr**                                 | never on purpose — the parse is closed so a typo cannot silently SERVE                 |
@@ -100,7 +100,7 @@ pins `ASMLIFT_CANDCACHE=0` for every suite it runs (`test:offline`, `apps/benchm
 `apps/web/test`) — ablated, `pnpm test:offline` wrote 8 namespaces / 20 keys of a throwaway `sh`
 "compiler"'s output into the shared store, and against a poisoned store 13 tests in
 `compile-command.test.ts` failed on the poison. It also pins `ASMLIFT_CANDCACHE_SAMPLE=0`, because
-the 1% audit under a random per-run seed is a 1-in-100 flake for any test asserting "a hit is an
+the 2% audit under a random per-run seed is a 1-in-50 flake for any test asserting "a hit is an
 execution that did not happen"; and `ASMLIFT_CANDCACHE_DIR` to a per-run throwaway, because the
 candcache suites DELETE the mode pin to exercise the real default and the mode pin therefore cannot
 protect them. `pnpm test:matching` is the deliberate exception: it forces `verify` and audits the
@@ -267,36 +267,45 @@ find nothing to disagree with and go green having audited nothing.
   so a cache defect makes BOTH GO GREEN. Neither gate is capable of catching one, so serving mode
   compiles a sampled fraction of the keys it serves anyway and runs them through the exact same
   two-direction comparison `verify` uses. Same counters, same `MISMATCHES.log`, same nonzero exit.
-  - **The rate is 1%, and the rate COMPARISON is a null result — which is the finding, not a
-    hedge.** Three rates were run interleaved on the same warm LoadBGTilemapData store (68,352
-    candidates, one box, one namespace, `A0 B1 C2 A0 B1 C2`, then the same store cache-off):
+  - **The rate is 2%, and a five-rate measurement is what picked it.** Ten runs on ONE warm
+    LoadBGTilemapData store (68,352 candidates, one box, one namespace, one bundle at
+    `dae489e`), interleaved `0 25 0 10 0 5 0 2` so a drifting load cannot be read as a rate, then
+    the same command with the cache off:
 
-    | rate      | walls         | mean        | sampled       | speedup vs cache-off |
-    | --------- | ------------- | ----------- | ------------- | -------------------- |
-    | audit off | 162 s / 164 s | **163.0 s** | 0             | **4.04x**            |
-    | 1%        | 167 s / 163 s | **165.0 s** | 688 / 686     | **3.99x**            |
-    | 2%        | 164 s / 161 s | **162.5 s** | 1,426 / 1,393 | **4.06x**            |
+    | state                | wall        | loadavg (1 m, before) | `sampled` |
+    | -------------------- | ----------- | --------------------- | --------- |
+    | cache OFF            | **740.9 s** | 16.8                  | —         |
+    | cache on, COLD fill  | **711.2 s** | 28.3                  | —         |
+    | warm, audit off      | 167.4 s     | 15.0                  | 0         |
+    | warm, audit off      | 173.1 s     | 9.0                   | 0         |
+    | warm, audit off      | 176.2 s     | 10.2                  | 0         |
+    | warm, audit off      | 192.7 s     | 20.2                  | 0         |
+    | **warm, 2%**         | **186.2 s** | 16.7                  | 1,394     |
+    | warm, 5%             | 222.6 s     | 17.2                  | 3,477     |
+    | warm, 10%            | 238.9 s     | 8.8                   | 6,977     |
+    | warm, 25%            | 287.0 s     | 6.6                   | 17,137    |
 
-    Cache-off on the same store and session: **659 s**; the cold run that filled it: **810 s**.
-    The 2% arm came out FASTER than the no-audit arm. That is not a speedup, it is the measurement
-    saying the three rates are NOT SEPARABLE on this workload: the within-arm spread is 2-3 s and
-    every mean sits inside it. A warm run is no longer compile-bound — its wall is 48 s of
-    enumerate plus 68,352 scores on the main thread — so 700 or 1,400 extra compiles spread over
-    six workers disappear into idle worker time.
-    **So "2% is affordable" is true and says nothing, because so is 0%.** The rate stays at 1%
-    because no measurement moves it, and `ASMLIFT_CANDCACHE_SAMPLE` is there for a reader who
-    wants the survival numbers above halved.
-    **Do not price the audit off the `[phase]` compile column.** It reads
-    off 263.8 s / 267.2 s, 1% 549.3 s / 536.0 s, 2% 541.5 s / 530.8 s of worker time — and 2%
-    costs the SAME as 1% for TWICE the compiles, which no per-compile cost model can produce. That
-    column is counting the queueing every hit does behind a busy worker, not the audit's work; a
-    "cost per sampled compile" or a knee derived from it is an artifact.
-    **A wall here is ordinal, and the loadavgs say why**: a neighbour worktree on the same box ran
-    probes and dockerized compiles throughout, and the 1-minute loadavg before these arms swung
-    between 5.0 and 190.8. The interleave is what makes the comparison survive that; a single
-    sequential pair would not.
+    All ten printed `best …: 386`, the same 68,352 `[score]` lines (md5
+    `3cd87d7623dd843fd791b9bdc86ea27b`) and the same stdout (md5
+    `fd90209d88d7313cb7f5568186ef6e73`), each stamped `[asmlift source dae489e]`.
 
-  - **The seed is on the line and it rotates.** `[candcache] on sample=1%/seed=88dbd665e2876874 {…}`
+    **2% is the largest rate that lands inside the audit-off arms' OWN SPREAD** (167.4-192.7 s);
+    5% is 30 s above the slowest of them, 10% is 46 s and 25% is 94 s above their mean. So the
+    audit is NOT free as a function of rate, and an earlier round's "0%, 1% and 2% are not
+    separable" was the flat part of a curve, not the curve: read off the separable arms the cost
+    is 6-13 ms of wall per sampled compile, falling as the count rises because a warm run's six
+    workers are otherwise idle. Speedup against cache-off: **4.18x** with the audit off, **3.98x**
+    at 2% — **95% of it survives**, and every survival number below is halved against 1%.
+    **Do not price the audit off the `[phase]` compile column.** It reads 273-306 s with the audit
+    off and 633 s at 2%, 817 s at 5%, 926 s at 10% — 2.3x the worker time for a wall 5% longer.
+    That column sums the queueing every hit does behind a busy worker; a "cost per sampled
+    compile" derived from it is an artifact.
+    **A wall here is ordinal, and the loadavgs say why**: another project's test suite ran at
+    390% CPU on this box throughout, and the 1-minute loadavg before these arms swung between 6.6
+    and 28.3. The interleave is what makes the comparison survive that; a single sequential pair
+    would not.
+
+  - **The seed is on the line and it rotates.** `[candcache] on sample=2%/seed=8cd2c1164ce2105d {…}`
     — an audited run is distinguishable from an unaudited one, and `sample=off` says so when
     someone turns it off. Sampling is deterministic within a run (so a run is reproducible) and
     picks DIFFERENT keys next run (so the rest of the store is eventually looked at, which
@@ -304,13 +313,13 @@ find nothing to disagree with and go green having audited nothing.
     exact selection; `ASMLIFT_CANDCACHE_SAMPLE=<percent>` changes the rate (`0` turns it off).
   - **What it catches and how fast — PER CLASS, because the residuals are not one population.**
     The catch probability in one run is `1 - (1 - rate)^C` where C is the number of SERVED keys the
-    staleness touches. At 1%: C = 700 is certain (99.9%), C = 100 is 63%, C = 9 is 8.6%, C = 1 is
-    1% (mean 100 runs, 63% within 100). Most of the residuals listed above are "the namespace does
+    staleness touches. At 2%: C = 700 is certain, C = 100 is 87%, C = 9 is 17%, C = 1 is 2%
+    (mean 50 runs, 87% within 100). Most of the residuals listed above are "the namespace does
     not measure input X" where X is read by a whole CLASS — a directory, a wrapper's config, the
     runtime — and those are caught in the first run that serves a few hundred keys. **One is not:**
     a candidate's own assembler `.include`/`.incbin` is per-CANDIDATE, and the same list measures
-    it at 0 of 66,816 on LoadBGTilemapData — the sparse regime, where the honest number is the
-    100-run figure, not "the first run".
+    it at 0 of 68,352 on LoadBGTilemapData — the sparse regime, where the honest number is the
+    50-run figure, not "the first run".
     **And the BENCH path is sparser than the ranked one.** One whole `pnpm bench run` serves
     ~42,110 answers and audits ~399 of them (0.95%), so a staleness confined to ONE ROW's keys
     (~9 objects on the agbcc real tier) is caught with probability 8.2% per bench run — a mean of
@@ -334,7 +343,7 @@ find nothing to disagree with and go green having audited nothing.
     printed. Read `sampled` alone and a run that audited 400 keys can claim 700.
   - A sampled key is withheld, so its candidate is compiled for real — and is therefore exposed to
     a transient compile failure exactly as an uncached run is. That is the state every wall
-    published before the default flipped was measured in, on 100% of keys instead of 1%. What
+    published before the default flipped was measured in, on 100% of keys instead of 2%. What
     that no longer costs is the CANDIDATE: when the compile of a withheld key produces neither an
     object nor a deterministic rejection, the withheld answer is handed back (`sampledAbandoned`),
     which is what an unaudited run would have been served. Sampling must never be worse than not

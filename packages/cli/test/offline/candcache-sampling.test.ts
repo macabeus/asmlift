@@ -394,8 +394,8 @@ describe('sampling is deterministic within a run and rotates across runs', () =>
 
   test('a SET-AND-EMPTY seed is refused out loud — it would pin the audit to one subset forever', async () => {
     // `??` catches only `undefined`, and '' is a perfectly usable seed: `isSampled` degenerates
-    // into a pure function of the key, so the same fixed 1% of every store is audited in
-    // perpetuity and the other 99% is never compared — the exact failure the seed exists to
+    // into a pure function of the key, so the same fixed slice of every store is audited in
+    // perpetuity and the rest is never compared — the exact failure the seed exists to
     // prevent, on every machine, with a trailing `seed=` on the line as the only tell. Its two
     // siblings (ASMLIFT_CANDCACHE_MAX_MB, ASMLIFT_CANDCACHE_SAMPLE) both guard it; this one did
     // not.
@@ -476,6 +476,17 @@ describe('the rate and the seed are on the [candcache] line, and the rate is a k
     expect(stats.sampled).toBeUndefined();
   });
 
+  test('with nothing set, the audit runs at the rate a measurement picked', async () => {
+    // The default is the whole point of the flip: a serving cache nobody switched on is a serving
+    // cache nothing audits. 2% is the largest rate whose wall landed inside the audit-off arms'
+    // own spread on the LoadBGTilemapData fan (167.4 / 173.1 / 176.2 / 192.7 s against 186.2 s;
+    // 5% was 222.6 s, 30 s above the slowest arm it could have hidden behind).
+    const { value } = await capture({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: undefined }, (m) =>
+      m.cacheSampleNote(),
+    );
+    expect(value).toMatch(/ sample=2%\/seed=[0-9a-f]{16}$/);
+  });
+
   test('a malformed rate is rejected OUT LOUD and the default stands', async () => {
     // Number('abc') is NaN, and a NaN threshold compares false against everything: the audit would
     // be disabled with no output at all, which is the silent half of a loud-failure rule.
@@ -484,7 +495,7 @@ describe('the rate and the seed are on the [candcache] line, and the rate is a k
         m.cacheSampleNote(),
       );
       expect(said).toContain('ignoring ASMLIFT_CANDCACHE_SAMPLE');
-      expect(value).toContain('sample=1%');
+      expect(value).toContain('sample=2%');
     }
   });
 
@@ -713,7 +724,7 @@ describe('an audit whose REPAIR did not land must not be served — sampling may
   test('an entry proved wrong and not repaired is DROPPED, so the next run misses instead of serving it', async () => {
     // The repair fails where `objects/` cannot be written; `ns/` is a different directory and is
     // usually still writable. A miss recompiles, which is always correct — leaving the entry means
-    // the next run serves the disproved answer and only another 1% draw would look at it again.
+    // the next run serves the disproved answer and only another sampling draw would look at it again.
     const root = scratch();
     await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).put('k', 'f', object('STALE-FROM-AN-OLD-TOOLCHAIN')));
     const stale = keyFiles(root)[0];
