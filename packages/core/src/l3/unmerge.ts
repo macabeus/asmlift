@@ -39,13 +39,16 @@
 //     call instead of before it. The third is why the assignment's TARGET is not either: an
 //     `assign` names a variable, and structure.ts spells a write to a scalar GLOBAL as one, so
 //     `gBlendValue = v;` is an `assign` with an effect-free value that writes MEMORY. Not a
-//     corner of the corpus: 22 of the 951 winning sources this was measured over emit a statement-level
-//     assignment to a name they declare nowhere — 71 occurrences, 7 of them in
-//     `kleod:ProcessInputAndUpdateEntities` alone. (That artifact is now 957 rows; the count is
-//     ANCHORED to the one it was taken over rather than renumbered, because re-deriving it needs
-//     the script that produced it and an approximation of that script is a different measurement,
-//     not a cheaper one. Re-run it before quoting it against today's corpus.) `exprHasEffect` answers "a call, or a marker"
-//     and cannot see one, the same way it could not see a qualifier;
+//     corner of the corpus, and RE-DERIVED over today's 957 rows rather than anchored to the 951
+//     it was first taken over: 22 winning sources emit a statement-level assignment to a name they
+//     declare nowhere — 71 occurrences, 7 of them in `kleod:ProcessInputAndUpdateEntities` alone
+//     (the largest single row is `sa3:GetInput`, at 8). All three numbers reproduced unchanged. An
+//     earlier revision froze them to 951 on the grounds that re-deriving needed a script it no
+//     longer had; it needs one pass over the artifact — collect each winning source's declared
+//     locals and parameters, then count its statement-level `name = ` lines whose name is not among
+//     them — so re-run it against the artifact in front of you rather than quoting this line.
+//     `exprHasEffect` answers "a call, or a marker" and cannot see one, the same way it could not
+//     see a qualifier;
 //   - an intervening assignment writes a name one of those values reads — same reason, one level
 //     more precise;
 //   - a definition's value reads another of the merge names (the substitutions would need an order

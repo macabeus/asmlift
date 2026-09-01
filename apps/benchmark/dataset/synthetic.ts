@@ -4819,6 +4819,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // in the first u16, agbcc compiles the named read `gPacked.dreamStones` to `ldrh` at the
   // DECLARATION's access width; the source that loaded the whole WORD and shifted by hand emits
   // `ldr`. One instruction differs, and the differ referees it.
+  //
+  // THE m2c HALF OF BOTH ROWS IS A NONCOMPILE, and it moved: they were published at m2c MATCH when
+  // the ctx carried the prototype alone, because m2c self-declared `extern s32 gPacked;` and its
+  // integer arithmetic compiles against that. Handed the map — the same facts asmlift gets — m2c
+  // omits the declaration, as a decompiler told about a symbol should, and emits the same integer
+  // arithmetic on a struct: `invalid operands to binary <<` and `invalid operands to binary &`.
+  // The counterfactual is measured and is in `eval/evaluate.ts`'s note beside the rung that
+  // supplies the declarations: the SAME emitted body under m2c's own `extern s32 gPacked;` scores
+  // 0 and matches. So the loss is m2c's output not compiling against the context m2c was given,
+  // and it is the honest price of closing the channel rather than a capability claim.
   {
     sym: 'bfwordread',
     src:
@@ -4889,13 +4899,26 @@ export const SYNTHETIC: SynthSpec[] = [
   // the two rows above need one — the axis is enumerated only where the map declares a pointer
   // member with a pointee width of 1/2/4, so a map-less tier produces zero candidates for it.
   //
-  // IT PAYS THE SAME TWO LOUD DROPS the two rows above pay, and for the same reason — this row
-  // also relocates against a named `extern` global, so `/raw-globals` has no declaration to emit
-  // and fails candidate compilation on each signedness arm. `synthetic:ptrelem` therefore
-  // publishes 2 `droppedCandidates` (`unsigned/raw-globals`, `signed/raw-globals`) permanently.
+  // IT PAYS TWO LOUD DROPS OF ITS OWN, for the reason the rows above pay theirs — this row also
+  // relocates against a named `extern` global, so `/raw-globals` has no declaration to emit and
+  // fails candidate compilation on each signedness arm it enumerates. `synthetic:ptrelem`
+  // therefore publishes 2 `droppedCandidates` (`unsigned/raw-globals`, `signed/raw-globals`)
+  // permanently. The price is per SIGNEDNESS ARM and not per row, which is why the two rows above
+  // publish 1 and 2 rather than two each — an earlier revision of this paragraph said "the same
+  // two loud drops the two rows above pay" and contradicted, forty lines away, the paragraph the
+  // same commit had just corrected to say exactly that. Read off the artifact: 1, 2, 2.
   // Stated here because it is stated there: an undocumented pair of standing compile failures in
   // the corpus is one nobody can tell from a new regression, and nothing in `apps/benchmark` gates
   // a corpus-wide drop count.
+  //
+  // ITS m2c HALF IS A STANDING NONCOMPILE, before the map channel and after it, so this row is no
+  // part of that channel's price. Measured through `evaluate()` with both caches off. Told only
+  // the prototype, m2c emitted `(gBgPtrs + (i * 2))->unk13A` and failed with `invalid type
+  // argument of '->'`; told the map, it emits `gBgPtrs.pMap[i].unk13A` — better, and the member
+  // selection is now on the right object — and fails with `request for member 'unk13A' in
+  // something not a structure or union`, `pMap` being a `u16 *`. Recorded because a round report
+  // lumped this row in with `bfwordread`/`bfwordwrite` under their `invalid operands to binary <<`,
+  // which is an error it has never produced.
   {
     sym: 'ptrelem',
     src:

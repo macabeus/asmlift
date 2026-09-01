@@ -1146,10 +1146,13 @@ export function enumerateCandidates(
   // rather than re-spelled, so the gate cannot be narrower than the rule it gates. It is still a
   // superset — it does not know the access WIDTH, and it cannot know whether any residual carries
   // a row term — so where the axis changes nothing the tree dedup below collapses the pair and the
-  // fan does not grow. 9 of the 951 rows this was measured over name such a symbol at all — 8 of them in
-  // their winning `symbolsUsed`, the ninth (`kleod:SetupBG3WindowOverlay`) in a source its row
-  // cannot compile, which is why that count is taken off the emitted sources and not off
-  // `symbolsUsed`, where a row with no winner is invisible.
+  // fan does not grow. RE-DERIVED over today's 957 rows, because this branch's own `sbscope` row
+  // moved it while the previous revision still read 9/8: 10 rows name such a symbol at all — 9 of
+  // them in their winning `symbolsUsed`, the tenth (`kleod:SetupBG3WindowOverlay`) in a source its
+  // row cannot compile, which is why the count is taken off the emitted sources and not off
+  // `symbolsUsed`, where a row with no winner is invisible. That a count moves because the round
+  // quoting it also adds a row is the reason to re-derive rather than re-anchor: the ninth
+  // `symbolsUsed` entry IS `synthetic:sbscope:agbcc`, whose map declares `dims: [4, 1024]`.
   const fnNamesMultidimArray =
     byName !== undefined &&
     [...bareGlobalSymbols(probe).keys()].some((n) => {
