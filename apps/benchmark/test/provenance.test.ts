@@ -5,7 +5,7 @@
 import type { BenchOutput } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
-import { codeDirtyFrom } from '../src/provenance';
+import { codeDirtyFrom, combineProvenance } from '../src/provenance';
 import { checkTierProvenance } from '../src/report/merge';
 
 const tier = (asmlift?: { commit: string; dirty: boolean }): BenchOutput =>
@@ -57,5 +57,39 @@ describe('the merge refusal', () => {
 
   test('an unreadable git at merge time still catches a dirty RUN', () => {
     expect(() => checkTierProvenance('real.json', tier({ commit: 'aaaa', dirty: true }), undefined)).toThrow(/dirty/);
+  });
+});
+
+// The fan-out half, and the reason it is pinned separately: the RUN stamp is written by the shard
+// CHILDREN, and `stitch` is what decides whether it survives into the tier file. Re-sampling in the
+// orchestrator instead of combining is the exact shape that made the merge refusal compare two
+// samples taken seconds apart — reproduced end to end before this was written (an untracked file in
+// `packages/core` present for the first 40s of a 129s fanned run stamped `dirty: false`, while the
+// part file it was stitched from said `dirty: true`).
+describe('the run stamp survives the stitch', () => {
+  const clean = { commit: 'aaaa', dirty: false };
+
+  test('one DIRTY shard makes the tier dirty, however clean the orchestrator is', () => {
+    expect(combineProvenance([clean, { commit: 'aaaa', dirty: true }], clean)).toEqual({
+      commit: 'aaaa',
+      dirty: true,
+    });
+  });
+
+  test('shards that disagree about HEAD are dirty — no single commit holds those numbers', () => {
+    expect(combineProvenance([clean, { commit: 'bbbb', dirty: false }], clean)?.dirty).toBe(true);
+  });
+
+  test('all clean stays clean, and the commit is reported', () => {
+    expect(combineProvenance([clean, clean], clean)).toEqual(clean);
+  });
+
+  test('parts with no stamp contribute nothing, and a stampless run reports nothing', () => {
+    expect(combineProvenance([undefined, undefined], clean)).toEqual(clean);
+    expect(combineProvenance([undefined], undefined)).toBeUndefined();
+  });
+
+  test('a dirty ORCHESTRATOR sample still counts — this only ever adds evidence', () => {
+    expect(combineProvenance([clean], { commit: 'aaaa', dirty: true })?.dirty).toBe(true);
   });
 });

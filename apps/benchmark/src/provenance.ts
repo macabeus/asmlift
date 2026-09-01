@@ -71,3 +71,30 @@ export function resetProvenanceSample(): void {
   sticky = undefined;
   lastSample = 0;
 }
+
+/** The RUN's provenance for a tier that was STITCHED from shard part files.
+ *
+ *  The default `bench run` path fans every tier across child processes, and only those children
+ *  are alive while the numbers are made: each samples git after every case, so a tree that is
+ *  mutated and reverted mid-run is recorded in the part files and nowhere else. The orchestrator's
+ *  own sample is taken after the last child has exited — the same instant as `bench:merge`, which
+ *  is precisely the window `merge` cannot see. Stitching therefore has to COMBINE the parts'
+ *  stamps; re-sampling in the parent throws away the only observation that exists, which is what
+ *  this function is here to stop.
+ *
+ *  Combining is an OR over `dirty`, plus one more rule: shard stamps that disagree about HEAD mean
+ *  the code moved while the tier was being measured, so no single commit holds those numbers —
+ *  which is what `dirty` already means to `merge` and `report/stale-check.ts`. Parts written before
+ *  the stamp existed carry `undefined` and contribute nothing, so an old part cannot mark a clean
+ *  run dirty. */
+export function combineProvenance(
+  parts: readonly ({ commit: string; dirty: boolean } | undefined)[],
+  own: { commit: string; dirty: boolean } | undefined,
+): { commit: string; dirty: boolean } | undefined {
+  const stamps = [...parts, own].filter((s) => s !== undefined);
+  if (stamps.length === 0) {
+    return undefined;
+  }
+  const commits = new Set(stamps.map((s) => s.commit));
+  return { commit: stamps[0].commit, dirty: stamps.some((s) => s.dirty) || commits.size > 1 };
+}

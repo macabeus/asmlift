@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 
 import { RESULTS_DIR } from '../config';
+import { asmliftProvenance, combineProvenance } from '../provenance';
 import { benchMeta } from './runner';
 
 const CLI = join(import.meta.dirname, '..', 'cli.ts');
@@ -116,9 +117,17 @@ export function emptySelectionError(
 }
 
 /** Stitch `${tier}.part{0..n-1}.json` back into the canonical `${tier}.json`, delete the parts.
- *  `filtered` says a filter could have selected rows here, which makes an empty result a typo. */
+ *  `filtered` says a filter could have selected rows here, which makes an empty result a typo.
+ *
+ *  The parts' `meta.asmlift` is CARRIED FORWARD, not re-sampled. Only the shard children are alive
+ *  while a fanned-out tier is measured, so their stamps are the only record of the tree the numbers
+ *  were read from; this parent's own sample happens after the last child exits, seconds before
+ *  `bench:merge` takes its, and re-stamping with it made the run-time check compare two samples
+ *  from the same instant. Measured: a tier run with an untracked file in `packages/core` that was
+ *  removed 40s into a 129s run stamped `dirty: false` — the part file said `dirty: true`. */
 function stitch(tier: Tier, n: number, filtered: boolean): number {
   const results: FunctionResult[] = [];
+  const stamps: ({ commit: string; dirty: boolean } | undefined)[] = [];
   let parts = 0;
   for (let i = 0; i < n; i++) {
     const part = join(RESULTS_DIR, `${tier}.part${i}.json`);
@@ -126,7 +135,9 @@ function stitch(tier: Tier, n: number, filtered: boolean): number {
       continue;
     }
     parts++;
-    results.push(...(JSON.parse(readFileSync(part, 'utf8')) as BenchOutput).results);
+    const out = JSON.parse(readFileSync(part, 'utf8')) as BenchOutput;
+    results.push(...out.results);
+    stamps.push(out.meta.asmlift);
     rmSync(part);
   }
   if (parts === 0) {
@@ -140,7 +151,10 @@ function stitch(tier: Tier, n: number, filtered: boolean): number {
     // good 240-row `real.json` with `results: []` — which is what `bench merge` reads next.
     return 0;
   }
-  const out: BenchOutput = { meta: benchMeta(results), results };
+  const out: BenchOutput = {
+    meta: { ...benchMeta(results), asmlift: combineProvenance(stamps, asmliftProvenance()) },
+    results,
+  };
   writeFileSync(join(RESULTS_DIR, `${tier}.json`), JSON.stringify(out, null, 2));
   return results.length;
 }
@@ -164,6 +178,11 @@ export function shardQueue(opts: Pick<OrchestrateOptions, 'jobs' | 'tiers'>): { 
 
 export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   mkdirSync(RESULTS_DIR, { recursive: true });
+  // Sample BEFORE the first child spawns. `asmliftProvenance` is sticky over the process, so this
+  // parent's stamp then covers the whole run rather than only the instant after the last shard
+  // exits — belt to the shard stamps' braces, and the only cover a tier whose parts predate the
+  // stamp has at all.
+  asmliftProvenance();
 
   // ONE queue across ALL tiers, drained by exactly `opts.jobs` slots. Fanning the tiers one after
   // the other (a `Promise.all` per tier) made every run pay both tiers' TAILS: the real fan could
