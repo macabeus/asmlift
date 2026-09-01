@@ -188,13 +188,20 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      `redefinition of s16` — the prelude already emits C_TYPEDEFS — so v15's entries record a
   //      retry that failed for its own reason, which is indistinguishable in the cache from the
   //      failure it was added to fix.
+  // v17: when NO rung compiles, `scoreM2c` now reports the failure of the last rung that compiled
+  //      the source AS EMITTED (rung 2 where there are declarations) rather than rung 0's. The
+  //      whole difference is the `errorMarkers` this function's own value carries, so a v16 entry
+  //      replays ``gPacked' undeclared`` for a row whose deciding rung declares the symbol — the
+  //      exact wrong answer the change removes, served out of a warm store and invisible to every
+  //      artifact comparison, `errorMarkers` being outside `FIELDS.m2c`. Caught by reading this
+  //      list before publishing a run, which is what it is for.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
   const key = sha(
     JSON.stringify({
-      v: 16,
+      v: 17,
       kind: 'm2c',
       commit,
       objdiff: objdiffVersion(),
