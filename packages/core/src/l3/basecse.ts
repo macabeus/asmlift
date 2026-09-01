@@ -333,7 +333,7 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
  *  evidence `BASEFOLD_GATES` exempts on. The two tables read one field and ask opposite questions
  *  of it — that one exempts `single-use` for a key reached ONCE whose offset survived, this one
  *  keeps `single-use` and demands the same survival of a key reached TWICE — so neither is the
- *  other relaxed, and a key admitted by both is a key both tables' other rules also admit.
+ *  other relaxed.
  *
  *  WHY IT IS A SELECTION AND NOT A WIDENING. `/livebase` and `/livebase-block` are one chain:
  *  every key the narrow table binds the wide one binds too, so between them a function has only

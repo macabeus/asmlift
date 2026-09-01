@@ -716,8 +716,9 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
 
   test('it is not `/basefold` relaxed: the two tables ask opposite questions of one field', () => {
     // `/basefold` exempts `single-use` on the evidence, so it reaches a base read ONCE and this
-    // table refuses that same base; here the evidenced base is read twice and `/basefold` refuses
-    // it, on the `repeated-const-offset` heuristic it keeps and this table ablates.
+    // table refuses that same base on `single-use`; the evidenced base below is read twice inside
+    // a loop, so `/basefold` refuses it first on `loop` — a placement heuristic it keeps and this
+    // table ablates. Both rejections read off `firstRejection`, not off the table's order.
     const once = fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1, fromOperand), value: c(0) }]);
     expect(admittedBases(once, BASEFOLD_GATES)).toHaveLength(1);
     expect(admittedBases(once, UNFOLDED_GATES)).toEqual([]);
