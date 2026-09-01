@@ -119,12 +119,14 @@ export function emptySelectionError(
 /** Stitch `${tier}.part{0..n-1}.json` back into the canonical `${tier}.json`, delete the parts.
  *  `filtered` says a filter could have selected rows here, which makes an empty result a typo.
  *
- *  The parts' `meta.asmlift` is CARRIED FORWARD, not re-sampled. Only the shard children are alive
- *  while a fanned-out tier is measured, so their stamps are the only record of the tree the numbers
- *  were read from; this parent's own sample happens after the last child exits, seconds before
- *  `bench:merge` takes its, and re-stamping with it made the run-time check compare two samples
- *  from the same instant. Measured: a tier run with an untracked file in `packages/core` that was
- *  removed 40s into a 129s run stamped `dirty: false` — the part file said `dirty: true`. */
+ *  The parts' `meta.asmlift` is CARRIED FORWARD, not re-sampled. Only the shard children sample git
+ *  while a fanned-out tier is being measured, so their stamps are the fine-grained record of the
+ *  tree the numbers were read from; re-stamping the tier with `benchMeta`'s own sample — which,
+ *  before `orchestrate` was made to sample at spawn time, was taken only after the last child had
+ *  exited — made the run-time check compare two measurements from the same instant. Measured on
+ *  the code as it stood then: a tier run with an untracked file in `packages/core` that was removed
+ *  40s into a 129s run stamped `dirty: false`, while the part file it was stitched from said
+ *  `dirty: true`. */
 function stitch(tier: Tier, n: number, filtered: boolean): number {
   const results: FunctionResult[] = [];
   const stamps: ({ commit: string; dirty: boolean } | undefined)[] = [];

@@ -76,11 +76,14 @@ export function resetProvenanceSample(): void {
  *
  *  The default `bench run` path fans every tier across child processes, and only those children
  *  are alive while the numbers are made: each samples git after every case, so a tree that is
- *  mutated and reverted mid-run is recorded in the part files and nowhere else. The orchestrator's
- *  own sample is taken after the last child has exited — the same instant as `bench:merge`, which
- *  is precisely the window `merge` cannot see. Stitching therefore has to COMBINE the parts'
- *  stamps; re-sampling in the parent throws away the only observation that exists, which is what
- *  this function is here to stop.
+ *  mutated and reverted mid-run is recorded in the part files, at a resolution the parent process
+ *  cannot match. `stitch` used to drop those stamps and re-sample in the parent, whose only sample
+ *  was the one `benchMeta` took after the last child had exited — the same instant as
+ *  `bench:merge`'s, so the two agreed by construction and the run-time check compared a
+ *  measurement with itself. Stitching therefore COMBINES the parts' stamps. (`orchestrate` now
+ *  also samples before the first child spawns, so the parent's own sticky window covers the run
+ *  rather than only its end; that is a second observer, not a substitute for the parts' — it still
+ *  cannot see a mutation that appears and reverts entirely between its two samples.)
  *
  *  Combining is an OR over `dirty`, plus one more rule: shard stamps that disagree about HEAD mean
  *  the code moved while the tier was being measured, so no single commit holds those numbers —
