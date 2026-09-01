@@ -35,7 +35,8 @@ import {
   cacheStats,
 } from '@asmlift/cli/candcache';
 import { macroDefinesUsedBy } from '@asmlift/core/macros';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { symbolMapToJson } from '@asmlift/core/symbols';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -215,7 +216,17 @@ switch (command) {
     const { obj } = c.build();
     copyFileSync(obj, join(out, 'target.o'));
     let elf: string | undefined;
-    if (c.symbols) {
+    let symbolsFile: string | undefined;
+    if (c.symbols && c.tier === 'synthetic') {
+      // A SYNTHETIC row's map is AUTHORED in the dataset, not derived from any ELF, so there is
+      // no checkout to graft and nothing for --project-root to point at. Write the same map the
+      // harness fed the row, in the CLI's `tools.asmlift.symbols` JSON shape, beside target.o.
+      // Without this the script would run map-less and reproduce a DIFFERENT source than the
+      // row it claims to reproduce — a `/no-bitfield` or `/no-ptr-elem` row's whole content is
+      // the spelling the map licenses.
+      writeFileSync(join(out, 'symbols.json'), `${JSON.stringify(symbolMapToJson(c.symbols), null, 2)}\n`);
+      symbolsFile = 'symbols.json';
+    } else if (c.symbols) {
       // the row was MEASURED with the project's symbol map — resolve the checkout's derived
       // symbols ELF so the CLI loads the same map the benchmark fed this function
       const man = loadManifestsForVendor().find((m) => m.project === c.project);
@@ -265,9 +276,11 @@ switch (command) {
         ctxFile = materializeScoringContext(picked.prelude + macros, out);
       }
     }
-    writeScoreConfig(c.toolchain.id, out, elf, ctxFile);
+    writeScoreConfig(c.toolchain.id, out, elf, ctxFile, symbolsFile);
     console.log(
       `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id}${elf ? ' + symbol-map ELF' : ''}${
+        symbolsFile ? ' + authored symbol map' : ''
+      }${
         ctxFile ? ` + scoring context (escalation rung ${ctxRung}: ${RUNG_NAMES[ctxRung - 1] ?? 'vendored ctx'})` : ''
       })`,
     );

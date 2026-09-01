@@ -185,13 +185,28 @@ describe('asmliftScript (pinned)', () => {
   });
 
   test('symbol-fed rows carry the vendored-map provenance; map-free rows state none is needed', () => {
-    const withMap = rows.filter((r) => r.asmlift.symbolMap);
-    expect(withMap.length).toBeGreaterThan(0); // the dataset does carry symbol-fed rows
+    // Two KINDS of map row, and the script owes a different provenance for each: a REAL row's map
+    // is derived from the project's ELF and vendored, a SYNTHETIC row's is authored in the
+    // dataset. What neither may do is stay silent — a map-less reproduction of a map-fed row
+    // answers a different question than the row.
+    const withMap = rows.filter((r) => r.asmlift.symbolMap && r.tier === 'real');
+    expect(withMap.length).toBeGreaterThan(0); // the dataset does carry symbol-fed real rows
     for (const fn of withMap) {
       const s = asmliftScript(fn);
       expect(s, fn.id).toContain(`apps/benchmark/dataset/real/tu/${fn.project}/symbols.json.gz`);
       expect(s, fn.id).toMatch(/sha256 of the decompressed map JSON: [0-9a-f]{64}/);
       expect(s, fn.id).toContain('decomp.yaml (tools.asmlift.elf)');
+    }
+    const authored = rows.filter((r) => r.asmlift.symbolMap && r.tier === 'synthetic');
+    expect(authored.length).toBeGreaterThan(0); // and the synthetic tier carries authored ones
+    for (const fn of authored) {
+      const s = asmliftScript(fn);
+      expect(s, fn.id).toContain('SYMBOLS:');
+      expect(s, fn.id).toContain('apps/benchmark/dataset/synthetic.ts');
+      expect(s, fn.id).toContain('tools.asmlift.symbols');
+      // authored, so there is no vendored blob and no project checkout to name
+      expect(s, fn.id).not.toContain('symbols.json.gz');
+      expect(s, fn.id).not.toContain('sha256 of the decompressed map JSON');
     }
     const noMap = rows.find((r) => r.tier === 'real' && !r.asmlift.symbolMap);
     if (noMap) {
@@ -203,7 +218,7 @@ describe('asmliftScript (pinned)', () => {
   });
 
   test('symbol-fed rows LOAD the map: PROJECT_PATH placeholder + --project-root on the pre-step', () => {
-    const withMap = rows.filter((r) => r.asmlift.symbolMap);
+    const withMap = rows.filter((r) => r.asmlift.symbolMap && r.tier === 'real');
     expect(withMap.length).toBeGreaterThan(0);
     for (const fn of withMap) {
       const s = asmliftScript(fn);
@@ -220,8 +235,10 @@ describe('asmliftScript (pinned)', () => {
     if (kleod) {
       expect(asmliftScript(kleod)).toContain("PROJECT_PATH='/path/to/klonoa-empire-of-dreams'");
     }
-    // map-free rows keep the plain pre-step and no placeholder
-    for (const fn of rows.filter((r) => !r.asmlift.symbolMap)) {
+    // map-free rows keep the plain pre-step and no placeholder — and so do the AUTHORED-map
+    // rows, whose map `bench target` writes itself: there is no checkout for a placeholder to
+    // point at, and a script that asked for one would be asking for a thing that does not exist.
+    for (const fn of rows.filter((r) => !r.asmlift.symbolMap || r.tier === 'synthetic')) {
       const s = asmliftScript(fn);
       expect(s, fn.id).not.toContain('PROJECT_PATH');
       expect(s, fn.id).not.toContain('--project-root');

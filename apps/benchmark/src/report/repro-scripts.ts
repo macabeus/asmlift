@@ -69,11 +69,30 @@ function usesSymbolMap(fn: FunctionResult): boolean {
   return fn.tier === 'real' && Boolean(fn.asmlift.symbolMap) && manifestFor(fn.project) !== null;
 }
 
+/** Whether this row's map is AUTHORED in the dataset rather than derived from a project ELF —
+ *  the synthetic tier's map-fed rows. `bench target` writes that map beside target.o and names
+ *  it in the generated decomp.yaml (tools.asmlift.symbols), so the script needs no checkout and
+ *  no PROJECT_PATH; what it must NOT do is stay silent about a map, because a map-less
+ *  reproduction of one of these rows answers a different question than the row. */
+function usesAuthoredMap(fn: FunctionResult): boolean {
+  return fn.tier === 'synthetic' && Boolean(fn.asmlift.symbolMap);
+}
+
 /** The symbol-map provenance note for a real row (asmlift script only — the map is asmlift's
  *  analogue of m2c's context input). Map rows also declare the PROJECT_PATH placeholder here:
  *  step 1 grafts that checkout's tools.asmlift.elf into the scoring config, so the CLI loads
  *  the same map the benchmark fed this function. */
 function symbolsNote(fn: FunctionResult): string {
+  if (usesAuthoredMap(fn)) {
+    return `
+# SYMBOLS: this row ran WITH a symbol map, and unlike a real row's it is AUTHORED — the
+# benchmark's synthetic dataset hand-writes it (apps/benchmark/dataset/synthetic.ts), because
+# these rows exercise rules that only fire when a map declares a bitfield member, a sized
+# pointer member or an array's rank, and there is no project ELF to derive one from. Step 1
+# writes that same map next to target.o as symbols.json and names it in the generated
+# decomp.yaml (tools.asmlift.symbols), so this run loads exactly what the row was measured
+# with. No checkout is involved.`;
+  }
   if (fn.tier !== 'real') {
     return '';
   }
@@ -243,7 +262,12 @@ ASMLIFT_PATH='/path/to/asmlift'${checkoutRecipe(fn)}${symbolsNote(fn)}
     usesSymbolMap(fn)
       ? `
 # --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.`
-      : ''
+      : usesAuthoredMap(fn)
+        ? `
+# It also writes this row's authored symbol map as symbols.json and names it in that
+# decomp.yaml (tools.asmlift.symbols), which is how the CLI loads the map the row was
+# measured with.`
+        : ''
   }
 # (progress goes to stderr so the script's stdout stays purely the decompiled source)
 pnpm --dir "$ASMLIFT_PATH" bench target ${fn.id} --out "$PWD"${

@@ -173,3 +173,78 @@ test('any other value is a loud error — a typo must never read as "on"', () =>
   );
   expect(() => loadDecompConfig(join(root, 'decomp.yaml'))).toThrow(/candidateCache must be 'off'/);
 });
+
+// ── tools.asmlift.symbols — a map that is already DERIVED ─────────────────────────────────────
+//
+// `elf` is the ordinary source: a project has a built ELF and asmlift derives names + declaration
+// shapes from it. This key is the case where there is no ELF to derive from and the map is
+// authored — the benchmark's synthetic rows hand-write one, and their published reproduction
+// scripts have to feed the CLI the same map or they reproduce a different source than the row.
+// The tests below pin the CHANNEL (a map that loads changes the output), not just the parse.
+const POOL_ASM =
+  '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n\t.align 2\n.L1:\n\t.word\t0x03005220\n';
+const MAP_JSON = JSON.stringify({
+  '0x03005220': [{ name: 'gCell', kind: 'data', declared: true, shape: 'scalar', size: 4, signed: false }],
+});
+
+test('CLI: tools.asmlift.symbols loads an authored map — the output NAMES what it declares', async () => {
+  const root = tmp();
+  writeFileSync(join(root, 'symbols.json'), MAP_JSON);
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+  );
+  const file = join(root, 'f.s');
+  writeFileSync(file, POOL_ASM);
+  const r = await runCli([file]);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain('gCell');
+
+  // the same run with the key removed is the control: no map, no name — so the assertion above
+  // is about the map being LOADED, not about the address happening to render that way.
+  const bare = tmp();
+  writeFileSync(join(bare, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n');
+  const file2 = join(bare, 'f.s');
+  writeFileSync(file2, POOL_ASM);
+  const r2 = await runCli([file2]);
+  expect(r2.code).toBe(0);
+  expect(r2.stdout).not.toContain('gCell');
+});
+
+test('CLI: declaring BOTH elf and symbols is a usage error — two sources for one map', async () => {
+  const root = tmp();
+  writeFileSync(join(root, 'symbols.json'), MAP_JSON);
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    elf: game.elf\n    symbols: symbols.json\n',
+  );
+  const file = join(root, 'f.s');
+  writeFileSync(file, POOL_ASM);
+  const r = await runCli([file]);
+  expect(r.code).toBe(64);
+  expect(r.stderr).toContain('BOTH elf and symbols');
+});
+
+test('CLI: an unreadable or malformed symbols map is loud, never a silent map-less run', async () => {
+  const missing = tmp();
+  writeFileSync(
+    join(missing, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: nope.json\n',
+  );
+  const f1 = join(missing, 'f.s');
+  writeFileSync(f1, POOL_ASM);
+  const r = await runCli([f1]);
+  expect(r.code).toBe(66);
+  expect(r.stderr).toContain('cannot load symbols from tools.asmlift.symbols');
+
+  const bad = tmp();
+  writeFileSync(join(bad, 'symbols.json'), '{not json');
+  writeFileSync(
+    join(bad, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+  );
+  const f2 = join(bad, 'f.s');
+  writeFileSync(f2, POOL_ASM);
+  const r2 = await runCli([f2]);
+  expect(r2.code).toBe(66);
+});

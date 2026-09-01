@@ -25,6 +25,14 @@ export interface AsmliftToolConfig {
    *  names from `.symtab`, declaration shapes from the linked-in DWARF types-sidecar when
    *  present. Absent ⇒ no symbol map (today's behavior). */
   elf?: string;
+  /** a symbol map already DERIVED, as JSON (the `symbolMapToJson` shape: hex address →
+   *  SymbolInfo[]), relative to this decomp.yaml. The `elf` key above is the ordinary source —
+   *  a project has a built ELF and asmlift derives the map from it — and this key is for the
+   *  case where there is no ELF to derive from and the map is authored: the benchmark's
+   *  synthetic rows hand-write one, and a published reproduction script has to feed the CLI the
+   *  same map or it reproduces a different answer. Mutually exclusive with `elf`: two sources
+   *  for one map is a silent precedence question, so declaring both is a loud input error. */
+  symbols?: string;
   /** `off` — this project REFUSES the cross-run candidate-object cache for its `compiler`
    *  command, whatever `ASMLIFT_CANDCACHE` says. The only value; anything else is an error, so a
    *  typo cannot silently read as "on".

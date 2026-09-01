@@ -339,6 +339,16 @@ export async function runCli(
   // tools.asmlift.elf → the project's symbol map (names + declaration shapes). Explicit
   // config, so an unreadable ELF is a loud input error, never a silent names-less run.
   let symbols: SymbolMap | undefined;
+  if (toolCfg?.elf && toolCfg?.symbols) {
+    return {
+      code: 64,
+      stdout: '',
+      stderr:
+        'asmlift: tools.asmlift declares BOTH elf and symbols — two sources for one map. ' +
+        'Name the one this project has (elf: derive from the built ELF; symbols: a map already ' +
+        'derived, as JSON).\n',
+    };
+  }
   if (toolCfg?.elf) {
     const elfPath = resolve(configDir!, toolCfg.elf);
     try {
@@ -349,6 +359,22 @@ export async function runCli(
         code: 66,
         stdout: '',
         stderr: `asmlift: cannot load symbols from tools.asmlift.elf (${elfPath}): ${e instanceof Error ? e.message : e}\n`,
+      };
+    }
+  } else if (toolCfg?.symbols) {
+    // The already-derived map. Same loudness rule as the ELF above: explicit config, so an
+    // unreadable or malformed file is an input error and never a silent names-less run — a map
+    // that quietly failed to load reads exactly like a row that never had one, and the two
+    // produce different source.
+    const mapPath = resolve(configDir!, toolCfg.symbols);
+    try {
+      const { symbolMapFromJson } = await import('@asmlift/core/symbols');
+      symbols = symbolMapFromJson(JSON.parse(readFileSync(mapPath, 'utf8')));
+    } catch (e) {
+      return {
+        code: 66,
+        stdout: '',
+        stderr: `asmlift: cannot load symbols from tools.asmlift.symbols (${mapPath}): ${e instanceof Error ? e.message : e}\n`,
       };
     }
   }
