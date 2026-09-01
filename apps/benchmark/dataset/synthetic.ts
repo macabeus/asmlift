@@ -37,8 +37,11 @@ export interface SynthSpec {
    *  prototype, m2c emits `extern ? gBgTilemapBufs;` on `sbscope` and the row publishes a DECLINE
    *  that the declaration alone dissolves. `src/cases/synthetic.ts` therefore RENDERS this map
    *  into the row's `ctx` through core's own declaration renderer, and `authored-facts.test.ts`
-   *  holds the two equal by symbol name. Add a fact here and m2c is told it; there is no way to
-   *  set one channel and forget the other. */
+   *  holds the two equal FACT BY FACT — every symbol, every declared member, every inner array
+   *  extent — rather than by symbol name, which is what it used to check and which a shape stripped
+   *  out of the ctx passes with every gate green. Add a fact here and m2c is told it. The single
+   *  exception is an array's OUTERMOST extent, left unsized by `declare.ts`'s own rule and measured
+   *  on `sbscope` to change m2c's output not at all. */
   symbols?: SymbolMap;
 }
 

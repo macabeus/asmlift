@@ -20,6 +20,8 @@
 // CI runs this: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`. It is
 // toolchain-free (JSON + gzip only) and in no `bench` command, deliberately — a dataset lie must
 // fail on a hosted runner with no compilers, not only where someone can run the benchmark.
+import { renderDeclarations } from '@asmlift/core/declare';
+import { arrayInnerExtents, declaredFields } from '@asmlift/core/symbols';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -315,16 +317,87 @@ describe('an authored symbol map agrees with its own row', () => {
     expect(mapped.length).toBeGreaterThan(0);
   });
 
-  test('every symbol a map declares to asmlift is also declared to m2c', () => {
+  // SYMMETRY, LAYER 1 — CHANNEL IDENTITY. The ctx must contain the declaration block the map
+  // renders to, byte for byte, and the block is re-derived HERE from `c.symbols` rather than
+  // asked of the production helper: a gate that calls the same function the call site calls
+  // cannot see the call site hand it worse input. That is not hypothetical. The predecessor of
+  // this test asserted only that each symbol's NAME appeared somewhere in the ctx, and under a
+  // renderer input degraded to `{name, kind, declared}` — core's documented name-only exception —
+  // it stayed green while the ctx became `extern u32 gPacked;` / `extern u32 gBgTilemapBufs;` /
+  // `extern u32 gBgPtrs;`: struct layout, bitfield bit offsets, pointee width and array rank all
+  // present for asmlift and gone for m2c. Measured under that degradation, `ptrelem` emits
+  // `(gBgPtrs + (i * 2))->unk13A` — verbatim the pre-fix output the map channel exists to
+  // dissolve — and `sbscope` goes from nonmatch to noncompile. The name was never the fact.
+  test("the m2c ctx carries the map's rendered declarations verbatim", () => {
     const cases = syntheticCases().filter((c) => c.symbols);
     expect(cases.length).toBe(mapped.reduce((n, s) => n + s.toolchains.length, 0));
-    const asymmetric = cases.flatMap((c) =>
-      [...c.symbols!.values()]
-        .flat()
-        .filter((info) => !new RegExp(`\\b${info.name}\\b`).test(c.ctx ?? ''))
-        .map((info) => `${c.id}: asmlift's map declares \`${info.name}\`, the m2c ctx does not`),
+    const missing = cases
+      .filter((c) => {
+        const block = renderDeclarations([...c.symbols!.values()].flat().map((info) => ({ name: info.name, info })));
+        return !(c.ctx ?? '').includes(block);
+      })
+      .map((c) => `${c.id}: the ctx does not contain the declaration block its own map renders to`);
+    expect(missing).toEqual([]);
+  });
+
+  // SYMMETRY, LAYER 2 — THE FACTS THEMSELVES, read off the map and looked for in the ctx TEXT.
+  // Layer 1 is defeated the moment the renderer itself loses a fact, because both sides then
+  // render the same loss; this layer does not go through the renderer at all. It is what catches
+  // a member that never reaches the declaration: give a map two bitfields overlapping at one
+  // offset and `declaredFields` keeps the first view and drops the alias, so the second member
+  // vanishes from the struct with no error anywhere.
+  //
+  // THE ONE FACT DELIBERATELY NOT CHECKED, so its absence is a decision and not an oversight: an
+  // array's OUTERMOST extent. `declare.ts` leaves it unsized on purpose (`u16 g[][1024]`) — it is
+  // the extent C lets a declaration omit, and omitting it keeps the synthesized decl compatible
+  // with a project's real one whatever its size. So `sbscope`'s `dims: [4, 1024]` reaches asmlift
+  // whole and reaches m2c as the inner `[1024]` alone. Measured rather than waved past: rendering
+  // that ctx with `[4][1024]` substituted leaves m2c's output BYTE-IDENTICAL on that row, so the
+  // residual is disclosed and costs nothing today — it is not a fact m2c is denied the use of.
+  test('every fact a map declares — symbol, member, inner extent — is spelled in the m2c ctx', () => {
+    const problems = syntheticCases()
+      .filter((c) => c.symbols)
+      .flatMap((c) => {
+        const ctx = c.ctx ?? '';
+        const spelled = (w: string): boolean => new RegExp(`\\b${w}\\b`).test(ctx);
+        return [...c.symbols!.values()]
+          .flat()
+          .flatMap((info) => [
+            ...(spelled(info.name) ? [] : [`${c.id}: map declares \`${info.name}\`, the m2c ctx does not`]),
+            ...[...(info.layout ?? []), ...(info.pointee?.layout ?? [])]
+              .filter((f) => !spelled(f.name))
+              .map((f) => `${c.id}: map declares member \`${info.name}.${f.name}\`, the m2c ctx does not`),
+            ...(arrayInnerExtents(info) ?? [])
+              .filter((d) => !new RegExp(`\\[\\s*${d}\\s*\\]`).test(ctx))
+              .map((d) => `${c.id}: map declares inner extent [${d}] of \`${info.name}\`, the m2c ctx does not`),
+          ]);
+      });
+    expect(problems).toEqual([]);
+  });
+
+  // AND THE SAME LOSS, ATTRIBUTED. The check above says a member is missing from one channel; this
+  // one says why, and it is the more accurate charge: `declaredFields` is the SHARED predicate —
+  // core's access rules gate on the same call the declaration renderer does — so a member it drops
+  // is a member NEITHER decompiler can name. That is not an asymmetry, it is an authored map the
+  // row cannot mean, and a synthetic map is hand-written so there is no excuse for authoring one.
+  // (A real project's map may legitimately carry union aliases; this rule is for authored data.)
+  test('every member an authored map declares survives the shared declaration predicate', () => {
+    const problems = mapped.flatMap((s) =>
+      [...s.symbols!.values()].flat().flatMap((info) =>
+        [[info.name, info.layout] as const, [`${info.name}'s pointee`, info.pointee?.layout] as const].flatMap(
+          ([where, layout]) => {
+            if (layout === undefined) {
+              return [];
+            }
+            const kept = new Set((declaredFields(layout) ?? []).map((f) => f.name));
+            return layout
+              .filter((f) => !kept.has(f.name))
+              .map((f) => `${s.sym}: ${where} declares \`${f.name}\`, which the declaration renderer drops`);
+          },
+        ),
+      ),
     );
-    expect(asymmetric).toEqual([]);
+    expect(problems).toEqual([]);
   });
 
   test("every map names only symbols and members its row's own src spells", () => {

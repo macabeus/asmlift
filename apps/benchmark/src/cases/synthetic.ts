@@ -19,8 +19,19 @@ import type { Case } from './types';
  *
  *  So the ctx is DERIVED rather than hand-written beside the map, through the same renderer
  *  asmlift's own candidates are declared with (`core/declare.ts`). One source of truth: whatever
- *  the map says, m2c is told, and an author cannot add a fact to one channel and forget the
- *  other. `authored-facts.test.ts` holds the two equal by symbol name.
+ *  the map says, m2c is told, and an author cannot add a fact to one channel and forget the other.
+ *
+ *  WHAT HOLDS THAT, precisely — the derivation is not self-enforcing, and an earlier draft of this
+ *  comment claimed it was. Deriving the ctx here rules out an author writing the two by hand and
+ *  letting them drift; it does NOT rule out this function handing the renderer worse input than the
+ *  map holds, which is a one-line edit and was measured to leave every gate green while the ctx
+ *  degraded to `extern u32 gPacked;`. `authored-facts.test.ts` is what rules that out, and it does
+ *  it in two layers because one is not enough: it re-derives the block from `Case.symbols` ITSELF
+ *  and requires the ctx to contain it verbatim, and — because a renderer that lost a fact would
+ *  lose it on both sides of that comparison — it separately looks for every symbol, every declared
+ *  member and every inner array extent in the ctx TEXT. The one map fact that deliberately does not
+ *  cross is an array's outermost extent, which `declare.ts` leaves unsized by design; measured on
+ *  `sbscope`, spelling it changes m2c's output not at all.
  *
  *  This is not the answer leaking to either side. The map is PROJECT data of the kind a real row
  *  carries off a manifest; the row's own source spelling — the hand-rolled shift, the byte
