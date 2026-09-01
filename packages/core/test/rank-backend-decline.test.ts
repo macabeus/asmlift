@@ -58,3 +58,63 @@ test('a backend that refuses every tree fails LOUD, naming the refusal', () => {
     /no spellable candidate for 'f': refusing backend/,
   );
 });
+
+// …AND IT MUST SAY WHICH SPELLING IT REFUSED. The PRE-FAN products (rank.ts PRE_FAN_PRODUCTS)
+// rewrite the TREE and then run this same fan over the result, so a backend refusal there deletes
+// the lever's whole half of the row's candidates. Reported under the bare function name it is
+// byte-identical to a refusal of the PRIMARY spelling, which sends the reader at the one spelling
+// that did not fail — the wrong-cause attribution the channel exists to remove.
+//
+// This is the ONE assertion on the `[lever]` line's content anywhere: the line has never printed
+// in a corpus run (0 throws over the 948 base trees), so nothing else pins what it says.
+test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the primary spelling', () => {
+  // `if (c) { *A = 1; } else { *B = 2; }` as agbcc cross-jumps it: both arms leave an ADDRESS and a
+  // VALUE in registers and the merged store follows the join — the shape `/unmerge` rewrites.
+  const asm = [
+    'f:',
+    '\tcmp\tr0, #0x0',
+    '\tbeq\t.L2',
+    '\tldr\tr1, .L8',
+    '\tmov\tr2, #0x1',
+    '\tb\t.L3',
+    '.L2:',
+    '\tldr\tr1, .L9',
+    '\tmov\tr2, #0x2',
+    '.L3:',
+    '\tstr\tr2, [r1]',
+    '\tbx\tlr',
+    '.L8:',
+    '\t.word\t0x03001000',
+    '.L9:',
+    '\t.word\t0x03002000',
+  ].join('\n');
+
+  const plain = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.label);
+  const unmerged = plain.filter((l) => l.includes('/unmerge'));
+  expect(unmerged.length).toBeGreaterThan(0); // the fixture really reaches the pre-fan product
+
+  // a backend that emits normally but refuses exactly the trees the pre-fan product produced
+  const refused = new Set(
+    enumerateCandidates('f', asm, ARMV4T_AGBCC)
+      .filter((c) => c.label.includes('/unmerge'))
+      .map((c) => c.source),
+  );
+  const seen: string[] = [];
+  const kept = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
+    backend: {
+      ...cBackend,
+      emit: (sfn) => {
+        const source = cBackend.emit(sfn);
+        if (refused.has(source)) {
+          throw new Error('refusing backend: no spelling for the rewritten tree');
+        }
+        return source;
+      },
+    },
+    onLeverError: (label) => seen.push(label),
+  }).map((c) => c.label);
+
+  expect(kept.some((l) => l.includes('/unmerge'))).toBe(false); // the half really was deleted
+  expect(seen.length).toBeGreaterThan(0);
+  expect(seen.every((l) => l.includes('/unmerge'))).toBe(true); // …and every report names it
+});

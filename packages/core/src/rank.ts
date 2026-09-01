@@ -1233,7 +1233,12 @@ export function enumerateCandidates(
   // a reviewer. The same argument l3/ast.ts's `walkExprs` header makes for its own shape, and it
   // counts for more here: a lever reading `fn` would not misprint a candidate, it would DELETE one,
   // and nothing in the harness reports a candidate that was never enumerated.
-  const fanOut = (sfn: SFn): Spelling[] => {
+  // `leverLabel` names the SPELLING this call is fanning, and it is a diagnostic argument only: it
+  // reaches `onLeverError` and nothing else, so the invariant the parameter list states above —
+  // every spelling is a pure function of the tree and this call's own constants — is untouched by
+  // it. It exists because the pre-fan products call this on a REWRITTEN tree, where a refusal of
+  // the primary spelling is a refusal of the rewrite, not of the row's own spelling.
+  const fanOut = (sfn: SFn, leverLabel = ''): Spelling[] => {
     // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
     // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
@@ -1253,7 +1258,7 @@ export function enumerateCandidates(
       spellings.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {
       lastEmitError = e;
-      opts.onLeverError?.(name, e instanceof Error ? e.message.split('\n')[0] : String(e));
+      opts.onLeverError?.(name + leverLabel, e instanceof Error ? e.message.split('\n')[0] : String(e));
       return spellings;
     }
     // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
@@ -2104,11 +2109,22 @@ export function enumerateCandidates(
               // `fanOut` writes the shared `lastEmitError` when the PRIMARY emit throws, and that
               // is what the row's "no spellable candidate" refusal reports. A backend refusal on a
               // REWRITTEN tree is not a refusal of the primary spelling, so it must not be able to
-              // become the row's stated cause — save and restore around the call rather than let
-              // the wrong cause outlive it. The lever channel below still reports it, labelled.
+              // become the row's stated cause — saved and restored around the call, in a `finally`
+              // so a throw cannot leak it either, rather than letting the wrong cause outlive it.
+              //
+              // It is reported instead through `onLeverError` under `pf.suffix`, which is what
+              // `fanOut`'s second argument is for. That labelling is the other half of the same
+              // rule and it was missing: a primary emit refusal does not THROW — `fanOut` records
+              // it and returns — so the `catch` below never sees it, and reported under the bare
+              // function name it read exactly like a refusal of the primary spelling while the
+              // lever's whole half of the fan was deleted.
               const before = lastEmitError;
-              const fanned = fanOut(made);
-              lastEmitError = before;
+              let fanned: Spelling[];
+              try {
+                fanned = fanOut(made, pf.suffix);
+              } finally {
+                lastEmitError = before;
+              }
               for (const sp of fanned) {
                 spellings.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
               }
