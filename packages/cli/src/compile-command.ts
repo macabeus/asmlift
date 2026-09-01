@@ -880,7 +880,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     h.update(cwd);
     // THIS MODULE'S OWN BYTES. The bench pipeline hashes its harness code (`compile/agbcc.ts`,
     // `compile/util.ts`) because that code shapes what the compiler is handed; this one shapes it
-    // too, and it shapes something the probe object structurally cannot see — 77% of what a warm
+    // too, and it shapes something the probe object structurally cannot see — most of what a warm
     // store SERVES is a stored REJECTION, and `verdict()` above builds the text that is stored and
     // then published as `ranked.dropped[].error`. The probe only ever exercises the success path,
     // so perturbing that text left the namespace unmoved and the store replayed the old spelling.
@@ -1098,7 +1098,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     }
     if (cache.mode !== 'off' && storableRejection(r)) {
       // verifyFail FIRST: a STORED OBJECT for a TU that no longer compiles is a mismatch, and it
-      // is the direction that nothing audited — 77% of a warm store's served answers are
+      // is the direction that nothing audited — 84% of a warm bench store's served answers are
       // rejections and verify mode never looked at one.
       cache.verifyFail(key, symbol, r.err);
       cache.putFail(key, symbol, r.err);

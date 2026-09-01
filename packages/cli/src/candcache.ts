@@ -249,9 +249,9 @@ function report(line: string, counter: 'mismatch' | 'objectCorrupt' = 'mismatch'
 }
 
 // ---------------------------------------------------------------------------------------------
-// The CAP. It bounds what the store COSTS, which is not what `objects/` weighs: 77% of a warm
-// store's entries are cached REJECTIONS, written straight into `ns/`, and on APFS a 200-byte
-// `.fail` costs a whole allocation block. Measured on one full-bench store: `objects/` 7.57 MB
+// The CAP. It bounds what the store COSTS, which is not what `objects/` weighs: most of a store's
+// ENTRIES are cached REJECTIONS, written straight into `ns/` — 21,027 of the 29,244 one full
+// `pnpm bench run` writes, 72% — and on APFS a 200-byte `.fail` costs a whole allocation block. Measured on one full-bench store: `objects/` 7.57 MB
 // against `du -sm` 156 MB — a cap counting only the first sees 4.9% of the cost and fires after
 // roughly 540 bench runs. So the cost is the distinct object bytes PLUS one block per `ns/` entry.
 const BLOCK_BYTES = 4096;
@@ -819,7 +819,7 @@ function reapUnlinked(): number {
 }
 
 /** What the store costs on disk: the distinct object bytes plus one allocation block per `ns/`
- *  entry. The `.fail` half is 77% of all entries and weighs nothing logically — it is inodes and
+ *  entry. The `.fail` half is most of the entries and weighs nothing logically — it is inodes and
  *  blocks, and that is what runs a disk out. */
 function storeCost(): { bytes: number; entries: number } {
   let bytes = 0;
@@ -1007,7 +1007,8 @@ export interface CandCache {
   verify(key: string, symbol: string, objPath: string): void;
   /** verify mode only, fresh compile was a DETERMINISTIC REJECTION: a stored OBJECT for this key
    *  is a mismatch — it would have been scored as a candidate that no longer compiles. This is
-   *  the half of the store that is 77% of what a warm run is served. */
+   *  the half of the store that dominates what a warm run is SERVED: 30,332 of 36,025 answers,
+   *  84%, on one full `pnpm bench run`. */
   verifyFail(key: string, symbol: string, message: string): void;
 }
 
@@ -1242,7 +1243,7 @@ export function candCache(label: string, stamp: () => string): CandCache {
     return 'sound';
   };
 
-  /** The same for a fresh DETERMINISTIC REJECTION. This half is 77% of what a warm store serves. */
+  /** The same for a fresh DETERMINISTIC REJECTION — 84% of what a warm bench store serves. */
   const auditRejection = (n: string, key: string, symbol: string, message: string): AuditVerdict => {
     const found = lookup(n, key, symbol);
     if (found === undefined) {

@@ -157,10 +157,11 @@ switch (command) {
       // that prints `mismatch` has served bytes a fresh compile disagrees with, and the store's
       // whole namespace is suspect. An `on` shard reports the same way: it compiles a sampled
       // fraction of the keys it serves anyway and audits them, and the `sample=…%/seed=…` field
-      // says at what rate — a bench run is where the negative half of the store (77% of the
-      // entries, and 0 of the LoadBGTilemapData fan) gets sampled at all. Absent only when the cache is off, which is no longer the
-      // default — an unset ASMLIFT_CANDCACHE now serves, so a shard with no line here was turned
-      // off on purpose (ASMLIFT_CANDCACHE=0/off/empty, ASMLIFT_BENCH_CACHE=0, or a refusal).
+      // says at what rate — a bench run is where the negative half of the store (84% of what this
+      // run's shards were served, and 0 of the LoadBGTilemapData fan) gets sampled at all. Absent
+      // only when the cache is off, which is not the default — an unset ASMLIFT_CANDCACHE serves,
+      // so a shard with no line here was turned off on purpose (ASMLIFT_CANDCACHE=0/off/empty,
+      // ASMLIFT_BENCH_CACHE=0, or a refusal).
       if (cacheMode() !== 'off') {
         const stats = cacheStats();
         if (Object.keys(stats).length > 0) {

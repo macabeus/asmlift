@@ -157,7 +157,7 @@ describe('a sampled key is AUDITED, not silently re-stored', () => {
   });
 
   test('OUTCOME direction: a stored REJECTION whose TU now compiles — the one that drops a spelling', async () => {
-    // 77% of a warm store's served answers are rejections. Under `on` a stale one throws for a
+    // Most of a warm store's served answers are rejections. Under `on` a stale one throws for a
     // candidate that compiles, and the spelling leaves the row's fan with nothing said.
     const root = scratch();
     await load(seedEnv(root), (m) =>

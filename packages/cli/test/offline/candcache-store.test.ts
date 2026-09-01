@@ -327,7 +327,7 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     });
   });
 
-  test('the cap counts the NEGATIVE entries too — they are 77% of the store and weighed zero', async () => {
+  test('the cap counts the NEGATIVE entries too — they are most of the store and weighed zero', async () => {
     // MEASURED on one full-bench store: `objects/` 7.57 MB against `du -sm` 156 MB, because
     // `putFail` writes straight into `ns/` and a 200-byte `.fail` costs a whole allocation block.
     // A cap counting only `objects/` saw 4.9% of the cost and would fire after ~540 bench runs.

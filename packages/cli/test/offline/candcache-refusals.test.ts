@@ -307,8 +307,8 @@ describe('verify mode audits BOTH directions — the outcome, not only the bytes
 
   test('a stored REJECTION against a fresh OBJECT is a mismatch — the direction that drops a spelling', async () => {
     // Served under `on`, a stale rejection throws for a candidate that compiles: the spelling
-    // leaves the row's fan silently, and it might have been the match. 77% of a warm store's
-    // served answers are rejections, and verify mode used to look at none of them.
+    // leaves the row's fan silently, and it might have been the match. Most of a warm store's
+    // served answers are rejections — 84% of the 36,025 one full `pnpm bench run` was served.
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed: c.c:3: syntax error');
@@ -344,7 +344,7 @@ describe('verify mode audits BOTH directions — the outcome, not only the bytes
     expect(served).toBeInstanceOf(Error);
   });
 
-  test('an agreeing REJECTION is COUNTED — an audit that skips 77% of the store is not an audit', async () => {
+  test('an agreeing REJECTION is COUNTED — an audit that skips the negative half is not an audit', async () => {
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed: c.c:3: syntax error');
