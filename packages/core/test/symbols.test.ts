@@ -185,6 +185,12 @@ describe('declaration shapes (P2)', () => {
   //
   // `gRows` is a rank-2 u16 table (`u16 g[4][0x400]`, row stride 0x800 bytes) indexed by two
   // parameters: `a0 << 0xb` is the row, `a1 << 0x1` the element.
+  //
+  // AND THIS BODY IS THE CAST SPELLING'S OWN agbcc OUTPUT, instruction for instruction — compiling
+  // `*(u16 *)((a << 11) + (b << 1) + (u32)&gRows)` gives exactly it, while `gRows[a][b]` loads the
+  // pool word FIRST (`ldr r2, .L3` ahead of both shifts) and sums into a different register. So
+  // the input below is evidence that a ROW was computed and is not evidence about which of the two
+  // sources computed it, which is why the recovery is `/flat-rank`'s ON arm and not a default.
   const ROW_AND_ELEM =
     '\tlsl\tr0, r0, #0xb\n\tlsl\tr1, r1, #0x1\n\tadd\tr0, r0, r1\n' +
     '\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03000900\n';
@@ -195,6 +201,39 @@ describe('declaration shapes (P2)', () => {
     const src = run('f', ROW_AND_ELEM, rows([4, 1024]));
     expect(src).toContain('gRows[a0][a1]');
     expect(src).not.toContain('&gRows'); // not the cast fallback the flat residual used to take
+  });
+
+  // …AND THE SPELLING IT DISPLACES IS STILL IN THE FAN. The residual says a ROW was computed; it
+  // does not say which of the two sources that both produce it was written. Compiled, the cast
+  // form differs from `g[a][b]` only in where the pool load sits (agbcc, kmc, mwcc) and is
+  // byte-identical under IDO — so a default here would delete a spelling nothing refutes, and the
+  // recovery is enumerated as `/flat-rank`'s ON arm with the differ refereeing.
+  test('the displaced flat spelling is enumerated as the `/flat-rank` arm', () => {
+    const cands = enumerateCandidates('f', asmOf('f', ROW_AND_ELEM), ARMV4T_AGBCC, { symbols: rows([4, 1024]) });
+    const flat = cands.filter((c) => c.label.includes('/flat-rank'));
+    expect(flat.length).toBeGreaterThan(0);
+    for (const c of flat) {
+      expect(c.source).toContain('*(u16 *)((a0 << 11) + (a1 << 1) + (u32)&gRows)');
+      expect(c.source).not.toContain('gRows[a0][a1]');
+    }
+    // …and the recovered spelling is still the one the unsuffixed candidates carry
+    const plain = cands.filter((c) => !c.label.includes('/flat-rank') && !c.label.includes('/raw-globals'));
+    expect(plain.length).toBeGreaterThan(0);
+    for (const c of plain) {
+      expect(c.source).toContain('gRows[a0][a1]');
+    }
+  });
+
+  test('the axis is INERT where the recovery never fires — no arm, no fan', () => {
+    // The gate is a superset (it asks whether the FUNCTION names a multidimensional array, not
+    // whether any residual carries a row term), so the flat spelling's own codegen still admits
+    // the axis — and both arms then structure the identical tree, which the tree dedup collapses.
+    // Pinned because an axis that doubled the fan for nothing would be a price with no question.
+    const flat =
+      '\tlsl\tr0, r0, #0xa\n\tadd\tr0, r0, r1\n\tlsl\tr0, r0, #0x1\n' +
+      '\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03000900\n';
+    const cands = enumerateCandidates('f', asmOf('f', flat), ARMV4T_AGBCC, { symbols: rows([4, 1024]) });
+    expect(cands.filter((c) => c.label.includes('/flat-rank'))).toHaveLength(0);
   });
 
   test('the recovery is INERT without the rank — a rank-1 declaration keeps the flat spelling', () => {

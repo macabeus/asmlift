@@ -206,6 +206,14 @@ function bareArrayElement(si: SymbolInfo, width: number, signed: boolean): boole
 //
 // The recovered address is the SAME address either way (C scales `[r]` by the declared row size,
 // which is the constant the arithmetic multiplied by), so this is a spelling, not a re-addressing.
+//
+// AND IT IS AN AXIS, NOT A DEFAULT — the evidence above says the residual carries a ROW, and it
+// does not say which of the two spellings that reach it wrote one. The cast form this replaces
+// (`*(T *)((r<<11) + (i<<1) + (u32)&g)`) compiles to the SAME shift structure and differs only in
+// scheduling on agbcc, kmc and mwcc, and is byte-identical on IDO — where the flat sum is
+// distributed into those same separate scales, so the premise above is a per-compiler fact and not
+// a universal one. `spellDeclaredSubscripts` is the switch and `/flat-rank` the arm; see that
+// option for the compiled table.
 
 /** `residual` as a list of additively combined terms with their sign — `a + (b - c)` is
  *  `[+a, +b, -c]`. Only `+`/`-` are opened; anything else is one opaque term. */
@@ -353,6 +361,10 @@ interface SymRenderCtx {
   /** may {@link ptrMemberElement} spell a whole-element subscript through a pointer member — the
    *  `/no-ptr-elem` arm's OFF switch, off the `spellPtrMemberElements` structure option. */
   ptrElements: boolean;
+  /** may {@link declaredSubscripts} recover a multidimensional global's declared subscripts out of
+   *  the byte residual — the `/flat-rank` arm's OFF switch, off the `spellDeclaredSubscripts`
+   *  structure option. */
+  declRank: boolean;
   /** The members a symbol's declaration seats — a struct global's own, or a pointer global's
    *  pointee's — MEMOIZED per symbol. `declaredFields` validates every member and returns a fresh
    *  sorted copy on every call, and `isPtrValue` asks it for both operands of every binary node
@@ -770,8 +782,9 @@ function memAccess(
   }
   // …and the MULTIDIMENSIONAL bare-name spelling, which needs the byte terms globalOf's division
   // into elements has already merged: `g[r][i]`, where a term at the declared ROW stride is `r`.
-  // Tried before the flat spellings because those cannot express a recovered row at all.
-  const gbb = sym ? globalByteBase(baseExpr) : null;
+  // Tried before the flat spellings because those cannot express a recovered row at all — and off
+  // under `/flat-rank`, which is what puts those flat spellings back in the fan for the differ.
+  const gbb = sym?.declRank ? globalByteBase(baseExpr) : null;
   const siMulti = gbb ? sym!.info(gbb.name) : undefined;
   const multi = siMulti ? declaredSubscripts(siMulti, gbb!.residual, width, signed) : null;
   if (multi) {
@@ -1235,6 +1248,28 @@ export interface StructureOptions {
   // per-function knowledge the asm does not carry, so both are emitted and the differ referees.
   // Only the map declares a pointee width, so with no `symbols` this is normalized to false.
   spellPtrMemberElements?: boolean;
+  // Recover a multidimensional array global's DECLARED subscripts (`g[r][i]`) from a byte residual
+  // carrying a term at the declared ROW stride, rather than spelling the whole residual as the
+  // `*(T *)(… + (u32)&g)` cast it replaces. On by default; rank.ts enumerates the OFF spelling as
+  // the `/flat-rank` axis.
+  //
+  // IT IS AN AXIS AND NOT A DEFAULT BECAUSE THE ASM DOES NOT DETERMINE IT, and the evidence that
+  // it does not is the same compile the recovery's own premise rests on, read against the spelling
+  // the recovery DISPLACES rather than against the flat one it refuses. For `u16 g[4][0x400]`:
+  //
+  //   agbcc  g[a][b]  lsl #0xb ; lsl #0x1 ; add ; add   |  *(u16 *)((a<<11)+(b<<1)+(u32)&g)
+  //                   md5 f58a694f…                     |  md5 051bf506…   DIFFERENT, and the
+  //                   difference is WHERE THE POOL LOAD SITS — the shift structure the recovery
+  //                   reads is IDENTICAL in both, so the residual is evidence about the row and
+  //                   NOT about which of these two spellings wrote it.
+  //   kmc / mwcc      the same: separate scales both sides, differing only in scheduling.
+  //   IDO             the two are BYTE-IDENTICAL (md5 2b55b493…) — and IDO also distributes the
+  //                   FLAT sum into the same separate scales, so on that compiler the recovery's
+  //                   own premise is false and the flat spelling reaches it too.
+  //
+  // So both are emitted and the differ referees, exactly as for `/no-ptr-elem`. Only the map
+  // declares a rank, so with no `symbols` this is normalized to false.
+  spellDeclaredSubscripts?: boolean;
   // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
   // (a store to a different named global), instead of caching it in a local. Off by default;
   // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
@@ -1363,6 +1398,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     littleEndian = true,
     spellBitfieldMembers: bitfieldSpellingWanted = true,
     spellPtrMemberElements: ptrElementSpellingWanted = true,
+    spellDeclaredSubscripts: declRankSpellingWanted = true,
     rereadGlobals = false,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
@@ -1563,6 +1599,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         info: (n) => symbols.get(n),
         noteGlobal: (n, t) => shapedGlobalTypes.set(n, t),
         ptrElements: ptrElementSpellingWanted,
+        declRank: declRankSpellingWanted,
         fieldsOf: (n) => {
           const hit = declaredFieldCache.get(n);
           if (hit !== undefined) {

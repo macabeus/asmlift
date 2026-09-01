@@ -62,7 +62,7 @@ import {
   hasMergeFeedHome,
 } from './structure/analysis';
 import { hasParamRootedMerge } from './structure/structure';
-import { type SymbolInfo, type SymbolMap, isPtrField, symbolsByName } from './symbols';
+import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
 import { C_TYPEDEFS, type TargetDescription, structureOptionsFor } from './target';
 
 /** The STRUCTURING AXES — the boolean candidate dimensions crossed into every enumeration
@@ -878,11 +878,43 @@ export function enumerateCandidates(
   // 2×2 cross: the fourth point costs another quarter of the whole fan — the anchor dimension
   // multiplies everything below it — and no row has been shown to need it.
   const senseAnchor = [
-    { suffix: '', sense: defSense, anchor: false, entry: false, bitfields: true, ptrElems: true },
-    { suffix: '/flip-branch', sense: !defSense, anchor: false, entry: false, bitfields: true, ptrElems: true },
-    { suffix: '/defsite', sense: defSense, anchor: true, entry: false, bitfields: true, ptrElems: true },
-    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, entry: false, bitfields: true, ptrElems: true },
-    { suffix: '/defsite/loop-entry', sense: defSense, anchor: true, entry: true, bitfields: true, ptrElems: true },
+    { suffix: '', sense: defSense, anchor: false, entry: false, bitfields: true, ptrElems: true, declRank: true },
+    {
+      suffix: '/flip-branch',
+      sense: !defSense,
+      anchor: false,
+      entry: false,
+      bitfields: true,
+      ptrElems: true,
+      declRank: true,
+    },
+    {
+      suffix: '/defsite',
+      sense: defSense,
+      anchor: true,
+      entry: false,
+      bitfields: true,
+      ptrElems: true,
+      declRank: true,
+    },
+    {
+      suffix: '/flip-branch/defsite',
+      sense: !defSense,
+      anchor: true,
+      entry: false,
+      bitfields: true,
+      ptrElems: true,
+      declRank: true,
+    },
+    {
+      suffix: '/defsite/loop-entry',
+      sense: defSense,
+      anchor: true,
+      entry: true,
+      bitfields: true,
+      ptrElems: true,
+      declRank: true,
+    },
     {
       suffix: '/flip-branch/defsite/loop-entry',
       sense: !defSense,
@@ -890,6 +922,7 @@ export function enumerateCandidates(
       entry: true,
       bitfields: true,
       ptrElems: true,
+      declRank: true,
     },
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
@@ -1046,6 +1079,32 @@ export function enumerateCandidates(
   const ptrElemCands = fnHasSizedPtrFields
     ? [...bitfieldCands, ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/no-ptr-elem`, ptrElems: false }))]
     : bitfieldCands;
+  // `/flat-rank` — spell a multidimensional global's access as the FLAT byte arithmetic
+  // (`*(u16 *)((r << 11) + (i << 1) + (u32)&g)`) where the default recovers the map's declared
+  // subscripts (`g[r][i]`). The recovery's evidence is a term at the declared ROW stride, and that
+  // is evidence the residual carries a row — NOT evidence about which of the two spellings that
+  // both produce it was written. Compiled (structure.ts `spellDeclaredSubscripts` carries the
+  // table): the two differ only in where the pool load sits under agbcc, kmc and mwcc, and are
+  // BYTE-IDENTICAL under IDO, which also distributes the flat sum into the same separate scales.
+  // So the asm underdetermines it on every compiler measured, and the differ referees — the same
+  // posture as `/no-ptr-elem` and `/no-bitfield`.
+  //
+  // THE GATE IS ASKED OF THIS FUNCTION, not of the map, for `/no-ptr-elem`'s reason: a declared
+  // subscript is only ever recovered off a global the function NAMES, and every named global
+  // reaches the IR as a `gaddr`. `arrayInnerExtents` is the recovery's own rank test, called here
+  // rather than re-spelled, so the gate cannot be narrower than the rule it gates. It is still a
+  // superset — it does not know the access WIDTH, and it cannot know whether any residual carries
+  // a row term — so where the axis changes nothing the tree dedup below collapses the pair and the
+  // fan does not grow. 9 of the 948 corpus rows name such a symbol at all.
+  const fnNamesMultidimArray =
+    byName !== undefined &&
+    [...bareGlobalSymbols(probe).keys()].some((n) => {
+      const i = byName.get(n);
+      return i !== undefined && i.shape === 'array' && (arrayInnerExtents(i)?.length ?? 0) > 0;
+    });
+  const declRankCands = fnNamesMultidimArray
+    ? [...ptrElemCands, ...ptrElemCands.map((s) => ({ ...s, suffix: `${s.suffix}/flat-rank`, declRank: false }))]
+    : ptrElemCands;
   // The axis chain, derived from STRUCTURING_AXES: each admitted axis doubles the list, OFF arm
   // first — order is load-bearing for the dropped-primary skip below (every OFF sibling
   // enumerates before its ON twin, so a twin's stripped-key lookup always finds a sibling that
@@ -1054,7 +1113,7 @@ export function enumerateCandidates(
   // a pair wherever the axis changed nothing.
   const probeDefs = defOpMap(probe);
   type AxisCand = (typeof ptrElemCands)[number] & Record<StructuringAxis['flag'], boolean>;
-  let axisCands: AxisCand[] = ptrElemCands.map((s) => ({
+  let axisCands: AxisCand[] = declRankCands.map((s) => ({
     ...s,
     reread: false,
     inplace: false,
@@ -1808,8 +1867,10 @@ export function enumerateCandidates(
     // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
     // …and `/no-ptr-elem` names a spelling only the MAP makes available, for the same reason:
     // structure() normalizes `spellPtrMemberElements` to false without `symbols`, so both arms
-    // structure the identical tree on the raw variant.
-    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields && s.ptrElems);
+    // structure the identical tree on the raw variant. `/flat-rank` is the third: the declared
+    // subscripts come off the symbol RENDER CONTEXT, which structure() builds only from a map, so
+    // its OFF arm is the raw variant's only spelling already.
+    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields && s.ptrElems && s.declRank);
     const treeOwnedFold = treeOwnedIn(sv.symbols);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
@@ -1961,6 +2022,7 @@ export function enumerateCandidates(
               anchorLoopEntryConsts: s.entry,
               spellBitfieldMembers: s.bitfields,
               spellPtrMemberElements: s.ptrElems,
+              spellDeclaredSubscripts: s.declRank,
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
             });
           } catch (e) {
@@ -1970,6 +2032,7 @@ export function enumerateCandidates(
               !s.join &&
               s.bitfields &&
               s.ptrElems &&
+              s.declRank &&
               STRUCTURING_AXES.every((ax) => !s[ax.flag])
             ) {
               throw e; // the base lift's base axes keep their behavior: a failure aborts the row

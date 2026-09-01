@@ -39,6 +39,9 @@ const POW2_FLAT = `${DECLS}u16 f(u32 a, u32 b) { return gRows[0][(a << 10) + b];
 // A NON-power-of-two row stride (36 bytes) — kleod's own `gUnk_0818B8E0[6][9]` shape.
 const ODD_TWO = `${DECLS}u32 f(u32 a, u32 b) { return gSmall[a][b]; }\n`;
 const ODD_FLAT = `${DECLS}u32 f(u32 a, u32 b) { return gSmall[0][a * 9 + b]; }\n`;
+// …and the spelling the recovery DISPLACES, which is neither of those: the honest byte cast the
+// flat residual used to take. This is the `/flat-rank` arm's source.
+const POW2_CAST = `${DECLS}u16 f(u32 a, u32 b) { return *(u16 *)((a << 11) + (b << 1) + (u32)&gRows); }\n`;
 
 describe.runIf(HAVE)('the DECLARED-SUBSCRIPT premise (checkout-gated)', () => {
   const hex = new Map<string, string>();
@@ -56,6 +59,7 @@ describe.runIf(HAVE)('the DECLARED-SUBSCRIPT premise (checkout-gated)', () => {
       ['pow2-flat', POW2_FLAT],
       ['odd-two', ODD_TWO],
       ['odd-flat', ODD_FLAT],
+      ['pow2-cast', POW2_CAST],
     ] as const) {
       const obj = compile(src, 'f', 'c');
       const bin = join(dir, `${name}.bin`);
@@ -68,7 +72,7 @@ describe.runIf(HAVE)('the DECLARED-SUBSCRIPT premise (checkout-gated)', () => {
   }, 240_000);
 
   test('all four spellings really compiled — the pairs below are not comparing two undefineds', () => {
-    for (const k of ['pow2-two', 'pow2-flat', 'odd-two', 'odd-flat']) {
+    for (const k of ['pow2-two', 'pow2-flat', 'odd-two', 'odd-flat', 'pow2-cast']) {
       expect(hex.get(k), k).toMatch(/^[0-9a-f]{16,}$/);
     }
   });
@@ -78,6 +82,22 @@ describe.runIf(HAVE)('the DECLARED-SUBSCRIPT premise (checkout-gated)', () => {
     // the flat sum scales once (`lsl #0xa; add; lsl #0x1`). The byte residual the recovery reads
     // carries that difference, which is what makes it evidence rather than a preference.
     expect(hex.get('pow2-two')).not.toBe(hex.get('pow2-flat'));
+  });
+
+  // THE PAIR THAT MAKES THE RECOVERY AN AXIS RATHER THAN A DEFAULT, and it is the pair the two
+  // tests above do not cover. The evidence the recovery reads is a term at the ROW stride, and the
+  // cast spelling produces one too — its agbcc output is
+  //
+  //     lsl r0, r0, #0xb ; lsl r1, r1, #0x1 ; add r0, r0, r1 ; ldr r1, .L3 ; add ; ldrh
+  //
+  // the same separate scales, differing from `gRows[a][b]` only in where the pool load sits and
+  // which registers carry the sum. So the residual says a row was computed and says nothing about
+  // which source wrote it — while the two are still DIFFERENT programs, which is what makes the
+  // question one the differ can answer and a default cannot.
+  test('the recovered spelling and the CAST it displaces differ — a refereeable question, so both are enumerated', () => {
+    expect(hex.get('pow2-cast')).not.toBe(hex.get('pow2-two'));
+    // …and it is not the flat sum either: three distinct programs, one asm shape shared by two.
+    expect(hex.get('pow2-cast')).not.toBe(hex.get('pow2-flat'));
   });
 
   test('at a NON-power-of-two row stride they are IDENTICAL — so nothing referees, and the element path refuses', () => {
