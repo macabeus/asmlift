@@ -1238,6 +1238,15 @@ export function enumerateCandidates(
   // every spelling is a pure function of the tree and this call's own constants — is untouched by
   // it. It exists because the pre-fan products call this on a REWRITTEN tree, where a refusal of
   // the primary spelling is a refusal of the rewrite, not of the row's own spelling.
+  //
+  // IT PREFIXES EVERY `onLeverError` IN THIS FUNCTION, not just the primary emit's, and that is
+  // the whole point rather than a detail: every one of them is reachable from both fans, and the
+  // suffix each already carries names a LEVER, which on a pre-fan tree is a lever applied to the
+  // rewrite. Reported without this prefix, a refusal of `/unmerge/volatile` reads as a refusal of
+  // `/volatile` — a spelling that did not fail and is still in the fan — which is the same
+  // wrong-cause attribution the argument was added to remove, one lever further down. The order
+  // is the candidate labels' own (`${pf.suffix}${sp.suffix}`), so a reported label and an
+  // enumerated one name the same spelling the same way.
   const fanOut = (sfn: SFn, leverLabel = ''): Spelling[] => {
     // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
@@ -1382,7 +1391,7 @@ export function enumerateCandidates(
               }
             } catch (e) {
               opts.onLeverError?.(
-                name + suffix + shapeSuffix,
+                name + leverLabel + suffix + shapeSuffix,
                 e instanceof Error ? e.message.split('\n')[0] : String(e),
               );
             }
@@ -1394,7 +1403,7 @@ export function enumerateCandidates(
         // so without this a lever that fails here vanishes with no trace — indistinguishable
         // from one that correctly declined, which is exactly the hidden failure
         // DroppedCandidate exists to surface.
-        opts.onLeverError?.(name + suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
       }
     };
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
@@ -1411,7 +1420,7 @@ export function enumerateCandidates(
       } catch (e) {
         // the error label falls back to the full subset — the fired set is unknown mid-throw
         const label = subset.map((x) => x.suffix).join('');
-        opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
       }
     }
     respell('/argbase', () => materializeArgBases(sfn));
@@ -1603,7 +1612,7 @@ export function enumerateCandidates(
         const base = from();
         variants = base ? variantsOf(base) : [];
       } catch (e) {
-        opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
         return;
       }
       for (const c of variants) {
