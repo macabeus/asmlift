@@ -1,13 +1,12 @@
 // WHICH asmlift produced a number, sampled WHERE the number was produced.
 //
-// The published artifact has carried `meta.asmlift = { commit, dirty }` for a long time, and
-// `report/stale-check.ts` refuses to publish anything whose `dirty` is not `false`. That check was
-// sampled at MERGE time only, and merge runs minutes after the last case — so a run made against a
-// modified working tree that was reverted before `bench:merge` published as `dirty: false`, with
-// nothing anywhere saying the numbers came from code no commit holds. That is the exact shape the
-// standing rule forbids: a silent wrong answer where a loud failure belongs. It is not theoretical
-// — two agents sharing one worktree produced it, one of them enumerating candidates while the
-// other's uncommitted patch sat in `packages/core`.
+// The artifact carries `meta.asmlift = { commit, dirty }` and `report/stale-check.ts` refuses to
+// publish anything whose `dirty` is not `false`. Sampled at MERGE time alone that says nothing:
+// merge runs minutes after the last case, so a run made against a modified working tree that was
+// reverted before `bench:merge` publishes as `dirty: false`, with nothing anywhere saying the
+// numbers came from code no commit holds — a silent wrong answer where a loud failure belongs.
+// Two agents sharing one worktree are enough to produce it, one enumerating candidates while the
+// other's uncommitted patch sits in `packages/core`.
 //
 // So the RUN stamps its own provenance into each tier file (`run/runner.ts` benchMeta) and
 // `report/merge.ts` refuses to merge a tier whose stamp disagrees with merge time. The two
@@ -16,8 +15,8 @@
 // STICKY, and that is the point rather than an optimization: a mutation that appears and is
 // reverted mid-run must still be reported, so once a sample sees a dirty tree this process reports
 // dirty for the rest of its life. Sampling is rate-limited (`flush()` runs after every case, and
-// `git status` is ~35ms) — the rate limit can miss a mutation that lands and reverts inside one
-// window, which is why this is a detector and not a proof.
+// `git status` costs tens of milliseconds) — the rate limit can miss a mutation that lands and
+// reverts inside one window, which is why this is a detector and not a proof.
 import { spawnSync } from 'node:child_process';
 
 import { REPO_ROOT } from './config';
@@ -77,13 +76,12 @@ export function resetProvenanceSample(): void {
  *  The default `bench run` path fans every tier across child processes, and only those children
  *  are alive while the numbers are made: each samples git after every case, so a tree that is
  *  mutated and reverted mid-run is recorded in the part files, at a resolution the parent process
- *  cannot match. `stitch` used to drop those stamps and re-sample in the parent, whose only sample
- *  was the one `benchMeta` took after the last child had exited — the same instant as
- *  `bench:merge`'s, so the two agreed by construction and the run-time check compared a
- *  measurement with itself. Stitching therefore COMBINES the parts' stamps. (`orchestrate` now
- *  also samples before the first child spawns, so the parent's own sticky window covers the run
- *  rather than only its end; that is a second observer, not a substitute for the parts' — it still
- *  cannot see a mutation that appears and reverts entirely between its two samples.)
+ *  cannot match. Stitching therefore COMBINES the parts' stamps rather than re-sampling: a parent
+ *  that only sampled after the last child exited would be sampling the same instant `bench:merge`
+ *  does, and the run-time check would be comparing a measurement with itself. (`orchestrate` also
+ *  samples before the first child spawns, so the parent's own sticky window covers the run; that
+ *  is a second observer, not a substitute for the parts' — it still cannot see a mutation that
+ *  appears and reverts entirely between its two samples.)
  *
  *  Combining is an OR over `dirty`, plus one more rule: shard stamps that disagree about HEAD mean
  *  the code moved while the tier was being measured, so no single commit holds those numbers —

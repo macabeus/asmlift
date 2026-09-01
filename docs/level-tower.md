@@ -342,19 +342,18 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `p0 = (u8 *)&gStageData;` sinking to its own first use is the whole of the difference. Head
   placement scores worse than not hoisting at all, read off each row's own `[score]` table —
   head 5 · inline 2 · sunk 0 there, and head 9 · inline 2 · sunk 0 on the `synthetic:foldsink`
-  isolate. So the roster offers both and the differ referees. NEITHER ROW IS BRACKETED ANY MORE,
-  and this paragraph used to say the sunk one was: re-ablated at this commit, `synthetic:foldsink`
-  and `sa3:sub_803213C` are MATCH with the sunk row removed, with the head row removed and with
-  both removed, and `kleod:ProcessInputAndUpdateEntities` is 248 either way where this note's
-  2-point return was measured as 369 → 367. `synthetic:basecell` never was the bracket — both rows
-  emit the identical source there and `seen` collapses the sunk one. A bracket is a claim about the
-  WHOLE tree and not about the rule it names, so it expires whenever anything else learns to reach
-  the same spelling: every row this pair was ever bought with now wins under `/offmember`, and 0 of
-  the artifact's 951 rows carries a `basefold` token in its winning label. `rank.ts`'s
-  BASEFOLD_ADMISSIONS note carries the current ablation, the per-configuration fan counts that
-  prove it reached, and the recipe — there is no shipped ablation knob, so pricing a roster row
-  means filtering the roster at its one use site behind a temporary env read and reverting, with a
-  row that DOES move (`synthetic:livepark` under `/livebase`) run as the positive control.
+  isolate. So the roster offers both and the differ referees. NEITHER ROW IS BRACKETED: ablated,
+  `synthetic:foldsink` and `sa3:sub_803213C` are MATCH with the sunk row removed, with the head row
+  removed and with both removed, and `kleod:ProcessInputAndUpdateEntities` is 248 either way.
+  `synthetic:basecell` looks like the sunk row's bracket and is not — both rows emit the identical
+  source there and `seen` collapses the sunk one. A bracket is a claim about the WHOLE tree and not
+  about the rule it names, so it expires whenever anything else learns to reach the same spelling:
+  every row this pair was bought with wins under `/offmember` today, and 0 of the artifact's 951
+  rows carries a `basefold` token in its winning label. `rank.ts`'s BASEFOLD_ADMISSIONS note
+  carries the ablation, the per-configuration fan counts that prove it reached, and the recipe —
+  there is no shipped ablation knob, so pricing a roster row means filtering the roster at its one
+  use site behind a temporary env read and reverting, with a row that DOES move
+  (`synthetic:livepark` under `/livebase`) run as the positive control.
 
   A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,

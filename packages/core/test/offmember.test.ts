@@ -203,11 +203,9 @@ describe('every gate is load-bearing', () => {
 // One address CAN leave here spelled two ways, and that is the shipped behaviour rather than an
 // oversight: the declaration governs the constant subscripts it was built from, and a sibling this
 // pass has no member spelling for keeps its own cast. Pinned because the alternative was built and
-// measured, and RE-measured at this commit because a bracket expires when the rest of the tree
-// moves — refusing a base whose siblings it cannot spell costs
-// kleod:ProcessInputAndUpdateEntities 248 → 273 (it was 284 → 306 against a baseline that no
-// longer exists) and moves none of the other eight artifact rows whose winner carries
-// `/offmember`, which are the only rows an extra gate here can move.
+// measured — refusing a base whose siblings it cannot spell costs
+// kleod:ProcessInputAndUpdateEntities 248 → 273 and moves none of the other eight artifact rows
+// whose winner carries `/offmember`, which are the only rows an extra gate here can move.
 test('a variable-subscript sibling keeps its own cast beside the respelled member', () => {
   const MIXED = fn([
     ret(idx(cbase(50345232), 4, 4, { operandOff: 16 })),

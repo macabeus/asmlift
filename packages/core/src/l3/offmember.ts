@@ -84,14 +84,12 @@
 // contradiction is between two FICTIONAL TYPES over one address, which is a readability claim —
 // `quality`'s clientele, not a gate's.
 //
-// AND THE TIGHTER RULE IS PRICED, so it is not re-derived from scratch — RE-priced, because a
-// bracket is a claim about the whole tree and expires when anything else moves. Refusing a base
-// whose siblings this pass cannot spell removes `a:gCallbackQueue` from
+// AND THE TIGHTER RULE IS PRICED, so it is not re-derived from scratch. Refusing a base whose
+// siblings this pass cannot spell removes `a:gCallbackQueue` from
 // `kleod:ProcessInputAndUpdateEntities` (asserted by dumping that row's winning source both ways:
 // 9 `struct Off*` declarations become 2, and the survivor is `gUnk_03004C20`) and costs that row
-// 248 → 273, while protecting no row anywhere in the artifact. It used to say 284 → 306; the 284
-// was the score when the line was written and the rest of the tree has since moved that row to
-// 248, so BOTH endpoints were dead and the delta was not the delta.
+// 248 → 273, while protecting no row anywhere in the artifact. RE-PRICE IT BEFORE QUOTING IT: a
+// bracket is a claim about the whole tree, so both endpoints move whenever anything else does.
 // "PROTECTS NO ROW" IS A CENSUS AND NOT A SAMPLE, and the population is small because this is an
 // extra GATE: it only ever removes candidates, so only a row whose winner carries `/offmember`
 // can move at all. The artifact holds NINE, and eight are unmoved with the rule on —

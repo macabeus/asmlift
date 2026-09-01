@@ -121,12 +121,10 @@ export function emptySelectionError(
  *
  *  The parts' `meta.asmlift` is CARRIED FORWARD, not re-sampled. Only the shard children sample git
  *  while a fanned-out tier is being measured, so their stamps are the fine-grained record of the
- *  tree the numbers were read from; re-stamping the tier with `benchMeta`'s own sample — which,
- *  before `orchestrate` was made to sample at spawn time, was taken only after the last child had
- *  exited — made the run-time check compare two measurements from the same instant. Measured on
- *  the code as it stood then: a tier run with an untracked file in `packages/core` that was removed
- *  40s into a 129s run stamped `dirty: false`, while the part file it was stitched from said
- *  `dirty: true`. */
+ *  tree the numbers were read from; a tier re-stamped from the parent's own sample alone loses
+ *  them — measured, an untracked file in `packages/core` removed 40s into a 129s fanned run left
+ *  the tier reading `dirty: false` while the part file it was stitched from said `dirty: true`.
+ *  See ../provenance.ts for what combining does with them. */
 function stitch(tier: Tier, n: number, filtered: boolean): number {
   const results: FunctionResult[] = [];
   const stamps: ({ commit: string; dirty: boolean } | undefined)[] = [];
@@ -182,8 +180,8 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   mkdirSync(RESULTS_DIR, { recursive: true });
   // Sample BEFORE the first child spawns. `asmliftProvenance` is sticky over the process, so this
   // parent's stamp then covers the whole run rather than only the instant after the last shard
-  // exits — belt to the shard stamps' braces, and the only cover a tier whose parts predate the
-  // stamp has at all.
+  // exits — belt to the shard stamps' braces, and the only cover a tier whose parts carry no stamp
+  // has at all.
   asmliftProvenance();
 
   // ONE queue across ALL tiers, drained by exactly `opts.jobs` slots. Fanning the tiers one after

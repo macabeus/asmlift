@@ -2559,13 +2559,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // So this family reaches that row and is worth at least 3 of its 386 — but 3 is the whole
   // respelling including register-allocation churn (104 diff lines, mostly r4/r5 renaming), not a
   // per-instruction decomposition, and neither row's endpoint produces it. `bgshare`/`bgswitch`
-  // gate preferring an ALREADY-MINTED local — CORRECTED, having been measured since: a local DOES
-  // hold that base in the fan (16,128 of the 68,352 candidates read the cell through one, best 399),
-  // so the missing capability is not a mint but the SELECTION of which keys get one, which is the
-  // `livepark`/`foldpark`/`unfoldpark` family below; `bgfixed` gates the fixed-element member
-  // spelling, and applying THAT to the
-  // same two sites scores 386, unmoved, because the ROM reaches the member from the plain base at
-  // `#0x3c` rather than from the element base. Surface 1 occurs nowhere in that winner at all.
+  // gate preferring an ALREADY-MINTED local, and a local DOES hold that base in that fan — 16,128
+  // of the 68,352 candidates read the cell through one, best 399 — so the missing capability is
+  // not a MINT but the SELECTION of which keys get one, which is the
+  // `livepark`/`foldpark`/`unfoldpark` family below. `bgfixed` gates the fixed-element member
+  // spelling, and applying THAT to the same two sites scores 386, unmoved, because the ROM reaches
+  // the member from the plain base at `#0x3c` rather than from the element base. Surface 1 occurs
+  // nowhere in that winner at all.
   {
     sym: 'bgshare',
     src:
@@ -4090,28 +4090,32 @@ export const SYNTHETIC: SynthSpec[] = [
   // 36 for all six remaining candidates (`signed`, `signed/offmember`, `signed/vol-store` and the
   // unsigned mirrors), so removing `/scopebase` ON TOP OF the whole-roster ablation takes the row
   // 9 → 36.
-  // AND THAT DOES NOT MAKE IT A GUARD ON `/scopebase`, which an earlier version of this paragraph
-  // claimed and which is worth spelling out because it is the shape a deletion round would be
-  // misled by. A deletion only ever REMOVES candidates, so the question is what the row's fan
-  // holds WITHOUT the roster ablation, and there the two `/scopebase` candidates are ties, not
-  // winners: scored at this commit, `unfoldpark`'s fan is 36 candidates, `9 signed/scopebase` and
+  // AND THAT DOES NOT MAKE IT A GUARD ON `/scopebase`, which is the shape a deletion round is
+  // likeliest to be misled by. A deletion only ever REMOVES candidates, so the question is what
+  // the row's fan holds WITHOUT the roster ablation, and there the two `/scopebase` candidates are
+  // ties, not winners: `unfoldpark`'s fan is 36 candidates, `9 signed/scopebase` and
   // `9 unsigned/scopebase` among them, and its best over the 34 candidates carrying no `scopebase`
-  // token is 9 as well — its own winner, `signed/livebase-block/volatile/sinkinit`. Deleting plain
-  // `/scopebase` from the tree as it stands moves this row by 0. The guard exists only in a tree
-  // that has already lost the base-admission roster, which is a configuration no round proposes
-  // and `bench diff` cannot run.
-  // NOR IS IT THE ONLY ROW REACHING THE FAMILY, censused rather than asserted: enumerating every
-  // agbcc synthetic row at this commit, FIVE carry a plain `/scopebase` candidate — `dmascope` 12
-  // of 260, `livepark` 2 of 28, `foldpark` 2 of 34, `unfoldpark` 2 of 36, `dmastride` 2 of 18 —
-  // and two of them, `dmascope` and `dmastride`, predate this branch. On every one of the five the
-  // best candidate carrying no `scopebase` token equals the row's own best — `dmascope` 9,
-  // `livepark` 0, `foldpark` 0, `unfoldpark` 9, `dmastride` 0 — so the family is reached in five
-  // published fans and still wins nothing anywhere, which leaves the negative census standing
-  // rather than overturned. Its two neighbours are guards on the ROSTER, and were measured as such, each moved
-  // by its own admission and by neither the other's nor the pair's: `livepark` MATCH → diff:3 with
-  // `/livebase` ablated (MATCH without it), `foldpark` MATCH → diff:6 with `/livebase-block`
-  // ablated (MATCH without it) — and under the whole-roster ablation both land on `/scopebase`
-  // too, at 3 and 6.
+  // token is 9 as well — its own winner, `signed/livebase-block/volatile/sinkinit`. Deleting the
+  // plain `/scopebase` roster entry moves this row by 0. The guard exists only in a tree that has
+  // already lost the base-admission roster, which is a configuration no round proposes and
+  // `bench diff` cannot run.
+  // NOR IS IT THE ONLY ROW REACHING THE PLAIN ADMISSION, censused rather than asserted: over every
+  // agbcc synthetic row, FIVE carry a plain `/scopebase` candidate — `dmascope` 12 of 260,
+  // `livepark` 2 of 28, `foldpark` 2 of 34, `unfoldpark` 2 of 36, `dmastride` 2 of 18 — and on
+  // every one of the five the best candidate carrying no `scopebase` token equals the row's own
+  // best (`dmascope` 9, `livepark` 0, `foldpark` 0, `unfoldpark` 9, `dmastride` 0). So the plain
+  // admission is reached in five published fans and wins none of them, and 0 of the artifact's 951
+  // winning labels carries the bare `scopebase` token.
+  // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS, and the two are one token apart:
+  // rank.ts enumerates COALESCED variants of the same `hoistScopedBases` under
+  // `/scopebase-coalesce`, and one of those wins a match — `kleod:UpdateHUDCounterDisplay:agbcc`,
+  // MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`. An exact-token
+  // census says the plain admission wins nothing; a substring one, or a deletion aimed at
+  // `l3/scopebase.ts` rather than at `respell('/scopebase', …)`, costs that match.
+  // The two neighbour rows ARE guards on the roster, each moved by its own admission and by
+  // neither the other's nor the pair's: `livepark` MATCH → diff:3 with `/livebase` ablated,
+  // `foldpark` MATCH → diff:6 with `/livebase-block` ablated — and under the whole-roster ablation
+  // both land on `/scopebase` too, at 3 and 6.
   //
   // NO EXISTING ROW EXERCISES IT, censused rather than argued. Enumerating every agbcc synthetic row
   // with the probe admission off and on — candidates only, no compiles, comparing the md5 of each
