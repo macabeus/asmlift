@@ -103,12 +103,16 @@ describe('refusals', () => {
   test('a NON-ZERO lead is refused — dropping it would address a different row', () => {
     // `g[1][i]` is a whole row past `g[0][i]`; the local points at the object start, and the rewrite
     // drops the lead. Silently the wrong bytes, and no contract checks it.
-    const arm: Stmt[] = [store(ix(594, { lead: [1] }), ix(659, { lead: [1] }))];
+    const arm: Stmt[] = [
+      store(ix(594, { lead: [{ k: 'const', value: 1 }] }), ix(659, { lead: [{ k: 'const', value: 1 }] })),
+    ];
     expect(hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]))).toBeNull();
   });
 
   test('a ZERO lead fires, and the rewrite DROPS it', () => {
-    const arm: Stmt[] = [store(ix(594, { lead: [0] }), ix(659, { lead: [0] }))];
+    const arm: Stmt[] = [
+      store(ix(594, { lead: [{ k: 'const', value: 0 }] }), ix(659, { lead: [{ k: 'const', value: 0 }] })),
+    ];
     const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]));
     expect(out).not.toBeNull();
     const st = (out!.body[0] as Extract<Stmt, { k: 'if' }>).then[1] as Extract<Stmt, { k: 'store' }>;
@@ -395,7 +399,9 @@ describe('the admission rules are DATA, and every one of them is load-bearing', 
     fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }], globals);
 
   test('nonzero-lead: ablated, the pass names a base whose lead points at another ROW', () => {
-    const arm: Stmt[] = [store(ix(594, { lead: [1] }), ix(659, { lead: [1] }))];
+    const arm: Stmt[] = [
+      store(ix(594, { lead: [{ k: 'const', value: 1 }] }), ix(659, { lead: [{ k: 'const', value: 1 }] })),
+    ];
     expect(hoistScopedBases(inArm(arm))).toBeNull();
     const out = hoistScopedBases(inArm(arm), { eligibility: without(SCOPEBASE_ELIGIBILITY, 'nonzero-lead') });
     expect(hoists(armOf(out))).toEqual(['p0']);

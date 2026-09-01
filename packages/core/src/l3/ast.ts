@@ -44,12 +44,15 @@ export type Expr =
   // Variable-index `a[i]` is recovered at the IR level (`aload`/`astore` carry elemSize;
   // raise/arrays.ts) but still LOWERS to this one C-shaped `index` node, so it stays C-only
   // (a Pascal array-access spelling is future work). Treat `index` with idx ≠ 0 as C-shaped.
-  // `lead` prefixes CONSTANT subscripts before `idx` — `g[0][i]` rather than `g[i]`. It exists for
-  // exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL array global, where one
-  // subscript reaches a row and the element needs the leading dimensions pinned first. The node
-  // still denotes ONE `width`-byte element, so its type, its legalization and its stride contract
-  // are unchanged — this is a spelling of the same address, not a new kind of access. Absent for
-  // every rank-1 access, which is why it is optional rather than an empty array.
+  // `lead` prefixes the LEADING subscripts before `idx` — `g[0][i]` or `g[r][i]` rather than
+  // `g[i]`. It exists for exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL
+  // array global, where one subscript reaches a row and the element needs the leading dimensions
+  // pinned first. The node still denotes ONE `width`-byte element, so its type, its legalization
+  // and its stride contract are unchanged — this is a spelling of the same address, not a new kind
+  // of access. Absent for every rank-1 access, which is why it is optional rather than an empty
+  // array. A leading subscript is an EXPRESSION because a row index the asm computed is a value,
+  // not a literal (`g[gRow][i]`), so every generic walk descends into it: a name mentioned there
+  // is a real use, and a rewrite that skipped it would rename half an address.
   // `operandOff` is the one field here that is EVIDENCE rather than spelling: it is the BYTE
   // DISPLACEMENT this access's constant offset arrived in through the instruction's MEMORY
   // OPERAND (`ldrb [r0, #0x3]` records 3), as opposed to through the address the pool word
@@ -78,7 +81,7 @@ export type Expr =
   // gaddr in its cone, versus `l3/offmember.ts`'s leaf base), so a shared dispatch would be
   // scaffolding over two rules that already disagree about what a base is. What the reader needs
   // is the map, which is this paragraph.
-  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: number[]; operandOff?: number }
+  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: Expr[]; operandOff?: number }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
   // Unlike `index`, this carries the field NAME (which encodes the byte offset, `field_<off>`),
@@ -334,7 +337,7 @@ export function exprEquals(a: Expr, b: Expr): boolean {
         a.width === bb.width &&
         a.signed === bb.signed &&
         lead.length === bLead.length &&
-        lead.every((v, i) => v === bLead[i]) &&
+        lead.every((v, i) => exprEquals(v, bLead[i])) &&
         exprEquals(a.base, bb.base) &&
         exprEquals(a.idx, bb.idx)
       );
@@ -387,7 +390,7 @@ export function exprChildren(e: Expr): Expr[] {
     case 'call':
       return e.args;
     case 'index':
-      return [e.base, e.idx];
+      return [e.base, ...(e.lead ?? []), e.idx];
     case 'field':
       return [e.base];
     case 'marker':
@@ -410,7 +413,7 @@ export function mapExprChildren(e: Expr, f: (c: Expr) => Expr): Expr {
     case 'call':
       return { ...e, args: e.args.map(f) };
     case 'index':
-      return { ...e, base: f(e.base), idx: f(e.idx) };
+      return { ...e, base: f(e.base), ...(e.lead ? { lead: e.lead.map(f) } : {}), idx: f(e.idx) };
     case 'field':
       return { ...e, base: f(e.base) };
     case 'marker':

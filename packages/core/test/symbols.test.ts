@@ -177,6 +177,66 @@ describe('declaration shapes (P2)', () => {
     expect(run('f', ARRAY_U16_BODY, map)).toContain('gGrid[0][0][');
   });
 
+  // ── the DECLARED subscripts, recovered from the address arithmetic ──────────────────────
+  // A row index the asm computed is a term at the declared ROW stride, added beside the element
+  // term. Pinning the leading dimension at 0 and folding that term into the last subscript
+  // reaches the same address, but it is not the spelling the source wrote and it does not compile
+  // to the same instructions.
+  //
+  // `gRows` is a rank-2 u16 table (`u16 g[4][0x400]`, row stride 0x800 bytes) indexed by two
+  // parameters: `a0 << 0xb` is the row, `a1 << 0x1` the element.
+  const ROW_AND_ELEM =
+    '\tlsl\tr0, r0, #0xb\n\tlsl\tr1, r1, #0x1\n\tadd\tr0, r0, r1\n' +
+    '\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03000900\n';
+  const rows = (dims: (number | null)[]) =>
+    mapOf([[0x03000900, { name: 'gRows', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims }]]);
+
+  test('a term at the declared ROW stride is recovered as the leading subscript', () => {
+    const src = run('f', ROW_AND_ELEM, rows([4, 1024]));
+    expect(src).toContain('gRows[a0][a1]');
+    expect(src).not.toContain('&gRows'); // not the cast fallback the flat residual used to take
+  });
+
+  test('the recovery is INERT without the rank — a rank-1 declaration keeps the flat spelling', () => {
+    // The row term is only a row against a declared row stride. With no second dimension there is
+    // no such stride, and the residual is byte arithmetic on a flat array.
+    expect(run('f', ROW_AND_ELEM, rows([4096]))).toContain('*(u16 *)((a0 << 11) + (a1 << 1) + (u32)&gRows)');
+  });
+
+  test('an inner extent of 1 refuses — two positions at one stride cannot be told apart', () => {
+    // On `u16 g[4][1]` a row IS an element, so `g[i][0]` and `g[0][i]` are the same address and
+    // the arithmetic cannot say which the source wrote.
+    expect(run('f', ROW_AND_ELEM, rows([4, 1]))).toContain('&gRows');
+  });
+
+  test('an inner extent the map does not state refuses — no subscript is invented', () => {
+    const src = run('f', ROW_AND_ELEM, rows([4, null]));
+    expect(src).toContain('&gRows'); // the honest cast form
+    expect(src).not.toMatch(/[^&]gRows\[/);
+  });
+
+  // `gPick` is a rank-2 byte table (`u8 g[4][4]`, row stride 4 bytes) — the aload path, whose
+  // index already counts elements, so the row stride is 4 ELEMENTS rather than 4 bytes.
+  const pick = mapOf([
+    [0x08116600, { name: 'gPick', kind: 'data', shape: 'array', elemSize: 1, elemSigned: false, dims: [4, 4] }],
+  ]);
+
+  test('a rank-2 array of BYTES recovers the row through the element-unit index too', () => {
+    const body =
+      '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r1\n\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n' +
+      '\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x08116600\n';
+    expect(run('f', body, pick)).toContain('gPick[a0][a1]');
+  });
+
+  test('a CONSTANT row is left where it was — nothing referees that respelling', () => {
+    // `&g + 4 + a0` is `g[1][a0]` and `g[0][a0 + 4]` at the same address AND the same
+    // instructions, so the recovery declines and today's spelling stands.
+    const constRow =
+      '\tadd\tr0, r0, #0x4\n\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x08116600\n';
+    expect(run('f', constRow, pick)).toContain('gPick[0][a0 + 4]');
+  });
+
   test('a rank-1 `dims` is the same bare spelling as no dims at all', () => {
     const map = mapOf([
       [0x08057b4c, { name: 'gTbl', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims: [64] }],

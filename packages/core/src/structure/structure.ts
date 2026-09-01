@@ -112,9 +112,21 @@ function addrIn(e: Expr): Extract<Expr, { k: 'addr' }> | null {
 // `&gSym + i` → idx `i / width` (exact division only — a non-multiple residual is a mid-element
 // access this whole-global spelling can't express, so it declines to null and the caller casts).
 function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
+  const gb = globalByteBase(e);
+  if (gb === null) {
+    return null;
+  }
+  const idx = elementIndex(gb.residual, width);
+  return idx ? { name: gb.name, idx } : null;
+}
+
+/** The same split ONE step earlier: `&gSym` and the raw BYTE residual added to it, before the
+ *  division into elements throws the individual terms away. The multidimensional recovery needs
+ *  the terms — a row index is a term at the row's byte stride. */
+function globalByteBase(e: Expr): { name: string; residual: Expr } | null {
   const top = addrIn(e);
   if (top) {
-    return { name: top.name, idx: { k: 'const', value: 0 } };
+    return { name: top.name, residual: { k: 'const', value: 0 } };
   }
   if (e.k === 'bin' && e.op === '+') {
     for (const [side, other] of [
@@ -123,8 +135,7 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
     ] as const) {
       const addrSide = addrIn(side);
       if (addrSide) {
-        const idx = elementIndex(other, width);
-        return idx ? { name: addrSide.name, idx } : null;
+        return { name: addrSide.name, residual: other };
       }
     }
   }
@@ -149,9 +160,20 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
 // inner extent) gets no bare form at all; `((T *)&gSym)[i]` is byte-identical and valid under ANY
 // declaration, which is why it is the safe fallback. See symbols.ts arrayInnerExtents for why an
 // ABSENT rank is read as 1 rather than as unknown.
-function bareArrayLead(si: SymbolInfo, width: number, signed: boolean): { lead?: number[] } | null {
-  if (si.shape !== 'array' || si.elemSize !== width) {
+function bareArrayLead(si: SymbolInfo, width: number, signed: boolean): { lead?: Expr[] } | null {
+  if (!bareArrayElement(si, width, signed)) {
     return null;
+  }
+  const inner = arrayInnerExtents(si);
+  return inner === null ? null : inner.length === 0 ? {} : { lead: inner.map((): Expr => ({ k: 'const', value: 0 })) };
+}
+
+/** The element half of the bare-name rule: the global is an ARRAY whose declared element the
+ *  access reads WHOLE and with the declared extension. Shared by the rank-pinning fallback above
+ *  and the declared-subscript recovery below, so the two cannot disagree about what they spell. */
+function bareArrayElement(si: SymbolInfo, width: number, signed: boolean): boolean {
+  if (si.shape !== 'array' || si.elemSize !== width) {
+    return false;
   }
   // …and the element must EXTEND the way the access does, for the same reason the width must
   // match: the bare spelling carries no cast, so the declared element type is the only thing in
@@ -161,11 +183,109 @@ function bareArrayLead(si: SymbolInfo, width: number, signed: boolean): { lead?:
   // subscript has no room for that wrapping.
   //
   // The caller then falls through to `((T *)&gSym)[i]`, byte-identical under any declaration.
-  if (width < 4 && (si.elemSigned ?? false) !== signed) {
+  return !(width < 4 && (si.elemSigned ?? false) !== signed);
+}
+
+// ── the DECLARED subscripts, recovered from the address arithmetic ───────────────────────────
+//
+// A rank-2 access the source wrote as `g[r][i]` reaches the element through `&g + r*rowBytes +
+// i*elemSize`, and agbcc leaves those two terms SEPARATE (`lsl #0xb` and `lsl #0x1`, added). The
+// flat spelling `((u16 *)&g)[r*1024 + i]` does not: it scales once (`lsl #0xa` then `lsl #0x1`),
+// so the two are distinguishable in the asm and the term at the declared ROW stride is the
+// evidence that the source named the row. bareArrayLead cannot use it — one subscript is all it
+// spells, so a residual with a row term falls through to `*(T *)(… + (u32)&g)` — and that cast
+// form is what this recovers the subscripts out of.
+//
+// The recovered address is the SAME address either way (C scales `[r]` by the declared row size,
+// which is the constant the arithmetic multiplied by), so this is a spelling, not a re-addressing.
+
+/** `residual` as a list of additively combined terms with their sign — `a + (b - c)` is
+ *  `[+a, +b, -c]`. Only `+`/`-` are opened; anything else is one opaque term. */
+function addTerms(e: Expr, sign: 1 | -1, into: { e: Expr; sign: 1 | -1 }[]): void {
+  if (e.k === 'bin' && (e.op === '+' || e.op === '-')) {
+    addTerms(e.l, sign, into);
+    addTerms(e.r, e.op === '+' ? sign : (-sign as 1 | -1), into);
+    return;
+  }
+  into.push({ e, sign });
+}
+
+/** `x` when `t` is the NON-CONSTANT value `x` scaled by exactly `stride` (`x * stride` or
+ *  `x << log2(stride)`), else null. A constant term is never a recovered subscript: both
+ *  spellings of a constant row index compile identically, so nothing referees the choice. */
+function scaledBy(t: Expr, stride: number): Expr | null {
+  if (t.k !== 'bin') {
+    return null;
+  }
+  if (t.op === '<<' && t.r.k === 'const' && t.r.value < 31 && 1 << t.r.value === stride && t.l.k !== 'const') {
+    return t.l;
+  }
+  if (t.op === '*' && t.r.k === 'const' && t.r.value === stride && t.l.k !== 'const') {
+    return t.l;
+  }
+  return null;
+}
+
+/** The leading subscripts of `si` recovered from `residual`, plus what is left for the last one.
+ *
+ *  `unit` is the size in bytes of what `residual` counts — 1 for a raw byte residual (memAccess),
+ *  `width` for an index already in elements (arrayAccess).
+ *
+ *  REFUSES (falling back to the caller's existing spelling, which is byte-identical) when: the
+ *  symbol is not an array of exactly this element; the declared rank is 1 or unspellable; any
+ *  leading stride is not strictly larger than the one below it (an extent of 1 makes two
+ *  positions indistinguishable, so the split would be a guess); NO term is a non-constant
+ *  multiple of a leading stride (there is nothing to recover and today's answer already spells
+ *  the same address); or what remains does not divide into whole elements. */
+function declaredSubscripts(
+  si: SymbolInfo,
+  residual: Expr,
+  width: number,
+  signed: boolean,
+  unit: number,
+): { lead: Expr[]; idx: Expr } | null {
+  if (!bareArrayElement(si, width, signed)) {
     return null;
   }
   const inner = arrayInnerExtents(si);
-  return inner === null ? null : inner.length === 0 ? {} : { lead: new Array<number>(inner.length).fill(0) };
+  if (inner === null || inner.length === 0) {
+    return null;
+  }
+  const strides: number[] = [];
+  for (let p = 0; p < inner.length; p++) {
+    strides.push(inner.slice(p).reduce((a, b) => a * b, width) / unit);
+  }
+  for (let p = 0; p < strides.length; p++) {
+    if (!Number.isSafeInteger(strides[p]) || strides[p] <= (p + 1 < strides.length ? strides[p + 1] : width / unit)) {
+      return null;
+    }
+  }
+  const terms: { e: Expr; sign: 1 | -1 }[] = [];
+  addTerms(residual, 1, terms);
+  const taken = new Set<number>();
+  const lead = strides.map((stride): Expr => {
+    for (let i = 0; i < terms.length; i++) {
+      const x = taken.has(i) || terms[i].sign !== 1 ? null : scaledBy(terms[i].e, stride);
+      if (x) {
+        taken.add(i);
+        return x;
+      }
+    }
+    return { k: 'const', value: 0 };
+  });
+  if (taken.size === 0) {
+    return null;
+  }
+  let sum: Expr = { k: 'const', value: 0 };
+  for (const [i, t] of terms.entries()) {
+    sum = taken.has(i)
+      ? sum
+      : sum.k === 'const' && sum.value === 0 && t.sign === 1
+        ? t.e
+        : { k: 'bin', op: t.sign === 1 ? '+' : '-', l: sum, r: t.e };
+  }
+  const idx = unit === 1 ? elementIndex(sum, width) : sum;
+  return idx === null ? null : { lead, idx };
 }
 
 // A BYTE residual read as an ELEMENT index of `elemSize`-wide elements, or null when it is not one
@@ -196,6 +316,17 @@ function elementIndex(residual: Expr, elemSize: number): Expr | null {
     }
   }
   return null;
+}
+
+/** `idx + n` with a constant fold, `idx` itself for n 0 — the one place an access's memory-operand
+ *  displacement joins the subscript it was always part of. */
+function addOffset(idx: Expr, n: number): Expr {
+  if (n === 0) {
+    return idx;
+  }
+  return idx.k === 'const'
+    ? { k: 'const', value: idx.value + n }
+    : { k: 'bin', op: '+', l: idx, r: { k: 'const', value: n } };
 }
 
 /** The symbol-map rendering context threaded into memAccess/arrayAccess: shape facts per
@@ -622,6 +753,24 @@ function memAccess(
       return { ...elem, ...fromOperand };
     }
   }
+  // …and the MULTIDIMENSIONAL bare-name spelling, which needs the byte terms globalOf's division
+  // into elements has already merged: `g[r][i]`, where a term at the declared ROW stride is `r`.
+  // Tried before the flat spellings because those cannot express a recovered row at all.
+  const gbb = sym ? globalByteBase(baseExpr) : null;
+  const siMulti = gbb ? sym!.info(gbb.name) : undefined;
+  const multi = siMulti ? declaredSubscripts(siMulti, gbb!.residual, width, signed, 1) : null;
+  if (multi) {
+    sym!.noteGlobal(gbb!.name, T.ptr(T.int(width * 8, siMulti!.elemSigned ?? false)));
+    return {
+      k: 'index',
+      base: { k: 'var', name: gbb!.name },
+      idx: addOffset(multi.idx, off / width),
+      width,
+      signed,
+      lead: multi.lead,
+      ...fromOperand,
+    };
+  }
   const g = globalOf(baseExpr, width);
   if (g) {
     const idxVal = g.idx;
@@ -634,12 +783,7 @@ function memAccess(
     if (off === 0 && idxVal.k === 'const' && idxVal.value === 0 && scalarGlobals.has(g.name)) {
       return { k: 'var', name: g.name };
     }
-    const idx: Expr =
-      off === 0
-        ? idxVal
-        : idxVal.k === 'const'
-          ? { k: 'const', value: idxVal.value + off / width }
-          : { k: 'bin', op: '+', l: idxVal, r: { k: 'const', value: off / width } };
+    const idx = addOffset(idxVal, off / width);
     // ARRAY-declared global (symbol map): index the bare name — `gSym[i]`, the spelling the
     // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
     // so the stride check passes and no cast is added. Element-width match only.
@@ -705,6 +849,19 @@ function arrayAccess(
   if (baseExpr.k === 'addr' && fieldOff === undefined && memberOff === undefined) {
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
+    // The index is already in ELEMENTS here, so the row term is at the row's stride in elements.
+    const multi = si ? declaredSubscripts(si, idxExpr, elemSize, signed, elemSize) : null;
+    if (multi) {
+      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
+      return {
+        k: 'index',
+        base: { k: 'var', name: baseExpr.name },
+        idx: multi.idx,
+        width: elemSize,
+        signed,
+        lead: multi.lead,
+      };
+    }
     const lead = si === undefined ? null : bareArrayLead(si, elemSize, signed);
     if (lead !== null) {
       sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));

@@ -222,7 +222,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
             `c backend: a multidimensional array access needs a base that strides ${e.width} bytes as spelled`,
           );
         }
-        return `${rec(base, 1)}${e.lead.map((l) => `[${l}]`).join('')}[${rec(e.idx, 99)}]`;
+        return `${rec(base, 1)}${e.lead.map((l) => `[${rec(l, 99)}]`).join('')}[${rec(e.idx, 99)}]`;
       }
       if (e.idx.k === 'const' && e.idx.value === 0) {
         const s = `*${rec(base, 2)}`;
