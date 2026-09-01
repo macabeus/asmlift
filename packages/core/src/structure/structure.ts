@@ -244,7 +244,15 @@ function scaledBy(t: Expr, stride: number): Expr | null {
  *  leading stride is not strictly larger than the one below it (an extent of 1 makes two
  *  positions indistinguishable, so the split would be a guess); NO term is a non-constant
  *  multiple of a leading stride (there is nothing to recover and today's answer already spells
- *  the same address); or what remains does not divide into whole elements. */
+ *  the same address); or what remains does not divide into whole elements.
+ *
+ *  It does NOT refuse an unknown OUTERMOST extent (`dims: [null, 0x400]` — 8 symbols across the
+ *  six vendored maps), and that is deliberate rather than an omission: only the INNER extents
+ *  enter a stride, and declare.ts leaves the outermost dimension unsized in the emitted
+ *  declaration either way (`extern u16 gRows[][1024];` for `[4,1024]` and for `[null,1024]`
+ *  alike), so the recovered subscripts and the declaration they are read against agree and stride
+ *  identically. An earlier statement of this rule listed a non-null outer extent among the
+ *  refusals; the guard was never written because there is nothing for it to protect. */
 function declaredSubscripts(
   si: SymbolInfo,
   residual: Expr,

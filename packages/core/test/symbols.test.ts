@@ -203,6 +203,14 @@ describe('declaration shapes (P2)', () => {
     expect(run('f', ROW_AND_ELEM, rows([4096]))).toContain('*(u16 *)((a0 << 11) + (a1 << 1) + (u32)&gRows)');
   });
 
+  test('an unknown OUTERMOST extent is accepted — nothing in the address arithmetic depends on it', () => {
+    // Only the INNER extents enter a stride, and declare.ts leaves the outermost dimension unsized
+    // in the emitted declaration either way, so `[null, 0x400]` and `[4, 0x400]` produce the same
+    // access against the same declaration. Pinned because an earlier statement of the rule listed
+    // this among the refusals.
+    expect(run('f', ROW_AND_ELEM, rows([null, 1024]))).toContain('gRows[a0][a1]');
+  });
+
   test('an inner extent of 1 refuses — two positions at one stride cannot be told apart', () => {
     // On `u16 g[4][1]` a row IS an element, so `g[i][0]` and `g[0][i]` are the same address and
     // the arithmetic cannot say which the source wrote.
