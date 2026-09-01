@@ -272,18 +272,18 @@ find nothing to disagree with and go green having audited nothing.
     `dae489e`), interleaved `0 25 0 10 0 5 0 2` so a drifting load cannot be read as a rate, then
     the same command with the cache off:
 
-    | state                | wall        | loadavg (1 m, before) | `sampled` |
-    | -------------------- | ----------- | --------------------- | --------- |
-    | cache OFF            | **740.9 s** | 16.8                  | —         |
-    | cache on, COLD fill  | **711.2 s** | 28.3                  | —         |
-    | warm, audit off      | 167.4 s     | 15.0                  | 0         |
-    | warm, audit off      | 173.1 s     | 9.0                   | 0         |
-    | warm, audit off      | 176.2 s     | 10.2                  | 0         |
-    | warm, audit off      | 192.7 s     | 20.2                  | 0         |
-    | **warm, 2%**         | **186.2 s** | 16.7                  | 1,394     |
-    | warm, 5%             | 222.6 s     | 17.2                  | 3,477     |
-    | warm, 10%            | 238.9 s     | 8.8                   | 6,977     |
-    | warm, 25%            | 287.0 s     | 6.6                   | 17,137    |
+    | state               | wall        | loadavg (1 m, before) | `sampled` |
+    | ------------------- | ----------- | --------------------- | --------- |
+    | cache OFF           | **740.9 s** | 16.8                  | —         |
+    | cache on, COLD fill | **711.2 s** | 28.3                  | —         |
+    | warm, audit off     | 167.4 s     | 15.0                  | 0         |
+    | warm, audit off     | 173.1 s     | 9.0                   | 0         |
+    | warm, audit off     | 176.2 s     | 10.2                  | 0         |
+    | warm, audit off     | 192.7 s     | 20.2                  | 0         |
+    | **warm, 2%**        | **186.2 s** | 16.7                  | 1,394     |
+    | warm, 5%            | 222.6 s     | 17.2                  | 3,477     |
+    | warm, 10%           | 238.9 s     | 8.8                   | 6,977     |
+    | warm, 25%           | 287.0 s     | 6.6                   | 17,137    |
 
     All ten printed `best …: 386`, the same 68,352 `[score]` lines (md5
     `3cd87d7623dd843fd791b9bdc86ea27b`) and the same stdout (md5

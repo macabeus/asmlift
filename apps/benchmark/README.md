@@ -197,7 +197,7 @@ It changes no result — the same rows, the same scores — and on a compile-dom
 difference between minutes and tens of minutes. It is not a historical archive: hit rate decays as
 the axes accumulate. `ASMLIFT_CANDCACHE=0` (or `off`, or SET-BUT-EMPTY) bypasses it, so does
 `ASMLIFT_BENCH_CACHE=0`; `ASMLIFT_CANDCACHE=verify` compiles everything anyway and audits the store
-against it, failing the run on any disagreement. Serving mode audits itself too, on a sampled 1% of
+against it, failing the run on any disagreement. Serving mode audits itself too, on a sampled 2% of
 the keys it serves — the `[candcache]` line carries `sample=…%/seed=…`, and a shard that finds a
 disagreement FAILS. The flag table, the cold-vs-warm rule and what a project must declare before the
 cache runs on its own `decomp.yaml` are in `docs/ranked-repro.md`.
@@ -242,12 +242,21 @@ it also keeps 1234 script re-executions from filling and pruning a developer's s
 scripts THEMSELVES stay cache-silent, which is what a reader will actually get.
 
 The sampled audit is what stands between that and a silently wrong number, and the cost of not
-having it is measurable rather than theoretical. With every object in a warm real-tier store
-replaced by a fixed 19-byte string: at `ASMLIFT_CANDCACHE_SAMPLE=100` the run exits 1 with
-`BYTE MISMATCH label=bench-agbcc` lines; at `ASMLIFT_CANDCACHE_SAMPLE=0` it exits **0** and prints
-`pokeemerald:MathUtil_Mul16:agbcc asmlift=MATCH m2c=diff:3` — the row text byte-identical to the
-clean-store run, off 7 served hits of poison. `bench regression` and `bench diff` compare outcomes,
-so both would have gone green on it.
+having it is measurable rather than theoretical. Measured on a private store holding one row pair
+(`--tier real --only MathUtil_Mul16 --serial`, 7 object keys), with every stored object replaced
+by a fixed 19-byte string:
+
+| run                      | exit  | what it published                                                |
+| ------------------------ | ----- | ---------------------------------------------------------------- |
+| clean store, warm        | **0** | `pokeemerald:MathUtil_Mul16:agbcc asmlift=MATCH m2c=diff:3`      |
+| poisoned, `…_SAMPLE=100` | **3** | four `BYTE MISMATCH label=bench-agbcc` lines, run FAILS          |
+| poisoned, `…_SAMPLE=0`   | **0** | the same row as `asmlift=noncompile(1)` — a MATCH lost, silently |
+
+The last line is the point: the shard reports success, and the only thing that says otherwise is
+an audit that compiled something anyway. `bench regression` and `bench diff` compare the head's
+outcome against the BASE ARTIFACT's, and both sides come off the same developer's store — a
+staleness already present when the base artifact was measured is served identically on both, so
+neither gate can see it.
 
 ### Environment
 
