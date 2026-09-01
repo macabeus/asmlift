@@ -31,7 +31,14 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
-import { MISMATCH_LOG, cacheMismatches, cacheMode, cacheStats } from './candcache';
+import {
+  CACHE_MISMATCH_EXIT,
+  MISMATCH_LOG,
+  cacheMismatches,
+  cacheMode,
+  cacheSampleNote,
+  cacheStats,
+} from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { renderDeclarations } from './declare';
@@ -42,12 +49,30 @@ import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 // The `[candcache]` line, and — when a stored answer disagreed with a fresh compile — the loud
 // second line that turns a verify run into a FAILING one. A counter that only prints cannot stop
 // anything: a verify pass writes one line among sixteen shard logs, so the mismatch has to reach
-// the exit status.
+// the exit status. The same is true of an `on` run now: its sampled audit fails the run exactly
+// as verify's does.
+//
+// `cacheSampleNote()` carries the sampling RATE and the run's SEED, so a reader can tell an
+// audited serve from an unaudited one and replay the exact selection
+// (ASMLIFT_CANDCACHE_SAMPLE_SEED). Without it a run with the audit switched off would print the
+// same line as one with it on.
+
+/**
+ * The exit status of a ranked run, ON EITHER OF ITS TWO RETURNS — and both is the point.
+ *
+ * A cache mismatch outranks what the run would otherwise say, a decline included: a store that
+ * lied invalidates the fan, while a decline is an ordinary outcome. The failure return needs it
+ * because a mismatch is REACHABLE behind one — the audit runs inside the candidate compiles, so a
+ * run that declines after them has already reported — and a 1 there is indistinguishable from the
+ * decline every wrapper keying on the status expects. Which reason it was is not lost: `[declined]`
+ * / `[internal error]` and the `[candcache]` lines are both in the stderr returned beside the code.
+ */
+export const rankedExitCode = (match: boolean): number => (cacheMismatches() > 0 ? CACHE_MISMATCH_EXIT : match ? 0 : 1);
 const candCacheLine = (): string => {
   if (cacheMode() === 'off') {
     return '';
   }
-  const line = `asmlift: [candcache] ${cacheMode()} ${JSON.stringify(cacheStats())}\n`;
+  const line = `asmlift: [candcache] ${cacheMode()}${cacheSampleNote()} ${JSON.stringify(cacheStats())}\n`;
   return cacheMismatches() === 0
     ? line
     : line +
@@ -114,7 +139,8 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --progress       with --score-against: stream a liveness line to stderr while
                    scoring; the [score] table it prints at the end is unchanged
 
-Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 64 usage · 66 unreadable input.
+Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 3 the candidate-object cache served
+            bytes a fresh compile disagrees with · 64 usage · 66 unreadable input.
 Full reference (flags, decomp.yaml integration): the @asmlift/cli README.`;
 
 // A principled decline (the pipeline refusing to guess) vs an internal error (a bug) must be
@@ -495,7 +521,7 @@ export async function runCli(
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
         `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {
-        code: ranked.best.score.match && cacheMismatches() === 0 ? 0 : 1,
+        code: rankedExitCode(ranked.best.score.match),
         stdout: ranked.best.source,
         // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
         // tail stay adjacent.
@@ -512,11 +538,16 @@ export async function runCli(
           candCacheLine(),
       };
     } catch (e) {
+      // …and the cache line belongs HERE too. A decline or an internal error drops out of the
+      // ranked path before the success-path stderr is assembled, so a reader on this path could
+      // not tell an audited run from an unaudited one — nor that the store had disagreed, even
+      // though `MISMATCHES.log` was already written.
       const kind = isDecline(e) ? 'declined' : 'internal error';
       return {
-        code: 1,
+        code: rankedExitCode(false),
         stdout: '',
-        stderr: `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n`,
+        stderr:
+          `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n` + candCacheLine(),
       };
     }
   }

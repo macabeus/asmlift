@@ -150,6 +150,9 @@ describe('a TU whose object is not a function of its own bytes is refused PER KE
 describe('the mode parse is closed: an unrecognised value is OFF and LOUD, never "on"', () => {
   // `ASMLIFT_CANDCACHE=VERIFY` used to mean SERVE. A Gate-E run typed that way was a serve run
   // that printed `{"hit":…}` instead of `{"verified":…}` and reported clean.
+  //
+  // The parse got MORE load-bearing when the default flipped to `on`: every branch below that
+  // lands on `off` is now a branch that has to say no against a default that says yes.
   test.each([
     ['verify', 'verify'],
     ['Verify', 'verify'],
@@ -190,6 +193,77 @@ describe('the mode parse is closed: an unrecognised value is OFF and LOUD, never
     expect(await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_BENCH_CACHE: '0' }, (m) => m.cacheMode())).toBe('off');
     expect(await load({ ASMLIFT_CANDCACHE: 'verify', ASMLIFT_BENCH_CACHE: '0' }, (m) => m.cacheMode())).toBe('off');
     expect(await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode())).toBe('on');
+    // The case the flip CREATED: with unset meaning on, this is the only thing standing between a
+    // developer bisecting a suspect row and a candidate object off disk.
+    expect(
+      await load({ ASMLIFT_CANDCACHE: undefined, ASMLIFT_BENCH_CACHE: '0' }, (m) => m.cacheMode()),
+      'ASMLIFT_BENCH_CACHE=0 must beat the new default, not just an explicit request',
+    ).toBe('off');
+  });
+
+  test('the ASMLIFT_BENCH_CACHE line fires only where that variable CHANGED the answer', async () => {
+    // Two causes for one state, on adjacent lines, and the wrong one looks actionable: an
+    // unrecognised value is already OFF through the closed parse, so a line saying the bypass
+    // turned it off invites unsetting ASMLIFT_BENCH_CACHE, which will not turn that cache on.
+    const heard = async (env: Record<string, string | undefined>): Promise<string> => {
+      let said = '';
+      const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+        said += typeof c === 'string' ? c : Buffer.from(c).toString();
+        return true;
+      });
+      try {
+        await load(env, (m) => m.cacheMode());
+      } finally {
+        spy.mockRestore();
+      }
+      return said;
+    };
+    const typo = await heard({ ASMLIFT_CANDCACHE: 'bogus', ASMLIFT_BENCH_CACHE: '0' });
+    expect(typo).toContain('REFUSED reason=unrecognised-mode');
+    expect(typo, 'the value alone already lands on off; the bypass changed nothing').not.toContain(
+      'ASMLIFT_BENCH_CACHE=0 bypasses',
+    );
+    // …and it still fires on all three states that WOULD have served.
+    for (const raw of [undefined, '1', 'verify']) {
+      expect(await heard({ ASMLIFT_CANDCACHE: raw, ASMLIFT_BENCH_CACHE: '0' })).toContain(
+        'ASMLIFT_BENCH_CACHE=0 bypasses',
+      );
+    }
+    // An explicit `off` is not a surprise and gets no line: both variables agree.
+    expect(await heard({ ASMLIFT_CANDCACHE: 'off', ASMLIFT_BENCH_CACHE: '0' })).not.toContain('ASMLIFT_BENCH_CACHE=0');
+  });
+
+  test('UNSET is ON — the default the flip installed, and the reason the cache was inert before', async () => {
+    expect(await load({ ASMLIFT_CANDCACHE: undefined, ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode())).toBe(
+      'on',
+    );
+  });
+
+  test('SET AND EMPTY is OFF, and it SAYS SO — unset and empty are not one state', async () => {
+    // `ASMLIFT_CANDCACHE=` and no variable at all land on opposite modes, and the difference is
+    // invisible on the command line: a reader who cannot see it in the output would have to infer
+    // it from a MISSING `[candcache]` line, which is not evidence.
+    let said = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+      said += typeof c === 'string' ? c : Buffer.from(c).toString();
+      return true;
+    });
+    let mode: string;
+    try {
+      mode = await load({ ASMLIFT_CANDCACHE: '', ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode());
+    } finally {
+      spy.mockRestore();
+    }
+    expect(mode).toBe('off');
+    expect(said).toContain('SET AND EMPTY');
+  });
+
+  test('an unrecognised value does NOT inherit the new default — it is refused onto off', async () => {
+    // The silent failure the closed parse exists to prevent, restated for a world where falling
+    // through means SERVING rather than doing nothing.
+    for (const raw of ['maybe', '2', 'ONN', 'verifyy']) {
+      expect(await load({ ASMLIFT_CANDCACHE: raw, ASMLIFT_BENCH_CACHE: undefined }, (m) => m.cacheMode())).toBe('off');
+    }
   });
 });
 
@@ -233,8 +307,8 @@ describe('verify mode audits BOTH directions — the outcome, not only the bytes
 
   test('a stored REJECTION against a fresh OBJECT is a mismatch — the direction that drops a spelling', async () => {
     // Served under `on`, a stale rejection throws for a candidate that compiles: the spelling
-    // leaves the row's fan silently, and it might have been the match. 77% of a warm store's
-    // served answers are rejections, and verify mode used to look at none of them.
+    // leaves the row's fan silently, and it might have been the match. Most of a warm store's
+    // served answers are rejections — 84% of the 36,025 one full `pnpm bench run` was served.
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed: c.c:3: syntax error');
@@ -270,7 +344,7 @@ describe('verify mode audits BOTH directions — the outcome, not only the bytes
     expect(served).toBeInstanceOf(Error);
   });
 
-  test('an agreeing REJECTION is COUNTED — an audit that skips 77% of the store is not an audit', async () => {
+  test('an agreeing REJECTION is COUNTED — an audit that skips the negative half is not an audit', async () => {
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
       m.candCache('t', () => NS_A).putFail('k', 'f', 'agbcc failed: c.c:3: syntax error');
@@ -393,4 +467,118 @@ describe('the store survives another process rewriting it under us', () => {
       expect(litter).toEqual([]);
     });
   });
+});
+
+describe('a store this process cannot prepare is a COLD store, never a dropped candidate', () => {
+  // `putFail` and `pruneOnce` both already said it in so many words ("a store that cannot be
+  // written is a cold store", "an unreadable store is a cache miss, never an error"). `namespace()`
+  // did not: `mkdirSync` / `utimesSync` / `claimNamespace` sat outside the try that guards
+  // `stamp()`, so the throw escaped `get`/`put`/`warm` into the candidate compile — where
+  // compile-command.ts and compile/agbcc.ts read ANY exception as "this spelling does not compile"
+  // and delete it from the fan. MEASURED end to end against a read-only store: `1 dropped`, the
+  // published winner moved `unsigned` -> `signed` on the one line docs/ranked-repro.md tells
+  // readers to quote, and the `[candcache]` line still read a clean `{"hit":1}`.
+  const captureAll = async (
+    env: Record<string, string | undefined>,
+    fn: (m: CandCacheModule) => void,
+  ): Promise<{ said: string; stats: Record<string, number> }> => {
+    let said = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+      said += typeof c === 'string' ? c : Buffer.from(c).toString();
+      return true;
+    });
+    try {
+      return await load(env, (m) => {
+        fn(m);
+        return { said, stats: m.cacheStats() };
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  };
+
+  /** A ROOT whose parent is a FILE: `mkdir` answers ENOTDIR on every platform, and unlike `chmod`
+   *  it does not depend on whether the test runs as root (hosted CI containers often do). */
+  const unusableRoot = (): string => {
+    const f = join(scratch(), 'not-a-directory');
+    writeFileSync(f, 'x');
+    return join(f, 'store');
+  };
+
+  test('every entry point answers like a miss and NOTHING throws', async () => {
+    const root = unusableRoot();
+    const { said, stats } = await captureAll({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      const scratchObj = object('FRESHLY-COMPILED');
+      expect(() => c.warm()).not.toThrow();
+      expect(c.get('k', 'f')).toBeUndefined();
+      // put hands back the CALLER'S OWN path, which is the answer it just compiled.
+      expect(c.put('k', 'f', scratchObj)).toBe(scratchObj);
+      expect(() => c.putFail('k2', 'f', 'agbcc failed (exit 1)')).not.toThrow();
+      expect(c.mode, 'and the instance is off for the rest of the process').toBe('off');
+    });
+    expect(said).toContain('REFUSED label=t reason=store-unusable');
+    expect(stats).toMatchObject({ refused: 1 });
+  });
+
+  test('the refusal is said ONCE, not once per candidate', async () => {
+    const root = unusableRoot();
+    const { said, stats } = await captureAll({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      for (let i = 0; i < 20; i++) {
+        c.get(`k${i}`, 'f');
+      }
+    });
+    expect(said.split('store-unusable').length - 1).toBe(1);
+    expect(stats.refused).toBe(1);
+  });
+});
+
+describe('the matching gate upgrades to verify off ONE list of off-words, never a copy of it', () => {
+  // `pnpm test:matching` is the only thing in this repo that audits the store a developer's real
+  // runs have filled, so its globalSetup forces `verify`. It decided that with
+  // `asked !== '0' && asked !== 'off'` — a two-element copy of a list candcache.ts already owns —
+  // and therefore forced `verify` for `false`, `no`, `disable` and the SET-AND-EMPTY state, every
+  // one of which the module calls OFF and docs/ranked-repro.md describes as "touches no disk".
+  // Under a forced `verify` such a run stores every key and appends to the SHARED
+  // `MISMATCHES.log`, which a neighbour worktree's lines can then fail the teardown on.
+  //
+  // UNSET is the case the obvious fix breaks: `process.env.X ?? ''` puts unset INTO the off-words
+  // (`''` is one), and unset means the module's default, which is `on` — this suite must upgrade
+  // it. The two states have to stay apart here exactly as they do in the module.
+  const modeAfterSetup = async (raw: string | undefined): Promise<string | undefined> => {
+    const saved = process.env.ASMLIFT_CANDCACHE;
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      if (raw === undefined) {
+        delete process.env.ASMLIFT_CANDCACHE;
+      } else {
+        process.env.ASMLIFT_CANDCACHE = raw;
+      }
+      vi.resetModules();
+      (await import('../matching/candcache-gate')).default();
+      return process.env.ASMLIFT_CANDCACHE;
+    } finally {
+      spy.mockRestore();
+      if (saved === undefined) {
+        delete process.env.ASMLIFT_CANDCACHE;
+      } else {
+        process.env.ASMLIFT_CANDCACHE = saved;
+      }
+    }
+  };
+
+  test.each([['0'], ['off'], ['false'], ['no'], ['n'], ['disable'], ['disabled'], [''], ['OFF'], [' off ']])(
+    'ASMLIFT_CANDCACHE=%j is left OFF — a no-disk spelling must not be upgraded to a storing mode',
+    async (raw) => {
+      expect(await modeAfterSetup(raw)).toBe(raw);
+    },
+  );
+
+  test.each([[undefined], ['1'], ['on'], ['true'], ['yes'], ['verify'], ['nonsense']])(
+    'ASMLIFT_CANDCACHE=%j becomes verify — the gate may not be SERVED, and unset means on',
+    async (raw) => {
+      expect(await modeAfterSetup(raw)).toBe('verify');
+    },
+  );
 });

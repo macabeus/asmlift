@@ -43,7 +43,16 @@ function runScript(script: string): Promise<{ code: number; stdout: string; stde
   const dir = mkdtempSync(join(tmpdir(), 'bench-fidelity-'));
   writeFileSync(join(dir, 'script.sh'), script);
   return new Promise((res) => {
-    const child = spawn('bash', ['script.sh'], { cwd: dir });
+    // THE CANDIDATE-OBJECT CACHE IS PINNED OFF FOR EVERY SCRIPT, and this gate is exactly where
+    // it has to be. What fidelity proves is that a READER who copies the published script gets
+    // the published row — and that reader starts with an empty store, so their run compiles
+    // everything. Since the cache defaults to ON, an inherited environment would run these ~1234
+    // re-executions SERVED off the publishing machine's warm store: the base-versus-head
+    // asymmetry the audit exists to bound, in the one gate whose job is to be the reader. (It also
+    // keeps 1234 script runs from filling and pruning a developer's shared store.) Cache-off and
+    // cache-on-cold produce the same objects, so this is the conservative spelling of the same
+    // run; the scripts themselves stay cache-silent, which is what a reader will actually get.
+    const child = spawn('bash', ['script.sh'], { cwd: dir, env: { ...process.env, ASMLIFT_CANDCACHE: '0' } });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d: Buffer) => (stdout += d));

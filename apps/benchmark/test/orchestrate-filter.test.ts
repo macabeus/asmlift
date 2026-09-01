@@ -1,6 +1,7 @@
+import { CACHE_MISMATCH_EXIT } from '@asmlift/cli/candcache';
 import { describe, expect, it } from 'vitest';
 
-import { emptySelectionError, shardQueue, tierIsFiltered } from '../src/run/orchestrate';
+import { emptySelectionError, fanExitCode, shardQueue, tierIsFiltered } from '../src/run/orchestrate';
 
 // A filter that selects no row used to print `✓ real: 0 results` and exit 0, having replaced a
 // good 240-row `real.json` with `results: []` — the file `bench merge` reads next. The verdict is
@@ -82,5 +83,22 @@ describe('shardQueue', () => {
       { tier: 'synthetic', shard: 1 },
       { tier: 'synthetic', shard: 2 },
     ]);
+  });
+});
+
+// A shard that served a stored answer a fresh compile disagreed with exits CACHE_MISMATCH_EXIT.
+// The fan-out is the only thing between that status and the person who typed `pnpm bench run`, and
+// 1 — the status a build failure, an empty selection and a crashed shard already share — would say
+// no more than the `[candcache]` line already in the scrollback.
+describe('fanExitCode', () => {
+  it('propagates the cache status only when every failing shard says cache', () => {
+    expect(fanExitCode([CACHE_MISMATCH_EXIT])).toBe(CACHE_MISMATCH_EXIT);
+    expect(fanExitCode([CACHE_MISMATCH_EXIT, CACHE_MISMATCH_EXIT])).toBe(CACHE_MISMATCH_EXIT);
+    expect(fanExitCode([CACHE_MISMATCH_EXIT, 1]), 'one shard failed for its own reason').toBe(1);
+    expect(fanExitCode([1, 1])).toBe(1);
+  });
+
+  it('is 1 when nothing failed — the caller asks it only after a failure, and it may not invent one', () => {
+    expect(fanExitCode([])).toBe(1);
   });
 });

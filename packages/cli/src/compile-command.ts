@@ -718,9 +718,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   // headers collision (drop prelude + decls); failure means the TEMPLATE is broken — keep
   // everything so the first real candidate fails with the template's own loud diagnostics.
   // Exit-code-only: no error-message parsing (gcc-2.9/IDO/mwcc all format differently).
-  // The cross-run candidate-object cache on the project-template path (candcache.ts). OFF unless
-  // ASMLIFT_CANDCACHE; ON for any project's own command otherwise, because everything the
-  // command reads is now MEASURED rather than declared.
+  // The cross-run candidate-object cache on the project-template path (candcache.ts).
   //
   // The NAMESPACE is a measurement, not a version constant: the template text, the cwd, the
   // content hash of every directory a path FLAG names (`-iquote include`, recursively), of every
@@ -882,7 +880,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     h.update(cwd);
     // THIS MODULE'S OWN BYTES. The bench pipeline hashes its harness code (`compile/agbcc.ts`,
     // `compile/util.ts`) because that code shapes what the compiler is handed; this one shapes it
-    // too, and it shapes something the probe object structurally cannot see — 77% of what a warm
+    // too, and it shapes something the probe object structurally cannot see — most of what a warm
     // store SERVES is a stored REJECTION, and `verdict()` above builds the text that is stored and
     // then published as `ranked.dropped[].error`. The probe only ever exercises the success path,
     // so perturbing that text left the namespace unmoved and the store replayed the old spelling.
@@ -1044,10 +1042,10 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     rmSync(d2, { recursive: true, force: true });
     return answer;
   };
-  // ON, for any project's own command, whenever ASMLIFT_CANDCACHE says so — there is no second,
-  // per-project opt-IN. A project DECLARING what its command reads is wrong in the stale-object
-  // direction the moment the declaration is incomplete, and nothing verifies it; the namespace
-  // measures those inputs instead (`stamp()`).
+  // ON, for any project's own command, unless ASMLIFT_CANDCACHE says otherwise — there is no
+  // second, per-project opt-IN. A project DECLARING what its command reads is wrong in the
+  // stale-object direction the moment the declaration is incomplete, and nothing verifies it; the
+  // namespace measures those inputs instead (`stamp()`).
   //
   // `tools.asmlift.candidateCache: off` is the only per-project key, and it is the other shape: a
   // REFUSAL, never an assertion, so getting it wrong costs a cold start. It answers what the
@@ -1100,10 +1098,24 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     }
     if (cache.mode !== 'off' && storableRejection(r)) {
       // verifyFail FIRST: a STORED OBJECT for a TU that no longer compiles is a mismatch, and it
-      // is the direction that nothing audited — 77% of a warm store's served answers are
+      // is the direction that nothing audited — 84% of a warm bench store's served answers are
       // rejections and verify mode never looked at one.
       cache.verifyFail(key, symbol, r.err);
       cache.putFail(key, symbol, r.err);
+      return r;
+    }
+    // NO FRESH ANSWER AT ALL — a spawn failure, the timeout, a signal. If the sampled audit
+    // WITHHELD this key, there is now nothing to compare against, and the withholding has done
+    // pure harm: a warm run had zero exposure to a transient because it never compiled. Take the
+    // answer back rather than letting the audit delete a spelling from the fan.
+    if (cache.mode !== 'off') {
+      const held = cache.abandonAudit(key, symbol);
+      if (typeof held === 'string') {
+        return { ok: true, transient: false, cmd: held, err: '' };
+      }
+      if (held instanceof Error) {
+        return { ok: false, transient: false, cmd: '', err: held.message };
+      }
     }
     return r;
   };
@@ -1138,6 +1150,18 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     if (cache.mode !== 'off' && storableRejection(r)) {
       cache.verifyFail(key, symbol, r.err);
       cache.putFail(key, symbol, r.err);
+      return r;
+    }
+    // Same as `viaCache` above: a withheld key whose compile produced no verdict takes its
+    // withheld answer back.
+    if (cache.mode !== 'off') {
+      const held = cache.abandonAudit(key, symbol);
+      if (typeof held === 'string') {
+        return { ok: true, transient: false, cmd: held, err: '' };
+      }
+      if (held instanceof Error) {
+        return { ok: false, transient: false, cmd: '', err: held.message };
+      }
     }
     return r;
   };

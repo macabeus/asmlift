@@ -327,7 +327,7 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     });
   });
 
-  test('the cap counts the NEGATIVE entries too — they are 77% of the store and weighed zero', async () => {
+  test('the cap counts the NEGATIVE entries too — they are most of the store and weighed zero', async () => {
     // MEASURED on one full-bench store: `objects/` 7.57 MB against `du -sm` 156 MB, because
     // `putFail` writes straight into `ns/` and a 200-byte `.fail` costs a whole allocation block.
     // A cap counting only `objects/` saw 4.9% of the cost and would fire after ~540 bench runs.
@@ -488,6 +488,143 @@ describe('verify mode compiles anyway, compares, and lets the FRESH bytes win', 
       m.candCache('t', () => NS_A).verify('k', 'f', object('AGREED'));
       expect(m.cacheStats()).toMatchObject({ verified: 1 });
       expect(m.cacheStats().mismatch).toBeUndefined();
+    });
+  });
+});
+
+describe('EXISTENCE IS NOT CONTENT: a corrupt objects/<sha> entry is caught where the truth is in hand', () => {
+  // The threat `linkInto` names in its own docstring — "an entry can be wrong: a disk error, an
+  // external edit, or a write THROUGH one of its hardlinks" — reached the caller through the ONE
+  // path no audit covers. Sampling is reached from `get`, so it can only ever look at a key the
+  // store already answers; `put` is a MISS by construction. So a run where every key missed, every
+  // candidate was freshly and correctly compiled, and the audit was at 100% still handed the
+  // scorer bytes that were not the object it had just compiled — measured end to end as a NONMATCH
+  // published as a byte-exact MATCH with exit 0.
+  //
+  // A `put` holds the truth in memory and has already hashed it, so the comparison costs one read
+  // of a file the dedup path was about to link anyway.
+  test('a put whose bytes dedup onto a CORRUPTED object reports a mismatch and repairs it', async () => {
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      c.put('k1', 'f', object('TRUTH-BYTES'));
+      const [obj] = objectsIn(root);
+      // The filename still says sha(TRUTH-BYTES); the contents no longer hash to it.
+      writeFileSync(obj, 'CORRUPT-BYTES-OF-A-DIFFERENT-LENGTH');
+
+      const served = c.put('k2', 'f', object('TRUTH-BYTES'));
+      expect(readFileSync(served, 'utf8'), 'the caller is served what it compiled, never the store`s claim').toBe(
+        'TRUTH-BYTES',
+      );
+      expect(readFileSync(obj, 'utf8'), 'and the content-addressed entry is repaired').toBe('TRUTH-BYTES');
+      expect(m.cacheMismatches(), 'a store that disagreed with the compiler must FAIL the run').toBe(1);
+      expect(readFileSync(m.mismatchLogFor(root), 'utf8')).toContain('OBJECT STORE CORRUPT');
+      // Counted APART from an audit mismatch: it is not an audit of a withheld key, and folding
+      // it in would break the identity `sampled` is read against.
+      expect(m.cacheStats()).toMatchObject({ objectCorrupt: 1 });
+      expect(m.cacheStats().mismatch).toBeUndefined();
+    });
+  });
+
+  test('every key ALREADY linked to the corrupt object is repaired too — the repair goes through the inode', async () => {
+    // The reason the repair is a plain in-place write and not `writeAtomic`. Renaming a new inode
+    // over `objects/<sha>` repairs the NAME: every `ns/` key that deduped onto the old inode keeps
+    // serving the corrupt bytes this very call reported, and a warm run is all hits and never
+    // reaches the comparison again — so the loud line would name a corruption it had left in place
+    // for every key but the one being stored.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      const first = c.put('k1', 'f', object('TRUTH-BYTES'));
+      const second = c.put('k2', 'f', object('TRUTH-BYTES'));
+      writeFileSync(objectsIn(root)[0], 'CORRUPT');
+      expect(readFileSync(first, 'utf8'), 'the hardlink shows the corruption').toBe('CORRUPT');
+
+      c.put('k3', 'f', object('TRUTH-BYTES'));
+      expect(m.cacheStats()).toMatchObject({ objectCorrupt: 1 });
+      for (const [name, p] of [
+        ['k1', first],
+        ['k2', second],
+      ] as const) {
+        expect(readFileSync(p, 'utf8'), `${name} deduped onto that inode and must be repaired with it`).toBe(
+          'TRUTH-BYTES',
+        );
+      }
+    });
+  });
+
+  test('an honest store says nothing and stores nothing twice', async () => {
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root }, (m) => {
+      const c = m.candCache('t', () => NS_A);
+      for (const k of ['k1', 'k2', 'k3']) {
+        expect(readFileSync(c.put(k, 'f', object('SAME')), 'utf8')).toBe('SAME');
+      }
+      expect(objectsIn(root).length).toBe(1);
+      expect(m.cacheMismatches()).toBe(0);
+      expect(m.cacheStats().mismatch).toBeUndefined();
+    });
+  });
+});
+
+describe('ASMLIFT_CANDCACHE_DIR: set-and-empty is a PATH, and the path it is is the current directory', () => {
+  // `??` catches only `undefined`. `ASMLIFT_CANDCACHE_DIR=` — an unexpanded `$SOMETHING`, or a
+  // half-typed one-shot override — therefore put `ns/`, `objects/` and `MISMATCHES.log` wherever
+  // the process was standing, which docs/ranked-repro.md tells the reader is their decomp
+  // checkout. MEASURED: with the store in a CWD holding `objects/aa/build-artifact.o`, one
+  // over-cap prune reported `{"prunedObjects":1}` and the file was gone. This is the same
+  // unexpanded-variable shape `ASMLIFT_CANDCACHE=` is guarded against, and the flip is what armed
+  // it: before it, an empty DIR was inert because the mode was off.
+  const captureLoad = async (
+    env: Record<string, string | undefined>,
+    fn: (m: CandCacheModule) => void,
+  ): Promise<string> => {
+    let said = '';
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+      said += typeof c === 'string' ? c : Buffer.from(c).toString();
+      return true;
+    });
+    try {
+      await load(env, (m) => fn(m));
+      return said;
+    } finally {
+      spy.mockRestore();
+    }
+  };
+
+  test('an empty DIR falls back to the default store and SAYS so — it never writes to the CWD', async () => {
+    const cwd = scratch();
+    const spy = vi.spyOn(process, 'cwd').mockReturnValue(cwd);
+    try {
+      const said = await captureLoad({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: '' }, (m) => {
+        expect(m.MISMATCH_LOG, 'the loud line must name a path a reader can find').toBe(
+          join(tmpdir(), 'asmlift-candcache', 'MISMATCHES.log'),
+        );
+      });
+      expect(said).toContain('ASMLIFT_CANDCACHE_DIR is SET AND EMPTY');
+      expect(readdirSync(cwd), 'nothing lands in the current directory').toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('a RELATIVE DIR is resolved once, so one process cannot mean two stores', async () => {
+    const base = scratch();
+    const spy = vi.spyOn(process, 'cwd').mockReturnValue(base);
+    try {
+      await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: 'rel-store' }, (m) => {
+        expect(m.MISMATCH_LOG).toBe(join(base, 'rel-store', 'MISMATCHES.log'));
+        m.candCache('t', () => NS_A).put('k', 'f', object('OBJ'));
+      });
+      expect(readdirSync(join(base, 'rel-store')).sort()).toEqual(['ns', 'objects']);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('an UNSET DIR is still the shared default, unchanged by the guard', async () => {
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: undefined }, (m) => {
+      expect(m.MISMATCH_LOG).toBe(join(tmpdir(), 'asmlift-candcache', 'MISMATCHES.log'));
     });
   });
 });

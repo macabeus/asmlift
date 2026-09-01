@@ -9,7 +9,7 @@
 // also what catches a leaked counter, since `v*`/`t*` numbering would drift immediately.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { frontendFor } from '../src/frontend/registry';
@@ -18,6 +18,14 @@ import { verify } from '../src/ir/verify';
 import { applyIdiomPatterns, raiseRecovered } from '../src/pipeline';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
+
+// CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
+// budget. Solo these tests run in 0.9-1.7 s; inside a full `pnpm test:offline` at loadavg ~26 this
+// file and two siblings went red with `Error: Test timed out in 5000ms` and nothing else, which
+// reads like a soundness failure and is not — re-run alone, 11 tests green in under 2 s. A real
+// hang is still loud, just 60 s later. (Not caused by the candidate-object cache: nothing under
+// packages/core imports it, and the test fence's positive control passed in the same red run.)
+vi.setConfig({ testTimeout: 60_000 });
 
 const ASM_DIR = join(__dirname, '../../../apps/benchmark/checkouts/klonoa-empire-of-dreams/asm/nonmatchings');
 
