@@ -248,3 +248,47 @@ test('CLI: an unreadable or malformed symbols map is loud, never a silent map-le
   const r2 = await runCli([f2]);
   expect(r2.code).toBe(66);
 });
+
+// THE SHAPE AN EXCEPTION CANNOT REPORT, and the one the key exists to prevent. The check above
+// covers a file that is missing or is not JSON — both throw. But `symbolMapFromJson` is a total
+// function over `Object.entries`, so `[]`, `{}` and `{"nope": []}` are all VALID JSON that reduce
+// to an EMPTY map with no error at all, and an empty map is byte-for-byte the state a map-less run
+// is in. Before `parseSymbolMapJson` these exited 0 and scored a DIFFERENT source under a
+// DIFFERENT label while a published repro script said the row had a map: a silent wrong answer
+// wearing the provenance of a real one. Each shape is asserted separately — a single case would
+// pass on a check that only rejected arrays.
+test('CLI: a symbols map that PARSES but declares nothing is an input error, not a map-less run', async () => {
+  for (const [body, needle] of [
+    ['[]', 'is not a symbol map'],
+    ['{}', 'declares no symbols'],
+    ['{"nope": []}', 'is not a symbol map'],
+    ['{"0x03001234": [{"kind": "data"}]}', 'is not a symbol map'],
+  ] as const) {
+    const root = tmp();
+    writeFileSync(join(root, 'symbols.json'), body);
+    writeFileSync(
+      join(root, 'decomp.yaml'),
+      'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+    );
+    const f = join(root, 'f.s');
+    writeFileSync(f, POOL_ASM);
+    const r = await runCli([f]);
+    expect({ body, code: r.code }).toEqual({ body, code: 66 });
+    expect(r.stderr).toContain(needle);
+  }
+});
+
+// The positive control for the test above: the SAME rig with a real map exits 0. Without it, a
+// change that made every symbols-bearing run exit 66 would pass the loudness check.
+test('CLI: the loud-rejection rig accepts a well-formed map (the control)', async () => {
+  const root = tmp();
+  writeFileSync(join(root, 'symbols.json'), MAP_JSON);
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+  );
+  const f = join(root, 'f.s');
+  writeFileSync(f, POOL_ASM);
+  const r = await runCli([f]);
+  expect(r.code).toBe(0);
+});

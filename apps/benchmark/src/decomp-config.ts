@@ -124,10 +124,14 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
 export function scoreViaBenchConfig(
   id: ToolchainId,
   builtin: (candC: string, sym: string, obj: string) => MatchScore,
-): (candC: string, sym: string, obj: string) => MatchScore {
-  return (candC, sym, obj) => {
+): (candC: string, sym: string, obj: string, declarations?: string) => MatchScore {
+  return (candC, sym, obj, declarations) => {
     const compile = benchCompilerFor(id);
-    return compile ? scoreObjects(obj, compile(candC, sym, 'c'), sym) : builtin(candC, sym, obj);
+    // `declarations` reaches the compiler's own prelude slot, never the front of the source: the
+    // prelude already emits C_TYPEDEFS, and a concatenated copy redefines `s16`/`s32`. The
+    // builtin fallback has no such slot, so it is called unchanged — it is only reached where no
+    // decomp.yaml command exists, which is not a configuration any row with a map runs in.
+    return compile ? scoreObjects(obj, compile(candC, sym, 'c', declarations), sym) : builtin(candC, sym, obj);
   };
 }
 

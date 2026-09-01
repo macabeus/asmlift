@@ -12,6 +12,12 @@
 // it cost this file its subject. `recip` fires the lever through R2 (const-expression staging)
 // instead, which keeps the seam covered.
 //
+// IT ALSO PINS THE LABEL, which nothing else did: `/regcopy-ret-fresh` won nothing over the
+// corpus for as long as it existed, so a family census read it as dead — and deleting the string
+// from rank.ts's table was a SILENT RENAME to `/regcopy-2`, a 0-flip change `bench regression`
+// green-lights. The names are the instrument (`candidateLabel` is a `bench diff` field), so they
+// are asserted here as names, and the tail-kind correspondence is asserted below.
+//
 // SCOPE, stated so it is not mistaken for more than it is: this pins that the candidates are
 // ENUMERATED and that ranking still lands on a byte-exact spelling. It does NOT pin a shape where
 // the regcopy spelling is the one that WINS — the measured winners are real ROM functions
@@ -27,9 +33,18 @@ test('the register-copy candidates are enumerated and ranked through the ranked 
   const asm = compileTargetAsm(c);
   const obj = assembleTarget(asm);
   const cands = enumerateCandidates('recip', asm, ARMV4T_AGBCC, {});
-  // the lever fired, and BOTH tails (with/without R3's assign-back) reached the candidate set
+  // The lever fired, and the tail reached the candidate set under the name of the tail it IS.
+  //
+  // `recip` fires through R2 alone — no diamond, so R1 never runs and there is no dead value var
+  // for the tail to reuse. The only tail that exists here is the FRESH one, and this line used to
+  // assert `/regcopy-ret`: the label table in rank.ts was indexed by list POSITION, and with the
+  // reuse tail absent the fresh spelling landed at index 1 and wore the reuse name. This file was
+  // the only place the label was pinned at all, so it pinned the mislabel. Asserting the ABSENCE
+  // of the reuse name is the load-bearing half — without it, a return to positional labelling
+  // passes again.
   expect(cands.some((x) => x.label.endsWith('/regcopy'))).toBe(true);
-  expect(cands.some((x) => x.label.endsWith('/regcopy-ret'))).toBe(true);
+  expect(cands.some((x) => x.label.endsWith('/regcopy-ret-fresh'))).toBe(true);
+  expect(cands.filter((x) => x.label.endsWith('/regcopy-ret'))).toEqual([]);
   // every regcopy candidate is emittable C, not a shape that throws downstream of the seam
   const r = rankBy(cands, 'recip', (src) => scoreC(src, 'recip', obj));
   expect(r.best.score.match).toBe(true);

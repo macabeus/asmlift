@@ -17,7 +17,13 @@ import type { Toolchain } from '../toolchains';
 import { compilerErrorLines } from './outcome';
 import { assessQuality } from './quality';
 
-export type Scorer = (candC: string, sym: string, obj: string) => MatchScore;
+/** `declarations` is the fourth argument for the same reason the candidate compiler has one: a
+ *  source that NAMES a project global must be compiled with that global declared, and the
+ *  declaration belongs in the compiler's own prelude slot rather than glued onto the front of the
+ *  source — the prelude already carries `C_TYPEDEFS`, so a hand-concatenated block redefines
+ *  `s16`/`s32` and the compile fails for a reason that has nothing to do with the candidate.
+ *  Optional: a scorer whose rows declare nothing ignores it. */
+export type Scorer = (candC: string, sym: string, obj: string, declarations?: string) => MatchScore;
 
 // asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous levers
 // (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the

@@ -367,9 +367,10 @@ export async function runCli(
     // that quietly failed to load reads exactly like a row that never had one, and the two
     // produce different source.
     const mapPath = resolve(configDir!, toolCfg.symbols);
+    let parsed;
     try {
-      const { symbolMapFromJson } = await import('@asmlift/core/symbols');
-      symbols = symbolMapFromJson(JSON.parse(readFileSync(mapPath, 'utf8')));
+      const { parseSymbolMapJson } = await import('@asmlift/core/symbols');
+      parsed = parseSymbolMapJson(JSON.parse(readFileSync(mapPath, 'utf8')));
     } catch (e) {
       return {
         code: 66,
@@ -377,6 +378,26 @@ export async function runCli(
         stderr: `asmlift: cannot load symbols from tools.asmlift.symbols (${mapPath}): ${e instanceof Error ? e.message : e}\n`,
       };
     }
+    // A file that PARSES and still declares nothing is the failure this key exists to prevent, and
+    // it is the one an exception cannot report: `[]`, `{}` and `{"nope": []}` are all valid JSON
+    // that reduce to an EMPTY map, which is byte-for-byte the state a map-less run is in. The run
+    // would then exit 0 having scored a different source under a different label — a silent wrong
+    // answer wearing a published repro script's provenance. Both shapes are input errors here.
+    if ('error' in parsed) {
+      return {
+        code: 66,
+        stdout: '',
+        stderr: `asmlift: tools.asmlift.symbols (${mapPath}) is not a symbol map — ${parsed.error}\n`,
+      };
+    }
+    if (parsed.map.size === 0) {
+      return {
+        code: 66,
+        stdout: '',
+        stderr: `asmlift: tools.asmlift.symbols (${mapPath}) declares no symbols — remove the key to run without a map\n`,
+      };
+    }
+    symbols = parsed.map;
   }
 
   const name = nameFlag ?? detectName(asm);

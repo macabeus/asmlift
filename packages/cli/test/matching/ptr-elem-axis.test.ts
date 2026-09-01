@@ -6,12 +6,22 @@
 // (`spellPtrMemberElements`, enumerated at rank.ts's `ptrElemCands`), and the two are the same
 // ADDRESS and different OBJECTS — so the differ referees.
 //
-// No row of the 951-row benchmark artifact wins under a label containing `ptr-elem`, and that is
-// a fact about the CORPUS, not about the axis: the enumeration gate needs a symbol map declaring
-// a pointer member with a pointee width of 1, 2 or 4, the 696 synthetic rows carry NO map, and
-// klonoa's map holds exactly ONE such symbol — whose every decompiled caller happens to have been
-// written in the element form. A synthetic row cannot pin this axis (a synthetic case never
-// carries `symbols`), so the pin is here, against the project's own map and its own toolchain.
+// No REAL row wins under a label containing `ptr-elem`, and that is a fact about the CORPUS, not
+// about the axis: the enumeration gate needs a symbol map declaring a pointer member with a
+// pointee width of 1, 2 or 4, and klonoa's map holds exactly ONE such symbol — whose every
+// decompiled caller happens to have been written in the element form.
+//
+// THE SYNTHETIC TIER CAN NOW CARRY A MAP (`SynthSpec.symbols`), and `synthetic:ptrelem:agbcc` is
+// the row that pins the WIN: match at 0 under `unsigned/no-ptr-elem`, NONMATCH 6 when the arm is
+// ablated. This header shipped in the same change as that row still saying a synthetic case never
+// carries `symbols` and that a synthetic row cannot pin this axis — both false as written, and
+// false about the very commit they were written in.
+//
+// SO WHAT IS THIS FILE FOR, given the row exists. Two things the row cannot do. It runs against
+// the PROJECT'S OWN map and toolchain rather than an authored map, so it would catch a divergence
+// between what an ELF really says and what the dataset hand-writes; and it pins the axis TWO-SIDED
+// on four shapes at once — on the byte target the arm is the only match, on the element target the
+// default is — where a benchmark row can only ever pin the side it was compiled from.
 //
 // WHAT THIS PINS, and it is the thing a census cannot see: on the byte-arithmetic target the
 // `/no-ptr-elem` candidate is the ONLY match and the default arm does not match, and on the

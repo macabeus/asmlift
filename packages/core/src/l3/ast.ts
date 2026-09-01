@@ -48,7 +48,8 @@ export type Expr =
   // `g[i]`. It exists for exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL
   // array global, where one subscript reaches a row and the element needs the leading dimensions
   // pinned first. What that costs and what it buys, measured over the published artifact rather
-  // than carried from the sweep the field was proposed under: 5 of the artifact's 951 rows spell a
+  // than carried from the sweep the field was proposed under: 5 of the 951-row artifact this was
+  // measured over spell a
   // two-subscript access at all, and the `Expr[]` — the part every generic walk pays for — is
   // earned by the 2 whose OUTER subscript is not the literal 0 (`ProcessInputAndUpdateEntities`,
   // `SetupBG3WindowOverlay`; the second is `noncompile`, for an unrelated callee arity, on this

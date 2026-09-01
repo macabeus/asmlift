@@ -3,6 +3,7 @@
 // each decompiler runs and is scored against the SAME object with the SAME compiler — symmetric.
 import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
+import { renderDeclarations } from '@asmlift/core/declare';
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
 
@@ -44,16 +45,66 @@ const M2C_DIALECT_TYPEDEFS = 'typedef float f32;typedef double f64;\n#define NUL
 
 /** Score plain first; retry with the dialect typedefs only when the plain attempt cannot
  *  compile. Whichever compiles is the measurement. */
-function scoreM2c(score: Scorer, source: string, sym: string, obj: string): ReturnType<Scorer> {
-  try {
-    return score(source, sym, obj);
-  } catch (first) {
+function scoreM2c(
+  score: Scorer,
+  source: string,
+  sym: string,
+  obj: string,
+  decls: string | undefined,
+): ReturnType<Scorer> {
+  const rungs: { src: string; decls?: string }[] = [
+    { src: source },
+    { src: M2C_DIALECT_TYPEDEFS + source },
+    ...(decls
+      ? [
+          { src: source, decls },
+          { src: M2C_DIALECT_TYPEDEFS + source, decls },
+        ]
+      : []),
+  ];
+  let first: unknown;
+  for (const [i, rung] of rungs.entries()) {
     try {
-      return score(M2C_DIALECT_TYPEDEFS + source, sym, obj);
-    } catch {
-      throw first; // report the plain attempt's error — the dialect retry is best-effort
+      return score(rung.src, sym, obj, rung.decls);
+    } catch (e) {
+      if (i === 0) {
+        first = e;
+      }
     }
   }
+  throw first; // report the plain attempt's error — every retry is best-effort
+}
+
+/** THE DECLARATIONS m2c'S OUTPUT IS COMPILED WITH, on a synthetic row whose `ctx` carries a map.
+ *
+ *  A decompiler told about a global in its `--context` correctly OMITS the declaration from its
+ *  output — the user already has that header. asmlift's candidates are handled that way too: the
+ *  scoring layer prepends `declarationsOf(cand)` at compile. The synthetic tier has no project
+ *  context to compile in, so before the map rows existed m2c's self-declaration was all it needed
+ *  and this was moot.
+ *
+ *  It stopped being moot the moment `ctx` started carrying a map's declarations. Measured without
+ *  this: m2c emits `gPacked = (gPacked & 0xFFFFF01F) | …` — correct, and exactly what it should
+ *  emit having been told the symbol — and the compile fails with "`gPacked' undeclared", turning a
+ *  MATCH into a noncompile on `bfwordread` and `bfwordwrite`. That is a rig artifact of handing a
+ *  tool a context it is then not compiled against, not a capability it lacks, and publishing it
+ *  would be a wrong answer dressed as a measurement.
+ *
+ *  The real tier needs none of this: there `scorer` is the project-context compile, which already
+ *  supplies the headers m2c was given. So this is the synthetic tier's analogue of that, and it is
+ *  a RETRY rung rather than an unconditional prelude — a row that already compiles is untouched,
+ *  so this can only ever turn a harness-caused failure into a score. */
+function m2cDeclarationsFor(spec: EvalSpec): string | undefined {
+  if (spec.tier !== 'synthetic' || !spec.symbols) {
+    return undefined;
+  }
+  // The declaration BLOCK only — not `selfDeclaredContext`, which prepends `C_TYPEDEFS`. This goes
+  // into the compiler's own prelude slot, which already emits those typedefs, and the first draft
+  // of this fix concatenated the whole context onto the source instead: every rung then died on
+  // `redefinition of s16` and the four rows stayed noncompile, which reads exactly like the bug
+  // being fixed. A retry that fails for its OWN reason is worse than no retry, because it looks
+  // like evidence.
+  return renderDeclarations([...spec.symbols.values()].flat().map((info) => ({ name: info.name, info })));
 }
 
 /** Classify m2c through the same rule set as asmlift (outcome.ts): no usable output ⇒ failed;
@@ -95,7 +146,7 @@ function evaluateM2c(
     };
   }
   try {
-    const s = scoreM2c(score, m.source, sym, obj);
+    const s = scoreM2c(score, m.source, sym, obj, m2cDeclarationsFor(spec));
     return {
       decompiler: 'm2c',
       outcome: s.match ? 'match' : 'nonmatch',

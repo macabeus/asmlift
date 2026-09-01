@@ -38,6 +38,7 @@ import {
 } from '../src/cases/authored-facts';
 import { REAL_DIR, type RealManifest } from '../src/cases/manifests';
 import { m2cOwnPrototype } from '../src/cases/real';
+import { syntheticCases } from '../src/cases/synthetic';
 
 const files = readdirSync(REAL_DIR).filter((f) => f.endsWith('.json'));
 
@@ -271,5 +272,109 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
     const noOracle = SYNTHETIC.filter((s) => typeof oracleFor('', s.sym, s.src) === 'string').map((s) => s.sym);
     expect(noOracle).toEqual([]);
     expect(SYNTHETIC.length).toBeGreaterThan(200);
+  });
+});
+
+// ── An authored SYMBOL MAP is an authored fact, and it had no gate at all ──────────────────────
+//
+// `SynthSpec.symbols` arrived with the six zero-row-family rows and is strictly MORE expressive
+// than `proto`, the channel whose absence of a gate once cost a real row its match (a manifest
+// declaring `returnsVoid: true` for a function whose own reference returns `void *`). A map states
+// member offsets, bitfield bit offsets, pointee widths and array rank — and the rows that carry
+// one exist precisely to defend the axes those facts enumerate, so a map that quietly disagreed
+// with its own source would flatter exactly what it was authored to measure.
+//
+// TWO THINGS ARE CHECKED, and neither is a restatement of the other.
+//
+// SYMMETRY — every symbol the map declares to asmlift must also reach m2c. The map is asmlift-only
+// input (`Case.symbols`; m2c's analogue is `ctx`), so `src/cases/synthetic.ts` renders it into the
+// ctx and this asserts the rendering actually happened. It is the same class the callee check
+// above covers and the class PR #119 corrected on the real tier, on a channel that check cannot
+// see: `declaredFunctionNames` reads FUNCTION names, so a struct layout added to one side alone is
+// invisible to it. Measured before this existed: told only its prototype, m2c emits
+// `extern ? gBgTilemapBufs;` on `sbscope` and the row publishes a DECLINE.
+//
+// AGREEMENT WITH THE ROW'S OWN SOURCE — the synthetic tier's `src` IS the compiler's input, so it
+// is the oracle here exactly as it is for `proto` above. Checked by NAME (every symbol and every
+// member the map declares must be spelled in the source that defines them) and by internal
+// CONSISTENCY (a member cannot lie outside the size it is declared in, a bitfield cannot span past
+// its container, a pointee width must be one a load can have).
+//
+// WHAT THIS DOES NOT CHECK, stated so the next reader does not over-trust it: it does not compile
+// anything, so it cannot catch a map whose OFFSETS are self-consistent and still wrong for the
+// struct the source declares — a `dreamStones` moved from bit 5 to bit 6 passes here. That is a
+// compiled question and it belongs to a toolchain-bound suite, not to a hosted runner with no
+// compilers. What it does catch is the map pointing at a different symbol, a different member, or
+// a shape no C declaration could have.
+describe('an authored symbol map agrees with its own row', () => {
+  const mapped = SYNTHETIC.filter((s) => s.symbols);
+
+  test('the map channel is CONNECTED — some row carries one', () => {
+    // Before asserting anything about maps, prove there are maps: every check below is vacuously
+    // green over an empty list, which reads identically to "nothing is wrong".
+    expect(mapped.length).toBeGreaterThan(0);
+  });
+
+  test('every symbol a map declares to asmlift is also declared to m2c', () => {
+    const cases = syntheticCases().filter((c) => c.symbols);
+    expect(cases.length).toBe(mapped.reduce((n, s) => n + s.toolchains.length, 0));
+    const asymmetric = cases.flatMap((c) =>
+      [...c.symbols!.values()]
+        .flat()
+        .filter((info) => !new RegExp(`\\b${info.name}\\b`).test(c.ctx ?? ''))
+        .map((info) => `${c.id}: asmlift's map declares \`${info.name}\`, the m2c ctx does not`),
+    );
+    expect(asymmetric).toEqual([]);
+  });
+
+  test("every map names only symbols and members its row's own src spells", () => {
+    const problems = mapped.flatMap((s) =>
+      [...s.symbols!.values()]
+        .flat()
+        .flatMap((info) => [
+          ...(new RegExp(`\\b${info.name}\\b`).test(s.src)
+            ? []
+            : [`${s.sym}: map declares \`${info.name}\`, src does not`]),
+          ...[...(info.layout ?? []), ...(info.pointee?.layout ?? [])]
+            .filter((f) => !new RegExp(`\\b${f.name}\\b`).test(s.src))
+            .map((f) => `${s.sym}: map declares member \`${info.name}.${f.name}\`, src does not`),
+        ]),
+    );
+    expect(problems).toEqual([]);
+  });
+
+  test('every map is internally consistent — no member outside its object, no bitfield past its unit', () => {
+    const problems = mapped.flatMap((s) =>
+      [...s.symbols!.values()].flat().flatMap((info) => {
+        const where = `${s.sym}:${info.name}`;
+        return [
+          ...(info.dims ?? [])
+            .filter((d) => d !== null && !(Number.isInteger(d) && d > 0))
+            .map((d) => `${where}: array extent ${d} is not a positive integer`),
+          ...[...(info.layout ?? []), ...(info.pointee?.layout ?? [])].flatMap((f) => {
+            const at = `${where}.${f.name}`;
+            const out: string[] = [];
+            if (f.size !== null && info.size !== undefined && f.offset + f.size > info.size) {
+              out.push(`${at}: ends at ${f.offset + f.size}, past the declared size ${info.size}`);
+            }
+            if (f.bitWidth !== undefined) {
+              // A bitfield's bit offset is stated RELATIVE TO ITS OWN BYTE OFFSET, so the unit it
+              // must fit inside is the member's own `size` — the same convention the fold reads
+              // (`f.offset * 8 + f.bitOffset`), which is why a `bitOffset` big enough to leave it
+              // is not a tighter style rule but a member the fold would seat in the wrong word.
+              const unit = (f.size ?? 4) * 8;
+              if (f.bitWidth < 1 || (f.bitOffset ?? 0) < 0 || (f.bitOffset ?? 0) + f.bitWidth > unit) {
+                out.push(`${at}: bits [${f.bitOffset ?? 0}, +${f.bitWidth}) do not fit its ${unit}-bit unit`);
+              }
+            }
+            if (f.pointer && f.pointeeSize !== undefined && ![1, 2, 4].includes(f.pointeeSize)) {
+              out.push(`${at}: pointee width ${f.pointeeSize} is not a width a load has`);
+            }
+            return out;
+          }),
+        ];
+      }),
+    );
+    expect(problems).toEqual([]);
   });
 });

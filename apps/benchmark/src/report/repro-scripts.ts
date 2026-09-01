@@ -193,7 +193,14 @@ CTX_PROTO`
 # the benchmark states them here instead; the same callees are named to asmlift through its
 # --proto hints, and a test holds the two lists equal. Everything else the project declares
 # reaches asmlift as a symbol map and does not reach m2c on this row.`
-            : `
+            : usesAuthoredMap(fn)
+              ? `
+# Prototypes AND the declarations of this row's authored symbol map. The synthetic tier measures
+# COLD recovery and is symmetric by construction, so a row that hands asmlift a map hands m2c the
+# same map: the block above is that map rendered to C by asmlift's own declaration renderer, not a
+# second hand-written claim beside it. What the row measures is the reference SOURCE's spelling,
+# which is in neither channel — see the asmlift script's --config for the map's own JSON.`
+              : `
 # Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is
 # symmetric by construction: these are the same facts asmlift is given as --proto hints, and
 # neither tool is given a project.`
