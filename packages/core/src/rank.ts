@@ -355,11 +355,13 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  `kleod:CountCollectedGems` +64 and nothing else more than 32. The first of those is an
  *  `outcome: noncompile` row — `decompileRanked` throws only when EVERY candidate failed to build
  *  — so its whole fan is compiled and discarded, and this made that discard 10% bigger. Timed on
- *  two full bench runs on a shared box: that row 377.6s → 483.0s, the second 238.4s → 313.6s for
- *  a 369 → 367 gain, real tier 416.1s → 529.4s. Priced, not free, and bought with three rows:
- *  `sa3:sub_803213C` (MATCH, sunk row), `kleod:ProcessInputAndUpdateEntities` (369 → 367) and
- *  `kleod:CountCollectedGems` (328 → 327). Which ROW of the pair each is credited to is a label
- *  and not a cause — see the note on BASEFOLD_ADMISSIONS, where the two are ablated apart. */
+ *  two full bench runs on a shared box: that row 377.6s → 483.0s, the second 238.4s → 313.6s,
+ *  real tier 416.1s → 529.4s. Priced, and the three rows it was bought with NO LONGER BUY IT:
+ *  re-ablated at this commit, `sa3:sub_803213C` is MATCH with the pair removed,
+ *  `kleod:ProcessInputAndUpdateEntities` is 248 either way and `kleod:CountCollectedGems` 290
+ *  either way — the 369 → 367 and 328 → 327 gains were measured against baselines the rest of
+ *  the tree has since moved past. Read the ablation in the note on BASEFOLD_ADMISSIONS, which
+ *  carries the current numbers and the fan counts that prove the ablation reached. */
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
@@ -390,18 +392,29 @@ const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  does not carry, so both ride and the differ referees.
  *
  *  WHAT EACH ROW IS WORTH, ablated through the harness rather than read off the winning labels,
- *  because three of the four labels the head row wins are TIES the sunk row also reaches.
- *  Dropping the SUNK row costs two matches: `synthetic:foldsink` MATCH → diff:2 and
- *  `sa3:sub_803213C` MATCH → diff:2. Dropping the HEAD row costs no match anywhere — including
- *  `synthetic:basecell`, which its label wins only because it is enumerated first: the two rows
- *  emit the identical source set there (measured over the corpus sweep, 0 distinct sources lost
- *  on that row) and `seen` collapses the sunk one, so that row does not bracket this placement and
- *  no row in this corpus does. Its whole measured return is 2 points on one NONMATCH row
- *  (`kleod:ProcessInputAndUpdateEntities` 367 with, 369 without); `kleod:CountCollectedGems` 327
- *  and `kleod:RollRandomLevelVariant` 18 either way. It is kept because it is a real spelling —
+ *  because a label a row wins can be a TIE another row also reaches. RE-MEASURED, and the answer
+ *  MOVED: NEITHER ROW IS BRACKETED BY ANYTHING IN THIS CORPUS TODAY. Ablating the sunk row, the
+ *  head row, or BOTH leaves every row this note ever named exactly where it was —
+ *  `synthetic:foldsink` MATCH in all four configurations (its fan 12 → 8 → 8 → 4, so the
+ *  ablation reached and each row really does emit sources of its own), `synthetic:basecell` MATCH
+ *  (fan 4 → 4 → 2 — the head row's sources are the sunk row's there and `seen` collapses one),
+ *  `sa3:sub_803213C` MATCH, and — with the pair removed — `kleod:ProcessInputAndUpdateEntities`
+ *  248, `kleod:CountCollectedGems` 290 and `kleod:RollRandomLevelVariant` 18, each of them the
+ *  number the artifact already carries. The two points this note credited the head row on that
+ *  first nonmatch row are gone with the 369 they were measured against; 0 of the artifact's 951
+ *  rows carries a `basefold` token in its winning label at all, and all six rows above win under
+ *  `/offmember` today. WHAT MOVED WAS THE REST OF THE TREE, not this pair: an earlier claim keeps
+ *  its truth only until something else reaches the same spelling more cheaply, so a bracket has to
+ *  be re-run before it is re-quoted. This pair is now kept ONLY because it is a real spelling —
  *  1432 distinct candidate sources over 21 observations that nothing else emits, and a C source
- *  that initializes its base pointers where it declares them is the ordinary case — but a later
- *  round pricing the agbcc fan should know it costs half of what this pair adds for that. */
+ *  that initializes its base pointers where it declares them is the ordinary case. That is a
+ *  weaker justification than a protected row and it should be read as one: a round pricing the
+ *  agbcc fan may delete the pair, and the gate on doing so is `bench diff`, not this note.
+ *  HOW THE ABLATION WAS DONE, so the next round does not re-invent it: there is no shipped knob.
+ *  Filter this roster at its one use site (the `admissions` const in `enumerateCandidates`) behind
+ *  a temporary env read, run the rows with `ASMLIFT_CANDCACHE=0`, and revert. Prove the filter
+ *  REACHED before believing a null result — `synthetic:livepark` MATCH → diff:3 with `/livebase`
+ *  removed is the positive control, and a fan count per configuration is the second. */
 const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
   { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
@@ -967,8 +980,15 @@ export function enumerateCandidates(
   // Where it DOES reach, the cross is the honest price of an arm the differ has to referee, and on
   // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` enumerates 17,856
   // candidates with the axis and 12,096 without (+47.6%), and today its OFF arm wins nothing — no
-  // winning label in the 948-row corpus carries `/no-ptr-elem`. That is a price paid for a
-  // question the asm cannot answer, not a lever earning its keep.
+  // winning label carries `/no-ptr-elem`. That is a price paid for a question the asm cannot
+  // answer, not a lever earning its keep.
+  // STATE THE DENOMINATOR, because a label census is not a corpus census: of the 951 rows in the
+  // artifact only 729 carry a `candidateLabel` at all (218 declined, 4 noncompile), and this axis
+  // is offered only where a symbol map exists — 151 of the 252 REAL rows are labelled and 0 of the
+  // 578 labelled synthetic rows could ever carry it. So "0 winning labels" is 0 of 151 here, not
+  // 0 of 951, and it is a weaker statement than an ablation over every row would be. What makes
+  // "no row is LOST" a proof rather than a sample is the soundness rule instead: this axis only
+  // ADDS candidates, so a row whose winner does not carry it cannot move when it is removed.
   const byName = opts.symbols !== undefined ? symbolsByName(opts.symbols) : undefined;
   const fnHasSizedPtrFields =
     byName !== undefined &&
