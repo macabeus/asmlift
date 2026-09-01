@@ -202,15 +202,16 @@ the keys it serves — the `[candcache]` line carries `sample=…%/seed=…`, an
 disagreement FAILS. The flag table, the cold-vs-warm rule and what a project must declare before the
 cache runs on its own `decomp.yaml` are in `docs/ranked-repro.md`.
 
-**What that audit is worth here, measured on one full run** (948 rows, warm real-tier store, 16
-shards, nothing planted): the eight real shards served **6,911 objects and 34,800 stored
-REJECTIONS** — 83% of served answers are the negative half — and re-compiled **399 of them (0.95%)
-to compare against the store: 57 objects, 342 rejections, 0 disagreements**. The rejection
-direction is the one that silently drops a spelling from a row's fan, and a `bench run` is the only
-thing in this repo that exercises it at all; the LoadBGTilemapData fan the rate was tuned on has 0
-of them. Sum the per-shard `[candcache]` lines to check it. The eight synthetic shards were cold
-(`miss` only) and audited nothing, which is the same reason CI's audit is inert: a hosted runner
-starts with an empty store.
+**What that audit is worth here, measured on the run this repo's committed artifact came from**
+(948 rows, warm store, 16 shards, nothing planted): the shards served **10,221 objects and 50,583
+stored REJECTIONS** — 83% of served answers are the negative half — and re-compiled **1,283 of them
+(2.11%) to compare against the store: 210 objects, 1,073 rejections, 0 disagreements**, with
+`sampled` reconciling exactly against the audits it accounts for. The rejection direction is the
+one that silently drops a spelling from a row's fan, and a `bench run` is the only thing in this
+repo that exercises it at all; the LoadBGTilemapData fan the rate was measured on has 0 of them.
+Sum the per-shard `[candcache]` lines to check it. A shard that starts cold (`miss` only) audits
+nothing, which is the same reason CI's audit is inert: a hosted runner starts with an empty
+store.
 
 **Which bench compiles it actually reaches** — measured per toolchain with a private store
 (`ASMLIFT_CANDCACHE_DIR=<empty> ASMLIFT_CANDCACHE_TRACE=1 pnpm bench run --tier … --toolchain … --serial`),

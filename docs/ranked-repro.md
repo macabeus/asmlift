@@ -320,18 +320,20 @@ find nothing to disagree with and go green having audited nothing.
     a candidate's own assembler `.include`/`.incbin` is per-CANDIDATE, and the same list measures
     it at 0 of 68,352 on LoadBGTilemapData — the sparse regime, where the honest number is the
     50-run figure, not "the first run".
-    **And the BENCH path is sparser than the ranked one.** One whole `pnpm bench run` serves
-    ~42,110 answers and audits ~399 of them (0.95%), so a staleness confined to ONE ROW's keys
-    (~9 objects on the agbcc real tier) is caught with probability 8.2% per bench run — a mean of
-    about 12 bench runs. The bench is where every published score comes from, so that is the number
-    to quote for a row-local staleness, not the ranked fan's.
+    **And the BENCH path is sparser than the ranked one, though the rate is the same.** One whole
+    `pnpm bench run` serves ~60,800 answers and audits ~1,280 of them (2.1%), so a staleness
+    confined to ONE ROW's keys (~9 objects on the agbcc real tier) is caught with probability 17%
+    per bench run — a mean of about 6. The bench is where every published score comes from, so that
+    is the number to quote for a row-local staleness, not the ranked fan's.
     Sampling does not ELIMINATE the residual list; it bounds how long one can live undetected.
   - **This fan prices only the OBJECT half, and the negative half is measured on the bench.** 0 of
-    its 68,352 answers are cached rejections. One whole `pnpm bench run` (948 rows, warm real-tier
-    store, 16 shards) served **6,911 objects and 34,800 rejections** — 83% negative — and audited
-    **399 of them (0.95%): 57 objects, 342 rejections, 0 disagreements**. That is the direction
-    nothing was checking before #132 and the one that silently DROPS a spelling, and it is only
-    ever exercised by a bench run. Read it off the per-shard `[candcache]` lines, which is where a
+    its 68,352 answers are cached rejections. The `pnpm bench run` this repo's committed artifact
+    was generated from (948 rows, warm store, 16 shards) served **10,221 objects and 50,583
+    rejections** — 83% negative — and audited **1,283 of them (2.11% of what it served): 210
+    objects, 1,073 rejections, 0 disagreements**, with `sampled` reconciling exactly against the
+    audits. A second full run the same day read 84% negative on the same measure, so treat it as
+    "five sixths", not as a constant. That is the direction that silently DROPS a spelling, and it
+    is only ever exercised by a bench run: sum the per-shard `[candcache]` lines, which is where a
     reader can check it too.
   - **A withholding accounts for itself, so `sampled` cannot overstate the audit.** `sampled`
     counts keys the cache WITHHELD, not comparisons it made: a withheld key whose compile dies

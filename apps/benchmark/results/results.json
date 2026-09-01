@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-31T21:58:38.144Z",
+    "generatedAt": "2026-09-01T01:12:12.116Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "b1e8059bfe3c1ef0403b0f46cbb9b2a2d2c74e6b",
+      "commit": "f6aee2e4c8a3625f5955873991559338894659c2",
       "dirty": false
     },
     "m2c": {
@@ -58763,6 +58763,12 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "candidateLabel": "signed/flip-join/reread-globals",
+        "droppedCandidates": [
+          {
+            "label": "unsigned",
+            "error": "gcc 2.7.2 failed: gcc 2.7.2 (docker) failed:"
+          }
+        ],
         "symbolsUsed": [
           {
             "name": "D_800CC69C_CD29C",
