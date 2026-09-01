@@ -309,7 +309,12 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
 
   test('the joint spelling reaches the differ, over the whole admission roster', () => {
     expect(labels).toContain('signed/livebase/sinkinit');
-    expect(labels).toContain('signed/livebase-block/volatile/sinkinit');
+    // The NARROW admission's sunk spelling arrives under `/unfolded` here, not under the pairing:
+    // on this fixture `/unfolded` binds the same register file `/livebase-block` does, its roster
+    // row is enumerated before the product loops, and it places at first use — so it emits that
+    // source first and `seen` keeps its label. Same program, one label.
+    expect(labels).toContain('signed/unfolded/volatile');
+    expect(labels.filter((l) => l.includes('livebase-block'))).not.toEqual([]);
   });
 
   test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {

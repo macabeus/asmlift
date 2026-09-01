@@ -329,6 +329,40 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
   },
 ];
 
+/** `/unfolded`'s admission (rank.ts): `/livebase` plus `folded-offset`, which REQUIRES the fold
+ *  evidence `BASEFOLD_GATES` exempts on. The two tables read one field and ask opposite questions
+ *  of it — that one exempts `single-use` for a key reached ONCE whose offset survived, this one
+ *  keeps `single-use` and demands the same survival of a key reached TWICE — so neither is the
+ *  other relaxed, and a key admitted by both is a key both tables' other rules also admit.
+ *
+ *  WHY IT IS A SELECTION AND NOT A WIDENING. `/livebase` and `/livebase-block` are one chain:
+ *  every key the narrow table binds the wide one binds too, so between them a function has only
+ *  "all the reused bases" and "those minus the scalar cells". A source that parked ONE numeric
+ *  base and left a second one inline sits between them at neither end, and `singleCell` cannot
+ *  separate the two — both are reached at fixed offsets. `unfoldedOffset` can: on a compiler that
+ *  folds a constant subscript into the literal it materializes, the offset that reached the
+ *  instruction is the one a POINTER LOCAL strode, and the address that reached the pool with the
+ *  offset already in it is the one the source spelled inline.
+ *
+ *  The evidence is not proof and the gate never treats it as such — an aggregate member emits the
+ *  same operand offset — so what it produces is a candidate beside the other admissions, refereed
+ *  by the differ. Absence, per the header, is not evidence either way: an offset the address
+ *  expression already carried and an offset of 0 never set the flag, so `folded-offset` refuses on
+ *  MISSING EVIDENCE and never on a claim that the offset was folded.
+ *
+ *  This table is its own gate object, so `without(UNFOLDED_GATES, 'folded-offset')` is
+ *  `LIVEBASE_GATES` and the rule prices by ablation — the handle `BASEFOLD_GATES`' exemption
+ *  cannot have (see the note above it). */
+export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
+  ...LIVEBASE_GATES,
+  {
+    id: 'folded-offset',
+    why: 'no offset survived into the operand, so nothing says a pointer local strode this base',
+    sound: false,
+    rejects: (c) => !c.unfoldedOffset,
+  },
+];
+
 /** The census without the rewrite, so a caller choosing between admissions can compare what two
  *  tables would bind for one tree walk each. */
 export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[]): readonly string[] {

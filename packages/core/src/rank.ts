@@ -24,6 +24,7 @@ import {
   type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
+  UNFOLDED_GATES,
   admittedBases,
   hoistBaseLocals,
 } from './l3/basecse';
@@ -459,6 +460,44 @@ const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
 const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
   { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
+];
+
+/** The fifth admission, and the one BETWEEN the two `/livebase` rows rather than beside them: its
+ *  table requires the fold evidence (l3/basecse.ts, UNFOLDED_GATES), so it binds the reused bases
+ *  an operand offset says a pointer local strode and leaves the ones the pool already carried
+ *  folded. `/livebase` and `/livebase-block` are a chain — all the reused bases, or those minus
+ *  the scalar cells — and a source that parked one numeric base and spelled another inline is at
+ *  neither end of it.
+ *
+ *  LAST on the roster, so `sameBases` and `seen` between them keep it from restating an earlier
+ *  ROSTER row: it declines outright where it binds what an earlier row binds at this placement,
+ *  and where it emits an earlier row's text `seen` keeps that row's label.
+ *  IT CAN STILL RENAME A PAIRING'S CANDIDATE, and does — the roster loop below runs before the
+ *  `/livebase ×` product loops, so a source one of those products would emit later is claimed by
+ *  this row's label instead. `synthetic:foldpark` is that case measured: its fan is 34 candidates
+ *  with this entry and 34 without, the same source winning at 0 under `signed/unfolded/volatile`
+ *  here and `signed/livebase-block/volatile/sinkinit` there. A label move with no fan move is that
+ *  and not a new spelling.
+ *
+ *  ONE placement, unlike the `/basefold` pair, and by measurement rather than by symmetry. Every
+ *  one of the four configurations was scored on `synthetic:unfoldpark`, cache off:
+ *    first-use, unpaired  fan 44   this row's own candidates 0 — MATCH
+ *    first-use, paired    fan 44   0, and no product emits a source the unpaired row does not
+ *    head, unpaired       fan 44   9, the score the row already had without any of this
+ *    head, paired         fan 48   0, reached only through the `/sinkinit` product
+ *  The head is where `/livebase` already offers a spelling for every base this table can bind —
+ *  these are bases reached 2+ times — so what the row adds is the SUNK init, which is where a
+ *  source that declares its base pointer beside the loop it feeds puts the pool load. On both
+ *  neighbouring rows the head placement is shadowed outright (`/unfolded` binds set-for-set what
+ *  `/livebase` binds on `synthetic:livepark` and what `/livebase-block` binds on
+ *  `synthetic:foldpark`). A second row at the head is one line and no new table; add it when a row
+ *  demands it, which none does today.
+ *
+ *  `pairings: false` for the reason the field's own doc gives — a product is added for a row that
+ *  demands the joint spelling, and the row that earned this entry does not: paired and unpaired
+ *  are the same 44 candidates above. */
+const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
+  { suffix: '/unfolded', gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
 ];
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -1703,7 +1742,7 @@ export function enumerateCandidates(
     // spelling under a different label, so it declines for that too. `/basefold` joins the roster
     // where the target declares the fold.
     const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
-      ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS]
+      ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS]
       : LIVEBASE_ADMISSIONS;
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
