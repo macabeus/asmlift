@@ -1,14 +1,21 @@
 // THE PREMISE THE DECLARED-SUBSCRIPT RECOVERY RESTS ON, compiled rather than asserted in prose.
 //
-// `structure/structure.ts`'s `declaredSubscripts` recovers `g[r][i]` from a byte residual carrying
-// a term at the declared ROW stride, and it does so as a DEFAULT rather than as a differ-refereed
-// axis. That is only legitimate if the asm DETERMINES which of the two candidate sources was
-// written — i.e. if `g[r][i]` and the flat `g[0][r*N + i]` compile to different bytes. And the
-// mirror matters just as much: where the compiler reassociates them into the SAME bytes, nothing
-// referees the choice, which is why the recovery refuses the already-divided element index that
-// `arrayAccess` holds (see the note at that site).
+// `structure/globalaccess.ts`'s `declaredSubscripts` recovers `g[r][i]` from a byte residual
+// carrying a term at the declared ROW stride, and it emits that spelling BESIDE the one it
+// displaces — `/flat-rank` is the arm that turns it off, `spellDeclaredSubscripts` the switch — so
+// the differ referees. THREE compiled facts are what settle that posture, and they pull in
+// different directions:
 //
-// Both halves lived in a commit message. This repo's idiom for a load-bearing compiler fact is a
+//   • `g[r][i]` and the flat `g[0][r*N + i]` compile to DIFFERENT bytes, so the residual really is
+//     evidence that a row was computed and not a preference;
+//   • …and so do `g[r][i]` and the byte CAST the recovery displaces, which produces the same
+//     row-stride term — so the residual says nothing about which of THOSE two was written, and a
+//     default would be answering a question the asm does not ask. That pair is why this is an axis;
+//   • where the compiler reassociates the flat sum into the same separate scales, nothing referees
+//     any of it, which is why the recovery refuses the already-divided element index that
+//     `arrayAccess` holds (see the note at that site).
+//
+// All of it lived in commit messages. This repo's idiom for a load-bearing compiler fact is a
 // pinned test (matching/decl-scope-axis.test.ts, core/test/sign-axis.test.ts), so here it is, with
 // the flags it was measured under — the klonoa checkout's own `tools.asmlift.compiler` template.
 //
@@ -77,7 +84,7 @@ describe.runIf(HAVE)('the DECLARED-SUBSCRIPT premise (checkout-gated)', () => {
     }
   });
 
-  test('at a POWER-OF-TWO row stride the two spellings DIFFER — so the asm decides, and a default is honest', () => {
+  test('at a POWER-OF-TWO row stride the two spellings DIFFER — so the residual is evidence, not a preference', () => {
     // `gRows[a][b]` leaves the row and element scales separate (`lsl #0xb`, `lsl #0x1`, added);
     // the flat sum scales once (`lsl #0xa; add; lsl #0x1`). The byte residual the recovery reads
     // carries that difference, which is what makes it evidence rather than a preference.

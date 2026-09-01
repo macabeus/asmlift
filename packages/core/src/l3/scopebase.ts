@@ -95,9 +95,13 @@ export interface AccessCtx {
  *  A subscript that is not the literal 0 — a recovered row index included — is therefore refused.
  *
  *  A `var` base is admitted ONLY for a name in `SFn.globals`. That list is populated by `noteGlobal`
- *  alone (two call sites in structure.ts, both on the `bareArrayLead` path, which requires
- *  `shape === 'array'`) — so a `var` base here is always an ARRAY-declared global and `(T *)&gSym`
- *  is its start address under any declaration. For a POINTER-shaped global `(T *)&gPtr` names the
+ *  alone — three call sites in structure.ts (`declaredSubscripts`' recovered subscripts, and
+ *  `bareArrayLead`'s rank-pinned form on each of the byte-address and element-index paths) — and
+ *  the guarantee is not the count but what they SHARE: all three are gated on
+ *  `structure/globalaccess.ts`'s `bareArrayElement`, which requires `shape === 'array'`. So a `var`
+ *  base here is always an ARRAY-declared global and `(T *)&gSym` is its start address under any
+ *  declaration, and a fourth spelling added there inherits that only by going through the same
+ *  gate. For a POINTER-shaped global `(T *)&gPtr` names the
  *  pointer CELL rather than the object it points at; for a LOCAL it names a cell something may
  *  assign between the hoist point and a use. */
 export const SCOPEBASE_ELIGIBILITY: readonly Gate<AccessCtx>[] = [
