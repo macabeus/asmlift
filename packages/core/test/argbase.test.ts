@@ -252,7 +252,7 @@ describe("a multidimensional array global's access is not nameable through a pla
       idx: { k: 'const', value: 3 },
       width: 1,
       signed: false,
-      lead: [0],
+      lead: [{ k: 'const', value: 0 }],
     };
     const fn: SFn = {
       name: 'f',

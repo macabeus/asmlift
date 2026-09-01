@@ -63,7 +63,6 @@ import {
   type DeclaredField,
   type SymbolInfo,
   type SymbolStructField,
-  arrayInnerExtents,
   declaredFields,
   isArrayField,
   isBitfieldField,
@@ -73,6 +72,15 @@ import {
   scalarCellType,
 } from '../symbols';
 import { analyze } from './analysis';
+import {
+  addOffset,
+  addrIn,
+  bareArrayLead,
+  declaredSubscripts,
+  elementIndex,
+  globalByteBase,
+  globalOf,
+} from './globalaccess';
 import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
@@ -90,113 +98,6 @@ import { type ArmExit, makeSwitchRecovery } from './switch-recover';
 // TODAY — carrying the struct name (resolved against SFn.structs) is the same move as width and
 // the named follow-up; until then no backend pays a tax for the tree cast (Pascal loud-fails
 // `field` regardless, C++ falls through its leaf hook to the shared C spelling).
-// `&gSym`, possibly wearing the value-context integer cast the additive lowering adds
-// (`(u32)&gSym` — see lowerDef's addr-intify): both spell the same link-time constant, so the
-// fold rules match through the cast and every access that CAN spell a named element still does.
-// WIDTH 32 ONLY — a NARROWING cast (`(u8)&gSym`, from a zext/sext lowering) is a different
-// VALUE (`addr & 0xFF`), and folding through it would read the named global at a wrong address
-// (the adversarial round's probe: `*(u8*)(u8)&gSym` must keep its truncation, never become
-// `*(u8*)&gSym` — let alone a confidently-named `gSym.field`).
-function addrIn(e: Expr): Extract<Expr, { k: 'addr' }> | null {
-  if (e.k === 'addr') {
-    return e;
-  }
-  if (e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 && e.e.k === 'addr') {
-    return e.e;
-  }
-  return null;
-}
-
-// If `e` is a global address `&gSym` (optionally `+ index`), return the global name and the
-// element index (byte residual divided by the access width). `&gSym` alone → idx const 0;
-// `&gSym + i` → idx `i / width` (exact division only — a non-multiple residual is a mid-element
-// access this whole-global spelling can't express, so it declines to null and the caller casts).
-function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
-  const top = addrIn(e);
-  if (top) {
-    return { name: top.name, idx: { k: 'const', value: 0 } };
-  }
-  if (e.k === 'bin' && e.op === '+') {
-    for (const [side, other] of [
-      [e.l, e.r],
-      [e.r, e.l],
-    ] as const) {
-      const addrSide = addrIn(side);
-      if (addrSide) {
-        const idx = elementIndex(other, width);
-        return idx ? { name: addrSide.name, idx } : null;
-      }
-    }
-  }
-  return null;
-}
-
-// THE one gate on the BARE-NAME array-global spelling (`gSym[i]` rather than `((T *)&gSym)[i]`),
-// shared by the constant-offset and variable-index access paths so the two cannot disagree.
-// Returns the `index` node's `lead` fragment when the bare form is spellable, or null to fall
-// through to the always-valid `&gSym` cast form.
-//
-// Two facts are required, not one. The element WIDTH must match, as it always has. And the RANK
-// must be SPELLABLE, because one subscript reaches an element only on a rank-1 array: on `u16
-// g[4][0x400]`, `g[i]` is a ROW. Against the project's own header that is usually a type error,
-// but where the row address flows into an integer context it is merely a warning and the emitted C
-// then addresses a different object than the asm did — silently.
-//
-// A rank > 1 pins the leading dimensions at 0 and puts the whole flat element index in the last
-// subscript (`g[0][i]`) — the same address arithmetic, and the idiom decomp sources themselves use
-// when the split is not observable in the asm either (`gBgTilemapBufs[0][…]` in kleod,
-// `gNatureStatTable[nature][…]` in pokeemerald). A rank the map states but cannot spell (an unknown
-// inner extent) gets no bare form at all; `((T *)&gSym)[i]` is byte-identical and valid under ANY
-// declaration, which is why it is the safe fallback. See symbols.ts arrayInnerExtents for why an
-// ABSENT rank is read as 1 rather than as unknown.
-function bareArrayLead(si: SymbolInfo, width: number, signed: boolean): { lead?: number[] } | null {
-  if (si.shape !== 'array' || si.elemSize !== width) {
-    return null;
-  }
-  // …and the element must EXTEND the way the access does, for the same reason the width must
-  // match: the bare spelling carries no cast, so the declared element type is the only thing in
-  // the emitted C that says whether a sub-word read sign- or zero-fills. Against the DECLARED
-  // signedness, defaulted exactly as the element type registered for the env is (noteGlobal, just
-  // below) — a disagreement there makes the deref legalization wrap the base, and a leading
-  // subscript has no room for that wrapping.
-  //
-  // The caller then falls through to `((T *)&gSym)[i]`, byte-identical under any declaration.
-  if (width < 4 && (si.elemSigned ?? false) !== signed) {
-    return null;
-  }
-  const inner = arrayInnerExtents(si);
-  return inner === null ? null : inner.length === 0 ? {} : { lead: new Array<number>(inner.length).fill(0) };
-}
-
-// A BYTE residual read as an ELEMENT index of `elemSize`-wide elements, or null when it is not one
-// — the residual then addresses mid-element and no whole-element spelling can express it, so the
-// caller falls through to the honest cast forms. THE one copy of the rule, indexing the
-// `&gSym`-based array spelling: width 1 → the byte residual IS the index; wider → a constant
-// residual must divide exactly, and a non-constant one must already be element-scaled
-// (`i * elemSize` / `i << log2(elemSize)`), which is exactly what the asm's own index scaling
-// produced.
-function elementIndex(residual: Expr, elemSize: number): Expr | null {
-  if (elemSize === 1) {
-    return residual;
-  }
-  if (residual.k === 'const') {
-    return residual.value % elemSize === 0 ? { k: 'const', value: residual.value / elemSize } : null;
-  }
-  if (residual.k === 'bin' && (residual.op === '*' || residual.op === '<<')) {
-    const factor =
-      residual.op === '<<'
-        ? residual.r.k === 'const'
-          ? 1 << residual.r.value
-          : 0
-        : residual.r.k === 'const'
-          ? residual.r.value
-          : 0;
-    if (factor === elemSize) {
-      return residual.l;
-    }
-  }
-  return null;
-}
 
 /** The symbol-map rendering context threaded into memAccess/arrayAccess: shape facts per
  *  global name, plus a callback registering a global's env type (so the bare `gSym[i]` spelling,
@@ -207,6 +108,10 @@ interface SymRenderCtx {
   /** may {@link ptrMemberElement} spell a whole-element subscript through a pointer member — the
    *  `/no-ptr-elem` arm's OFF switch, off the `spellPtrMemberElements` structure option. */
   ptrElements: boolean;
+  /** may {@link declaredSubscripts} recover a multidimensional global's declared subscripts out of
+   *  the byte residual — the `/flat-rank` arm's OFF switch, off the `spellDeclaredSubscripts`
+   *  structure option. */
+  declRank: boolean;
   /** The members a symbol's declaration seats — a struct global's own, or a pointer global's
    *  pointee's — MEMOIZED per symbol. `declaredFields` validates every member and returns a fresh
    *  sorted copy on every call, and `isPtrValue` asks it for both operands of every binary node
@@ -622,6 +527,25 @@ function memAccess(
       return { ...elem, ...fromOperand };
     }
   }
+  // …and the MULTIDIMENSIONAL bare-name spelling, which needs the byte terms globalOf's division
+  // into elements has already merged: `g[r][i]`, where a term at the declared ROW stride is `r`.
+  // Tried before the flat spellings because those cannot express a recovered row at all — and off
+  // under `/flat-rank`, which is what puts those flat spellings back in the fan for the differ.
+  const gbb = sym?.declRank ? globalByteBase(baseExpr) : null;
+  const siMulti = gbb ? sym!.info(gbb.name) : undefined;
+  const multi = siMulti ? declaredSubscripts(siMulti, gbb!.residual, width, signed) : null;
+  if (multi) {
+    sym!.noteGlobal(gbb!.name, T.ptr(T.int(width * 8, siMulti!.elemSigned ?? false)));
+    return {
+      k: 'index',
+      base: { k: 'var', name: gbb!.name },
+      idx: addOffset(multi.idx, off / width),
+      width,
+      signed,
+      lead: multi.lead,
+      ...fromOperand,
+    };
+  }
   const g = globalOf(baseExpr, width);
   if (g) {
     const idxVal = g.idx;
@@ -634,12 +558,7 @@ function memAccess(
     if (off === 0 && idxVal.k === 'const' && idxVal.value === 0 && scalarGlobals.has(g.name)) {
       return { k: 'var', name: g.name };
     }
-    const idx: Expr =
-      off === 0
-        ? idxVal
-        : idxVal.k === 'const'
-          ? { k: 'const', value: idxVal.value + off / width }
-          : { k: 'bin', op: '+', l: idxVal, r: { k: 'const', value: off / width } };
+    const idx = addOffset(idxVal, off / width);
     // ARRAY-declared global (symbol map): index the bare name — `gSym[i]`, the spelling the
     // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
     // so the stride check passes and no cast is added. Element-width match only.
@@ -705,6 +624,24 @@ function arrayAccess(
   if (baseExpr.k === 'addr' && fieldOff === undefined && memberOff === undefined) {
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
+    // NO declared-subscript recovery here, and the reason is the evidence, not the shape. The
+    // index reaching this spelling is already in ELEMENTS — the asm scaled the whole sum ONCE, at
+    // the end — and that single scale is what both candidate sources reduce to, so the term at the
+    // row's stride in elements is no longer evidence that the source named the row. Compiled, with
+    // the klonoa checkout's own agbcc command line:
+    //
+    //   u16 g[4][0x400] — a POWER-OF-TWO row stride: `g[a][b]` is `lsl #0xb` + `lsl #0x1` added
+    //     (the SEPARATE terms memAccess reads), `g[0][(a<<10)+b]` is `lsl #0xa; add; lsl #0x1`.
+    //     DIFFERENT bytes — so the single-scale shape that arrives here is the FLAT spelling's own
+    //     codegen, and recovering `g[a][b]` out of it emits a source that does not reproduce the
+    //     input asm.
+    //   u32 g[6][9] — a NON-power-of-two row stride: `g[a][b]` and `g[0][a*9+b]` are BYTE-
+    //     IDENTICAL, because agbcc reassociates `(a*36)+(b*4)` into `((a*9)+b)*4` itself. Nothing
+    //     referees the choice, which is the same reason `scaledBy` refuses a CONSTANT row term.
+    //
+    // Both cases say decline: in the first the evidence points the other way, in the second there
+    // is none. The recovery therefore lives on the byte residual alone (memAccess), where the two
+    // spellings are still distinguishable. Pinned by matching/array-rank-axis.test.ts.
     const lead = si === undefined ? null : bareArrayLead(si, elemSize, signed);
     if (lead !== null) {
       sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
@@ -1058,6 +995,33 @@ export interface StructureOptions {
   // per-function knowledge the asm does not carry, so both are emitted and the differ referees.
   // Only the map declares a pointee width, so with no `symbols` this is normalized to false.
   spellPtrMemberElements?: boolean;
+  // Recover a multidimensional array global's DECLARED subscripts (`g[r][i]`) from a byte residual
+  // carrying a term at the declared ROW stride, rather than spelling the whole residual as the
+  // `*(T *)(… + (u32)&g)` cast it replaces. On by default; rank.ts enumerates the OFF spelling as
+  // the `/flat-rank` axis.
+  //
+  // IT IS AN AXIS AND NOT A DEFAULT BECAUSE THE ASM DOES NOT DETERMINE IT, and the evidence that
+  // it does not is the same compile the recovery's own premise rests on, read against the spelling
+  // the recovery DISPLACES rather than against the flat one it refuses. For `u16 g[4][0x400]`:
+  //
+  //   agbcc  g[a][b]  lsl #0xb ; lsl #0x1 ; add ; add   |  *(u16 *)((a<<11)+(b<<1)+(u32)&g)
+  //                   md5 f58a694f…                     |  md5 051bf506…   DIFFERENT, and the
+  //                   difference is WHERE THE POOL LOAD SITS — the shift structure the recovery
+  //                   reads is IDENTICAL in both, so the residual is evidence about the row and
+  //                   NOT about which of these two spellings wrote it.
+  //   kmc / mwcc      the same: separate scales both sides, differing only in scheduling.
+  //   IDO             the two are BYTE-IDENTICAL (md5 2b55b493…) — and IDO also distributes the
+  //                   FLAT sum into the same separate scales, so on that compiler the recovery's
+  //                   own premise is false and the flat spelling reaches it too.
+  //
+  // WHICH ROW OF THAT TABLE IS PINNED: the agbcc pair, by
+  // packages/cli/test/matching/array-rank-axis.test.ts, which compiles both spellings through the
+  // klonoa checkout's own template. The other three were measured by hand and nothing re-runs
+  // them, so treat them as the record of a measurement rather than as a live check.
+  //
+  // So both are emitted and the differ referees, exactly as for `/no-ptr-elem`. Only the map
+  // declares a rank, so with no `symbols` this is normalized to false.
+  spellDeclaredSubscripts?: boolean;
   // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
   // (a store to a different named global), instead of caching it in a local. Off by default;
   // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
@@ -1186,6 +1150,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     littleEndian = true,
     spellBitfieldMembers: bitfieldSpellingWanted = true,
     spellPtrMemberElements: ptrElementSpellingWanted = true,
+    spellDeclaredSubscripts: declRankSpellingWanted = true,
     rereadGlobals = false,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
@@ -1386,6 +1351,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         info: (n) => symbols.get(n),
         noteGlobal: (n, t) => shapedGlobalTypes.set(n, t),
         ptrElements: ptrElementSpellingWanted,
+        declRank: declRankSpellingWanted,
         fieldsOf: (n) => {
           const hit = declaredFieldCache.get(n);
           if (hit !== undefined) {

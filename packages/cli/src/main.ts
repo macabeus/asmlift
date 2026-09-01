@@ -444,12 +444,22 @@ export async function runCli(
       // Under `--progress` — the flag that already says "report on this run as it goes" — the run
       // also says what it SPENT (phase.ts). A run nobody is watching writes only what it computed.
       const clock = flags.has('progress') ? new PhaseClock() : undefined;
+      // A lever that THREW is a defect and must not read as a lever that declined — core rank.ts
+      // makes that argument for its own channel, and this is the consumer it had been missing.
+      // Deduped by label: the enumeration walks a lever over every axis point, so one broken pass
+      // would otherwise print thousands of identical lines. Silent when nothing threw.
+      const leverErrors = new Map<string, string>();
       const rankOpts = {
         backend,
         asmData,
         prototypes,
         symbols,
         compile,
+        onLeverError: (label: string, error: string) => {
+          if (!leverErrors.has(label)) {
+            leverErrors.set(label, error);
+          }
+        },
         ...(onProgress ? { onProgress } : {}),
         ...(clock ? { clock } : {}),
       };
@@ -468,6 +478,12 @@ export async function runCli(
         .join('');
       // Spellings the scorer refused are recorded, not silent: a lever whose every candidate
       // fails to build looks identical to one that declined unless the drops are visible.
+      // …and the same idea one stage EARLIER: `[dropped]` reports a spelling the SCORER refused,
+      // which presumes the spelling was enumerated at all. A lever that threw produced no
+      // candidate to drop.
+      const levers = [...leverErrors]
+        .map(([label, error]) => `asmlift: [lever] ${label} threw (no candidate from it): ${error}\n`)
+        .join('');
       const drops = ranked.dropped.length
         ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
           `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
@@ -529,6 +545,7 @@ export async function runCli(
           targetTrace +
           warn +
           table +
+          levers +
           drops +
           held +
           declared +

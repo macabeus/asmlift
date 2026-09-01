@@ -11,19 +11,22 @@ import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { T } from '../src/ir/types';
 import type { Expr, SFn } from '../src/l3/ast';
-import { exprEquals } from '../src/l3/ast';
+import { exprChildren, exprEquals, mapExprChildren } from '../src/l3/ast';
+import { localMentions, readsOf } from '../src/l3/mentions';
 import { decompile } from '../src/pipeline';
 import { compareScored, composeLevers, rankBy, withheldReason } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
-const ixLead = (lead?: number[]): Expr => ({
+const ixLead = (lead?: (number | string)[]): Expr => ({
   k: 'index',
   base: { k: 'var', name: 'g' },
   idx: { k: 'var', name: 'i' },
   width: 2,
   signed: false,
-  ...(lead ? { lead } : {}),
+  ...(lead
+    ? { lead: lead.map((l): Expr => (typeof l === 'number' ? { k: 'const', value: l } : { k: 'var', name: l })) }
+    : {}),
 });
 
 const fnOf = (value: Expr): SFn => ({
@@ -50,9 +53,57 @@ describe('exprEquals treats `lead` as part of the address', () => {
   });
 });
 
+describe('a `lead` is walked like every other sub-expression', () => {
+  // A recovered row index is a VALUE, so a name mentioned there is a real use. A generic walk
+  // that skipped it would rename half an address — the reader sees `g[gRow][i]` renamed to
+  // `g[gRow][j]`, with the row silently left behind.
+  test('exprChildren reaches the leading subscripts, in syntactic order', () => {
+    const e = ixLead(['r']) as Extract<Expr, { k: 'index' }>;
+    expect(exprChildren(e).map((c) => (c.k === 'var' ? c.name : c.k))).toEqual(['g', 'r', 'i']);
+  });
+
+  test('mapExprChildren rewrites them', () => {
+    const out = mapExprChildren(ixLead(['r']), (c) =>
+      c.k === 'var' && c.name === 'r' ? { k: 'var', name: 'q' } : c,
+    ) as Extract<Expr, { k: 'index' }>;
+    expect(out.lead?.[0]).toEqual({ k: 'var', name: 'q' });
+  });
+
+  test('exprEquals compares them as expressions, not by identity', () => {
+    expect(exprEquals(ixLead(['r']), ixLead(['r']))).toBe(true);
+    expect(exprEquals(ixLead(['r']), ixLead(['q']))).toBe(false);
+    expect(exprEquals(ixLead(['r']), ixLead([0]))).toBe(false);
+  });
+
+  // …AND THE ONE WALK THAT IS NOT DERIVED FROM THAT VOCABULARY. l3/mentions.ts hand-rolls its own
+  // traversal (it has to tell an `index` BASE from every other position, which `exprChildren`
+  // flattens away), so the three tests above cannot speak for it — a walk that bypasses them can
+  // diverge with all three green. It is asked here, beside them, because an undercount there does
+  // not lose a candidate: it DELETES a local the body still reads, and `assertResolved` looks for
+  // absent names, not for unwritten ones.
+  test('localMentions counts a name used as a leading subscript as a real read', () => {
+    const f: SFn = {
+      ...fnOf(ixLead(['r'])),
+      locals: [
+        { name: 'i', type: T.u(32) },
+        { name: 'r', type: T.u(32) },
+      ],
+    };
+    const m = localMentions(f);
+    expect(readsOf(m.get('r')!)).toBe(1);
+    // …and it is NOT counted as an `index` base: only `g` stands in that position, and the base
+    // levers re-spell exactly that use shape.
+    expect(m.get('r')!.baseUses).toBe(0);
+    expect(m.get('r')!.otherUses).toBe(1);
+    // the sibling positions still count as they always did
+    expect(readsOf(m.get('i')!)).toBe(1);
+  });
+});
+
 describe('backends either spell `lead` or refuse it', () => {
   test('the C backend spells every leading subscript', () => {
     expect(cBackend.emit(fnOf(ixLead([0, 0])))).toContain('g[0][0][i]');
+    expect(cBackend.emit(fnOf(ixLead(['i'])))).toContain('g[i][i]'); // a recovered row is an expression
   });
 
   test('the C backend REFUSES a lead whose base does not stride the access width', () => {

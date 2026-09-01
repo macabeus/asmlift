@@ -205,7 +205,8 @@ describe('refusals — anything that does not land on an element boundary keeps 
 
   test('a SIGNED sub-word access does not read a member declared to point at an unsigned one', () => {
     // the subscript carries no cast of its own in the source spelling, so the declared pointee is
-    // the only thing saying how a sub-word read fills — the argument bareArrayLead makes
+    // the only thing saying how a sub-word read fills — the argument `bareArrayElement` makes
+    // (structure/globalaccess.ts), for the bare array spellings
     const asm =
       'f:\n\tldr\tr1, .L1\n\tldr\tr1, [r1, #0x4]\n\tlsl\tr0, r0, #1\n\tadd\tr0, r0, r1\n' +
       '\tmov\tr2, #0x9d\n\tlsl\tr2, r2, #1\n\tadd\tr0, r0, r2\n\tmov\tr3, #0x0\n' +

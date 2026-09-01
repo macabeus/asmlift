@@ -212,8 +212,9 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       // Leading constant subscripts (a multidimensional array global's bare spelling) keep the
       // postfix form whatever `idx` is: `g[0][0]` is the element, `*g[0]` would be its ROW.
       //
-      // `lead` implies the base already strides the access width — its only producer registers a
-      // matching element type for the global (structure.ts bareArrayLead + noteGlobal). Nothing
+      // `lead` implies the base already strides the access width — its only producers register a
+      // matching element type for the global (structure/globalaccess.ts `bareArrayLead` and
+      // `declaredSubscripts`, both through structure.ts's `noteGlobal`). Nothing
       // else enforced that, and the failure would be quiet-ish: legalization would wrap the base,
       // spelling `((u16 *)g)[0][i]`, which subscripts a `u16` twice. Check it rather than assume.
       if (e.lead && e.lead.length > 0) {
@@ -222,7 +223,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
             `c backend: a multidimensional array access needs a base that strides ${e.width} bytes as spelled`,
           );
         }
-        return `${rec(base, 1)}${e.lead.map((l) => `[${l}]`).join('')}[${rec(e.idx, 99)}]`;
+        return `${rec(base, 1)}${e.lead.map((l) => `[${rec(l, 99)}]`).join('')}[${rec(e.idx, 99)}]`;
       }
       if (e.idx.k === 'const' && e.idx.value === 0) {
         const s = `*${rec(base, 2)}`;

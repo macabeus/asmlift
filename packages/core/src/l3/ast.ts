@@ -44,12 +44,25 @@ export type Expr =
   // Variable-index `a[i]` is recovered at the IR level (`aload`/`astore` carry elemSize;
   // raise/arrays.ts) but still LOWERS to this one C-shaped `index` node, so it stays C-only
   // (a Pascal array-access spelling is future work). Treat `index` with idx ≠ 0 as C-shaped.
-  // `lead` prefixes CONSTANT subscripts before `idx` — `g[0][i]` rather than `g[i]`. It exists for
-  // exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL array global, where one
-  // subscript reaches a row and the element needs the leading dimensions pinned first. The node
-  // still denotes ONE `width`-byte element, so its type, its legalization and its stride contract
-  // are unchanged — this is a spelling of the same address, not a new kind of access. Absent for
-  // every rank-1 access, which is why it is optional rather than an empty array.
+  // `lead` prefixes the LEADING subscripts before `idx` — `g[0][i]` or `g[r][i]` rather than
+  // `g[i]`. It exists for exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL
+  // array global, where one subscript reaches a row and the element needs the leading dimensions
+  // pinned first. What that costs and what it buys, measured over the published artifact rather
+  // than carried from the sweep the field was proposed under: 5 of the artifact's 951 rows spell a
+  // two-subscript access at all, and the `Expr[]` — the part every generic walk pays for — is
+  // earned by the 2 whose OUTER subscript is not the literal 0 (`ProcessInputAndUpdateEntities`,
+  // `SetupBG3WindowOverlay`; the second is `noncompile`, for an unrelated callee arity, on this
+  // branch and on its base alike). A rank-2 access with a constant row needs `number[]` and no
+  // more. The node still denotes ONE `width`-byte element, so its type, its legalization
+  // and its stride contract are unchanged — this is a spelling of the same address, not a new kind
+  // of access. Absent for every rank-1 access, which is why it is optional rather than an empty
+  // array. A leading subscript is an EXPRESSION because a row index the asm computed is a value,
+  // not a literal (`g[gRow][i]`), so every generic walk descends into it: a name mentioned there
+  // is a real use, and a rewrite that skipped it would rename half an address. `exprChildren` and
+  // `mapExprChildren` below carry it, which is what makes that true for every walk DERIVED from
+  // them; the one walk that is not — l3/mentions.ts, which hand-rolls a traversal to tell an
+  // `index` BASE from every other position — enumerates the positions itself and has to be
+  // extended by hand when one is added here.
   // `operandOff` is the one field here that is EVIDENCE rather than spelling: it is the BYTE
   // DISPLACEMENT this access's constant offset arrived in through the instruction's MEMORY
   // OPERAND (`ldrb [r0, #0x3]` records 3), as opposed to through the address the pool word
@@ -78,7 +91,7 @@ export type Expr =
   // gaddr in its cone, versus `l3/offmember.ts`'s leaf base), so a shared dispatch would be
   // scaffolding over two rules that already disagree about what a base is. What the reader needs
   // is the map, which is this paragraph.
-  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: number[]; operandOff?: number }
+  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: Expr[]; operandOff?: number }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
   // Unlike `index`, this carries the field NAME (which encodes the byte offset, `field_<off>`),
@@ -334,7 +347,7 @@ export function exprEquals(a: Expr, b: Expr): boolean {
         a.width === bb.width &&
         a.signed === bb.signed &&
         lead.length === bLead.length &&
-        lead.every((v, i) => v === bLead[i]) &&
+        lead.every((v, i) => exprEquals(v, bLead[i])) &&
         exprEquals(a.base, bb.base) &&
         exprEquals(a.idx, bb.idx)
       );
@@ -387,7 +400,7 @@ export function exprChildren(e: Expr): Expr[] {
     case 'call':
       return e.args;
     case 'index':
-      return [e.base, e.idx];
+      return [e.base, ...(e.lead ?? []), e.idx];
     case 'field':
       return [e.base];
     case 'marker':
@@ -410,7 +423,7 @@ export function mapExprChildren(e: Expr, f: (c: Expr) => Expr): Expr {
     case 'call':
       return { ...e, args: e.args.map(f) };
     case 'index':
-      return { ...e, base: f(e.base), idx: f(e.idx) };
+      return { ...e, base: f(e.base), ...(e.lead ? { lead: e.lead.map(f) } : {}), idx: f(e.idx) };
     case 'field':
       return { ...e, base: f(e.base) };
     case 'marker':
@@ -531,6 +544,38 @@ export function rematerializableAddress(e: Expr): boolean {
  *  standing in for an unmodelled instruction (annotate mode). */
 export function exprHasEffect(e: Expr): boolean {
   return e.k === 'call' || e.k === 'marker' || exprChildren(e).some(exprHasEffect);
+}
+
+/** Whether the tree performs an access to a `volatile` object — the OTHER thing no re-ordering may
+ *  move, and the one `exprHasEffect` deliberately does not answer: that one is about a call, this
+ *  about a QUALIFIER, and a pass that asks the first where it means the second reorders device
+ *  accesses while its gate reports clean.
+ *
+ *  Three spellings assert one thing, and all three are here because a lever that knew only the cast
+ *  would miss the two a later lever writes: a `volatile` cast (where a raw address carries it), a
+ *  read through a pointer local declared to point at volatile data (l3/volatileptr.ts), and a read
+ *  of a `volatile` local object (l3/volatileval.ts). A bare cast counts even with no deref under it
+ *  — the qualifier is on the ACCESS the cast exists to spell, and every caller so far is asking
+ *  whether it may move the expression rather than how many accesses it holds. */
+export function exprReadsVolatile(e: Expr, sfn: SFn): boolean {
+  const pointee = new Set(sfn.locals.filter((l) => l.pointeeVolatile).map((l) => l.name));
+  const object = new Set(sfn.locals.filter((l) => l.volatile).map((l) => l.name));
+  const namesUnder = (x: Expr): string[] =>
+    [...subterms(x)].filter((y): y is Extract<Expr, { k: 'var' }> => y.k === 'var').map((y) => y.name);
+  return [...subterms(e)].some(
+    (x) =>
+      (x.k === 'cast' && x.volatile === true) ||
+      (x.k === 'var' && object.has(x.name)) ||
+      ((x.k === 'index' || x.k === 'field') && namesUnder(x).some((n) => pointee.has(n))),
+  );
+}
+
+/** every node of an expression tree, itself included */
+function* subterms(e: Expr): Generator<Expr> {
+  yield e;
+  for (const c of exprChildren(e)) {
+    yield* subterms(c);
+  }
 }
 
 /** The statements a statement DIRECTLY contains, in the order a backend prints them — a `switch`

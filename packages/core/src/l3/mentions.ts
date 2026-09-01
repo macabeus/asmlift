@@ -7,8 +7,13 @@
 // did before it declares them all observable. One walk answers both, and it has to: on the second
 // consumer a miscount is a wrong `volatile` claim, not a missed candidate.
 //
-// Derived from the ONE traversal vocabulary (exprChildren/stmtExprs/stmtChildren), so a new node
-// kind is a compile error there rather than a silent undercount here.
+// Derived from the ONE traversal vocabulary (exprChildren/stmtExprs/stmtChildren) for every node
+// kind, so a new one is a compile error there rather than a silent undercount here — with `index`
+// as the ONE hand-rolled case, because the callback needs to know which child stands as the base
+// and `exprChildren` flattens that away. That hand-rolling is a standing hazard rather than an
+// oversight: a POSITION added to `index` reaches the generic vocabulary for free and this walk not
+// at all. Every position is enumerated below and pinned by
+// test/array-rank-guards.test.ts, beside the generic helpers it cannot speak for.
 import { type Expr, type SFn, type Stmt, exprChildren, stmtChildren, stmtExprs } from './ast';
 
 export interface Mentions {
@@ -47,6 +52,12 @@ function walkExpr(e: Expr, visit: (x: Expr, isIndexBase: boolean) => void, isInd
   visit(e, isIndexBase);
   if (e.k === 'index') {
     walkExpr(e.base, visit, true);
+    // `lead` — a multidimensional global's LEADING subscripts — is an ordinary value position, so
+    // a name mentioned there is a real read. Missing it does not cost a candidate: it lets a lever
+    // DELETE a local the body still names.
+    for (const l of e.lead ?? []) {
+      walkExpr(l, visit, false);
+    }
     walkExpr(e.idx, visit, false);
     return;
   }

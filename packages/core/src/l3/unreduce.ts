@@ -139,6 +139,7 @@ import {
   type Stmt,
   exprEquals,
   exprHasEffect,
+  exprReadsVolatile,
   mapExprChildren,
   stmtChildren,
   stmtExprs,
@@ -415,20 +416,6 @@ const hasContinueIn = (stmts: readonly Stmt[]): boolean =>
 const accessesIn = (e: Expr): (Extract<Expr, { k: 'index' }> | Extract<Expr, { k: 'field' }>)[] =>
   [...subterms(e)].filter((x): x is Extract<Expr, { k: 'index' | 'field' }> => x.k === 'index' || x.k === 'field');
 
-/** Does the closed form read a `volatile` object? Three spellings assert one: a `volatile` cast
- *  (which is where a raw address carries it), a pointer local declared to point at volatile data,
- *  and a read of a `volatile` local object. */
-function readsVolatile(e: Expr, sfn: SFn): boolean {
-  const pointee = new Set(sfn.locals.filter((l) => l.pointeeVolatile).map((l) => l.name));
-  const object = new Set(sfn.locals.filter((l) => l.volatile).map((l) => l.name));
-  return [...subterms(e)].some(
-    (x) =>
-      (x.k === 'cast' && x.volatile === true) ||
-      (x.k === 'var' && object.has(x.name)) ||
-      ((x.k === 'index' || x.k === 'field') && namesUnder(x).some((n) => pointee.has(n))),
-  );
-}
-
 const namesUnder = (e: Expr): string[] =>
   [...subterms(e)].filter((y): y is Extract<Expr, { k: 'var' }> => y.k === 'var').map((y) => y.name);
 
@@ -615,7 +602,7 @@ export function unreduceAccumulators(
         // an effect inside the counter-start subterm the substitution replaces would be dropped
         // rather than moved — one fewer execution, which no gate reading `closed` could see.
         movedEffect: exprHasEffect(initStmt.value),
-        movedVolatile: readsVolatile(initStmt.value, sfn),
+        movedVolatile: exprReadsVolatile(initStmt.value, sfn),
         movedAliasable: movedReadAliasable(initStmt.value, evaluated, window),
       };
       if (firstRejection(UNREDUCE_GATES, ctx) !== null) {

@@ -43,6 +43,14 @@ export interface RankOptions {
    *  driver can only separate the compile from the score when `compile` is supplied; reached
    *  through the registry instead, the compile is charged to `score`. */
   clock?: PhaseClock;
+  /** A lever that THREW, rather than declining — core rank.ts's own channel, forwarded so the CLI
+   *  can print it. Core's header states why the distinction matters ("a lever that never fires
+   *  because it always throws is a defect, and without this it looks identical to a lever that
+   *  correctly declined"). THIS IS THE CHANNEL'S ONLY CONSUMER ANYWHERE: the benchmark reaches
+   *  `decompileRanked` without supplying one, so a whole pre-fan half of a row's fan can still
+   *  vanish from a `pnpm bench run` with nothing printed. Read an absent `[lever]` line as a fact
+   *  about the wiring before reading it as a fact about the levers. */
+  onLeverError?: (label: string, error: string) => void;
 }
 
 // Self-declaring candidates: a candidate that names map-derived symbols carries their refs
@@ -61,6 +69,7 @@ const enumerate = (name: string, asm: string, target: TargetDescription, opts: R
     prototypes: opts.prototypes,
     asmData: opts.asmData,
     symbols: opts.symbols,
+    ...(opts.onLeverError ? { onLeverError: opts.onLeverError } : {}),
   });
 
 /** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score. */

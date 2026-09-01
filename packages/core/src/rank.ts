@@ -44,6 +44,7 @@ import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
+import { unmergeJoins } from './l3/unmerge';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
@@ -61,7 +62,7 @@ import {
   hasMergeFeedHome,
 } from './structure/analysis';
 import { hasParamRootedMerge } from './structure/structure';
-import { type SymbolInfo, type SymbolMap, isPtrField, symbolsByName } from './symbols';
+import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
 import { C_TYPEDEFS, type TargetDescription, structureOptionsFor } from './target';
 
 /** The STRUCTURING AXES — the boolean candidate dimensions crossed into every enumeration
@@ -264,6 +265,25 @@ const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
   { suffix: '/pollguard', apply: pollGuards },
   { suffix: '/pollread', apply: pollReads },
 ];
+/** The PRE-FAN products (rank's FOURTH sanctioned product mechanism): a tree rewrite applied
+ *  BEFORE the re-spelling fan, so the whole fan derives from its output instead of composing onto
+ *  it. Same record type as SHAPE_PRODUCTS above, and deliberately so — the only difference is
+ *  WHERE it is applied, and that is the whole admission bar.
+ *
+ *  ADMITTED on one ground: the spelling a row demands needs a downstream lever to run on this
+ *  rewrite's OUTPUT, and the measured pair shows neither order alone reaches it. For `/unmerge`
+ *  (l3/unmerge.ts, the dual of the unconditional `tailmerge`) that measurement is
+ *  `synthetic:dmascope`: the un-merged store has to land inside the arm's own region base
+ *  (`p0[2] = …`), which only a base lever running AFTER the un-merge can spell — hand-compiled,
+ *  that source is byte-exact where the merged spelling the structurer produces is 9, and applying
+ *  the un-merge to the WINNER's tree instead measures 14. Every other lever derives from the base
+ *  tree, so the order can only be had this way.
+ *
+ *  A pre-fan product only ADDS candidates, so it cannot cost a match; its price is a second fan
+ *  on every tree where the rewrite fires, which is why the table is not a place to put a lever
+ *  that would compose perfectly well as a `respell`. */
+const PRE_FAN_PRODUCTS: typeof SHAPE_PRODUCTS = [{ suffix: '/unmerge', apply: unmergeJoins }];
+
 const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
   ...SHAPE_PRODUCTS.map((x) => [x]),
   ...(SHAPE_PRODUCTS.length > 1 ? [SHAPE_PRODUCTS] : []),
@@ -858,11 +878,43 @@ export function enumerateCandidates(
   // 2×2 cross: the fourth point costs another quarter of the whole fan — the anchor dimension
   // multiplies everything below it — and no row has been shown to need it.
   const senseAnchor = [
-    { suffix: '', sense: defSense, anchor: false, entry: false, bitfields: true, ptrElems: true },
-    { suffix: '/flip-branch', sense: !defSense, anchor: false, entry: false, bitfields: true, ptrElems: true },
-    { suffix: '/defsite', sense: defSense, anchor: true, entry: false, bitfields: true, ptrElems: true },
-    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, entry: false, bitfields: true, ptrElems: true },
-    { suffix: '/defsite/loop-entry', sense: defSense, anchor: true, entry: true, bitfields: true, ptrElems: true },
+    { suffix: '', sense: defSense, anchor: false, entry: false, bitfields: true, ptrElems: true, declRank: true },
+    {
+      suffix: '/flip-branch',
+      sense: !defSense,
+      anchor: false,
+      entry: false,
+      bitfields: true,
+      ptrElems: true,
+      declRank: true,
+    },
+    {
+      suffix: '/defsite',
+      sense: defSense,
+      anchor: true,
+      entry: false,
+      bitfields: true,
+      ptrElems: true,
+      declRank: true,
+    },
+    {
+      suffix: '/flip-branch/defsite',
+      sense: !defSense,
+      anchor: true,
+      entry: false,
+      bitfields: true,
+      ptrElems: true,
+      declRank: true,
+    },
+    {
+      suffix: '/defsite/loop-entry',
+      sense: defSense,
+      anchor: true,
+      entry: true,
+      bitfields: true,
+      ptrElems: true,
+      declRank: true,
+    },
     {
       suffix: '/flip-branch/defsite/loop-entry',
       sense: !defSense,
@@ -870,6 +922,7 @@ export function enumerateCandidates(
       entry: true,
       bitfields: true,
       ptrElems: true,
+      declRank: true,
     },
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
@@ -1026,6 +1079,35 @@ export function enumerateCandidates(
   const ptrElemCands = fnHasSizedPtrFields
     ? [...bitfieldCands, ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/no-ptr-elem`, ptrElems: false }))]
     : bitfieldCands;
+  // `/flat-rank` — spell a multidimensional global's access as the FLAT byte arithmetic
+  // (`*(u16 *)((r << 11) + (i << 1) + (u32)&g)`) where the default recovers the map's declared
+  // subscripts (`g[r][i]`). The recovery's evidence is a term at the declared ROW stride, and that
+  // is evidence the residual carries a row — NOT evidence about which of the two spellings that
+  // both produce it was written. Compiled (structure.ts `spellDeclaredSubscripts` carries the
+  // table): the two differ only in where the pool load sits under agbcc, kmc and mwcc, and are
+  // BYTE-IDENTICAL under IDO, which also distributes the flat sum into the same separate scales.
+  // So the asm underdetermines it on every compiler measured, and the differ referees — the same
+  // posture as `/no-ptr-elem` and `/no-bitfield`.
+  //
+  // THE GATE IS ASKED OF THIS FUNCTION, not of the map, for `/no-ptr-elem`'s reason: a declared
+  // subscript is only ever recovered off a global the function NAMES, and every named global
+  // reaches the IR as a `gaddr`. `arrayInnerExtents` is the recovery's own rank test, called here
+  // rather than re-spelled, so the gate cannot be narrower than the rule it gates. It is still a
+  // superset — it does not know the access WIDTH, and it cannot know whether any residual carries
+  // a row term — so where the axis changes nothing the tree dedup below collapses the pair and the
+  // fan does not grow. 9 of the artifact's 951 rows name such a symbol at all — 8 of them in
+  // their winning `symbolsUsed`, the ninth (`kleod:SetupBG3WindowOverlay`) in a source its row
+  // cannot compile, which is why that count is taken off the emitted sources and not off
+  // `symbolsUsed`, where a row with no winner is invisible.
+  const fnNamesMultidimArray =
+    byName !== undefined &&
+    [...bareGlobalSymbols(probe).keys()].some((n) => {
+      const i = byName.get(n);
+      return i !== undefined && i.shape === 'array' && (arrayInnerExtents(i)?.length ?? 0) > 0;
+    });
+  const declRankCands = fnNamesMultidimArray
+    ? [...ptrElemCands, ...ptrElemCands.map((s) => ({ ...s, suffix: `${s.suffix}/flat-rank`, declRank: false }))]
+    : ptrElemCands;
   // The axis chain, derived from STRUCTURING_AXES: each admitted axis doubles the list, OFF arm
   // first — order is load-bearing for the dropped-primary skip below (every OFF sibling
   // enumerates before its ON twin, so a twin's stripped-key lookup always finds a sibling that
@@ -1034,7 +1116,7 @@ export function enumerateCandidates(
   // a pair wherever the axis changed nothing.
   const probeDefs = defOpMap(probe);
   type AxisCand = (typeof ptrElemCands)[number] & Record<StructuringAxis['flag'], boolean>;
-  let axisCands: AxisCand[] = ptrElemCands.map((s) => ({
+  let axisCands: AxisCand[] = declRankCands.map((s) => ({
     ...s,
     reread: false,
     inplace: false,
@@ -1057,6 +1139,8 @@ export function enumerateCandidates(
 
   const seen = new Map<string, Candidate>();
   const seenTrees = new Set<string>();
+  /** the PRE-FAN products' own tree dedup — see the pre-fan loop for why it is not `seenTrees` */
+  const seenPreFan = new Set<string>();
   const out: Candidate[] = [];
   // The map-derived VALUE references one emitted tree contains, applied at every point a candidate
   // is finalized and derived from the tree that candidate emitted. No pipeline stage carries refs
@@ -1152,7 +1236,20 @@ export function enumerateCandidates(
   // a reviewer. The same argument l3/ast.ts's `walkExprs` header makes for its own shape, and it
   // counts for more here: a lever reading `fn` would not misprint a candidate, it would DELETE one,
   // and nothing in the harness reports a candidate that was never enumerated.
-  const fanOut = (sfn: SFn): Spelling[] => {
+  // `leverLabel` names the SPELLING this call is fanning, and it is a diagnostic argument only: it
+  // reaches `onLeverError` and nothing else, so the invariant the parameter list states above —
+  // every spelling is a pure function of the tree and this call's own constants — is untouched by
+  // it. It exists because the pre-fan products call this on a REWRITTEN tree, where a refusal of
+  // the primary spelling is a refusal of the rewrite, not of the row's own spelling.
+  //
+  // IT PREFIXES EVERY `onLeverError` IN THIS FUNCTION, not just the primary emit's, and that is
+  // the whole point rather than a detail: every one of them is reachable from both fans, and the
+  // suffix each already carries names a LEVER, which on a pre-fan tree is a lever applied to the
+  // rewrite. Reported without this prefix, a refusal of `/unmerge/volatile` reads as a refusal of
+  // `/volatile` — a spelling that did not fail and is still in the fan. The order
+  // is the candidate labels' own (`${pf.suffix}${sp.suffix}`), so a reported label and an
+  // enumerated one name the same spelling the same way.
+  const fanOut = (sfn: SFn, leverLabel = ''): Spelling[] => {
     // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
     // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
@@ -1172,7 +1269,7 @@ export function enumerateCandidates(
       spellings.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {
       lastEmitError = e;
-      opts.onLeverError?.(name, e instanceof Error ? e.message.split('\n')[0] : String(e));
+      opts.onLeverError?.(name + leverLabel, e instanceof Error ? e.message.split('\n')[0] : String(e));
       return spellings;
     }
     // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
@@ -1181,7 +1278,10 @@ export function enumerateCandidates(
     // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
     //
     // POLICY: re-spellings derive from the BASE spelling only — levers do not compose by
-    // default. THREE product mechanisms are sanctioned, each with its own admission bar —
+    // default. FOUR product mechanisms are sanctioned, each with its own admission bar — the
+    // three below, which all derive from or compose onto a spelling, plus the PRE-FAN products
+    // (PRE_FAN_PRODUCTS, applied to the TREE before this fan runs over it; its admission bar is
+    // stated at the table) —
     // plus ALTERNATIVE OUTPUTS: one lever whose single application has several legitimate
     // results (which locals a coalesce merges, which pointers /volatile qualifies) emits
     // each as its own candidate via `enumerate`, capped at the lever, with the base spelling
@@ -1293,7 +1393,7 @@ export function enumerateCandidates(
               }
             } catch (e) {
               opts.onLeverError?.(
-                name + suffix + shapeSuffix,
+                name + leverLabel + suffix + shapeSuffix,
                 e instanceof Error ? e.message.split('\n')[0] : String(e),
               );
             }
@@ -1305,7 +1405,7 @@ export function enumerateCandidates(
         // so without this a lever that fails here vanishes with no trace — indistinguishable
         // from one that correctly declined, which is exactly the hidden failure
         // DroppedCandidate exists to surface.
-        opts.onLeverError?.(name + suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
       }
     };
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
@@ -1322,7 +1422,7 @@ export function enumerateCandidates(
       } catch (e) {
         // the error label falls back to the full subset — the fired set is unknown mid-throw
         const label = subset.map((x) => x.suffix).join('');
-        opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
       }
     }
     respell('/argbase', () => materializeArgBases(sfn));
@@ -1514,7 +1614,7 @@ export function enumerateCandidates(
         const base = from();
         variants = base ? variantsOf(base) : [];
       } catch (e) {
-        opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
         return;
       }
       for (const c of variants) {
@@ -1783,8 +1883,10 @@ export function enumerateCandidates(
     // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
     // …and `/no-ptr-elem` names a spelling only the MAP makes available, for the same reason:
     // structure() normalizes `spellPtrMemberElements` to false without `symbols`, so both arms
-    // structure the identical tree on the raw variant.
-    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields && s.ptrElems);
+    // structure the identical tree on the raw variant. `/flat-rank` is the third: the declared
+    // subscripts come off the symbol RENDER CONTEXT, which structure() builds only from a map, so
+    // its OFF arm is the raw variant's only spelling already.
+    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields && s.ptrElems && s.declRank);
     const treeOwnedFold = treeOwnedIn(sv.symbols);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
@@ -1936,6 +2038,7 @@ export function enumerateCandidates(
               anchorLoopEntryConsts: s.entry,
               spellBitfieldMembers: s.bitfields,
               spellPtrMemberElements: s.ptrElems,
+              spellDeclaredSubscripts: s.declRank,
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
             });
           } catch (e) {
@@ -1945,6 +2048,7 @@ export function enumerateCandidates(
               !s.join &&
               s.bitfields &&
               s.ptrElems &&
+              s.declRank &&
               STRUCTURING_AXES.every((ax) => !s[ax.flag])
             ) {
               throw e; // the base lift's base axes keep their behavior: a failure aborts the row
@@ -1989,6 +2093,56 @@ export function enumerateCandidates(
           }
           seenTrees.add(treeKey);
           const spellings = fanOut(sfn);
+          // The PRE-FAN products (PRE_FAN_PRODUCTS, the fourth mechanism the POLICY note names):
+          // rewrite the TREE, then fan the whole re-spelling set over the result, so every lever
+          // below derives from the rewrite instead of composing onto it. The gate is the pass's
+          // own decline; the contracts are `respell`'s three, for `respell`'s reasons.
+          for (const pf of PRE_FAN_PRODUCTS) {
+            try {
+              const made = pf.apply(sfn);
+              if (made === null) {
+                continue;
+              }
+              // The SAME tree dedup the primary above gets, and for the same reason: `fanOut` is a
+              // pure function of the tree, so re-fanning one already fanned buys nothing and makes
+              // the row's quoted fan cost a number that is partly duplicates. A SEPARATE set, not
+              // `seenTrees`: adding a rewritten tree there would let it skip a later PRIMARY tree
+              // that happens to equal it, and that primary's own pre-fan output — which nothing
+              // has computed — would go with it.
+              const madeKey = JSON.stringify(made);
+              if (seenPreFan.has(madeKey)) {
+                continue;
+              }
+              seenPreFan.add(madeKey);
+              assertResolved(made);
+              assertDerefsTyped(made);
+              assertLocalsWritten(made);
+              // `fanOut` writes the shared `lastEmitError` when the PRIMARY emit throws, and that
+              // is what the row's "no spellable candidate" refusal reports. A backend refusal on a
+              // REWRITTEN tree is not a refusal of the primary spelling, so it must not be able to
+              // become the row's stated cause — saved and restored around the call, in a `finally`
+              // so a throw cannot leak it either, rather than letting the wrong cause outlive it.
+              //
+              // It is reported instead through `onLeverError` under `pf.suffix`, which is what
+              // `fanOut`'s second argument is for, and it is the other half of the same rule: a
+              // primary emit refusal does not THROW — `fanOut` records it and returns — so the
+              // `catch` below never sees it, and under the bare function name it would read as a
+              // refusal of the primary spelling while the lever's whole half of the fan was
+              // deleted.
+              const before = lastEmitError;
+              let fanned: Spelling[];
+              try {
+                fanned = fanOut(made, pf.suffix);
+              } finally {
+                lastEmitError = before;
+              }
+              for (const sp of fanned) {
+                spellings.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
+              }
+            } catch (e) {
+              opts.onLeverError?.(`${name}${pf.suffix}`, e instanceof Error ? e.message.split('\n')[0] : String(e));
+            }
+          }
           for (const sp of spellings) {
             const source = sp.source;
             // Collapse a spelling that produced identical source (a function with no divergent `if`
