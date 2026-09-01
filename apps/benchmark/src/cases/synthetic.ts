@@ -34,6 +34,7 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         refSource: spec.src,
         ctx: spec.ctx,
         proto: spec.proto,
+        ...(spec.symbols ? { symbols: spec.symbols } : {}),
         note: spec.note,
         toolchain: tc,
         build: () => cachedBuildTarget(tc, spec.src, spec.sym, spec.lang),

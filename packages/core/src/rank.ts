@@ -1040,10 +1040,29 @@ export function enumerateCandidates(
   // same edit against a different measurement. Its cross is censused below beside this one.)
   //
   // Where it DOES reach, the cross is the honest price of an arm the differ has to referee, and on
-  // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` enumerates 17,856
-  // candidates with the axis and 12,096 without (+47.6%), and its OFF arm wins nothing — no
-  // winning label carries `/no-ptr-elem`. That is a price paid for a question the asm cannot
-  // answer, not a lever earning its keep.
+  // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` roughly doubles.
+  // (The exact pair of counts this paragraph used to quote — 17,856 with the axis, 12,096 without
+  // — is STALE; the fan has grown since, so re-measure before quoting one.)
+  //
+  // NO WINNING LABEL IN THE ARTIFACT CARRIES `/no-ptr-elem`, AND THAT IS A FACT ABOUT THE CORPUS.
+  // This paragraph used to conclude from it that the arm is "a price paid for a question the asm
+  // cannot answer, not a lever earning its keep". Measured, that conclusion is false and the axis
+  // is two-sided: compile the byte spelling and the element spelling of the SAME address with the
+  // klonoa checkout's own agbcc, lift each back with that project's own map, and the arm is the
+  // ONLY candidate that matches the byte target while the default is the only one that matches the
+  // element target — on a constant element offset, at one element in, at a pointee width of 1, and
+  // on a STORE. `cli/test/matching/ptr-elem-axis.test.ts` is that measurement, and deleting the
+  // `ptrElemCands` cross below turns 8 of its 13 assertions red — the four BYTE-target ones (each
+  // scoring 1 rather than 0) and the four that check the arm is enumerated at all — while its four
+  // ELEMENT-target ones stay green, which is the two-sidedness itself. What the census counts is
+  // that the ONE symbol klonoa's map declares with a sized pointer member happens to be spelled in
+  // the element form by every decompiled caller of it — not that the OFF arm loses where it fires.
+  //
+  // WHERE IT GENUINELY DOES NOT REACH, measured on the same probes: at element offset ZERO the two
+  // arms emit the IDENTICAL source (`((u16 *)gSym.pMap)[a0]`, because with no constant left there
+  // is nothing for the byte form to spell differently), the tree dedup collapses the pair — 10
+  // candidates, not 12 — and neither arm matches a byte-form target. That is an open gap in the
+  // spelling, not a refusal of this axis.
   //
   // STATE THE DENOMINATOR, AND DERIVE IT FROM REACH RATHER THAN FROM CO-OCCURRENCE — the same
   // distinction the paragraph above draws about the gate, applied to the gate's own price.
@@ -1051,15 +1070,18 @@ export function enumerateCandidates(
   // so that framing hands back 151 labelled rows, which is the map-wide `some` this gate was
   // written to avoid. The gate is per-FUNCTION, so census the FUNCTIONS. Enumerating every real
   // case (candidates only, `ASMLIFT_CANDCACHE=0`, the harness's own inputs) and counting rows with
-  // any surviving `/no-ptr-elem` candidate: TWO — `kleod:ProcessInputAndUpdateEntities` (5760 of
-  // its 17856) and `kleod:SetupBG3WindowOverlay` (48 of 544), and only the first carries a winning
-  // label at all, the second being `noncompile`. So "0 winning labels" is 0 of ONE here, not 0 of
+  // any surviving `/no-ptr-elem` candidate: TWO — `kleod:ProcessInputAndUpdateEntities` (23040 of
+  // its 58752) and `kleod:SetupBG3WindowOverlay` (128 of 952), and only the first carries a winning
+  // label at all, the second being `noncompile`. (Re-derived at c30799cd; the counts this sentence
+  // used to carry, 5760 of 17856 and 48 of 544, were measured before the fan grew — the TWO-row
+  // reach held, every number did not, so re-run the census rather than quoting one.) So "0 winning
+  // labels" is 0 of ONE here, not 0 of
   // 151 and not 0 of the 951-row artifact. That census enumerates 155 of the 252 real rows — the
   // 151 the artifact labels plus its 4 `noncompile` rows — and the 97 it cannot enumerate are
   // exactly the rows the artifact declines. What makes "no row is LOST" a proof rather than a
   // sample is the soundness rule instead: this axis only ADDS candidates, so a row whose winner
   // does not carry it cannot move when it is removed. The same census prices `/no-bitfield`: it
-  // survives dedup on FIVE real rows — `ProcessInputAndUpdateEntities` 6336, `CountCollectedGems`
+  // survives dedup on FIVE real rows — `ProcessInputAndUpdateEntities` 25344, `CountCollectedGems`
   // 192, `UpdateWorldMapNodeAnim` 168, `UpdateHUDCounterDisplay` 96, `CopyBGScrollTiles` 4 — every
   // one of them a row the artifact labels, and no winning label in the artifact carries
   // `/no-bitfield` either. So its map-wide enumeration gate buys a candidate cross on 5 functions
