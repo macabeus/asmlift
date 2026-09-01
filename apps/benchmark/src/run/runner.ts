@@ -6,6 +6,7 @@ import { writeFileSync } from 'node:fs';
 
 import type { Case } from '../cases/types';
 import { type EvalSpec, evaluate } from '../eval/evaluate';
+import { asmliftProvenance } from '../provenance';
 
 export interface Shard {
   idx: number; // 0-based shard index
@@ -21,7 +22,9 @@ export function parseShard(s: string): Shard {
   return { idx: i, n };
 }
 
-/** The base meta block for a result set (merge extends it with provenance). */
+/** The base meta block for a result set, carrying the provenance sampled WHERE THE NUMBERS WERE
+ *  PRODUCED. `merge` re-stamps `asmlift` with its own sample and cross-checks the two (see
+ *  ../provenance.ts for why one sample at merge time was not enough). */
 export function benchMeta(results: FunctionResult[]): BenchMeta {
   return {
     generatedAt: new Date().toISOString(),
@@ -31,6 +34,7 @@ export function benchMeta(results: FunctionResult[]): BenchMeta {
       synthetic: results.filter((r) => r.tier === 'synthetic').length,
       real: results.filter((r) => r.tier === 'real').length,
     },
+    asmlift: asmliftProvenance(),
   };
 }
 
