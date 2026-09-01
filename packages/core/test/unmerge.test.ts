@@ -181,6 +181,50 @@ describe('what refuses — each one would read a different value', () => {
 //
 // `exprHasEffect` is documented as "a call, or a marker" and does not model a qualifier, so the
 // refusal is asked of the qualifier's own model (`exprReadsVolatile`), never of a node kind.
+// A KEPT STATEMENT MAY NOT WRITE MEMORY EITHER, and `exprHasEffect` cannot say so: it answers "a
+// call, or a marker" about a VALUE, and the thing that writes here is the assignment's TARGET.
+// `structure.ts` spells a write to a scalar global as an `assign` — `gBlendValue = v;` — so the
+// kind test and the value test both pass while the statement stores to memory a moved read could
+// be answered by.
+describe('a kept statement writes no memory — its target, not only its value', () => {
+  test('an intervening assignment to a GLOBAL refuses — an `assign` is not always a local write', () => {
+    // `gBlendValue` is named by no local and no param, exactly as structure.ts leaves it.
+    const body = [
+      iff(
+        [asg('p', deref(v('s'))), asg('gBlendValue', c(5)), asg('x', c(1))],
+        [asg('p', deref(v('s'))), asg('gBlendValue', c(6)), asg('x', c(2))],
+      ),
+      store(v('g'), v('p')),
+    ];
+    expect(unmergeJoins(fn(body, ['p', 'x', 's']))).toBeNull();
+  });
+
+  test('THE CONTROL: the identical shape writing a declared LOCAL still un-merges', () => {
+    const body = [
+      iff(
+        [asg('p', deref(v('s'))), asg('q', c(5)), asg('x', c(1))],
+        [asg('p', deref(v('s'))), asg('q', c(6)), asg('x', c(2))],
+      ),
+      store(v('g'), v('p')),
+    ];
+    expect(unmergeJoins(fn(body, ['p', 'x', 's', 'q']))).not.toBeNull();
+  });
+
+  test('…and a PARAM is a declared local for this purpose, not a global', () => {
+    const base = fn(
+      [
+        iff(
+          [asg('p', deref(v('s'))), asg('a0', c(5)), asg('x', c(1))],
+          [asg('p', deref(v('s'))), asg('a0', c(6)), asg('x', c(2))],
+        ),
+        store(v('g'), v('p')),
+      ],
+      ['p', 'x', 's'],
+    );
+    expect(unmergeJoins({ ...base, params: [{ name: 'a0', type: T.s(32) }] })).not.toBeNull();
+  });
+});
+
 describe('an observable access is never the thing that moves', () => {
   const volCast = (addr: number): Expr => ({
     k: 'index',

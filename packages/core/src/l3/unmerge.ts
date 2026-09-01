@@ -31,12 +31,17 @@
 //     the join statement, never address-taken — the counts are function-wide, so a second reader
 //     anywhere refuses) nor untouched by both arms (a name the arms DO write and this cannot
 //     substitute would read a different value at the arm's end);
-//   - anything but an EFFECT-FREE assignment stands between the first definition and the arm's
-//     end: the substituted values are evaluated where the copy lands, so an intervening store or
-//     call could answer a load inside one of them differently. Both halves of that are tested,
-//     and the second is why the statement KIND is not enough — `q = Foo();` is an `assign` whose
-//     value is a call, and a load moved past it is a load answered after the call instead of
-//     before it;
+//   - anything but an EFFECT-FREE assignment TO A DECLARED LOCAL stands between the first
+//     definition and the arm's end: the substituted values are evaluated where the copy lands, so
+//     an intervening store or call could answer a load inside one of them differently. All three
+//     halves of that are tested. The second is why the statement KIND is not enough — `q = Foo();`
+//     is an `assign` whose value is a call, and a load moved past it is a load answered after the
+//     call instead of before it. The third is why the assignment's TARGET is not either: an
+//     `assign` names a variable, and structure.ts spells a write to a scalar GLOBAL as one, so
+//     `gBlendValue = v;` is an `assign` with an effect-free value that writes MEMORY — 3456 of
+//     them in this row's own base trees, and 62 emitted assignments to a global over the published
+//     948. `exprHasEffect` answers "a call, or a marker" and cannot see it, the same way it could
+//     not see a qualifier;
 //   - an intervening assignment writes a name one of those values reads — same reason, one level
 //     more precise;
 //   - a definition's value reads another of the merge names (the substitutions would need an order
@@ -49,14 +54,24 @@
 //     asked of the qualifier's own model (`exprReadsVolatile`), which knows all three spellings —
 //     the cast, the pointee-volatile pointer local, and the volatile local object.
 //
-// AND THE SCOPE OF THAT LAST ONE IS WHAT MOVES, which is exactly one thing. A kept statement holds
-// its position, and the join runs where it already ran (immediately after that arm), so the only
-// access whose point in the sequence changes is a DEFINITION's value — moved down to the arm's end,
-// past every kept statement. A plain read may make that trip: the kept statements are effect-free
-// assignments to locals, so none of them writes memory that could answer it differently, which is
-// what the two effect gates above establish. An observable one may not, and it is observable
-// against the other device accesses beside it — which is why the gate is stated on the moved value
-// and needs no clause for the statements that stay put.
+// AND THE SCOPE OF THE VOLATILE ONE IS WHAT MOVES, which is exactly one thing. A kept statement
+// holds its position, and the join runs where it already ran (immediately after that arm), so the
+// only access whose point in the sequence changes is a DEFINITION's value — moved down to the
+// arm's end, past every kept statement. A plain read may make that trip, because the kept
+// statements from the first definition on are effect-free assignments to DECLARED LOCALS and so
+// none of them writes memory that could answer it differently — which is what the three gates
+// above establish, the local-target one included; without it that sentence was false, and true of
+// the corpus only by measurement. An observable read may not make the trip, and it is observable
+// against the other device accesses beside it — which is why THAT gate is stated on the moved
+// value and needs no clause for the statements that stay put.
+//
+// WHAT THE LOCAL-TARGET GATE DOES NOT CLOSE, stated rather than implied: ALIASING. A moved value
+// reading `*p` and a kept assignment to an address-taken local can name the same object under two
+// spellings, and the name-keyed refusal below (an intervening assignment writes a name one of
+// those values READS) cannot see it. That is one question further out than this pass models —
+// every other lever here defers it to the same name-keyed model — and it has no inhabitant: over
+// the 332 agbcc rows, 0 arms this pass ACCEPTS hold a kept assignment to an address-taken local
+// after the first definition, the same sweep that found 0 holding one to a global.
 import {
   type Expr,
   type SFn,
@@ -107,7 +122,11 @@ function readsIn(e: Expr): Set<string> {
 
 /** The arm's definitions of `names` and the statements that survive beside them, or null when the
  *  substituted copy would not evaluate to the same values at the arm's end. */
-function armDefs(arm: Stmt[], names: ReadonlySet<string>): { defs: Map<string, Expr>; keep: Stmt[] } | null {
+function armDefs(
+  arm: Stmt[],
+  names: ReadonlySet<string>,
+  declared: ReadonlySet<string>,
+): { defs: Map<string, Expr>; keep: Stmt[] } | null {
   const at = new Map<string, number>();
   arm.forEach((s, i) => {
     if (s.k === 'assign' && names.has(s.name)) {
@@ -118,12 +137,16 @@ function armDefs(arm: Stmt[], names: ReadonlySet<string>): { defs: Map<string, E
     return null;
   }
   const first = Math.min(...at.values());
-  // From the first definition on, nothing but EFFECT-FREE assignments: a store or a call there
-  // would run BEFORE a value this moves to the arm's end, and could answer a load inside it
-  // differently. The KIND test alone does not say that — an `assign` whose value is a call is an
-  // intervening call — so the effect test is applied to the kept statements too, not only to the
-  // definition values below.
-  if (arm.slice(first).some((s) => s.k !== 'assign' || exprHasEffect(s.value))) {
+  // From the first definition on, nothing but EFFECT-FREE assignments TO A DECLARED LOCAL: a store
+  // or a call there would run BEFORE a value this moves to the arm's end, and could answer a load
+  // inside it differently. Neither the KIND nor the VALUE alone says that. Not the kind — an
+  // `assign` whose value is a call is an intervening call — so the effect test is applied to the
+  // kept statements too, not only to the definition values below. And not the value either: an
+  // `assign` names a VARIABLE, and structure.ts spells a write to a scalar global as one, so
+  // `gBlendValue = v;` passes both tests and writes memory. `declared` is the tree's own locals
+  // and params, so the target has to be an object no moved read can reach except by the name the
+  // refusal below already keys on.
+  if (arm.slice(first).some((s) => s.k !== 'assign' || !declared.has(s.name) || exprHasEffect(s.value))) {
     return null;
   }
   const defs = new Map([...at].map(([n, i]) => [n, (arm[i] as Extract<Stmt, { k: 'assign' }>).value] as const));
@@ -152,6 +175,10 @@ function substitute(s: Stmt, defs: ReadonlyMap<string, Expr>): Stmt {
 export function unmergeJoins(sfn: SFn): SFn | null {
   const mentions = localMentions(sfn);
   const localNames = new Set(sfn.locals.map((l) => l.name));
+  // Locals AND params — both name an automatic object, and an assignment to either is the write
+  // `armDefs` may keep. Separate from `localNames` above, which answers a different question
+  // (which of the join's reads a substitution could supply) and is deliberately locals-only.
+  const declaredNames = new Set([...localNames, ...sfn.params.map((p) => p.name)]);
   const consumed = new Set<string>();
 
   const unmergeAt = (iff: Extract<Stmt, { k: 'if' }>, join: Joinable): Stmt | null => {
@@ -174,8 +201,8 @@ export function unmergeJoins(sfn: SFn): SFn | null {
     if (merge.size === 0) {
       return null;
     }
-    const then = armDefs(iff.then, merge);
-    const els = armDefs(iff.else, merge);
+    const then = armDefs(iff.then, merge, declaredNames);
+    const els = armDefs(iff.else, merge, declaredNames);
     if (then === null || els === null) {
       return null;
     }
