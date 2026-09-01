@@ -43,12 +43,26 @@
 //     between them that the join statement does not fix);
 //   - a definition's value carries an EFFECT — a call or a gap marker. One statement's operands
 //     have no evaluation order in C, so folding two effectful expressions into it would let the
-//     backend choose an order the asm did not.
+//     backend choose an order the asm did not;
+//   - a definition's value performs a VOLATILE access. `exprHasEffect` above answers "a call, or a
+//     marker" and says nothing about a qualifier, so it is not the test for this: the refusal is
+//     asked of the qualifier's own model (`exprReadsVolatile`), which knows all three spellings —
+//     the cast, the pointee-volatile pointer local, and the volatile local object.
+//
+// AND THE SCOPE OF THAT LAST ONE IS WHAT MOVES, which is exactly one thing. A kept statement holds
+// its position, and the join runs where it already ran (immediately after that arm), so the only
+// access whose point in the sequence changes is a DEFINITION's value — moved down to the arm's end,
+// past every kept statement. A plain read may make that trip: the kept statements are effect-free
+// assignments to locals, so none of them writes memory that could answer it differently, which is
+// what the two effect gates above establish. An observable one may not, and it is observable
+// against the other device accesses beside it — which is why the gate is stated on the moved value
+// and needs no clause for the statements that stay put.
 import {
   type Expr,
   type SFn,
   type Stmt,
   exprHasEffect,
+  exprReadsVolatile,
   mapExprChildren,
   mapStmtExprs,
   stmtChildren,
@@ -166,7 +180,7 @@ export function unmergeJoins(sfn: SFn): SFn | null {
       return null;
     }
     for (const v of [...then.defs.values(), ...els.defs.values()]) {
-      if (exprHasEffect(v) || [...readsIn(v)].some((n) => merge.has(n))) {
+      if (exprHasEffect(v) || exprReadsVolatile(v, sfn) || [...readsIn(v)].some((n) => merge.has(n))) {
         return null;
       }
     }

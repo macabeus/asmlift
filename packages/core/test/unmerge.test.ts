@@ -173,6 +173,94 @@ describe('what refuses — each one would read a different value', () => {
   });
 });
 
+// THE ONE THING THIS PASS MOVES is a definition's VALUE, from its own statement down to the arm's
+// end. A plain read may make that trip — nothing a kept statement does can answer it differently,
+// which is what the effect gates above establish. A VOLATILE read may not: it is an access the
+// machine performed at a stated point, and the copy performs it at a different one, after any
+// observable access the kept statements hold.
+//
+// `exprHasEffect` is documented as "a call, or a marker" and does not model a qualifier, so the
+// refusal is asked of the qualifier's own model (`exprReadsVolatile`), never of a node kind.
+describe('an observable access is never the thing that moves', () => {
+  const volCast = (addr: number): Expr => ({
+    k: 'index',
+    base: { k: 'cast', to: T.ptr(T.u(16)), e: c(addr), volatile: true },
+    idx: c(0),
+    width: 2,
+    signed: false,
+  });
+  const volFn = (body: Stmt[], names: string[], quals: Record<string, 'object' | 'pointee'> = {}): SFn => ({
+    ...fn(body, names),
+    locals: names.map((name) => ({
+      name,
+      type: T.s(32),
+      ...(quals[name] === 'object' ? { volatile: true as const } : {}),
+      ...(quals[name] === 'pointee' ? { pointeeVolatile: true as const } : {}),
+    })),
+  });
+
+  test('a definition reading a DEVICE REGISTER refuses — the copy would touch it after the kept read', () => {
+    // REG_DMA3SAD moved below a read of REG_DMA3CNT: the two device reads swap order, and the
+    // published source performs them in an order the asm did not.
+    const body = [
+      iff(
+        [asg('p', volCast(0x40000d4)), asg('q', volCast(0x40000d8)), asg('x', c(1))],
+        [asg('p', volCast(0x40000d4)), asg('q', volCast(0x40000d8)), asg('x', c(2))],
+      ),
+      store(v('g'), v('p')),
+    ];
+    expect(unmergeJoins(volFn(body, ['p', 'x', 'q']))).toBeNull();
+  });
+
+  test('…and through a pointer local DECLARED to point at volatile data, not only through a cast', () => {
+    const body = [
+      iff([asg('p', deref(v('m'))), asg('x', c(1))], [asg('p', deref(v('m'))), asg('x', c(2))]),
+      store(v('g'), v('p')),
+    ];
+    expect(unmergeJoins(volFn(body, ['p', 'x', 'm'], { m: 'pointee' }))).toBeNull();
+  });
+
+  test('…and a read of a VOLATILE local object', () => {
+    const body = [iff([asg('p', v('m')), asg('x', c(1))], [asg('p', v('m')), asg('x', c(2))]), store(v('g'), v('p'))];
+    expect(unmergeJoins(volFn(body, ['p', 'x', 'm'], { m: 'object' }))).toBeNull();
+  });
+
+  test('THE CONTROL: the same shape with PLAIN reads still un-merges — the gate is the qualifier', () => {
+    // Identical statement kinds, identical positions; only the `volatile` is gone. If this
+    // refused too, the rule would be "a definition may not read memory", which is not the rule
+    // and would delete the corpus shape the lever exists for.
+    const plain = (addr: number): Expr => ({
+      k: 'index',
+      base: { k: 'cast', to: T.ptr(T.u(16)), e: c(addr) },
+      idx: c(0),
+      width: 2,
+      signed: false,
+    });
+    const body = [
+      iff(
+        [asg('p', plain(0x40000d4)), asg('q', plain(0x40000d8)), asg('x', c(1))],
+        [asg('p', plain(0x40000d4)), asg('q', plain(0x40000d8)), asg('x', c(2))],
+      ),
+      store(v('g'), v('p')),
+    ];
+    expect(unmergeJoins(volFn(body, ['p', 'x', 'q']))).not.toBeNull();
+  });
+
+  test('THE SCOPE: a volatile read among the KEPT statements alone still un-merges — it does not move', () => {
+    // The kept statements hold their positions and the join lands exactly where it already ran,
+    // so the only access whose position changes is a definition's. A gate on the kept statements
+    // would refuse a site with nothing wrong with it.
+    const body = [
+      iff(
+        [asg('q', volCast(0x40000d8)), asg('p', v('a')), asg('x', c(1))],
+        [asg('q', volCast(0x40000d8)), asg('p', v('b')), asg('x', c(2))],
+      ),
+      store(v('p'), v('x')),
+    ];
+    expect(unmergeJoins(volFn(body, ['p', 'x', 'q']))).not.toBeNull();
+  });
+});
+
 // THE COUNTS THE MERGE-TEMP TEST RESTS ON. `readsOf(m) === 1` above is a FUNCTION-WIDE count from
 // l3/mentions.ts, so a use that walk cannot see is a temp this pass deletes while the body still
 // reads it. `index.lead` — a multidimensional global's leading subscripts — is a position that

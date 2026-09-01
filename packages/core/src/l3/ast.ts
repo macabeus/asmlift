@@ -540,6 +540,38 @@ export function exprHasEffect(e: Expr): boolean {
   return e.k === 'call' || e.k === 'marker' || exprChildren(e).some(exprHasEffect);
 }
 
+/** Whether the tree performs an access to a `volatile` object — the OTHER thing no re-ordering may
+ *  move, and the one `exprHasEffect` deliberately does not answer: that one is about a call, this
+ *  about a QUALIFIER, and a pass that asks the first where it means the second reorders device
+ *  accesses while its gate reports clean.
+ *
+ *  Three spellings assert one thing, and all three are here because a lever that knew only the cast
+ *  would miss the two a later lever writes: a `volatile` cast (where a raw address carries it), a
+ *  read through a pointer local declared to point at volatile data (l3/volatileptr.ts), and a read
+ *  of a `volatile` local object (l3/volatileval.ts). A bare cast counts even with no deref under it
+ *  — the qualifier is on the ACCESS the cast exists to spell, and every caller so far is asking
+ *  whether it may move the expression rather than how many accesses it holds. */
+export function exprReadsVolatile(e: Expr, sfn: SFn): boolean {
+  const pointee = new Set(sfn.locals.filter((l) => l.pointeeVolatile).map((l) => l.name));
+  const object = new Set(sfn.locals.filter((l) => l.volatile).map((l) => l.name));
+  const namesUnder = (x: Expr): string[] =>
+    [...subterms(x)].filter((y): y is Extract<Expr, { k: 'var' }> => y.k === 'var').map((y) => y.name);
+  return [...subterms(e)].some(
+    (x) =>
+      (x.k === 'cast' && x.volatile === true) ||
+      (x.k === 'var' && object.has(x.name)) ||
+      ((x.k === 'index' || x.k === 'field') && namesUnder(x).some((n) => pointee.has(n))),
+  );
+}
+
+/** every node of an expression tree, itself included */
+function* subterms(e: Expr): Generator<Expr> {
+  yield e;
+  for (const c of exprChildren(e)) {
+    yield* subterms(c);
+  }
+}
+
 /** The statements a statement DIRECTLY contains, in the order a backend prints them — a `switch`
  *  splices its default in at `defaultAt` for that reason. NOTE for document-order walks: a `for`'s
  *  init/inc are listed here while its cond is in stmtExprs — a walker visiting exprs-then-stmts
