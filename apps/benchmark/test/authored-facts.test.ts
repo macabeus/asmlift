@@ -288,13 +288,19 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
 //
 // TWO THINGS ARE CHECKED, and neither is a restatement of the other.
 //
-// SYMMETRY — every symbol the map declares to asmlift must also reach m2c. The map is asmlift-only
+// SYMMETRY — every FACT the map declares to asmlift must also reach m2c. The map is asmlift-only
 // input (`Case.symbols`; m2c's analogue is `ctx`), so `src/cases/synthetic.ts` renders it into the
 // ctx and this asserts the rendering actually happened. It is the same class the callee check
 // above covers and the class PR #119 corrected on the real tier, on a channel that check cannot
 // see: `declaredFunctionNames` reads FUNCTION names, so a struct layout added to one side alone is
 // invisible to it. Measured before this existed: told only its prototype, m2c emits
 // `extern ? gBgTilemapBufs;` on `sbscope` and the row publishes a DECLINE.
+//
+// FACT, not SYMBOL, because the first version of this check said symbol and could be defeated in
+// one line: it matched `\b<name>\b` against the ctx, so degrading the renderer's input to core's
+// documented name-only exception left it green while the ctx became `extern u32 gPacked;` — the
+// whole layout gone from m2c and kept for asmlift, which is PR #119's asymmetry reopened inside
+// the fix for it. The three tests below are what replaced it, and each was shown to fire.
 //
 // AGREEMENT WITH THE ROW'S OWN SOURCE — the synthetic tier's `src` IS the compiler's input, so it
 // is the oracle here exactly as it is for `proto` above. Checked by NAME (every symbol and every
@@ -306,8 +312,11 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
 // anything, so it cannot catch a map whose OFFSETS are self-consistent and still wrong for the
 // struct the source declares — a `dreamStones` moved from bit 5 to bit 6 passes here. That is a
 // compiled question and it belongs to a toolchain-bound suite, not to a hosted runner with no
-// compilers. What it does catch is the map pointing at a different symbol, a different member, or
-// a shape no C declaration could have.
+// compilers. It also does not check an array's OUTERMOST extent, which `declare.ts` leaves unsized
+// by design and which therefore reaches asmlift and not the ctx text — measured on `sbscope` to
+// leave m2c's output byte-identical either way, so it is disclosed rather than gated. What it does
+// catch is the map pointing at a different symbol, a different member, or a shape no C declaration
+// could have — and now, a fact that reaches one channel and not the other.
 describe('an authored symbol map agrees with its own row', () => {
   const mapped = SYNTHETIC.filter((s) => s.symbols);
 
