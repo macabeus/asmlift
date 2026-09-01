@@ -1014,6 +1014,11 @@ export interface StructureOptions {
   //                   FLAT sum into the same separate scales, so on that compiler the recovery's
   //                   own premise is false and the flat spelling reaches it too.
   //
+  // WHICH ROW OF THAT TABLE IS PINNED: the agbcc pair, by
+  // packages/cli/test/matching/array-rank-axis.test.ts, which compiles both spellings through the
+  // klonoa checkout's own template. The other three were measured by hand and nothing re-runs
+  // them, so treat them as the record of a measurement rather than as a live check.
+  //
   // So both are emitted and the differ referees, exactly as for `/no-ptr-elem`. Only the map
   // declares a rank, so with no `symbols` this is normalized to false.
   spellDeclaredSubscripts?: boolean;

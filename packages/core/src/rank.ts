@@ -275,8 +275,8 @@ const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
  *  (l3/unmerge.ts, the dual of the unconditional `tailmerge`) that measurement is
  *  `synthetic:dmascope`: the un-merged store has to land inside the arm's own region base
  *  (`p0[2] = …`), which only a base lever running AFTER the un-merge can spell — hand-compiled,
- *  that source is byte-exact where the shipped merged spelling is 9, and applying the un-merge to
- *  the WINNER's tree instead of before it measures 14. Every other lever derives from the base
+ *  that source is byte-exact where the merged spelling the structurer produces is 9, and applying
+ *  the un-merge to the WINNER's tree instead measures 14. Every other lever derives from the base
  *  tree, so the order can only be had this way.
  *
  *  A pre-fan product only ADDS candidates, so it cannot cost a match; its price is a second fan
@@ -1095,7 +1095,10 @@ export function enumerateCandidates(
   // rather than re-spelled, so the gate cannot be narrower than the rule it gates. It is still a
   // superset — it does not know the access WIDTH, and it cannot know whether any residual carries
   // a row term — so where the axis changes nothing the tree dedup below collapses the pair and the
-  // fan does not grow. 9 of the 948 corpus rows name such a symbol at all.
+  // fan does not grow. 9 of the artifact's 951 rows name such a symbol at all — 8 of them in
+  // their winning `symbolsUsed`, the ninth (`kleod:SetupBG3WindowOverlay`) in a source its row
+  // cannot compile, which is why that count is taken off the emitted sources and not off
+  // `symbolsUsed`, where a row with no winner is invisible.
   const fnNamesMultidimArray =
     byName !== undefined &&
     [...bareGlobalSymbols(probe).keys()].some((n) => {
@@ -1243,8 +1246,7 @@ export function enumerateCandidates(
   // the whole point rather than a detail: every one of them is reachable from both fans, and the
   // suffix each already carries names a LEVER, which on a pre-fan tree is a lever applied to the
   // rewrite. Reported without this prefix, a refusal of `/unmerge/volatile` reads as a refusal of
-  // `/volatile` — a spelling that did not fail and is still in the fan — which is the same
-  // wrong-cause attribution the argument was added to remove, one lever further down. The order
+  // `/volatile` — a spelling that did not fail and is still in the fan. The order
   // is the candidate labels' own (`${pf.suffix}${sp.suffix}`), so a reported label and an
   // enumerated one name the same spelling the same way.
   const fanOut = (sfn: SFn, leverLabel = ''): Spelling[] => {
@@ -2122,11 +2124,11 @@ export function enumerateCandidates(
               // so a throw cannot leak it either, rather than letting the wrong cause outlive it.
               //
               // It is reported instead through `onLeverError` under `pf.suffix`, which is what
-              // `fanOut`'s second argument is for. That labelling is the other half of the same
-              // rule and it was missing: a primary emit refusal does not THROW — `fanOut` records
-              // it and returns — so the `catch` below never sees it, and reported under the bare
-              // function name it read exactly like a refusal of the primary spelling while the
-              // lever's whole half of the fan was deleted.
+              // `fanOut`'s second argument is for, and it is the other half of the same rule: a
+              // primary emit refusal does not THROW — `fanOut` records it and returns — so the
+              // `catch` below never sees it, and under the bare function name it would read as a
+              // refusal of the primary spelling while the lever's whole half of the fan was
+              // deleted.
               const before = lastEmitError;
               let fanned: Spelling[];
               try {

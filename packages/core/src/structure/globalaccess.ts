@@ -182,8 +182,8 @@ function scaledBy(t: Expr, stride: number): Expr | null {
  *  enter a stride, and declare.ts leaves the outermost dimension unsized in the emitted
  *  declaration either way (`extern u16 gRows[][1024];` for `[4,1024]` and for `[null,1024]`
  *  alike), so the recovered subscripts and the declaration they are read against agree and stride
- *  identically. An earlier statement of this rule listed a non-null outer extent among the
- *  refusals; the guard was never written because there is nothing for it to protect. */
+ *  identically. There is therefore no guard on the outermost extent anywhere below, and its
+ *  absence is the rule rather than a gap in it. */
 export function declaredSubscripts(
   si: SymbolInfo,
   residual: Expr,

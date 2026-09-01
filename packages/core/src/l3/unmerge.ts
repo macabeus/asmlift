@@ -38,10 +38,11 @@
 //     is an `assign` whose value is a call, and a load moved past it is a load answered after the
 //     call instead of before it. The third is why the assignment's TARGET is not either: an
 //     `assign` names a variable, and structure.ts spells a write to a scalar GLOBAL as one, so
-//     `gBlendValue = v;` is an `assign` with an effect-free value that writes MEMORY — 3456 of
-//     them in this row's own base trees, and 62 emitted assignments to a global over the published
-//     948. `exprHasEffect` answers "a call, or a marker" and cannot see it, the same way it could
-//     not see a qualifier;
+//     `gBlendValue = v;` is an `assign` with an effect-free value that writes MEMORY. Not a
+//     corner of the corpus: 22 of the artifact's 951 winning sources emit a statement-level
+//     assignment to a name they declare nowhere — 71 occurrences, 7 of them in
+//     `kleod:ProcessInputAndUpdateEntities` alone. `exprHasEffect` answers "a call, or a marker"
+//     and cannot see one, the same way it could not see a qualifier;
 //   - an intervening assignment writes a name one of those values reads — same reason, one level
 //     more precise;
 //   - a definition's value reads another of the merge names (the substitutions would need an order
@@ -60,8 +61,8 @@
 // arm's end, past every kept statement. A plain read may make that trip, because the kept
 // statements from the first definition on are effect-free assignments to DECLARED LOCALS and so
 // none of them writes memory that could answer it differently — which is what the three gates
-// above establish, the local-target one included; without it that sentence was false, and true of
-// the corpus only by measurement. An observable read may not make the trip, and it is observable
+// above establish, the local-target one included. An observable read may not make the trip, and it
+// is observable
 // against the other device accesses beside it — which is why THAT gate is stated on the moved
 // value and needs no clause for the statements that stay put.
 //
@@ -69,9 +70,11 @@
 // reading `*p` and a kept assignment to an address-taken local can name the same object under two
 // spellings, and the name-keyed refusal below (an intervening assignment writes a name one of
 // those values READS) cannot see it. That is one question further out than this pass models —
-// every other lever here defers it to the same name-keyed model — and it has no inhabitant: over
-// the 332 agbcc rows, 0 arms this pass ACCEPTS hold a kept assignment to an address-taken local
-// after the first definition, the same sweep that found 0 holding one to a global.
+// every other lever here defers it to the same name-keyed model — and the sweep behind this note
+// found no inhabitant: 0 arms this pass ACCEPTS hold a kept assignment to an address-taken local
+// after the first definition, the same sweep that found 0 holding one to a global. That sweep's
+// population was the agbcc rows whose BASE TREE the rig could build, which is not the corpus's
+// agbcc row count — the artifact carries 358 — so re-run it before quoting a count off it.
 import {
   type Expr,
   type SFn,

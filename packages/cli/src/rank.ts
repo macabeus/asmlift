@@ -46,8 +46,10 @@ export interface RankOptions {
   /** A lever that THREW, rather than declining — core rank.ts's own channel, forwarded so the CLI
    *  can print it. Core's header states why the distinction matters ("a lever that never fires
    *  because it always throws is a defect, and without this it looks identical to a lever that
-   *  correctly declined"), and until this was threaded the channel had no consumer outside core:
-   *  a whole pre-fan half of the fan could vanish from a row with nothing printed anywhere. */
+   *  correctly declined"). THIS IS THE CHANNEL'S ONLY CONSUMER ANYWHERE: the benchmark reaches
+   *  `decompileRanked` without supplying one, so a whole pre-fan half of a row's fan can still
+   *  vanish from a `pnpm bench run` with nothing printed. Read an absent `[lever]` line as a fact
+   *  about the wiring before reading it as a fact about the levers. */
   onLeverError?: (label: string, error: string) => void;
 }
 

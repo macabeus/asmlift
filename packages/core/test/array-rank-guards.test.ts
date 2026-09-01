@@ -77,10 +77,10 @@ describe('a `lead` is walked like every other sub-expression', () => {
 
   // …AND THE ONE WALK THAT IS NOT DERIVED FROM THAT VOCABULARY. l3/mentions.ts hand-rolls its own
   // traversal (it has to tell an `index` BASE from every other position, which `exprChildren`
-  // flattens away), so the three tests above cannot speak for it: pinning the generic helpers is
-  // exactly what let a walker that bypasses them diverge unnoticed. It is asked here, beside them,
-  // because an undercount there does not lose a candidate — it DELETES a local the body still
-  // reads, and `assertResolved` looks for absent names, not for unwritten ones.
+  // flattens away), so the three tests above cannot speak for it — a walk that bypasses them can
+  // diverge with all three green. It is asked here, beside them, because an undercount there does
+  // not lose a candidate: it DELETES a local the body still reads, and `assertResolved` looks for
+  // absent names, not for unwritten ones.
   test('localMentions counts a name used as a leading subscript as a real read', () => {
     const f: SFn = {
       ...fnOf(ixLead(['r'])),

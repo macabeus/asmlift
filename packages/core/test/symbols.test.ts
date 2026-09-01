@@ -245,8 +245,8 @@ describe('declaration shapes (P2)', () => {
   test('an unknown OUTERMOST extent is accepted — nothing in the address arithmetic depends on it', () => {
     // Only the INNER extents enter a stride, and declare.ts leaves the outermost dimension unsized
     // in the emitted declaration either way, so `[null, 0x400]` and `[4, 0x400]` produce the same
-    // access against the same declaration. Pinned because an earlier statement of the rule listed
-    // this among the refusals.
+    // access against the same declaration. Pinned because the ACCEPT is the surprising half: the
+    // sibling tests below all refuse, and an unstated outermost extent looks like one of them.
     expect(run('f', ROW_AND_ELEM, rows([null, 1024]))).toContain('gRows[a0][a1]');
   });
 

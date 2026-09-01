@@ -149,12 +149,12 @@ describe('what refuses — each one would read a different value', () => {
     ]);
   });
 
-  // The KIND test that used to stand alone here is not the refusal the header states: an `assign`
-  // whose VALUE is a call IS an intervening call. Without the effect test on the kept statements,
-  // `p = *g` was substituted into a join that landed AFTER `q = Foo();`, so a load the lifted tree
-  // performed before the call was performed after it — a candidate that reads memory at a
-  // different point than the asm does, with no contract downstream that models evaluation order
-  // (`assertEffectsPreserved` does not run on lever trees).
+  // A statement's KIND is not the refusal the header states: an `assign` whose VALUE is a call IS
+  // an intervening call. Without the effect test on the kept statements, `p = *g` substitutes into
+  // a join that lands AFTER `q = Foo();`, so a load the lifted tree performed before the call is
+  // performed after it — a candidate that reads memory at a different point than the asm does,
+  // with no contract downstream that models evaluation order (`assertEffectsPreserved` does not
+  // run on lever trees).
   test('an intervening assignment whose VALUE is a CALL refuses — the kind test is not the effect test', () => {
     declines(
       [
@@ -307,8 +307,9 @@ describe('an observable access is never the thing that moves', () => {
 
 // THE COUNTS THE MERGE-TEMP TEST RESTS ON. `readsOf(m) === 1` above is a FUNCTION-WIDE count from
 // l3/mentions.ts, so a use that walk cannot see is a temp this pass deletes while the body still
-// reads it. `index.lead` — a multidimensional global's leading subscripts — is a position that
-// carries a real value, and it is the position mentions.ts's hand-rolled walk had to be taught.
+// reads it. `index.lead` — a multidimensional global's leading subscripts — carries a real value
+// and is one of the positions that walk enumerates by hand rather than getting from the shared
+// vocabulary, which is why it is worth a test from this side too.
 describe('a merge temp read from a position the mention count must see', () => {
   const leadIx = (row: string): Expr => ({
     k: 'index',
