@@ -44,6 +44,7 @@ import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
+import { unmergeJoins } from './l3/unmerge';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
@@ -1989,6 +1990,30 @@ export function enumerateCandidates(
           }
           seenTrees.add(treeKey);
           const spellings = fanOut(sfn);
+          // `/unmerge` — the one PRE-lever: push a join statement back into the arms agbcc
+          // cross-jumped it out of (l3/unmerge.ts, the dual of the unconditional `tailmerge`), then
+          // fan the WHOLE re-spelling set over the result. It is not a `respell` for the reason the
+          // POLICY note admits a pairing on: the spelling a row demands is reachable from neither
+          // side alone. On `synthetic:dmascope` the un-merged store has to land inside the arm's own
+          // region base (`p0[2] = …`), which only a base lever running AFTER the un-merge can spell
+          // — hand-compiled, that source is byte-exact where the shipped merged spelling is 9, and
+          // applying the un-merge to the winner's tree INSTEAD of before it measures 14.
+          // Every other lever derives from the base tree, so the order can only be had this way.
+          // It only ADDS candidates, so it cannot cost a match; its price is a second fan on each
+          // tree where the pass fires, and its gate is the pass's own decline.
+          try {
+            const unmerged = unmergeJoins(sfn);
+            if (unmerged !== null) {
+              assertResolved(unmerged);
+              assertDerefsTyped(unmerged);
+              assertLocalsWritten(unmerged);
+              for (const sp of fanOut(unmerged)) {
+                spellings.push({ ...sp, suffix: `/unmerge${sp.suffix}` });
+              }
+            }
+          } catch (e) {
+            opts.onLeverError?.(`${name}/unmerge`, e instanceof Error ? e.message.split('\n')[0] : String(e));
+          }
           for (const sp of spellings) {
             const source = sp.source;
             // Collapse a spelling that produced identical source (a function with no divergent `if`
