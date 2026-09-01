@@ -2559,10 +2559,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // So this family reaches that row and is worth at least 3 of its 386 — but 3 is the whole
   // respelling including register-allocation churn (104 diff lines, mostly r4/r5 renaming), not a
   // per-instruction decomposition, and neither row's endpoint produces it. `bgshare`/`bgswitch`
-  // gate preferring an ALREADY-MINTED local, and no local holds that base at either site, so the
-  // change is a mint; `bgfixed` gates the fixed-element member spelling, and applying THAT to the
-  // same two sites scores 386, unmoved, because the ROM reaches the member from the plain base at
-  // `#0x3c` rather than from the element base. Surface 1 occurs nowhere in that winner at all.
+  // gate preferring an ALREADY-MINTED local, and a local DOES hold that base in that fan — 16,128
+  // of the 68,352 candidates read the cell through one, best 399 — so the missing capability is
+  // not a MINT but the SELECTION of which keys get one, which is the
+  // `livepark`/`foldpark`/`unfoldpark` family below. `bgfixed` gates the fixed-element member
+  // spelling, and applying THAT to the same two sites scores 386, unmoved, because the ROM reaches
+  // the member from the plain base at `#0x3c` rather than from the element base. Surface 1 occurs
+  // nowhere in that winner at all.
   {
     sym: 'bgshare',
     src:
@@ -4024,6 +4027,202 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void dmaflat(s32 n);',
     proto: { dmaflat: { params: ['s32'], returnsVoid: true } },
+  },
+
+  // WHICH BASE KEYS GET A LOCAL — A PER-KEY QUESTION THE ROSTER ANSWERS PER FUNCTION. l3/basecse.ts
+  // hoists every key its gate table admits, so the two admissions on the roster are two ANSWERS FOR
+  // THE WHOLE FUNCTION: `/livebase` binds every key reached twice, `/livebase-block` binds those
+  // minus the ones read at a single fixed offset (`single-cell`). A source that spelled ONE base as
+  // a pointer local and left a second one inline is between them, and nothing on the roster is
+  // between them. These three rows are that gap and its two boundaries, one admission each.
+  //
+  // THE DISCRIMINATOR ALREADY EXISTS IN THE VOCABULARY AND NO TABLE REQUIRES IT. `BaseKey`
+  // (l3/basecse.ts) carries `unfoldedOffset`: agbcc folds a constant SUBSCRIPT into the literal it
+  // materializes, so an offset that arrived in the MEMORY OPERAND instead got there because
+  // something other than a subscript put it there — a named base local, or an aggregate member.
+  // `((s32 *)0x0300343C)[0]` emits `.word 0x300343c` + `ldr [r0]`; `s32 *p = (s32 *)0x03003400;
+  // p[15]` emits `.word 0x3003400` + `ldr [r0, #0x3c]`. The ONE table that reads the field,
+  // `BASEFOLD_GATES`, reads it as an EXEMPTION to `single-use` (a base reached ONCE) — the opposite
+  // question — and keeps both placement heuristics, so it never reaches a key reached twice inside a
+  // loop. Requiring the field instead of exempting on it is a gate that does not exist.
+  //
+  // THE MATRIX, and it is why there are three rows and not one. Best score per admission over each
+  // row's own fan, agbcc, candidate cache OFF. `/unfolded` is a TEMPORARY roster row — `/livebase`'s
+  // gates plus `rejects: (c) => !c.unfoldedOffset`, head placement, pairings on — added, measured
+  // and reverted; it is NOT in the tree, which is why `unfoldpark` is a nonmatch row today.
+  //         plain  /livebase  /livebase-block  /scopebase  /unfolded
+  //  livepark   30     0             6              3        (shadowed)
+  //  foldpark   37     6             0              6        (shadowed)
+  //  unfoldpark 36     9             9              9           0
+  // Each row is won by a DIFFERENT admission and the third by none of them. `/unfolded` binds
+  // exactly what `/livebase` binds on `livepark` and exactly what `/livebase-block` binds on
+  // `foldpark`, so on both boundary rows it is shadowed by an earlier roster row and adds ZERO
+  // candidates (fan 28 and 34, identical label multisets with the probe on and off) — the over-fire
+  // control, and the reason a third admission cannot cost these two anything.
+  //
+  // WHAT EACH ROW ISOLATES.
+  //   `livepark`   two bases, both wanted as locals, one of them read at a single fixed offset
+  //                through a local (`cur[15]`). `single-cell` refuses that key, so the NARROW
+  //                admission binds only the DMA base and lands at 6. MATCH under `/livebase`.
+  //   `foldpark`   `unfoldpark` — NOT `livepark` — with that cell spelled INLINE at its folded
+  //                address (`*(s32 *)0x0300343C`), the shape `single-cell` was written for. It is
+  //                ONE edit from `unfoldpark` and TWO from `livepark`, because it keeps the
+  //                `0x03002040` distractor line `livepark` does not have: asserted by command, not
+  //                by eye — `sed 's/foldpark/unfoldpark/' | diff` against `unfoldpark`'s source
+  //                shows only the fold, and against `livepark`'s it shows the fold AND the
+  //                distractor. The WIDE admission binds the cell anyway and lands at 6. MATCH
+  //                under `/livebase-block`.
+  //   `unfoldpark` `livepark` plus ONE folded single-cell distractor the source left inline
+  //                (`*(s32 *)0x03002040 = *(s32 *)0x03002040 + 1;`). Now the two wanted keys and
+  //                the unwanted one are on opposite sides of no gate the roster has: wide binds all
+  //                three, narrow binds one, and both land at 9. The row is `livepark` plus one line
+  //                — `sed '/0x03002040/d'` on its own source, with the symbol renamed, is
+  //                `livepark`'s source exactly, and that scores 0 today. That is the measurement
+  //                which says the gap is SELECTION and not "bind more".
+  //
+  // WHAT `unfoldpark` CAN AND CANNOT GATE, because a green row is not automatically a guard.
+  // `unfoldpark` is a GAP MARKER for the base-admission roster, not a regression guard on it:
+  // ablating the WHOLE roster — `/livebase`, `/livebase-block` and the `/basefold` pair together —
+  // leaves it at diff:9, unchanged, so no roster row can move it and a `9` here is evidence about
+  // nothing the roster does, until the admission it names exists. SCOPE THAT CLAIM TO THE
+  // ABLATION THAT BACKS IT: the 9 that survives is not the bare tree's, it is `/scopebase`'s.
+  // Under that ablation the row's whole fan is `9 signed/scopebase`, `9 unsigned/scopebase` and
+  // 36 for all six remaining candidates (`signed`, `signed/offmember`, `signed/vol-store` and the
+  // unsigned mirrors), so removing `/scopebase` ON TOP OF the whole-roster ablation takes the row
+  // 9 → 36.
+  // AND THAT DOES NOT MAKE IT A GUARD ON `/scopebase`, which is the shape a deletion round is
+  // likeliest to be misled by. A deletion only ever REMOVES candidates, so the question is what
+  // the row's fan holds WITHOUT the roster ablation, and there the two `/scopebase` candidates are
+  // ties, not winners: `unfoldpark`'s fan is 36 candidates, `9 signed/scopebase` and
+  // `9 unsigned/scopebase` among them, and its best over the 34 candidates carrying no `scopebase`
+  // token is 9 as well — its own winner, `signed/livebase-block/volatile/sinkinit`. Deleting the
+  // plain `/scopebase` roster entry moves this row by 0. The guard exists only in a tree that has
+  // already lost the base-admission roster, which is a configuration no round proposes and
+  // `bench diff` cannot run.
+  // NOR IS IT THE ONLY ROW REACHING THE PLAIN ADMISSION, censused rather than asserted: over every
+  // agbcc synthetic row, FIVE carry a plain `/scopebase` candidate — `dmascope` 12 of 260,
+  // `livepark` 2 of 28, `foldpark` 2 of 34, `unfoldpark` 2 of 36, `dmastride` 2 of 18 — and on
+  // every one of the five the best candidate carrying no `scopebase` token equals the row's own
+  // best (`dmascope` 9, `livepark` 0, `foldpark` 0, `unfoldpark` 9, `dmastride` 0). So the plain
+  // admission is reached in five published fans and wins none of them, and 0 of the artifact's 951
+  // winning labels carries the bare `scopebase` token.
+  // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS, and the two are one token apart:
+  // rank.ts enumerates COALESCED variants of the same `hoistScopedBases` under
+  // `/scopebase-coalesce`, and one of those wins a match — `kleod:UpdateHUDCounterDisplay:agbcc`,
+  // MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`. An exact-token
+  // census says the plain admission wins nothing; a substring one, or a deletion aimed at
+  // `l3/scopebase.ts` rather than at `respell('/scopebase', …)`, costs that match.
+  // The two neighbour rows ARE guards on the roster, each moved by its own admission and by
+  // neither the other's nor the pair's: `livepark` MATCH → diff:3 with `/livebase` ablated,
+  // `foldpark` MATCH → diff:6 with `/livebase-block` ablated — and under the whole-roster ablation
+  // both land on `/scopebase` too, at 3 and 6.
+  //
+  // NO EXISTING ROW EXERCISES IT, censused rather than argued. Enumerating every agbcc synthetic row
+  // with the probe admission off and on — candidates only, no compiles, comparing the md5 of each
+  // row's sorted distinct-source set — over the 229 rows that existed before these three: 8 decline
+  // on unrelated links (`uhalf`/`utag` overlapping fields, three `preupdate_*`, `lladd`/`llsub`
+  // unmodelled `adc`/`sbc`, `stkarg` stack-as-data), 220 hash IDENTICALLY, and exactly ONE gains
+  // candidates — `dmascope`, 260 → 324 distinct sources, 64 of them probe-labelled. Scored both ways
+  // `dmascope` does not move: 9 on `signed/regionbase/volatile/vol-store/initfirst` either way. So
+  // the capability is effectively untested — zero rows change when it changes — and the one guard
+  // that reads the field, `BASEFOLD_GATES`, never reaches these keys. Re-run with these three rows
+  // in it (232 rows): 8 decline, 222 hash identically, 2 change — `dmascope` and `unfoldpark`. That
+  // `livepark` and `foldpark` are in the identical 222 is the over-fire control by measurement.
+  //
+  // CUT FROM kleod:LoadBGTilemapData:agbcc, where the same three-way split is 399 / 386 / 383 —
+  // `/livebase` parks five bases, `/livebase-block` parks one, and parking exactly the two whose
+  // offsets survived the fold is what a hand-compiled spelling reaches. NAME THE SET FROM THE FILE
+  // AND NOT FROM THE SENTENCE: that hand-compiled 383 is the 386 winner plus one local, so it
+  // carries THREE pointer-base inits — the two parked bases and the winner's own `/addr-home` walk
+  // local — and a filter written from the two-base description measures a different set than the
+  // spelling does. Both were counted, and the fan of 68,352 contains ZERO candidates with EITHER,
+  // measured at both dedup sites over all 165,888 generated spellings. No stack of gate ablations
+  // can produce it: `hoistBaseLocals` binds `admittedBases(sfn, gates)` wholesale and the two
+  // tables are a chain, so ablation only ever widens. `unfoldpark` is that shape at 15 lines.
+  //
+  // agbcc only, and for a reason this family owns rather than the `dmascope` one it inherits:
+  // `unfoldedOffset` is evidence only where the target declares
+  // `compilerBehaviors.foldsConstAddrOffset`, and MIPS and PPC put the addend in the instruction by
+  // construction (`lui`/`%lo`, `lis`/`ori`), so a surviving operand offset carries no information
+  // there and rank.ts offers the row no such admission. The addresses are GBA absolute constants;
+  // mwcc_242_81 also stays off per the `hipress` hazard policy (a candidate compile has no timeout).
+  //
+  // m2c NONCOMPILES all three, on the identical `ctx` and `proto`, for the raw-address reason every
+  // such row in this file records and not for anything in this family: `(void *)0x040000D4->unk0 =`
+  // , `invalid type argument of '->'`, 1 compile error. It does READ the discriminator — the folded
+  // cell comes out as `*(s32 *)0x0300343C` and the unfolded one as `(void *)0x03003400->unk3C` —
+  // and homes NO base at all, so its output for `livepark` and for `unfoldpark` is the same text
+  // apart from the one distractor line, and the distinction costing agbcc 9 bytes is one it does
+  // not represent.
+  {
+    sym: 'livepark',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      'void livepark(s32 n, s32 *out) {\n' +
+      '  s32 i = 0;\n' +
+      '  s32 *cur = (s32 *)0x03003400;\n' +
+      '  vu32 *dmaRegs = (vu32 *)0x040000D4;\n' +
+      '  do {\n' +
+      '    *out = cur[15];\n' +
+      '    if (cur[15] > 0) {\n' +
+      '      dmaRegs[0] = (vu32)cur[15];\n' +
+      '      dmaRegs[1] = (vu32)n;\n' +
+      '      dmaRegs[2] = 32;\n' +
+      '    }\n' +
+      '    i = i + 1;\n' +
+      '  } while (i < n);\n' +
+      '}',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void livepark(s32 n, s32 *out);',
+    proto: { livepark: { params: ['s32', 's32*'], returnsVoid: true } },
+  },
+  {
+    sym: 'foldpark',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      'void foldpark(s32 n, s32 *out) {\n' +
+      '  s32 i = 0;\n' +
+      '  vu32 *dmaRegs = (vu32 *)0x040000D4;\n' +
+      '  do {\n' +
+      '    *(s32 *)0x03002040 = *(s32 *)0x03002040 + 1;\n' +
+      '    *out = *(s32 *)0x0300343C;\n' +
+      '    if (*(s32 *)0x0300343C > 0) {\n' +
+      '      dmaRegs[0] = (vu32)*(s32 *)0x0300343C;\n' +
+      '      dmaRegs[1] = (vu32)n;\n' +
+      '      dmaRegs[2] = 32;\n' +
+      '    }\n' +
+      '    i = i + 1;\n' +
+      '  } while (i < n);\n' +
+      '}',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void foldpark(s32 n, s32 *out);',
+    proto: { foldpark: { params: ['s32', 's32*'], returnsVoid: true } },
+  },
+  {
+    sym: 'unfoldpark',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      'void unfoldpark(s32 n, s32 *out) {\n' +
+      '  s32 i = 0;\n' +
+      '  s32 *cur = (s32 *)0x03003400;\n' +
+      '  vu32 *dmaRegs = (vu32 *)0x040000D4;\n' +
+      '  do {\n' +
+      '    *(s32 *)0x03002040 = *(s32 *)0x03002040 + 1;\n' +
+      '    *out = cur[15];\n' +
+      '    if (cur[15] > 0) {\n' +
+      '      dmaRegs[0] = (vu32)cur[15];\n' +
+      '      dmaRegs[1] = (vu32)n;\n' +
+      '      dmaRegs[2] = 32;\n' +
+      '    }\n' +
+      '    i = i + 1;\n' +
+      '  } while (i < n);\n' +
+      '}',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void unfoldpark(s32 n, s32 *out);',
+    proto: { unfoldpark: { params: ['s32', 's32*'], returnsVoid: true } },
   },
 
   // A DEVICE REGISTER WRITTEN INSIDE A LOOP, WITH NOTHING READING IT BACK. A store to a DMA

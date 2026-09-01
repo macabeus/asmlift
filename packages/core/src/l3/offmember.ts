@@ -84,10 +84,21 @@
 // contradiction is between two FICTIONAL TYPES over one address, which is a readability claim —
 // `quality`'s clientele, not a gate's.
 //
-// AND THE TIGHTER RULE IS PRICED, so it is not re-derived from scratch: refusing a base whose
+// AND THE TIGHTER RULE IS PRICED, so it is not re-derived from scratch. Refusing a base whose
 // siblings this pass cannot spell removes `a:gCallbackQueue` from
-// `kleod:ProcessInputAndUpdateEntities` and costs that row 284 → 306, while protecting no row on
-// the 948-row bench. A gate needs a row it protects.
+// `kleod:ProcessInputAndUpdateEntities` (asserted by dumping that row's winning source both ways:
+// 9 `struct Off*` declarations become 2, and the survivor is `gUnk_03004C20`) and costs that row
+// 248 → 273, while protecting no row anywhere in the artifact. RE-PRICE IT BEFORE QUOTING IT: a
+// bracket is a claim about the whole tree, so both endpoints move whenever anything else does.
+// "PROTECTS NO ROW" IS A CENSUS AND NOT A SAMPLE, and the population is small because this is an
+// extra GATE: it only ever removes candidates, so only a row whose winner carries `/offmember`
+// can move at all. The artifact holds NINE, and eight are unmoved with the rule on —
+// `synthetic:basecell`, `synthetic:bgfixed`, `synthetic:foldsink`, `sa3:sub_802DFC8` and
+// `sa3:sub_803213C` all still MATCH, `kleod:RollRandomLevelVariant` 18, `kleod:CountCollectedGems`
+// 290, `kleod:UpdateWorldMapNodeAnim` 157, each the artifact's own number. A gate needs a row it
+// protects. (One side effect worth recording: with the rule on, PI's winner becomes
+// `unsigned/setup-args/no-ptr-elem/offmember` — the `/no-ptr-elem` arm that wins nothing today
+// wins there. It is an ablation's artifact, not a reason to ship either.)
 //
 // ALL-OR-NOTHING PER FUNCTION, and that is a PRICE rather than a property. Every admitted base is
 // respelled together in one candidate, so a function with two admitted bases where the target

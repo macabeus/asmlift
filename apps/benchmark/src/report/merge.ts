@@ -1,52 +1,62 @@
 // Merge synthetic.json + real.json → results.json (the single committed artifact; the tier
 // files are gitignored intermediates), annotating each function with its measured gap size. Run
-// AFTER `bench run`. PURE data transform — pushing the
-// snapshot into the web app is report/publish.ts, a named step.
-import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
-import { spawnSync } from 'node:child_process';
+// AFTER `bench run`. A near-pure data transform — pushing the
+// snapshot into the web app is report/publish.ts, a named step — with one REFUSAL: a tier whose
+// run-time provenance disagrees with merge time is not merged (see ../provenance.ts).
+import type { BenchOutput } from '@asmlift/bench-schema';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { M2C_PINNED_COMMIT, REPO_ROOT, RESULTS_DIR } from '../config';
+import { M2C_PINNED_COMMIT, RESULTS_DIR } from '../config';
 import { assessQuality } from '../eval/quality';
+import { asmliftProvenance } from '../provenance';
 import { benchMeta } from '../run/runner';
 import { gapSize } from './gap-size';
 import { asmliftScript, m2cScript } from './repro-scripts';
 
-const load = (f: string): FunctionResult[] =>
+const read = (f: string): BenchOutput | undefined =>
   existsSync(join(RESULTS_DIR, f))
-    ? (JSON.parse(readFileSync(join(RESULTS_DIR, f), 'utf8')) as BenchOutput).results
-    : [];
+    ? (JSON.parse(readFileSync(join(RESULTS_DIR, f), 'utf8')) as BenchOutput)
+    : undefined;
 
-// Provenance: which asmlift commit produced these numbers (dirty flag included). "Dirty" means
-// the CODE differs from the commit — the benchmark's own regenerated artifacts (results,
-// report data, playground summary) are excluded, otherwise every run marks itself dirty.
-// UNTRACKED `.claude/commands/` files are excluded too: agent-workflow docs staged for a later
-// commit cannot change what any run computes, and counting them stamps an honest run dirty.
-// Deliberately NOT all of `.claude/` — an untracked settings file can carry env/hooks that a
-// bench invocation launched through the agent would inherit.
-const ARTIFACT_PATH = /^(apps\/benchmark\/results\/|apps\/web\/src\/pages\/benchmark\/data\/|apps\/web\/src\/data\/)/;
-const UNTRACKED_NONCODE = /^\.claude\/commands\//;
-function asmliftProvenance(): { commit: string; dirty: boolean } | undefined {
-  const head = spawnSync('git', ['-C', REPO_ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
-  if (head.status !== 0) {
-    return undefined;
+/** Refuse to merge a tier whose RUN-time provenance disagrees with merge time. A tier written
+ *  before this stamp existed carries no `meta.asmlift` and is passed through — the loud failure is
+ *  for a disagreement, not for an absence, because a missing stamp is an old artifact rather than
+ *  a mutated tree. */
+export function checkTierProvenance(
+  f: string,
+  out: BenchOutput | undefined,
+  now: { commit: string; dirty: boolean } | undefined,
+): void {
+  const ran = out?.meta.asmlift;
+  if (ran === undefined) {
+    return;
   }
-  const status = spawnSync('git', ['-C', REPO_ROOT, 'status', '--porcelain'], { encoding: 'utf8' });
-  const codeDirty = status.stdout.split('\n').some((l) => {
-    if (l.trim() === '') {
-      return false;
-    }
-    const path = l.slice(3).replace(/^"|"$/g, '');
-    return !ARTIFACT_PATH.test(path) && !(l.startsWith('??') && UNTRACKED_NONCODE.test(path));
-  });
-  return { commit: head.stdout.trim(), dirty: status.status !== 0 || codeDirty };
+  if (ran.dirty) {
+    throw new Error(
+      `${f} was RUN against a dirty working tree (commit ${ran.commit}) — those numbers come from code no ` +
+        `commit holds. Re-run on a clean tree; see apps/benchmark/src/provenance.ts.`,
+    );
+  }
+  if (now !== undefined && now.commit !== ran.commit) {
+    throw new Error(
+      `${f} was RUN at ${ran.commit} but merge is at ${now.commit} — the code moved between run and merge, ` +
+        `so the artifact would publish this commit's provenance over another commit's numbers. Re-run.`,
+    );
+  }
 }
 
 export function merge(): void {
+  const tiers = { 'synthetic.json': read('synthetic.json'), 'real.json': read('real.json') };
+  const now = asmliftProvenance();
+  for (const [f, out] of Object.entries(tiers)) {
+    checkTierProvenance(f, out, now);
+  }
   // id-sorted: the tier files' row order depends on the shard count, which differs by machine
   // (CPU count) — sorting makes the canonical artifact byte-stable across hosts
-  const results = [...load('synthetic.json'), ...load('real.json')].sort((a, b) => a.id.localeCompare(b.id));
+  const results = [...(tiers['synthetic.json']?.results ?? []), ...(tiers['real.json']?.results ?? [])].sort((a, b) =>
+    a.id.localeCompare(b.id),
+  );
   for (const r of results) {
     r.gapSize = gapSize(r);
     r.scripts = { m2c: m2cScript(r), asmlift: asmliftScript(r) };
@@ -61,7 +71,7 @@ export function merge(): void {
   }
 
   const out: BenchOutput = {
-    meta: { ...benchMeta(results), asmlift: asmliftProvenance(), m2c: { commit: M2C_PINNED_COMMIT } },
+    meta: { ...benchMeta(results), asmlift: now, m2c: { commit: M2C_PINNED_COMMIT } },
     results,
   };
   writeFileSync(join(RESULTS_DIR, 'results.json'), JSON.stringify(out, null, 2));

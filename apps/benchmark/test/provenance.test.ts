@@ -1,0 +1,94 @@
+// Pin the RUN-time provenance stamp and the merge refusal it feeds. The defect this exists for is
+// a silent one: a bench run made against a modified working tree that was reverted before
+// `bench:merge` published `dirty: false`, because merge sampled git only at merge time. Both
+// halves are pinned — what counts as dirty, and that a disagreement THROWS rather than merges.
+import type { BenchOutput } from '@asmlift/bench-schema';
+import { describe, expect, test } from 'vitest';
+
+import { codeDirtyFrom, combineProvenance } from '../src/provenance';
+import { checkTierProvenance } from '../src/report/merge';
+
+const tier = (asmlift?: { commit: string; dirty: boolean }): BenchOutput =>
+  ({ meta: { generatedAt: 'whenever', ...(asmlift ? { asmlift } : {}) }, results: [] }) as unknown as BenchOutput;
+
+const NOW = { commit: 'aaaa', dirty: false };
+
+describe('what counts as a dirty tree', () => {
+  test('a modified source file does', () => {
+    expect(codeDirtyFrom(' M packages/core/src/rank.ts\n')).toBe(true);
+  });
+
+  test('an untracked rig or knob does', () => {
+    expect(codeDirtyFrom('?? packages/core/src/probe.ts\n')).toBe(true);
+  });
+
+  test("the benchmark's own regenerated artifacts do not", () => {
+    expect(codeDirtyFrom(' M apps/benchmark/results/results.json\n M apps/web/src/data/summary.json\n')).toBe(false);
+  });
+
+  test('untracked .claude/commands/ docs do not, and untracked .claude/settings does', () => {
+    expect(codeDirtyFrom('?? .claude/commands/attribute-function.md\n')).toBe(false);
+    expect(codeDirtyFrom('?? .claude/settings.local.json\n')).toBe(true);
+  });
+
+  test('a clean tree is clean', () => {
+    expect(codeDirtyFrom('')).toBe(false);
+    expect(codeDirtyFrom('\n')).toBe(false);
+  });
+});
+
+describe('the merge refusal', () => {
+  test('a tier RUN against a dirty tree is refused, however clean merge time is', () => {
+    expect(() => checkTierProvenance('real.json', tier({ commit: 'aaaa', dirty: true }), NOW)).toThrow(/dirty/);
+  });
+
+  test('a tier run at another commit is refused', () => {
+    expect(() => checkTierProvenance('real.json', tier({ commit: 'bbbb', dirty: false }), NOW)).toThrow(/moved/);
+  });
+
+  test('agreement passes', () => {
+    expect(() => checkTierProvenance('real.json', tier(NOW), NOW)).not.toThrow();
+  });
+
+  test('an OLD tier with no stamp passes — an absence is not a mutation', () => {
+    expect(() => checkTierProvenance('real.json', tier(), NOW)).not.toThrow();
+    expect(() => checkTierProvenance('real.json', undefined, NOW)).not.toThrow();
+  });
+
+  test('an unreadable git at merge time still catches a dirty RUN', () => {
+    expect(() => checkTierProvenance('real.json', tier({ commit: 'aaaa', dirty: true }), undefined)).toThrow(/dirty/);
+  });
+});
+
+// The fan-out half, and the reason it is pinned separately: the RUN stamp is written by the shard
+// CHILDREN, and `stitch` is what decides whether it survives into the tier file. Re-sampling in the
+// orchestrator instead of combining makes the merge refusal compare two samples taken seconds
+// apart — reproduced end to end, an untracked file in `packages/core` present for the first 40s of
+// a 129s fanned run leaving the tier `dirty: false` over a part file saying `dirty: true`.
+describe('the run stamp survives the stitch', () => {
+  const clean = { commit: 'aaaa', dirty: false };
+
+  test('one DIRTY shard makes the tier dirty, however clean the orchestrator is', () => {
+    expect(combineProvenance([clean, { commit: 'aaaa', dirty: true }], clean)).toEqual({
+      commit: 'aaaa',
+      dirty: true,
+    });
+  });
+
+  test('shards that disagree about HEAD are dirty — no single commit holds those numbers', () => {
+    expect(combineProvenance([clean, { commit: 'bbbb', dirty: false }], clean)?.dirty).toBe(true);
+  });
+
+  test('all clean stays clean, and the commit is reported', () => {
+    expect(combineProvenance([clean, clean], clean)).toEqual(clean);
+  });
+
+  test('parts with no stamp contribute nothing, and a stampless run reports nothing', () => {
+    expect(combineProvenance([undefined, undefined], clean)).toEqual(clean);
+    expect(combineProvenance([undefined], undefined)).toBeUndefined();
+  });
+
+  test('a dirty ORCHESTRATOR sample still counts — this only ever adds evidence', () => {
+    expect(combineProvenance([clean], { commit: 'aaaa', dirty: true })?.dirty).toBe(true);
+  });
+});

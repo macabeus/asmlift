@@ -344,22 +344,32 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  on an instruction that carries the addend by construction, where there is none.
  *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
  *  ranked command in docs/ranked-repro.md — the admission declines on every structuring, leaving
- *  that fan the size it was: 48000 candidates either way. All floors, though: the ranked path
- *  structures each function many ways where this census builds one tree per observation.
+ *  that fan the size it was: 68352 candidates either way, with ZERO `basefold`-labelled candidates
+ *  in the control arm. All floors, though: the ranked path structures each function many ways
+ *  where this census builds one tree per observation.
  *
- *  WHAT THE PAIR COSTS. The two rows plus the symbol widening add 2878 distinct candidates to the
- *  agbcc tier — 24326 → 27204 over the same 451 observations, +11.8% — on 25 of them, 1446 sources
- *  under `/basefold` and 1432 under `/basefold/sinkinit`. It is CONCENTRATED, not spread: in the
- *  map configuration the harness uses on real rows, `kleod:UpdateCameraScroll` takes +512 (5200 →
- *  5712), `kleod:ProcessInputAndUpdateEntities` +384, `kleod:UpdateWorldMapNodeAnim` +88,
- *  `kleod:CountCollectedGems` +64 and nothing else more than 32. The first of those is an
- *  `outcome: noncompile` row — `decompileRanked` throws only when EVERY candidate failed to build
- *  — so its whole fan is compiled and discarded, and this made that discard 10% bigger. Timed on
- *  two full bench runs on a shared box: that row 377.6s → 483.0s, the second 238.4s → 313.6s for
- *  a 369 → 367 gain, real tier 416.1s → 529.4s. Priced, not free, and bought with three rows:
- *  `sa3:sub_803213C` (MATCH, sunk row), `kleod:ProcessInputAndUpdateEntities` (369 → 367) and
- *  `kleod:CountCollectedGems` (328 → 327). Which ROW of the pair each is credited to is a label
- *  and not a cause — see the note on BASEFOLD_ADMISSIONS, where the two are ablated apart. */
+ *  WHAT THE PAIR COSTS, through the HARNESS's own enumeration and re-runnable from the recipe in
+ *  the BASEFOLD_ADMISSIONS note below: enumerate every agbcc row with the pair on and off,
+ *  `ASMLIFT_CANDCACHE=0`, candidates only. The pair adds 3921
+ *  distinct candidate sources over 14 observations — 3911 over 12 real rows and 10 over 2
+ *  synthetic ones (`foldsink` 4 → 12, `basecell` 2 → 4) — and every per-row delta equals that
+ *  row's count of `basefold`-labelled candidates exactly, which is both what says the ablation
+ *  reached and what says these are sources nothing earlier in the roster emits.
+ *  It is CONCENTRATED, not spread: in the map configuration the harness uses on real rows,
+ *  `kleod:ProcessInputAndUpdateEntities` takes +2880 (14976 → 17856),
+ *  `kleod:UpdateCameraScroll` +512 (5968 → 6480), `kleod:CountCollectedGems` +192 (384 → 576),
+ *  `kleod:UpdateWorldMapNodeAnim` +176 (488 → 664) and nothing else more than 32. Re-run a
+ *  concentration figure before budgeting against it: a DELTA can reproduce while the fan it was
+ *  quoted against has moved, and that is what makes a stale paragraph read as verified.
+ *  `kleod:UpdateCameraScroll` is an `outcome: noncompile` row — `decompileRanked` throws only when
+ *  EVERY candidate failed to build — so its whole fan is compiled and discarded, and this made
+ *  that discard 10% bigger. Timed on two full bench runs on a shared box, and not re-timed since
+ *  the deltas above, so read them as a floor rather than a price: that row 377.6s → 483.0s, the
+ *  second 238.4s → 313.6s, real tier 416.1s → 529.4s. Priced — and the three rows the pair was
+ *  bought with DO NOT BUY IT TODAY: ablated, `sa3:sub_803213C` is MATCH with the pair removed,
+ *  `kleod:ProcessInputAndUpdateEntities` 248 either way and `kleod:CountCollectedGems` 290 either
+ *  way. Read the ablation in the note on BASEFOLD_ADMISSIONS, which carries the fan counts that
+ *  prove it reached. */
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
@@ -390,18 +400,30 @@ const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  does not carry, so both ride and the differ referees.
  *
  *  WHAT EACH ROW IS WORTH, ablated through the harness rather than read off the winning labels,
- *  because three of the four labels the head row wins are TIES the sunk row also reaches.
- *  Dropping the SUNK row costs two matches: `synthetic:foldsink` MATCH → diff:2 and
- *  `sa3:sub_803213C` MATCH → diff:2. Dropping the HEAD row costs no match anywhere — including
- *  `synthetic:basecell`, which its label wins only because it is enumerated first: the two rows
- *  emit the identical source set there (measured over the corpus sweep, 0 distinct sources lost
- *  on that row) and `seen` collapses the sunk one, so that row does not bracket this placement and
- *  no row in this corpus does. Its whole measured return is 2 points on one NONMATCH row
- *  (`kleod:ProcessInputAndUpdateEntities` 367 with, 369 without); `kleod:CountCollectedGems` 327
- *  and `kleod:RollRandomLevelVariant` 18 either way. It is kept because it is a real spelling —
- *  1432 distinct candidate sources over 21 observations that nothing else emits, and a C source
- *  that initializes its base pointers where it declares them is the ordinary case — but a later
- *  round pricing the agbcc fan should know it costs half of what this pair adds for that. */
+ *  because a label a row wins can be a TIE another row also reaches. NEITHER ROW IS BRACKETED BY
+ *  ANYTHING IN THIS CORPUS. Ablating the sunk row, the head row, or BOTH leaves every row this
+ *  note names exactly where it was — `synthetic:foldsink` MATCH in all four configurations (its
+ *  fan 12 → 8 → 8 → 4, so the ablation reached and each row really does emit sources of its own),
+ *  `synthetic:basecell` MATCH (fan 4 → 4 → 4 → 2 — FOUR numbers in the same order, because on that
+ *  row the two rows emit the SAME two sources and `seen` collapses them, so removing either ALONE
+ *  costs nothing and only removing both takes the fan down; a three-number sequence here would
+ *  read as if the head row alone halved it), `sa3:sub_803213C` MATCH, and — with the pair removed
+ *  — `kleod:ProcessInputAndUpdateEntities` 248, `kleod:CountCollectedGems` 290 and
+ *  `kleod:RollRandomLevelVariant` 18, each of them the number the artifact already carries. 0 of
+ *  the artifact's 951 rows carries a `basefold` token in its winning label at all, and all six
+ *  rows above win under `/offmember`. A BRACKET IS A CLAIM ABOUT THE WHOLE TREE, so it expires
+ *  whenever anything else learns to reach the same spelling more cheaply: re-run one before
+ *  re-quoting it, including the number that survived the last re-run.
+ *  This pair is kept ONLY because it is a real spelling: 3921 distinct candidate sources over 14
+ *  observations that nothing else emits (see WHAT THE PAIR COSTS above for the per-row split), and
+ *  a C source that initializes its base pointers where it declares them is the ordinary case. That
+ *  is a weaker justification than a protected row and should be read as one — a round pricing the
+ *  agbcc fan may delete the pair, and the gate on doing so is `bench diff`, not this note.
+ *  HOW THE ABLATION IS DONE, since there is no shipped knob: filter this roster at its one use
+ *  site (the `admissions` const in `enumerateCandidates`) behind a temporary env read, run the
+ *  rows with `ASMLIFT_CANDCACHE=0`, and revert. Prove the filter REACHED before believing a null
+ *  result — `synthetic:livepark` MATCH → diff:3 with `/livebase` removed is the positive control,
+ *  and a fan count per configuration is the second. */
 const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
   { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
@@ -961,14 +983,34 @@ export function enumerateCandidates(
   // the shared two-fact test, so this gate and the rule it gates cannot disagree about what a
   // pointer member is.
   //
-  // (`/no-bitfield` above still asks the map. Its gate predates this branch and its cross is not
-  // measured here; narrowing it is the same edit against a different measurement.)
+  // (`/no-bitfield` above still asks the MAP rather than the function; narrowing it would be this
+  // same edit against a different measurement. Its cross is censused below beside this one.)
   //
   // Where it DOES reach, the cross is the honest price of an arm the differ has to referee, and on
   // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` enumerates 17,856
-  // candidates with the axis and 12,096 without (+47.6%), and today its OFF arm wins nothing — no
-  // winning label in the 948-row corpus carries `/no-ptr-elem`. That is a price paid for a
-  // question the asm cannot answer, not a lever earning its keep.
+  // candidates with the axis and 12,096 without (+47.6%), and its OFF arm wins nothing — no
+  // winning label carries `/no-ptr-elem`. That is a price paid for a question the asm cannot
+  // answer, not a lever earning its keep.
+  //
+  // STATE THE DENOMINATOR, AND DERIVE IT FROM REACH RATHER THAN FROM CO-OCCURRENCE — the same
+  // distinction the paragraph above draws about the gate, applied to the gate's own price.
+  // "Offered only where a symbol map exists" is true and useless: all 252 real rows carry a map,
+  // so that framing hands back 151 labelled rows, which is the map-wide `some` this gate was
+  // written to avoid. The gate is per-FUNCTION, so census the FUNCTIONS. Enumerating every real
+  // case (candidates only, `ASMLIFT_CANDCACHE=0`, the harness's own inputs) and counting rows with
+  // any surviving `/no-ptr-elem` candidate: TWO — `kleod:ProcessInputAndUpdateEntities` (5760 of
+  // its 17856) and `kleod:SetupBG3WindowOverlay` (48 of 544), and only the first carries a winning
+  // label at all, the second being `noncompile`. So "0 winning labels" is 0 of ONE here, not 0 of
+  // 151 and not 0 of the 951-row artifact. That census enumerates 155 of the 252 real rows — the
+  // 151 the artifact labels plus its 4 `noncompile` rows — and the 97 it cannot enumerate are
+  // exactly the rows the artifact declines. What makes "no row is LOST" a proof rather than a
+  // sample is the soundness rule instead: this axis only ADDS candidates, so a row whose winner
+  // does not carry it cannot move when it is removed. The same census prices `/no-bitfield`: it
+  // survives dedup on FIVE real rows — `ProcessInputAndUpdateEntities` 6336, `CountCollectedGems`
+  // 192, `UpdateWorldMapNodeAnim` 168, `UpdateHUDCounterDisplay` 96, `CopyBGScrollTiles` 4 — every
+  // one of them a row the artifact labels, and no winning label in the artifact carries
+  // `/no-bitfield` either. So its map-wide enumeration gate buys a candidate cross on 5 functions
+  // and the dedup collapses it everywhere else.
   const byName = opts.symbols !== undefined ? symbolsByName(opts.symbols) : undefined;
   const fnHasSizedPtrFields =
     byName !== undefined &&

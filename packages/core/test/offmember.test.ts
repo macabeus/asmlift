@@ -204,7 +204,8 @@ describe('every gate is load-bearing', () => {
 // oversight: the declaration governs the constant subscripts it was built from, and a sibling this
 // pass has no member spelling for keeps its own cast. Pinned because the alternative was built and
 // measured — refusing a base whose siblings it cannot spell costs
-// kleod:ProcessInputAndUpdateEntities 284 → 306 and protects no row on the 948-row bench.
+// kleod:ProcessInputAndUpdateEntities 248 → 273 and moves none of the other eight artifact rows
+// whose winner carries `/offmember`, which are the only rows an extra gate here can move.
 test('a variable-subscript sibling keeps its own cast beside the respelled member', () => {
   const MIXED = fn([
     ret(idx(cbase(50345232), 4, 4, { operandOff: 16 })),
