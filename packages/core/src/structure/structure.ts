@@ -196,6 +196,14 @@ function bareArrayElement(si: SymbolInfo, width: number, signed: boolean): boole
 // spells, so a residual with a row term falls through to `*(T *)(… + (u32)&g)` — and that cast
 // form is what this recovers the subscripts out of.
 //
+// THE EVIDENCE IS THE BYTE RESIDUAL, AND ONLY THE BYTE RESIDUAL — the refusal that keeps the
+// paragraph above from being read backwards. An index ALREADY DIVIDED into elements (what
+// arrayAccess holds, when the asm scaled the whole sum once at the end) is what BOTH spellings
+// reduce to: `(r<<11) + (i<<1)` and `((r<<10) + i) << 1` differ only in where the element scale
+// sits, which is exactly what the division removes. So this runs on the byte residual and
+// arrayAccess does not call it — see the note at that site for what the two spellings measure.
+// `packages/cli/test/matching/array-rank-axis.test.ts` compiles both halves of that.
+//
 // The recovered address is the SAME address either way (C scales `[r]` by the declared row size,
 // which is the constant the arithmetic multiplied by), so this is a spelling, not a re-addressing.
 
@@ -226,10 +234,10 @@ function scaledBy(t: Expr, stride: number): Expr | null {
   return null;
 }
 
-/** The leading subscripts of `si` recovered from `residual`, plus what is left for the last one.
- *
- *  `unit` is the size in bytes of what `residual` counts — 1 for a raw byte residual (memAccess),
- *  `width` for an index already in elements (arrayAccess).
+/** The leading subscripts of `si` recovered from the BYTE `residual`, plus what is left for the
+ *  last one. The parameter is a byte residual by contract, not by convention: a residual already
+ *  divided into elements carries no evidence about the row (see the header), so there is no unit
+ *  to pass and no caller that could pass one.
  *
  *  REFUSES (falling back to the caller's existing spelling, which is byte-identical) when: the
  *  symbol is not an array of exactly this element; the declared rank is 1 or unspellable; any
@@ -242,7 +250,6 @@ function declaredSubscripts(
   residual: Expr,
   width: number,
   signed: boolean,
-  unit: number,
 ): { lead: Expr[]; idx: Expr } | null {
   if (!bareArrayElement(si, width, signed)) {
     return null;
@@ -253,10 +260,10 @@ function declaredSubscripts(
   }
   const strides: number[] = [];
   for (let p = 0; p < inner.length; p++) {
-    strides.push(inner.slice(p).reduce((a, b) => a * b, width) / unit);
+    strides.push(inner.slice(p).reduce((a, b) => a * b, width));
   }
   for (let p = 0; p < strides.length; p++) {
-    if (!Number.isSafeInteger(strides[p]) || strides[p] <= (p + 1 < strides.length ? strides[p + 1] : width / unit)) {
+    if (!Number.isSafeInteger(strides[p]) || strides[p] <= (p + 1 < strides.length ? strides[p + 1] : width)) {
       return null;
     }
   }
@@ -284,7 +291,7 @@ function declaredSubscripts(
         ? t.e
         : { k: 'bin', op: t.sign === 1 ? '+' : '-', l: sum, r: t.e };
   }
-  const idx = unit === 1 ? elementIndex(sum, width) : sum;
+  const idx = elementIndex(sum, width);
   return idx === null ? null : { lead, idx };
 }
 
@@ -758,7 +765,7 @@ function memAccess(
   // Tried before the flat spellings because those cannot express a recovered row at all.
   const gbb = sym ? globalByteBase(baseExpr) : null;
   const siMulti = gbb ? sym!.info(gbb.name) : undefined;
-  const multi = siMulti ? declaredSubscripts(siMulti, gbb!.residual, width, signed, 1) : null;
+  const multi = siMulti ? declaredSubscripts(siMulti, gbb!.residual, width, signed) : null;
   if (multi) {
     sym!.noteGlobal(gbb!.name, T.ptr(T.int(width * 8, siMulti!.elemSigned ?? false)));
     return {
@@ -849,19 +856,24 @@ function arrayAccess(
   if (baseExpr.k === 'addr' && fieldOff === undefined && memberOff === undefined) {
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
-    // The index is already in ELEMENTS here, so the row term is at the row's stride in elements.
-    const multi = si ? declaredSubscripts(si, idxExpr, elemSize, signed, elemSize) : null;
-    if (multi) {
-      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
-      return {
-        k: 'index',
-        base: { k: 'var', name: baseExpr.name },
-        idx: multi.idx,
-        width: elemSize,
-        signed,
-        lead: multi.lead,
-      };
-    }
+    // NO declared-subscript recovery here, and the reason is the evidence, not the shape. The
+    // index reaching this spelling is already in ELEMENTS — the asm scaled the whole sum ONCE, at
+    // the end — and that single scale is what both candidate sources reduce to, so the term at the
+    // row's stride in elements is no longer evidence that the source named the row. Compiled, with
+    // the klonoa checkout's own agbcc command line:
+    //
+    //   u16 g[4][0x400] — a POWER-OF-TWO row stride: `g[a][b]` is `lsl #0xb` + `lsl #0x1` added
+    //     (the SEPARATE terms memAccess reads), `g[0][(a<<10)+b]` is `lsl #0xa; add; lsl #0x1`.
+    //     DIFFERENT bytes — so the single-scale shape that arrives here is the FLAT spelling's own
+    //     codegen, and recovering `g[a][b]` out of it emits a source that does not reproduce the
+    //     input asm.
+    //   u32 g[6][9] — a NON-power-of-two row stride: `g[a][b]` and `g[0][a*9+b]` are BYTE-
+    //     IDENTICAL, because agbcc reassociates `(a*36)+(b*4)` into `((a*9)+b)*4` itself. Nothing
+    //     referees the choice, which is the same reason `scaledBy` refuses a CONSTANT row term.
+    //
+    // Both cases say decline: in the first the evidence points the other way, in the second there
+    // is none. The recovery therefore lives on the byte residual alone (memAccess), where the two
+    // spellings are still distinguishable. Pinned by matching/array-rank-axis.test.ts.
     const lead = si === undefined ? null : bareArrayLead(si, elemSize, signed);
     if (lead !== null) {
       sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));

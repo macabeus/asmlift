@@ -215,13 +215,15 @@ describe('declaration shapes (P2)', () => {
     expect(src).not.toMatch(/[^&]gRows\[/);
   });
 
-  // `gPick` is a rank-2 byte table (`u8 g[4][4]`, row stride 4 bytes) — the aload path, whose
-  // index already counts elements, so the row stride is 4 ELEMENTS rather than 4 bytes.
+  // `gPick` is a rank-2 byte table (`u8 g[4][4]`, row stride 4 bytes). Its elements are BYTES, so
+  // the byte residual the recovery reads and an element count are the same number — which is why
+  // this case says nothing either way about an index already divided by a wider element, the
+  // shape the element path refuses below.
   const pick = mapOf([
     [0x08116600, { name: 'gPick', kind: 'data', shape: 'array', elemSize: 1, elemSigned: false, dims: [4, 4] }],
   ]);
 
-  test('a rank-2 array of BYTES recovers the row through the element-unit index too', () => {
+  test('a rank-2 array of BYTES recovers the row from its byte residual', () => {
     const body =
       '\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r1\n\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n' +
       '\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x08116600\n';
@@ -235,6 +237,31 @@ describe('declaration shapes (P2)', () => {
       '\tadd\tr0, r0, #0x4\n\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n' +
       '.L1:\n\t.word\t0x08116600\n';
     expect(run('f', constRow, pick)).toContain('gPick[0][a0 + 4]');
+  });
+
+  // THE REFUSAL THAT KEEPS THE RULE FROM BEING READ BACKWARDS. `((u16 *)&g)[(a0 << 10) + a1]`
+  // scales ONCE, at the end: `lsl #0xa; add; lsl #0x1`. That is a different program from
+  // `g[a0][a1]` (`lsl #0xb` and `lsl #0x1`, separate) — measured, and pinned by
+  // packages/cli/test/matching/array-rank-axis.test.ts. asmlift lifts the single scale to an
+  // index already in ELEMENTS, where the row term sits at the row's stride in elements and looks
+  // exactly like the two-subscript source's — so recovering subscripts there would emit a source
+  // that does not reproduce the input asm, on the strength of evidence that says the opposite.
+  test('the FLAT spelling`s own codegen keeps the flat spelling — one scale is not a row term', () => {
+    const flat =
+      '\tlsl\tr0, r0, #0xa\n\tadd\tr0, r0, r1\n\tlsl\tr0, r0, #0x1\n' +
+      '\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03000900\n';
+    const src = run('f', flat, rows([4, 1024]));
+    expect(src).toContain('(a0 << 10) + a1'); // the sum the asm computed, left whole
+    expect(src).not.toContain('gRows[a0][a1]');
+  });
+
+  // …and the same input against a rank-1 declaration, to show the line above is about the ASM
+  // shape and not about the map: the flat sum survives either way.
+  test('the flat sum survives a rank-1 declaration identically', () => {
+    const flat =
+      '\tlsl\tr0, r0, #0xa\n\tadd\tr0, r0, r1\n\tlsl\tr0, r0, #0x1\n' +
+      '\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03000900\n';
+    expect(run('f', flat, rows([4096]))).toContain('(a0 << 10) + a1');
   });
 
   test('a rank-1 `dims` is the same bare spelling as no dims at all', () => {
