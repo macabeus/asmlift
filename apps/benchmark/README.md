@@ -174,7 +174,10 @@ pnpm bench:merge                      # = bench merge: tiers -> results/results.
 pnpm bench publish                    # re-stage results.json into the web app alone
 pnpm bench:smoke                      # one trivial fn through every available toolchain
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
-pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row
+pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row --
+                                           #   TWICE: once against `--base`, then again over the
+                                           #   rows THIS BRANCH added since it (which the first
+                                           #   comparison, walking the base's rows, never reaches)
 pnpm bench diff --base origin/main         # gate: exit 1 if ANY compared field moved, row by row
                                            #   exit 2 if results.json was never regenerated: it is
                                            #   committed, so an unrun gate compares the base with
