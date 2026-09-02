@@ -4296,6 +4296,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // `unsigned/fresh-merge/scopebase` at 0, going NONMATCH 11 with the plain respell ablated. So
   // the reaching population is six and the plain admission wins one of them. A CENSUS SENTENCE IN
   // A COMMENT EXPIRES THE MOMENT A ROW IS ADDED BESIDE IT — re-run it rather than reading it.
+  // AND IT EXPIRED WHEN A ROW WAS ADDED TO THE ROSTER, not to the dataset: those five fan counts
+  // predate `/unfolded` (l3/basecse.ts), and a fan count is a fact about the roster it was taken
+  // under. Re-enumerated at the commit that ships it, candidates only: `dmascope` 24 of 544,
+  // `livepark` 2 of 32, `foldpark` 2 of 34, `unfoldpark` 2 of 44, `dmastride` 2 of 18 — the plain
+  // admission is reached in the same five fans and the counts under it moved on two of them.
+  // `sbscope` is NOT re-run here and its numbers above are the ones this file already carried: a
+  // candidates-only rig that does not hand the row its `ctx` enumerates a fan of FOUR for it
+  // against the harness's, so this rig cannot speak to that row. Quote the SCOPE with the number.
   // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS, and the two are one token apart:
   // rank.ts enumerates COALESCED variants of the same `hoistScopedBases` under
   // `/scopebase-coalesce`, and one of those wins a match — `kleod:UpdateHUDCounterDisplay:agbcc`,
