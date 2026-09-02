@@ -4985,11 +4985,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // Seven rows. FIVE — `harr`, `harridx`, `bgarr`, `tblrank2`, `arrbias` — are modelled on array
   // shapes the same graphics translation unit the `value-home` and DMA families above were cut
   // from actually indexes. Each of the five has a counterpart there, which is the point of
-  // authoring them rather than inventing shapes: a bare `extern u8` scalar array read at a
-  // variable index (`harr`, `harridx`), a global array of 28-byte structs read at a variable
-  // index for one `u16` member (`bgarr`), a rank-2 table of pointers (`tblrank2`), and a
-  // CONSTANT-BIASED read of a byte table — the TU's rank-3 ROM table is read at a constant final
-  // subscript, which is exactly the pool-addend shape (`arrbias`). TWO of the seven are
+  // authoring them rather than inventing shapes: a bare extern scalar array read at a variable
+  // index (the TU's is `u8` — `harridx` keeps that width, `harr` takes the `u16` one so that the
+  // ordering axis below is observable at all), a global array of 28-byte structs read at a
+  // variable index for one `u16` member at offset 0x10 (`bgarr`), a rank-2 table of pointers
+  // (`tblrank2`), and a CONSTANT BYTE BIAS on a global byte table — the TU's rank-3 ROM table is
+  // read at a CONSTANT final subscript, which is the shape `arrbias` isolates (the TU's own form
+  // was not compiled here, so this is a shape correspondence, not a claim that it too folds to a
+  // pool addend). TWO of the seven are
   // CONSTRUCTED PROBES with no counterpart, and both are labelled as such rather than passed off
   // as found code:
   //  • `arrcast` guards a direction the other rows leave open (axis 2 below).
