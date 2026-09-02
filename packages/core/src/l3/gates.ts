@@ -42,6 +42,20 @@ export function without<Ctx>(gates: readonly Gate<Ctx>[], id: string): readonly 
   return gates.filter((g) => g.id !== id);
 }
 
+/** The named gates, in the order given — the positive counterpart of `without`, for a SECOND
+ *  consumer that asks a SUBSET of one table's questions rather than the same questions minus one.
+ *  Throws on an unknown id for the reason `without` does: a rule renamed underneath a selection
+ *  would leave that consumer silently asking fewer questions than its author wrote. */
+export function just<Ctx>(gates: readonly Gate<Ctx>[], ids: readonly string[]): readonly Gate<Ctx>[] {
+  return ids.map((id) => {
+    const g = gates.find((x) => x.id === id);
+    if (g === undefined) {
+      throw new Error(`no gate '${id}' to select (have: ${gates.map((x) => x.id).join(', ')})`);
+    }
+    return g;
+  });
+}
+
 /** `without` for SHIPPED code. A test may ablate any gate — that is how `guardedBy` differential
  *  tests work — but a pass that re-runs itself with an ablated table as a ranked candidate may
  *  only drop a HEURISTIC: ablating a `sound: true` gate would ship semantically wrong candidates,

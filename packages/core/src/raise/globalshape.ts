@@ -40,6 +40,25 @@
 //     `LEGITIMIZE_ADDRESS` is empty, so nothing splits it back), so a runtime `add` against a bare
 //     `.word gSym` is a shape only the array subscript produces. Available at every width.
 //
+// THE ORDER LICENCE HAS TWO CONSUMERS, and they are asking different questions of the same fact.
+// `inferGlobalArrays` asks "how is this name DECLARED", which needs the order licence AND a
+// whole-element subscript to spell. `orderLicensedGlobals` (bottom of this file) asks only "was the
+// base materialized before the index was scaled", which is what decides whether the address has a
+// HOME — a pointer local `T *p = (T *)&gSym; p[i]` — or is re-derived inline at each access. Those
+// are the SAME `build_array_ref` fork: an array-typed object and a pointer local both expand their
+// base ahead of the subscript, and only the cast of the symbol's address expands it last. Compiled
+// through the benchmark's own agbcc command, at element width 2:
+//
+//     extern u16 gTbl[];  gTbl[i]                        base first  ┐ byte-identical
+//     u16 *p = (u16 *)&gTbl; p[i]                        base first  ┘
+//     ((u16 *)&gTbl)[i]                                  index first  — a different object
+//
+// So the order half licenses the HOME on its own, at every element width the declaration half
+// cannot describe — which is the whole population it adds: a 28-byte struct element has no
+// `intType`, reads its members at a DISPLACEMENT, and is refused for the declaration by
+// `interior-or-non-access` while saying exactly as much about the order as a clean access does.
+// That is why `ADDRESS_GATES` is assembled from two halves below rather than written as one list.
+//
 // WHAT REFUSES — and the list is DOWN THERE, not here. The refusals are two `Gate<Ctx>` tables
 // (`ADDRESS_GATES` and `SHAPE_GATES`, below), each rule carrying its own `why` and the test that
 // fails without it, because an enumeration in a header is prose that nothing re-checks and a
@@ -100,7 +119,7 @@
 // a compiler earns it by showing the same compiled divergence.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import type { SFn } from '../l3/ast';
-import { type Gate, firstRejection } from '../l3/gates';
+import { type Gate, firstRejection, just } from '../l3/gates';
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
 
@@ -183,9 +202,12 @@ interface AddressUse {
   readonly consumers: readonly { readonly isElementAccess: boolean }[];
 }
 
-/** Is this use of `&gSym` an element address, and only that? Order is the attribution: the first
- *  rejection is the rule that decided. */
-export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [
+/** Is this use of `&gSym` an ELEMENT ADDRESS at all — does the base own every byte the address
+ *  adds, is the residual readable as a sum, and does anything read the result? The half that asks
+ *  about the ADDRESS, which is the half BOTH consumers of this module need (see THE ORDER LICENCE
+ *  HAS TWO CONSUMERS in the header). Order is the attribution: the first rejection is the rule that
+ *  decided. */
+export const ELEMENT_ADDRESS_GATES: readonly Gate<AddressUse>[] = [
   {
     id: 'address-escapes',
     why: 'the address is used as something other than the base of one element-address add',
@@ -219,6 +241,13 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     sound: false,
     rejects: (u) => u.isAdd && u.consumers.length === 0,
   },
+];
+
+/** …and does a WHOLE-ELEMENT SUBSCRIPT spell what the address reaches? The half that is about the
+ *  DECLARATION, so only `inferGlobalArrays` asks it: `orderLicensedGlobals` is deciding where the
+ *  base was materialized, a question an interior read answers exactly as well as a whole-element
+ *  one. */
+export const DECLARATION_ADDRESS_GATES: readonly Gate<AddressUse>[] = [
   {
     // THIS is the rule that decides the `bgarr` shape — a 28-byte element read 2 bytes at a time.
     // It is uniquely load-bearing only where the symbol ALSO has a clean access: with an interior read alone,
@@ -234,6 +263,10 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     rejects: (u) => u.consumers.some((c) => !c.isElementAccess),
   },
 ];
+
+/** The two halves in the order they were always asked, so the shape derivation's attribution is
+ *  rule-for-rule what it was before the split. */
+export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [...ELEMENT_ADDRESS_GATES, ...DECLARATION_ADDRESS_GATES];
 
 /** Everything one symbol's surviving accesses evidence, reduced to the facts `SHAPE_GATES` decide
  *  over. Per-access fields stay per-access on purpose: a rank is a property of ONE address
@@ -354,6 +387,14 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   },
 ];
 
+/** The rules that read the ORDER LICENCE and nothing else — `orderLicensedGlobals`' shape half.
+ *  Selected out of `SHAPE_GATES` by id rather than restated, so the two consumers share the RULE
+ *  OBJECTS: an edit to either predicate reaches both, and a rename throws at import. */
+export const ORDER_SHAPE_GATES: readonly Gate<ShapeEvidence>[] = just(SHAPE_GATES, [
+  'index-materialized-first',
+  'no-positive-evidence',
+]);
+
 /** The two tables together, so a caller ablates one rule by name without knowing which stage owns
  *  it. Defaulted on `inferGlobalArrays`; a test passes an ablated pair. */
 export interface ArrayShapeGates {
@@ -361,6 +402,11 @@ export interface ArrayShapeGates {
   readonly shape: readonly Gate<ShapeEvidence>[];
 }
 export const ARRAY_SHAPE_GATES: ArrayShapeGates = { address: ADDRESS_GATES, shape: SHAPE_GATES };
+
+/** The same pair for the ORDER half alone: the address rules that are about the address, and the
+ *  shape rules that read `baseFirst`. Both halves are the shipped rule OBJECTS, so this table
+ *  cannot drift from the one `inferGlobalArrays` asks. */
+export const ORDER_LICENCE_GATES: ArrayShapeGates = { address: ELEMENT_ADDRESS_GATES, shape: ORDER_SHAPE_GATES };
 
 /** Op → (block index, op index), for the order comparison. */
 function positions(fn: Fn): Map<Op, { b: number; i: number }> {
@@ -446,8 +492,17 @@ function residualTerms(root: Value, defs: Map<Value, Op>): Term[] | null {
  *  whose uses `ADDRESS_GATES` rejects, the ID OF THE RULE that rejected it. The rejection is per
  *  SYMBOL and never withdrawn: what is being derived is a DECLARATION, and one use this spelling
  *  does not model makes the name keep the cast form everywhere. The id is carried rather than a
- *  bare null so a census asks which rule decided instead of re-deriving the predicates. */
-function accessesBySymbol(fn: Fn, gates: readonly Gate<AddressUse>[]): Map<string, Access[] | { refusedBy: string }> {
+ *  bare null so a census asks which rule decided instead of re-deriving the predicates.
+ *
+ *  `interiorIsEvidence` is the second consumer's half of the filter below: an access at a non-zero
+ *  displacement says nothing about the ELEMENT (its width is the sub-word read's, not the
+ *  element's) and everything about the ORDER (its terms and its `gaddr` are the same ones). The
+ *  declaration derivation keeps the default and never sees one. */
+function accessesBySymbol(
+  fn: Fn,
+  gates: readonly Gate<AddressUse>[],
+  interiorIsEvidence = false,
+): Map<string, Access[] | { refusedBy: string }> {
   const defs = defOpMap(fn);
   const uses = useIndex(fn);
   const out = new Map<string, Access[] | { refusedBy: string }>();
@@ -494,7 +549,7 @@ function accessesBySymbol(fn: Fn, gates: readonly Gate<AddressUse>[]): Map<strin
         // `interior-or-non-access` ABLATED (a test does exactly that) an interior read would
         // otherwise be recorded with an undefined width, and an ablation must remove a REFUSAL,
         // never manufacture a fact.
-        for (const c of consumers.filter((x) => x.isElementAccess)) {
+        for (const c of consumers.filter((x) => (interiorIsEvidence ? x.isLoad || x.isStore : x.isElementAccess))) {
           record(sym, {
             width: c.m.attrs.width as number,
             signed: c.isLoad && (c.m.attrs.signed as boolean) === true,
@@ -668,6 +723,40 @@ export function inferGlobalArrays(
     const si = Array.isArray(accs) ? shapeOf(accs, pos, gates.shape) : null;
     if (si !== null) {
       out.set(sym, si);
+    }
+  }
+  return out;
+}
+
+/** The globals whose address `fn`'s assembly materialized BEFORE it scaled the index — the ORDER
+ *  half of the licence, on its own (see THE ORDER LICENCE HAS TWO CONSUMERS in the header).
+ *
+ *  A SUPERSET of the names `inferGlobalArrays` shapes: a name that one shapes has no interior
+ *  consumer at all (`interior-or-non-access` refused every symbol that does), so both derivations
+ *  see the identical accesses and this one asks strictly fewer rules of them. The difference is the
+ *  point — a name read at a DISPLACEMENT, which is what a struct element is and what has neither an
+ *  `intType` nor a whole-element subscript, is licensed here and refused there. The declaration derivation is unchanged, and so is what it
+ *  claims: this set is not a declaration and travels through no honesty channel, because a pointer
+ *  local over `&gSym` reproduces the bytes under any declaration of `gSym`, exactly as the cast
+ *  spelling it re-homes does.
+ *
+ *  A GENERATOR, never a classifier. Its consumer (`l3/basecse.ts`'s `order-licensed`, reached from
+ *  rank's `/orderbase` roster row) uses it to OFFER a candidate beside the inline spelling, which
+ *  the differ then referees — so an over-licensed name costs fan and a tie-break, never meaning.
+ *  Empty for every target that has not opted in. */
+export function orderLicensedGlobals(
+  fn: Fn,
+  target: TargetDescription,
+  gates: ArrayShapeGates = ORDER_LICENCE_GATES,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  if (target.compilerBehaviors.arrayShapeFromStride !== true) {
+    return out;
+  }
+  const pos = positions(fn);
+  for (const [sym, accs] of accessesBySymbol(fn, gates.address, true)) {
+    if (Array.isArray(accs) && accs.length > 0 && firstRejection(gates.shape, evidenceOf(accs, pos)) === null) {
+      out.add(sym);
     }
   }
   return out;

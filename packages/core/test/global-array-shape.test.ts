@@ -16,7 +16,18 @@ import { describe, expect, test } from 'vitest';
 import { frontendFor } from '../src/frontend/registry';
 import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
-import { ARRAY_SHAPE_GATES, arrayShapeRefusals, inferGlobalArrays, sameDerivedShape } from '../src/raise/globalshape';
+import {
+  ADDRESS_GATES,
+  ARRAY_SHAPE_GATES,
+  DECLARATION_ADDRESS_GATES,
+  ELEMENT_ADDRESS_GATES,
+  ORDER_SHAPE_GATES,
+  SHAPE_GATES,
+  arrayShapeRefusals,
+  inferGlobalArrays,
+  orderLicensedGlobals,
+  sameDerivedShape,
+} from '../src/raise/globalshape';
 import { enumerateCandidates } from '../src/rank';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
@@ -44,6 +55,9 @@ const lift = (name: string, asm: string) =>
   frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, undefined);
 
 const derive = (name: string, asm: string) => inferGlobalArrays(lift(name, asm), ARMV4T_AGBCC);
+
+/** The ORDER half alone — the names a value HOME may be spelled over (raise/globalshape.ts). */
+const licensed = (name: string, asm: string) => orderLicensedGlobals(lift(name, asm), ARMV4T_AGBCC);
 
 /** WHICH RULE decided, per symbol — `firstRejection` over the two gate tables. The refusals are
  *  DATA (raise/globalshape.ts's `ADDRESS_GATES` / `SHAPE_GATES`) precisely so a test can assert the
@@ -900,5 +914,70 @@ describe('the licence is a per-compiler behaviour, never a universal', () => {
       compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, arrayShapeFromStride: false },
     };
     expect(inferGlobalArrays(frontendFor(ARMV4T_AGBCC).lift('f', BASE_FIRST, ARMV4T_AGBCC, {}), off).size).toBe(0);
+  });
+});
+
+// ── the ORDER half, on its own ────────────────────────────────────────────────────────────────
+//
+// `orderLicensedGlobals` answers the question a VALUE HOME asks — was the base materialized before
+// the index was scaled — where `inferGlobalArrays` answers the one a DECLARATION asks. They read
+// the same `baseFirst` fact through the same rule objects; the order half simply drops every rule
+// that is about the element, which is what lets a struct element (read at a displacement, no
+// `intType`, no whole-element subscript) be licensed for a home and still refused for a decl.
+
+describe('the order licence, split out for the value-home consumer', () => {
+  test('the declaration derivation asks exactly the rules it always did', () => {
+    // The split is a partition of one list, so `inferGlobalArrays`' attribution cannot have moved.
+    expect(ADDRESS_GATES.map((g) => g.id)).toEqual([
+      'address-escapes',
+      'relocation-addend',
+      'residual-not-a-sum',
+      'address-unused',
+      'interior-or-non-access',
+    ]);
+    expect(ADDRESS_GATES).toEqual([...ELEMENT_ADDRESS_GATES, ...DECLARATION_ADDRESS_GATES]);
+    // the shape half is SELECTED, not restated — the same objects, so a predicate edit reaches both
+    expect(ORDER_SHAPE_GATES.every((g) => SHAPE_GATES.includes(g))).toBe(true);
+  });
+
+  test('a struct element read at a displacement is licensed for a home and refused for a decl', () => {
+    // The `bgarr` shape: a 28-byte element read 2 bytes in (`gBgInfo[i].field_16`), pool word
+    // FIRST. No array declaration describes it — and none is needed to know where the base lived.
+    const structElem = thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+      '.word\tgBgInfo',
+    );
+    expect(derive('f', structElem).size).toBe(0);
+    expect([...licensed('f', structElem)]).toEqual(['gBgInfo']);
+  });
+
+  test('base-first licenses, index-first does not — the same minimal pair', () => {
+    expect([...licensed('f', BASE_FIRST)]).toEqual(['gTbl']);
+    expect([...licensed('f', INDEX_FIRST)]).toEqual([]);
+  });
+
+  test('the addend belongs to the base, so `arrbias` is refused here too', () => {
+    // `relocation-addend` stays in the ELEMENT half: a constant baked into the pool word says the
+    // address the source named is not `&gTbl`, whatever order it was materialized in.
+    expect([...licensed('f', fixture('relocation-addend'))]).toEqual([]);
+  });
+
+  test('every name the declaration derivation shapes is licensed for a home', () => {
+    // The superset claim, measured on the fixtures rather than argued: a shaped name has no
+    // interior consumer, so both derivations see the same accesses and this one asks fewer rules.
+    for (const [, asm] of [...GATE_FIXTURES, ['licence', BASE_FIRST] as const]) {
+      for (const name of derive('f', asm).keys()) {
+        expect([...licensed('f', asm)]).toContain(name);
+      }
+    }
+  });
+
+  test('a target that has not opted in licenses nothing', () => {
+    const off = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, arrayShapeFromStride: false },
+    };
+    expect(orderLicensedGlobals(lift('f', BASE_FIRST), off).size).toBe(0);
   });
 });
