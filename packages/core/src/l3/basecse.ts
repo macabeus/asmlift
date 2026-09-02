@@ -386,10 +386,12 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  WHICH ROWS THE ABLATION REACHES, since "found by running it" is only an instruction until
  *  someone runs it. Enumeration only, no compiles, both arms — `single-cell` spliced out of this
  *  array in process, prototypes only, map-less, over all artifact rows; run twice with the working
- *  tree hashed either side and byte-identical both times. THIRTEEN rows change their
- *  distinct-source set, corpus fan 48995 → 42701, and ZERO non-agbcc rows are reached — which is
- *  the arm easiest to skip, because this table sits on the UNCONDITIONAL half of the roster and is
- *  offered to ido/kmc/mwcc/gcc272 too. READ THAT POPULATION HONESTLY, since a denominator is a rig
+ *  tree hashed either side and byte-identical both times. THE ARTIFACT HELD 951 ROWS THAT DAY (358
+ *  agbcc, 593 not) and holds 957 (363 / 594) now: this paragraph is at the earlier scope and is not
+ *  re-run against the later one, so its per-row fans still stand and its two TOTALS do not.
+ *  THIRTEEN rows change their distinct-source set, corpus fan 48995 → 42701, and ZERO non-agbcc
+ *  rows are reached — the arm easiest to skip, because this table sits on the UNCONDITIONAL half of
+ *  the roster and is offered to ido/kmc/mwcc/gcc272 too. READ THAT POPULATION HONESTLY, since a denominator is a rig
  *  artifact until it is broken out: of the 593 non-agbcc rows, 400 enumerate in both arms and NONE
  *  of them moves; the other 193 decline at the lift or structure seam and have no fan on either
  *  side, so they are vacuous rather than evidence. The claim is over the 400.
