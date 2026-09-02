@@ -5141,12 +5141,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //     A bare pool word plus a runtime add means the constant belongs on the INDEX, and there
   //     only the DECLARED-ARRAY subscript survives, because every cast base folds it away.
   //
-  // AXIS 2 — INSTRUCTION ORDER, which is what decides when there is no constant term at all. At a
-  // zero addend the assembly still forks, and the axis has exactly TWO instances here: `harr`,
-  // whose base-first target is reached by a declared array OR a base local (0 and 0), and
-  // `arrcast`, whose index-first target wants the cast and where BOTH base-first spellings score
-  // 2. They are a minimal pair (below). A zero addend therefore does NOT license base-first —
-  // that was the first cut's error, and `arrcast` is the row added to catch it.
+  // AXIS 2 — INSTRUCTION ORDER, which is what decides when there is no constant term at all. It
+  // has a PRECONDITION the first two cuts of this block both missed: order is only observable at
+  // ELEMENT WIDTH > 1, because at width 1 there is no scaling to order against the base `ldr`
+  // (measured above). So the axis has exactly TWO instances here, both u16: `harr`, whose
+  // base-first target is reached by a declared array OR a base local (0 and 0), and `arrcast`,
+  // whose index-first target wants the cast and where BOTH base-first spellings score 2. They
+  // are a minimal pair (below). A zero addend does NOT license base-first — that was the first
+  // cut's error, and `arrcast` is the row added to catch it.
   //
   // THE OTHER ROWS ARE NOT INSTANCES OF THIS AXIS, and an earlier cut of this paragraph listed
   // three of them as if they were. Each fails the predicate for its own reason:
@@ -5155,11 +5157,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //    with anything and cannot referee an ordering rule on its own.
   //  • `tblrank2` is zero-addend and base-first, but a base local does NOT reach it: the
   //    rank-preserving one scores 2. It is a PARTIAL on this axis, not an instance.
-  //  • `arrbias` IS NOT ZERO-ADDEND AT ALL — its pool word carries addend 1 — and it is an
+  //  • `arrbias` fails the precondition — it is u8, so it CANNOT discriminate instruction order
+  //    at all — and it is not zero-addend either (its pool word carries addend 1). It is an
   //    AXIS 1 row. It also does not want a declared array or a base local: asmlift already
   //    MATCHES it with a cast, `*(u8 *)(a0 + ((u32)&gTbl + 1))`, and axis 1's cross above shows
   //    three spellings tying at 0 there, so the row does not discriminate cast from array in
-  //    either direction. Reading it as an axis-2 over-fire control is wrong twice over.
+  //    either direction. Reading it as an axis-2 over-fire control is wrong three times over.
   //
   // TWO ROWS GUARD THIS, one per axis, and BOTH are authored as matches:
   //  • `arrbias` — AXIS 1, the addend direction. Applying the index-side spelling unconditionally
