@@ -77,8 +77,10 @@ Per commit:
   stage contracts (`packages/core/src/contracts.ts`) and keep `@asmlift/core` browser-pure.
 - Add unit tests in `packages/core/test/` next to the sibling capability's tests. A capability with
   no test that fails before the change is not done.
-- Gate: `pnpm test:offline` + `pnpm typecheck` + `pnpm lint`, and re-run `pnpm bench run --tier real
-  --only $1` plus the rows you predicted are affected. Report the diff number movement.
+- Gate: `npx vitest run` (NOT `pnpm test:offline` — see Phase 4's fourth bullet: `test:offline`
+  runs three directories and CI runs five) + `pnpm typecheck` + `pnpm lint`, and re-run
+  `pnpm bench run --tier real --only $1` plus the rows you predicted are affected. Report the diff
+  number movement.
 - Commit only when green. Message says what capability was added and what it moved, e.g.
   `feat(raise): recover X from Y idiom (Foo 41→18)`.
 - If a step moves the number the wrong way, keep it only if it is a prerequisite, and say so in the
@@ -99,7 +101,7 @@ gate. If a match is lost, either tighten the gate on your lever or drop the leve
 rationalize a trade unless the user explicitly approves it. Report the totals (asmlift vs m2c)
 before and after.
 
-Three things this gate does not catch by itself:
+Four things this gate does not catch by itself:
 
 - **The regenerated artifact is the LAST commit on the branch — after the final rebase.**
   `results.json` stamps the commit it was generated at, and every number you publish reads from it,
@@ -119,6 +121,17 @@ Three things this gate does not catch by itself:
   own cost, so "it had not finished" is checkable against the log — a round once wrote that of a
   re-score "not finished after 2h", in a session under an hour long that had run no ranked
   command at all.
+- **A CI SUITE THAT NO OTHER GATE RUNS.** `pnpm test:offline` runs three directories
+  (`packages/core/test`, `packages/cli/test/offline`, `packages/toolchains/test`); hosted CI runs
+  those three PLUS `apps/benchmark/test` and `apps/web/test` (`ci.yml`), and `pnpm test:matching`
+  runs only in `benchmark.yml`, which is `workflow_dispatch`-only — so no PR gate runs it at all.
+  A gate list spelled as `test:offline` + `apps/benchmark/test` +
+  `test:matching` — which is what several rounds have run — leaves `apps/web/test` collected by
+  nobody, and a change to the DEFAULT map-less spelling lands there: the playground preset pins its
+  own map-less source byte for byte. Run `npx vitest run` (the whole config, apps included) and
+  `pnpm test:matching`, and quote both counts. A branch has shipped twenty commits, two adversarial
+  rounds and every full bench run green while `pnpm exec vitest run apps/web/test` was red — from
+  its very first capability commit.
 - **A corpus sweep's configuration is part of its claim.** Sweeping a project's functions with the
   new rule ON vs OFF proves nothing about the configuration you did not run: with a symbol map
   every absolute pool constant lifts to a `gaddr`, so a symbol-map sweep is blind to a rule that
