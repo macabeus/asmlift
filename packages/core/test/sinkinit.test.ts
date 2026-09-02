@@ -300,16 +300,51 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
 describe('the /livebase pairing is WIRED into enumeration', () => {
   // `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc — an MMIO poll whose bases the DEFAULT
   // hoist refuses outright, so the tree this lever reads on its own carries no init at all.
-  const labels = enumerateCandidates(
+  const fan = enumerateCandidates(
     'mixpoll',
     readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-mixpoll.s'), 'utf8'),
     ARMV4T_AGBCC,
     { prototypes: { mixpoll: { returnsVoid: true } } },
-  ).map((x) => x.label);
+  );
+  const labels = fan.map((x) => x.label);
+  const sourceOf = (label: string): string | undefined => fan.find((c) => c.label === label)?.source;
 
   test('the joint spelling reaches the differ, over the whole admission roster', () => {
     expect(labels).toContain('signed/livebase/sinkinit');
-    expect(labels).toContain('signed/livebase-block/volatile/sinkinit');
+    // PINNED AS A PROGRAM, because a label is not an attribution (see the `seen` dedup in rank.ts).
+    // WHICH route emits the sunk narrow program is exactly what `seen` decides, and it moves under
+    // roster edits that change no program at all: on this fixture `/unfolded` binds the same
+    // register file `/livebase-block` does, its roster row runs before the `/livebase ×` product
+    // loops, and it places at first use — so it takes the label today, and ablating that row leaves
+    // the same 60 distinct sources with the same sunk program relabelled
+    // `signed/livebase-block/volatile/sinkinit`. A label-keyed assertion goes red there for a
+    // program that never moved. A substring one (`some label contains livebase-block`) fails the
+    // other way: the twelve HEAD-placed narrow candidates satisfy it with the sunk spelling gone
+    // entirely.
+    //
+    // So SEARCH for the program and let whichever route produced it own the label. What has to hold
+    // is that the narrow admission's bases reach the differ SUNK: the same declarations and the same
+    // statements as the head-placed narrow candidate, differing only in where the base init sits
+    // relative to the loop counter's `v0 = 0;`. Ablating the narrow family itself (`single-cell` out
+    // of LIVEBASE_BLOCK_GATES) takes `head` away and this goes red, which is the regression it is
+    // for.
+    const head = sourceOf('signed/livebase-block/volatile');
+    expect(head).toBeDefined();
+    expect(head!.indexOf('v0 = 0;')).toBeGreaterThan(head!.indexOf('p0 = (s32 *)'));
+    const sameLines = (a: string, b: string): boolean =>
+      a.split('\n').sort().join('\n') === b.split('\n').sort().join('\n');
+    const sunk = fan.filter(
+      (cand) =>
+        cand.source !== head &&
+        sameLines(cand.source, head!) &&
+        cand.source.indexOf('v0 = 0;') < cand.source.indexOf('p0 = (s32 *)'),
+    );
+    expect(sunk).toHaveLength(1);
+    // Its label today is `signed/unfolded/volatile`, and `signed/livebase-block/volatile/sinkinit`
+    // with that roster row ablated. Deliberately NOT asserted: either is the same program. That
+    // leaves the ROSTER ROW unpinned here by design — `basecse.test.ts`'s "and the ROSTER offers
+    // it" owns that subject, keyed on the base SET only that row parks. Two tests, two subjects;
+    // this one stays label-free.
   });
 
   test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {

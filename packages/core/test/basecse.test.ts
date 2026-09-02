@@ -7,15 +7,18 @@ import { frontendFor } from '../src/frontend/registry';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import * as basecse from '../src/l3/basecse';
 import {
   BASECSE_GATES,
   BASEFOLD_GATES,
+  type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
+  UNFOLDED_GATES,
   admittedBases,
   hoistBaseLocals,
 } from '../src/l3/basecse';
-import { without } from '../src/l3/gates';
+import { type Gate, without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
@@ -201,23 +204,84 @@ ${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
   });
 
   test('the blast radius is bounded to the roster: the COMMITTED table cannot read the flag', () => {
-    // `unfoldedOffset` has exactly one reader — `BASEFOLD_GATES`' `single-use-unfolded` rule, which
-    // only `rank.ts`'s roster asks for. So whatever a merge decides, `structureChecked`'s own hoist
-    // binds the same bases either way: that is the bound, and it is about MEANING, not about
-    // score. Widen the readership — promote the exemption into `BASECSE_GATES` — and it goes.
+    // The bound is that `structureChecked`'s own hoist binds the same bases either way, so whatever
+    // a merge decides is about SCORE and never about meaning. Widen the readership — promote either
+    // rule into `BASECSE_GATES` — and it goes.
+    //
+    // THE READERSHIP IS TWO TABLES, NOT ONE, and a sentence naming them is what goes stale: the
+    // second reader can ship without this file being opened. `BASEFOLD_GATES` EXEMPTS `single-use`
+    // on the flag; `UNFOLDED_GATES` REQUIRES it. So the population a merge can move is
+    // `/basefold*` AND `/unfolded*`, and the two move on DISJOINT shapes. The readership census
+    // below is the assertion rather than this paragraph — it DISCOVERS its tables, so it fails
+    // both when one of the two stops reading the field and when a third starts.
     //
     // The two directions are NOT symmetric, and reading them as one is how this note first got
     // written. A flag the merge INVENTS offers an extra candidate, and `compareScored` orders by
     // score, so that costs a compile and nothing else. A flag it EATS withholds one, and
-    // withholding a `/basefold*` candidate costs whatever that candidate would have won: deleting
-    // the sunk roster row turns `synthetic:foldsink` and `sa3:sub_803213C` from MATCH into diff:2
-    // (ablated through the harness). So "it can only offer or withhold a candidate" is a bound on
-    // meaning and not on matches.
-    // Its reach today is zero, which is a measurement and not an argument: over the whole artifact
-    // (1140 observations, five toolchains, both symbol-map configurations) `mergeCommonTails`
-    // peels 25 tails and NONE of them is a pair of arms differing only in `operandOff`.
+    // withholding a roster candidate costs whatever that candidate would have won: deleting the
+    // sunk `/basefold` roster row turns `synthetic:foldsink` and `sa3:sub_803213C` from MATCH into
+    // diff:2 (ablated through the harness). So "it can only offer or withhold a candidate" is a
+    // bound on meaning and not on matches — and it is now two families' worth of candidates, not
+    // one.
+    // The merge's reach today is zero, which is a measurement and not an argument: over the whole
+    // artifact (1140 observations, five toolchains, both symbol-map configurations)
+    // `mergeCommonTails` peels 25 tails and NONE of them is a pair of arms differing only in
+    // `operandOff`.
     expect(admittedBases(structureChecked(parse(twoArms(true)), {}), BASECSE_GATES)).toEqual([]);
     expect(admittedBases(structureChecked(parse(twoArms(false)), {}), BASECSE_GATES)).toEqual([]);
+  });
+
+  test('the readership is exactly two tables, and they read the flag in OPPOSITE directions', () => {
+    // Feed each table the same tree twice, once with the evidence and once without, and the tables
+    // that MOVE are the ones that read it. Two shapes, because the two readers are reached by
+    // disjoint ones: a key reached TWICE (past `single-use`, which is what `/unfolded` keeps) and a
+    // key reached ONCE (which is what `/basefold` exempts).
+    const twice = (evidence: object): SFn =>
+      fn([
+        { k: 'exprstmt', value: idx('gSym', c(3), 1, evidence) },
+        { k: 'exprstmt', value: idx('gSym', c(4), 1) },
+      ]);
+    const once = (evidence: object): SFn => fn([{ k: 'exprstmt', value: idx('gSym', c(3), 1, evidence) }]);
+    const K = 'a:gSym 1 false';
+    const moves = (shape: (e: object) => SFn, gates: Parameters<typeof admittedBases>[1]): boolean =>
+      admittedBases(shape(fromOperand), gates).join() !== admittedBases(shape({}), gates).join();
+
+    // The population is DISCOVERED, not listed, or this census cannot see the drift it is for: a
+    // hand-written list of today's five tables stays green when a SIXTH starts reading the field.
+    // Every gate table this file exports, then — `Gate<BaseKey>` tables live only here, and
+    // `withholdingKey` (l3/homesplit.ts) composes over a caller's table and inherits its
+    // readership.
+    const tables = Object.entries(basecse).filter(
+      (e): e is [string, readonly Gate<BaseKey>[]] =>
+        Array.isArray(e[1]) &&
+        e[1].length > 0 &&
+        e[1].every((g) => typeof g === 'object' && g !== null && 'rejects' in g),
+    );
+    // …and the discovery has its own floor, so a filter that silently matches nothing cannot read
+    // as "no table reads the flag". A table added later needs no line here: it is censused because
+    // it was found, and only a table that MOVES shows up in the two expectations below.
+    expect(tables.map(([n]) => n).sort()).toEqual(
+      expect.arrayContaining([
+        'BASECSE_GATES',
+        'BASEFOLD_GATES',
+        'LIVEBASE_BLOCK_GATES',
+        'LIVEBASE_GATES',
+        'UNFOLDED_GATES',
+      ]),
+    );
+    const readersOf = (shape: (e: object) => SFn): string[] =>
+      tables.filter(([, g]) => moves(shape, g)).map(([n]) => n);
+
+    // reached twice: only UNFOLDED_GATES changes its answer
+    expect(admittedBases(twice(fromOperand), UNFOLDED_GATES)).toEqual([K]);
+    expect(admittedBases(twice({}), UNFOLDED_GATES)).toEqual([]);
+    expect(readersOf(twice)).toEqual(['UNFOLDED_GATES']);
+
+    // reached once: only BASEFOLD_GATES changes its answer — the opposite question, so the two
+    // readers never both move on one key.
+    expect(admittedBases(once(fromOperand), BASEFOLD_GATES)).toEqual([K]);
+    expect(admittedBases(once({}), BASEFOLD_GATES)).toEqual([]);
+    expect(readersOf(once)).toEqual(['BASEFOLD_GATES']);
   });
 });
 
@@ -673,6 +737,121 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
       { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(6) },
     ]);
     expect(boundBases(hoistBaseLocals(twoFiles, LIVEBASE_BLOCK_GATES))).toEqual([0x40000d4, 0x40000b0]);
+  });
+});
+
+describe('the fold-evidence admission (WHICH reused bases the source PARKED)', () => {
+  // Two numeric bases reached twice each in the same loop, so `/livebase` binds both and the
+  // default table neither. One is read through a surviving operand offset — the shape a pointer
+  // local strides — and the other at the address the pool already carried, which is what a source
+  // that spelled it inline leaves behind. `single-cell` cannot tell them apart: both are read at
+  // one fixed offset.
+  const parked = (): SFn =>
+    fn([
+      {
+        k: 'dowhile',
+        cond: { k: 'bin', op: '!=', l: cidx(0x3002040, c(0)), r: c(0) },
+        body: [
+          { k: 'store', lval: cidx(0x3002040, c(0)), value: c(1) },
+          { k: 'store', lval: cidx(0x3003400, c(15), 4, fromOperand), value: c(2) },
+          { k: 'store', lval: cidx(0x3003400, c(15), 4, fromOperand), value: c(3) },
+        ],
+      },
+    ]);
+  const boundBases = (s: SFn): number[] =>
+    s.body
+      .filter((x): x is Stmt & { k: 'assign' } => x.k === 'assign')
+      .map((x) => ((x.value as Expr & { k: 'cast' }).e as Expr & { k: 'const' }).value);
+
+  test('it binds the base whose offset survived and leaves the folded one inline', () => {
+    expect(boundBases(hoistBaseLocals(parked(), UNFOLDED_GATES))).toEqual([0x3003400]);
+    // the two boundaries the roster already had: all of them, or all of them minus the cells
+    expect(boundBases(hoistBaseLocals(parked(), LIVEBASE_GATES))).toEqual([0x3002040, 0x3003400]);
+    expect(boundBases(hoistBaseLocals(parked(), LIVEBASE_BLOCK_GATES))).toEqual([]);
+  });
+
+  test("the axis is one gate: ablating `folded-offset` is /livebase's own admission", () => {
+    expect(without(UNFOLDED_GATES, 'folded-offset').map((g) => g.id)).toEqual(LIVEBASE_GATES.map((g) => g.id));
+    expect(admittedBases(parked(), without(UNFOLDED_GATES, 'folded-offset'))).toEqual(
+      admittedBases(parked(), LIVEBASE_GATES),
+    );
+  });
+
+  test('it is not `/basefold` relaxed: the two tables ask opposite questions of one field', () => {
+    // `/basefold` exempts `single-use` on the evidence, so it reaches a base read ONCE and this
+    // table refuses that same base on `single-use`; the evidenced base below is read twice inside
+    // a loop, so `/basefold` refuses it first on `loop` — a placement heuristic it keeps and this
+    // table ablates. Both rejections read off `firstRejection`, not off the table's order.
+    const once = fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1, fromOperand), value: c(0) }]);
+    expect(admittedBases(once, BASEFOLD_GATES)).toHaveLength(1);
+    expect(admittedBases(once, UNFOLDED_GATES)).toEqual([]);
+    expect(admittedBases(parked(), BASEFOLD_GATES)).toEqual([]);
+    expect(admittedBases(parked(), UNFOLDED_GATES)).toHaveLength(1);
+  });
+
+  test('MISSING evidence is what it refuses on, never a claim the offset was folded', () => {
+    // An offset the address expression already carried records nothing (see the header), and
+    // `structure/structure.ts` records nothing for an offset of 0 either — so a base the source
+    // really parked can arrive here indistinguishable from one it spelled inline. The table
+    // declines on both, and declining is the whole of the refusal: the tree comes back untouched
+    // rather than hoisted on a guess.
+    const noEvidence = (): SFn =>
+      fn([
+        { k: 'store', lval: cidx(0x3003400, c(15)), value: c(2) },
+        { k: 'store', lval: cidx(0x3003400, c(15)), value: c(3) },
+      ]);
+    const input = noEvidence();
+    expect(admittedBases(input, LIVEBASE_GATES)).toHaveLength(1);
+    expect(admittedBases(input, UNFOLDED_GATES)).toEqual([]);
+    expect(hoistBaseLocals(input, UNFOLDED_GATES)).toBe(input);
+  });
+
+  test("the census on the row's own agbcc output: the two parked bases, in first-use order", () => {
+    // `corpus/agbcc-unfoldpark.s` is synthetic:unfoldpark:agbcc — one folded scalar cell
+    // (`*(s32 *)0x03002040`) beside two bases the source held in pointer locals. The roster's two
+    // admissions bind all three keys and one of them; the set the source actually parked is
+    // neither, which is what this table is for.
+    const sfn = structureChecked(
+      frontendFor(ARMV4T_AGBCC).lift(
+        'unfoldpark',
+        readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-unfoldpark.s'), 'utf8'),
+        ARMV4T_AGBCC,
+        { unfoldpark: { params: ['s32', 's32*'], returnsVoid: true } },
+      ),
+      {},
+    );
+    expect(admittedBases(sfn, UNFOLDED_GATES)).toEqual(['c:50344960 4 true', 'c:67109076 4 true']);
+    expect(admittedBases(sfn, LIVEBASE_GATES)).toHaveLength(3);
+    expect(admittedBases(sfn, LIVEBASE_BLOCK_GATES)).toEqual(['c:67109076 4 true']);
+    expect(admittedBases(sfn, BASECSE_GATES)).toEqual([]);
+  });
+
+  test('and the ROSTER offers it — where the target declares the fold, and only there', () => {
+    // THE TABLE IS NOT THE LEVER — `rank.ts`'s `UNFOLDED_ADMISSIONS` is, and it needs its own pin:
+    // delete that one roster row and the whole `/unfolded` family leaves the ranked path
+    // (`synthetic:unfoldpark`'s fan 44 → 36) without any table in `basecse.ts` changing its answer.
+    // `sinkinit.test.ts` owns the sunk PROGRAM and must stay label-free to do it, so it cannot own
+    // this: whichever route emits that program satisfies it. Two tests, two subjects.
+    //
+    // Program-keyed for the same reason, so `seen`'s first-label-wins cannot decide it: what only
+    // this row reaches is a candidate parking EXACTLY the two evidenced bases and leaving
+    // `0x03002040` — the cell whose offset the pool already carried — inline. On this fixture that
+    // is 8 candidates with the row, 0 with it ablated, and 0 on a target not declaring the fold.
+    const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-unfoldpark.s'), 'utf8');
+    const opts = { prototypes: { unfoldpark: { params: ['s32', 's32*'], returnsVoid: true } } };
+    const parkedBy = (source: string): string =>
+      [...source.matchAll(/= \((?:volatile )?[a-z0-9]+ \*\)(\d+);/g)]
+        .map((m) => Number(m[1]))
+        .sort((a, b) => a - b)
+        .join();
+    const wanted = (cand: { source: string }): boolean => parkedBy(cand.source) === [0x3003400, 0x40000d4].join();
+    expect(enumerateCandidates('unfoldpark', asm, ARMV4T_AGBCC, opts).filter(wanted).length).toBeGreaterThan(0);
+    // the fold is a per-compiler declaration, so a target without it never offers the row
+    const noFold = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, foldsConstAddrOffset: undefined },
+    };
+    expect(enumerateCandidates('unfoldpark', asm, noFold, opts).filter(wanted)).toEqual([]);
   });
 });
 

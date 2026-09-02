@@ -24,6 +24,7 @@ import {
   type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
+  UNFOLDED_GATES,
   admittedBases,
   hoistBaseLocals,
 } from './l3/basecse';
@@ -335,11 +336,13 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  pairing 3, and its `/indexed`, `/coalesce` and volatile-subset products none at all. A function
  *  inhabiting them all pays far more, and the fan is not always a win there: the mixpoll dataset
  *  entry prices one where the `/coalesce` pairing costs the most candidates of any and scores two
- *  points worse than going unpaired. It fans anyway because a pairing belongs to the LEVER, not to
- *  one of its admissions.
+ *  points worse than going unpaired. THAT row fans anyway because on the `/livebase` rows a
+ *  pairing belongs to the LEVER rather than to one of its admissions — but it is a per-row
+ *  decision, not a property of the roster: three of the five rows below are unpaired. `pairings`
+ *  is the field, and its own doc says how a row earns a `true`.
  *
- *  `/basefold` is the third and fourth admission and the only conditional pair —
- *  `enumerateCandidates` appends them where the target declares
+ *  `/basefold` is the third and fourth admission and `/unfolded` the fifth; those three are the
+ *  conditional set — `enumerateCandidates` appends them where the target declares
  *  `compilerBehaviors.foldsConstAddrOffset`. They need no second "did the primary already carry
  *  this" test: `structureChecked` runs the DEFAULT hoist to its fixpoint before any tree reaches
  *  here, so a key still admissible is by construction one `BASECSE_GATES` rejected, and binding
@@ -359,13 +362,16 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  value-proxy predicate this replaced, the same census binds the 4 numeric keys and nothing else,
  *  losing none of them. `admittedBases(sfn, BASECSE_GATES)` — the COMMITTED table — differs on 0
  *  of 451, which is the check that says the widening stayed on the roster.
- *  A target that declares no fold is offered neither row — not to protect a score (no roster row
- *  can cost one; see LIVEBASE_BLOCK_GATES) but because `unfoldedOffset` would be read as evidence
- *  on an instruction that carries the addend by construction, where there is none.
+ *  A target that declares no fold is offered none of the three — not to protect a score (no roster
+ *  row can cost one; see LIVEBASE_BLOCK_GATES) but because `unfoldedOffset` would be read as
+ *  evidence on an instruction that carries the addend by construction, where there is none.
  *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
- *  ranked command in docs/ranked-repro.md — the admission declines on every structuring, leaving
- *  that fan the size it was: 68352 candidates either way, with ZERO `basefold`-labelled candidates
- *  in the control arm. All floors, though: the ranked path structures each function many ways
+ *  ranked command in docs/ranked-repro.md — the `/basefold` admission declines on every
+ *  structuring, leaving that fan the size it was, with ZERO `basefold`-labelled candidates in the
+ *  control arm. NO FAN TOTAL IS QUOTED HERE ON PURPOSE: that function's fan was 112896 at this
+ *  commit and two five-figure numbers ago at others, and a DELTA outlives the total it was
+ *  measured beside — which is what makes a stale paragraph read as verified. Re-run the total
+ *  before budgeting against it. All floors, though: the ranked path structures each function many ways
  *  where this census builds one tree per observation.
  *
  *  WHAT THE PAIR COSTS, through the HARNESS's own enumeration and re-runnable from the recipe in
@@ -403,7 +409,16 @@ interface BaseAdmission {
   /** Whether the row joins the `/livebase ×` PAIRINGS below. Each of those products was added for
    *  a row that demanded the joint spelling (see POLICY), and every demanding row so far is a
    *  `/livebase` row — so a new admission joins them when a row demands it, not by roster
-   *  membership. */
+   *  membership.
+   *
+   *  ONE BOOLEAN PER ROSTER ROW, ANSWERING A QUESTION THAT IS REALLY PER FUNCTION, so a `false`
+   *  here is a corpus claim and has to be measured like one — on the whole corpus, not on the
+   *  synthetic row that earned the entry. The measurement is candidates-only and cheap: enumerate
+   *  every agbcc row twice from `row.scripts.asmlift`'s heredocs and compare the distinct-source
+   *  sets. For `/unfolded` (see its note) that is +912 sources over 8 rows (+1.92% corpus fan) and
+   *  the only nonmatch among the 8 scores the same either way, which is what the `false` rests on.
+   *  Flipping one of these is one character; the gate on doing it is that census plus a score on
+   *  every row it moves. */
   pairings: boolean;
 }
 
@@ -454,11 +469,72 @@ const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  HOW THE ABLATION IS DONE, since there is no shipped knob: filter this roster at its one use
  *  site (the `admissions` const in `enumerateCandidates`) behind a temporary env read, run the
  *  rows with `ASMLIFT_CANDCACHE=0`, and revert. Prove the filter REACHED before believing a null
- *  result — `synthetic:livepark` MATCH → diff:3 with `/livebase` removed is the positive control,
- *  and a fan count per configuration is the second. */
+ *  result — `synthetic:livepark` MATCH → diff:3 with `/livebase` AND `/unfolded` both removed is
+ *  the positive control, and a fan count per configuration is the second. Removing `/livebase`
+ *  alone leaves that row MATCH today, which is a control silently going vacuous rather than a
+ *  lever going dead: `/unfolded` binds the same base there. Any positive control naming ONE roster
+ *  row expires the next time a row is added — re-run it, and if it no longer moves, widen the
+ *  ablation until it does before concluding anything from a null. */
 const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
   { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
+];
+
+/** The fifth admission: its table requires the fold evidence (l3/basecse.ts, UNFOLDED_GATES), so
+ *  it binds the reused bases an operand offset says a pointer local strode and leaves the ones the
+ *  pool already carried folded. `/livebase` and `/livebase-block` are a chain — all the reused
+ *  bases, or those minus the scalar cells — and a source that parked one numeric base and spelled
+ *  another inline is at neither end of it. This row is not a third link in that chain but beside
+ *  it: `singleCell` and `unfoldedOffset` are independent fields, so each of the two tables binds
+ *  keys the other refuses (censused, with its scope, in UNFOLDED_GATES' own note). Read the roster
+ *  as five hand-picked subsets, never as a narrowness ranking.
+ *
+ *  LAST on the roster, so `seen` and `sameBases` between them keep it from restating an earlier
+ *  ROSTER row — but only `seen` does any work here. `sameBases` declines a row that binds what an
+ *  EARLIER row binds AT THE SAME PLACEMENT, and the only earlier `first-use` row is
+ *  `/basefold/sinkinit`, whose table keeps the two gates this one ablates; instrumented over every
+ *  agbcc row it fires on 0 of 5541 roster observations for this entry (33 distinct functions),
+ *  against 3939 for `/livebase-block`. So the shadow is available and vacuous, and what keeps this
+ *  row from restating anything is `seen` — WHICH MAKES IT A RENAMER, and it renames: the roster
+ *  loop below runs before the `/livebase ×` product loops, so a source one of those products would
+ *  emit later is claimed by this row's label instead. `synthetic:foldpark` is that case measured —
+ *  fan 34 with this entry and 34 without, the same source winning at 0 under
+ *  `signed/unfolded/volatile` here and `signed/livebase-block/volatile/sinkinit` there.
+ *  Corpus-wide (map-less, candidates only, over the artifact's 363 agbcc rows) 21 of the 333 rows
+ *  whose distinct-source set is byte-identical either way carry `/unfolded`-labelled candidates:
+ *  21 pure renames against 7 rows that really gain sources, and 0 that lose one. What that costs
+ *  any census taken over labels is at the `seen` dedup site below.
+ *
+ *  ONE placement, unlike the `/basefold` pair, and by measurement rather than by symmetry. All
+ *  four configurations scored on `synthetic:unfoldpark`, cache off — the fan, then that fan's best
+ *  score:
+ *    first-use, unpaired  44   0  MATCH — shipped
+ *    first-use, paired    44   0  no product emits a source the unpaired row does not
+ *    head,      unpaired  44   9  the score the row already had without any of this
+ *    head,      paired    48   0  reached only through the `/sinkinit` product
+ *  The head is where `/livebase` already offers a spelling for every base this table can bind —
+ *  these are bases reached 2+ times — so what the row adds is the SUNK init, which is where a
+ *  source that declares its base pointer beside the loop it feeds puts the pool load. On both
+ *  neighbouring rows the head placement is shadowed outright (`/unfolded` binds set-for-set what
+ *  `/livebase` binds on `synthetic:livepark` and what `/livebase-block` binds on
+ *  `synthetic:foldpark`). A second row at the head is one line and no new table; add it when a row
+ *  demands it, which none does today.
+ *
+ *  `pairings: false` for the reason the field's own doc gives — a product is added for a row that
+ *  demands the joint spelling, and the row that earned this entry does not: paired and unpaired
+ *  are the same 44 candidates above. ONE 15-LINE FUNCTION CANNOT SETTLE A CORPUS QUESTION, so the
+ *  same knob was censused over every agbcc row the artifact carries, candidates only: `true` adds
+ *  912 distinct sources over 8 rows, +1.92% of the agbcc corpus fan (quoted as the DELTA,
+ *  because the total moves with the corpus and with the roster) — `kleod:UpdateCameraScroll`
+ *  +608, `synthetic:sizebound` +128, `synthetic:dmascope` +64, `kleod:SetupBG3WindowOverlay` and
+ *  `synthetic:maskhome` +32 each, and +16 each on `dmafield`, `dmaflat` and `dmapoll`. Five of the
+ *  eight are MATCH and two are `noncompile`, where extra candidates cannot help; the one that
+ *  could, `synthetic:sizebound`, scores diff:8 with the products on and diff:8 with them off. So
+ *  the `false` buys 1.92% of the agbcc fan for a measured zero, on the whole corpus rather than on
+ *  the row that earned the entry. Flip it when a row scores better with it, and re-run that
+ *  census when one does. */
+const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
+  { suffix: '/unfolded', gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
 ];
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -1700,10 +1776,12 @@ export function enumerateCandidates(
     // loop, and the read-back. The primary already carries every base those rules admit, so a
     // hoist-nothing result means the lever has nothing to add and declines.
     // One family per admission row; a row binding exactly what an earlier row bound is the same
-    // spelling under a different label, so it declines for that too. `/basefold` joins the roster
-    // where the target declares the fold.
+    // spelling under a different label, so it declines for that too. `/basefold`'s TWO rows and
+    // `/unfolded` join the roster where the target declares the fold — THREE of the five, so a
+    // target without it is offered the two `/livebase` rows and nothing else. The same fact is
+    // stated at the two POLICY sites above; a roster change repairs all three or none.
     const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
-      ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS]
+      ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS]
       : LIVEBASE_ADMISSIONS;
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
@@ -2214,6 +2292,34 @@ export function enumerateCandidates(
             // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
             // scores identically, so it can never change `best` — and it keeps the candidate set to
             // the genuinely distinct spellings.
+            //
+            // THE PUBLISHED LABEL IS THEREFORE NOT AN ATTRIBUTION, and every argument in this tree
+            // that counts winning labels is unsound to exactly that extent. The label kept is the
+            // FIRST route's; the later routes are discarded, silently and by design. Adding one
+            // roster row renamed 21 agbcc rows whose emitted source sets were byte-identical —
+            // a CANDIDATE-SET census (whole fan unchanged, some candidate relabelled), which is a
+            // different population from a WINNING-label census: over published winners the same
+            // row moved 5 labels, 2 of them renames.
+            //
+            // AND A LABEL CENSUS CANNOT EVEN SEPARATE A RENAME FROM A RESPELLING. Of those 5
+            // winners, THREE changed the source they publish — `synthetic:unfoldpark`
+            // (402 → 397 bytes, score 9 → 0), `kleod:ConfigureEntityBehavior` (3677 → 3993,
+            // 233 → 230) and `synthetic:livepark` (337 → 346, both MATCH) — while
+            // `synthetic:foldpark` and `kleod:DecompressDma` are byte-identical renames. The two
+            // look the same from here; only the emitted SOURCE tells them apart (`bench diff`
+            // publishes that field, `bench regression` does not).
+            //
+            // So "N rows win under this family" bounds nothing: a family can win zero labels and
+            // still be the only route to a source, and a family can win five and have introduced
+            // three. Price a family by ABLATING it and re-running the rows
+            // (LIVEBASE_BLOCK_GATES carries the recipe); a zero census is not a death certificate,
+            // and a nonzero one is not a mechanism.
+            // THE SEAM FIX IS BOOKED AND NOT BUILT: keep the losing producers on the surviving
+            // candidate (`label` plus an `alsoReachedBy: string[]`) and a census by mechanism
+            // becomes one. It is not free — every consumer that reads `label` as the derivation
+            // would have to say which it means, and the published `candidateLabel` must not
+            // change — so build it when a round needs the census, not before. Until then the only
+            // sound census is an ablation.
             const dup = seen.get(source);
             if (dup !== undefined) {
               // The same TEXT, reached twice. `matchOnly` is a property of the DERIVATION and the

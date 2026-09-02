@@ -16,9 +16,26 @@
 // inline, and rank's LIVEBASE_ADMISSIONS roster emits each table's hoist — and every product of
 // it — as its own candidate family, for the differ to referee between them. The unit is
 // the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
-// gate can leave one of them inline while the other binds. COVERAGE: two admissions, not a subset
-// lattice, so "some of the several block bases" stays unreachable — a function with two register
-// files binds both or neither.
+// gate can leave one of them inline while the other binds.
+//
+// COVERAGE: the roster is FIVE rows over FOUR gate tables (`/basefold` and `/basefold/sinkinit`
+// share one, differing only in placement), and it is a set of hand-picked SUBSETS rather than a
+// narrowness ranking — only `/livebase` ⊇ `/livebase-block` are ordered by inclusion. A table
+// whose predicate cuts across the others therefore carves out a PARTIAL answer, which is what
+// `UNFOLDED_GATES` does. Measured at ONE stated scope, `decompile()`'s default structuring,
+// map-less, one tree per row over the artifact's 363 agbcc rows (23 unstructurable):
+// `admittedBases(sfn, UNFOLDED_GATES)` is a PROPER NONEMPTY SUBSET of
+// `admittedBases(sfn, LIVEBASE_GATES)` on THIRTEEN of them — `kleod:ConfigureEntityBehavior` 3→2,
+// `kleod:ProcessInputAndUpdateEntities` 7→5, `kleod:UpdateCameraScroll` 5→2,
+// `sa3:Sio32MultiLoadIntr` 5→1 and `synthetic:unfoldpark` 3→2 among them — and on
+// `synthetic:dmascope`, a function with THREE bases `single-cell` does not reject, exactly ONE
+// binds. So "some of the several" is reachable wherever a PREDICATE separates the bases. What
+// stays unreachable is an ARBITRARY subset: a table is a conjunction of gates and so denotes ONE
+// predicate over `BaseKey`, which means the only subsets on offer are the ones some predicate
+// carves, and choosing per key by score is the per-base policy assignment nobody has built.
+// EVERY COUNT HERE IS SCOPED TO THAT ONE STRUCTURING and to the artifact's row count on the day —
+// a wider census (every structuring `enumerateCandidates` builds) sees keys this one never mints,
+// and the corpus grows. Re-run rather than read.
 //
 // WHAT THE ASM SUGGESTS, AND WHY IT IS A CANDIDATE. `single-use` refuses a base reached once, on
 // the theory that one access re-materializes as cheaply as a named local. A surviving `[rN, #imm]`
@@ -198,14 +215,56 @@ export interface BaseKey {
   /** A base whose constant offset arrived in the MEMORY OPERAND (l3/ast.ts `index.operandOff`).
    *  On a compiler that folds a constant subscript into the literal it materializes, an offset
    *  that reached the instruction instead survived because something OTHER than a subscript put it
-   *  there — a named base, or an aggregate member (see the header). Read only by
-   *  `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares the fold.
+   *  there — a named base, or an aggregate member (see the header). TWO gate tables read it, both
+   *  on roster rows rank.ts offers only where the target declares the fold, and they ask OPPOSITE
+   *  questions: `BASEFOLD_GATES` EXEMPTS `single-use` on it, `UNFOLDED_GATES` REQUIRES it. Neither
+   *  subtracts the other, so ablating one prices one.
    *
    *  Where the fold leaves no evidence to read is decided UPSTREAM and once, in
-   *  `structure/structure.ts`: an offset the address expression carried (a relocation addend, a
-   *  folded `add`) and an offset of 0 never set the flag, so absence is never proof of anything.
-   *  Nothing is subtracted again here, which puts the whole judgement in `single-use-unfolded`
-   *  where `ablateHeuristic` can price it. A base of 0 is NOT a second refusal, tempting as it
+   *  `structure/structure.ts` (`const fromOperand = off !== 0 ? { operandOff: off } : {}`). THREE
+   *  ways to get an absence:
+   *    • an offset the address expression carried (a relocation addend, a folded `add`);
+   *    • an offset of 0;
+   *    • an offset the INSTRUCTION COULD NOT ENCODE — not upstream's doing, and the one to watch,
+   *      because the flag then reads the same for BOTH spellings and the gate is blind rather than
+   *      unpersuaded. Thumb's load displacement is a scaled imm5 — 31 bytes for `ldrb`, 62 for
+   *      `ldrh`, 124 for `ldr` — and past it agbcc materializes the pointer local with an explicit
+   *      `add`: `u16 *p = (u16 *)&gBgInfo; p[36]` compiles to `.word gBgInfo` +
+   *      `add r4, r4, #0x48` + `ldrh r0, [r4]` (no operand offset), against the inline
+   *      `((u16 *)&gBgInfo)[36]`'s `.word gBgInfo+0x48` + `ldrh r0, [r4]` (also none). At an
+   *      in-range subscript the same pair is `.word gBgInfo` + `ldrh [r4, #0xa]` against
+   *      `.word gBgInfo+0xa` + `ldrh [r4]`, so the field discriminates there and only there.
+   *
+   *      A GROUP OF TWO OR MORE ACCESSES PAST THE RANGE INVERTS THE SENSE, which is worse than
+   *      blind: the fold SHIFTS the literal and the displacements resume relative to the shifted
+   *      base, so it is the INLINE spelling that sets the flag. It bites only where a table is
+   *      CONSULTED — a key `BASECSE_GATES` rejects, i.e. one reached inside a loop, since the
+   *      default hoist binds anything else first; on a straight-line pair `admittedBases` is empty
+   *      for every table here and for an EMPTY gate list, so that shape says nothing either way.
+   *      In a loop over `((u16 *)&gBgInfo)[36]` and `[37]` the inline spelling emits
+   *      `.word gBgInfo+0x48` + `ldrh [r5]` + `ldrh [r5, #0x2]` while the pointer-local twin emits
+   *      `.word gBgInfo` + two `add`s and no operand offset at all; lifted, `UNFOLDED_GATES`
+   *      admits `a:gBgInfo 2 false` on the INLINE one (2 of its 8 candidates carry `/unfolded`)
+   *      and NOTHING on the local one. So on such a group `folded-offset` admits the key the
+   *      reference spelled inline and refuses the key it parked — backwards, costing fan and a
+   *      tie-break and never meaning, since the inline spelling is enumerated beside it. The two
+   *      spellings still differ in the asm — a bare `.word` plus an `add` against a `.word` with
+   *      the addend baked in — but not through THIS field, and no field carries it.
+   *
+   *      HOW BIG THE INVERTED CLASS IS, at ONE stated scope — `decompile()`'s default structuring,
+   *      map-less, one tree per row over the artifact's 363 agbcc rows (23 unstructurable):
+   *      `folded-offset` ADMITS 43 keys and ZERO of them have every nonzero displacement past the
+   *      range for their width, so the inverted class has no corpus inhabitant at this scope; it
+   *      REJECTS 40, of which 36 have no nonzero constant displacement at all (the two documented
+   *      causes) and FOUR are past the range — `ConfigureEntityBehavior` gBgInfo 72,
+   *      `EntityItemDrop` gEntity 504/506, `ProcessInputAndUpdateEntities` gUnk_03005220 76,
+   *      `TransformSingleEntityToScreen` gUnk_03003430 64/66. A WIDER census — every structuring
+   *      `enumerateCandidates` builds — mints keys this one never sees and reads higher on both
+   *      sides, so quote the scope with the number and re-run rather than compare across scopes.
+   *      Reaching the rejected four needs a NEW piece of evidence recorded upstream, not a relaxed
+   *      gate here: widening `folded-offset` to fire on absence would make it fire exactly where
+   *      its premise is false.
+   *  Nothing is subtracted again here. A base of 0 is NOT a second refusal, tempting as it
    *  looks: on MIPS `((s8 *)0)[16]` really is one `lb $v0, 16($zero)` with nowhere else for the
    *  offset to be, but this rule runs only where `foldsConstAddrOffset` is declared, and agbcc
    *  materializes a zero base like any other — `mov r0, #0x10` + `ldrb [r0, #0]` inline against
@@ -301,19 +360,57 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *
  *  WHAT IT IS WORTH, since a generator's price is what its own family WINS and not what its
  *  refusal explains. Ablated — this table made equal to `LIVEBASE_GATES`, at which point
- *  rank.ts's `sameBases` shadow declines the whole `/livebase-block` family — FOUR matches go:
- *  `synthetic:dmaflat` MATCH → diff:10, `synthetic:dmapoll` MATCH → diff:12,
- *  `synthetic:mixpoll` MATCH → diff:10 and `synthetic:foldpark` MATCH → diff:6.
- *  AND IT IS A COMPLETE CENSUS, not the synthetic half of one, because the ablation only ever
- *  REMOVES candidates: a row whose winner does not carry `/livebase-block` cannot move, and the
- *  artifact holds exactly SEVEN that do. The other three, all re-run rather than reasoned about:
- *  `synthetic:sizebound` — the counterexample row above, which the narrow family still helps —
- *  goes 8 → 16; `sa3:Sio32MultiLoadIntr` 69 → 70, the one REAL-tier row involved and the reason
- *  this gate is not a synthetic-only concern; and `synthetic:unfoldpark` 9 either way, the row the
- *  narrow admission wins nothing on. A round promoting this rule into `BASECSE_GATES` prices it
- *  against all seven. `synthetic:foldpark` is the row that prices the gate rather than its
- *  refusal: it is a shape the WIDE admission binds anyway, so it is the narrow one landing at 0
- *  where the wide one lands at 6.
+ *  rank.ts's `sameBases` shadow declines the whole `/livebase-block` family — THREE matches go:
+ *  `synthetic:dmaflat` MATCH → diff:3, `synthetic:dmapoll` MATCH → diff:12 and
+ *  `synthetic:mixpoll` MATCH → diff:2.
+ *
+ *  A PRICE IS A CLAIM ABOUT THE WHOLE ROSTER, not about one table, and nothing in the gate order
+ *  can see it go stale: `bench regression` and `bench diff` measure OUTCOMES, and a rule nobody
+ *  ablated has no outcome. `synthetic:foldpark` is the standing example — `/unfolded` binds that
+ *  row's bases set-for-set at `first-use`, so with THIS gate ablated alone the row is still MATCH
+ *  and brackets nothing; ablate both and it goes diff:6. Re-run every number in this paragraph
+ *  whenever an admission is added to or removed from the roster.
+ *  HOW: prefer the edit-free form — import this array and `splice` the gate out of it before the
+ *  first `enumerateCandidates` call, since the roster holds a reference to this very object. The
+ *  env-read recipe on BASEFOLD_ADMISSIONS edits files instead, and a tap reverted underneath a
+ *  running process reports ZEROES rather than crashing, which reads exactly like "the rule never
+ *  fires"; if you use it, hash the tree either side of the window and quote both hashes.
+ *
+ *  A CENSUS OVER WINNING LABELS CANNOT STAND IN FOR THAT — "only a row whose winner carries
+ *  `/livebase-block` can move" is unsound for the reason rank.ts's `seen` dedup spells out. This
+ *  table's own winning-label census reads 5 rows and read 7 before `/unfolded` shipped, and the
+ *  two that left differ: `synthetic:foldpark` by RENAME (byte-identical source, MATCH either
+ *  side), `synthetic:unfoldpark` because its winning SPELLING changed, 402 bytes at diff:9 to 397
+ *  at MATCH.
+ *
+ *  WHICH ROWS THE ABLATION REACHES, since "found by running it" is only an instruction until
+ *  someone runs it. Enumeration only, no compiles, both arms — `single-cell` spliced out of this
+ *  array in process, prototypes only, map-less, over all artifact rows; run twice with the working
+ *  tree hashed either side and byte-identical both times. THE ARTIFACT HELD 951 ROWS THAT DAY (358
+ *  agbcc, 593 not) and holds 957 (363 / 594) now: this paragraph is at the earlier scope and is not
+ *  re-run against the later one, so its per-row fans still stand and its two TOTALS do not.
+ *  THIRTEEN rows change their distinct-source set, corpus fan 48995 → 42701, and ZERO non-agbcc
+ *  rows are reached — the arm easiest to skip, because this table sits on the UNCONDITIONAL half of
+ *  the roster and is offered to ido/kmc/mwcc/gcc272 too. READ THAT POPULATION HONESTLY, since a denominator is a rig
+ *  artifact until it is broken out: of the 593 non-agbcc rows, 400 enumerate in both arms and NONE
+ *  of them moves; the other 193 decline at the lift or structure seam and have no fan on either
+ *  side, so they are vacuous rather than evidence. The claim is over the 400.
+ *  Seven of the thirteen are the rows this note already names (the three matches above, plus the
+ *  four re-run below); the other six are `kleod:ConfigureEntityBehavior` (fan 1248 → 864),
+ *  `kleod:ProcessInputAndUpdateEntities` (23040 → 19200), `kleod:SetupBG3WindowOverlay`
+ *  (696 → 640), `kleod:UpdateCameraScroll` (15936 → 14272), `kleod:UpdateWorldMapNodeAnim`
+ *  (216 → 192) and `synthetic:livepark` (32 → 24, a MATCH row). `ConfigureEntityBehavior` and
+ *  `livepark` keep their published winning source in the ablated fan, so neither outcome nor score
+ *  can move on them. THE OTHER FOUR ARE UNPRICED, not free: they are real-tier rows whose
+ *  published spelling is map-FUL, and a map-less enumeration does not contain it in EITHER arm, so
+ *  this rig cannot say. Do not quote them as unmoved.
+ *
+ *  The rows it is quoted against, all re-run at this commit: `synthetic:sizebound` — the
+ *  counterexample row above, which the narrow family still helps — goes 8 → 10;
+ *  `sa3:Sio32MultiLoadIntr`, the one REAL-tier row involved and the reason this gate is not a
+ *  synthetic-only concern, is 69 either way; and `synthetic:foldpark` and `synthetic:unfoldpark`
+ *  are MATCH either way. A round promoting this rule into `BASECSE_GATES` prices it against all of
+ *  them, re-run rather than re-quoted.
  *
  *  Why the ACCESS SHAPE and not the address: an MMIO register file and the IWRAM halfword beside
  *  it are both numeric constants in the same range. And why the rule is not in `BASECSE_GATES`: it
@@ -326,6 +423,61 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
     why: 'a base reached at one fixed offset reads as a scalar, which the source more often spells inline',
     sound: false,
     rejects: (c) => c.singleCell,
+  },
+];
+
+/** `/unfolded`'s admission (rank.ts): `/livebase` plus `folded-offset`, which REQUIRES the fold
+ *  evidence `BASEFOLD_GATES` exempts on. The two tables read one field and ask opposite questions
+ *  of it — that one exempts `single-use` for a key reached ONCE whose offset survived, this one
+ *  keeps `single-use` and demands the same survival of a key reached TWICE — so neither is the
+ *  other relaxed.
+ *
+ *  WHY IT IS A SELECTION AND NOT A WIDENING. `/livebase` and `/livebase-block` ARE one chain:
+ *  every key the narrow table binds the wide one binds too, so between them a function has only
+ *  "all the reused bases" and "those minus the scalar cells". A source that parked ONE numeric
+ *  base and left a second one inline is at neither end of that chain, and `singleCell` cannot
+ *  separate the two — both are reached at fixed offsets. `unfoldedOffset` can: on a compiler that
+ *  folds a constant subscript into the literal it materializes, the offset that reached the
+ *  instruction is the one a POINTER LOCAL strode, and the address that reached the pool with the
+ *  offset already in it is the one the source spelled inline.
+ *
+ *  BUT THIS TABLE IS NOT ITSELF ON THAT CHAIN, and reading it as "the middle one" is wrong in
+ *  both directions. `singleCell` and `unfoldedOffset` are independent fields, so this table and
+ *  `LIVEBASE_BLOCK_GATES` are lattice-INCOMPARABLE: a block walk with no constant displacement
+ *  (`varIndexed`, so not `singleCell`; offset 0, so no `unfoldedOffset`) is bound by that table
+ *  and refused by this one, and a scalar cell at a surviving offset is the reverse. Censused at
+ *  `decompile()`'s default structuring, map-less, over the artifact's 363 agbcc rows (23
+ *  unstructurable): 8 keys on 7 functions go to `/livebase-block` alone and 5 keys on 5 functions
+ *  to this table alone, and `kleod:ProcessInputAndUpdateEntities` crosses BOTH ways on one tree.
+ *  That is why `sameBases` compares sets and never subsets (see COVERAGE in the header).
+ *
+ *  The evidence is not proof and the gate never treats it as such — what it produces is a
+ *  candidate beside the other admissions, refereed by the differ. Two counterexamples, both
+ *  compiled rather than argued:
+ *    • an aggregate member emits the same operand offset as a strided pointer local;
+ *    • so does a SYMBOL BASE whose address the tree also uses as a value. agbcc CSEs the symbol
+ *      reference where it re-materializes the integer, so `sink((int)(u8 *)&gS); sink(((u8 *)&gS)
+ *      [3]); sink(((u8 *)&gS)[4]);` and its pointer-local twin emit BYTE-IDENTICAL Thumb — one
+ *      `.word gS`, `add r0, r4, #0`, `ldrb [r4, #0x3]`, `ldrb [r4, #0x4]`. On such a key the
+ *      field is not weak evidence, it is none. At the scope above, FOUR of this table's 43
+ *      admissions sit on one: `ProcessInputAndUpdateEntities` gBgDataPtrs / gCallbackQueue /
+ *      gUnk_03004C20 and `sa3:sub_802DFC8` gStageData. It costs fan and a tie-break, never
+ *      meaning, because the inline spelling rides beside it.
+ *  Absence is not evidence either way — see the header for the THREE ways to get one, including
+ *  the displacement the instruction could not encode, where this gate is blind rather than
+ *  unpersuaded — so `folded-offset` refuses on MISSING EVIDENCE and never on a claim that the
+ *  offset was folded.
+ *
+ *  This table is its own gate object, so `without(UNFOLDED_GATES, 'folded-offset')` is
+ *  `LIVEBASE_GATES` and the rule prices by ablation — the handle `BASEFOLD_GATES`' exemption
+ *  cannot have (see the note above it). */
+export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
+  ...LIVEBASE_GATES,
+  {
+    id: 'folded-offset',
+    why: 'no offset survived into the operand, so nothing says a pointer local strode this base',
+    sound: false,
+    rejects: (c) => !c.unfoldedOffset,
   },
 ];
 

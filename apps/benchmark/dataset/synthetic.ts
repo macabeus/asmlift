@@ -2674,7 +2674,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // respelling including register-allocation churn (104 diff lines, mostly r4/r5 renaming), not a
   // per-instruction decomposition, and neither row's endpoint produces it. `bgshare`/`bgswitch`
   // gate preferring an ALREADY-MINTED local, and a local DOES hold that base in that fan — 16,128
-  // of the 68,352 candidates read the cell through one, best 399 — so the missing capability is
+  // of the 68,352 candidates read the cell through one, best 399, MEASURED AT #138 (`84aa4222`)
+  // AND NOT RE-RUN SINCE — so the missing capability is
   // not a MINT but the SELECTION of which keys get one, which is the
   // `livepark`/`foldpark`/`unfoldpark` family below. `bgfixed` gates the fixed-element member
   // spelling, and applying THAT to the same two sites scores 386, unmoved, because the ROM reaches
@@ -4208,35 +4209,42 @@ export const SYNTHETIC: SynthSpec[] = [
   },
 
   // WHICH BASE KEYS GET A LOCAL — A PER-KEY QUESTION THE ROSTER ANSWERS PER FUNCTION. l3/basecse.ts
-  // hoists every key its gate table admits, so the two admissions on the roster are two ANSWERS FOR
-  // THE WHOLE FUNCTION: `/livebase` binds every key reached twice, `/livebase-block` binds those
-  // minus the ones read at a single fixed offset (`single-cell`). A source that spelled ONE base as
-  // a pointer local and left a second one inline is between them, and nothing on the roster is
-  // between them. These three rows are that gap and its two boundaries, one admission each.
+  // hoists every key its gate table admits, so an admission is an ANSWER FOR THE WHOLE FUNCTION.
+  // THE GAP THESE ROWS WERE AUTHORED FOR: with only `/livebase` (every key reached twice) and
+  // `/livebase-block` (those minus the ones read at a single fixed offset, `single-cell`) on the
+  // roster, a source that spelled ONE base as a pointer local and left a second one inline sat
+  // between them with nothing on the roster between them. These three rows are that gap and its
+  // two boundaries, one admission each. `/unfolded` (l3/basecse.ts, UNFOLDED_GATES) now fills it
+  // and `unfoldpark` is a MATCH.
   //
-  // THE DISCRIMINATOR ALREADY EXISTS IN THE VOCABULARY AND NO TABLE REQUIRES IT. `BaseKey`
+  // THE DISCRIMINATOR IT TURNS ON WAS ALREADY IN THE VOCABULARY. `BaseKey`
   // (l3/basecse.ts) carries `unfoldedOffset`: agbcc folds a constant SUBSCRIPT into the literal it
   // materializes, so an offset that arrived in the MEMORY OPERAND instead got there because
   // something other than a subscript put it there — a named base local, or an aggregate member.
   // `((s32 *)0x0300343C)[0]` emits `.word 0x300343c` + `ldr [r0]`; `s32 *p = (s32 *)0x03003400;
-  // p[15]` emits `.word 0x3003400` + `ldr [r0, #0x3c]`. The ONE table that reads the field,
-  // `BASEFOLD_GATES`, reads it as an EXEMPTION to `single-use` (a base reached ONCE) — the opposite
-  // question — and keeps both placement heuristics, so it never reaches a key reached twice inside a
-  // loop. Requiring the field instead of exempting on it is a gate that does not exist.
+  // p[15]` emits `.word 0x3003400` + `ldr [r0, #0x3c]`. The field now has TWO readers, and they ask
+  // OPPOSITE questions of it: `BASEFOLD_GATES` EXEMPTS `single-use` on it (a base reached ONCE) and
+  // keeps both placement heuristics, so it never reaches a key reached twice inside a loop, which
+  // is why it did not close this gap; `UNFOLDED_GATES` keeps `single-use` and REQUIRES the field.
+  // Requiring it instead of exempting on it is the gate `/unfolded` ships as — `/livebase`'s table
+  // plus `folded-offset`.
   //
   // THE MATRIX, and it is why there are three rows and not one. Best score per admission over each
-  // row's own fan, agbcc, candidate cache OFF. `/unfolded` is a TEMPORARY roster row — `/livebase`'s
-  // gates plus `rejects: (c) => !c.unfoldedOffset`, head placement, pairings on — added, measured
-  // and reverted; it is NOT in the tree, which is why `unfoldpark` is a nonmatch row today.
+  // row's own fan, agbcc, candidate cache OFF.
   //         plain  /livebase  /livebase-block  /scopebase  /unfolded
-  //  livepark   30     0             6              3        (shadowed)
-  //  foldpark   37     6             0              6        (shadowed)
+  //  livepark   30     0             6              3           0
+  //  foldpark   37     6             0              6           0
   //  unfoldpark 36     9             9              9           0
-  // Each row is won by a DIFFERENT admission and the third by none of them. `/unfolded` binds
-  // exactly what `/livebase` binds on `livepark` and exactly what `/livebase-block` binds on
-  // `foldpark`, so on both boundary rows it is shadowed by an earlier roster row and adds ZERO
-  // candidates (fan 28 and 34, identical label multisets with the probe on and off) — the over-fire
-  // control, and the reason a third admission cannot cost these two anything.
+  // Each row is won by a DIFFERENT admission, and `/unfolded` is the one that wins all three —
+  // which is what says the gap was SELECTION. It binds exactly what `/livebase` binds on
+  // `livepark` and exactly what `/livebase-block` binds on `foldpark`, so on those two it is
+  // offering an existing base set at its own placement rather than a set nothing else reaches.
+  // What that costs is measured per row, not asserted: fan 28 → 32 on `livepark`, 34 → 34 on
+  // `foldpark` and 36 → 44 on `unfoldpark`, ablated the way BASEFOLD_ADMISSIONS' note describes
+  // (a temporary env read filtering the roster at its one use site), cache off.
+  // `foldpark`'s 34 → 34 is a RENAME and not a spelling: the same source that
+  // won as `signed/livebase-block/volatile/sinkinit` wins as `signed/unfolded/volatile`, because
+  // the roster loop runs before the `/livebase ×` product loops and `seen` keeps the first label.
   //
   // WHAT EACH ROW ISOLATES.
   //   `livepark`   two bases, both wanted as locals, one of them read at a single fixed offset
@@ -4259,22 +4267,21 @@ export const SYNTHETIC: SynthSpec[] = [
   //                which says the gap is SELECTION and not "bind more".
   //
   // WHAT `unfoldpark` CAN AND CANNOT GATE, because a green row is not automatically a guard.
-  // `unfoldpark` is a GAP MARKER for the base-admission roster, not a regression guard on it:
-  // ablating the WHOLE roster — `/livebase`, `/livebase-block` and the `/basefold` pair together —
-  // leaves it at diff:9, unchanged, so no roster row can move it and a `9` here is evidence about
-  // nothing the roster does, until the admission it names exists. SCOPE THAT CLAIM TO THE
-  // ABLATION THAT BACKS IT: the 9 that survives is not the bare tree's, it is `/scopebase`'s.
-  // Under that ablation the row's whole fan is `9 signed/scopebase`, `9 unsigned/scopebase` and
-  // 36 for all six remaining candidates (`signed`, `signed/offmember`, `signed/vol-store` and the
-  // unsigned mirrors), so removing `/scopebase` ON TOP OF the whole-roster ablation takes the row
-  // 9 → 36.
+  // It IS the guard on `/unfolded`: ablate that one admission and the row goes MATCH → diff:9 at
+  // fan 44 → 36. It was a guard on nothing before that admission existed, and the ablation that
+  // backs THAT is the whole-roster one — `/livebase`, `/livebase-block` and the `/basefold` pair
+  // together left the row at diff:9, unchanged. SCOPE IT: the 9 that survived was not the bare
+  // tree's, it was `/scopebase`'s. Under that ablation the row's fan was `9 signed/scopebase`,
+  // `9 unsigned/scopebase` and 36 for all six remaining candidates (`signed`, `signed/offmember`,
+  // `signed/vol-store` and the unsigned mirrors), so removing `/scopebase` on top of it took the
+  // row 9 → 36.
   // AND THAT DOES NOT MAKE IT A GUARD ON `/scopebase`, which is the shape a deletion round is
   // likeliest to be misled by. A deletion only ever REMOVES candidates, so the question is what
   // the row's fan holds WITHOUT the roster ablation, and there the two `/scopebase` candidates are
-  // ties, not winners: `unfoldpark`'s fan is 36 candidates, `9 signed/scopebase` and
-  // `9 unsigned/scopebase` among them, and its best over the 34 candidates carrying no `scopebase`
-  // token is 9 as well — its own winner, `signed/livebase-block/volatile/sinkinit`. Deleting the
-  // plain `/scopebase` roster entry moves this row by 0. The guard exists only in a tree that has
+  // ties, not winners: `unfoldpark`'s fan is 44 candidates, `9 signed/scopebase` and
+  // `9 unsigned/scopebase` among them, and its best over the 42 candidates carrying no `scopebase`
+  // token is 0 — its own winner, `signed/unfolded/volatile-p1`. Deleting the plain `/scopebase`
+  // roster entry moves this row by 0. The guard exists only in a tree that has
   // already lost the base-admission roster, which is a configuration no round proposes and
   // `bench diff` cannot run.
   // NOR IS IT THE ONLY ROW REACHING THE PLAIN ADMISSION, censused rather than asserted: over every
@@ -4288,28 +4295,57 @@ export const SYNTHETIC: SynthSpec[] = [
   // `unsigned/fresh-merge/scopebase` at 0, going NONMATCH 11 with the plain respell ablated. So
   // the reaching population is six and the plain admission wins one of them. A CENSUS SENTENCE IN
   // A COMMENT EXPIRES THE MOMENT A ROW IS ADDED BESIDE IT — re-run it rather than reading it.
+  // AND A ROW ADDED TO THE ROSTER EXPIRES IT TOO, not only a row added to the dataset: a fan count
+  // is a fact about the roster it was taken under. Re-enumerated at this commit, candidates only:
+  // `dmascope` 24 of 544, `livepark` 2 of 32, `foldpark` 2 of 34, `unfoldpark` 2 of 44,
+  // `dmastride` 2 of 18 — the plain
+  // admission is reached in the same five fans and the counts under it moved on two of them.
+  // `sbscope` is NOT re-run here and its numbers above are the ones this file already carried: a
+  // candidates-only rig that does not hand the row its `ctx` enumerates a fan of FOUR for it
+  // against the harness's, so this rig cannot speak to that row. Quote the SCOPE with the number.
   // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS, and the two are one token apart:
   // rank.ts enumerates COALESCED variants of the same `hoistScopedBases` under
   // `/scopebase-coalesce`, and one of those wins a match — `kleod:UpdateHUDCounterDisplay:agbcc`,
   // MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`. So an exact-token
   // census of the plain admission never sees that row at all; a substring one does, and a deletion
   // aimed at `l3/scopebase.ts` rather than at `respell('/scopebase', …)` costs that match.
-  // The two neighbour rows ARE guards on the roster, each moved by its own admission and by
-  // neither the other's nor the pair's: `livepark` MATCH → diff:3 with `/livebase` ablated,
-  // `foldpark` MATCH → diff:6 with `/livebase-block` ablated — and under the whole-roster ablation
-  // both land on `/scopebase` too, at 3 and 6.
+  // The two neighbour rows ARE guards on the roster, but on a CONFIGURATION and not on one lever
+  // each, and naming one lever is what makes such a guard go vacuous. `/unfolded` binds the same
+  // base on both, so a SINGLE-row ablation moves neither: `livepark` is MATCH with `/livebase`
+  // alone removed and `foldpark` is MATCH with `/livebase-block` alone removed. It takes
+  // `/livebase` + `/unfolded` to get `livepark` to diff:3 and `/livebase-block` + `/unfolded` to
+  // get `foldpark` to diff:6, and under the whole-roster ablation both land on `/scopebase` at
+  // those same 3 and 6. ADDING AN ADMISSION THAT REACHES A GUARD ROW CAN MAKE ITS ABLATION
+  // VACUOUS WITHOUT CHANGING ANY PUBLISHED OUTCOME, which is why no gate in the order can see it:
+  // re-run every ablation a comment quotes whenever the roster gains a row.
   //
-  // NO EXISTING ROW EXERCISES IT, censused rather than argued. Enumerating every agbcc synthetic row
-  // with the probe admission off and on — candidates only, no compiles, comparing the md5 of each
-  // row's sorted distinct-source set — over the 229 rows that existed before these three: 8 decline
-  // on unrelated links (`uhalf`/`utag` overlapping fields, three `preupdate_*`, `lladd`/`llsub`
-  // unmodelled `adc`/`sbc`, `stkarg` stack-as-data), 220 hash IDENTICALLY, and exactly ONE gains
-  // candidates — `dmascope`, 260 → 324 distinct sources, 64 of them probe-labelled. Scored both ways
-  // `dmascope` does not move: 9 on `signed/regionbase/volatile/vol-store/initfirst` either way. So
-  // the capability is effectively untested — zero rows change when it changes — and the one guard
-  // that reads the field, `BASEFOLD_GATES`, never reaches these keys. Re-run with these three rows
-  // in it (232 rows): 8 decline, 222 hash identically, 2 change — `dmascope` and `unfoldpark`. That
-  // `livepark` and `foldpark` are in the identical 222 is the over-fire control by measurement.
+  // WHAT THE ADMISSION REACHES AND WHAT IT COSTS, censused rather than argued: every agbcc row the
+  // artifact carries, candidates only, no compiles, the entry off and on, comparing the md5 of
+  // each row's sorted distinct-source set — and in BOTH symbol-map configurations, because with a
+  // map every absolute pool constant lifts to a `gaddr` and a census run in one arm is blind to
+  // the other. SEVEN rows gain candidates and ZERO lose one, the same seven in both arms:
+  //   kleod:ProcessInputAndUpdateEntities  21120 → 23040 map-less   58752 → 62208 map-ful
+  //   kleod:ConfigureEntityBehavior         1056 →  1248             1536 →  1728
+  //   synthetic:dmascope                     496 →   544              496 →   544
+  //   synthetic:dmaflat / synthetic:dmapoll   72 →    80               72 →    80
+  //   synthetic:unfoldpark                    36 →    44               36 →    44
+  //   synthetic:livepark                      28 →    32               28 →    32
+  // Zero losses is the roster's additivity holding: the entry is appended, so no earlier row's
+  // shadow decision moves and no source stops being emitted.
+  // TWO SCOPES IN ONE TABLE, and the per-row figures are stable across them while the TOTALS are
+  // not. The map-less arm is re-run at this commit over 363 agbcc rows (23 throw identically, 333
+  // hash identically, 7 gain): corpus fan 45223 → 47411 distinct sources, +4.84%. The map-ful
+  // column and its total, 81747 → 85471 (+4.6%), were taken over the 358 agbcc rows the artifact
+  // carried before this family's last rebase and are NOT re-run here; the seven rows and the zero
+  // losses are what reproduced in both. Either way the cost is CONCENTRATED —
+  // `ProcessInputAndUpdateEntities`, the corpus's slowest row, takes +3456 of the map-ful +3724.
+  // A SECOND POPULATION MOVES WITHOUT THE FAN MOVING: 21 rows carry `/unfolded`-labelled
+  // candidates whose source set is byte-identical to the ablated arm's, `synthetic:foldpark` (4)
+  // and `kleod:UpdateCameraScroll` (1024) among them. Those are renames, not spellings, and the
+  // only thing they can move is a published `candidateLabel` — which is why the gate on this entry
+  // is `bench diff`'s label field and not `bench regression`.
+  // The one other guard that reads the field, `BASEFOLD_GATES`, reaches none of these keys: its
+  // census is empty on all three rows here.
   //
   // CUT FROM kleod:LoadBGTilemapData:agbcc, where the same three-way split is 399 / 386 / 383 —
   // `/livebase` parks five bases, `/livebase-block` parks one, and parking exactly the two whose
@@ -4317,10 +4353,20 @@ export const SYNTHETIC: SynthSpec[] = [
   // AND NOT FROM THE SENTENCE: that hand-compiled 383 is the 386 winner plus one local, so it
   // carries THREE pointer-base inits — the two parked bases and the winner's own `/addr-home` walk
   // local — and a filter written from the two-base description measures a different set than the
-  // spelling does. Both were counted, and the fan of 68,352 contains ZERO candidates with EITHER,
-  // measured at both dedup sites over all 165,888 generated spellings. No stack of gate ablations
-  // can produce it: `hoistBaseLocals` binds `admittedBases(sfn, gates)` wholesale and the two
-  // tables are a chain, so ablation only ever widens. `unfoldpark` is that shape at 15 lines.
+  // spelling does. Both were counted, and the fan of 68,352 contained ZERO candidates with
+  // EITHER, measured at both dedup sites over all 165,888 generated spellings. No stack of gate
+  // ablations can produce it: `hoistBaseLocals` binds `admittedBases(sfn, gates)` wholesale and
+  // the two tables are a chain, so ablation only ever widens. `unfoldpark` is that shape at
+  // 15 lines.
+  // BOTH TOTALS ABOVE ARE #138's (`84aa4222`) AND NEITHER WAS RE-RUN HERE: that function's fan was
+  // 68,352 then and 112,896 at this commit, so the ZERO is a claim about generated spellings that
+  // needs a fresh enumeration to restate. A total goes stale silently while the delta beside it
+  // stays true — re-run one before budgeting against it, and stamp it when you cannot.
+  // THE ADMISSION REACHES THAT FUNCTION, which is a census fact and not a score: on its default
+  // structuring `UNFOLDED_GATES` admits exactly two keys, `0x040000D4` and `0x03003430`, where
+  // `/livebase` admits five, `/livebase-block` one and `/basefold` none. Reaching and COMPOSING
+  // are different facts and only the ranked command answers the second — that function is not a
+  // benchmark row, so `regression` and `diff` are blind to it.
   //
   // agbcc only, and for a reason this family owns rather than the `dmascope` one it inherits:
   // `unfoldedOffset` is evidence only where the target declares
