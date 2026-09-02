@@ -4999,16 +4999,26 @@ export const SYNTHETIC: SynthSpec[] = [
   //   extern u16 gTbl[]; u32 harr(u32 i){ u16 *p = (u16 *)&gTbl; return p[i]; }          -> 0
   //   struct Elem0 {...}; u32 bgarr(u32 i){ struct Elem0 *p = (struct Elem0 *)&gBgInfo;
   //                                         return p[i].field_16; }                      -> 0
-  //   the same base-local shape against `harridx`                                        -> 6
-  //   the same base-local shape against `tblrank2`                                       -> 6
+  //   the same base-local shape against `harridx` (with or without the cast)              -> 6
+  //   a RANK-PRESERVING base local against `tblrank2`
+  //     `const s32 *(*p)[2] = (const s32 *(*)[2])&gPtrTbl; return (s32)p[i][j];`          -> 2
+  //   a FLAT base local against `tblrank2` (base local AND the rank flattened)            -> 6
   //
   // So `harr` and `bgarr` DO NOT isolate the array-typed subscript: a base local reaches their
   // targets byte-for-byte, and that is the CHEAPER of two sufficient answers — a value home over a
   // named symbol, which is the family asmlift already has (`value-home` above, though every row
-  // there spells its base as an address macro, never as a named symbol). `harridx` and `tblrank2`
-  // are the rows where the base local is NOT sufficient and the array-typed operand is forced.
-  // A round that reads this block should close `harr`/`bgarr` with the base local and reach for
-  // the array fork only for the other two.
+  // there spells its base as an address macro, never as a named symbol). A round that reads this
+  // block should close `harr`/`bgarr` with the base local, and reach for the array fork only for
+  // the other two.
+  //
+  // `harridx` and `tblrank2` are the rows where the base local is NOT sufficient, but they fail
+  // it differently and the difference is the point. On `harridx` the base local is simply wrong
+  // (6, against asmlift's 5 today) — the addend decides and no base spelling reaches it. On
+  // `tblrank2` the base local is a PARTIAL: rank-preserving it scores 2, BETTER than the 3 asmlift
+  // ranks today, so a base-local lever alone would move that row without matching it. Only the
+  // array-typed subscript with the rank preserved reaches 0. Note also that the two `tblrank2`
+  // figures differ by whether the RANK survives, not by the base spelling — flattening the rank
+  // costs 4 points on its own, which is the same axis the additivity gate below measures.
   //
   // Today, agbcc only, map-less, fan 2 on every scored row, BOTH candidates of every fan scoring
   // identically, winning label `unsigned` on every scored row, one declaration synthesized on
@@ -5020,7 +5030,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //                    `add r0,r0,#0x1`, asmlift `((u8 *)&gTbl)[a0 + 1]`, which agbcc folds
   //                    into a pool word of `.word gTbl+0x1` and no `add`. Base local scores 6
   //   bgarr     8      the struct-array member read. Base local OR array subscript reaches it
-  //   tblrank2  3      the declared rank — AND the additivity gate, below. Base local scores 6
+  //   tblrank2  3      the declared rank — AND the additivity gate, below. A rank-preserving
+  //                    base local scores 2 here: better than today, still not a match
   //   arrbias   0      MATCH. OVER-FIRE CONTROL, addend direction — see below
   //   arrcast   0      MATCH. OVER-FIRE CONTROL, zero-addend direction — see below
   //   outparam  none   no score at all: a whole-function DECLINE
