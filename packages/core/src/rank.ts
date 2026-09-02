@@ -54,7 +54,7 @@ import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
-import { inferGlobalArrays, sameDerivedShape } from './raise/globalshape';
+import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import {
@@ -2149,6 +2149,7 @@ export function enumerateCandidates(
       for (const lv of liftVariants) {
         let fn: Fn;
         let inferredSymbols = new Map<string, SymbolInfo>();
+        let orderLicensed: ReadonlySet<string> = new Set<string>();
         try {
           // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
           // flags here would leave a fourth axis sharing the primary's already-mutated `base`.
@@ -2177,6 +2178,13 @@ export function enumerateCandidates(
           // knows this name" but "whatever will be DECLARED for this name says the same thing" —
           // a name the two answer differently keeps the cast form, which needs no declaration.
           inferredSymbols = inferGlobalArrays(fn, target);
+          // The ORDER half, off the same variant lift. NO map-precedence filter, and the
+          // asymmetry is the point: a shape is a DECLARATION, so a name the map describes must
+          // not be spelled from this function's strides — a licence declares nothing, and the
+          // spelling it enables keeps the cast (`(T *)&gSym`), which is byte-correct under any
+          // declaration. A map that names the symbol an array takes the access to a bare `var`
+          // base anyway, which carries no licence: the two never meet.
+          orderLicensed = orderLicensedGlobals(fn, target);
           for (const [n, si] of [...inferredSymbols]) {
             if (baseOpts.symbols?.has(n) === true || !sameDerivedShape(declSymbols.get(n), si)) {
               inferredSymbols.delete(n);
@@ -2237,6 +2245,7 @@ export function enumerateCandidates(
             sfn = structureChecked(fn, {
               ...svOpts,
               ...(inferredSymbols.size ? { inferredSymbols } : {}),
+              ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
               preserveDivergentBranchSense: s.sense,
               negateJoinedBranchSense: s.join ? !defSense : defSense,
               anchorConstCopies: s.anchor,

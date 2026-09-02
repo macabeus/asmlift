@@ -23,7 +23,7 @@ import { mergeCommonTails } from './l3/tailmerge';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
-import { assumedShapes, inferGlobalArrays } from './raise/globalshape';
+import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
@@ -150,6 +150,9 @@ function runTower(
   // was materialized before the index was scaled — is destroyed by the raising tower below
   // (raise/globalshape.ts's module note). Empty unless the target opts in.
   const inferredSymbols = inferGlobalArrays(fn, target);
+  // …and the ORDER half of the same reading, for globals no shape describes (a struct element is
+  // licensed here and shaped nowhere). Read off the same lifted fn, for the same reason.
+  const orderLicensed = orderLicensedGlobals(fn, target);
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
@@ -169,6 +172,7 @@ function runTower(
     onGap,
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
+    ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
   });
 
   // (5) lower + print: neutral AST → target language

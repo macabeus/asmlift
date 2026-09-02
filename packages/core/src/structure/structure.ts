@@ -51,6 +51,7 @@ import {
   exprHasEffect,
   gapReasonFor,
   mapExprChildren,
+  mapStmtExprs,
   negateCond,
   stmtChildren,
   walkExprs,
@@ -1110,6 +1111,49 @@ export interface StructureOptions {
    *  `/no-bitfield` axis's decline — see bitfield-members.test.ts). And it keeps the derivation
    *  ATTRIBUTABLE: everything the map does stays keyed on the map. */
   inferredSymbols?: Map<string, SymbolInfo>;
+  /** THE ORDER HALF of the same derivation (raise/globalshape.ts `orderLicensedGlobals`): the
+   *  globals whose address the assembly materialized BEFORE it scaled the index. Not a shape and
+   *  not a declaration — nothing is spelled from it here — it is stamped onto every `index` node it
+   *  reaches (`Expr.baseOrdered`, l3/ast.ts) for the L3 pass that decides whether a base gets a
+   *  HOME.
+   *
+   *  A SUPERSET of `inferredSymbols`' names, and its own field for exactly that reason: a struct
+   *  element is licensed here and has no shape there. */
+  orderLicensedGlobals?: ReadonlySet<string>;
+}
+
+/** The named global an `index` node's base LEAF denotes, or undefined. Two shapes reach this pass
+ *  with a symbol under them: the bare `&gSym` an ordinary element access indexes, and the
+ *  `(struct S *)&gSym` an array-of-struct element indexes — the reinterpret cast is the base's
+ *  spelling, not a different base. Anything else (a numeric address, a local, arithmetic) names no
+ *  global and can carry no order licence. */
+function indexBaseSymbol(e: Expr): string | undefined {
+  if (e.k === 'addr') {
+    return e.name;
+  }
+  return e.k === 'cast' && e.e.k === 'addr' ? e.e.name : undefined;
+}
+
+/** Stamp `baseOrdered` on every `index` whose base names an order-licensed global — the ONE place
+ *  the L1 order fact enters the L3 tree.
+ *
+ *  A post-pass over the finished body rather than a `...fromOrder` at each construction site: the
+ *  index node is built at six of them (memAccess's three spellings, arrayAccess's three), the
+ *  licence is per SYMBOL and not per site, and a walk is exhaustive by construction where a
+ *  seventh site would silently carry no evidence. */
+function stampOrderedBases(body: Stmt[], licensed: ReadonlySet<string> | undefined): Stmt[] {
+  if (licensed === undefined || licensed.size === 0) {
+    return body;
+  }
+  const stamp = (e: Expr): Expr => {
+    const mapped = mapExprChildren(e, stamp);
+    if (mapped.k !== 'index') {
+      return mapped;
+    }
+    const sym = indexBaseSymbol(mapped.base);
+    return sym !== undefined && licensed.has(sym) ? { ...mapped, baseOrdered: true as const } : mapped;
+  };
+  return body.map((s) => mapStmtExprs(s, stamp));
 }
 
 /** Test-only seams. SEPARATE from `StructureOptions` on purpose: `structureOptionsFor` builds that
@@ -1184,6 +1228,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     onGap = 'strict',
     symbols: mapSymbols,
     inferredSymbols,
+    orderLicensedGlobals,
   } = opts;
   // THE shape dictionary the rendering context asks, map-first. Built as a lookup rather than a
   // merged Map because the map is the PROJECT's and is asked by name for a whole project's worth
@@ -4157,7 +4202,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return out;
   };
 
-  const body = recognizeForLoops(structureRegion(entry, null));
+  const body = stampOrderedBases(recognizeForLoops(structureRegion(entry, null)), orderLicensedGlobals);
   // THE OBLIGATION `anchorConstCopies` CANNOT DISCHARGE ON ITS OWN, checked now that the render is
   // complete. Anchoring is two edits that must both land: `suppressedArgs` DELETES a write from its
   // edge, and `anchoredAt` owes it back at the const's def site. Its refusal conditions establish

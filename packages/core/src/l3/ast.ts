@@ -95,7 +95,27 @@ export type Expr =
   // gaddr in its cone, versus `l3/offmember.ts`'s leaf base), so a shared dispatch would be
   // scaffolding over two rules that already disagree about what a base is. What the reader needs
   // is the map, which is this paragraph.
-  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: Expr[]; operandOff?: number }
+  //
+  // `baseOrdered` is the SECOND evidence field, and it answers about the base rather than the
+  // offset: the input assembly materialized this access's base BEFORE it scaled the index
+  // (raise/globalshape.ts `orderLicensedGlobals`, stamped at the structure seam). On a compiler
+  // whose subscript expansion forks on the base's array-ness that is the order a declared array or
+  // a POINTER LOCAL produces, and the inline cast of a symbol's address produces the other one —
+  // so it is what says a base may be given a HOME (`l3/basecse.ts`'s `order-licensed`). Absent
+  // means "no such evidence", never "the index came first": a scaling in another block is not
+  // comparable, and a compiler that has not opted in stamps nothing. `exprEquals` ignores it for
+  // `operandOff`'s reason — both spellings denote the same cell — and it is per SYMBOL, so every
+  // access of one name carries the same answer.
+  | {
+      k: 'index';
+      base: Expr;
+      idx: Expr;
+      width: number;
+      signed: boolean;
+      lead?: Expr[];
+      operandOff?: number;
+      baseOrdered?: true;
+    }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
   // Unlike `index`, this carries the field NAME (which encodes the byte offset, `field_<off>`),

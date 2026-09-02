@@ -14,6 +14,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
+import { type Expr, type Stmt, exprChildren, stmtChildren, stmtExprs } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
 import {
@@ -979,5 +980,67 @@ describe('the order licence, split out for the value-home consumer', () => {
       compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, arrayShapeFromStride: false },
     };
     expect(orderLicensedGlobals(lift('f', BASE_FIRST), off).size).toBe(0);
+  });
+});
+
+// ── the licence's route into the L3 tree ──────────────────────────────────────────────────────
+//
+// The order fact is read at L1 and consumed at L3 (l3/basecse.ts decides whether a base gets a
+// HOME), so it travels on the access node — `index.baseOrdered`, stamped once at the structure
+// seam. These pin the route rather than the rule: that the stamp lands where the licence says and
+// nowhere else, and that it is still there after the rewrites `structureChecked` runs on its own
+// output — which is the tree rank hands the lever.
+
+/** Every `index` node in the emitted tree, as `<base symbol or shape> ordered=<bool>`. */
+const stamps = (name: string, asm: string): string[] => {
+  const out: string[] = [];
+  const walk = (e: Expr): void => {
+    if (e.k === 'index') {
+      const b = e.base;
+      const sym = b.k === 'addr' ? `&${b.name}` : b.k === 'cast' && b.e.k === 'addr' ? `(T *)&${b.e.name}` : b.k;
+      out.push(`${sym} ordered=${e.baseOrdered === true}`);
+    }
+    exprChildren(e).forEach(walk);
+  };
+  const walkS = (s: Stmt): void => {
+    stmtExprs(s).forEach(walk);
+    stmtChildren(s).forEach(walkS);
+  };
+  decompile(name, asm, ARMV4T_AGBCC, {}).sfn.body.forEach(walkS);
+  return out;
+};
+
+describe('the licence reaches L3 on the access node', () => {
+  // The `bgarr` pair: the SAME seven instructions, differing only in where the pool load sits.
+  const STRUCT_BASE_FIRST = thumb(
+    'f',
+    '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+    '.word\tgBgInfo',
+  );
+  const STRUCT_INDEX_FIRST = thumb(
+    'f',
+    '\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tldr\tr2, .L3\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+    '.word\tgBgInfo',
+  );
+
+  test('a struct element over a licensed base is stamped', () => {
+    // …and it survives `structureChecked`'s own rewrites — tail merging, dead-store elimination and
+    // the DEFAULT base hoist all run between the stamp and this tree, which is the one rank reads.
+    expect(stamps('f', STRUCT_BASE_FIRST)).toEqual(['(T *)&gBgInfo ordered=true']);
+  });
+
+  test('the same access with the index materialized first is not', () => {
+    expect(stamps('f', STRUCT_INDEX_FIRST)).toEqual(['(T *)&gBgInfo ordered=false']);
+  });
+
+  test('a name the DECLARATION derivation shaped has no `&gSym` base left to stamp', () => {
+    // Where the shape derives, the access spells the bare `gTbl[i]` and its base is a `var`. The
+    // two consumers do not overlap on one access — the home question only arises where the
+    // declaration one was refused.
+    expect(stamps('f', BASE_FIRST)).toEqual(['var ordered=false']);
+  });
+
+  test('an unlicensed cast base is left alone', () => {
+    expect(stamps('f', INDEX_FIRST)).toEqual(['&gTbl ordered=false']);
   });
 });
