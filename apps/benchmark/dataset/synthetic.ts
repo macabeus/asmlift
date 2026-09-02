@@ -4637,9 +4637,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // decl-vs-cast, and a price measured here does not carry to a `gaddr` array declaration.
   //
   // NO ROW for the third gap this investigation named — a folded `symbol+k` pool literal against
-  // the reference's single `symbol` — and the reason is structural, not an omission: a synthetic
-  // candidate has no ELF, so no symbol map is ever attached and a `gaddr` never forms. Only a
-  // real-tier row can reach it.
+  // the reference's single `symbol`. The reason given here was that a synthetic candidate has no
+  // ELF, "so no symbol map is ever attached and a `gaddr` never forms", and that stopped being
+  // true: `SynthSpec.symbols` now exists and rows in this file set it, so a synthetic row CAN be
+  // handed a map and a `gaddr` CAN form. The rows in THIS family still carry none, so the gap is
+  // unreached here — but it is reachable now by a synthetic row, not only by a real-tier one.
   //
   // NO ROW for declaration order either, because one already exists: permuting the 14 declarations
   // of asmlift's own winning `dma_fill_uninit` candidate and recompiling gives 0 / 6 / 9 / 12 over
@@ -5076,15 +5078,22 @@ export const SYNTHETIC: SynthSpec[] = [
   //     Note `--only` is a SUBSTRING filter. Run for all seven syms, `harr` is the ONE that does
   //     not isolate — it also runs `harridx`, printing `[1/2]` and `[2/2]`; the other six each
   //     print `[1/1]`.
-  //   • FAN SIZE, WINNING LABEL, SYNTHESIZED COUNT — the CLI against a built target,
-  //     `asmlift <sym>.s --target agbcc --score-against <sym>.o`. Its `[declared]` line reads
-  //     `1 declaration(s) synthesized from the target asm`; its `[ranked]` line reads
-  //     `2 candidate(s) scored, 0 dropped, 0 withheld, 1 synthesized, best unsigned: <score>`.
+  //   • FAN SIZE, WINNING LABEL, SYNTHESIZED COUNT — the CLI against a built target:
+  //     `asmlift <sym>.s --config apps/benchmark/dataset/toolchains/agbcc/decomp.yaml
+  //      --score-against <sym>.o`, with `$ASMLIFT_AGBCC` and `$ASMLIFT_ARM_AS` both exported.
+  //     THE `--config` IS NOT OPTIONAL and a bare `--target agbcc` is not a substitute — an
+  //     earlier cut of this bullet wrote the command without it, and run that way it prints no
+  //     figures at all, only `--score-against needs tools.asmlift.compiler in decomp.yaml`. That
+  //     yaml is the one the benchmark itself scores through; `--target` then comes from it.
+  //     Its `[declared]` line reads `1 declaration(s) synthesized from the target asm`; its
+  //     `[ranked]` line reads `2 candidate(s) scored, 0 dropped, 0 withheld, 1 synthesized,
+  //     best unsigned: <score>` followed by a source stamp.
   //   • EVERY CANDIDATE'S SCORE — `[ranked]` prints only the WINNER, so this needs a third call:
   //     `decompileRanked(sym, asm, tc.targetDesc, obj, { compile: benchCompilerFor('agbcc') })`,
-  //     walking its result list. Measured, `unsigned` and `signed` tie on all six scored rows —
-  //     2/2, 5/5, 8/8, 3/3, 0/0, 0/0. THIS is the enumeration both controls below require, and
-  //     no `bench` subcommand substitutes for it.
+  //     walking `.candidates` (NOT `.results`, which does not exist — `rankBy` returns
+  //     `{ best, candidates, dropped, withheld }`). Measured, `unsigned` and `signed` tie on all
+  //     six scored rows — 2/2, 5/5, 8/8, 3/3, 0/0, 0/0. THIS is the enumeration both controls
+  //     below require, and no `bench` subcommand substitutes for it.
   //
   // The scores those commands report today, and what each row is for:
   //
@@ -5113,9 +5122,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // three family headers far above this block (`value-home`, `read-once`, and the fold family that
   // books the named-symbol question as unreachable) asserted a synthetic candidate could not
   // declare an extern global; these seven rows refute that, and all three are corrected in place.
-  // One nearby claim is NOT refuted and is left standing: no symbol map attaches to a synthetic
-  // row, so a folded `gaddr` pool literal still never forms here. asmlift's synthesized
-  // `extern u32 gTbl;` is the DECLARE path, which is a different thing.
+  // A nearby claim was ALSO left standing here — "no symbol map attaches to a synthetic row" — and
+  // it is FALSE on this base: `SynthSpec.symbols` exists and rows above set it, so a folded `gaddr`
+  // pool literal CAN form on a synthetic row. It does not form on THESE SEVEN, because none of them
+  // carries a map, and that is deliberate rather than incidental: measured, handing `harr` a map
+  // that declares `gTbl` an array flips asmlift's own winner from `((u16 *)&gTbl)[a0]` to the bare
+  // `gTbl[a0]` — the very spelling this family exists to measure the absence of — so a mapped row
+  // would measure nothing here. asmlift's synthesized `extern u32 gTbl;` is a third thing again:
+  // the DECLARE path, which names the symbol without typing it.
   //
   // THE SOUNDNESS RULE THE FAMILY ENCODES. There are TWO INDEPENDENT AXES here, and the first cut
   // of this block fused them into one sentence about "bare versus cast" that is not what either
@@ -5271,25 +5285,41 @@ export const SYNTHETIC: SynthSpec[] = [
   // This is a
   // ONE-SIDED HANDICAP ON EXACTLY THESE ROWS and it should be read that way: asmlift does not need
   // the `ctx` because it synthesizes the declaration off the target asm itself, and m2c cannot.
-  // The rows are published anyway, with the cost stated, because the alternative is worse — the
-  // SYNTHETIC tier does not prepend `ctx` to m2c's candidate at scoring time the way the real tier
-  // does (`makeRealScorer` in `apps/benchmark/src/cases/real.ts` vs `scoreM2c` in
-  // `apps/benchmark/src/eval/evaluate.ts`), so putting the array in `ctx` here yields a noncompile
-  // on every scored row and measures even less. Prototypes-only is this dataset's stated rule (see the
-  // file header) and is what ships; the m2c column on these seven rows is NOT a fair read of m2c's
-  // array-shape ability, and fixing the tier is a harness change that belongs to a harness round.
+  // The rows are published anyway, with the cost stated, because BOTH ways of paying it measure
+  // less. Route one, `ctx` alone: the SYNTHETIC tier does not prepend `ctx` to m2c's candidate at
+  // scoring time the way the real tier does (`makeRealScorer` in `apps/benchmark/src/cases/real.ts`
+  // vs `scoreM2c` in `apps/benchmark/src/eval/evaluate.ts`), and measured, an array in `ctx` and
+  // nothing prepended is a NONCOMPILE on all six scored rows. Route two exists on this base and an
+  // earlier cut of this sentence did not know it — it called the fix "a harness change that belongs
+  // to a harness round", and it is not: a synthetic row that sets `symbols` already gets the map's
+  // declarations rendered into `ctx` (`withMapDeclarations`, `src/cases/synthetic.ts`) AND prepended
+  // to m2c's candidate at scoring time (`m2cDeclarationsFor`, `src/eval/evaluate.ts`), so closing
+  // the asymmetry is a DATASET change today. It is refused here for the reason given far above: the
+  // same map reaches asmlift and flips its winner to the bare subscript, so it would buy m2c a fair
+  // column by deleting the gap the rows measure. Prototypes-only — the file header's rule, whose
+  // one stated exception is exactly a row carrying `symbols` — is what ships; the m2c column on
+  // these seven rows is NOT a fair read of m2c's array-shape ability, and the row that closes it is
+  // a real-tier row where both sides get the project's own declarations.
   //
   // agbcc only. The nearest precedent is `read-once`, which is genuinely agbcc-only (4 dataset
   // entries, 4 rows, all agbcc); `uninit-local` and `value-home` are NOT — they span all four
   // toolchains, so no appeal to them justifies anything here. COUNTED IN ROWS, which is what
-  // `bench` reports and what "rows" means everywhere else in this file: `uninit-local` is 16 rows
-  // (agbcc 7, ido7.1 3, gcc2.7.2kmc 3, mwcc_242_81 3) and `value-home` is 69 (agbcc 49,
-  // gcc2.7.2kmc 8, ido7.1 6, mwcc_242_81 6 — 64 synthetic plus 5 real). The "7 and 52" an earlier
-  // cut of this sentence quoted are DATASET-ENTRY counts written as row counts; 7 is also exactly
-  // `uninit-local`'s agbcc-only row total, so the one number a reader checks against the artifact
-  // reads as evidence for the opposite of the claim. The reason these
-  // stay agbcc-only is direct: whether ido7.1, gcc2.7.2kmc and mwcc_242_81 fork the subscript on
-  // the operand's array-ness at all was NOT measured, so those lanes are left off rather than
+  // `bench` reports and what "rows" means everywhere else in this file, and read off THE ARTIFACT
+  // THIS BRANCH PUBLISHES: `uninit-local` is 16 rows (agbcc 7, ido7.1 3, gcc2.7.2kmc 3,
+  // mwcc_242_81 3) and `value-home` is 72 (agbcc 51, gcc2.7.2kmc 8, ido7.1 7, mwcc_242_81 6 —
+  // 67 synthetic plus 5 real). TWO earlier cuts of this sentence got these wrong in two different
+  // ways, and the second way is the instructive one. The first quoted "7 and 52": at the base this
+  // round was cut from, `uninit-local` was 15 rows over 6 dataset entries and `value-home` 69 over
+  // 50, so 52 is neither a row nor an entry count — it is the number of LINES quoting
+  // `'value-home'` in this file there. (7 does coincide with `uninit-local`'s agbcc-only row total
+  // on THIS base, which is how a wrong number survives a reader's spot-check.) The second cut
+  // quoted 69 / 49 / 8 / 6 / 6 / 64-plus-5 — correct when written, and stale by the time the round
+  // landed, because a sibling family merged into main and the rebase moved `value-home` by three
+  // rows underneath a sentence nobody re-measured. A cross-family census in a comment is a fact
+  // about the whole file, so it goes stale on someone ELSE's merge: re-run it after every rebase,
+  // from the artifact and not from a `grep` over this file, which counts prose lines. The reason
+  // these stay agbcc-only is direct: whether ido7.1, gcc2.7.2kmc and mwcc_242_81 fork the subscript
+  // on the operand's array-ness at all was NOT measured, so those lanes are left off rather than
   // assumed; what would earn one is the same compiled pair on that toolchain showing the same
   // divergence.
   {
