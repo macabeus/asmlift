@@ -100,7 +100,7 @@
 // and the accesses stride correctly with no per-use cast. A wrong hoist (a base agbcc would actually
 // re-materialize) only changes recompiled bytes -> a LOST match under the zero-lost gate, never a
 // miscompile: the address value is identical, just held in a different place.
-import { type IrType, T, scalarTypeForAccess } from '../ir/types';
+import { type IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
@@ -113,9 +113,28 @@ import { type BaseInit, type HoistPlacement, nameAllocator, placeBaseLocals } fr
 // argbase.ts take is the obvious consolidation and it is wrong twice over: this pass has no `lead`
 // handling, so a rank-aware `g[0][i]` comes out as `p[0][i]` through a scalar pointer, and it
 // undoes raise/gvn.ts's hoist on exactly the rows a symbol map serves (test/addr-placement.test.ts).
-type HoistableBase = Extract<Expr, { k: 'addr' } | { k: 'const' }>;
-const isHoistableBase = (e: Expr): e is HoistableBase => e.k === 'addr' || e.k === 'const';
-const baseId = (b: HoistableBase): string => (b.k === 'addr' ? `a:${b.name}` : `c:${b.value}`);
+//
+// …and a REINTERPRET CAST of one of those leaves, `((struct S *)&gSym)[i]`, which is the same leaf
+// wearing the pointer type its element needs. The structurer emits it for an array of STRUCTS
+// (structure.ts arrayAccess's `fieldOff` path), where the scalar `scalarTypeForAccess` this pass
+// otherwise mints is meaningless — a 28-byte element has no `intType`. The cast is the base's
+// SPELLING rather than a different base, so it hoists to `struct S *p = (struct S *)&gSym` and the
+// accesses stride it exactly as a scalar key's do. Refused when the cast's target is not a pointer
+// (nothing an index can stride) and when it is `volatile`: dropping that qualifier onto a
+// non-volatile local would make every access through the local a plain one, which is a silent
+// change of meaning rather than of bytes — volatility on a hoisted local is `l3/volatileptr.ts`'s
+// question, asked of the local and not of the leaf.
+//
+// The KEY carries the cast's target type, because two casts over one symbol stride differently and
+// are two locals.
+type HoistableLeaf = Extract<Expr, { k: 'addr' } | { k: 'const' }>;
+type HoistableCast = Extract<Expr, { k: 'cast' }> & { e: HoistableLeaf };
+type HoistableBase = HoistableLeaf | HoistableCast;
+const isHoistableLeaf = (e: Expr): e is HoistableLeaf => e.k === 'addr' || e.k === 'const';
+const isHoistableBase = (e: Expr): e is HoistableBase =>
+  isHoistableLeaf(e) || (e.k === 'cast' && e.to.kind === 'ptr' && e.volatile !== true && isHoistableLeaf(e.e));
+const leafId = (b: HoistableLeaf): string => (b.k === 'addr' ? `a:${b.name}` : `c:${b.value}`);
+const baseId = (b: HoistableBase): string => (b.k === 'cast' ? `${leafId(b.e)} <${typeToString(b.to)}>` : leafId(b));
 
 /** The (base, access-shape) key an `index`-of-hoistable-base shares with its reuse siblings. */
 const keyOf = (base: HoistableBase, width: number, signed: boolean): string => `${baseId(base)} ${width} ${signed}`;
@@ -138,6 +157,12 @@ interface Collected {
   /** keys with an access whose constant offset arrived in the MEMORY OPERAND (l3/ast.ts
    *  `index.operandOff`) — the input to `unfoldedOffset`. */
   operandOff: Set<string>;
+  /** keys EVERY access of which carries the order licence (l3/ast.ts `index.baseOrdered`) — the
+   *  input to `orderLicensed`. Per key rather than per access because a home is one decision for
+   *  the whole key; the licence is derived per SYMBOL upstream, so the two only disagree where a
+   *  pass has rebuilt one node and dropped the stamp, and requiring all of them makes that a
+   *  refusal rather than a half-homed base. */
+  ordered: Map<string, boolean>;
 }
 
 /** Every `index` node whose base is a hoistable leaf, tallied by key (the gates' use count) and in
@@ -166,6 +191,7 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
       if (e.operandOff !== undefined) {
         c.operandOff.add(k);
       }
+      c.ordered.set(k, (c.ordered.get(k) ?? true) && e.baseOrdered === true);
     }
     for (const ch of exprChildrenOf(e)) {
       visitExpr(ch, inLoop);
@@ -273,6 +299,18 @@ export interface BaseKey {
    *  reaches a base-0 access with an operand offset, in either symbol-map configuration), which is
    *  exactly why an unmeasured clause could sit in it. */
   unfoldedOffset: boolean;
+  /** The base is a REINTERPRET CAST of a leaf (`(struct S *)&gSym`) rather than the leaf itself —
+   *  the array-of-struct element shape. Its own field because it is about what the base IS, not
+   *  about how often it is reached, and because every shipped table refuses it: the default
+   *  spelling of a struct element is the inline cast, and homing it is a candidate `/orderbase`
+   *  offers where the assembly licenses it. */
+  castBase: boolean;
+  /** Every access through this base was materialized BEFORE the index was scaled (l3/ast.ts
+   *  `index.baseOrdered`, from raise/globalshape.ts). On agbcc that is the order a POINTER LOCAL
+   *  produces and the inline cast does not, so it is the evidence a home is what the source wrote.
+   *  Read only by `ORDERBASE_GATES` (rank.ts); false for every base a compiler that has not opted
+   *  in produced, which is what keeps the axis off those targets. */
+  orderLicensed: boolean;
 }
 
 /** The admission rules. NONE is sound, and that is a property of the pass rather than an oversight:
@@ -286,6 +324,15 @@ export interface BaseKey {
 const reachedOnce = (c: BaseKey): boolean => c.uses < 2;
 
 export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
+  {
+    // FIRST, so a cast base attributes here rather than to whichever use-count rule it also trips.
+    // Every table derived from this one inherits it, which is what keeps the widened
+    // `isHoistableBase` inert: the shape is now collectable and no shipped admission binds it.
+    id: 'cast-base',
+    why: 'a struct element’s reinterpret cast is the inline spelling unless the assembly says the base had a home',
+    sound: false,
+    rejects: (c) => c.castBase,
+  },
   {
     id: 'single-use',
     why: 'one access re-materializes as cheaply as a named local',
@@ -499,6 +546,7 @@ export function baseSites(sfn: SFn): ReadonlyMap<string, { base: HoistableBase; 
     constOffCount: new Map(),
     varIndexed: new Set(),
     operandOff: new Set(),
+    ordered: new Map(),
   };
   collect(sfn.body, c, false);
   return c.meta;
@@ -514,6 +562,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
     constOffCount: new Map(),
     varIndexed: new Set(),
     operandOff: new Set(),
+    ordered: new Map(),
   };
   collect(sfn.body, c, false);
   const keys = c.order.filter((k) => {
@@ -526,6 +575,8 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
         repeatedConstOffset: [...(offsets?.values() ?? [])].some((n) => n >= 2),
         singleCell: !c.varIndexed.has(k) && (offsets?.size ?? 0) <= 1,
         unfoldedOffset: c.operandOff.has(k),
+        castBase: c.meta.get(k)!.base.k === 'cast',
+        orderLicensed: c.ordered.get(k) === true,
       }) === null
     );
   });
@@ -550,12 +601,19 @@ export function hoistBaseLocals(
   const hoistStmts: BaseInit[] = [];
   for (const k of hoisted) {
     const m = meta.get(k)!;
-    const ptrType = T.ptr(scalarTypeForAccess(m.width, m.signed));
+    // A CAST base already wears the pointer type its element needs — a struct element's, which
+    // `scalarTypeForAccess` cannot spell at all (a 28-byte element has no `intType`) — so the local
+    // takes that type and the cast the structurer wrote becomes the initializer unchanged.
+    const ptrType = m.base.k === 'cast' ? m.base.to : T.ptr(scalarTypeForAccess(m.width, m.signed));
     const nm = fresh();
     localFor.set(k, nm);
     newLocals.push({ name: nm, type: ptrType });
     // `p = (T *)base` — the cast makes the local the access's pointer type so each `p[i]` strides it.
-    hoistStmts.push({ k: 'assign', name: nm, value: { k: 'cast', to: ptrType, e: m.base } });
+    hoistStmts.push({
+      k: 'assign',
+      name: nm,
+      value: m.base.k === 'cast' ? m.base : { k: 'cast', to: ptrType, e: m.base },
+    });
   }
 
   const rewritten = sfn.body.map((s) => mapStmtExprs(s, (e) => rewrite(e, localFor)));

@@ -215,9 +215,12 @@ export function splitHomeBases(sfn: SFn, opts: HomeSplitOpts): { homed: SFn; spl
   const homed = hoistBaseLocals(sfn, withholdingKey(opts.gates, opts.key), opts.placement);
   // The withheld key in the REGION pass's vocabulary. The two passes key on the same address but
   // spell an `addr` base's identity differently, so the translation is explicit — a string compare
-  // across them would silently never match for an `addr` base.
+  // across them would silently never match for an `addr` base. A CAST base (an array-of-struct
+  // element's `(struct S *)&gSym`) has no spelling in the region pass at all — its `LeafBase` is
+  // the leaf kinds only — so it translates to nothing and the pairing declines, which is the same
+  // answer the region planner would have given.
   const meta = baseSites(sfn).get(opts.key);
-  const scoped = meta ? scopedBaseKey(meta.base, meta.width, meta.signed) : null;
+  const scoped = meta && meta.base.k !== 'cast' ? scopedBaseKey(meta.base, meta.width, meta.signed) : null;
   // ONE plan, then its applier — the count below and the rewrite read the same decision rather than
   // two runs of the planner that a future rule could make disagree.
   const plan = planScopedBases(homed, { regions: 'per-region' });
