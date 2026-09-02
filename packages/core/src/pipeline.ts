@@ -103,7 +103,9 @@ export interface DecompileResult {
    *  So this travels with the source on every path that can emit it: the scoring layer renders it
    *  (declare.ts, and main.ts's `[declared]` block), and a caller that shows the source alone must
    *  show these too, or it is publishing a spelling whose meaning it has not stated. Empty on every
-   *  run that assumed nothing. */
+   *  run that assumed nothing — which includes every derived shape the structurer did not spell
+   *  bare, and every name the caller's own map described (raise/globalshape.ts `assumedShapes`
+   *  computes that narrowing and names the corpus row behind each half). */
   assumedSymbols: SymbolInfo[];
 }
 

@@ -56,7 +56,12 @@ export interface TraceReport {
   /** The shapes the emitted source's spelling ASSUMES, derived from the assembly rather than read
    *  from a map — pipeline.ts `DecompileResult.assumedSymbols`, and the same obligation: a
    *  consumer showing the source must show these, because a bare `gSym[i]` means what the
-   *  declaration of `gSym` says it means. */
+   *  declaration of `gSym` says it means.
+   *
+   *  NARROWER THAN THE `stage:globalshape` ENTRY ABOVE, on purpose. That entry reports what the
+   *  stage DERIVED, so a spelling decision downstream is attributable to a stage; this reports
+   *  what the SOURCE rests on, and a shape the structurer refused or a name the caller's own map
+   *  described is not an obligation the reader has (raise/globalshape.ts `assumedShapes`). */
   assumedSymbols: SymbolInfo[];
 }
 
