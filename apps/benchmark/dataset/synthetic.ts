@@ -4982,11 +4982,19 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: BGPTRS_MAP,
   },
   // ── GLOBAL ARRAY SHAPE — the base local, the array-typed subscript, and the pool addend ────────
-  // Seven rows. Six are cut from the same graphics translation unit the `value-home` and DMA
-  // families above were cut from, whose body indexes a global array of 28-byte structs through a
-  // variable index, a rank-2 table of pointers, and a rank-3 ROM table. The seventh, `arrcast`,
-  // is NOT from that TU — it is a control constructed to guard a direction the other six leave
-  // open (axis 2 below), and it is labelled as such rather than passed off as found code.
+  // Seven rows. FIVE — `harr`, `harridx`, `bgarr`, `tblrank2`, `arrbias` — are modelled on shapes
+  // in the same graphics translation unit the `value-home` and DMA families above were cut from,
+  // whose body indexes a global array of 28-byte structs through a variable index, a rank-2 table
+  // of pointers, and a rank-3 ROM table. TWO are CONSTRUCTED PROBES, and both are labelled as such
+  // rather than passed off as found code:
+  //  • `arrcast` guards a direction the other rows leave open (axis 2 below).
+  //  • `outparam` pins the out-parameter idiom `T v; callee(&v); use(v);`, which has ZERO
+  //    INHABITANTS in that TU. Measured, not assumed: across its 956 lines the ONLY address-taken
+  //    LOCAL is a `u16` that is written before use and handed to a DMA register — never to a
+  //    callee as argument 0 — and every other `&x` in the file is a global. The near-match
+  //    reference for the family's own source function contains no `&local` call argument at all.
+  //    A round pricing this decline by counting inhabitants in that function will find none: the
+  //    row is here because the idiom is general, not because the source TU needs it.
   //
   // asmlift recovers every one of those as a
   // CAST over the symbol's address — `((u16 *)&gTbl)[i]` — which scales the index FIRST and loads
