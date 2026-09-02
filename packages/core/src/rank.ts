@@ -2303,13 +2303,29 @@ export function enumerateCandidates(
             // THE PUBLISHED LABEL IS THEREFORE NOT AN ATTRIBUTION, and every argument in this tree
             // that counts winning labels is unsound to exactly that extent. The label kept is the
             // FIRST route's; the later routes are discarded, silently and by design. Adding one
-            // roster row renamed 21 agbcc rows whose emitted source sets were byte-identical, took
-            // `/livebase-block`'s winning-label census from 7 to 5 and `/sinkinit`'s from 7 to 2,
-            // and changed the PROGRAM on none of them. So "N rows win under this family" bounds
-            // nothing: a family can win zero labels and still be the only route to a source, and a
-            // family can win five and have introduced three. Price a family by ABLATING it and
-            // re-running the rows (LIVEBASE_BLOCK_GATES carries the recipe); a zero census is not
-            // a death certificate, and a nonzero one is not a mechanism.
+            // roster row renamed 21 agbcc rows whose emitted source sets were byte-identical —
+            // a CANDIDATE-SET census (whole fan unchanged, some candidate relabelled), which is a
+            // different population from the WINNING-label census below; over published winners the
+            // same row moved 5 labels, 2 of them renames.
+            //
+            // THE STRONGER FORM, and the correction this paragraph needed: it used to add that the
+            // same row "took `/livebase-block`'s winning-label census from 7 to 5 and `/sinkinit`'s
+            // from 7 to 2, and changed the PROGRAM on none of them". The two counts are right and
+            // the last clause is FALSE, which makes the point harder rather than softer. Compared
+            // row by row against the previous artifact, FIVE distinct rows left those two censuses
+            // and THREE of them changed the source they publish: `synthetic:unfoldpark`
+            // (402 → 397 bytes, score 9 → 0), `kleod:ConfigureEntityBehavior` (3677 → 3993,
+            // 233 → 230) and `synthetic:livepark` (337 → 346, both MATCH); the other two,
+            // `synthetic:foldpark` and `kleod:DecompressDma`, are byte-identical renames. So a
+            // label census does not even separate a rename from a respelling — the two look the
+            // same from here, and only the emitted SOURCE tells them apart (`bench diff` publishes
+            // that field; `bench regression` does not).
+            //
+            // So "N rows win under this family" bounds nothing: a family can win zero labels and
+            // still be the only route to a source, and a family can win five and have introduced
+            // three. Price a family by ABLATING it and re-running the rows
+            // (LIVEBASE_BLOCK_GATES carries the recipe); a zero census is not a death certificate,
+            // and a nonzero one is not a mechanism.
             // THE SEAM FIX IS BOOKED AND NOT BUILT, named here so the next round does not have to
             // rediscover it: keep the losing producers on the surviving candidate (`label` plus an
             // `alsoReachedBy: string[]`) and a census by mechanism becomes one. It is not free —
