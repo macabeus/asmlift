@@ -24,7 +24,18 @@ test('M5: report captures stages, a scored pattern event, candidates, and the sc
   // every pipeline stage is traced by a STABLE id (the AI loop's localization anchor — pinned
   // so a relabel can't silently drop one), and each stage verified.
   const ids = report.trace.map((t) => t.id);
-  expect(ids).toEqual(['stage:lift', 'stage:idiom', 'stage:recover', 'stage:structure', 'stage:emit']);
+  // `stage:globalshape` carries no `irDump` — its product is the array shapes the assembly
+  // evidences for globals no map describes (raise/globalshape.ts) — but it is a stage, and a
+  // change to the default spelling of every indexed global with no line in the trail is a change
+  // attributable to nothing.
+  expect(ids).toEqual([
+    'stage:lift',
+    'stage:globalshape',
+    'stage:idiom',
+    'stage:recover',
+    'stage:structure',
+    'stage:emit',
+  ]);
   expect(report.trace.every((t) => t.verified)).toBe(true);
 
   // the idiom pattern fired and its objdiff score delta is RECORDED — what this pins is that the
@@ -50,5 +61,5 @@ test('M5: report is JSON-serializable (consumable by agent + webapp)', () => {
   const { report } = decompileWithReport('half', asm, ARMV4T_AGBCC, { patterns: [SDIV_POW2_2] });
   const round = JSON.parse(JSON.stringify(report));
   expect(round.symbol).toBe('half');
-  expect(round.trace.length).toBe(5);
+  expect(round.trace.length).toBe(6);
 });
