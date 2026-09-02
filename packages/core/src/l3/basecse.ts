@@ -198,14 +198,41 @@ export interface BaseKey {
   /** A base whose constant offset arrived in the MEMORY OPERAND (l3/ast.ts `index.operandOff`).
    *  On a compiler that folds a constant subscript into the literal it materializes, an offset
    *  that reached the instruction instead survived because something OTHER than a subscript put it
-   *  there — a named base, or an aggregate member (see the header). Read only by
-   *  `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares the fold.
+   *  there — a named base, or an aggregate member (see the header). Read by TWO gate tables, both
+   *  on roster rows rank.ts offers only where the target declares the fold: `BASEFOLD_GATES`
+   *  EXEMPTS `single-use` on it, `UNFOLDED_GATES` REQUIRES it. Neither subtracts the other, so
+   *  ablating one prices one — `single-use-unfolded` is not "the whole judgement" and has not been
+   *  since the second reader landed.
    *
    *  Where the fold leaves no evidence to read is decided UPSTREAM and once, in
-   *  `structure/structure.ts`: an offset the address expression carried (a relocation addend, a
-   *  folded `add`) and an offset of 0 never set the flag, so absence is never proof of anything.
-   *  Nothing is subtracted again here, which puts the whole judgement in `single-use-unfolded`
-   *  where `ablateHeuristic` can price it. A base of 0 is NOT a second refusal, tempting as it
+   *  `structure/structure.ts` (`const fromOperand = off !== 0 ? { operandOff: off } : {}`), and
+   *  there are THREE ways to get an absence, not the two this note used to list:
+   *    • an offset the address expression carried (a relocation addend, a folded `add`);
+   *    • an offset of 0;
+   *    • an offset the INSTRUCTION COULD NOT ENCODE. This one is not upstream's doing and is the
+   *      one to watch, because the flag then reads the same for BOTH spellings and the gate is
+   *      blind rather than unpersuaded. Thumb's load displacement is a scaled imm5 — 31 bytes for
+   *      `ldrb`, 62 for `ldrh`, 124 for `ldr` — and past it agbcc materializes the pointer local
+   *      with an explicit `add`: `u16 *p = (u16 *)&gBgInfo; p[36]` compiles to `.word gBgInfo` +
+   *      `add r4, r4, #0x48` + `ldrh r0, [r4]` (no operand offset), against the inline
+   *      `((u16 *)&gBgInfo)[36]`'s `.word gBgInfo+0x48` + `ldrh r0, [r4]` (also none). At an
+   *      in-range subscript the same pair is `.word gBgInfo` + `ldrh [r4, #0xa]` against
+   *      `.word gBgInfo+0xa` + `ldrh [r4]`, so the field discriminates there and only there.
+   *      The two spellings still differ in the asm — a bare `.word` plus an `add` against a
+   *      `.word` with the addend baked in — but not through THIS field, and no field carries it.
+   *      Censused over the artifact's 358 agbcc rows, map-less, every structuring
+   *      `enumerateCandidates` builds: of the 50 keys `/livebase` admits and `folded-offset`
+   *      rejects, 42 have no nonzero constant displacement at all (the documented causes) and
+   *      EIGHT have every nonzero displacement past the range for their width —
+   *      `ConfigureEntityBehavior` gBgInfo 72 and gEntityInfo 911/967/995, `EntityItemDrop`
+   *      gEntity 504/506, `ProcessInputAndUpdateEntities` gCallbackQueue 120/122 and
+   *      gUnk_03005220 76, `SetupBG3WindowOverlay` gCallbackQueue 120/121,
+   *      `TransformSingleEntityToScreen` gUnk_03003430 64/66, `UpdateHUDCounterDisplay`
+   *      gBgTilemapBufs 1188/1252/1318/1382. Two of them carry the pointer-local signature in
+   *      their own target asm. Reaching those needs a NEW piece of evidence recorded upstream,
+   *      not a relaxed gate here: widening `folded-offset` to fire on absence would make it fire
+   *      exactly where its premise is false.
+   *  Nothing is subtracted again here. A base of 0 is NOT a second refusal, tempting as it
    *  looks: on MIPS `((s8 *)0)[16]` really is one `lb $v0, 16($zero)` with nowhere else for the
    *  offset to be, but this rule runs only where `foldsConstAddrOffset` is declared, and agbcc
    *  materializes a zero base like any other — `mov r0, #0x10` + `ldrb [r0, #0]` inline against
@@ -301,19 +328,33 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *
  *  WHAT IT IS WORTH, since a generator's price is what its own family WINS and not what its
  *  refusal explains. Ablated — this table made equal to `LIVEBASE_GATES`, at which point
- *  rank.ts's `sameBases` shadow declines the whole `/livebase-block` family — FOUR matches go:
- *  `synthetic:dmaflat` MATCH → diff:10, `synthetic:dmapoll` MATCH → diff:12,
- *  `synthetic:mixpoll` MATCH → diff:10 and `synthetic:foldpark` MATCH → diff:6.
- *  AND IT IS A COMPLETE CENSUS, not the synthetic half of one, because the ablation only ever
- *  REMOVES candidates: a row whose winner does not carry `/livebase-block` cannot move, and the
- *  artifact holds exactly SEVEN that do. The other three, all re-run rather than reasoned about:
+ *  rank.ts's `sameBases` shadow declines the whole `/livebase-block` family — THREE matches go:
+ *  `synthetic:dmaflat` MATCH → diff:3, `synthetic:dmapoll` MATCH → diff:12 and
+ *  `synthetic:mixpoll` MATCH → diff:2.
+ *
+ *  A NEIGHBOURING ROSTER ROW MOVES THAT PRICE, which is the trap this paragraph exists to name.
+ *  Every number in it read FOUR matches and 10/12/10 before `/unfolded` (rank.ts) was added, and
+ *  the fourth was `synthetic:foldpark` MATCH → diff:6 — the row the note then called "the one that
+ *  prices the gate rather than its refusal". `/unfolded` binds that row's bases set-for-set at
+ *  `first-use`, so with this gate ablated `foldpark` is MATCH and brackets nothing. Ablate BOTH
+ *  and the old 4 / 10-12-10-6 reproduce exactly, so the old numbers were true of the tree they
+ *  were measured in and stale for this one. A PRICE IS A CLAIM ABOUT THE WHOLE ROSTER: re-run it
+ *  whenever an admission is added or removed, because nothing in the gate order can see this —
+ *  `bench regression` and `bench diff` measure OUTCOMES, not the price of a rule nobody ablated.
+ *  HOW: filter this table at its definition and the roster at its one use site, both behind a
+ *  temporary env read, `ASMLIFT_CANDCACHE=0`, and revert (the recipe on BASEFOLD_ADMISSIONS).
+ *
+ *  A CENSUS OVER WINNING LABELS CANNOT STAND IN FOR THAT, and this note used to try: "a row whose
+ *  winner does not carry `/livebase-block` cannot move, and the artifact holds exactly SEVEN that
+ *  do" is unsound as an argument, because `seen` (rank.ts) keeps the FIRST producer's label for a
+ *  source two routes emit — a label census counts ROUTES, not mechanisms. The count is FIVE today
+ *  and two of the seven left by RENAME, having lost nothing. The rows this ablation moves are
+ *  found by running it. The others it was quoted against, all re-run at this commit:
  *  `synthetic:sizebound` — the counterexample row above, which the narrow family still helps —
- *  goes 8 → 16; `sa3:Sio32MultiLoadIntr` 69 → 70, the one REAL-tier row involved and the reason
- *  this gate is not a synthetic-only concern; and `synthetic:unfoldpark` 9 either way, the row the
- *  narrow admission wins nothing on. A round promoting this rule into `BASECSE_GATES` prices it
- *  against all seven. `synthetic:foldpark` is the row that prices the gate rather than its
- *  refusal: it is a shape the WIDE admission binds anyway, so it is the narrow one landing at 0
- *  where the wide one lands at 6.
+ *  goes 8 → 10 (it was 8 → 16); `sa3:Sio32MultiLoadIntr`, the one REAL-tier row involved and the
+ *  reason this gate is not a synthetic-only concern, is 69 either way (it was 69 → 70); and
+ *  `synthetic:foldpark` and `synthetic:unfoldpark` are MATCH either way. A round promoting this
+ *  rule into `BASECSE_GATES` prices it against all of them, re-run rather than re-quoted.
  *
  *  Why the ACCESS SHAPE and not the address: an MMIO register file and the IWRAM halfword beside
  *  it are both numeric constants in the same range. And why the rule is not in `BASECSE_GATES`: it
@@ -335,20 +376,42 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
  *  keeps `single-use` and demands the same survival of a key reached TWICE — so neither is the
  *  other relaxed.
  *
- *  WHY IT IS A SELECTION AND NOT A WIDENING. `/livebase` and `/livebase-block` are one chain:
+ *  WHY IT IS A SELECTION AND NOT A WIDENING. `/livebase` and `/livebase-block` ARE one chain:
  *  every key the narrow table binds the wide one binds too, so between them a function has only
  *  "all the reused bases" and "those minus the scalar cells". A source that parked ONE numeric
- *  base and left a second one inline sits between them at neither end, and `singleCell` cannot
+ *  base and left a second one inline is at neither end of that chain, and `singleCell` cannot
  *  separate the two — both are reached at fixed offsets. `unfoldedOffset` can: on a compiler that
  *  folds a constant subscript into the literal it materializes, the offset that reached the
  *  instruction is the one a POINTER LOCAL strode, and the address that reached the pool with the
  *  offset already in it is the one the source spelled inline.
  *
- *  The evidence is not proof and the gate never treats it as such — an aggregate member emits the
- *  same operand offset — so what it produces is a candidate beside the other admissions, refereed
- *  by the differ. Absence, per the header, is not evidence either way: an offset the address
- *  expression already carried and an offset of 0 never set the flag, so `folded-offset` refuses on
- *  MISSING EVIDENCE and never on a claim that the offset was folded.
+ *  BUT THIS TABLE IS NOT ITSELF ON THAT CHAIN, and reading it as "the middle one" is wrong in
+ *  both directions. `singleCell` and `unfoldedOffset` are independent fields, so this table and
+ *  `LIVEBASE_BLOCK_GATES` are lattice-INCOMPARABLE: a block walk with no constant displacement
+ *  (`varIndexed`, so not `singleCell`; offset 0, so no `unfoldedOffset`) is bound by that table
+ *  and refused by this one, and a scalar cell at a surviving offset is the reverse. Censused over
+ *  the artifact's 358 agbcc rows, map-less, every structuring: 17 keys on 14 functions go to
+ *  `/livebase-block` alone and 5 keys on 5 functions to this table alone. The roster is five
+ *  hand-picked SUBSETS, only two of which are ordered by inclusion — not a narrowness-ordered
+ *  chain — which is why `sameBases` compares sets and never subsets, and why WHICH bases a
+ *  function parks stays a per-key question the differ referees rather than one this file answers.
+ *
+ *  The evidence is not proof and the gate never treats it as such — what it produces is a
+ *  candidate beside the other admissions, refereed by the differ. Two counterexamples, both
+ *  compiled rather than argued, and both with their corpus reach measured:
+ *    • an aggregate member emits the same operand offset as a strided pointer local;
+ *    • so does a SYMBOL BASE whose address the tree also uses as a value. agbcc CSEs the symbol
+ *      reference where it re-materializes the integer, so `sink((int)(u8 *)&gS); sink(((u8 *)&gS)
+ *      [3]); sink(((u8 *)&gS)[4]);` and its pointer-local twin emit BYTE-IDENTICAL Thumb — one
+ *      `.word gS`, `add r0, r4, #0`, `ldrb [r4, #0x3]`, `ldrb [r4, #0x4]`. On such a key the
+ *      field is not weak evidence, it is none. Five of this table's 57 corpus admissions sit on
+ *      one: `EntityItemDrop` gEntity, `ProcessInputAndUpdateEntities` gBgDataPtrs /
+ *      gCallbackQueue / gUnk_03004C20, `sa3:sub_802DFC8` gStageData. It costs fan and a
+ *      tie-break, never meaning, because the inline spelling rides beside it.
+ *  Absence is not evidence either way — see the header for the THREE ways to get one, including
+ *  the displacement the instruction could not encode, where this gate is blind rather than
+ *  unpersuaded — so `folded-offset` refuses on MISSING EVIDENCE and never on a claim that the
+ *  offset was folded.
  *
  *  This table is its own gate object, so `without(UNFOLDED_GATES, 'folded-offset')` is
  *  `LIVEBASE_GATES` and the rule prices by ablation — the handle `BASEFOLD_GATES`' exemption

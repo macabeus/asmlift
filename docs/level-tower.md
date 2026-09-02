@@ -104,7 +104,12 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     does its constant offset belong in the address the compiler materializes, or in the load's
     displacement — and every one of them answers it for the WHOLE FUNCTION. `/unfolded` narrows
     WHICH bases the answer covers (its table admits only the keys an operand offset was observed
-    on) without making the answer per-base: one table still decides the whole function. Three rows
+    on) without making the answer per-base: one table still decides the whole function. Nor are the
+    tables a narrowness ranking one could extend by adding a sixth: `singleCell` and
+    `unfoldedOffset` are independent fields, so `/unfolded` and `/livebase-block` are
+    lattice-INCOMPARABLE and each binds keys the other refuses (17 keys on 14 functions one way,
+    5 on 5 the other, censused over the artifact's agbcc rows). The roster is hand-picked subsets,
+    so a base set that is no row's stays unreachable however many rows are added. Three rows
     want a per-BASE assignment instead: `LoadBGTilemapData` wants `/livebase-block` on its `+0x3c` key,
     `synthetic:bgfixed` wants `/offmember` on its one key, and `synthetic:dmapoll` (booked in
     PR #124) wants a per-base split of a different pair. It is a CONJUNCTION — shipped additively

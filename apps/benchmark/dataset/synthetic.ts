@@ -4297,10 +4297,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`. So an exact-token
   // census of the plain admission never sees that row at all; a substring one does, and a deletion
   // aimed at `l3/scopebase.ts` rather than at `respell('/scopebase', …)` costs that match.
-  // The two neighbour rows ARE guards on the roster, each moved by its own admission and by
-  // neither the other's nor the pair's: `livepark` MATCH → diff:3 with `/livebase` ablated,
-  // `foldpark` MATCH → diff:6 with `/livebase-block` ablated — and under the whole-roster ablation
-  // both land on `/scopebase` too, at 3 and 6.
+  // The two neighbour rows ARE guards on the roster, but on a CONFIGURATION and not on one lever
+  // each. They used to be: `livepark` MATCH → diff:3 with `/livebase` ablated, `foldpark`
+  // MATCH → diff:6 with `/livebase-block` ablated, and under the whole-roster ablation both land
+  // on `/scopebase` too, at 3 and 6.
+  // BOTH SINGLE-ROW ABLATIONS ARE NOW VACUOUS, measured at the commit `/unfolded` shipped: it
+  // binds the same base on both rows, so `livepark` is MATCH with `/livebase` alone removed and
+  // `foldpark` is MATCH with `/livebase-block` alone removed. It takes `/livebase` + `/unfolded`
+  // to get the 3 and `/livebase-block` + `/unfolded` to get the 6 — and then the old numbers
+  // reproduce exactly, so nothing was lost, the control just needs both rows named. ADDING AN
+  // ADMISSION THAT REACHES A GUARD ROW CAN MAKE ITS ABLATION VACUOUS WITHOUT CHANGING ANY
+  // PUBLISHED OUTCOME, which is why no gate in the order can see it: re-run every ablation a
+  // comment quotes whenever the roster gains a row.
   //
   // WHAT THE ADMISSION REACHES AND WHAT IT COSTS, censused rather than argued: every agbcc row the
   // artifact carries (358), candidates only, no compiles, the entry off and on, comparing the md5

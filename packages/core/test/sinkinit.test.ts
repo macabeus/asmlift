@@ -300,21 +300,38 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
 describe('the /livebase pairing is WIRED into enumeration', () => {
   // `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc — an MMIO poll whose bases the DEFAULT
   // hoist refuses outright, so the tree this lever reads on its own carries no init at all.
-  const labels = enumerateCandidates(
+  const fan = enumerateCandidates(
     'mixpoll',
     readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-mixpoll.s'), 'utf8'),
     ARMV4T_AGBCC,
     { prototypes: { mixpoll: { returnsVoid: true } } },
-  ).map((x) => x.label);
+  );
+  const labels = fan.map((x) => x.label);
+  const sourceOf = (label: string): string | undefined => fan.find((c) => c.label === label)?.source;
 
   test('the joint spelling reaches the differ, over the whole admission roster', () => {
     expect(labels).toContain('signed/livebase/sinkinit');
     // The NARROW admission's sunk spelling arrives under `/unfolded` here, not under the pairing:
     // on this fixture `/unfolded` binds the same register file `/livebase-block` does, its roster
     // row is enumerated before the product loops, and it places at first use — so it emits that
-    // source first and `seen` keeps its label. Same program, one label.
+    // source first and `seen` keeps its label. Same program, one label — and no label in this fan
+    // carries both `livebase-block` and `sinkinit`.
+    //
+    // PINNED AS A PROGRAM, because a label is not an attribution (see the `seen` dedup in rank.ts).
+    // The predicate this replaces — "some label contains livebase-block" — is satisfied by the
+    // twelve HEAD-placed narrow candidates the fixture also emits, so it would have stayed green
+    // with the sunk narrow spelling gone entirely. What has to hold is that the narrow admission's
+    // bases reach the differ SUNK: the same declarations and the same statements as the
+    // head-placed narrow candidate, differing only in where the base init sits relative to the
+    // loop counter's `v0 = 0;`.
     expect(labels).toContain('signed/unfolded/volatile');
-    expect(labels.filter((l) => l.includes('livebase-block'))).not.toEqual([]);
+    const head = sourceOf('signed/livebase-block/volatile');
+    const sunk = sourceOf('signed/unfolded/volatile');
+    expect(head).toBeDefined();
+    expect(sunk!.split('\n').sort()).toEqual(head!.split('\n').sort());
+    expect(sunk).not.toEqual(head);
+    expect(sunk!.indexOf('v0 = 0;')).toBeLessThan(sunk!.indexOf('p0 = (s32 *)'));
+    expect(head!.indexOf('v0 = 0;')).toBeGreaterThan(head!.indexOf('p0 = (s32 *)'));
   });
 
   test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {
