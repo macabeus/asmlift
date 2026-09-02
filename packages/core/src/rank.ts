@@ -1781,8 +1781,12 @@ export function enumerateCandidates(
     // loop, and the read-back. The primary already carries every base those rules admit, so a
     // hoist-nothing result means the lever has nothing to add and declines.
     // One family per admission row; a row binding exactly what an earlier row bound is the same
-    // spelling under a different label, so it declines for that too. `/basefold` joins the roster
-    // where the target declares the fold.
+    // spelling under a different label, so it declines for that too. `/basefold`'s TWO rows and
+    // `/unfolded` join the roster where the target declares the fold — THREE of the five, so a
+    // target without it is offered the two `/livebase` rows and nothing else. (This sentence said
+    // `/basefold` alone through the round that added the fifth row, while the same claim was
+    // repaired at the two POLICY sites above: a fact stated in three places is repaired in three
+    // places or not at all.)
     const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
       ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS]
       : LIVEBASE_ADMISSIONS;
@@ -2306,6 +2310,13 @@ export function enumerateCandidates(
             // family can win five and have introduced three. Price a family by ABLATING it and
             // re-running the rows (LIVEBASE_BLOCK_GATES carries the recipe); a zero census is not
             // a death certificate, and a nonzero one is not a mechanism.
+            // THE SEAM FIX IS BOOKED AND NOT BUILT, named here so the next round does not have to
+            // rediscover it: keep the losing producers on the surviving candidate (`label` plus an
+            // `alsoReachedBy: string[]`) and a census by mechanism becomes one. It is not free —
+            // every consumer that reads `label` as the derivation would have to say which it
+            // means, and the published `candidateLabel` must not change — so it is worth building
+            // when a round needs the census, not before. Until then the only sound census is an
+            // ablation.
             const dup = seen.get(source);
             if (dup !== undefined) {
               // The same TEXT, reached twice. `matchOnly` is a property of the DERIVATION and the

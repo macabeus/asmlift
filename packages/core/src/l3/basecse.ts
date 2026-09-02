@@ -218,6 +218,18 @@ export interface BaseKey {
    *      `((u16 *)&gBgInfo)[36]`'s `.word gBgInfo+0x48` + `ldrh r0, [r4]` (also none). At an
    *      in-range subscript the same pair is `.word gBgInfo` + `ldrh [r4, #0xa]` against
    *      `.word gBgInfo+0xa` + `ldrh [r4]`, so the field discriminates there and only there.
+   *      AND ON A GROUP OF TWO OR MORE ACCESSES PAST THE RANGE ITS SENSE INVERTS, which is worse
+   *      than blind and is not what "no field carries it" below would lead you to expect. The
+   *      fold SHIFTS the literal and the displacements resume relative to the shifted base, so it
+   *      is the INLINE spelling that sets the flag: `((u16 *)&gBgInfo)[36]` and `[37]` compile to
+   *      `.word gBgInfo+0x48` + `ldrh [r4]` + `ldrh [r4, #0x2]` — an operand offset, from the
+   *      spelling this field reads as evidence AGAINST a local — while the pointer-local twin
+   *      compiles to `.word gBgInfo` + `add r0, r0, #0x48` + `ldrh [r0]` + `add r4, r4, #0x4a` +
+   *      `ldrh [r4]`, with none at all. On such a group `folded-offset` therefore ADMITS the key
+   *      the reference spelled inline. That costs fan and a tie-break and never meaning — the
+   *      inline spelling is enumerated beside it, as with the two counterexamples on
+   *      UNFOLDED_GATES — but it is the third measured shape in which this field is not the
+   *      one-directional hint its name suggests.
    *      The two spellings still differ in the asm — a bare `.word` plus an `add` against a
    *      `.word` with the addend baked in — but not through THIS field, and no field carries it.
    *      Censused over the artifact's 358 agbcc rows, map-less, every structuring
@@ -229,7 +241,11 @@ export interface BaseKey {
    *      gUnk_03005220 76, `SetupBG3WindowOverlay` gCallbackQueue 120/121,
    *      `TransformSingleEntityToScreen` gUnk_03003430 64/66, `UpdateHUDCounterDisplay`
    *      gBgTilemapBufs 1188/1252/1318/1382. Two of them carry the pointer-local signature in
-   *      their own target asm. Reaching those needs a NEW piece of evidence recorded upstream,
+   *      their own target asm. THAT POPULATION IS SCOPE-SENSITIVE AND WAS NOT RECONCILED: the
+   *      census that first found this class, taken at a different scope, read 40 keys rejected
+   *      and 4 in the class against these 50 and 8. Neither was re-run against the other, so
+   *      quote the SCOPE with the number and re-run it before either is load-bearing.
+   *      Reaching those needs a NEW piece of evidence recorded upstream,
    *      not a relaxed gate here: widening `folded-offset` to fire on absence would make it fire
    *      exactly where its premise is false.
    *  Nothing is subtracted again here. A base of 0 is NOT a second refusal, tempting as it

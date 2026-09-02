@@ -2674,7 +2674,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // respelling including register-allocation churn (104 diff lines, mostly r4/r5 renaming), not a
   // per-instruction decomposition, and neither row's endpoint produces it. `bgshare`/`bgswitch`
   // gate preferring an ALREADY-MINTED local, and a local DOES hold that base in that fan — 16,128
-  // of the 68,352 candidates read the cell through one, best 399 — so the missing capability is
+  // of the 68,352 candidates read the cell through one, best 399, MEASURED AT #138 (`84aa4222`)
+  // AND NOT RE-RUN SINCE — so the missing capability is
   // not a MINT but the SELECTION of which keys get one, which is the
   // `livepark`/`foldpark`/`unfoldpark` family below. `bgfixed` gates the fixed-element member
   // spelling, and applying THAT to the same two sites scores 386, unmoved, because the ROM reaches
@@ -4341,10 +4342,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // AND NOT FROM THE SENTENCE: that hand-compiled 383 is the 386 winner plus one local, so it
   // carries THREE pointer-base inits — the two parked bases and the winner's own `/addr-home` walk
   // local — and a filter written from the two-base description measures a different set than the
-  // spelling does. Both were counted, and the fan of 68,352 contains ZERO candidates with EITHER,
-  // measured at both dedup sites over all 165,888 generated spellings. No stack of gate ablations
-  // can produce it: `hoistBaseLocals` binds `admittedBases(sfn, gates)` wholesale and the two
-  // tables are a chain, so ablation only ever widens. `unfoldpark` is that shape at 15 lines.
+  // spelling does. Both were counted, and the fan of 68,352 contained ZERO candidates with
+  // EITHER, measured at both dedup sites over all 165,888 generated spellings. No stack of gate
+  // ablations can produce it: `hoistBaseLocals` binds `admittedBases(sfn, gates)` wholesale and
+  // the two tables are a chain, so ablation only ever widens. `unfoldpark` is that shape at
+  // 15 lines.
+  // BOTH TOTALS ABOVE ARE #138's (`84aa4222`) AND NEITHER WAS RE-RUN HERE. That function's fan
+  // was 68,352 then, 102,528 at the commit this family was cut from, and 112,896 at this one — so
+  // a paragraph quoting "the fan of 68,352" reads as a fact about the current tree and is a fact
+  // about a tree two rounds gone. The ZERO is a claim about generated spellings and needs an
+  // enumeration run to restate; the counts are not load-bearing for anything below, but the TOTAL
+  // is the thing that goes stale silently while the delta beside it stays true. The same stale
+  // total stood in rank.ts's POLICY note until this round; re-run a total before budgeting
+  // against it, and stamp it with the commit when you cannot.
   // THE ADMISSION REACHES THAT FUNCTION, which is a census fact and not a score: on its default
   // structuring `UNFOLDED_GATES` admits exactly two keys, `0x040000D4` and `0x03003430`, where
   // `/livebase` admits five, `/livebase-block` one and `/basefold` none. Reaching and COMPOSING
