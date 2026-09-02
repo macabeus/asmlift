@@ -343,7 +343,11 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
     expect(sunk).toHaveLength(1);
     // Its label today is `signed/unfolded/volatile` and with that roster row ablated it is
     // `signed/livebase-block/volatile/sinkinit`. Deliberately NOT asserted: either is the same
-    // program, and pinning one is the defect above.
+    // program, and pinning one is the defect above. WHICH LEAVES THE ROW ITSELF UNPINNED HERE, and
+    // it was unpinned everywhere until it was measured: deleting `UNFOLDED_ADMISSIONS` from
+    // rank.ts's roster left the whole core suite green. `basecse.test.ts` now owns that subject —
+    // "and the ROSTER offers it" — keyed on the base SET only that row parks. Two tests, two
+    // subjects; this one must stay label-free.
   });
 
   test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {

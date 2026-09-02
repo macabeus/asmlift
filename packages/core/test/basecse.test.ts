@@ -7,16 +7,18 @@ import { frontendFor } from '../src/frontend/registry';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import * as basecse from '../src/l3/basecse';
 import {
   BASECSE_GATES,
   BASEFOLD_GATES,
+  type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
   UNFOLDED_GATES,
   admittedBases,
   hoistBaseLocals,
 } from '../src/l3/basecse';
-import { without } from '../src/l3/gates';
+import { type Gate, without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
@@ -211,8 +213,9 @@ ${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
     // without this file being opened. `BASEFOLD_GATES` EXEMPTS `single-use` on the flag;
     // `UNFOLDED_GATES` REQUIRES it. So the population a merge can move is `/basefold*` AND
     // `/unfolded*`, and the two move on DISJOINT shapes — the readership census below is the
-    // assertion that would have caught the drift, and it fails the moment a third table reads the
-    // field or one of these two stops.
+    // assertion that would have caught the drift. It fails when one of these two stops reading the
+    // field, and — because it DISCOVERS its tables rather than listing them — when a third starts;
+    // as first written it listed today's five by hand, which is the same blind spot one level up.
     //
     // The two directions are NOT symmetric, and reading them as one is how this note first got
     // written. A flag the merge INVENTS offers an extra candidate, and `compareScored` orders by
@@ -245,22 +248,42 @@ ${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
     const moves = (shape: (e: object) => SFn, gates: Parameters<typeof admittedBases>[1]): boolean =>
       admittedBases(shape(fromOperand), gates).join() !== admittedBases(shape({}), gates).join();
 
+    // The population is DISCOVERED, not listed, or this census cannot see the drift it is for: a
+    // hand-written list of today's five tables stays green when a SIXTH starts reading the field,
+    // which is the same shape as the "exactly one reader" sentence above going stale. Every gate
+    // table this file exports, then — `Gate<BaseKey>` tables live only here, and `withholdingKey`
+    // (l3/homesplit.ts) composes over a caller's table and inherits its readership.
+    const tables = Object.entries(basecse).filter(
+      (e): e is [string, readonly Gate<BaseKey>[]] =>
+        Array.isArray(e[1]) &&
+        e[1].length > 0 &&
+        e[1].every((g) => typeof g === 'object' && g !== null && 'rejects' in g),
+    );
+    // …and the discovery has its own floor, so a filter that silently matches nothing cannot read
+    // as "no table reads the flag". A table added later needs no line here: it is censused because
+    // it was found, and only a table that MOVES shows up in the two expectations below.
+    expect(tables.map(([n]) => n).sort()).toEqual(
+      expect.arrayContaining([
+        'BASECSE_GATES',
+        'BASEFOLD_GATES',
+        'LIVEBASE_BLOCK_GATES',
+        'LIVEBASE_GATES',
+        'UNFOLDED_GATES',
+      ]),
+    );
+    const readersOf = (shape: (e: object) => SFn): string[] =>
+      tables.filter(([, g]) => moves(shape, g)).map(([n]) => n);
+
     // reached twice: only UNFOLDED_GATES changes its answer
     expect(admittedBases(twice(fromOperand), UNFOLDED_GATES)).toEqual([K]);
     expect(admittedBases(twice({}), UNFOLDED_GATES)).toEqual([]);
-    expect(moves(twice, BASECSE_GATES)).toBe(false);
-    expect(moves(twice, LIVEBASE_GATES)).toBe(false);
-    expect(moves(twice, LIVEBASE_BLOCK_GATES)).toBe(false);
-    expect(moves(twice, BASEFOLD_GATES)).toBe(false);
+    expect(readersOf(twice)).toEqual(['UNFOLDED_GATES']);
 
     // reached once: only BASEFOLD_GATES changes its answer — the opposite question, so the two
     // readers never both move on one key.
     expect(admittedBases(once(fromOperand), BASEFOLD_GATES)).toEqual([K]);
     expect(admittedBases(once({}), BASEFOLD_GATES)).toEqual([]);
-    expect(moves(once, BASECSE_GATES)).toBe(false);
-    expect(moves(once, LIVEBASE_GATES)).toBe(false);
-    expect(moves(once, LIVEBASE_BLOCK_GATES)).toBe(false);
-    expect(moves(once, UNFOLDED_GATES)).toBe(false);
+    expect(readersOf(once)).toEqual(['BASEFOLD_GATES']);
   });
 });
 
@@ -803,6 +826,37 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
     expect(admittedBases(sfn, LIVEBASE_GATES)).toHaveLength(3);
     expect(admittedBases(sfn, LIVEBASE_BLOCK_GATES)).toEqual(['c:67109076 4 true']);
     expect(admittedBases(sfn, BASECSE_GATES)).toEqual([]);
+  });
+
+  test('and the ROSTER offers it — where the target declares the fold, and only there', () => {
+    // THE TABLE IS NOT THE LEVER. `rank.ts`'s `UNFOLDED_ADMISSIONS` is, and nothing pinned it:
+    // measured by deleting that one roster row — the whole `/unfolded` family gone from the ranked
+    // path, `synthetic:unfoldpark`'s fan back to the 36 candidates it had before the lever — the
+    // core suite stayed 1963/1963 GREEN. The assertion that HAD covered it lived in
+    // `sinkinit.test.ts` and was
+    // replaced, correctly, by a label-free program check; but whichever route emits that program
+    // satisfies it, so the substitution was sound about its own subject and silently gave up this
+    // one. Two tests, two subjects: that one owns the sunk PROGRAM, this one owns the ROW.
+    //
+    // Program-keyed for the same reason, so `seen`'s first-label-wins cannot decide it: what only
+    // this row reaches is a candidate parking EXACTLY the two evidenced bases and leaving
+    // `0x03002040` — the cell whose offset the pool already carried — inline. On this fixture that
+    // is 8 candidates with the row, 0 with it ablated, and 0 on a target not declaring the fold.
+    const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-unfoldpark.s'), 'utf8');
+    const opts = { prototypes: { unfoldpark: { params: ['s32', 's32*'], returnsVoid: true } } };
+    const parkedBy = (source: string): string =>
+      [...source.matchAll(/= \((?:volatile )?[a-z0-9]+ \*\)(\d+);/g)]
+        .map((m) => Number(m[1]))
+        .sort((a, b) => a - b)
+        .join();
+    const wanted = (cand: { source: string }): boolean => parkedBy(cand.source) === [0x3003400, 0x40000d4].join();
+    expect(enumerateCandidates('unfoldpark', asm, ARMV4T_AGBCC, opts).filter(wanted).length).toBeGreaterThan(0);
+    // the fold is a per-compiler declaration, so a target without it never offers the row
+    const noFold = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, foldsConstAddrOffset: undefined },
+    };
+    expect(enumerateCandidates('unfoldpark', asm, noFold, opts).filter(wanted)).toEqual([]);
   });
 });
 

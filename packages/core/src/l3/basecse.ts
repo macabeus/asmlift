@@ -249,8 +249,12 @@ export interface BaseKey {
    *      with zero `/unfolded` labels. An inference about a gate needs a tree the gate is
    *      consulted on.
    *      Where it IS consulted the inversion is real, compiled at the shape that gets there —
-   *      the key must survive `BASECSE_GATES`, i.e. be `inLoop` or `repeatedConstOffset`, the two
-   *      rules `LIVEBASE_GATES` ablates. The same two accesses inside a loop
+   *      and that shape is one `BASECSE_GATES` REJECTS, not one it admits, so read the polarity
+   *      with the file's own vocabulary: the key must be `inLoop` or `repeatedConstOffset`, the
+   *      two REJECTIONS `LIVEBASE_GATES` ablates, and the default hoist then leaves it in the tree
+   *      for a wider table to answer for. Measured on the pair below, `admittedBases` under
+   *      `BASECSE_GATES` is EMPTY on both spellings while `LIVEBASE_GATES` and `UNFOLDED_GATES`
+   *      are consulted on both. The same two accesses inside a loop
    *      (`for (i = 0; i < n; i++) { sink(((u16 *)&gBgInfo)[36]); sink(((u16 *)&gBgInfo)[37]); }`)
    *      emit `.word gBgInfo+0x48` + `ldrh [r5]` + `ldrh [r5, #0x2]` inline, against the
    *      pointer-local twin's `.word gBgInfo` + `add r6, r6, #0x48` + `add r5, r5, #0x4a` +
@@ -412,9 +416,13 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  someone runs it. Enumeration only, no compiles, both arms — `single-cell` spliced out of this
  *  array in process, prototypes only, map-less, over all 951 artifact rows; run twice with the
  *  working tree hashed either side and byte-identical both times. THIRTEEN rows change their
- *  distinct-source set, corpus fan 48995 → 42701, and ZERO of the 593 non-agbcc rows are reached —
- *  which is the arm nobody had looked at, because this table sits on the UNCONDITIONAL half of the
- *  roster and is offered to ido/kmc/mwcc/gcc272 too. Seven are the rows this note already names
+ *  distinct-source set, corpus fan 48995 → 42701, and ZERO non-agbcc rows are reached — which is
+ *  the arm nobody had looked at, because this table sits on the UNCONDITIONAL half of the roster
+ *  and is offered to ido/kmc/mwcc/gcc272 too. READ THAT POPULATION HONESTLY, since a denominator
+ *  is a rig artifact until it is broken out: of the 593 non-agbcc rows, 400 enumerate in both arms
+ *  and NONE of them moves; the other 193 decline at the lift or structure seam and have no fan on
+ *  either side, so they are vacuous rather than evidence. The claim is over the 400.
+ *  Seven are the rows this note already names
  *  (the three matches above, plus the four re-run below); the other six
  *  are `kleod:ConfigureEntityBehavior` (fan 1248 → 864), `kleod:ProcessInputAndUpdateEntities`
  *  (23040 → 19200), `kleod:SetupBG3WindowOverlay` (696 → 640), `kleod:UpdateCameraScroll`
