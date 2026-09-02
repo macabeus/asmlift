@@ -4986,8 +4986,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // were cut from, whose body indexes a global array of 28-byte structs through a variable index,
   // a rank-2 table of pointers, and a rank-3 ROM table. asmlift recovers every one of those as a
   // CAST over the symbol's address — `((u16 *)&gTbl)[i]` — which scales the index FIRST and loads
-  // the base second. Four of the seven targets load the base first, and that ordering is what the
-  // family measures.
+  // the base second. FIVE of the six scored targets load the base first (`arrcast` is the one that
+  // does not), and the family measures that ordering plus a second, independent axis: where a
+  // constant term ends up, in the pool word's relocation addend or in a runtime `add`.
   //
   // THE ATTRIBUTION, CORRECTED — the first cut of this block named ONE cause and there are TWO.
   // agbcc's `c-typeck.c` does fork the subscript on
@@ -5054,24 +5055,48 @@ export const SYNTHETIC: SynthSpec[] = [
   // row, so a folded `gaddr` pool literal still never forms here. asmlift's synthesized
   // `extern u32 gTbl;` is the DECLARE path, which is a different thing.
   //
-  // THE SOUNDNESS RULE THE FAMILY ENCODES — and it is a NECESSARY condition, never a licence:
+  // THE SOUNDNESS RULE THE FAMILY ENCODES. There are TWO INDEPENDENT AXES here, and the first cut
+  // of this block fused them into one sentence about "bare versus cast" that is not what either
+  // axis turns on. Both are measured below; neither is a licence for the other.
   //
-  //     The base-first spelling (bare array subscript, or a base local) requires the pool word's
-  //     relocation addend to be ZERO. Where the target bakes an addend into the pool word, the
-  //     CAST form is the right answer. A zero addend does NOT conversely license base-first: at
-  //     addend zero the assembly still decides, by instruction ORDER, and the cast form is the
-  //     right answer wherever the target scales before it loads.
+  // AXIS 1 — WHERE THE CONSTANT TERM GOES. The full 2×4 cross, every spelling of `gTbl[i+1]`
+  // against both `+1` targets (`harridx`'s pool word is a bare `.word gTbl` plus a runtime
+  // `adds r0,#1`; `arrbias`'s is `.word gTbl+0x1` with no add — `R_ARM_ABS32 gTbl`, in-place
+  // addend `01 00 00 00` at 0x8, against `harridx`'s `00 00 00 00`):
   //
-  // TWO ROWS GUARD THAT, one per direction, and BOTH are authored as matches:
-  //  • `arrbias` — the ADDEND direction. Its target pool word is `.word gTbl+0x1`: in the ELF,
-  //    `R_ARM_ABS32 gTbl` with an in-place addend of 1 (`.text` bytes at 0x8 are `01 00 00 00`),
-  //    against `harridx`'s addend of 0 (`00 00 00 00`) on the same symbol. Applying the bare
-  //    spelling unconditionally — `extern u8 gTbl[]; return gTbl[a0 + 1];` — scores 5 here. The
+  //                                                        vs harridx   vs arrbias
+  //     gTbl[i + 1]                     (array, on index)      0 MATCH      5
+  //     const u8 *p = &gTbl[1]; p[i]    (array, in base)       5            0 MATCH
+  //     ((u8 *)&gTbl)[i + 1]            (cast,  on index)      5            0 MATCH
+  //     *(u8 *)(i + ((u32)&gTbl + 1))   (cast,  in base)       5            0 MATCH
+  //
+  // Read the columns, because they are NOT symmetric and that asymmetry is the whole rule.
+  // Against `arrbias` THREE spellings tie at 0 — anything that folds the constant into the base
+  // reaches a pool addend, cast or not — so `arrbias` does not discriminate cast from array at
+  // all; it discriminates BASE-FOLDED from ON-INDEX. Against `harridx` exactly ONE spelling
+  // works, and it is the only one that is BOTH array-typed AND index-side: agbcc constant-folds
+  // `&gTbl + 1` into the pool word for every pointer/cast base, so keeping the `+1` on the index
+  // is not enough — `((u8 *)&gTbl)[i + 1]` still scores 5. So:
+  //
+  //     A pool addend means the constant belongs in the BASE, and three spellings all reach it.
+  //     A bare pool word plus a runtime add means the constant belongs on the INDEX, and there
+  //     only the DECLARED-ARRAY subscript survives, because every cast base folds it away.
+  //
+  // AXIS 2 — INSTRUCTION ORDER, which is what decides when there is no constant term at all. At a
+  // zero addend the assembly still forks: base-first (`harr`, `bgarr`, `tblrank2`, and `arrbias`
+  // too) wants a declared array or a base local, index-first (`arrcast`) wants the cast. A zero
+  // addend therefore does NOT license base-first — that was the first cut's error, and `arrcast`
+  // is the row added to catch it.
+  //
+  // TWO ROWS GUARD THIS, one per axis, and BOTH are authored as matches:
+  //  • `arrbias` — AXIS 1, the addend direction. Applying the index-side spelling unconditionally
+  //    — `extern u8 gTbl[]; return gTbl[a0 + 1];`, which is exactly what wins `harridx` — scores 5
+  //    here, i.e. it loses the match. One symbol, two opposite right answers. The
   //    mirror is byte-level: asmlift's `harridx` candidate `((u8 *)&gTbl)[a0 + 1]` assembles to
   //    `.text` bytes IDENTICAL to `arrbias`'s target (`01 49 40 18 00 78 70 47 01 00 00 00`, one
   //    `R_ARM_ABS32 gTbl`), and the two 5s are mirror-image breakdowns — `delete: 2` one way,
   //    `insert: 2` the other. One symbol, two opposite right answers, separated only by the addend.
-  //  • `arrcast` — the ZERO-ADDEND direction, and the reason it exists is that the first cut of
+  //  • `arrcast` — AXIS 2, the zero-addend direction, and the reason it exists is that the first cut of
   //    this family had no row here at all. Its target is `((u16 *)gTbl)[i]`: `R_ARM_ABS32 gTbl` at
   //    an in-place addend of `00 00 00 00`, yet `lsl` before `ldr`. Both base-first spellings lose
   //    it — bare `gTbl[i]` scores 2 and the base local `const u16 *p = gTbl; p[i]` scores 2 (they
