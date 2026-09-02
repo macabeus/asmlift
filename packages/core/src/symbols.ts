@@ -555,3 +555,48 @@ export function symbolMapFromJson(obj: Record<string, SymbolInfo[]>): SymbolMap 
   }
   return map;
 }
+
+const HEX_KEY = /^(0x)?[0-9a-fA-F]+$/;
+
+/** STRUCTURAL VALIDATION of the vendored-map JSON, in core because BOTH readers of that format
+ *  need it and a second hand-rolled copy is how they come to disagree about what a map is: the
+ *  webapp's Symbols pane (which degrades — a bad map is reported and the run proceeds without
+ *  one) and the cli's `tools.asmlift.symbols` (which is LOUD — an explicit config that failed to
+ *  load must never read like a row that never had a map).
+ *
+ *  `symbolMapFromJson` alone cannot serve either: it is a total function over `Object.entries`,
+ *  so `[]` and `{}` and `{"nope": []}` all yield an EMPTY map and no error at all. An empty map
+ *  is exactly what a map-less run holds, and the two produce different source — so the shapes
+ *  that silently reduce to it are the ones this checks. Only the load-bearing minimum is
+ *  validated (hex keys, non-empty arrays, string `name`, `kind` ∈ code|data); the declaration
+ *  SHAPE fields are typed by this module and fail soft downstream.
+ *
+ *  Emptiness is REPORTED, not judged: a caller that tolerates an empty map reads `map.size`
+ *  itself. */
+export function parseSymbolMapJson(obj: unknown): { map: SymbolMap } | { error: string } {
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return {
+      error: 'expected an object of hex addresses, e.g. {"0x03001234": [{"name": "gCounter", "kind": "data"}]}',
+    };
+  }
+  for (const [key, infos] of Object.entries(obj)) {
+    if (!HEX_KEY.test(key)) {
+      return { error: `"${key}" is not a hex address key (e.g. "0x03001234")` };
+    }
+    if (!Array.isArray(infos) || infos.length === 0) {
+      return { error: `"${key}" must map to a non-empty array of symbols` };
+    }
+    for (const info of infos as unknown[]) {
+      const si = info as Partial<SymbolInfo> | null;
+      if (
+        typeof si !== 'object' ||
+        si === null ||
+        typeof si.name !== 'string' ||
+        (si.kind !== 'code' && si.kind !== 'data')
+      ) {
+        return { error: `"${key}": every symbol needs a string "name" and "kind": "code" | "data"` };
+      }
+    }
+  }
+  return { map: symbolMapFromJson(obj as Record<string, SymbolInfo[]>) };
+}

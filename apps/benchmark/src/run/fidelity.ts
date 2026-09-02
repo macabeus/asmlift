@@ -12,7 +12,7 @@
 //          ctx into the compile command), so drift here means environment skew, not a
 //          documented approximation. Warns are listed one-per-row — visible, never silent —
 //          but do not block publish.
-import type { FunctionResult } from '@asmlift/bench-schema';
+import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { execSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,6 +21,8 @@ import { join } from 'node:path';
 import { enforceCheckoutPin } from '../cases/checkout';
 import { loadManifestsForVendor, resolveProjectRoot } from '../cases/manifests';
 import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
+import { asmliftProvenance, sameMeasuredCode } from '../provenance';
+import { checkTierProvenance } from '../report/merge';
 import { asmliftScript, m2cScript } from '../report/repro-scripts';
 import { checkSymbolMapDrift, vendoredMapPath } from './symbol-drift';
 
@@ -33,9 +35,73 @@ interface Verdict {
 
 const SCRIPT_TIMEOUT_MS = 300_000;
 
+/** The tier files, REFUSED when their run-time provenance disagrees with now — the same check, the
+ *  same function, that `bench merge` applies before it will build an artifact out of them.
+ *
+ *  WHAT THIS GATE CAN AND CANNOT SEE, because the difference decided a round. Fidelity compares a
+ *  published SCRIPT against a published ROW. Both come from the same run, so the pair stays
+ *  self-consistent no matter how far either has drifted from the code: measured on tier files
+ *  written at a dangling commit against a DIRTY tree, `bench fidelity --only bfword` reported
+ *  `4 script runs — 4 ok` while running the harness fresh at HEAD gave `m2c=noncompile` on both of
+ *  those rows. Nothing was wrong with the scripts; the rows were from code no commit holds, and
+ *  "fidelity 12/12 ok" is not evidence that the rows behind those scripts are the ones the code
+ *  produces. Merge refuses exactly those files ("was RUN against a dirty working tree"), so the
+ *  refusal here is BORROWED rather than re-spelled, and it stays a refusal about PROVENANCE. It
+ *  is still not a code-versus-artifact check — nothing here re-runs the harness — and
+ *  `scripts/check-artifact-provenance.sh` remains the only gate that asks whether a later commit
+ *  moved something the artifact measures.
+ *
+ *  ONE CASE IS EXEMPT, and getting the exemption's premise right is the whole of it.
+ *  `checkTierProvenance` compares SHAS, so committing the regenerated artifact — the very next
+ *  step in the documented order — moves HEAD and would make fidelity refuse with "the code moved
+ *  between run and merge" for a commit that moved no code. A LOUD REFUSAL WHOSE STATED CAUSE IS
+ *  FALSE IS THE SAME CLASS OF WRONG ANSWER AS A FALSE PASS. So a commit DIFFERENCE is asked of the
+ *  measured PATHS (`provenance.ts` `sameMeasuredCode`, the same list the provenance script
+ *  invalidates the artifact on) and passes only when none of them differs; a `dirty` stamp is
+ *  refused unconditionally, because numbers from code no commit holds are never certifiable.
+ *
+ *  AND THE EXEMPTION ASKS ABOUT NOW'S TREE TOO, or its premise does not hold where it fires.
+ *  `sameMeasuredCode` compares two COMMITS; it cannot see an uncommitted edit, and the scripts
+ *  fidelity re-runs go through `packages/cli/src` from the WORKING TREE. Measured: with
+ *  `packages/core/src/rank.ts` modified and nothing committed, a commit-only exemption fires and
+ *  prints "these rows still measure this code" — false as stated, and a pass where the sha rule
+ *  refuses. So a dirty tree gets its own refusal, naming the cause it actually has rather than the
+ *  commits, which are not the thing that moved. */
+export function tierRows(
+  f: string,
+  raw: string,
+  now: { commit: string; dirty: boolean } | undefined,
+  sameCode: (a: string, b: string) => boolean = sameMeasuredCode,
+): FunctionResult[] {
+  const out = JSON.parse(raw) as BenchOutput;
+  const ran = out.meta.asmlift;
+  if (
+    ran !== undefined &&
+    !ran.dirty &&
+    now !== undefined &&
+    now.commit !== ran.commit &&
+    sameCode(ran.commit, now.commit)
+  ) {
+    if (now.dirty) {
+      throw new Error(
+        `${f} was RUN at ${ran.commit} and HEAD is ${now.commit}, which differ in no measured path — but ` +
+          `the WORKING TREE is dirty, so the code these scripts run against is code no commit holds and a ` +
+          `comparison of two commits cannot speak for it. Commit or revert, then re-run fidelity.`,
+      );
+    }
+    console.log(
+      `[fidelity] ${f} was run at ${ran.commit.slice(0, 7)}, HEAD is ${now.commit.slice(0, 7)} — ` +
+        `no measured path differs between them, so these rows still measure this code`,
+    );
+    return out.results;
+  }
+  checkTierProvenance(f, out, now);
+  return out.results;
+}
+
 function loadRows(): FunctionResult[] {
-  const load = (f: string): FunctionResult[] =>
-    (JSON.parse(readFileSync(join(RESULTS_DIR, f), 'utf8')) as { results: FunctionResult[] }).results;
+  const now = asmliftProvenance();
+  const load = (f: string): FunctionResult[] => tierRows(f, readFileSync(join(RESULTS_DIR, f), 'utf8'), now);
   return [...load('synthetic.json'), ...load('real.json')];
 }
 

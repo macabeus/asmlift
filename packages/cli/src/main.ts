@@ -339,6 +339,16 @@ export async function runCli(
   // tools.asmlift.elf → the project's symbol map (names + declaration shapes). Explicit
   // config, so an unreadable ELF is a loud input error, never a silent names-less run.
   let symbols: SymbolMap | undefined;
+  if (toolCfg?.elf && toolCfg?.symbols) {
+    return {
+      code: 64,
+      stdout: '',
+      stderr:
+        'asmlift: tools.asmlift declares BOTH elf and symbols — two sources for one map. ' +
+        'Name the one this project has (elf: derive from the built ELF; symbols: a map already ' +
+        'derived, as JSON).\n',
+    };
+  }
   if (toolCfg?.elf) {
     const elfPath = resolve(configDir!, toolCfg.elf);
     try {
@@ -351,6 +361,43 @@ export async function runCli(
         stderr: `asmlift: cannot load symbols from tools.asmlift.elf (${elfPath}): ${e instanceof Error ? e.message : e}\n`,
       };
     }
+  } else if (toolCfg?.symbols) {
+    // The already-derived map. Same loudness rule as `tools.asmlift.elf`: explicit config, so an
+    // unreadable or malformed file is an input error and never a silent names-less run — a map
+    // that quietly failed to load reads exactly like a row that never had one, and the two
+    // produce different source.
+    const mapPath = resolve(configDir!, toolCfg.symbols);
+    let parsed;
+    try {
+      const { parseSymbolMapJson } = await import('@asmlift/core/symbols');
+      parsed = parseSymbolMapJson(JSON.parse(readFileSync(mapPath, 'utf8')));
+    } catch (e) {
+      return {
+        code: 66,
+        stdout: '',
+        stderr: `asmlift: cannot load symbols from tools.asmlift.symbols (${mapPath}): ${e instanceof Error ? e.message : e}\n`,
+      };
+    }
+    // A file that PARSES and still declares nothing is the failure this key exists to prevent, and
+    // it is the one an exception cannot report: `[]`, `{}` and `{"nope": []}` are all valid JSON
+    // that reduce to an EMPTY map, which is byte-for-byte the state a map-less run is in. The run
+    // would then exit 0 having scored a different source under a different label — a silent wrong
+    // answer wearing a published repro script's provenance. Both shapes are input errors here.
+    if ('error' in parsed) {
+      return {
+        code: 66,
+        stdout: '',
+        stderr: `asmlift: tools.asmlift.symbols (${mapPath}) is not a symbol map — ${parsed.error}\n`,
+      };
+    }
+    if (parsed.map.size === 0) {
+      return {
+        code: 66,
+        stdout: '',
+        stderr: `asmlift: tools.asmlift.symbols (${mapPath}) declares no symbols — remove the key to run without a map\n`,
+      };
+    }
+    symbols = parsed.map;
   }
 
   const name = nameFlag ?? detectName(asm);

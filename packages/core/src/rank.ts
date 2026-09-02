@@ -39,7 +39,7 @@ import { spellOperandMembers } from './l3/offmember';
 import { parkParamsFirst } from './l3/parkfirst';
 import { pollGuards, pollReads } from './l3/pollguard';
 import { pointerFields } from './l3/ptrfield';
-import { registerishSpellings } from './l3/regspell';
+import { type RegcopyTail, registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
@@ -387,9 +387,11 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  the deltas above, so read them as a floor rather than a price: that row 377.6s → 483.0s, the
  *  second 238.4s → 313.6s, real tier 416.1s → 529.4s. Priced — and the three rows the pair was
  *  bought with DO NOT BUY IT TODAY: ablated, `sa3:sub_803213C` is MATCH with the pair removed,
- *  `kleod:ProcessInputAndUpdateEntities` 248 either way and `kleod:CountCollectedGems` 290 either
- *  way. Read the ablation in the note on BASEFOLD_ADMISSIONS, which carries the fan counts that
- *  prove it reached. */
+ *  `kleod:ProcessInputAndUpdateEntities` 211 either way and `kleod:CountCollectedGems` 290 either
+ *  way. A SCORE QUOTED HERE IS THE ARTIFACT'S: it moves whenever anything at all moves the row,
+ *  a basefold change or not, so re-read it off the artifact rather than off this line. Read the
+ *  ablation in the note on BASEFOLD_ADMISSIONS, which carries the fan counts that prove it
+ *  reached. */
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
@@ -420,25 +422,35 @@ const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  does not carry, so both ride and the differ referees.
  *
  *  WHAT EACH ROW IS WORTH, ablated through the harness rather than read off the winning labels,
- *  because a label a row wins can be a TIE another row also reaches. NEITHER ROW IS BRACKETED BY
- *  ANYTHING IN THIS CORPUS. Ablating the sunk row, the head row, or BOTH leaves every row this
- *  note names exactly where it was — `synthetic:foldsink` MATCH in all four configurations (its
- *  fan 12 → 8 → 8 → 4, so the ablation reached and each row really does emit sources of its own),
- *  `synthetic:basecell` MATCH (fan 4 → 4 → 4 → 2 — FOUR numbers in the same order, because on that
- *  row the two rows emit the SAME two sources and `seen` collapses them, so removing either ALONE
- *  costs nothing and only removing both takes the fan down; a three-number sequence here would
- *  read as if the head row alone halved it), `sa3:sub_803213C` MATCH, and — with the pair removed
- *  — `kleod:ProcessInputAndUpdateEntities` 248, `kleod:CountCollectedGems` 290 and
- *  `kleod:RollRandomLevelVariant` 18, each of them the number the artifact already carries. 0 of
- *  the artifact's 951 rows carries a `basefold` token in its winning label at all, and all six
- *  rows above win under `/offmember`. A BRACKET IS A CLAIM ABOUT THE WHOLE TREE, so it expires
+ *  because a label a row wins can be a TIE another row also reaches. THE HEAD ADMISSION IS
+ *  BRACKETED AND THE SUNK ONE IS NOT. `synthetic:foldhead` is MATCH at 0 under
+ *  `unsigned/basefold` and becomes NONMATCH 11 under `unsigned` the moment the HEAD entry is
+ *  removed — and removing BOTH entries gives the same 11, so the sunk entry is what nothing here
+ *  brackets. `synthetic:foldsink` and `synthetic:basecell` are unbracketed for a reason worth
+ *  keeping: they are MATCH at 0 in every configuration because `/offmember` ALSO reaches 0 on
+ *  them and wins `compareScored`'s line-count tie-break. A TIE IS NOT A SUBSUMPTION — that is
+ *  why a census over winning labels reads zero here, and reading that zero as "loses" would
+ *  delete a pair that no other spelling reaches.
+ *  (Their fans still move: `foldsink` 12 → 8 → 8 → 4 over control/sunk/head/both, `basecell`
+ *  4 → 4 → 4 → 2, the four-number sequence saying that on `basecell` the two entries emit the
+ *  SAME two sources and `seen` collapses them, so only removing both takes the fan down.)
+ *  `sa3:sub_803213C` MATCH, and — with the pair removed — `kleod:ProcessInputAndUpdateEntities`
+ *  211, `kleod:CountCollectedGems` 290 and `kleod:RollRandomLevelVariant` 18, each of them the
+ *  number the artifact already carries, and each of them ENTAILED rather than separately scored:
+ *  the ablated candidate set is a strict SUBSET of the control one on every row here (enumerated
+ *  both ways, 0 sources ADDED and 0 RELABELLED — `ProcessInputAndUpdateEntities` 58752 → 48384
+ *  with 10368 carrying the token, `CountCollectedGems` 576 → 384 with 192, `RollRandomLevelVariant`
+ *  29 → 11 with 18, `sub_803213C` 36 → 20 with 16), and no winner's label carries a `basefold`
+ *  token, so the minimum cannot move. A BRACKET IS A CLAIM ABOUT THE WHOLE TREE, so it expires
  *  whenever anything else learns to reach the same spelling more cheaply: re-run one before
  *  re-quoting it, including the number that survived the last re-run.
- *  This pair is kept ONLY because it is a real spelling: 3921 distinct candidate sources over 14
- *  observations that nothing else emits (see WHAT THE PAIR COSTS above for the per-row split), and
- *  a C source that initializes its base pointers where it declares them is the ordinary case. That
- *  is a weaker justification than a protected row and should be read as one — a round pricing the
- *  agbcc fan may delete the pair, and the gate on doing so is `bench diff`, not this note.
+ *  The SUNK entry is kept ONLY because it is a real spelling: 3921 distinct candidate sources over
+ *  14 observations that nothing else emits (see WHAT THE PAIR COSTS for the per-row split), and
+ *  a C source that initializes its base pointers where it declares them is the ordinary case.
+ *  That is a weaker justification than a protected row and should be read as one — a round pricing
+ *  the agbcc fan may delete it, and the gate on doing so is `bench diff`, not this note. The HEAD
+ *  entry is NOT in that category: deleting it costs `synthetic:foldhead` its match, which
+ *  `bench regression` fails on.
  *  HOW THE ABLATION IS DONE, since there is no shipped knob: filter this roster at its one use
  *  site (the `admissions` const in `enumerateCandidates`) behind a temporary env read, run the
  *  rows with `ASMLIFT_CANDCACHE=0`, and revert. Prove the filter REACHED before believing a null
@@ -972,10 +984,12 @@ export function enumerateCandidates(
   // `/setup-args` cannot move this answer — neither a parameter's type nor a call's argument list
   // moves a `cond_br` — but a SYMBOL MAP can, by lifting a pool-loaded comparison constant as a
   // `gaddr` the const-test test then does not read. Today they agree: over the 164 real rows that
-  // lift (the other 88 are frontend declines, and the 671 synthetic rows carry no map at all), 21
-  // sites mapped and 21 raw with no per-row divergence. So this buys no candidate; what it buys is
-  // that a lift-time change which splits them enumerates both arms rather than silently dropping
-  // one, the failure nothing reports.
+  // lift (the other 88 are frontend declines), 21 sites mapped and 21 raw with no per-row
+  // divergence. The SYNTHETIC tier is inside that comparison rather than exempt from it: 4 of its
+  // 705 rows carry a map (`SynthSpec.symbols`), and that count moves every time a map row is
+  // added, so re-derive it rather than carrying this one forward. So this buys no candidate; what
+  // it buys is that a lift-time change which splits them enumerates both arms rather than
+  // silently dropping one, the failure nothing reports.
   //
   // The MAPPED variant reads it off the probe below, itself a lift in exactly that configuration —
   // reuse, not inheritance. Only a variant lifting under DIFFERENT symbols pays a lift of its own,
@@ -1040,10 +1054,37 @@ export function enumerateCandidates(
   // same edit against a different measurement. Its cross is censused below beside this one.)
   //
   // Where it DOES reach, the cross is the honest price of an arm the differ has to referee, and on
-  // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` enumerates 17,856
-  // candidates with the axis and 12,096 without (+47.6%), and its OFF arm wins nothing — no
-  // winning label carries `/no-ptr-elem`. That is a price paid for a question the asm cannot
-  // answer, not a lever earning its keep.
+  // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` enumerates 58,752
+  // candidates of which 23,040 carry this arm, so removing it leaves 35,712 — a factor of 1.65,
+  // not a doubling. A ROUNDER NUMBER IS NOT A SAFER ONE: re-measure rather than reaching for a
+  // vaguer word. The instrument is `decompileRanked`'s own enumeration, and a direct
+  // `enumerateCandidates` call from a standalone script is NOT it (an ESM/CJS duplicate of this
+  // module answers 544 where the harness answers 952 on `SetupBG3WindowOverlay`).
+  //
+  // The two arms are also NESTED rather than independent — `ptrElemCands` is built by doubling
+  // `bitfieldCands`, so this arm's candidates include the `/no-bitfield` ones and adding the two
+  // families' counts double-counts the overlap: on that same row 12,672 of the 23,040 carry BOTH
+  // tokens, which is half of `/no-bitfield`'s own 25,344. A per-family price read off either
+  // label alone therefore double-counts more than half of this row's cross.
+  //
+  // EXACTLY ONE WINNING LABEL IN THE ARTIFACT CARRIES `/no-ptr-elem` — `synthetic:ptrelem:agbcc`,
+  // match at 0. READ THAT ONE, NOT A ZERO: the axis is two-sided where it fires. Compile the byte
+  // spelling and the element spelling of the SAME address with the klonoa checkout's own agbcc,
+  // lift each back with that project's own map, and the arm is the ONLY candidate that matches the
+  // byte target while the default is the only one that matches the element target — on a constant
+  // element offset, at one element in, at a pointee width of 1, and on a STORE.
+  // `cli/test/matching/ptr-elem-axis.test.ts` is that measurement, and deleting the `ptrElemCands`
+  // cross turns 8 of its 13 assertions red — the four BYTE-target ones (each scoring 1
+  // rather than 0) and the four that check the arm is enumerated at all — while its four
+  // ELEMENT-target ones stay green, which is the two-sidedness itself. A low count over the REAL
+  // tier counts something else: klonoa's map declares a sized pointer member at ONE address, and
+  // every decompiled caller of it happens to be written in the element form.
+  //
+  // WHERE IT GENUINELY DOES NOT REACH, measured on the same probes: at element offset ZERO the two
+  // arms emit the IDENTICAL source (`((u16 *)gSym.pMap)[a0]`, because with no constant left there
+  // is nothing for the byte form to spell differently), the tree dedup collapses the pair — 10
+  // candidates, not 12 — and neither arm matches a byte-form target. That is an open gap in the
+  // spelling, not a refusal of this axis.
   //
   // STATE THE DENOMINATOR, AND DERIVE IT FROM REACH RATHER THAN FROM CO-OCCURRENCE — the same
   // distinction the paragraph above draws about the gate, applied to the gate's own price.
@@ -1051,19 +1092,28 @@ export function enumerateCandidates(
   // so that framing hands back 151 labelled rows, which is the map-wide `some` this gate was
   // written to avoid. The gate is per-FUNCTION, so census the FUNCTIONS. Enumerating every real
   // case (candidates only, `ASMLIFT_CANDCACHE=0`, the harness's own inputs) and counting rows with
-  // any surviving `/no-ptr-elem` candidate: TWO — `kleod:ProcessInputAndUpdateEntities` (5760 of
-  // its 17856) and `kleod:SetupBG3WindowOverlay` (48 of 544), and only the first carries a winning
-  // label at all, the second being `noncompile`. So "0 winning labels" is 0 of ONE here, not 0 of
-  // 151 and not 0 of the 951-row artifact. That census enumerates 155 of the 252 real rows — the
+  // any surviving `/no-ptr-elem` candidate: TWO — `kleod:ProcessInputAndUpdateEntities` (23040 of
+  // its 58752) and `kleod:SetupBG3WindowOverlay` (128 of 952), and only the first carries a
+  // winning label at all, the second being `noncompile`. THE TWO-ROW REACH IS STABLE AND THE
+  // COUNTS ARE NOT — they move with every fan-widening axis, so re-run the census rather than
+  // quoting these. So the REAL tier's "0 winning labels" is 0 of ONE here, not 0 of 151 and not
+  // 0 of the artifact's row count. That census enumerates 155 of the 252 real rows — the
   // 151 the artifact labels plus its 4 `noncompile` rows — and the 97 it cannot enumerate are
   // exactly the rows the artifact declines. What makes "no row is LOST" a proof rather than a
   // sample is the soundness rule instead: this axis only ADDS candidates, so a row whose winner
   // does not carry it cannot move when it is removed. The same census prices `/no-bitfield`: it
-  // survives dedup on FIVE real rows — `ProcessInputAndUpdateEntities` 6336, `CountCollectedGems`
+  // survives dedup on FIVE real rows — `ProcessInputAndUpdateEntities` 25344, `CountCollectedGems`
   // 192, `UpdateWorldMapNodeAnim` 168, `UpdateHUDCounterDisplay` 96, `CopyBGScrollTiles` 4 — every
-  // one of them a row the artifact labels, and no winning label in the artifact carries
-  // `/no-bitfield` either. So its map-wide enumeration gate buys a candidate cross on 5 functions
-  // and the dedup collapses it everywhere else.
+  // one of them a row the artifact labels, and none of the five wins under it. So its map-wide
+  // enumeration gate buys a candidate cross on 5 functions and the dedup collapses it everywhere
+  // else.
+  //
+  // WHERE THE WINNING LABELS ARE, since the REAL tier has none for either arm: the SYNTHETIC tier
+  // carries rows that hand asmlift a map (`SynthSpec.symbols`), and both arms win on one —
+  // `/no-bitfield` on `bfwordread` and `bfwordwrite`, `/no-ptr-elem` on `ptrelem`, each a match at
+  // 0 that becomes a NONMATCH when its own arm is ablated. A LABEL CENSUS IS SCOPED TO ITS TIER
+  // AND ITS COMMIT: say which tier a count is over, and re-derive it rather than carrying it
+  // forward.
   const byName = opts.symbols !== undefined ? symbolsByName(opts.symbols) : undefined;
   const fnHasSizedPtrFields =
     byName !== undefined &&
@@ -1095,10 +1145,12 @@ export function enumerateCandidates(
   // rather than re-spelled, so the gate cannot be narrower than the rule it gates. It is still a
   // superset — it does not know the access WIDTH, and it cannot know whether any residual carries
   // a row term — so where the axis changes nothing the tree dedup below collapses the pair and the
-  // fan does not grow. 9 of the artifact's 951 rows name such a symbol at all — 8 of them in
-  // their winning `symbolsUsed`, the ninth (`kleod:SetupBG3WindowOverlay`) in a source its row
-  // cannot compile, which is why that count is taken off the emitted sources and not off
-  // `symbolsUsed`, where a row with no winner is invisible.
+  // fan does not grow. OVER THE ARTIFACT'S 957 ROWS: 10 name such a symbol at all — 9 of them in
+  // their winning `symbolsUsed`, the tenth (`kleod:SetupBG3WindowOverlay`) in a source its row
+  // cannot compile, which is why the count is taken off the emitted sources and not off
+  // `symbolsUsed`, where a row with no winner is invisible. RE-DERIVE THIS PAIR RATHER THAN
+  // RE-ANCHORING IT: adding one map-bearing row moves it, and one of the nine is exactly that —
+  // `synthetic:sbscope:agbcc`, whose map declares `dims: [4, 1024]`.
   const fnNamesMultidimArray =
     byName !== undefined &&
     [...bareGlobalSymbols(probe).keys()].some((n) => {
@@ -1855,9 +1907,21 @@ export function enumerateCandidates(
     respell('/sinkinit', () => sinkInitsToFirstUse(sfn));
     // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
     // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
-    // ambiguous, so both are ranked)
-    const REGCOPY_LABELS = ['/regcopy', '/regcopy-ret', '/regcopy-ret-fresh'];
-    registerishSpellings(sfn).forEach((alt, i) => respell(REGCOPY_LABELS[i] ?? `/regcopy-${i}`, () => alt));
+    // ambiguous, so both are ranked).
+    //
+    // LABELLED BY THE TAIL THE VARIANT CARRIES, NEVER BY ITS INDEX. The reuse tail exists only
+    // where R1 fired, so the list is 1, 2 or 3 long and the fresh tail sits at no fixed position;
+    // an index-keyed label table names the fresh spelling `/regcopy-ret` on every R1-less function
+    // — the dead-var-reuse name on the one spelling that has no dead var — and `candidateLabel` is
+    // what every census in this repo counts, `bench diff` included. The exhaustive record is the
+    // pin: a new tail kind is a type error here rather than a silent `/regcopy-3`.
+    // `cli/test/matching/regspell-candidate.test.ts` holds the correspondence.
+    const REGCOPY_LABEL: Record<RegcopyTail, string> = {
+      none: '/regcopy',
+      reuse: '/regcopy-ret',
+      fresh: '/regcopy-ret-fresh',
+    };
+    registerishSpellings(sfn).forEach((alt) => respell(REGCOPY_LABEL[alt.tail], () => alt.sfn));
     return spellings;
   };
   // The SYMBOL-MAP spelling is itself a ranked LEVER on the same footing as signedness/branch

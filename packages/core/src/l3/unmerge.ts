@@ -39,10 +39,13 @@
 //     call instead of before it. The third is why the assignment's TARGET is not either: an
 //     `assign` names a variable, and structure.ts spells a write to a scalar GLOBAL as one, so
 //     `gBlendValue = v;` is an `assign` with an effect-free value that writes MEMORY. Not a
-//     corner of the corpus: 22 of the artifact's 951 winning sources emit a statement-level
-//     assignment to a name they declare nowhere — 71 occurrences, 7 of them in
-//     `kleod:ProcessInputAndUpdateEntities` alone. `exprHasEffect` answers "a call, or a marker"
-//     and cannot see one, the same way it could not see a qualifier;
+//     corner of the corpus. Over the artifact's 957 rows: 22 winning sources emit a
+//     statement-level assignment to a name they declare nowhere — 71 occurrences, 7 of them in
+//     `kleod:ProcessInputAndUpdateEntities` alone, the largest single row being `sa3:GetInput` at
+//     8. RE-DERIVE THIS RATHER THAN QUOTING IT: one pass over the artifact does it — collect each
+//     winning source's declared locals and parameters, then count its statement-level `name = `
+//     lines whose name is not among them. `exprHasEffect` answers "a call, or a marker" and cannot
+//     see one, the same way it could not see a qualifier;
 //   - an intervening assignment writes a name one of those values reads — same reason, one level
 //     more precise;
 //   - a definition's value reads another of the merge names (the substitutions would need an order

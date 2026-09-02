@@ -68,8 +68,8 @@ test('a backend that refuses every tree fails LOUD, naming the refusal', () => {
 // This is the ONE assertion on the `[lever]` line's content anywhere, and NOT because no lever
 // throws over the corpus. `onLeverError` has exactly one caller — packages/cli/src/main.ts — and
 // the benchmark reaches `decompileRanked` (apps/benchmark/src/eval/asmlift.ts) without supplying
-// one, so a `pnpm bench run` cannot print the line at all. Its absence over 951 rows is evidence
-// about the WIRING, not about the levers, which leaves nothing but this test pinning the label.
+// one, so a `pnpm bench run` cannot print the line at all. Its absence over the whole corpus is
+// evidence about the WIRING, not about the levers, which leaves nothing but this test pinning the label.
 test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the primary spelling', () => {
   // `if (c) { *A = 1; } else { *B = 2; }` as agbcc cross-jumps it: both arms leave an ADDRESS and a
   // VALUE in registers and the merged store follows the join — the shape `/unmerge` rewrites.

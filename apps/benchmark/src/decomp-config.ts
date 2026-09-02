@@ -64,7 +64,7 @@ function substitutePlaceholders(cmd: string, id: ToolchainId): string {
 interface BenchDoc {
   name: string;
   platform: string;
-  tools: { asmlift: { target: string; compiler?: string; elf?: string; candidateCache?: 'off' } };
+  tools: { asmlift: { target: string; compiler?: string; elf?: string; symbols?: string; candidateCache?: 'off' } };
 }
 
 /** The committed config for one toolchain, with placeholders materialized. */
@@ -124,10 +124,14 @@ export function benchCompilerFor(id: ToolchainId): CandidateCompiler | undefined
 export function scoreViaBenchConfig(
   id: ToolchainId,
   builtin: (candC: string, sym: string, obj: string) => MatchScore,
-): (candC: string, sym: string, obj: string) => MatchScore {
-  return (candC, sym, obj) => {
+): (candC: string, sym: string, obj: string, declarations?: string) => MatchScore {
+  return (candC, sym, obj, declarations) => {
     const compile = benchCompilerFor(id);
-    return compile ? scoreObjects(obj, compile(candC, sym, 'c'), sym) : builtin(candC, sym, obj);
+    // `declarations` reaches the compiler's own prelude slot, never the front of the source: the
+    // prelude already emits C_TYPEDEFS, and a concatenated copy redefines `s16`/`s32`. The
+    // builtin fallback has no such slot, so it is called unchanged — it is only reached where no
+    // decomp.yaml command exists, which is not a configuration any row with a map runs in.
+    return compile ? scoreObjects(obj, compile(candC, sym, 'c', declarations), sym) : builtin(candC, sym, obj);
   };
 }
 
@@ -142,10 +146,23 @@ export function scoreViaBenchConfig(
  *  so a reader running one of these scripts gets the same store the harness does unless they say
  *  ASMLIFT_CANDCACHE=0. Sound either way: a cache is a throughput lever and never a result lever, so a miss is
  *  indistinguishable in RESULT from no cache at all. */
-export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string, ctxFile?: string): void {
+export function writeScoreConfig(
+  id: ToolchainId,
+  dir: string,
+  elf?: string,
+  ctxFile?: string,
+  symbolsFile?: string,
+): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
   if (elf) {
     doc.tools.asmlift.elf = elf;
+  }
+  // A row whose map has no ELF behind it — the synthetic tier's hand-written maps. `bench
+  // target` writes the map itself next to target.o and names it here, so the reproduction feeds
+  // the CLI the SAME map the harness fed the row rather than running map-less and answering a
+  // different question. Never both: the CLI refuses a config declaring two map sources.
+  if (symbolsFile) {
+    doc.tools.asmlift.symbols = symbolsFile;
   }
   if (ctxFile) {
     // REAL rows are scored INSIDE the escalation rung compile/real.ts stopped at for this row

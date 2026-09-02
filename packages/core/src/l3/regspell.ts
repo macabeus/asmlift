@@ -117,9 +117,31 @@ function isConstExpr(e: Expr): boolean {
   }
 }
 
-/** Apply the register-copy re-spelling. Returns 0–2 variant SFns (without/with the R3 tail);
- *  empty when nothing fired. Pure — never mutates the input. */
-export function registerishSpellings(sfn: SFn): SFn[] {
+/** ONE R3 TAIL, NAMED BY WHAT IT DID rather than by where it landed in the list.
+ *
+ *  The tail is the assign-back before the `return`, and there are two spellings of it: reuse R1's
+ *  now-dead value var, or take a fresh one. R1 may not have fired, in which case there is no dead
+ *  var and only the fresh spelling exists — so the tails are a 1- OR 2-element list and the SECOND
+ *  spelling is not at a fixed index.
+ *
+ *  This field exists because the caller labels these, and a label is the instrument every census
+ *  in this repo reads (it is a `bench diff` FIELD). Index a `['/regcopy', '/regcopy-ret',
+ *  '/regcopy-ret-fresh']` table by POSITION instead and an R1-less function publishes its fresh
+ *  tail as `/regcopy-ret` — the dead-var-reuse name on the spelling that has no dead var to reuse
+ *  — and a census over the token `/regcopy-ret-fresh` then censuses nothing wherever R1 declines,
+ *  which is most of the corpus. */
+export type RegcopyTail = 'none' | 'reuse' | 'fresh';
+
+export interface RegcopySpelling {
+  /** which R3 tail this variant carries — `none` is the un-tailed base */
+  tail: RegcopyTail;
+  sfn: SFn;
+}
+
+/** Apply the register-copy re-spelling. Returns 0–3 variants — the base, plus the R3 tail in each
+ *  spelling that exists (reuse needs R1 to have fired, fresh always does) — and an EMPTY list when
+ *  nothing fired. Pure — never mutates the input. */
+export function registerishSpellings(sfn: SFn): RegcopySpelling[] {
   const locals = [...sfn.locals];
   const taken = new Set([...sfn.params, ...sfn.locals].map((x) => x.name));
   let fresh = 0;
@@ -309,7 +331,7 @@ export function registerishSpellings(sfn: SFn): SFn[] {
   // itself allocator-ambiguous (gcc 2.9 wanted R1's dead value var — live-name-count sensitive;
   // another allocator may want the fresh one), so BOTH tails are emitted as candidates rather
   // than asserting one compiler's preference; the source dedupe collapses them when identical.
-  const tails: SFn[] = [];
+  const tails: RegcopySpelling[] = [];
   const last = base.body[base.body.length - 1];
   if (last?.k === 'return' && last.value && last.value.k !== 'var') {
     const mk = (name: string): SFn => ({
@@ -322,10 +344,10 @@ export function registerishSpellings(sfn: SFn): SFn[] {
       ],
     });
     if (deadValueVar) {
-      tails.push(mk(deadValueVar));
+      tails.push({ tail: 'reuse', sfn: mk(deadValueVar) });
     }
-    tails.push(mk(freshVar(T.s(32))));
+    tails.push({ tail: 'fresh', sfn: mk(freshVar(T.s(32))) });
   }
 
-  return [base, ...tails];
+  return [{ tail: 'none', sfn: base }, ...tails];
 }

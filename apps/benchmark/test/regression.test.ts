@@ -3,7 +3,9 @@
 import type { BenchOutput, DecompilerResult, FunctionResult, Outcome } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
-import { compareOutcomes } from '../src/report/regression';
+import { sameRun } from '../src/report/committed';
+import { notRegenerated } from '../src/report/diff';
+import { compareOutcomes, rowsAddedSince } from '../src/report/regression';
 
 const res = (outcome: Outcome): DecompilerResult => ({
   decompiler: 'asmlift',
@@ -71,5 +73,78 @@ describe('compareOutcomes (the mechanical zero-lost gate)', () => {
       out(row('a', 'match', 'match'), row('new', 'failed', 'failed')),
     );
     expect(r.ok).toBe(true);
+  });
+});
+
+// THE POPULATION THE BASE COMPARISON CANNOT SEE. `compareOutcomes` walks the BASE's rows, so a row
+// the branch added is compared against nothing at all — for as long as the branch lives, however
+// many times it republishes its own artifact. Measured on this branch: with base `origin/main` the
+// gate reads `0 lost` while two rows it had itself published at m2c MATCH have become noncompiles;
+// against the branch's own artifact the same fresh run is `2 lost`.
+describe('rowsAddedSince (the branch own rows, which the base comparison never reaches)', () => {
+  test('it is exactly the rows the base does not have', () => {
+    const base = out(row('a', 'match', 'match'));
+    const self = out(row('a', 'match', 'match'), row('b', 'match', 'match'), row('c', 'nonmatch', 'match'));
+    expect(rowsAddedSince(base, self).results.map((r) => r.id)).toEqual(['b', 'c']);
+  });
+
+  test('the flip the base comparison misses is LOST against this population', () => {
+    const base = out(row('a', 'match', 'match'));
+    const self = out(row('a', 'match', 'match'), row('b', 'match', 'match'));
+    const fresh = out(row('a', 'match', 'match'), row('b', 'match', 'noncompile'));
+    // against the BASE, the added row is invisible
+    expect(compareOutcomes(base, fresh).ok).toBe(true);
+    // against the added population, the same fresh run is seen
+    const added = compareOutcomes(rowsAddedSince(base, self), fresh);
+    expect(added.ok).toBe(false);
+    expect(added.lost).toEqual([{ id: 'b', decompiler: 'm2c', from: 'match', to: 'noncompile' }]);
+  });
+
+  // Rows in BOTH artifacts are already policed by the base comparison; asking them again would
+  // report one flip twice and make the two numbers un-addable.
+  test('a row the base also has is not counted twice', () => {
+    const base = out(row('a', 'match', 'match'));
+    const self = out(row('a', 'match', 'match'));
+    const fresh = out(row('a', 'nonmatch', 'match'));
+    expect(compareOutcomes(base, fresh).lost.length).toBe(1);
+    expect(compareOutcomes(rowsAddedSince(base, self), fresh).lost).toEqual([]);
+  });
+
+  // A branch that added a row and then stopped running it: the row vanishes from the fresh run and
+  // must read as MISSING, never as "no regression".
+  test('an added row absent from the fresh run is MISSING, not silence', () => {
+    const base = out(row('a', 'match', 'match'));
+    const self = out(row('a', 'match', 'match'), row('b', 'match', 'match'));
+    const r = compareOutcomes(rowsAddedSince(base, self), out(row('a', 'match', 'match')));
+    expect(r.ok).toBe(false);
+    expect(r.missing).toEqual(['b']);
+  });
+});
+
+// THE WINDOW THE ADDED-ROW COMPARISON IS A COMPARISON IN. `rowsAddedSince` reads the branch's own
+// committed artifact, and after the regenerated artifact is committed that file IS the one the gate
+// reads off disk — so the section compares a file with itself and prints `0 lost` in a millisecond,
+// which reads exactly like the ~30-minute run it is meant to summarise. Reproduced by command: at
+// the branch's artifact commit, with a clean tree, an unguarded
+// `pnpm bench regression --base origin/main` prints `added-row regression: 0 lost, 0 missing,
+// 0 gained, 0 other flips (6 rows this branch added since origin/main)` and exits 0, having
+// compared nothing. `diff.ts` guards the same vacuity on the BASE side (`notRegenerated`); this is
+// the same predicate asked of the SELF side.
+describe('sameRun — the artifact-compared-with-itself guard both added-row sections ask', () => {
+  const at = (generatedAt: string): BenchOutput => ({ meta: { generatedAt }, results: [] }) as unknown as BenchOutput;
+
+  test('equal generatedAt means no merge ran between them — nothing to compare', () => {
+    expect(sameRun(at('2026-09-02T00:46:16.025Z'), at('2026-09-02T00:46:16.025Z'))).toBe(true);
+  });
+
+  test('a merge re-mints it, so a real run is not mistaken for a self-comparison', () => {
+    expect(sameRun(at('2026-09-02T00:46:16.025Z'), at('2026-09-02T01:12:03.881Z'))).toBe(false);
+  });
+
+  // ONE IMPLEMENTATION, not two: `diff.ts`'s `notRegenerated` IS this predicate, so a change to
+  // the rule cannot reach one caller and miss the other.
+  test('diff.ts notRegenerated is this same predicate', () => {
+    expect(notRegenerated(at('x'), at('x'))).toBe(sameRun(at('x'), at('x')));
+    expect(notRegenerated(at('x'), at('y'))).toBe(sameRun(at('x'), at('y')));
   });
 });

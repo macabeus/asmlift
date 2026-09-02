@@ -178,13 +178,30 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // v13: assessQuality exempts project-idiom address casts from the casts count.
   // v14: the objdump→GNU-as normalizer carries MIPS REL addends into %hi/%lo (m2c-normalizer.ts)
   //      — the KEY holds the raw disassembly, so a normalizer change is invisible to it.
+  // v15: `scoreM2c` gained escalation rungs carrying a synthetic map row's declarations — the
+  //      analogue of the real tier's project-context compile. `ctx` IS in the key, so the four
+  //      map rows re-keyed anyway when their ctx grew the map; what is invisible to the key is
+  //      that every OTHER row's scoring path changed shape too, and a rung nobody reaches still
+  //      has to be proved inert by re-running rather than by argument.
+  // v16: those rungs pass the declarations through the compiler's PRELUDE SLOT rather than
+  //      concatenating them onto the source. v15 did the latter and every rung died on
+  //      `redefinition of s16` — the prelude already emits C_TYPEDEFS — so v15's entries record a
+  //      retry that failed for its own reason, which is indistinguishable in the cache from the
+  //      failure it was added to fix.
+  // v17: when NO rung compiles, `scoreM2c` now reports the failure of the last rung that compiled
+  //      the source AS EMITTED (rung 2 where there are declarations) rather than rung 0's. The
+  //      whole difference is the `errorMarkers` this function's own value carries, so a v16 entry
+  //      replays ``gPacked' undeclared`` for a row whose deciding rung declares the symbol — the
+  //      exact wrong answer the change removes, served out of a warm store and invisible to every
+  //      artifact comparison, `errorMarkers` being outside `FIELDS.m2c`. Caught by reading this
+  //      list before publishing a run, which is what it is for.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
   const key = sha(
     JSON.stringify({
-      v: 14,
+      v: 17,
       kind: 'm2c',
       commit,
       objdiff: objdiffVersion(),

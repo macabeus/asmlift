@@ -342,14 +342,17 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `p0 = (u8 *)&gStageData;` sinking to its own first use is the whole of the difference. Head
   placement scores worse than not hoisting at all, read off each row's own `[score]` table —
   head 5 · inline 2 · sunk 0 there, and head 9 · inline 2 · sunk 0 on the `synthetic:foldsink`
-  isolate. So the roster offers both and the differ referees. NEITHER ROW IS BRACKETED: ablated,
-  `synthetic:foldsink` and `sa3:sub_803213C` are MATCH with the sunk row removed, with the head row
-  removed and with both removed, and `kleod:ProcessInputAndUpdateEntities` is 248 either way.
-  `synthetic:basecell` looks like the sunk row's bracket and is not — both rows emit the identical
-  source there and `seen` collapses the sunk one. A bracket is a claim about the WHOLE tree and not
-  about the rule it names, so it expires whenever anything else learns to reach the same spelling:
-  every row this pair was bought with wins under `/offmember` today, and 0 of the artifact's 951
-  rows carries a `basefold` token in its winning label. `rank.ts`'s BASEFOLD_ADMISSIONS note
+  isolate. So the roster offers both and the differ referees. THE HEAD ROW IS BRACKETED AND THE
+  SUNK ONE IS NOT: `synthetic:foldhead` is MATCH at 0 under `unsigned/basefold` and NONMATCH 11
+  the moment the head entry is removed, while ablated, `synthetic:foldsink` and `sa3:sub_803213C`
+  are MATCH with the sunk row removed, with the head row removed and with both removed, and
+  `kleod:ProcessInputAndUpdateEntities` is 211 either way. `synthetic:basecell` looks like the sunk
+  row's bracket and is not — both rows emit the identical source there and `seen` collapses the
+  sunk one. A bracket is a claim about the WHOLE tree and not about the rule it names, so it
+  expires whenever anything else learns to reach the same spelling: the rows this pair was bought
+  with win under `/offmember`, which is a TIE broken on `lineCount` rather than a subsumption, and
+  exactly one artifact row carries a `basefold` token in its winning label — `foldhead`, the one
+  authored to bracket the head entry. `rank.ts`'s BASEFOLD_ADMISSIONS note
   carries the ablation, the per-configuration fan counts that prove it reached, and the recipe —
   there is no shipped ablation knob, so pricing a roster row means filtering the roster at its one
   use site behind a temporary env read and reverting, with a row that DOES move

@@ -51,7 +51,7 @@ describe('R1 — diamond → copy + in-place update', () => {
   test('the MultiplyQ8 shape re-spells with the copy, flipped guard, and downstream rename', () => {
     const out = registerishSpellings(diamond(MUL));
     expect(out.length).toBe(3); // base + both R3 tails (reuse / fresh)
-    const src = cBackend.emit(out[0]);
+    const src = cBackend.emit(out[0].sfn);
     expect(src).toContain('v0 = (s16)a0 * (s16)a1;');
     expect(src).toContain('w0 = v0;');
     expect(src).toContain('if (w0 < 0) w0 = w0 + 255;'); // update arm reads the COPY, in place
@@ -59,7 +59,7 @@ describe('R1 — diamond → copy + in-place update', () => {
   });
 
   test('R3 reuses the DEAD value var for the tail (the byte-exactness depends on it)', () => {
-    const src = cBackend.emit(registerishSpellings(diamond(MUL))[1]);
+    const src = cBackend.emit(registerishSpellings(diamond(MUL))[1].sfn);
     expect(src).toContain('v0 = w0 << 8 >> 16;'); // reused v0, not a fresh w1
     expect(src).toContain('return v0;');
   });
@@ -97,7 +97,7 @@ describe('R2 — constant-expression staging', () => {
     };
     const out = registerishSpellings(sfn);
     expect(out.length).toBeGreaterThan(0);
-    const src = cBackend.emit(out[0]);
+    const src = cBackend.emit(out[0].sfn);
     expect(src).toContain('w0 = 128 << 9;');
     expect(src).toContain('return w0 / (s16)a0;');
   });
@@ -182,17 +182,49 @@ describe('adversarial-round guards', () => {
     };
     const out = registerishSpellings(sfn);
     expect(out.length).toBeGreaterThan(0);
-    const src = cBackend.emit(out[0]);
+    const src = cBackend.emit(out[0].sfn);
     expect(src).toContain('u32 w0;'); // E (a0) is u32 — the compare keeps its unsignedness
   });
 
   test('BOTH R3 tails are ranked when R1 fired (the tail choice is allocator-ambiguous)', () => {
     const out = registerishSpellings(diamond(MUL));
     expect(out).toHaveLength(3); // base, tail-reuse, tail-fresh
-    const reuse = cBackend.emit(out[1]);
-    const fresh = cBackend.emit(out[2]);
+    const reuse = cBackend.emit(out[1].sfn);
+    const fresh = cBackend.emit(out[2].sfn);
     expect(reuse).toContain('v0 = w0 << 8 >> 16;');
     expect(fresh).toContain('w1 = w0 << 8 >> 16;');
+    // and each variant SAYS which tail it is — rank.ts labels off this, never off the index
+    expect(out.map((v) => v.tail)).toEqual(['none', 'reuse', 'fresh']);
+  });
+
+  // THE DEFECT THIS FIELD EXISTS FOR. The reuse tail needs a dead value var, which only R1 mints,
+  // so an R2-only function has ONE tail and it is the FRESH one — at index 1, where the reuse tail
+  // sits when R1 fires. Index rank.ts's label table by that position and every R1-less function
+  // publishes its fresh spelling as `/regcopy-ret`: a census over `/regcopy-ret-fresh` then
+  // measures nothing at all on this population, and a row winning here names the wrong transform
+  // in the artifact. Asserting the tail KIND at index 1 is what makes positional labelling fail.
+  test('an R2-only function yields the FRESH tail at index 1, not the reuse one', () => {
+    const sfn: SFn = {
+      name: 'f',
+      retType: T.s(32),
+      params: [{ name: 'a0', type: T.s(32) }],
+      locals: [],
+      body: [
+        {
+          k: 'return',
+          value: {
+            k: 'bin',
+            op: '/',
+            l: { k: 'bin', op: '<<', l: C(128), r: C(9) },
+            r: { k: 'cast', to: T.s(16), e: V('a0') },
+          },
+        },
+      ],
+    };
+    const out = registerishSpellings(sfn);
+    expect(out.map((v) => v.tail)).toEqual(['none', 'fresh']);
+    // the tail really is a fresh local, not R1's (absent) dead var reused
+    expect(cBackend.emit(out[1].sfn)).toContain('w1 = w0 / (s16)a0;');
   });
 
   test('a declined diamond leaves NO residue (no leaked w local)', () => {
@@ -222,7 +254,7 @@ describe('adversarial-round guards', () => {
     };
     const out = registerishSpellings(sfn);
     expect(out.length).toBeGreaterThan(0);
-    const names = out[0].locals.map((l) => l.name).filter((n) => n.startsWith('w'));
+    const names = out[0].sfn.locals.map((l) => l.name).filter((n) => n.startsWith('w'));
     expect(names).toEqual(['w0']); // exactly the R2 staging var — nothing leaked by the decline
   });
 });

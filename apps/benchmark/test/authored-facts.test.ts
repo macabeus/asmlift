@@ -20,6 +20,8 @@
 // CI runs this: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`. It is
 // toolchain-free (JSON + gzip only) and in no `bench` command, deliberately — a dataset lie must
 // fail on a hosted runner with no compilers, not only where someone can run the benchmark.
+import { renderDeclarations } from '@asmlift/core/declare';
+import { arrayInnerExtents, declaredFields } from '@asmlift/core/symbols';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -38,6 +40,7 @@ import {
 } from '../src/cases/authored-facts';
 import { REAL_DIR, type RealManifest } from '../src/cases/manifests';
 import { m2cOwnPrototype } from '../src/cases/real';
+import { syntheticCases } from '../src/cases/synthetic';
 
 const files = readdirSync(REAL_DIR).filter((f) => f.endsWith('.json'));
 
@@ -271,5 +274,189 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
     const noOracle = SYNTHETIC.filter((s) => typeof oracleFor('', s.sym, s.src) === 'string').map((s) => s.sym);
     expect(noOracle).toEqual([]);
     expect(SYNTHETIC.length).toBeGreaterThan(200);
+  });
+});
+
+// ── An authored SYMBOL MAP is an authored fact, and gets an authored fact's gate ──────────────
+//
+// `SynthSpec.symbols` carries the six zero-row-family rows and is strictly MORE expressive than
+// `proto`, the channel whose absence of a gate once cost a real row its match (a manifest
+// declaring `returnsVoid: true` for a function whose own reference returns `void *`). A map states
+// member offsets, bitfield bit offsets, pointee widths and array rank — and the rows that carry
+// one exist precisely to defend the axes those facts enumerate, so a map that quietly disagreed
+// with its own source would flatter exactly what it was authored to measure.
+//
+// TWO THINGS ARE CHECKED, and neither is a restatement of the other.
+//
+// SYMMETRY — every FACT the map declares to asmlift must also reach m2c. The map is asmlift-only
+// input (`Case.symbols`; m2c's analogue is `ctx`), so `src/cases/synthetic.ts` renders it into the
+// ctx and this asserts the rendering actually happened. It is the same class the callee check
+// above covers and the class PR #119 corrected on the real tier, on a channel that check cannot
+// see: `declaredFunctionNames` reads FUNCTION names, so a struct layout added to one side alone is
+// invisible to it. Measured: told only its prototype, m2c emits `extern ? gBgTilemapBufs;` on
+// `sbscope` and the row publishes a DECLINE.
+//
+// FACT, not SYMBOL, because a symbol-level check is defeated in one line: match `\b<name>\b`
+// against the ctx and degrading the renderer's input to core's documented name-only exception
+// leaves it green while the ctx becomes `extern u32 gPacked;` — the whole layout gone from m2c and
+// kept for asmlift, which is PR #119's asymmetry reopened inside the fix for it. Three tests carry
+// the FACT-level check instead, and each was shown to fire.
+//
+// AGREEMENT WITH THE ROW'S OWN SOURCE — the synthetic tier's `src` IS the compiler's input, so it
+// is the oracle here exactly as it is for `proto` above. Checked by NAME (every symbol and every
+// member the map declares must be spelled in the source that defines them) and by internal
+// CONSISTENCY (a member cannot lie outside the size it is declared in, a bitfield cannot span past
+// its container, a pointee width must be one a load can have).
+//
+// WHAT THIS DOES NOT CHECK, stated so the next reader does not over-trust it: it does not compile
+// anything, so it cannot catch a map whose OFFSETS are self-consistent and still wrong for the
+// struct the source declares — a `dreamStones` moved from bit 5 to bit 6 passes here. That is a
+// compiled question and it belongs to a toolchain-bound suite, not to a hosted runner with no
+// compilers. It also does not check an array's OUTERMOST extent, which `declare.ts` leaves unsized
+// by design and which therefore reaches asmlift and not the ctx text — measured on `sbscope` to
+// leave m2c's output byte-identical either way, so it is disclosed rather than gated. What it does
+// catch is the map pointing at a different symbol, a different member, or a shape no C declaration
+// could have — and now, a fact that reaches one channel and not the other.
+describe('an authored symbol map agrees with its own row', () => {
+  const mapped = SYNTHETIC.filter((s) => s.symbols);
+
+  test('the map channel is CONNECTED — some row carries one', () => {
+    // Before asserting anything about maps, prove there are maps: every check below is vacuously
+    // green over an empty list, which reads identically to "nothing is wrong".
+    expect(mapped.length).toBeGreaterThan(0);
+  });
+
+  // SYMMETRY, LAYER 1 — CHANNEL IDENTITY. The ctx must contain the declaration block the map
+  // renders to, byte for byte, and the block is re-derived HERE from `c.symbols` rather than
+  // asked of the production helper: a gate that calls the same function the call site calls
+  // cannot see the call site hand it worse input. THE NAME IS NOT THE FACT, and that is measured:
+  // a check asserting only that each symbol's NAME appears somewhere in the ctx stays green under
+  // a renderer input degraded to `{name, kind, declared}` — core's documented name-only exception
+  // — while the ctx becomes `extern u32 gPacked;` / `extern u32 gBgTilemapBufs;` /
+  // `extern u32 gBgPtrs;`: struct layout, bitfield bit offsets, pointee width and array rank all
+  // present for asmlift and gone for m2c. Under that degradation `ptrelem` emits
+  // `(gBgPtrs + (i * 2))->unk13A` — verbatim the map-less output the map channel exists to
+  // dissolve — and `sbscope` goes from nonmatch to noncompile.
+  test("the m2c ctx carries the map's rendered declarations verbatim", () => {
+    const cases = syntheticCases().filter((c) => c.symbols);
+    expect(cases.length).toBe(mapped.reduce((n, s) => n + s.toolchains.length, 0));
+    const missing = cases
+      .filter((c) => {
+        const block = renderDeclarations([...c.symbols!.values()].flat().map((info) => ({ name: info.name, info })));
+        return !(c.ctx ?? '').includes(block);
+      })
+      .map((c) => `${c.id}: the ctx does not contain the declaration block its own map renders to`);
+    expect(missing).toEqual([]);
+  });
+
+  // SYMMETRY, LAYER 2 — THE FACTS THEMSELVES, read off the map and looked for in the ctx TEXT.
+  // Layer 1 is defeated the moment the renderer itself loses a fact, because both sides then
+  // render the same loss; this layer does not go through the renderer at all. It is what catches
+  // a member that never reaches the declaration: give a map two bitfields overlapping at one
+  // offset and `declaredFields` keeps the first view and drops the alias, so the second member
+  // vanishes from the struct with no error anywhere.
+  //
+  // THE ONE FACT DELIBERATELY NOT CHECKED, so its absence is a decision and not an oversight: an
+  // array's OUTERMOST extent. `declare.ts` leaves it unsized on purpose (`u16 g[][1024]`) — it is
+  // the extent C lets a declaration omit, and omitting it keeps the synthesized decl compatible
+  // with a project's real one whatever its size. So `sbscope`'s `dims: [4, 1024]` reaches asmlift
+  // whole and reaches m2c as the inner `[1024]` alone. Measured rather than waved past: rendering
+  // that ctx with `[4][1024]` substituted leaves m2c's output BYTE-IDENTICAL on that row, so the
+  // residual is disclosed and costs nothing today — it is not a fact m2c is denied the use of.
+  test('every fact a map declares — symbol, member, inner extent — is spelled in the m2c ctx', () => {
+    const problems = syntheticCases()
+      .filter((c) => c.symbols)
+      .flatMap((c) => {
+        const ctx = c.ctx ?? '';
+        const spelled = (w: string): boolean => new RegExp(`\\b${w}\\b`).test(ctx);
+        return [...c.symbols!.values()]
+          .flat()
+          .flatMap((info) => [
+            ...(spelled(info.name) ? [] : [`${c.id}: map declares \`${info.name}\`, the m2c ctx does not`]),
+            ...[...(info.layout ?? []), ...(info.pointee?.layout ?? [])]
+              .filter((f) => !spelled(f.name))
+              .map((f) => `${c.id}: map declares member \`${info.name}.${f.name}\`, the m2c ctx does not`),
+            ...(arrayInnerExtents(info) ?? [])
+              .filter((d) => !new RegExp(`\\[\\s*${d}\\s*\\]`).test(ctx))
+              .map((d) => `${c.id}: map declares inner extent [${d}] of \`${info.name}\`, the m2c ctx does not`),
+          ]);
+      });
+    expect(problems).toEqual([]);
+  });
+
+  // AND THE SAME LOSS, ATTRIBUTED. The check above says a member is missing from one channel; this
+  // one says why, and it is the more accurate charge: `declaredFields` is the SHARED predicate —
+  // core's access rules gate on the same call the declaration renderer does — so a member it drops
+  // is a member NEITHER decompiler can name. That is not an asymmetry, it is an authored map the
+  // row cannot mean, and a synthetic map is hand-written so there is no excuse for authoring one.
+  // (A real project's map may legitimately carry union aliases; this rule is for authored data.)
+  test('every member an authored map declares survives the shared declaration predicate', () => {
+    const problems = mapped.flatMap((s) =>
+      [...s.symbols!.values()].flat().flatMap((info) =>
+        [[info.name, info.layout] as const, [`${info.name}'s pointee`, info.pointee?.layout] as const].flatMap(
+          ([where, layout]) => {
+            if (layout === undefined) {
+              return [];
+            }
+            const kept = new Set((declaredFields(layout) ?? []).map((f) => f.name));
+            return layout
+              .filter((f) => !kept.has(f.name))
+              .map((f) => `${s.sym}: ${where} declares \`${f.name}\`, which the declaration renderer drops`);
+          },
+        ),
+      ),
+    );
+    expect(problems).toEqual([]);
+  });
+
+  test("every map names only symbols and members its row's own src spells", () => {
+    const problems = mapped.flatMap((s) =>
+      [...s.symbols!.values()]
+        .flat()
+        .flatMap((info) => [
+          ...(new RegExp(`\\b${info.name}\\b`).test(s.src)
+            ? []
+            : [`${s.sym}: map declares \`${info.name}\`, src does not`]),
+          ...[...(info.layout ?? []), ...(info.pointee?.layout ?? [])]
+            .filter((f) => !new RegExp(`\\b${f.name}\\b`).test(s.src))
+            .map((f) => `${s.sym}: map declares member \`${info.name}.${f.name}\`, src does not`),
+        ]),
+    );
+    expect(problems).toEqual([]);
+  });
+
+  test('every map is internally consistent — no member outside its object, no bitfield past its unit', () => {
+    const problems = mapped.flatMap((s) =>
+      [...s.symbols!.values()].flat().flatMap((info) => {
+        const where = `${s.sym}:${info.name}`;
+        return [
+          ...(info.dims ?? [])
+            .filter((d) => d !== null && !(Number.isInteger(d) && d > 0))
+            .map((d) => `${where}: array extent ${d} is not a positive integer`),
+          ...[...(info.layout ?? []), ...(info.pointee?.layout ?? [])].flatMap((f) => {
+            const at = `${where}.${f.name}`;
+            const out: string[] = [];
+            if (f.size !== null && info.size !== undefined && f.offset + f.size > info.size) {
+              out.push(`${at}: ends at ${f.offset + f.size}, past the declared size ${info.size}`);
+            }
+            if (f.bitWidth !== undefined) {
+              // A bitfield's bit offset is stated RELATIVE TO ITS OWN BYTE OFFSET, so the unit it
+              // must fit inside is the member's own `size` — the same convention the fold reads
+              // (`f.offset * 8 + f.bitOffset`), which is why a `bitOffset` big enough to leave it
+              // is not a tighter style rule but a member the fold would seat in the wrong word.
+              const unit = (f.size ?? 4) * 8;
+              if (f.bitWidth < 1 || (f.bitOffset ?? 0) < 0 || (f.bitOffset ?? 0) + f.bitWidth > unit) {
+                out.push(`${at}: bits [${f.bitOffset ?? 0}, +${f.bitWidth}) do not fit its ${unit}-bit unit`);
+              }
+            }
+            if (f.pointer && f.pointeeSize !== undefined && ![1, 2, 4].includes(f.pointeeSize)) {
+              out.push(`${at}: pointee width ${f.pointeeSize} is not a width a load has`);
+            }
+            return out;
+          }),
+        ];
+      }),
+    );
+    expect(problems).toEqual([]);
   });
 });

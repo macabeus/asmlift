@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { RESULTS_DIR } from '../config';
-import { readCommitted } from './committed';
+import { readCommitted, sameRun } from './committed';
 
 export interface OutcomeFlip {
   id: string;
@@ -66,10 +66,30 @@ export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): Reg
   return { missing, lost, gained, changed, ok: missing.length === 0 && lost.length === 0 };
 }
 
-/** CLI entry: the committed results.json at `base` vs the freshly merged one. Returns the process
- *  exit code — 0 iff no match was lost AND no committed row vanished. `base` defaults to HEAD;
- *  a branch that has already committed its own artifact must pass its branch point instead, or
- *  this compares the branch against itself. */
+/** The rows the branch's OWN committed artifact holds that `base` does not.
+ *
+ *  THE BLIND SPOT THIS EXISTS FOR. `compareOutcomes(base, fresh)` walks the BASE's rows, so a row the branch added
+ *  is compared against nothing: it is an ADDITION relative to the branch point for as long as the
+ *  branch lives, however many times the branch republishes its own artifact. A round that adds six
+ *  rows in one commit and then changes the harness in the next can take one of them from a
+ *  published MATCH to a noncompile with `regression --base origin/main` reporting `0 lost` and
+ *  `diff --base origin/main` reporting it as `added`, not `changed`. Measured on exactly that: with
+ *  base `origin/main` the report is ok, `0 lost`; with the branch's own artifact as base it is
+ *  `2 lost` — `synthetic:bfwordread:agbcc` and `synthetic:bfwordwrite:agbcc`, m2c match → noncompile.
+ *
+ *  So the gate asks BOTH questions, and this is the second population: the branch's own artifact
+ *  narrowed to the rows the base lacks. Rows present in both are already policed by the base
+ *  comparison; asking them twice would only report the same flip twice. */
+export function rowsAddedSince(base: BenchOutput, self: BenchOutput): BenchOutput {
+  const baseIds = new Set(base.results.map((r) => r.id));
+  return { ...self, results: self.results.filter((r) => !baseIds.has(r.id)) };
+}
+
+/** CLI entry: the committed results.json at `base` vs the freshly merged one, PLUS the branch's own
+ *  committed artifact vs the fresh one over the rows `base` does not have. Returns the process exit
+ *  code — 0 iff no match was lost and no committed row vanished, in EITHER comparison. `base`
+ *  defaults to HEAD; a branch that has already committed its own artifact must pass its branch
+ *  point instead, or the first comparison compares the branch against itself. */
 export function regressionGate(base = 'HEAD'): number {
   const committed = readCommitted(base);
   const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
@@ -92,5 +112,65 @@ export function regressionGate(base = 'HEAD'): number {
     `regression: ${lost.length} lost, ${missing.length} missing, ${gained.length} gained, ` +
       `${changed.length} other flips (${committed.results.length} committed rows)`,
   );
-  return report.ok ? 0 : 1;
+
+  // The branch's OWN rows, which the comparison above cannot see (see rowsAddedSince). The
+  // population is always PRINTED, including when it is empty or unavailable: a gate whose silence
+  // reads the same for "nothing was added" and "this never ran" has reported nothing.
+  //
+  // AND IT IS ONLY A COMPARISON INSIDE ONE WINDOW — between `bench merge` and the commit of the
+  // regenerated artifact. After that commit, `readCommitted('HEAD')` hands back the very file this
+  // gate reads off disk, and `compareOutcomes` of a file with itself prints `0 lost` in a
+  // millisecond. That green line is indistinguishable from the one a real comparison produces,
+  // which is the vacuity `diff.ts`'s `notRegenerated` guards on the BASE side; asked here of the
+  // SELF side by the same predicate (`committed.ts` sameRun). NOT a
+  // failure — re-verifying a finished branch is a legitimate thing to do, and exiting 1 for it
+  // would be a false alarm — but never a pass either: it prints NOT CHECKED and says which window
+  // to run it in.
+  let selfOk = true;
+  if (base === 'HEAD') {
+    console.log(
+      `added-row regression: not applicable — base is HEAD, so the comparison above already IS the ` +
+        `branch's own artifact. Pass the branch point (--base origin/main) to police the rows it added.`,
+    );
+  } else {
+    let self: BenchOutput | undefined;
+    try {
+      self = readCommitted('HEAD');
+    } catch (e) {
+      console.error(`added-row regression: SKIPPED — cannot read this branch's own artifact: ${String(e)}`);
+      selfOk = false; // a gate that cannot run is not a gate that passed
+    }
+    if (self !== undefined && sameRun(self, fresh)) {
+      console.log(
+        `added-row regression: NOT CHECKED — this branch's committed artifact carries the same ` +
+          `meta.generatedAt (${fresh.meta.generatedAt}) as the fresh one, so it IS this run and the ` +
+          `comparison would be with itself. Run it after the merge and BEFORE committing the ` +
+          `regenerated artifact.`,
+      );
+      self = undefined;
+    }
+    if (self !== undefined) {
+      const added = rowsAddedSince(committed, self);
+      const selfReport = compareOutcomes(added, fresh);
+      for (const f of selfReport.gained) {
+        console.log(`GAINED  ${f.id} [${f.decompiler}] ${f.from} → match   (row this branch added)`);
+      }
+      for (const f of selfReport.changed) {
+        console.log(`changed ${f.id} [${f.decompiler}] ${f.from} → ${f.to}   (row this branch added)`);
+      }
+      for (const id of selfReport.missing) {
+        console.error(`MISSING ${id} — row this branch added is absent from the fresh run`);
+      }
+      for (const f of selfReport.lost) {
+        console.error(`LOST    ${f.id} [${f.decompiler}] match → ${f.to}   (row this branch added)`);
+      }
+      console.log(
+        `added-row regression: ${selfReport.lost.length} lost, ${selfReport.missing.length} missing, ` +
+          `${selfReport.gained.length} gained, ${selfReport.changed.length} other flips ` +
+          `(${added.results.length} rows this branch added since ${base})`,
+      );
+      selfOk = selfReport.ok;
+    }
+  }
+  return report.ok && selfOk ? 0 : 1;
 }

@@ -97,8 +97,8 @@
 // `sa3:sub_803213C` all still MATCH, `kleod:RollRandomLevelVariant` 18, `kleod:CountCollectedGems`
 // 290, `kleod:UpdateWorldMapNodeAnim` 157, each the artifact's own number. A gate needs a row it
 // protects. (One side effect worth recording: with the rule on, PI's winner becomes
-// `unsigned/setup-args/no-ptr-elem/offmember` — the `/no-ptr-elem` arm that wins nothing today
-// wins there. It is an ablation's artifact, not a reason to ship either.)
+// `unsigned/setup-args/no-ptr-elem/offmember` — an arm that wins no REAL row wins there. It is an
+// ablation's artifact, not a reason to ship either.)
 //
 // ALL-OR-NOTHING PER FUNCTION, and that is a PRICE rather than a property. Every admitted base is
 // respelled together in one candidate, so a function with two admitted bases where the target

@@ -174,8 +174,17 @@ pnpm bench:merge                      # = bench merge: tiers -> results/results.
 pnpm bench publish                    # re-stage results.json into the web app alone
 pnpm bench:smoke                      # one trivial fn through every available toolchain
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
-pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row
-pnpm bench diff --base origin/main         # gate: exit 1 if ANY compared field moved, row by row
+pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row --
+                                           #   TWICE: once against `--base`, then again over the
+                                           #   rows THIS BRANCH added since it (which the first
+                                           #   comparison, walking the base's rows, never reaches).
+                                           #   The second half is a comparison only BEFORE the
+                                           #   regenerated artifact is committed -- after that it
+                                           #   would read the fresh file back out of HEAD, so it
+                                           #   says NOT CHECKED rather than a green zero
+pnpm bench diff --base origin/main         # gate: exit 1 if ANY compared field moved, row by row --
+                                           #   and then NAMES the field moves on rows this branch
+                                           #   added since `--base`, which are `ADDED` there forever
                                            #   exit 2 if results.json was never regenerated: it is
                                            #   committed, so an unrun gate compares the base with
                                            #   ITSELF and prints a green line having measured nothing
