@@ -4996,11 +4996,26 @@ export const SYNTHETIC: SynthSpec[] = [
   //    A round pricing this decline by counting inhabitants in that function will find none: the
   //    row is here because the idiom is general, not because the source TU needs it.
   //
-  // asmlift recovers every one of those as a
-  // CAST over the symbol's address — `((u16 *)&gTbl)[i]` — which scales the index FIRST and loads
-  // the base second. FIVE of the six scored targets load the base first (`arrcast` is the one that
-  // does not), and the family measures that ordering plus a second, independent axis: where a
-  // constant term ends up, in the pool word's relocation addend or in a runtime `add`.
+  // asmlift spells the base as a CAST over the symbol's address — `((u16 *)&gTbl)[i]` — on FOUR of
+  // the six scored rows, and as flat pointer arithmetic on the other two. Whether that candidate
+  // then SCALES THE INDEX FIRST is a separate question that does not follow from the cast, and an
+  // earlier cut of this paragraph asserted it of all six. Disassembled, candidate against target:
+  //
+  //                candidate asmlift ranks today          candidate obj   target obj
+  //     harr       `((u16 *)&gTbl)[a0]`                   index-first     base-first
+  //     harridx    `((u8 *)&gTbl)[a0 + 1]`                BASE-first      base-first
+  //     bgarr      `((struct Elem0 *)&gBgInfo)[a0].f_16`  index-first     base-first
+  //     tblrank2   `*(s32 *)((a1<<2) + (a0<<3) + &gPtrTbl)`  index-first  base-first
+  //     arrbias    `*(u8 *)(a0 + ((u32)&gTbl + 1))`       BASE-first      base-first
+  //     arrcast    `((u16 *)&gTbl)[a0]`                   index-first     INDEX-first
+  //
+  // FIVE of the six scored TARGETS load the base first (`arrcast` is the one that does not), and
+  // asmlift's candidate mismatches that order on FOUR of those five, not on all five. `harridx`
+  // and `arrbias` are already base-first with no index scaling at all, because agbcc folds their
+  // `+1` into the pool word and the scaling goes with it (axis 1 below). That is precisely why
+  // `arrbias` is a MATCH and a control rather than a gap — do not read it as a row exposed to an
+  // index-first default. The family measures this ordering plus a second, independent axis: where
+  // a constant term ends up, in the pool word's relocation addend or in a runtime `add`.
   //
   // THE ATTRIBUTION, CORRECTED — the first cut of this block named ONE cause and there are TWO.
   // agbcc's `c-typeck.c` does fork the subscript on
