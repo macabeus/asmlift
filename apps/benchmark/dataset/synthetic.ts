@@ -1276,8 +1276,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // one register and reused at immediate offsets, a clamp overwriting its own variable, a value
   // parked across a high-pressure loop. The family is cut from kleod:LoadBGTilemapData:agbcc,
   // whose residual diff is almost entirely this class, but every shape is spelled with absolute
-  // addresses so the rows stay self-contained (no ELF, no extern data — a candidate could not
-  // declare one).
+  // addresses so the rows stay self-contained. (A named extern global would compile and score —
+  // asmlift synthesizes the declaration off the target asm, and rows elsewhere in this file
+  // relocate against one. Self-contained absolute addresses are still the right choice HERE,
+  // because these rows are about where a value lives, not about how a base is spelled, and a
+  // named symbol would add a second moving part.)
   //
   // The absolute base is PER-PLATFORM, so the spelled address is one the console actually has:
   // under agbcc the GBA DMA3 register file / EWRAM / IWRAM; under ido and kmc the N64 PI
@@ -1708,7 +1711,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // Cut from kleod:LoadBGTilemapData:agbcc, where re-reading ONE entry byte in two sibling arms
   // is 15 points of the residual. Spelled with absolute GBA addresses so the rows stay
-  // self-contained (no ELF, no extern data — a synthetic candidate could not declare one).
+  // self-contained. (Not because a named global is impossible — the GLOBAL ARRAY SHAPE family far
+  // below relocates against one and scores — but because these rows isolate a re-read, and the
+  // base spelling would be a second moving part.)
   //
   // `readshare` is the isolate: one absolute byte read, two sibling arms, nothing else moving.
   // `readarm` is its control — the same read with BOTH uses inside ONE arm, which asmlift
@@ -2657,11 +2662,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // in `fold-const.c`, the target-independent folder agbcc inherits from GCC 2.x, and join-block
   // tail sharing is a target-independent RTL pass. Whether these rows reproduce on the other three
   // toolchains is UNTESTED — no cross-compiler run was attempted.
-  // WHAT THESE ROWS CANNOT MEASURE, stated because it is the other half of the question they came
-  // from: the NAMED-symbol spelling. A synthetic candidate has no ELF to synthesize declarations
-  // from, so a row relocating against a named `gBgInfo` fails candidate compilation; these use an
-  // address macro, codegen-equivalent for the fold (verified above), which leaves the naming
-  // question to the real tier and to no row here.
+  // WHAT THESE ROWS DO NOT MEASURE, stated because it is the other half of the question they came
+  // from: the NAMED-symbol spelling. These use an address macro, codegen-equivalent for the fold
+  // (verified above). A row relocating against a named `gBgInfo` DOES compile and score — asmlift
+  // synthesizes the declaration off the target asm — and the GLOBAL ARRAY SHAPE family far below
+  // is exactly that row. So the naming question is measured here in this file, not deferred to
+  // the real tier.
   //
   // THE LBG NOTE, with this family's own share of that row priced rather than assumed away. On
   // `kleod:LoadBGTilemapData:agbcc` the 386 winner's pool holds 20 `.word` against the ROM's 20
@@ -3702,7 +3708,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // above the chain, and on `zxparam` it declares `u8 temp_r0;` and assigns `temp_r0 = a;`. Every
   // home this family is about, m2c has — and on `armkeep`, so does the restraint not to use one.
   //
-  // agbcc only, as the `read-once` and `uninit-local` families are. Every claim above is a pair of
+  // agbcc only, as the `read-once` family is (`uninit-local` is NOT — it spans all four
+  // toolchains, so it is no precedent). Every claim above is a pair of
   // spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and mwcc_242_81 place a
   // parameter's extension, a merge initializer or a base local the same way was NOT measured, so
   // those lanes are left off rather than assumed. What would earn one: the same compiled pair on
@@ -4629,9 +4636,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // decl-vs-cast, and a price measured here does not carry to a `gaddr` array declaration.
   //
   // NO ROW for the third gap this investigation named — a folded `symbol+k` pool literal against
-  // the reference's single `symbol` — and the reason is structural, not an omission: a synthetic
-  // candidate has no ELF, so no symbol map is ever attached and a `gaddr` never forms. Only a
-  // real-tier row can reach it.
+  // the reference's single `symbol`. The reason given here was that a synthetic candidate has no
+  // ELF, "so no symbol map is ever attached and a `gaddr` never forms", and that stopped being
+  // true: `SynthSpec.symbols` now exists and rows in this file set it, so a synthetic row CAN be
+  // handed a map and a `gaddr` CAN form. The rows in THIS family still carry none, so the gap is
+  // unreached here — but it is reachable now by a synthetic row, not only by a real-tier one.
   //
   // NO ROW for declaration order either, because one already exists: permuting the 14 declarations
   // of asmlift's own winning `dma_fill_uninit` candidate and recompiling gives 0 / 6 / 9 / 12 over
@@ -4708,7 +4717,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // trees are in the same position), so a decline there names no gate. Widening the scan is a
   // prerequisite for any lever that wants those loops, not a side effect of one that does not.
   //
-  // agbcc only, as the `read-once`, `uninit-local` and `value-home` families are. Every claim
+  // agbcc only, as the `read-once` family is (`uninit-local` and `value-home` are NOT — both span
+  // all four toolchains, so neither is a precedent). Every claim
   // above is a pair of spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and
   // mwcc_242_81 promote a loop-invariant device store, delete a use-less device read, or read a
   // field's pointer-ness in their alias analysis was NOT measured, so those lanes are left off
@@ -4971,6 +4981,379 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'unsigned short ptrelem(int i);',
     symbols: BGPTRS_MAP,
+  },
+  // ── GLOBAL ARRAY SHAPE — the base local, the array-typed subscript, and the pool addend ────────
+  // Seven rows. FIVE — `harr`, `harridx`, `bgarr`, `tblrank2`, `arrbias` — are modelled on array
+  // shapes the same graphics translation unit the `value-home` and DMA families above were cut
+  // from actually indexes, which is why they are modelled rather than invented: a bare extern
+  // scalar array read at a variable index (the TU's is `u8` — `harridx` keeps that width, `harr`
+  // takes the `u16` one so the ordering axis below is observable at all), a global array of
+  // 28-byte structs read at a variable index for one `u16` member at offset 0x10 (`bgarr`), a
+  // rank-2 table of pointers (`tblrank2`), and a CONSTANT BYTE BIAS on a global byte table — the
+  // TU's rank-3 ROM table is read at a CONSTANT final subscript, which is the shape `arrbias`
+  // isolates (that form was not compiled here, so this is a shape correspondence, not a claim
+  // that it too folds to a pool addend). TWO are CONSTRUCTED PROBES with no counterpart, labelled
+  // as such rather than passed off as found code:
+  //  • `arrcast` guards a direction the other rows leave open (axis 2 below).
+  //  • `outparam` pins the out-parameter idiom `T v; callee(&v); use(v);`, which has ZERO
+  //    INHABITANTS in that TU. Measured: across its 956 lines the ONLY address-taken LOCAL is a
+  //    `u16` written before use and handed to a DMA register — never to a callee as argument 0 —
+  //    and every other `&x` in the file is a global. The near-match reference for the family's own
+  //    source function contains no `&local` call argument at all. A round pricing this decline by
+  //    counting inhabitants in that function will find none: the row is here because the idiom is
+  //    general, not because the source TU needs it.
+  //
+  // asmlift spells the base as a CAST over the symbol's address — `((u16 *)&gTbl)[i]` — on four of
+  // the six scored rows, and as flat pointer arithmetic on the other two. Whether that candidate
+  // then SCALES THE INDEX FIRST is a separate question that does not follow from the cast.
+  // Disassembled, candidate against target:
+  //
+  //                candidate asmlift ranks today          candidate obj   target obj
+  //     harr       `((u16 *)&gTbl)[a0]`                   index-first     base-first
+  //     harridx    `((u8 *)&gTbl)[a0 + 1]`                BASE-first      base-first
+  //     bgarr      `((struct Elem0 *)&gBgInfo)[a0].f_16`  index-first     base-first
+  //     tblrank2   `*(s32 *)((a1<<2) + (a0<<3) + &gPtrTbl)`  index-first  base-first
+  //     arrbias    `*(u8 *)(a0 + ((u32)&gTbl + 1))`       BASE-first      base-first
+  //     arrcast    `((u16 *)&gTbl)[a0]`                   index-first     INDEX-first
+  //
+  // Five of the six scored TARGETS load the base first (`arrcast` is the one that does not), and
+  // asmlift's candidate mismatches that order on THREE of those five — `harr`, `bgarr`, `tblrank2`.
+  //
+  // WHY `harridx` AND `arrbias` ARE ALREADY BASE-FIRST, and it is NOT the addend. Both are u8
+  // rows, and AT ELEMENT WIDTH 1 THERE IS NO INDEX SCALING TO EMIT, so the base `ldr` is first
+  // whatever else is going on. Measured, cast base, `+1` present and absent:
+  //
+  //     ((u8 *)&gTbl)[a0]       ldr ; adds ; ldrb          ((u16 *)&gTbl)[a0]      lsls ; ldr ; …
+  //     ((u8 *)&gTbl)[a0 + 1]   ldr ; adds ; ldrb          ((u16 *)&gTbl)[a0 + 1]  lsls ; ldr ; …
+  //
+  // The constant term moves the pool word's ADDEND (axis 1) and does not touch the ORDER; the
+  // width decides the order. So instruction order is only OBSERVABLE at width > 1, which is why
+  // the axis-2 minimal pair below is `harr`/`arrcast` (both u16) and why no u8 row can referee it.
+  // `arrbias` being a MATCH is this, not an ordering win — do not read it as a row exposed to an
+  // index-first default.
+  //
+  // THE ATTRIBUTION: TWO sufficient causes, not one. agbcc's `c-typeck.c` does fork the subscript
+  // on `TREE_CODE (TREE_TYPE (array)) == ARRAY_TYPE && TREE_CODE (array) != INDIRECT_REF`, so a
+  // bare `gTbl[i]` over a declared array loads the base first. But so does an ordinary POINTER
+  // LOCAL holding the base, which has no array type at all. Measured object-vs-object against
+  // these rows' own targets, with `arm-none-eabi-objdump` confirming instruction-identical output:
+  //
+  //   extern u16 gTbl[]; u32 harr(u32 i){ u16 *p = (u16 *)&gTbl; return p[i]; }          -> 0
+  //   struct Elem0 {...}; u32 bgarr(u32 i){ struct Elem0 *p = (struct Elem0 *)&gBgInfo;
+  //                                         return p[i].field_16; }                      -> 0
+  //   the same base-local shape against `harridx` (with or without the cast)              -> 6
+  //   a RANK-PRESERVING base local against `tblrank2`
+  //     `const s32 *(*p)[2] = (const s32 *(*)[2])&gPtrTbl; return (s32)p[i][j];`          -> 2
+  //   a FLAT base local against `tblrank2` (base local AND the rank flattened)            -> 6
+  //
+  // So `harr` and `bgarr` DO NOT isolate the array-typed subscript: a base local reaches their
+  // targets byte-for-byte, and that is the CHEAPER of two sufficient answers — a value home over a
+  // named symbol, the family asmlift already has (`value-home` above). A round that reads this
+  // block should close `harr`/`bgarr` with the base local and reach for the array fork only for
+  // the other two.
+  //
+  // `harridx` and `tblrank2` are the rows where the base local is NOT sufficient, and they fail it
+  // differently. On `harridx` the base local is simply wrong (6, against asmlift's 5 today) — the
+  // addend decides and no base spelling reaches it. On `tblrank2` it is a PARTIAL: rank-preserving
+  // it scores 2, BETTER than the 3 asmlift ranks today, so a base-local lever alone would move
+  // that row without matching it. Only the array-typed subscript with the rank preserved reaches
+  // 0. The two `tblrank2` figures differ by whether the RANK survives, not by the base spelling —
+  // flattening the rank costs 4 points on its own, the same axis the additivity gate measures.
+  //
+  // Today, agbcc only, map-less, fan 2 on every scored row, BOTH candidates of every fan scoring
+  // identically, winning label `unsigned` on every scored row, one declaration synthesized on
+  // each. THOSE FIGURES COME FROM THREE DIFFERENT COMMANDS, and the row's score is the only one
+  // `bench run` prints:
+  //   • THE SCORE — `pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial`.
+  //     Note `--only` is a SUBSTRING filter. Run for all seven syms, `harr` is the ONE that does
+  //     not isolate — it also runs `harridx`, printing `[1/2]` and `[2/2]`; the other six each
+  //     print `[1/1]`.
+  //   • FAN SIZE, WINNING LABEL, SYNTHESIZED COUNT — the CLI against a built target:
+  //     `asmlift <sym>.s --config apps/benchmark/dataset/toolchains/agbcc/decomp.yaml
+  //      --score-against <sym>.o`, with `$ASMLIFT_AGBCC` and `$ASMLIFT_ARM_AS` both exported.
+  //     THE `--config` IS NOT OPTIONAL and a bare `--target agbcc` is not a substitute: run that
+  //     way it prints no figures at all, only `--score-against needs tools.asmlift.compiler in
+  //     decomp.yaml`. That yaml is the one the benchmark itself scores through; `--target` then
+  //     comes from it. Its `[declared]` line reads `1 declaration(s) synthesized from the target
+  //     asm`; its `[ranked]` line reads `2 candidate(s) scored, 0 dropped, 0 withheld,
+  //     1 synthesized, best unsigned: <score>` followed by a source stamp.
+  //   • EVERY CANDIDATE'S SCORE — `[ranked]` prints only the WINNER, so this needs a third call:
+  //     `decompileRanked(sym, asm, tc.targetDesc, obj, { compile: benchCompilerFor('agbcc') })`,
+  //     walking `.candidates` (NOT `.results`, which does not exist — `rankBy` returns
+  //     `{ best, candidates, dropped, withheld }`). Measured, `unsigned` and `signed` tie on all
+  //     six scored rows — 2/2, 5/5, 8/8, 3/3, 0/0, 0/0. THIS is the enumeration both controls
+  //     below require, and no `bench` subcommand substitutes for it.
+  //
+  // The scores those commands report today, and what each row is for:
+  //
+  //   harr      2      width > 1, no constant term. Base local OR array subscript reaches it
+  //   harridx   5      a constant term at width 1 — target pool word `.word gTbl` plus
+  //                    `add r0,r0,#0x1`, asmlift `((u8 *)&gTbl)[a0 + 1]`, which agbcc folds
+  //                    into a pool word of `.word gTbl+0x1` and no `add`. Base local scores 6
+  //   bgarr     8      the struct-array member read. Base local OR array subscript reaches it
+  //   tblrank2  3      the declared rank — AND the additivity gate, below. A rank-preserving
+  //                    base local scores 2 here: better than today, still not a match
+  //   arrbias   0      MATCH. OVER-FIRE CONTROL, addend direction — see below
+  //   arrcast   0      MATCH. OVER-FIRE CONTROL, zero-addend direction — see below
+  //   outparam  none   no score at all: a whole-function DECLINE
+  //
+  // WHY THESE SEVEN RELOCATE AGAINST A NAMED DATA GLOBAL rather than using the address-macro form
+  // most synthetic globals here use (`#define gTbl ((u16 *)0x03003430)`): respelled that way the
+  // family MEASURES NOTHING — all of them score 0 today. An array-typed OBJECT requires a SYMBOL,
+  // so at a literal address every available C spelling is a pointer cast or an INDIRECT_REF and
+  // takes the pointer path — bare `gTbl[i]`, `((u16 *)LIT)[i]` and `(*(u16 (*)[])LIT)[i]` compile
+  // to ONE object (md5 61b257461c93f452d7ea79e0778da534 for all three). The addend goes the same
+  // way: respelled, `harridx` and `arrbias` constant-fold to the same `.word 0x3003431` and become
+  // the same row, destroying the control. The rows compile because asmlift synthesizes the
+  // declaration itself off the target asm (`[declared] 1 declaration(s) synthesized`), `as`
+  // accepts an undefined `R_ARM_ABS32` in a `.o`, and objdiff pairs relocations BY SYMBOL NAME.
+  // These are NOT the first synthetic rows to do it: `bfwordread`, `bfwordwrite` and `ptrelem`
+  // (`gPacked`, `gBgPtrs`) and the `value-home` row `sbscope`
+  // (`extern unsigned short gBgTilemapBufs[4][1024]`) already relocate against named data globals,
+  // so the named-symbol base is established here and this family neither introduces nor pioneers
+  // it. Three family headers far above this block state that a synthetic candidate cannot declare
+  // an extern global; that is false and all three are corrected in place.
+  //
+  // NONE OF THE SEVEN CARRIES A SYMBOL MAP, and that is deliberate rather than incidental.
+  // `SynthSpec.symbols` exists and rows above set it (`ptrelem` does), so a folded `gaddr` pool
+  // literal CAN form on a synthetic row. Measured, handing `harr` a map that declares `gTbl` an
+  // array flips asmlift's own winner from `((u16 *)&gTbl)[a0]` to the bare `gTbl[a0]` — the very
+  // spelling this family exists to measure the absence of — so a mapped row would measure nothing
+  // here. asmlift's synthesized `extern u32 gTbl;` is a third thing again: the DECLARE path, which
+  // names the symbol without typing it.
+  //
+  // THE SOUNDNESS RULE THE FAMILY ENCODES: TWO INDEPENDENT AXES. Both are measured; neither is a
+  // licence for the other.
+  //
+  // AXIS 1 — WHERE THE CONSTANT TERM GOES. The full 2×4 cross, every spelling of `gTbl[i+1]`
+  // against both `+1` targets (`harridx`'s pool word is a bare `.word gTbl` plus a runtime
+  // `adds r0,#1`; `arrbias`'s is `.word gTbl+0x1` with no add — `R_ARM_ABS32 gTbl`, in-place
+  // addend `01 00 00 00` at 0x8, against `harridx`'s `00 00 00 00`):
+  //
+  //                                                        vs harridx   vs arrbias
+  //     gTbl[i + 1]                     (array, on index)      0 MATCH      5
+  //     const u8 *p = &gTbl[1]; p[i]    (array, in base)       5            0 MATCH
+  //     ((u8 *)&gTbl)[i + 1]            (cast,  on index)      5            0 MATCH
+  //     *(u8 *)(i + ((u32)&gTbl + 1))   (cast,  in base)       5            0 MATCH
+  //
+  // Read the columns, because they are NOT symmetric and that asymmetry is the whole rule.
+  // Against `arrbias` THREE spellings tie at 0 — anything that folds the constant into the base
+  // reaches a pool addend, cast or not — so `arrbias` does not discriminate cast from array at
+  // all; it discriminates BASE-FOLDED from ON-INDEX. Against `harridx` exactly ONE spelling works,
+  // and it is the only one that is BOTH array-typed AND index-side: agbcc constant-folds
+  // `&gTbl + 1` into the pool word for every pointer/cast base, so keeping the `+1` on the index
+  // is not enough — `((u8 *)&gTbl)[i + 1]` still scores 5. So:
+  //
+  //     A pool addend means the constant belongs in the BASE, and three spellings all reach it.
+  //     A bare pool word plus a runtime add means the constant belongs on the INDEX, and there
+  //     only the DECLARED-ARRAY subscript survives, because every cast base folds it away.
+  //
+  // AXIS 2 — INSTRUCTION ORDER, which is what decides when there is no constant term at all. It
+  // has a PRECONDITION: order is only observable at ELEMENT WIDTH > 1, because at width 1 there is
+  // no scaling to order against the base `ldr` (measured above). So the axis has exactly TWO
+  // instances here, both u16: `harr`, whose base-first target is reached by a declared array OR a
+  // base local (0 and 0), and `arrcast`, whose index-first target wants the cast and where BOTH
+  // base-first spellings score 2. A zero addend does NOT license base-first, and `arrcast` is the
+  // row that catches a rule which assumes it does.
+  //
+  // THE OTHER ROWS ARE NOT INSTANCES OF THIS AXIS. Each fails the predicate for its own reason:
+  //  • `bgarr` is zero-addend and base-first and a base local or a declared array does reach it
+  //    (0 and 0) — but its 28-byte element is a second moving part, so it is not a minimal pair
+  //    with anything and cannot referee an ordering rule on its own.
+  //  • `tblrank2` is zero-addend and base-first, but a base local does NOT reach it: the
+  //    rank-preserving one scores 2. It is a PARTIAL on this axis, not an instance.
+  //  • `arrbias` fails the precondition — it is u8, so it CANNOT discriminate instruction order at
+  //    all — and it is not zero-addend either (its pool word carries addend 1). It is an AXIS 1
+  //    row. It also does not want a declared array or a base local: asmlift already MATCHES it
+  //    with a cast, `*(u8 *)(a0 + ((u32)&gTbl + 1))`, and axis 1's cross shows three spellings
+  //    tying at 0 there, so the row does not discriminate cast from array in either direction.
+  //    Reading it as an axis-2 over-fire control is wrong three times over.
+  //
+  // TWO ROWS GUARD THIS, one per axis, and BOTH are authored as matches:
+  //  • `arrbias` — AXIS 1, the addend direction. Applying the index-side spelling unconditionally
+  //    — `extern u8 gTbl[]; return gTbl[a0 + 1];`, which is exactly what wins `harridx` — scores 5
+  //    here, i.e. it loses the match. The mirror is byte-level: asmlift's `harridx` candidate
+  //    `((u8 *)&gTbl)[a0 + 1]` assembles to `.text` bytes IDENTICAL to `arrbias`'s target
+  //    (`01 49 40 18 00 78 70 47 01 00 00 00`, one `R_ARM_ABS32 gTbl`), and the two 5s are
+  //    mirror-image breakdowns — `delete: 2` one way, `insert: 2` the other. One symbol, two
+  //    opposite right answers, separated only by the addend.
+  //  • `arrcast` — AXIS 2, the zero-addend direction. It is a MINIMAL PAIR with `harr`: same
+  //    symbol, same `u16` width, same single `R_ARM_ABS32 gTbl` at an in-place addend of
+  //    `00 00 00 00`, same index — the sources differ by nothing but a cast, and the objects
+  //    differ by nothing but instruction order:
+  //        harr     `gTbl[i]`            ldr r1,.L / lsl r0,#1 / add / ldrh
+  //        arrcast  `((u16 *)gTbl)[i]`   lsl r0,#1 / ldr r1,.L / add / ldrh
+  //    So the two rows are each other's over-fire control on this axis, and nothing else varies.
+  //    Both base-first spellings lose `arrcast` — bare `gTbl[i]` scores 2 and the base local
+  //    `const u16 *p = gTbl; p[i]` scores 2 (they are the same object). A rule implemented as
+  //    "addend zero, therefore base-first" over-fires on exactly this shape.
+  //
+  // HOW BOTH CONTROLS ACTUALLY BIND, because their fans make the obvious reading wrong. `rankBy`
+  // sorts and returns `results[0]` (`packages/core/src/rank.ts`), so the published score is the
+  // MINIMUM over the fan. `arrbias`'s fan is 2 and BOTH candidates score 0; `arrcast`'s likewise.
+  // A lever that merely ADDS a base-first candidate therefore CANNOT move either row — the
+  // 0-scoring cast candidate still wins, and the control reports green while the lever over-fires.
+  // BOTH CONTROLS BIND ONLY ON A LEVER THAT REPLACES OR WITHHOLDS THE CURRENT WINNER. A lever
+  // shipped additively must be checked by enumerating the fan (every candidate's score), not by
+  // reading the row's published score.
+  //
+  // THE ADDITIVITY GATE — `tblrank2`, and this half is a PREDICTION, not a measurement of a
+  // shipped lever. Endpoint-scored object-vs-object, half A alone (the array-typed subscript with
+  // a flat index, in asmlift's own operand order) `extern s32 gPtrTbl[]; return gPtrTbl[j + i*2];`
+  // scores 4 — WORSE than the 3 asmlift ranks today; the other operand order `gPtrTbl[i*2 + j]`
+  // scores 6; both halves together, which is the row's own spelling, score 0. So the subscript and
+  // the declared rank must ship TOGETHER or this row pays for the half. FALSIFYING COMMAND, and it
+  // is an ENDPOINT check for the same reason the controls are: ship half A alone, then score the
+  // half-A candidate against `tblrank2`'s target directly. Anything other than a score strictly
+  // worse than 3 falsifies the claim. Do NOT read this off `pnpm bench run` — `tblrank2`'s fan is
+  // 2 and both candidates score 3, so an additively-shipped half A leaves the published 3 standing
+  // and the gate would report a falsification for a lever behaving exactly as predicted.
+  //
+  // TWO THINGS THE ROWS FALSIFIED, said here because it is easy to assume otherwise:
+  //  • `bgarr` needs NO new element-layout capability. asmlift ALREADY synthesizes a correct
+  //    28-byte element and the right member — `struct Elem0 { u8 _pad0[16]; u16 field_16;
+  //    u8 _pad1[10]; }` reached as `((struct Elem0 *)&gBgInfo)[a0].field_16`. Feeding asmlift's
+  //    OWN `Elem0` back through a DECLARED array (`extern struct Elem0 gBgInfo[];
+  //    return gBgInfo[a0].field_16;`) scores 0, and through a BASE LOCAL scores 0 as well. The
+  //    whole 8 is where the base is materialized, not what the element looks like; a round that
+  //    closes it by inventing element layouts is aiming at the wrong gap.
+  //  • `tblrank2`'s rank ARITHMETIC is already recovered. asmlift emits
+  //    `*(s32 *)((a1 << 2) + (a0 << 3) + (u32)&gPtrTbl)` — the rank-preserving scaling, not the
+  //    flat `(i * 2 + j) * 4`. The flat index is a symbol-side SPELLING, not an arithmetic gap.
+  //
+  // `outparam` IS A DIFFERENT KIND OF ROW: it has no score, and its gate is that it keeps
+  // declining with the SAME first blocker after every rebase. It pins the out-parameter idiom
+  // `T v; callee(&v); use(v);`. On the TARGET side, agbcc's `expand_decl` refuses a register to a
+  // local whose address is taken, so the local becomes a one-word frame and its address becomes
+  // argument 0. That explains the ASM but it is NOT what asmlift refuses on: the perturbation
+  // `s32 v = 0; fill(&v); return v;` is equally address-taken and lifts CLEANLY to
+  // `s32 sp0; sp0 = 0; fill(&sp0); return sp0;`. The discriminator is the STORE-LESS slot — the
+  // frame word is never written before the call — which is what the message itself says.
+  // ATTRIBUTION, re-triggered rather than quoted, first blocker
+  // `packages/core/src/frontend/thumb.ts:3395`, message verbatim:
+  //     cannot lift 'outparam': address-taken stack local — the one-word frame is handed to a
+  //     callee as argument 0 and never written here, which is how a hidden struct-return pointer
+  //     looks — the callee owning the storage is not provably an addressable local
+  // That is a whole-function decline: zero candidates, no `[ranked]` line, nothing to score. Its
+  // `proto` entry is INERT TODAY — the decline is byte-identical with and without it — so the gate
+  // is the decline message alone and cannot detect a proto regression. The entry is kept because
+  // it becomes live the moment the decline is closed.
+  //
+  // THE m2c SIDE. All six scored rows are `declined` for m2c on its OWN self-reported gap — it
+  // emits `extern ? gTbl;` and the `? placeholder` is what the classifier reads. `outparam` is
+  // `noncompile` for m2c: it emits `fill(&unksp0);` with no declaration of `unksp0`, the same
+  // pre-existing class already carried by `stkaddr`, `maskhome` and `dmastride`. MEASURED — m2c
+  // run with `--context` carrying THE ROW'S OWN declaration, its `src` header verbatim, and its
+  // output scored with that same context prepended:
+  //
+  //   harr      `return (u32) gTbl[i];`                          score 0, MATCH
+  //   arrbias   `return (u32) (gTbl + 1)[i];`                    score 0, MATCH
+  //   bgarr     `return (u32) gBgInfo[i].hLength;`               score 0, MATCH
+  //   arrcast   `return (u32) gTbl[i];`                          score 2
+  //   tblrank2  `return *((j * 4) + (i * 8) + gPtrTbl);`         score 10
+  //   harridx   `return (u32) gTbl[i].unk1;`                     noncompile
+  //
+  // So the withheld declaration costs m2c THREE BYTE-EXACT MATCHES. Note `bgarr` must be measured
+  // with an element of the row's own WIDTH: `extern u32 gBgInfo[]` declares a 4-byte element for
+  // an array whose elements are 28 bytes, naming the SYMBOL without naming the row's ARRAY, and it
+  // is the one cell that moves when that is fixed. `bgarr`'s match does NOT rest on handing m2c a
+  // struct layout this file's prototypes-only rule withholds: fed instead asmlift's OWN synthesized
+  // element — the padded, member-name-free `struct Elem0 { u8 _pad0[16]; u16 field_16;
+  // u8 _pad1[10]; }` that asmlift derives from the target asm unaided — m2c emits
+  // `gBgInfo[i].field_16` and scores 0 as well. What it needs is the DECLARATION, not the field
+  // names, so the layout rule does not rescue this cell. It is not uniformly a gift either: on
+  // `arrcast` m2c emits the same base-first `gTbl[i]` it emits for `harr`, the WRONG spelling for
+  // that target, so the declaration would move it to 2 rather than to a match — m2c has no more of
+  // the axis-2 distinction than asmlift does.
+  //
+  // This is a ONE-SIDED HANDICAP and it should be read that way: asmlift does not need the `ctx`
+  // because it synthesizes the declaration off the target asm itself, and m2c cannot. It is NOT
+  // introduced by these rows — `bfwordread`, `bfwordwrite` and `ptrelem` already relocate against
+  // named data globals and already pay it (all three `noncompile` for m2c on this base). What
+  // these seven add is its PRICE on array shapes: three byte-exact matches. The rows are published
+  // anyway, with the cost stated, because BOTH ways of paying it measure less. Route one, `ctx`
+  // alone: the SYNTHETIC tier does not prepend `ctx` to m2c's candidate at scoring time the way the
+  // real tier does (`makeRealScorer`, `apps/benchmark/src/compile/real.ts`, vs `scoreM2c`,
+  // `apps/benchmark/src/eval/evaluate.ts`), and measured, an array in `ctx` with nothing prepended
+  // is a NONCOMPILE on all six scored rows. Route two is a DATASET change, not a harness one: a
+  // synthetic row that sets `symbols` already gets the map's declarations rendered into `ctx`
+  // (`withMapDeclarations`, `src/cases/synthetic.ts`) AND prepended to m2c's candidate at scoring
+  // time (`m2cDeclarationsFor`, `src/eval/evaluate.ts`). It is refused here for the reason given
+  // above: the same map reaches asmlift and flips its winner to the bare subscript, so it would
+  // buy m2c a fair column by deleting the gap the rows measure. Prototypes-only — the file
+  // header's rule, whose one stated exception is exactly a row carrying `symbols` — is what ships;
+  // the m2c column on these seven rows is NOT a fair read of m2c's array-shape ability, and the
+  // row that closes it is a real-tier row where both sides get the project's own declarations.
+  //
+  // agbcc only. The nearest precedent is `read-once`, genuinely agbcc-only (4 dataset entries, 4
+  // rows, all agbcc); `uninit-local` and `value-home` are NOT — they span all four toolchains, so
+  // no appeal to them justifies anything here. COUNTED IN ROWS, which is what `bench` reports and
+  // what "rows" means everywhere else in this file, and read off THE ARTIFACT THIS BRANCH
+  // PUBLISHES: `uninit-local` is 16 rows (agbcc 7, ido7.1 3, gcc2.7.2kmc 3, mwcc_242_81 3) and
+  // `value-home` is 72 (agbcc 51, gcc2.7.2kmc 8, ido7.1 7, mwcc_242_81 6 — 67 synthetic plus 5
+  // real). A cross-family census in a comment is a fact about the whole file, so it goes stale on
+  // someone ELSE's merge: re-run it after every rebase, from the artifact and not from a `grep`
+  // over this file, which counts prose lines. The reason these stay agbcc-only is direct: whether
+  // ido7.1, gcc2.7.2kmc and mwcc_242_81 fork the subscript on the operand's array-ness at all was
+  // NOT measured, so those lanes are left off rather than assumed; what would earn one is the same
+  // compiled pair on that toolchain showing the same divergence.
+  {
+    sym: 'harr',
+    src: 'extern u16 gTbl[];\nu32 harr(u32 i){ return gTbl[i]; }',
+    features: ['global', 'array', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 harr(u32 i);',
+  },
+  {
+    sym: 'harridx',
+    src: 'extern u8 gTbl[];\nu32 harridx(u32 i){ return gTbl[i+1]; }',
+    features: ['global', 'array', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 harridx(u32 i);',
+  },
+  {
+    sym: 'bgarr',
+    src:
+      'struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n' +
+      '                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n' +
+      'extern struct BgInfo gBgInfo[4];\n' +
+      'u32 bgarr(u32 i){ return gBgInfo[i].hLength; }',
+    features: ['global', 'array', 'variable-index', 'struct', 'field'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 bgarr(u32 i);',
+  },
+  {
+    sym: 'tblrank2',
+    src: 'extern const s32 *gPtrTbl[][2];\ns32 tblrank2(u32 i, u32 j){ return (s32)gPtrTbl[i][j]; }',
+    features: ['global', 'array', 'variable-index', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 's32 tblrank2(u32 i, u32 j);',
+  },
+  {
+    sym: 'arrbias',
+    src: 'extern u8 gTbl[];\nu32 arrbias(u32 i){ const u8 *p = &gTbl[1]; return p[i]; }',
+    features: ['global', 'array', 'variable-index', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 arrbias(u32 i);',
+  },
+  {
+    sym: 'arrcast',
+    src: 'extern u16 gTbl[];\nu32 arrcast(u32 i){ return ((u16 *)gTbl)[i]; }',
+    // NO `variable-index` tag, though the index IS variable: that tag's floor is
+    // `/\w+\s*\[\s*[^\]\d\s]/`, an identifier immediately before the `[`, and this row's
+    // subscript sits on a parenthesized cast (`)[i]`) so the floor rejects it. Widening a shared
+    // floor for one row is the wrong trade; the tag is dropped and the omission recorded here.
+    features: ['global', 'array', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 arrcast(u32 i);',
+  },
+  {
+    sym: 'outparam',
+    src: 'extern void fill(s32 *p);\ns32 outparam(void){ s32 v; fill(&v); return v; }',
+    features: ['stack-addr', 'uninit-local'],
+    toolchains: ['agbcc'],
+    ctx: 'void fill(s32 *p); s32 outparam(void);',
+    proto: { fill: { params: 1, returnsVoid: true } },
   },
 ];
 
