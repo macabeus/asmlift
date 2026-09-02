@@ -72,11 +72,14 @@
 //
 // LEVEL. L1-derived, L2-shaped, L3-consumed: it runs on the LIFTED function, because the fact it
 // needs — the order the compiler materialized the base in — is destroyed by the raising tower
-// (the array-idiom fold rewrites `gaddr; shl; add; load` into one `aload` and the two orders
-// become the same IR; `harr` and `arrcast` lift to different IR and recover to byte-identical
-// IR, which is why this cannot live any later). Its output is a name-keyed `SymbolInfo` map, the
-// same shape a symbol map supplies, consumed by `StructureOptions.inferredSymbols` and by the
-// declaration synthesis — and it NEVER claims a name a real map describes, which knows more.
+// (array LEGALIZATION — `recognizeArrays`, raise/arrays.ts, run as pre-recovery.ts's `arrays`
+// step, and NOT the patterns-as-data idiom fold, which cannot state the `1 << shiftImm ==
+// accessWidth` relation the match needs — rewrites `gaddr; shl; add; load` into one `aload` and
+// the two orders become the same IR; `harr` and `arrcast` lift to different IR and recover to
+// byte-identical IR, which is why this cannot live any later). Its output is a name-keyed
+// `SymbolInfo` map, the same shape a symbol map supplies, consumed by
+// `StructureOptions.inferredSymbols` and by the declaration synthesis — and it NEVER claims a
+// name a real map describes, which knows more.
 // That precedence is enforced TWICE, and both are needed: `structure()` asks the map first, and
 // rank.ts DELETES a map-known name from this map before structuring, because the `/raw-globals`
 // arm structures with no map and declares with one (see the filter's own note there).

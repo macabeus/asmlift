@@ -72,7 +72,8 @@ describe('the order of the pool load licenses the bare array subscript', () => {
   });
 
   test('the two lift to DIFFERENT IR and would otherwise recover to the same', () => {
-    // Why the derivation has to run on the lifted fn: the array-idiom fold turns both into the
+    // Why the derivation has to run on the lifted fn: array legalization (`recognizeArrays`,
+    // raise/arrays.ts, pre-recovery's `arrays` step — not the idiom fold) turns both into the
     // same `aload`, so anything downstream of it cannot tell them apart.
     const a = decompile('f', BASE_FIRST, ARMV4T_AGBCC, {});
     const b = decompile('f', INDEX_FIRST, ARMV4T_AGBCC, {});

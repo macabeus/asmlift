@@ -172,7 +172,7 @@ export interface TargetDescription {
     // spellings were compiled against the same target. NOT set anywhere else: whether ido, kmc or
     // mwcc distinguish them at all is unmeasured, and `docs/level-tower.md`'s rule for an
     // unmeasured per-compiler default is to claim nothing. Read off the target by a raising pass
-    // (`inferGlobalArrays`), not by the structurer — the third exception listed at the top of this
+    // (`inferGlobalArrays`), not by the structurer — the fourth exception listed at the top of this
     // file.
     arrayShapeFromStride?: boolean;
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
