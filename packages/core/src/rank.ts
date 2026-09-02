@@ -531,8 +531,9 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  are the same 44 candidates above. ONE 15-LINE FUNCTION CANNOT SETTLE A CORPUS QUESTION, so the
  *  same knob was censused over every agbcc row the artifact carries, candidates only: `true` adds
  *  912 distinct sources over 8 rows (corpus fan 47390 → 48302, +1.92%) — `kleod:UpdateCameraScroll`
- *  +608, `synthetic:sizebound` +128, `kleod:SetupBG3WindowOverlay` +32 and five smaller. Seven of
- *  the eight are already MATCH or `noncompile`, where extra candidates cannot help; the one that
+ *  +608, `synthetic:sizebound` +128, `synthetic:dmascope` +64, `kleod:SetupBG3WindowOverlay` and
+ *  `synthetic:maskhome` +32 each, and +16 each on `dmafield`, `dmaflat` and `dmapoll`. Five of the
+ *  eight are MATCH and two are `noncompile`, where extra candidates cannot help; the one that
  *  could, `synthetic:sizebound`, scores diff:8 with the products on and diff:8 with them off. So
  *  the `false` buys 1.92% of the agbcc fan for a measured zero, on the whole corpus rather than on
  *  the row that earned the entry. Flip it when a row scores better with it, and re-run that
