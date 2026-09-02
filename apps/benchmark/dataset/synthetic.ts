@@ -5255,9 +5255,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // file header) and is what ships; the m2c column on these seven rows is NOT a fair read of m2c's
   // array-shape ability, and fixing the tier is a harness change that belongs to a harness round.
   //
-  // agbcc only. The nearest precedent is `read-once`, which is genuinely agbcc-only; `uninit-local`
-  // and `value-home` are NOT — they span all four toolchains (7 and 52 rows over agbcc, ido7.1,
-  // gcc2.7.2kmc and mwcc_242_81), so no appeal to them justifies anything here. The reason these
+  // agbcc only. The nearest precedent is `read-once`, which is genuinely agbcc-only (4 dataset
+  // entries, 4 rows, all agbcc); `uninit-local` and `value-home` are NOT — they span all four
+  // toolchains, so no appeal to them justifies anything here. COUNTED IN ROWS, which is what
+  // `bench` reports and what "rows" means everywhere else in this file: `uninit-local` is 16 rows
+  // (agbcc 7, ido7.1 3, gcc2.7.2kmc 3, mwcc_242_81 3) and `value-home` is 69 (agbcc 49,
+  // gcc2.7.2kmc 8, ido7.1 6, mwcc_242_81 6 — 64 synthetic plus 5 real). The "7 and 52" an earlier
+  // cut of this sentence quoted are DATASET-ENTRY counts written as row counts; 7 is also exactly
+  // `uninit-local`'s agbcc-only row total, so the one number a reader checks against the artifact
+  // reads as evidence for the opposite of the claim. The reason these
   // stay agbcc-only is direct: whether ido7.1, gcc2.7.2kmc and mwcc_242_81 fork the subscript on
   // the operand's array-ness at all was NOT measured, so those lanes are left off rather than
   // assumed; what would earn one is the same compiled pair on that toolchain showing the same
