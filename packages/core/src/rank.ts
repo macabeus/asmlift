@@ -2055,13 +2055,13 @@ export function enumerateCandidates(
     // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
     // …and `/no-ptr-elem` names a spelling only the MAP makes available, for the same reason:
     // structure() normalizes `spellPtrMemberElements` to false without `symbols`, so both arms
-    // structure the identical tree on the raw variant. `/flat-rank` USED TO BE the third, on the
-    // premise that the declared subscripts come off a render context structure() builds only from
-    // a map — a premise raise/globalshape.ts falsified: the context is now the UNION of the map and
-    // the shapes this function's own strides evidence, and the raw arm derives its own. So the
-    // decline is asked of the EVIDENCE rather than of the map: it stands only where no derived
-    // shape carries a rank for the raw arm to spell, which is the condition under which both arms
-    // really do structure the identical tree.
+    // structure the identical tree on the raw variant. `/flat-rank` IS NOT a third such spelling,
+    // and the difference is why its decline is asked of the EVIDENCE and not of the map: the
+    // declared subscripts come off a render context structure() builds from the UNION of the map
+    // and the shapes this function's own strides evidence (raise/globalshape.ts), so the raw arm
+    // derives a rank of its own. The decline therefore stands only where no derived shape carries
+    // a rank for that arm to spell — the condition under which both arms really do structure the
+    // identical tree.
     const svCands = sv.symbols
       ? axisCands
       : axisCands.filter((s) => s.bitfields && s.ptrElems && (s.declRank || rawDerivesRank));

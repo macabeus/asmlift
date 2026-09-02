@@ -47,8 +47,7 @@ const derive = (name: string, asm: string) => inferGlobalArrays(lift(name, asm),
 
 /** WHICH RULE decided, per symbol — `firstRejection` over the two gate tables. The refusals are
  *  DATA (raise/globalshape.ts's `ADDRESS_GATES` / `SHAPE_GATES`) precisely so a test can assert the
- *  attribution rather than a reviewer reading one off a comment: two of this module's original
- *  prose attributions were wrong, and both are pinned below. */
+ *  attribution rather than a reviewer reading one off a comment. */
 const refusals = (name: string, asm: string) => [...arrayShapeRefusals(lift(name, asm), ARMV4T_AGBCC)];
 
 /** The same derivation with ONE named rule removed — the real predicate on real input, no
@@ -215,11 +214,10 @@ describe('nested strides recover the declared rank, and ship WITH the element ha
 // thing standing between the fixture and a derivation — it ablates that one rule and shows the
 // derivation then admits.
 //
-// This module shipped two attributions of exactly the kind that measurement catches: the module
-// note credited the element-stride rule with the `bgarr` shape (`interior-or-non-access` decides
-// it, one rule earlier) and the relocation-addend rule with `arrbias` (it fires first and decides
-// nothing — `no-subscript` refuses the same symbol without it). Both rules are still right; the
-// sentence about what each was doing was not.
+// Two of these are the kind of attribution only a measurement settles, and both are asserted
+// below rather than described: `interior-or-non-access` — not the element-stride rule one step
+// later — is what decides the `bgarr` shape, and `relocation-addend` fires first on `arrbias`
+// while deciding nothing (`no-subscript` refuses the same symbol without it).
 const GATE_FIXTURES: readonly (readonly [string, string])[] = [
   [
     // A declaration is per SYMBOL, not per access: one use this spelling does not model and the
@@ -615,11 +613,11 @@ describe('the order licence reads only what it can compare', () => {
 // derivation. `sound` records exactly that split, so the classification is re-measured on every
 // run rather than asserted once in a comment.
 //
-// THE FIXTURE IS PART OF THE CLAIM. `interior-or-non-access` measured as attributing until its
-// fixture carried a CLEAN access beside the interior one — with the interior read alone, removing
-// the rule records no access and the symbol is refused anyway, so the fixture was answering a
-// weaker question than the corpus does (`kleod:UpdateCameraScroll` derives an element type without
-// the rule). A gate that measures as subsumed may simply have the wrong input.
+// THE FIXTURE IS PART OF THE CLAIM, and `interior-or-non-access` is the worked example: its
+// fixture has to carry a CLEAN access beside the interior one, because with the interior read
+// alone removing the rule records no access and the symbol is refused anyway — a weaker question
+// than the corpus asks, where `kleod:UpdateCameraScroll` derives an element type without the rule.
+// A gate that measures as subsumed may simply have the wrong input.
 
 describe('every gate: which rule decides, and whether it is uniquely load-bearing', () => {
   test('`sound` says exactly which rules nothing else would have caught', () => {
@@ -869,10 +867,9 @@ describe('sameDerivedShape: what "the declaration will carry this" means', () =>
 describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does', () => {
   // `/flat-rank` exists BECAUSE the asm underdetermines the choice between `g[r][i]` and the flat
   // byte arithmetic (matching/array-rank-axis.test.ts compiles the pair). Its enumeration gate
-  // used to ask the PROJECT MAP, on the premise that structure() builds the symbol render context
-  // only from one — a premise this derivation falsified: the context is now the union of the map
-  // and the shapes the asm evidences. Supplying the rank from a new place does not make the choice
-  // determined, and nothing reports a candidate that was never enumerated.
+  // therefore asks the MAP OR THE DERIVED SHAPES, because structure() builds the symbol render
+  // context from the union of the two: supplying the rank from a new place does not make the
+  // choice determined, and nothing reports a candidate that was never enumerated.
   test('both arms are enumerated, and they are genuinely different spellings', () => {
     const cands = enumerateCandidates('f', RANK2, ARMV4T_AGBCC);
     expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/flat-rank', 'signed', 'signed/flat-rank']);

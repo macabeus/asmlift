@@ -116,7 +116,7 @@ test('the per-pattern score probe structures with the PROJECT MAP, not only the 
 test('…and so does the candidate RANKING beside it, through decompileWithReport itself', () => {
   // The same asymmetry one call further out, and it has to be asserted THROUGH the wrapper: a
   // test that calls `decompileRanked` directly with a map passes whether or not the wrapper
-  // forwards one, which is exactly the guard this round set out to stop shipping.
+  // forwards one, so only this shape pins the forwarding.
   //
   // `candidates` is a RANKING of the headline, so it must be enumerated from the same symbol
   // facts. Without the map every candidate was `gTbl[a0]` while the headline was

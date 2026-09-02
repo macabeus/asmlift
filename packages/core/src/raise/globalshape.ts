@@ -42,9 +42,9 @@
 //
 // WHAT REFUSES — and the list is DOWN THERE, not here. The refusals are two `Gate<Ctx>` tables
 // (`ADDRESS_GATES` and `SHAPE_GATES`, below), each rule carrying its own `why` and the test that
-// fails without it, because an enumeration in a header is prose that nothing re-checks: this
-// module's first version numbered six refusals in this spot and TWO of the numbers were attached
-// to the wrong rule. Every rejection falls back to today's cast spelling rather than guessing.
+// fails without it, because an enumeration in a header is prose that nothing re-checks and a
+// refusal's attribution has to be asked of `arrayShapeRefusals`. Every rejection falls back to
+// today's cast spelling rather than guessing.
 //
 // One thing about them belongs here rather than on a table entry, because it is about the pair.
 // THE ELEMENT HALF AND THE RANK HALF ARE ONE DERIVATION, not two commits: a multi-stride address
@@ -163,22 +163,11 @@ interface Access {
 // symbol that has a good access ALONGSIDE an escaping one does derive without it, which is a wrong
 // answer and is the fixture the ablation test uses. Co-occurrence is not reach either:
 // `no-subscript` would reject 21 symbols and is first for none of them. That does NOT make the twelve
-// decoration — each is right about a shape, and the ablation test beside this module ablates every
-// rule on a fixture that DOES reach it, where nine of the thirteen are the only thing standing
-// between that fixture and a derivation. What it does mean is that "which refusal protects which
-// row" has to be asked of `arrayShapeRefusals` and never read off a comment: this module's first
-// version enumerated six refusals in prose and put two of them on the wrong rule.
-//
-// The last row of that table used to read `index-materialized-first  8  5  0`, and four of those
-// five first-rejections were a MISATTRIBUTION rather than a refusal: the order licence recorded
-// `false` — the positive claim "the index was scaled first" — for a scaling it merely could not
-// COMPARE, in another block from the pool load. They are `kleod:CopyBGScrollTiles`,
-// `kleod:SetupBG3WindowOverlay`, `sa3:VramGetTotalAllocatedTiles` and `sa3:VramMalloc`, and in
-// every one the base is materialized first. They now route to `no-positive-evidence` (6 → 10
-// first, 4 → 8 moved), which is what "this evidences nothing" is called here. The derived map
-// over all 359 functions is IDENTICAL either way — nine shapes, the same nine — so on this corpus
-// the whole change is which rule is named; the capability it opens is measured on a compiled pair
-// at `baseFirst`.
+// decoration — each is right about a shape, and the ablation test beside this module gives all
+// thirteen rules that any input reaches a fixture that DOES reach them (`address-unused` is the
+// fourteenth and has none), where NINE are the only thing standing between their fixture and a
+// derivation. What it does mean is that "which refusal protects which row" is a question for
+// `arrayShapeRefusals`, never for a comment.
 
 /** One USE of a symbol's address, reduced to the facts `ADDRESS_GATES` decide over. */
 interface AddressUse {
@@ -208,8 +197,7 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     // ATTRIBUTING, NOT UNIQUELY LOAD-BEARING: with this rule removed, `interior-or-non-access`
     // refuses the same symbol (measured on its fixture — the addend `add`'s result feeds the index
     // `add`, which is not an element access). It is FIRST because it names the real cause — this
-    // is the `arrbias` control, whose pool word is `.word gTbl+0x1` — and a refusal that names the
-    // wrong cause is how this module shipped two wrong attributions.
+    // is the `arrbias` control, whose pool word is `.word gTbl+0x1`.
     id: 'relocation-addend',
     why: 'a constant added straight to the address IS the relocation addend, and belongs to the base',
     sound: false,
@@ -232,9 +220,8 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     rejects: (u) => u.isAdd && u.consumers.length === 0,
   },
   {
-    // THIS is the rule that decides the `bgarr` shape (a 28-byte element read 2 bytes at a time),
-    // which the module note used to credit to `stride-is-not-the-element`. It is uniquely
-    // load-bearing only where the symbol ALSO has a clean access: with an interior read alone,
+    // THIS is the rule that decides the `bgarr` shape — a 28-byte element read 2 bytes at a time.
+    // It is uniquely load-bearing only where the symbol ALSO has a clean access: with an interior read alone,
     // removing the rule records no access at all (an interior read is not evidence, and is
     // filtered out) and the symbol is refused anyway, while beside a clean access removing it
     // derives an element type off a name the function reads at a displacement.
@@ -295,9 +282,9 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   },
   {
     // Attributing: an address with no variable term also has no stride, so
-    // `stride-is-not-the-element` refuses it (measured on its fixture — the one subsumption claim
-    // in this table that survived being checked). It is stated separately because "there is no
-    // subscript here at all" and "the subscript scales by the wrong thing" are different facts.
+    // `stride-is-not-the-element` refuses it (measured on its fixture). It is stated separately
+    // because "there is no subscript here at all" and "the subscript scales by the wrong thing"
+    // are different facts.
     id: 'no-subscript',
     why: 'an address with no variable term names no element, so it evidences no array',
     sound: false,
@@ -548,11 +535,11 @@ function stridesOf(a: Access): number[] {
  *      for (i = 0; i < n; i++) s += gTbl[p[i]];
  *      for (i = 0; i < n; i++) s += ((u16 *)gTbl)[p[i]];
  *
- *  become ONE object, byte-identical `.s` included. Recording that as `false` was a positive
- *  claim ("the index was scaled first") about an access that makes no claim either way, and on
- *  the benchmark's 359 agbcc target functions it was FOUR of the five symbols
- *  `index-materialized-first` rejected. It now routes to `no-positive-evidence`, which is what
- *  "this says nothing" is called in that table — a refusal either way, but the true one.
+ *  become ONE object, byte-identical `.s` included. So a cross-block scaling gets `undefined`
+ *  rather than `false`: answering `false` there would be the positive claim "the index was scaled
+ *  first" about an access that makes no claim either way, and the symbol belongs to
+ *  `no-positive-evidence`, which is what "this says nothing" is called in that table — a refusal
+ *  either way, but the true one.
  *
  *  The discrimination the rule exists for is untouched, because it lives in the SAME-BLOCK
  *  accesses: compiled, a function that subscripts once outside a loop and once inside it is a
@@ -689,8 +676,8 @@ export function inferGlobalArrays(
 /** Which rule refused each name this function's pool spells, or null where a shape was derived —
  *  the attribution `firstRejection` exists for. NOT on the shipped path: a caller instrumenting a
  *  refusal (a census, a plan that needs the FIRST guard rather than the co-occurring set) asks
- *  here instead of re-deriving the predicates, which is how the two wrong attributions this
- *  module's prose used to carry were found. */
+ *  here instead of re-deriving the predicates — the one place an attribution is measured rather
+ *  than asserted. */
 export function arrayShapeRefusals(
   fn: Fn,
   target: TargetDescription,

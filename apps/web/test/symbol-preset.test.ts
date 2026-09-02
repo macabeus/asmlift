@@ -39,9 +39,7 @@ test('without the map: the STRUCT layout degrades, the array subscript is DERIVE
   // survives because raise/globalshape.ts derives `gBlendModeTable`'s element from the asm's own
   // stride evidence — the pool `ldr` precedes the `lsl #0x1`, which is agbcc's array-subscript
   // order. A struct layout leaves no such evidence, which is why `gState.timer` still needs the
-  // map. This test used to expect `((u16 *)&gBlendModeTable)[a0]` here and was the one gate that
-  // saw the derivation reach the playground preset — `apps/web/test` is a CI step that
-  // `test:offline`, `test:matching` and `apps/benchmark/test` all miss.
+  // map.
   const r = decompile('UpdateTimer', preset.asm, ARMV4T_AGBCC, {});
   expect(r.source).toBe(
     's32 UpdateTimer(s32 a0) {\n' +

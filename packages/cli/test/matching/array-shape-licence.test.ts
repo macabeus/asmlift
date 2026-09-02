@@ -167,9 +167,8 @@ describe.runIf(HAVE)('the ARRAY-SHAPE licence, compiled (checkout-gated)', () =>
   test('ACROSS A BLOCK BOUNDARY the two spellings COLLAPSE — so a cross-block scaling is no evidence', () => {
     // The premise of the same-block narrowing, compiled. With the only subscript inside the loop,
     // the pool `ldr` is hoisted into the preheader either way and the array and cast spellings are
-    // one object — so recording "the index was scaled first" there is a claim about a function
-    // that makes no claim. On the benchmark's 359 agbcc target functions this was FOUR of the five
-    // symbols `index-materialized-first` first-rejected.
+    // one object — so recording "the index was scaled first" there would be a claim about a
+    // function that makes no claim, and `baseFirst` answers `undefined` instead.
     expect(hex.get('loop-bare')).toBe(hex.get('loop-cast'));
   });
 

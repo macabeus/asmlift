@@ -5009,9 +5009,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // underdetermines `g[r][i]` against the flat byte arithmetic, and it is pinned by
   // `packages/core/test/global-array-shape.test.ts` ("a derived rank enumerates `/flat-rank`").
   // Corpus-wide that is +2 candidates on ONE function: `tblrank2` is the only row of the 964
-  // whose derived shape carries `dims` at all. This paragraph said "2 before and 2 after on every
-  // row" when it was written, which was true then and was falsified one commit later by the
-  // widening that opened that axis.
+  // whose derived shape carries `dims` at all.
   //
   // The AUTHORING-TIME figures below are kept verbatim rather than rewritten: they are what the
   // rows were cut to measure, and the "today"s in them mean that day, not this one.
