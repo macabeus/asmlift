@@ -4982,11 +4982,16 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: BGPTRS_MAP,
   },
   // ── GLOBAL ARRAY SHAPE — the base local, the array-typed subscript, and the pool addend ────────
-  // Seven rows. FIVE — `harr`, `harridx`, `bgarr`, `tblrank2`, `arrbias` — are modelled on shapes
-  // in the same graphics translation unit the `value-home` and DMA families above were cut from,
-  // whose body indexes a global array of 28-byte structs through a variable index, a rank-2 table
-  // of pointers, and a rank-3 ROM table. TWO are CONSTRUCTED PROBES, and both are labelled as such
-  // rather than passed off as found code:
+  // Seven rows. FIVE — `harr`, `harridx`, `bgarr`, `tblrank2`, `arrbias` — are modelled on array
+  // shapes the same graphics translation unit the `value-home` and DMA families above were cut
+  // from actually indexes. Each of the five has a counterpart there, which is the point of
+  // authoring them rather than inventing shapes: a bare `extern u8` scalar array read at a
+  // variable index (`harr`, `harridx`), a global array of 28-byte structs read at a variable
+  // index for one `u16` member (`bgarr`), a rank-2 table of pointers (`tblrank2`), and a
+  // CONSTANT-BIASED read of a byte table — the TU's rank-3 ROM table is read at a constant final
+  // subscript, which is exactly the pool-addend shape (`arrbias`). TWO of the seven are
+  // CONSTRUCTED PROBES with no counterpart, and both are labelled as such rather than passed off
+  // as found code:
   //  • `arrcast` guards a direction the other rows leave open (axis 2 below).
   //  • `outparam` pins the out-parameter idiom `T v; callee(&v); use(v);`, which has ZERO
   //    INHABITANTS in that TU. Measured, not assumed: across its 956 lines the ONLY address-taken
