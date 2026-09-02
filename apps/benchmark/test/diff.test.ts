@@ -103,9 +103,9 @@ describe('notRegenerated', () => {
 // THE SECOND POPULATION `diffGate` PRINTS. Rows the branch added are `ADDED` against the branch
 // POINT every time, for as long as the branch lives — so a score on one of them can move in either
 // direction and the published line still reads `0 field change(s), N added`. `regression` sees only
-// OUTCOME, so a score move on an added row was named by nothing at all. The gate narrows the
-// branch's own artifact to those rows and compares them by the same fields; it changes no exit
-// code (an addition already makes the base report not-ok), it supplies the missing names.
+// OUTCOME, so nothing else names a score move on an added row. The gate narrows the branch's own
+// artifact to those rows and compares them by the same fields; it changes no exit code (an
+// addition already makes the base report not-ok), it supplies the missing names.
 describe('the rows a branch added, compared against the branch own artifact', () => {
   const base = out(row('a'));
   const self = out(row('a'), row('b', { score: 0, outcome: 'match' as Outcome }));

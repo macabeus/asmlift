@@ -277,10 +277,10 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
   });
 });
 
-// ── An authored SYMBOL MAP is an authored fact, and it had no gate at all ──────────────────────
+// ── An authored SYMBOL MAP is an authored fact, and gets an authored fact's gate ──────────────
 //
-// `SynthSpec.symbols` arrived with the six zero-row-family rows and is strictly MORE expressive
-// than `proto`, the channel whose absence of a gate once cost a real row its match (a manifest
+// `SynthSpec.symbols` carries the six zero-row-family rows and is strictly MORE expressive than
+// `proto`, the channel whose absence of a gate once cost a real row its match (a manifest
 // declaring `returnsVoid: true` for a function whose own reference returns `void *`). A map states
 // member offsets, bitfield bit offsets, pointee widths and array rank — and the rows that carry
 // one exist precisely to defend the axes those facts enumerate, so a map that quietly disagreed
@@ -293,14 +293,14 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
 // ctx and this asserts the rendering actually happened. It is the same class the callee check
 // above covers and the class PR #119 corrected on the real tier, on a channel that check cannot
 // see: `declaredFunctionNames` reads FUNCTION names, so a struct layout added to one side alone is
-// invisible to it. Measured before this existed: told only its prototype, m2c emits
-// `extern ? gBgTilemapBufs;` on `sbscope` and the row publishes a DECLINE.
+// invisible to it. Measured: told only its prototype, m2c emits `extern ? gBgTilemapBufs;` on
+// `sbscope` and the row publishes a DECLINE.
 //
-// FACT, not SYMBOL, because the first version of this check said symbol and could be defeated in
-// one line: it matched `\b<name>\b` against the ctx, so degrading the renderer's input to core's
-// documented name-only exception left it green while the ctx became `extern u32 gPacked;` — the
-// whole layout gone from m2c and kept for asmlift, which is PR #119's asymmetry reopened inside
-// the fix for it. The three tests below are what replaced it, and each was shown to fire.
+// FACT, not SYMBOL, because a symbol-level check is defeated in one line: match `\b<name>\b`
+// against the ctx and degrading the renderer's input to core's documented name-only exception
+// leaves it green while the ctx becomes `extern u32 gPacked;` — the whole layout gone from m2c and
+// kept for asmlift, which is PR #119's asymmetry reopened inside the fix for it. Three tests carry
+// the FACT-level check instead, and each was shown to fire.
 //
 // AGREEMENT WITH THE ROW'S OWN SOURCE — the synthetic tier's `src` IS the compiler's input, so it
 // is the oracle here exactly as it is for `proto` above. Checked by NAME (every symbol and every
@@ -329,14 +329,14 @@ describe('an authored symbol map agrees with its own row', () => {
   // SYMMETRY, LAYER 1 — CHANNEL IDENTITY. The ctx must contain the declaration block the map
   // renders to, byte for byte, and the block is re-derived HERE from `c.symbols` rather than
   // asked of the production helper: a gate that calls the same function the call site calls
-  // cannot see the call site hand it worse input. That is not hypothetical. The predecessor of
-  // this test asserted only that each symbol's NAME appeared somewhere in the ctx, and under a
-  // renderer input degraded to `{name, kind, declared}` — core's documented name-only exception —
-  // it stayed green while the ctx became `extern u32 gPacked;` / `extern u32 gBgTilemapBufs;` /
+  // cannot see the call site hand it worse input. THE NAME IS NOT THE FACT, and that is measured:
+  // a check asserting only that each symbol's NAME appears somewhere in the ctx stays green under
+  // a renderer input degraded to `{name, kind, declared}` — core's documented name-only exception
+  // — while the ctx becomes `extern u32 gPacked;` / `extern u32 gBgTilemapBufs;` /
   // `extern u32 gBgPtrs;`: struct layout, bitfield bit offsets, pointee width and array rank all
-  // present for asmlift and gone for m2c. Measured under that degradation, `ptrelem` emits
-  // `(gBgPtrs + (i * 2))->unk13A` — verbatim the pre-fix output the map channel exists to
-  // dissolve — and `sbscope` goes from nonmatch to noncompile. The name was never the fact.
+  // present for asmlift and gone for m2c. Under that degradation `ptrelem` emits
+  // `(gBgPtrs + (i * 2))->unk13A` — verbatim the map-less output the map channel exists to
+  // dissolve — and `sbscope` goes from nonmatch to noncompile.
   test("the m2c ctx carries the map's rendered declarations verbatim", () => {
     const cases = syntheticCases().filter((c) => c.symbols);
     expect(cases.length).toBe(mapped.reduce((n, s) => n + s.toolchains.length, 0));

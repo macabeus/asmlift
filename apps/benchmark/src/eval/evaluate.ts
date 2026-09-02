@@ -46,20 +46,18 @@ const M2C_DIALECT_TYPEDEFS = 'typedef float f32;typedef double f64;\n#define NUL
 /** Score plain first; retry with the dialect typedefs, then with the row's map declarations, only
  *  when the attempt before could not compile. Whichever compiles is the measurement.
  *
- *  WHICH FAILURE IS PUBLISHED, when none of them compiles. It used to be rung 0's, on the rule that
- *  "every retry is best-effort" — right while the only retry ADDED TYPEDEFS the source might not
- *  need, wrong the moment a rung started adding the DECLARATIONS the row is actually compiled
- *  against. Measured at the commit that added them: `bfwordread` and `bfwordwrite` published
- *  ``gPacked' undeclared`` — the pre-fix diagnostic, for a symbol the deciding rung DOES declare —
- *  while that rung failed with `invalid operands to binary <<` and `invalid operands to binary &`.
- *  A published error naming a cause the run does not have is a silent wrong answer wearing a
- *  measurement's clothes, and `errorMarkers` is not among `FIELDS.m2c` in report/diff.ts, so no
- *  artifact comparison would ever have reported it.
- *
- *  So the reported failure is the LAST rung that compiled the source AS EMITTED — rung 0 where
- *  there are no declarations, rung 2 where there are. The dialect rungs stay unreported for the
- *  original reason, unchanged: they prepend typedefs, so their failure can be their own. Pinned by
- *  `m2c-rungs.test.ts`, which is why this function is exported. */
+ *  WHICH FAILURE IS PUBLISHED, when none of them compiles: the LAST rung that compiled the source
+ *  AS EMITTED — rung 0 where there are no declarations, rung 2 where there are. "Every retry is
+ *  best-effort, so report rung 0's" holds only while every retry ADDS TYPEDEFS the source might
+ *  not need; it breaks the moment a rung adds the DECLARATIONS the row is actually compiled
+ *  against, and it breaks LOUDLY-LOOKING-QUIET: `bfwordread` and `bfwordwrite` then publish
+ *  ``gPacked' undeclared`` for a symbol the deciding rung DOES declare, while that rung's own
+ *  failure is `invalid operands to binary <<` / `invalid operands to binary &`. A published error
+ *  naming a cause the run does not have is a silent wrong answer wearing a measurement's clothes,
+ *  and `errorMarkers` is not among `FIELDS.m2c` in report/diff.ts, so no artifact comparison
+ *  reports it. The dialect rungs stay unreported for the original reason: they prepend typedefs,
+ *  so their failure can be their own. Pinned by `m2c-rungs.test.ts`, which is why this function
+ *  is exported. */
 export function scoreM2c(
   score: Scorer,
   source: string,
@@ -95,10 +93,10 @@ export function scoreM2c(
  *  A decompiler told about a global in its `--context` correctly OMITS the declaration from its
  *  output — the user already has that header. asmlift's candidates are handled that way too: the
  *  scoring layer prepends `declarationsOf(cand)` at compile. The synthetic tier has no project
- *  context to compile in, so before the map rows existed m2c's self-declaration was all it needed
- *  and this was moot.
+ *  context to compile in, so on a row whose ctx carries no map m2c's self-declaration is all it
+ *  needs and this rung never runs.
  *
- *  It stopped being moot the moment `ctx` started carrying a map's declarations. Measured without
+ *  IT IS THE MAP-CARRYING `ctx` THAT MAKES IT NECESSARY. Measured without
  *  this: m2c emits `gPacked = (gPacked & 0xFFFFF01F) | …` — correct, and exactly what it should
  *  emit having been told the symbol — and the compile fails with "`gPacked' undeclared". That is a
  *  rig artifact of handing a tool a context it is then not compiled against, not a capability it
@@ -109,18 +107,20 @@ export function scoreM2c(
  *  a RETRY rung rather than an unconditional prelude — a row that already compiles is untouched,
  *  so this can only ever turn a harness-caused failure into a score.
  *
- *  WHAT THE RUNG DID AND DID NOT DISSOLVE, measured through `evaluate()` with both caches off, and
- *  stated because an earlier draft of this comment stopped at the sentence above and left the two
- *  cases indistinguishable. On `sbscope` it dissolves the artifact outright — the row was a DECLINE
+ *  WHAT THE RUNG DOES AND DOES NOT DISSOLVE — two cases, and they are worth keeping apart.
+ *  Measured through `evaluate()` with both caches off. On `sbscope` it dissolves the artifact
+ *  outright — the row is a DECLINE
  *  under the prototype-only ctx and scores under the map. On `bfwordread` and `bfwordwrite` it does
  *  NOT: told the true `struct Packed`, m2c emits `(gPacked << 0x14) >> 0x19` and
  *  `gPacked = (gPacked & 0xFFFFF01F) | …` — integer arithmetic on a struct — and the rung's compile
- *  fails with `invalid operands to binary <<` / `invalid operands to binary &`. Both rows go from a
- *  published m2c MATCH to a noncompile, and that loss is the round's, not a stale artifact's.
+ *  fails with `invalid operands to binary <<` / `invalid operands to binary &`. Both rows publish
+ *  an m2c NONCOMPILE where a prototype-only ctx gives them a MATCH, and that loss is real rather
+ *  than a stale artifact's.
  *
  *  THE COUNTERFACTUAL, because attributing that to m2c without it would overstate the case: the
- *  same emitted body compiled against the `extern s32 gPacked;` m2c ITSELF used to emit scores 0
- *  and MATCHES. Only the declaration changed, so this is not m2c failing to decompile the function
+ *  same emitted body compiled against the `extern s32 gPacked;` m2c declares for ITSELF when it is
+ *  not told the map scores 0 and MATCHES. Only the declaration changes, so this is not m2c failing
+ *  to decompile the function
  *  — it is m2c's output not compiling against the context m2c was given. The harness books that as
  *  a limit rather than an artifact for one reason, and it is a policy reason: the REAL tier already
  *  compiles m2c's output against the project's own headers, so letting the synthetic tier fall back
@@ -132,11 +132,10 @@ function m2cDeclarationsFor(spec: EvalSpec): string | undefined {
     return undefined;
   }
   // The declaration BLOCK only — not `selfDeclaredContext`, which prepends `C_TYPEDEFS`. This goes
-  // into the compiler's own prelude slot, which already emits those typedefs, and the first draft
-  // of this fix concatenated the whole context onto the source instead: every rung then died on
-  // `redefinition of s16` and the four rows stayed noncompile, which reads exactly like the bug
-  // being fixed. A retry that fails for its OWN reason is worse than no retry, because it looks
-  // like evidence.
+  // into the compiler's own PRELUDE SLOT, which already emits those typedefs; concatenate the
+  // whole context onto the source instead and every rung dies on `redefinition of s16`, leaving
+  // the four rows noncompile — which reads exactly like the failure the rung exists to fix. A
+  // retry that fails for its OWN reason is worse than no retry, because it looks like evidence.
   return renderDeclarations([...spec.symbols.values()].flat().map((info) => ({ name: info.name, info })));
 }
 

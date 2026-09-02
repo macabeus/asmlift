@@ -48,16 +48,15 @@ export type Expr =
   // `g[i]`. It exists for exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL
   // array global, where one subscript reaches a row and the element needs the leading dimensions
   // pinned first. What that costs and what it buys, measured over the published artifact rather
-  // than carried from the sweep the field was proposed under, RE-DERIVED over today's 957 rows
-  // rather than anchored to the 951 it was first taken over: 5 rows spell a two-subscript access
-  // at all (kleod CopyBGScrollTiles, ProcessInputAndUpdateEntities, SetupBG3WindowOverlay,
-  // UpdateHUDCounterDisplay, UpdateWorldMapNodeAnim), and the `Expr[]` — the part every generic
-  // walk pays for — is earned by the 2 whose OUTER subscript is not the literal 0
-  // (`ProcessInputAndUpdateEntities`, `SetupBG3WindowOverlay`; the second is `noncompile`, for an
-  // unrelated callee arity, on this branch and on its base alike). Both counts and all five names
-  // reproduced unchanged, and re-deriving is one pass over the artifact — match each winning
-  // `asmlift.source` against `] [`, then against a literal-0 outer subscript for the second
-  // number — so quote it against the artifact in front of you, never against this line. A rank-2 access with a constant row needs `number[]` and no
+  // than carried from the sweep the field was proposed under. Over the artifact's 957 rows: 5
+  // spell a two-subscript access at all (kleod CopyBGScrollTiles, ProcessInputAndUpdateEntities,
+  // SetupBG3WindowOverlay, UpdateHUDCounterDisplay, UpdateWorldMapNodeAnim), and the `Expr[]` —
+  // the part every generic walk pays for — is earned by the 2 whose OUTER subscript is not the
+  // literal 0 (`ProcessInputAndUpdateEntities`, `SetupBG3WindowOverlay`; the second is
+  // `noncompile`, for an unrelated callee arity, on this branch and on its base alike).
+  // RE-DERIVE THIS RATHER THAN QUOTING IT: one pass over the artifact does it — match each
+  // winning `asmlift.source` against `] [`, then against a literal-0 outer subscript for the
+  // second number. A rank-2 access with a constant row needs `number[]` and no
   // more. The node still denotes ONE `width`-byte element, so its type, its legalization
   // and its stride contract are unchanged — this is a spelling of the same address, not a new kind
   // of access. Absent for every rank-1 access, which is why it is optional rather than an empty

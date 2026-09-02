@@ -362,7 +362,7 @@ export async function runCli(
       };
     }
   } else if (toolCfg?.symbols) {
-    // The already-derived map. Same loudness rule as the ELF above: explicit config, so an
+    // The already-derived map. Same loudness rule as `tools.asmlift.elf`: explicit config, so an
     // unreadable or malformed file is an input error and never a silent names-less run — a map
     // that quietly failed to load reads exactly like a row that never had one, and the two
     // produce different source.

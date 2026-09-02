@@ -38,8 +38,8 @@ export interface SynthSpec {
    *  that the declaration alone dissolves. `src/cases/synthetic.ts` therefore RENDERS this map
    *  into the row's `ctx` through core's own declaration renderer, and `authored-facts.test.ts`
    *  holds the two equal FACT BY FACT — every symbol, every declared member, every inner array
-   *  extent — rather than by symbol name, which is what it used to check and which a shape stripped
-   *  out of the ctx passes with every gate green. Add a fact here and m2c is told it. The single
+   *  extent. BY FACT AND NOT BY SYMBOL NAME: a name-level check passes with every gate green on a
+   *  ctx the shape fields were stripped out of. Add a fact here and m2c is told it. The single
    *  exception is an array's OUTERMOST extent, left unsized by `declare.ts`'s own rule and measured
    *  on `sbscope` to change m2c's output not at all. */
   symbols?: SymbolMap;
@@ -3539,8 +3539,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //   asmlift's inline cast 2; the base local assigned at the top of the body 9 — WORSE than not
   //   hoisting, the same signal `basehome` gives, and the reason a placement policy that picks
   //   wrong regresses rather than stalls; the base local assigned at its first use 0.
-  //   IT NO LONGER BRACKETS THE SUNK PLACEMENT, and this paragraph used to say it did. Re-measured
-  //   through `compileTargetAsm`/`assembleTarget`/`decompileRanked` with `ASMLIFT_CANDCACHE=0`: the
+  //   IT DOES NOT BRACKET THE SUNK PLACEMENT. Measured through
+  //   `compileTargetAsm`/`assembleTarget`/`decompileRanked` with `ASMLIFT_CANDCACHE=0`: the
   //   fan is 12 candidates and TWO spellings reach 0 — `/basefold/sinkinit` and `/offmember` — so
   //   `compareScored` settles it on `lineCount`, the member spelling has one line fewer, and the
   //   published winner is `unsigned/offmember`. Deleting the sunk admission would leave this row
@@ -3552,8 +3552,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   //   `foldhead` MATCH — `foldsink`'s shape with the DECLARATION carrying the initializer, which is
   //   the ordinary way a C source spells a base it uses once further down: the local is assigned at
-  //   the top of the body and first read three statements later. It is the HEAD-position bracket
-  //   the paragraph above used to say nothing in this corpus provides. Read off this row's own
+  //   the top of the body and first read three statements later. It is the HEAD-position bracket,
+  //   which nothing else in this corpus is. Read off this row's own
   //   `[score]` table (12 candidates, `ASMLIFT_CANDCACHE=0`): `/basefold` 0, `/basefold/sinkinit`
   //   11, `/offmember` 11, no lever at all 11 — so deleting the HEAD entry of
   //   `BASEFOLD_ADMISSIONS` costs this row its match while deleting the SUNK entry does not, which
@@ -3572,8 +3572,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //   map-less and 272 / 365 map-ful, and on 141 of those bases (map-less; 142 map-ful)
   //   `/offmember` is refused outright — 83 of them by `no-operand-off`, because a sibling access
   //   at offset 0 through the same base leaves no displacement to read.
-  //   RANKED, AND SAY THE CONFIGURATION — this paragraph used to quote three score pairs with no
-  //   sweep named at all, next to a census half that names both. Re-run here with the target
+  //   RANKED, AND SAY THE CONFIGURATION — a sweep score quoted without one is not a weaker claim
+  //   than one with it, it is a different claim. With the target
   //   assembled by hand from the checkout's own `.s` (`.syntax unified` prepended, else the
   //   unified Thumb mnemonics do not assemble) and ranked through the benchmark's own agbcc
   //   candidate compiler, `ASMLIFT_CANDCACHE=0`, BOTH configurations:
@@ -3584,16 +3584,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //                                     REPRODUCES map-less; map-ful it is 99 vs 105, still won by
   //                                     `/basefold`, so the WIN survives the configuration and the
   //                                     numbers do not.
-  //     kleod:StreamCmd_SetTimerAndMode map-less 11 vs 12 on this rig, NOT the 17 vs 18 recorded
-  //                                     here before (13 candidates both times, so the fan is the
-  //                                     same and the TARGET differs — a hand-assembled object's
-  //                                     pool alignment is not the project build's). MAP-FUL IT
-  //                                     DOES NOT WIN AT ALL: 7 either way, `unsigned/inlinebase/
-  //                                     volatile` with and without the family.
+  //     kleod:StreamCmd_SetTimerAndMode map-less 11 vs 12 on this rig. A 17-vs-18 reading of the
+  //                                     same function comes off a DIFFERENT target: 13 candidates
+  //                                     either way, so the fan is identical and a hand-assembled
+  //                                     object's pool alignment is not the project build's.
+  //                                     MAP-FUL IT DOES NOT WIN AT ALL: 7 either way,
+  //                                     `unsigned/inlinebase/volatile` with and without it.
   //   So the honest reading is a one-point edge on two functions in one configuration, not three
-  //   wins: a sweep score quoted without its configuration is not a weaker claim than one with it,
-  //   it is a different claim. None of the three is a benchmark row; all of it is a rig artifact
-  //   until re-run, and the row's own bracket (`synthetic:foldhead`) rests on none of it.
+  //   wins. None of the three is a benchmark row; all of it is a rig artifact until re-run, and
+  //   the row's own bracket (`synthetic:foldhead`) rests on none of it.
   //
   // THE CONTROL. `armkeep` MATCH — the same pure expression computed in BOTH arms, but consumed
   //   inside each arm rather than merged out of the `if`. agbcc keeps both copies, asmlift emits
@@ -4282,21 +4281,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // agbcc synthetic row, FIVE carry a plain `/scopebase` candidate — `dmascope` 12 of 260,
   // `livepark` 2 of 28, `foldpark` 2 of 34, `unfoldpark` 2 of 36, `dmastride` 2 of 18 — and on
   // every one of the five the best candidate carrying no `scopebase` token equals the row's own
-  // best (`dmascope` 9, `livepark` 0, `foldpark` 0, `unfoldpark` 9, `dmastride` 0). Re-measured
+  // best (`dmascope` 9, `livepark` 0, `foldpark` 0, `unfoldpark` 9, `dmastride` 0). Measured
   // through the harness with the plain respell ablated, all five are UNMOVED — same outcome, same
-  // score, same label — so that half still holds.
-  // WHAT NO LONGER HOLDS is the sentence that used to follow it: "0 of the artifact's winning
-  // labels carries the bare `scopebase` token". `synthetic:sbscope` — added to THIS FILE in the
-  // same change that left this paragraph standing — wins under `unsigned/fresh-merge/scopebase` at
-  // 0 and goes NONMATCH 11 with the plain respell ablated. So the reaching population is SIX rows,
-  // and the plain admission wins one of them. A census sentence in a comment expires the moment a
-  // row is added beside it; re-run it rather than reading it.
+  // score, same label.
+  // A SIXTH ROW REACHES IT AND WINS: `synthetic:sbscope`, in this file, under
+  // `unsigned/fresh-merge/scopebase` at 0, going NONMATCH 11 with the plain respell ablated. So
+  // the reaching population is six and the plain admission wins one of them. A CENSUS SENTENCE IN
+  // A COMMENT EXPIRES THE MOMENT A ROW IS ADDED BESIDE IT — re-run it rather than reading it.
   // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS, and the two are one token apart:
   // rank.ts enumerates COALESCED variants of the same `hoistScopedBases` under
   // `/scopebase-coalesce`, and one of those wins a match — `kleod:UpdateHUDCounterDisplay:agbcc`,
-  // MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`. An exact-token
-  // census says the plain admission wins nothing; a substring one, or a deletion aimed at
-  // `l3/scopebase.ts` rather than at `respell('/scopebase', …)`, costs that match.
+  // MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`. So an exact-token
+  // census of the plain admission never sees that row at all; a substring one does, and a deletion
+  // aimed at `l3/scopebase.ts` rather than at `respell('/scopebase', …)` costs that match.
   // The two neighbour rows ARE guards on the roster, each moved by its own admission and by
   // neither the other's nor the pair's: `livepark` MATCH → diff:3 with `/livebase` ablated,
   // `foldpark` MATCH → diff:6 with `/livebase-block` ablated — and under the whole-roster ablation
@@ -4766,28 +4763,28 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { dmanest: { params: ['s32', 's32', 's32'], returnsVoid: true } },
   },
 
-  // ── THE MAP-ASKING AXES, and the first synthetic rows that carry a map ────────────────────
+  // ── THE MAP-ASKING AXES, and the synthetic rows that carry a map ──────────────────────────
   //
   // `/no-bitfield` keeps the honest shift spelling where the map would name a bitfield member.
-  // Its enumeration gate (rank.ts, `mapHasBitfields`) reads `opts.symbols`, so before these rows
-  // the entire synthetic tier was structurally incapable of producing one candidate for it, and
-  // the arm's zero winning labels over the whole artifact measured the CORPUS, not the axis.
+  // Its enumeration gate (rank.ts, `mapHasBitfields`) reads `opts.symbols`, so a MAP-LESS row is
+  // structurally incapable of producing one candidate for it, and a census over a map-less tier
+  // measures the CORPUS rather than the axis.
   // What the corpus does contain is the fold's own five reach rows, all kleod:agbcc, and on all
   // five the fold ON wins — so a census reads the OFF arm as dead. These two rows are the shapes
   // the axis was built for, where it is the ONLY spelling that matches.
   //
-  // WHY BOTH DIRECTIONS, AND WHAT EACH ROW ACTUALLY BRACKETS — two different things, which this
-  // paragraph used to run together. The switch (`spellBitfieldMembers`) gates the READ fold (the
+  // WHY BOTH DIRECTIONS, AND WHAT EACH ROW ACTUALLY BRACKETS — two different things, and keeping
+  // them apart is the point. The switch (`spellBitfieldMembers`) gates the READ fold (the
   // `(x << a) >> b` extract → `gPacked.dreamStones`) and the WRITE fold (the mask-and-insert →
   // `gPacked.dreamStones = v`) together.
   //
   // AT MATCH LEVEL, BOTH ROWS BRACKET THE SAME ONE-LINE DELETION: the `/no-bitfield` arm in
   // `bitfieldCands`. Delete it and `bfwordread` goes 0 → 1 and `bfwordwrite` goes 0 → 8. Both
   // numbers are read off THESE ROWS through the harness itself (`bench run --tier synthetic --only
-  // <sym> --toolchain agbcc --serial`, `ASMLIFT_CANDCACHE=0`), control re-run beside each — an
-  // earlier draft quoted 19 for the write row from a standalone CLI probe and it does not
-  // reproduce here. So the second row buys no second DELETION bracket; saying "one row per
-  // direction is what brackets it" overstated what was measured.
+  // <sym> --toolchain agbcc --serial`, `ASMLIFT_CANDCACHE=0`), control re-run beside each. TAKE
+  // THEM OFF THE ROW AND NOT OFF A STANDALONE CLI PROBE: a probe of the write shape scores that
+  // ablation 19, which is a different rig and not this row. So the second row buys no second
+  // DELETION bracket — one row per direction is not what brackets the arm.
   //
   // AT LABEL LEVEL THEY DO SPLIT, and that is what the second row is for. Guard the WRITE fold's
   // `bitfieldStore.set` alone and `bfwordwrite` stays MATCH at 0 while its label moves
@@ -4798,8 +4795,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // THE CONSEQUENCE, stated because it is a gap and not a reassurance: deleting either FOLD is a
   // label-only change on these rows. `bench regression` reports 0 lost and would green-light it;
   // only `bench diff`'s `candidateLabel` field catches it. The folds' match-level cost is on the
-  // REAL tier — the write fold is what took `kleod:ProcessInputAndUpdateEntities` 284 → 248 — and
-  // nothing here brackets that. A row where the fold ON is the only spelling that matches would,
+  // REAL tier — PR #136 measured the write fold alone at `kleod:ProcessInputAndUpdateEntities`
+  // 284 → 248, and that row is 211 in the artifact under later unrelated changes, so RE-DERIVE the
+  // fold's own value rather than quoting either number — and nothing here brackets it. A row where
+  // the fold ON is the only spelling that matches would,
   // and none is authored: on a source that really writes the member, both spellings compile to the
   // same bytes and the differ has nothing to referee.
   //
@@ -4820,11 +4819,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // DECLARATION's access width; the source that loaded the whole WORD and shifted by hand emits
   // `ldr`. One instruction differs, and the differ referees it.
   //
-  // THE m2c HALF OF BOTH ROWS IS A NONCOMPILE, and it moved: they were published at m2c MATCH when
-  // the ctx carried the prototype alone, because m2c self-declared `extern s32 gPacked;` and its
-  // integer arithmetic compiles against that. Handed the map — the same facts asmlift gets — m2c
-  // omits the declaration, as a decompiler told about a symbol should, and emits the same integer
-  // arithmetic on a struct: `invalid operands to binary <<` and `invalid operands to binary &`.
+  // THE m2c HALF OF BOTH ROWS IS A NONCOMPILE, AND THE MAP IS WHY. Told only the prototype, m2c
+  // self-declares `extern s32 gPacked;` and its integer arithmetic compiles against that — a
+  // MATCH. Handed the map — the same facts asmlift gets — m2c omits the declaration, as a
+  // decompiler told about a symbol should, and emits the same integer arithmetic against the
+  // struct: `invalid operands to binary <<` and `invalid operands to binary &`.
   // The counterfactual is measured and is in `eval/evaluate.ts`'s note beside the rung that
   // supplies the declarations: the SAME emitted body under m2c's own `extern s32 gPacked;` scores
   // 0 and matches. So the loss is m2c's output not compiling against the context m2c was given,
@@ -4865,7 +4864,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // label — so the two placements bracket each other rather than one dominating. Measured on this
   // row's own fan with `ASMLIFT_CANDCACHE=0`: `/scopebase` matches at 0 and the best spelling
   // without it is 11.
-  // Like the two rows above this one carries a MAP, and for the same structural reason: run
+  // Like `bfwordread`/`bfwordwrite` this row carries a MAP, and for the same structural reason: run
   // map-less the fan carries zero `/scopebase` candidates, because the primary already hoists
   // `p0 = (u16 *)&gBgTilemapBufs;` to the function top and there is no `var` base to scope.
   {
@@ -4889,24 +4888,21 @@ export const SYNTHETIC: SynthSpec[] = [
 
   // `/no-ptr-elem` — the OFF arm of `structure.ts`'s `ptrMemberElement`, which rewrites byte
   // arithmetic through a map-declared sized pointer member into the element spelling
-  // (`((u16 *)gBgPtrs.pMap)[i + 157]`). That rewrite shipped as an unconditional primary
-  // asserting it moved no constant agbcc would not redo; compiled, the claim is false — the two
-  // spellings are the same address and the same instruction count and DIFFERENT objects at a
-  // nonzero element offset — so it became an axis the differ referees, and this row is the side
-  // of it no corpus row exercised.
+  // (`((u16 *)gBgPtrs.pMap)[i + 157]`). IT IS AN AXIS AND NOT A PRIMARY, because the rewrite is
+  // not free: compiled, the two spellings are the same address and the same instruction count and
+  // DIFFERENT objects at a nonzero element offset, so the differ has to referee them. This row is
+  // the side of it no corpus row exercises.
   // Measured on this row's own fan with `ASMLIFT_CANDCACHE=0`: the byte-arithmetic target is
   // matched at 0 by `/no-ptr-elem` and by nothing else. The map is required for the same reason
-  // the two rows above need one — the axis is enumerated only where the map declares a pointer
-  // member with a pointee width of 1/2/4, so a map-less tier produces zero candidates for it.
+  // `bfwordread`/`bfwordwrite` need one — the axis is enumerated only where the map declares a
+  // pointer member with a pointee width of 1/2/4, so a map-less tier produces zero candidates.
   //
-  // IT PAYS TWO LOUD DROPS OF ITS OWN, for the reason the rows above pay theirs — this row also
+  // IT PAYS TWO LOUD DROPS OF ITS OWN, for the reason the bitfield rows pay theirs — this row also
   // relocates against a named `extern` global, so `/raw-globals` has no declaration to emit and
   // fails candidate compilation on each signedness arm it enumerates. `synthetic:ptrelem`
   // therefore publishes 2 `droppedCandidates` (`unsigned/raw-globals`, `signed/raw-globals`)
-  // permanently. The price is per SIGNEDNESS ARM and not per row, which is why the two rows above
-  // publish 1 and 2 rather than two each — an earlier revision of this paragraph said "the same
-  // two loud drops the two rows above pay" and contradicted, forty lines away, the paragraph the
-  // same commit had just corrected to say exactly that. Read off the artifact: 1, 2, 2.
+  // permanently. The price is per SIGNEDNESS ARM and not per row, which is why `bfwordread` and
+  // `bfwordwrite` publish 1 and 2 rather than two each. Read off the artifact: 1, 2, 2.
   // Stated here because it is stated there: an undocumented pair of standing compile failures in
   // the corpus is one nobody can tell from a new regression, and nothing in `apps/benchmark` gates
   // a corpus-wide drop count.
@@ -4916,9 +4912,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // the prototype, m2c emitted `(gBgPtrs + (i * 2))->unk13A` and failed with `invalid type
   // argument of '->'`; told the map, it emits `gBgPtrs.pMap[i].unk13A` — better, and the member
   // selection is now on the right object — and fails with `request for member 'unk13A' in
-  // something not a structure or union`, `pMap` being a `u16 *`. Recorded because a round report
-  // lumped this row in with `bfwordread`/`bfwordwrite` under their `invalid operands to binary <<`,
-  // which is an error it has never produced.
+  // something not a structure or union`, `pMap` being a `u16 *`. Recorded to keep this row out of
+  // the map channel's price: `invalid operands to binary <<` is `bfwordread`'s error, and not one
+  // this row has ever produced.
   {
     sym: 'ptrelem',
     src:

@@ -187,8 +187,8 @@ export function diffGate(base = 'HEAD'): number {
   // AND THE SAME WINDOW THE REGRESSION GATE'S HALF HAS: this is a comparison only between
   // `bench merge` and the commit of the regenerated artifact. After that commit `readCommitted`
   // hands back the file this gate already read off disk, and the section prints
-  // `0 field change(s)` from a file compared with itself — the vacuity `notRegenerated` above
-  // guards on the BASE side, asked here of the SELF side by the same predicate. It says NOT
+  // `0 field change(s)` from a file compared with itself — the vacuity `notRegenerated` guards on
+  // the BASE side, asked here of the SELF side by the same predicate. It says NOT
   // CHECKED rather than nothing, and rather than a zero.
   if (base !== 'HEAD') {
     let self: BenchOutput | undefined;

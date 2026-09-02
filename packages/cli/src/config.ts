@@ -26,7 +26,7 @@ export interface AsmliftToolConfig {
    *  present. Absent ⇒ no symbol map (today's behavior). */
   elf?: string;
   /** a symbol map already DERIVED, as JSON (the `symbolMapToJson` shape: hex address →
-   *  SymbolInfo[]), relative to this decomp.yaml. The `elf` key above is the ordinary source —
+   *  SymbolInfo[]), relative to this decomp.yaml. The `elf` key is the ordinary source —
    *  a project has a built ELF and asmlift derives the map from it — and this key is for the
    *  case where there is no ELF to derive from and the map is authored: the benchmark's
    *  synthetic rows hand-write one, and a published reproduction script has to feed the CLI the

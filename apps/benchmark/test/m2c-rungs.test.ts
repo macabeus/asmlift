@@ -5,14 +5,14 @@
 // compiles is the measurement, so the interesting case is the one where none does: exactly one of
 // up to four compiler errors reaches `errorMarkers` and the artifact.
 //
-// It used to be the FIRST rung's, on the rule "every retry is best-effort". That rule was written
-// when the only retry ADDED TYPEDEFS the source might not need — a retry that can fail for its own
-// reason, whose error would be a worse answer than the plain one. It stopped holding the moment a
-// rung started adding the DECLARATIONS the row is compiled against: measured on `bfwordread` and
-// `bfwordwrite`, the artifact published ``gPacked' undeclared`` for rows whose deciding rung
-// declares `gPacked` and fails with `invalid operands to binary <<`. `errorMarkers` is not among
-// `FIELDS.m2c` in report/diff.ts, so no artifact comparison could have caught it — which is why
-// the pin is here, on the function, and toolchain-free.
+// IT IS THE LAST RUNG THAT COMPILED THE SOURCE AS EMITTED, never the FIRST rung's. "Every retry
+// is best-effort, so report the first" holds only while every retry ADDS TYPEDEFS the source might
+// not need — a retry that can fail for its own reason, whose error would be a worse answer than
+// the plain one. It breaks the moment a rung adds the DECLARATIONS the row is compiled against:
+// under that rule `bfwordread` and `bfwordwrite` publish ``gPacked' undeclared`` while the rung
+// that decides them DOES declare `gPacked` and fails with `invalid operands to binary <<`.
+// `errorMarkers` is not among `FIELDS.m2c` in report/diff.ts, so no artifact comparison catches
+// it — which is why the pin is here, on the function, and toolchain-free.
 import { describe, expect, test } from 'vitest';
 
 import { scoreM2c } from '../src/eval/evaluate';

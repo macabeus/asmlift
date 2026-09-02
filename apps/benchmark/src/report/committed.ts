@@ -75,9 +75,9 @@ export const scrub = (s: string): string =>
  *  `new Date()` on every run (`run/runner.ts` benchMeta), so equal stamps mean no merge has run
  *  between them — they are the same bytes, and any comparison of the two measures nothing.
  *
- *  ONE PREDICATE, TWO CALLERS, deliberately. `diff.ts` has asked this of the BASE side since the
- *  gate existed (`notRegenerated`, and its comment is the argument for why: the cheapest way to
- *  produce a green neutrality line must not be the one that compares a file with itself). The
+ *  ONE PREDICATE, TWO CALLERS, deliberately. `diff.ts` asks it of the BASE side (`notRegenerated`,
+ *  and its comment is the argument for why: the cheapest way to produce a green neutrality line
+ *  must not be the one that compares a file with itself). The
  *  added-row sections of `diff` and `regression` need the same question asked of the SELF side —
  *  a branch that has already committed its artifact reads it straight back out of `HEAD` — and
  *  the way two copies of a predicate like this go wrong is that one of them stops being asked. */

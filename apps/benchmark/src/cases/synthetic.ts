@@ -21,11 +21,11 @@ import type { Case } from './types';
  *  asmlift's own candidates are declared with (`core/declare.ts`). One source of truth: whatever
  *  the map says, m2c is told, and an author cannot add a fact to one channel and forget the other.
  *
- *  WHAT HOLDS THAT, precisely — the derivation is not self-enforcing, and an earlier draft of this
- *  comment claimed it was. Deriving the ctx here rules out an author writing the two by hand and
- *  letting them drift; it does NOT rule out this function handing the renderer worse input than the
- *  map holds, which is a one-line edit and was measured to leave every gate green while the ctx
- *  degraded to `extern u32 gPacked;`. `authored-facts.test.ts` is what rules that out, and it does
+ *  WHAT HOLDS THAT, precisely — THE DERIVATION IS NOT SELF-ENFORCING. Deriving the ctx here rules
+ *  out an author writing the two by hand and letting them drift; it does NOT rule out this
+ *  function handing the renderer worse input than the map holds, which is a one-line edit and was
+ *  measured to leave every gate green while the ctx degraded to `extern u32 gPacked;`.
+ *  `authored-facts.test.ts` is what rules that out, and it does
  *  it in two layers because one is not enough: it re-derives the block from `Case.symbols` ITSELF
  *  and requires the ctx to contain it verbatim, and — because a renderer that lost a fact would
  *  lose it on both sides of that comparison — it separately looks for every symbol, every declared

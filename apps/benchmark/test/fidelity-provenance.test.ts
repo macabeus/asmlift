@@ -49,10 +49,9 @@ describe('fidelity refuses a tier file whose run-time provenance disagrees with 
 // AND THE ONE CASE THE SHA COMPARISON GETS WRONG. Committing the regenerated artifact is the very
 // next step in the documented order, and it moves HEAD — so a sha comparison refuses the tier
 // files it just certified, with the message "the code moved between run and merge" for a commit
-// that moved no code. A loud refusal whose stated cause is false is the same class of wrong answer
-// as a published error marker naming a cause the run does not have, which is what the commit two
-// before this one removed. Asked of the measured PATHS instead: exempt when none differs, refused
-// when one does, and `dirty` refused either way.
+// that moved no code. A LOUD REFUSAL WHOSE STATED CAUSE IS FALSE is the same class of wrong answer
+// as a published error marker naming a cause the run does not have. Asked of the measured PATHS
+// instead: exempt when none differs, refused when one does, and `dirty` refused either way.
 describe('a commit that moved no measured code is not "the code moved"', () => {
   const at = (commit: string, dirty = false): string => tier({ commit, dirty });
   const A = 'a'.repeat(40);
@@ -82,11 +81,11 @@ describe('a commit that moved no measured code is not "the code moved"', () => {
   });
 
   // THE EXEMPTION'S OWN PREMISE. `sameMeasuredCode` compares two COMMITS, and the scripts fidelity
-  // re-runs go through the working tree — so with an uncommitted edit to measured code the
-  // exemption's sentence ("these rows still measure this code") is false, and it fired anyway: run
-  // against a tree carrying a modified `packages/core/src/rank.ts`, `bench fidelity --only
-  // bfwordread` printed it and reported `2 ok`, where the sha rule this replaced had refused. The
-  // refusal names the tree rather than the commits, which are not what moved.
+  // re-runs go through the WORKING TREE — so with an uncommitted edit to measured code the
+  // exemption's sentence ("these rows still measure this code") is false. Measured: against a tree
+  // carrying a modified `packages/core/src/rank.ts`, a commit-only exemption prints it and reports
+  // `2 ok` where the sha rule refuses. The refusal names the tree rather than the commits, which
+  // are not what moved.
   test('a DIRTY tree is refused even when the two commits differ in no measured path', () => {
     expect(() => tierRows('synthetic.json', at(A), { commit: B, dirty: true }, () => true)).toThrow(
       /the WORKING TREE is dirty/,

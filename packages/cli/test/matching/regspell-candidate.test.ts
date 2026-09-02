@@ -12,11 +12,12 @@
 // it cost this file its subject. `recip` fires the lever through R2 (const-expression staging)
 // instead, which keeps the seam covered.
 //
-// IT ALSO PINS THE LABEL, which nothing else did: `/regcopy-ret-fresh` won nothing over the
-// corpus for as long as it existed, so a family census read it as dead — and deleting the string
-// from rank.ts's table was a SILENT RENAME to `/regcopy-2`, a 0-flip change `bench regression`
-// green-lights. The names are the instrument (`candidateLabel` is a `bench diff` field), so they
-// are asserted here as names, and the tail-kind correspondence is asserted below.
+// IT ALSO PINS THE LABEL, which nothing else does. `/regcopy-ret-fresh` wins exactly one corpus
+// row (`synthetic:ringread:ido7.1`), so a census over it is thin enough that a rename is easy to
+// miss — and with the labels unpinned, deleting the string from rank.ts's table is a SILENT
+// RENAME to `/regcopy-2`, a 0-flip change `bench regression` green-lights. The names are the
+// instrument (`candidateLabel` is a `bench diff` field), so they are asserted here as names, and
+// the tail-kind correspondence with them.
 //
 // SCOPE, stated so it is not mistaken for more than it is: this pins that the candidates are
 // ENUMERATED and that ranking still lands on a byte-exact spelling. It does NOT pin a shape where
@@ -36,12 +37,10 @@ test('the register-copy candidates are enumerated and ranked through the ranked 
   // The lever fired, and the tail reached the candidate set under the name of the tail it IS.
   //
   // `recip` fires through R2 alone — no diamond, so R1 never runs and there is no dead value var
-  // for the tail to reuse. The only tail that exists here is the FRESH one, and this line used to
-  // assert `/regcopy-ret`: the label table in rank.ts was indexed by list POSITION, and with the
-  // reuse tail absent the fresh spelling landed at index 1 and wore the reuse name. This file was
-  // the only place the label was pinned at all, so it pinned the mislabel. Asserting the ABSENCE
-  // of the reuse name is the load-bearing half — without it, a return to positional labelling
-  // passes again.
+  // for the tail to reuse. The only tail that exists here is the FRESH one. Label rank.ts's table
+  // by list POSITION and the fresh spelling lands at index 1 and wears the reuse name — and this
+  // file is the only place the label is pinned at all, so it would pin the mislabel. Asserting the
+  // ABSENCE of the reuse name is the load-bearing half: without it, positional labelling passes.
   expect(cands.some((x) => x.label.endsWith('/regcopy'))).toBe(true);
   expect(cands.some((x) => x.label.endsWith('/regcopy-ret-fresh'))).toBe(true);
   expect(cands.filter((x) => x.label.endsWith('/regcopy-ret'))).toEqual([]);

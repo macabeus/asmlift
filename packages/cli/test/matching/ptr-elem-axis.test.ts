@@ -11,11 +11,9 @@
 // pointee width of 1, 2 or 4, and klonoa's map holds exactly ONE such symbol — whose every
 // decompiled caller happens to have been written in the element form.
 //
-// THE SYNTHETIC TIER CAN NOW CARRY A MAP (`SynthSpec.symbols`), and `synthetic:ptrelem:agbcc` is
-// the row that pins the WIN: match at 0 under `unsigned/no-ptr-elem`, NONMATCH 6 when the arm is
-// ablated. This header shipped in the same change as that row still saying a synthetic case never
-// carries `symbols` and that a synthetic row cannot pin this axis — both false as written, and
-// false about the very commit they were written in.
+// THE SYNTHETIC TIER CAN CARRY A MAP (`SynthSpec.symbols`), and `synthetic:ptrelem:agbcc` is the
+// row that pins the WIN: match at 0 under `unsigned/no-ptr-elem`, NONMATCH 6 when the arm is
+// ablated.
 //
 // SO WHAT IS THIS FILE FOR, given the row exists. Two things the row cannot do. It runs against
 // the PROJECT'S OWN map and toolchain rather than an authored map, so it would catch a divergence

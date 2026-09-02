@@ -199,11 +199,10 @@ describe('adversarial-round guards', () => {
 
   // THE DEFECT THIS FIELD EXISTS FOR. The reuse tail needs a dead value var, which only R1 mints,
   // so an R2-only function has ONE tail and it is the FRESH one — at index 1, where the reuse tail
-  // sits when R1 fires. rank.ts used to index its label table by that position, so on every
-  // R1-less function the fresh spelling was published as `/regcopy-ret`: a census over
-  // `/regcopy-ret-fresh` then measured nothing at all on this population, and a row winning here
-  // named the wrong transform in the artifact. Asserting the tail KIND at index 1 is what makes a
-  // return to positional labelling fail.
+  // sits when R1 fires. Index rank.ts's label table by that position and every R1-less function
+  // publishes its fresh spelling as `/regcopy-ret`: a census over `/regcopy-ret-fresh` then
+  // measures nothing at all on this population, and a row winning here names the wrong transform
+  // in the artifact. Asserting the tail KIND at index 1 is what makes positional labelling fail.
   test('an R2-only function yields the FRESH tail at index 1, not the reuse one', () => {
     const sfn: SFn = {
       name: 'f',

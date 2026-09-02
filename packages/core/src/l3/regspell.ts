@@ -125,11 +125,11 @@ function isConstExpr(e: Expr): boolean {
  *  spelling is not at a fixed index.
  *
  *  This field exists because the caller labels these, and a label is the instrument every census
- *  in this repo reads (it is a `bench diff` FIELD). `rank.ts` used to index a `['/regcopy',
- *  '/regcopy-ret', '/regcopy-ret-fresh']` table by POSITION, so on an R1-less function the fresh
- *  tail was published as `/regcopy-ret` — the dead-var-reuse name on the spelling that has no dead
- *  var to reuse. A census over the token `/regcopy-ret-fresh` then did not census the fresh
- *  spelling at all wherever R1 declined, which is most of the corpus. */
+ *  in this repo reads (it is a `bench diff` FIELD). Index a `['/regcopy', '/regcopy-ret',
+ *  '/regcopy-ret-fresh']` table by POSITION instead and an R1-less function publishes its fresh
+ *  tail as `/regcopy-ret` — the dead-var-reuse name on the spelling that has no dead var to reuse
+ *  — and a census over the token `/regcopy-ret-fresh` then censuses nothing wherever R1 declines,
+ *  which is most of the corpus. */
 export type RegcopyTail = 'none' | 'reuse' | 'fresh';
 
 export interface RegcopySpelling {

@@ -68,8 +68,7 @@ export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): Reg
 
 /** The rows the branch's OWN committed artifact holds that `base` does not.
  *
- *  THE BLIND SPOT THIS EXISTS FOR, and it is not hypothetical — it was found by an audit after the
- *  gate had passed. `compareOutcomes(base, fresh)` walks the BASE's rows, so a row the branch added
+ *  THE BLIND SPOT THIS EXISTS FOR. `compareOutcomes(base, fresh)` walks the BASE's rows, so a row the branch added
  *  is compared against nothing: it is an ADDITION relative to the branch point for as long as the
  *  branch lives, however many times the branch republishes its own artifact. A round that adds six
  *  rows in one commit and then changes the harness in the next can take one of them from a
@@ -122,8 +121,8 @@ export function regressionGate(base = 'HEAD'): number {
   // regenerated artifact. After that commit, `readCommitted('HEAD')` hands back the very file this
   // gate reads off disk, and `compareOutcomes` of a file with itself prints `0 lost` in a
   // millisecond. That green line is indistinguishable from the one a real comparison produces,
-  // which is the vacuity `diff.ts`'s `notRegenerated` has guarded on the BASE side since that gate
-  // existed; asked here of the SELF side by the same predicate (`committed.ts` sameRun). NOT a
+  // which is the vacuity `diff.ts`'s `notRegenerated` guards on the BASE side; asked here of the
+  // SELF side by the same predicate (`committed.ts` sameRun). NOT a
   // failure — re-verifying a finished branch is a legitimate thing to do, and exiting 1 for it
   // would be a false alarm — but never a pass either: it prints NOT CHECKED and says which window
   // to run it in.
