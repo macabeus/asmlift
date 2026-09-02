@@ -160,7 +160,7 @@ interface Access {
 // answer and is the fixture the ablation test uses. Co-occurrence is not reach either:
 // `no-subscript` would reject 21 symbols and is first for none of them. That does NOT make the twelve
 // decoration — each is right about a shape, and the ablation test beside this module ablates every
-// rule on a fixture that DOES reach it, where eight of the thirteen are the only thing standing
+// rule on a fixture that DOES reach it, where nine of the thirteen are the only thing standing
 // between that fixture and a derivation. What it does mean is that "which refusal protects which
 // row" has to be asked of `arrayShapeRefusals` and never read off a comment: this module's first
 // version enumerated six refusals in prose and put two of them on the wrong rule.
@@ -190,11 +190,11 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     rejects: (u) => !u.isAdd,
   },
   {
-    // ATTRIBUTING, NOT UNIQUELY LOAD-BEARING, and provably so: `other` is a constant here, so the
-    // residual is a lone constant term and `no-subscript` refuses the same symbol with this rule
-    // removed. It is FIRST because it names the real cause — this is the `arrbias` control, whose
-    // pool word is `.word gTbl+0x1` — and a refusal that names the wrong cause is how this module
-    // shipped two wrong attributions.
+    // ATTRIBUTING, NOT UNIQUELY LOAD-BEARING: with this rule removed, `interior-or-non-access`
+    // refuses the same symbol (measured on its fixture — the addend `add`'s result feeds the index
+    // `add`, which is not an element access). It is FIRST because it names the real cause — this
+    // is the `arrbias` control, whose pool word is `.word gTbl+0x1` — and a refusal that names the
+    // wrong cause is how this module shipped two wrong attributions.
     id: 'relocation-addend',
     why: 'a constant added straight to the address IS the relocation addend, and belongs to the base',
     sound: false,
@@ -202,8 +202,8 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     rejects: (u) => u.addendIsConst,
   },
   {
-    // Attributing: with it removed the whole residual reduces to one scaled term and
-    // `stride-is-not-the-element` refuses the same symbol.
+    // Attributing: with it removed the walk stops at the `sub` and records no non-constant term,
+    // so `no-subscript` refuses the same symbol (measured on its fixture).
     id: 'residual-not-a-sum',
     why: 'a `sub` makes a term’s sign depend on the walk, and a negative stride is not a subscript',
     sound: false,
@@ -217,12 +217,17 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     rejects: (u) => u.isAdd && u.consumers.length === 0,
   },
   {
-    // Attributing: the `bgarr` shape it names — a 28-byte element read 2 bytes at a time — is also
-    // refused by `stride-is-not-the-element` one table later. THIS is the rule that decides it,
-    // which the module note used to credit to the stride rule.
+    // THIS is the rule that decides the `bgarr` shape (a 28-byte element read 2 bytes at a time),
+    // which the module note used to credit to `stride-is-not-the-element`. It is uniquely
+    // load-bearing only where the symbol ALSO has a clean access: with an interior read alone,
+    // removing the rule records no access at all (an interior read is not evidence, and is
+    // filtered out) and the symbol is refused anyway, while beside a clean access removing it
+    // derives an element type off a name the function reads at a displacement.
+    // `kleod:UpdateCameraScroll` is that shape on the corpus — `gSineTable` derives `elemSize 2`
+    // without this rule — which is why its fixture carries both accesses.
     id: 'interior-or-non-access',
     why: 'a non-zero displacement reads an INTERIOR of the element, which a whole-element subscript cannot spell',
-    sound: false,
+    sound: true,
     guardedBy: 'global-array-shape.test.ts: an element read at a displacement INSIDE it keeps the cast spelling',
     rejects: (u) => u.consumers.some((c) => !c.isElementAccess),
   },
@@ -254,9 +259,9 @@ interface ShapeEvidence {
  *  `((T *)&gSym)[i]`, which is byte-identical under any declaration. */
 export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   {
-    // Attributing on the fixture below: two widths normally come with two strides, so
-    // `stride-is-not-the-element` refuses too. It is first because "one name, two element types"
-    // is the reason, and the stride disagreement is its symptom.
+    // Attributing on the fixture below: with it removed the width collapses to the first access's
+    // and `mixed-extension` refuses the same symbol (measured). It is first because "one name, two
+    // element types" is the reason and the extension disagreement is a symptom of it.
     id: 'mixed-access-width',
     why: 'two widths under one name have no single element type to declare',
     sound: false,
@@ -275,7 +280,8 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   },
   {
     // Attributing: an address with no variable term also has no stride, so
-    // `stride-is-not-the-element` refuses it. It is stated separately because "there is no
+    // `stride-is-not-the-element` refuses it (measured on its fixture — the one subsumption claim
+    // in this table that survived being checked). It is stated separately because "there is no
     // subscript here at all" and "the subscript scales by the wrong thing" are different facts.
     id: 'no-subscript',
     why: 'an address with no variable term names no element, so it evidences no array',

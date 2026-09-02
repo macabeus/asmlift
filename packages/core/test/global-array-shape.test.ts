@@ -262,14 +262,18 @@ f:
       '.word\tgTbl',
     ),
   ],
-  // The `bgarr` shape: a 28-byte element read 2 bytes at a time (`gBgInfo[i].hLength`). Emitting a
-  // flat 16-bit subscript here would be out of bounds against the project's own header.
+  // ONE INTERIOR READ REFUSES THE WHOLE SYMBOL, and the fixture has to carry a clean access
+  // alongside it or the rule looks unnecessary: with an interior read alone, ablating the rule
+  // records no access at all (an interior read is not evidence) and the symbol is refused anyway.
+  // With a clean access beside it, ablating derives `elemSize 2` off a name the function also
+  // reads at +4 — the wrong declaration. `kleod:UpdateCameraScroll` is that shape on the corpus.
   [
     'interior-or-non-access',
     thumb(
       'f',
-      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
-      '.word\tgBgInfo',
+      '\tldr\tr2, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]\n\tlsl\tr1, r1, #0x1\n' +
+        '\tadd\tr1, r1, r2\n\tldrh\tr1, [r1, #0x4]\n\tadd\tr0, r0, r1',
+      '.word\tgTbl',
     ),
   ],
   [
@@ -379,8 +383,17 @@ describe('refusals: which rule decided, and what it is worth', () => {
 
   test('an element read at a displacement INSIDE it keeps the cast spelling', () => {
     // The refusal's OUTPUT, not just its verdict: every rejection falls back to a form that is
-    // byte-identical under any declaration.
-    expect(sourceOf('f', fixture('interior-or-non-access'))).toContain('&gBgInfo');
+    // byte-identical under any declaration. On the `bgarr` shape — a 28-byte element read 2 bytes
+    // at a time (`gBgInfo[i].hLength`) — where a flat 16-bit subscript would be out of bounds
+    // against the project's own header.
+    const structElem = thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+      '.word\tgBgInfo',
+    );
+    expect(refusals('f', structElem)).toEqual([['gBgInfo', 'interior-or-non-access']]);
+    expect(derive('f', structElem).size).toBe(0);
+    expect(sourceOf('f', structElem)).toContain('&gBgInfo');
   });
 
   test('two access widths under one name refuse', () => {
@@ -431,11 +444,17 @@ describe('refusals: which rule decided, and what it is worth', () => {
 // ── which refusals actually DECIDE, as a committed measurement ────────────────────────────────
 //
 // The header's list of refusals is prose; this is the part a reviewer can check. For each rule:
-// remove that ONE rule from the table and re-run the real derivation on the real fixture. Six are
+// remove that ONE rule from the table and re-run the real derivation on the real fixture. Four are
 // ATTRIBUTING — right about their shape, first because they name the real cause, subsumed by a
-// later rule if removed — and eight are the only thing standing between their fixture and a
+// later rule if removed — and nine are the only thing standing between their fixture and a
 // derivation. `sound` records exactly that split, so the classification is re-measured on every
 // run rather than asserted once in a comment.
+//
+// THE FIXTURE IS PART OF THE CLAIM. `interior-or-non-access` measured as attributing until its
+// fixture carried a CLEAN access beside the interior one — with the interior read alone, removing
+// the rule records no access and the symbol is refused anyway, so the fixture was answering a
+// weaker question than the corpus does (`kleod:UpdateCameraScroll` derives an element type without
+// the rule). A gate that measures as subsumed may simply have the wrong input.
 
 describe('every gate: which rule decides, and whether it is uniquely load-bearing', () => {
   test('`sound` says exactly which rules nothing else would have caught', () => {
@@ -443,8 +462,8 @@ describe('every gate: which rule decides, and whether it is uniquely load-bearin
     const measured = GATE_FIXTURES.map(([id, asm]) => [id, deriveWithout(id, 'f', asm).size > 0]);
     expect(measured).toEqual(GATE_FIXTURES.map(([id]) => [id, gates.find((g) => g.id === id)!.sound]));
     // …and the split is not degenerate in either direction
-    expect(measured.filter(([, u]) => u === true).length).toBe(8);
-    expect(measured.filter(([, u]) => u === false).length).toBe(5);
+    expect(measured.filter(([, u]) => u === true).length).toBe(9);
+    expect(measured.filter(([, u]) => u === false).length).toBe(4);
   });
 
   test('every gate in both tables has a fixture here', () => {
