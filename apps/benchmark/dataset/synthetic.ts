@@ -4209,22 +4209,26 @@ export const SYNTHETIC: SynthSpec[] = [
   },
 
   // WHICH BASE KEYS GET A LOCAL — A PER-KEY QUESTION THE ROSTER ANSWERS PER FUNCTION. l3/basecse.ts
-  // hoists every key its gate table admits, so the two admissions on the roster are two ANSWERS FOR
-  // THE WHOLE FUNCTION: `/livebase` binds every key reached twice, `/livebase-block` binds those
-  // minus the ones read at a single fixed offset (`single-cell`). A source that spelled ONE base as
-  // a pointer local and left a second one inline is between them, and nothing on the roster is
-  // between them. These three rows are that gap and its two boundaries, one admission each.
+  // hoists every key its gate table admits, so an admission is an ANSWER FOR THE WHOLE FUNCTION.
+  // THE GAP THESE ROWS WERE AUTHORED FOR, stated in the tense it belongs in: BEFORE `/unfolded`
+  // the roster carried two of them, `/livebase` (every key reached twice) and `/livebase-block`
+  // (those minus the ones read at a single fixed offset, `single-cell`), and a source that spelled
+  // ONE base as a pointer local and left a second one inline was between them with nothing on the
+  // roster between them. These three rows are that gap and its two boundaries, one admission each.
+  // `/unfolded` (l3/basecse.ts, UNFOLDED_GATES) has since SHIPPED into that gap and `unfoldpark`
+  // is a MATCH, so read the paragraph below as why the rows exist, not as the current roster.
   //
-  // THE DISCRIMINATOR ALREADY EXISTS IN THE VOCABULARY AND NO TABLE REQUIRES IT. `BaseKey`
+  // THE DISCRIMINATOR WAS ALREADY IN THE VOCABULARY AND NO TABLE REQUIRED IT. `BaseKey`
   // (l3/basecse.ts) carries `unfoldedOffset`: agbcc folds a constant SUBSCRIPT into the literal it
   // materializes, so an offset that arrived in the MEMORY OPERAND instead got there because
   // something other than a subscript put it there — a named base local, or an aggregate member.
   // `((s32 *)0x0300343C)[0]` emits `.word 0x300343c` + `ldr [r0]`; `s32 *p = (s32 *)0x03003400;
-  // p[15]` emits `.word 0x3003400` + `ldr [r0, #0x3c]`. The ONE table that reads the field,
-  // `BASEFOLD_GATES`, reads it as an EXEMPTION to `single-use` (a base reached ONCE) — the opposite
-  // question — and keeps both placement heuristics, so it never reaches a key reached twice inside a
-  // loop. Requiring the field instead of exempting on it is the gate `/unfolded` ships as
-  // (l3/basecse.ts, UNFOLDED_GATES: `/livebase`'s table plus `folded-offset`).
+  // p[15]` emits `.word 0x3003400` + `ldr [r0, #0x3c]`. The field now has TWO readers, and they ask
+  // OPPOSITE questions of it: `BASEFOLD_GATES` EXEMPTS `single-use` on it (a base reached ONCE) and
+  // keeps both placement heuristics, so it never reaches a key reached twice inside a loop, which
+  // is why it did not close this gap; `UNFOLDED_GATES` keeps `single-use` and REQUIRES the field.
+  // Requiring it instead of exempting on it is the gate `/unfolded` ships as — `/livebase`'s table
+  // plus `folded-offset`.
   //
   // THE MATRIX, and it is why there are three rows and not one. Best score per admission over each
   // row's own fan, agbcc, candidate cache OFF.

@@ -102,10 +102,16 @@
 //
 // ALL-OR-NOTHING PER FUNCTION, and that is a PRICE rather than a property. Every admitted base is
 // respelled together in one candidate, so a function with two admitted bases where the target
-// folded one and kept the other in the operand has no reachable spelling — the same coverage hole
-// `l3/basecse.ts` states for its two admissions and `l3/ptrfield.ts` measures for its fields. The
-// per-base fork is 2^n and the family's standing price for forking ten refusal sites per site was
-// 1024x, so the subsets stay unreachable until a row demands one. Measured over klonoa's 69
+// folded one and kept the other in the operand has no reachable spelling — the coverage hole
+// `l3/ptrfield.ts` measures for its fields. Do NOT read `l3/basecse.ts` as the second witness it
+// used to be cited as: that file's own COVERAGE paragraph said the same thing and is now the
+// counterexample. Its `UNFOLDED_GATES` cuts across `LIVEBASE_BLOCK_GATES` rather than refining it,
+// so a partial answer IS reachable there — a proper nonempty subset on 13 of 358 agbcc rows, one
+// of three bases on `synthetic:dmascope` — and the way it got there is the way out of this hole
+// too: not a per-base fork, but a SECOND PREDICATE that separates the bases the differ has to
+// choose between. The per-base fork is 2^n and the family's standing price for forking ten refusal
+// sites per site was 1024x, so the arbitrary subsets stay unreachable until a row demands one.
+// Measured over klonoa's 69
 // lifting functions (lift → idioms → raise → structure, one pass per configuration): 36 admitted
 // bases over 25 functions map-less and 38 over 24 map-ful, so the multi-base functions really are
 // the majority of the surplus and a missing subset has somewhere to live. The other three
