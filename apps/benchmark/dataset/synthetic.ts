@@ -5016,12 +5016,22 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // FIVE of the six scored TARGETS load the base first (`arrcast` is the one that does not), and
   // asmlift's candidate mismatches that order on THREE of those five — `harr`, `bgarr`,
-  // `tblrank2` — not on all five. `harridx` and `arrbias` are already base-first with no index
-  // scaling at all, because agbcc folds their `+1` into the pool word and the scaling goes with
-  // it (axis 1 below). That is precisely why
-  // `arrbias` is a MATCH and a control rather than a gap — do not read it as a row exposed to an
-  // index-first default. The family measures this ordering plus a second, independent axis: where
-  // a constant term ends up, in the pool word's relocation addend or in a runtime `add`.
+  // `tblrank2` — not on all five.
+  //
+  // WHY `harridx` AND `arrbias` ARE ALREADY BASE-FIRST, and it is NOT the addend. Both are u8
+  // rows, and AT ELEMENT WIDTH 1 THERE IS NO INDEX SCALING TO EMIT, so the base `ldr` is the
+  // first instruction whatever else is going on. Measured, cast base, `+1` present and absent:
+  //
+  //     ((u8 *)&gTbl)[a0]       ldr ; adds ; ldrb          ((u16 *)&gTbl)[a0]      lsls ; ldr ; …
+  //     ((u8 *)&gTbl)[a0 + 1]   ldr ; adds ; ldrb          ((u16 *)&gTbl)[a0 + 1]  lsls ; ldr ; …
+  //
+  // The constant term moves the pool word's ADDEND (axis 1) and does not touch the ORDER; the
+  // width decides the order. So instruction order is only OBSERVABLE at width > 1, which is why
+  // the axis-2 minimal pair below is `harr`/`arrcast` (both u16) and why no u8 row can referee
+  // it. `arrbias` being a MATCH is this, not an ordering win — do not read it as a row exposed
+  // to an index-first default. The family measures this ordering plus a second, independent
+  // axis: where a constant term ends up, in the pool word's relocation addend or in a runtime
+  // `add`.
   //
   // THE ATTRIBUTION, CORRECTED — the first cut of this block named ONE cause and there are TWO.
   // agbcc's `c-typeck.c` does fork the subscript on
