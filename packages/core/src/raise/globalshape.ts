@@ -538,10 +538,11 @@ function stridesOf(a: Access): number[] {
  *  compare, so the order says nothing at all and the symbol must find its licence elsewhere.
  *
  *  ONLY A SCALING IN THE SAME BLOCK AS THE POOL LOAD IS COMPARABLE, and that is a statement about
- *  agbcc rather than a convenience. The pool `ldr` is CSE'd and placed at the dominator of its
- *  uses, so once the two sit in different blocks at least one of them has been MOVED relative to
- *  the expression that wrote it and the function's instruction order no longer records
- *  `build_array_ref`'s expansion order. Compiled, that is exactly what happens — a loop whose
+ *  agbcc rather than a convenience. One `ldr` is SHARED by every access of the name and it is
+ *  hoisted out of loops — both visible in the fixtures beside this rule — so once the load and a
+ *  scaling sit in different blocks at least one of them has been MOVED relative to the expression
+ *  that wrote it, and the function's instruction order no longer records `build_array_ref`'s
+ *  expansion order. Compiled, that is exactly what happens — a loop whose
  *  only subscript is in the body hoists the `ldr` into the preheader and the two spellings
  *
  *      for (i = 0; i < n; i++) s += gTbl[p[i]];
