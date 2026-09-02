@@ -338,8 +338,8 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  entry prices one where the `/coalesce` pairing costs the most candidates of any and scores two
  *  points worse than going unpaired. THAT row fans anyway because on the `/livebase` rows a
  *  pairing belongs to the LEVER rather than to one of its admissions — but it is a per-row
- *  decision and not a property of the roster, and three of the five rows below are unpaired
- *  today. `pairings` is the field, and its own doc says how a row earns a `true`.
+ *  decision, not a property of the roster: three of the five rows below are unpaired. `pairings`
+ *  is the field, and its own doc says how a row earns a `true`.
  *
  *  `/basefold` is the third and fourth admission and `/unfolded` the fifth; those three are the
  *  conditional set — `enumerateCandidates` appends them where the target declares
@@ -368,11 +368,10 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
  *  ranked command in docs/ranked-repro.md — the `/basefold` admission declines on every
  *  structuring, leaving that fan the size it was, with ZERO `basefold`-labelled candidates in the
- *  control arm. The FAN FIGURE this paragraph used to quote (68352 either way) is stale and was
- *  left standing through two rounds that moved it: that function's fan was 102528 at the commit
- *  `/unfolded` was cut from and 112896 after it. A DELTA can outlive the total it was quoted
- *  against, which is what makes a stale paragraph read as verified — re-run the total before
- *  budgeting against it. All floors, though: the ranked path structures each function many ways
+ *  control arm. NO FAN TOTAL IS QUOTED HERE ON PURPOSE: that function's fan was 112896 at this
+ *  commit and two five-figure numbers ago at others, and a DELTA outlives the total it was
+ *  measured beside — which is what makes a stale paragraph read as verified. Re-run the total
+ *  before budgeting against it. All floors, though: the ranked path structures each function many ways
  *  where this census builds one tree per observation.
  *
  *  WHAT THE PAIR COSTS, through the HARNESS's own enumeration and re-runnable from the recipe in
@@ -487,17 +486,15 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  bases, or those minus the scalar cells — and a source that parked one numeric base and spelled
  *  another inline is at neither end of it.
  *
- *  IT IS NOT ITSELF ON THAT CHAIN, and this note used to call it "the one BETWEEN the two
- *  `/livebase` rows". It is beside them: `singleCell` and `unfoldedOffset` are independent, so
- *  this table and `LIVEBASE_BLOCK_GATES` are lattice-incomparable and each binds keys the other
- *  refuses — 17 keys on 14 functions one way, 5 on 5 the other, censused over the artifact's agbcc
- *  rows (the count is in UNFOLDED_GATES' note). Read the roster as five hand-picked subsets of
- *  which only two are ordered by inclusion, never as a narrowness ranking.
+ *  IT IS NOT ITSELF ON THAT CHAIN — it is beside it. `singleCell` and `unfoldedOffset` are
+ *  independent, so this table and `LIVEBASE_BLOCK_GATES` are lattice-incomparable and each binds
+ *  keys the other refuses: 8 keys on 7 functions one way, 5 on 5 the other, at the scope
+ *  UNFOLDED_GATES' note states. Read the roster as five hand-picked subsets of which only two are
+ *  ordered by inclusion, never as a narrowness ranking.
  *
  *  LAST on the roster, so `seen` and `sameBases` between them keep it from restating an earlier
- *  ROSTER row — but only ONE of those two does any work here, and it is not the one this note used
- *  to lead with. `sameBases` declines a row that binds what an EARLIER row binds AT THE SAME
- *  PLACEMENT, and the only earlier `first-use` row is `/basefold/sinkinit`, whose table keeps the
+ *  ROSTER row — but only ONE of the two does any work here, and it is `seen`. `sameBases` declines
+ *  a row that binds what an EARLIER row binds AT THE SAME PLACEMENT, and the only earlier `first-use` row is `/basefold/sinkinit`, whose table keeps the
  *  two gates this one ablates; instrumented over every agbcc row, it fires on 0 of 5541 roster
  *  observations for this entry (33 distinct functions), against 3939 for `/livebase-block`. So the
  *  shadow is available and vacuous, and what actually keeps this row from restating anything is
@@ -506,9 +503,10 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  product loops, so a source one of those products would emit later is claimed by this row's
  *  label instead. `synthetic:foldpark` is that case measured: its fan is 34 candidates with this
  *  entry and 34 without, the same source winning at 0 under `signed/unfolded/volatile` here and
- *  `signed/livebase-block/volatile/sinkinit` there. Corpus-wide, 21 of the 328 agbcc rows whose
- *  distinct-source set is byte-identical with and without this entry carry `/unfolded`-labelled
- *  candidates: 21 pure renames against 7 rows that really gain sources. A label move with no fan
+ *  `signed/livebase-block/volatile/sinkinit` there. Corpus-wide (map-less, candidates only, over the
+ *  artifact's 363 agbcc rows), 21 of the 333 whose distinct-source set is byte-identical with and
+ *  without this entry carry `/unfolded`-labelled candidates: 21 pure renames against 7 rows that
+ *  really gain sources, and 0 that lose one. A label move with no fan
  *  move is that and not a new spelling — AND A WINNING LABEL IS THEREFORE NOT AN ATTRIBUTION.
  *  Price a family by ABLATING it, never by counting the labels it wins.
  *
@@ -530,7 +528,8 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  demands the joint spelling, and the row that earned this entry does not: paired and unpaired
  *  are the same 44 candidates above. ONE 15-LINE FUNCTION CANNOT SETTLE A CORPUS QUESTION, so the
  *  same knob was censused over every agbcc row the artifact carries, candidates only: `true` adds
- *  912 distinct sources over 8 rows (corpus fan 47390 → 48302, +1.92%) — `kleod:UpdateCameraScroll`
+ *  912 distinct sources over 8 rows, +1.92% of the agbcc corpus fan (quoted as the DELTA,
+ *  because the total moves with the corpus and with the roster) — `kleod:UpdateCameraScroll`
  *  +608, `synthetic:sizebound` +128, `synthetic:dmascope` +64, `kleod:SetupBG3WindowOverlay` and
  *  `synthetic:maskhome` +32 each, and +16 each on `dmafield`, `dmaflat` and `dmapoll`. Five of the
  *  eight are MATCH and two are `noncompile`, where extra candidates cannot help; the one that
@@ -1783,10 +1782,8 @@ export function enumerateCandidates(
     // One family per admission row; a row binding exactly what an earlier row bound is the same
     // spelling under a different label, so it declines for that too. `/basefold`'s TWO rows and
     // `/unfolded` join the roster where the target declares the fold — THREE of the five, so a
-    // target without it is offered the two `/livebase` rows and nothing else. (This sentence said
-    // `/basefold` alone through the round that added the fifth row, while the same claim was
-    // repaired at the two POLICY sites above: a fact stated in three places is repaired in three
-    // places or not at all.)
+    // target without it is offered the two `/livebase` rows and nothing else. The same fact is
+    // stated at the two POLICY sites above; a roster change repairs all three or none.
     const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
       ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS]
       : LIVEBASE_ADMISSIONS;
@@ -2300,39 +2297,34 @@ export function enumerateCandidates(
             // scores identically, so it can never change `best` — and it keeps the candidate set to
             // the genuinely distinct spellings.
             //
+            //
             // THE PUBLISHED LABEL IS THEREFORE NOT AN ATTRIBUTION, and every argument in this tree
             // that counts winning labels is unsound to exactly that extent. The label kept is the
             // FIRST route's; the later routes are discarded, silently and by design. Adding one
             // roster row renamed 21 agbcc rows whose emitted source sets were byte-identical —
             // a CANDIDATE-SET census (whole fan unchanged, some candidate relabelled), which is a
-            // different population from the WINNING-label census below; over published winners the
-            // same row moved 5 labels, 2 of them renames.
+            // different population from a WINNING-label census: over published winners the same
+            // row moved 5 labels, 2 of them renames.
             //
-            // THE STRONGER FORM, and the correction this paragraph needed: it used to add that the
-            // same row "took `/livebase-block`'s winning-label census from 7 to 5 and `/sinkinit`'s
-            // from 7 to 2, and changed the PROGRAM on none of them". The two counts are right and
-            // the last clause is FALSE, which makes the point harder rather than softer. Compared
-            // row by row against the previous artifact, FIVE distinct rows left those two censuses
-            // and THREE of them changed the source they publish: `synthetic:unfoldpark`
+            // AND A LABEL CENSUS CANNOT EVEN SEPARATE A RENAME FROM A RESPELLING. Of those 5
+            // winners, THREE changed the source they publish — `synthetic:unfoldpark`
             // (402 → 397 bytes, score 9 → 0), `kleod:ConfigureEntityBehavior` (3677 → 3993,
-            // 233 → 230) and `synthetic:livepark` (337 → 346, both MATCH); the other two,
-            // `synthetic:foldpark` and `kleod:DecompressDma`, are byte-identical renames. So a
-            // label census does not even separate a rename from a respelling — the two look the
-            // same from here, and only the emitted SOURCE tells them apart (`bench diff` publishes
-            // that field; `bench regression` does not).
+            // 233 → 230) and `synthetic:livepark` (337 → 346, both MATCH) — while
+            // `synthetic:foldpark` and `kleod:DecompressDma` are byte-identical renames. The two
+            // look the same from here; only the emitted SOURCE tells them apart (`bench diff`
+            // publishes that field, `bench regression` does not).
             //
             // So "N rows win under this family" bounds nothing: a family can win zero labels and
             // still be the only route to a source, and a family can win five and have introduced
             // three. Price a family by ABLATING it and re-running the rows
             // (LIVEBASE_BLOCK_GATES carries the recipe); a zero census is not a death certificate,
             // and a nonzero one is not a mechanism.
-            // THE SEAM FIX IS BOOKED AND NOT BUILT, named here so the next round does not have to
-            // rediscover it: keep the losing producers on the surviving candidate (`label` plus an
-            // `alsoReachedBy: string[]`) and a census by mechanism becomes one. It is not free —
-            // every consumer that reads `label` as the derivation would have to say which it
-            // means, and the published `candidateLabel` must not change — so it is worth building
-            // when a round needs the census, not before. Until then the only sound census is an
-            // ablation.
+            // THE SEAM FIX IS BOOKED AND NOT BUILT: keep the losing producers on the surviving
+            // candidate (`label` plus an `alsoReachedBy: string[]`) and a census by mechanism
+            // becomes one. It is not free — every consumer that reads `label` as the derivation
+            // would have to say which it means, and the published `candidateLabel` must not
+            // change — so build it when a round needs the census, not before. Until then the only
+            // sound census is an ablation.
             const dup = seen.get(source);
             if (dup !== undefined) {
               // The same TEXT, reached twice. `matchOnly` is a property of the DERIVATION and the

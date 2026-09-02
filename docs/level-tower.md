@@ -107,8 +107,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     on) without making the answer per-base: one table still decides the whole function. Nor are the
     tables a narrowness ranking one could extend by adding a sixth: `singleCell` and
     `unfoldedOffset` are independent fields, so `/unfolded` and `/livebase-block` are
-    lattice-INCOMPARABLE and each binds keys the other refuses (17 keys on 14 functions one way,
-    5 on 5 the other, censused over the artifact's agbcc rows). The roster is hand-picked subsets,
+    lattice-INCOMPARABLE and each binds keys the other refuses (8 keys on 7 functions one way,
+    5 on 5 the other, censused over the artifact's agbcc rows at one structuring each). The roster
+    is hand-picked subsets,
     so a base set that is no row's stays unreachable however many rows are added. Three rows
     want a per-BASE assignment instead: `LoadBGTilemapData` wants `/livebase-block` on its `+0x3c` key,
     `synthetic:bgfixed` wants `/offmember` on its one key, and `synthetic:dmapoll` (booked in

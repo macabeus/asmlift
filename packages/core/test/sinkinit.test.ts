@@ -311,17 +311,16 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
 
   test('the joint spelling reaches the differ, over the whole admission roster', () => {
     expect(labels).toContain('signed/livebase/sinkinit');
-    // PINNED AS A PROGRAM, because a label is not an attribution (see the `seen` dedup in rank.ts)
-    // — and the first attempt at this pin got that WRONG IN ITS OWN FIX. It replaced
-    // "some label contains livebase-block" (satisfied by the twelve HEAD-placed narrow candidates
-    // the fixture also emits, so green with the sunk spelling gone entirely) with a program check
-    // KEYED ON `signed/unfolded/volatile`. Which route emits the sunk narrow program is exactly
-    // what `seen` decides: on this fixture `/unfolded` binds the same register file
-    // `/livebase-block` does, its roster row runs before the `/livebase ×` product loops, and it
-    // places at first use — so it wins the label. Ablate the `/unfolded` roster row and the fan is
-    // the same 60 distinct sources with the same sunk program in it, now labelled
-    // `signed/livebase-block/volatile/sinkinit` — and the label-keyed pin goes red for a program
-    // that never moved.
+    // PINNED AS A PROGRAM, because a label is not an attribution (see the `seen` dedup in rank.ts).
+    // WHICH route emits the sunk narrow program is exactly what `seen` decides, and it moves under
+    // roster edits that change no program at all: on this fixture `/unfolded` binds the same
+    // register file `/livebase-block` does, its roster row runs before the `/livebase ×` product
+    // loops, and it places at first use — so it takes the label today, and ablating that row leaves
+    // the same 60 distinct sources with the same sunk program relabelled
+    // `signed/livebase-block/volatile/sinkinit`. A label-keyed assertion goes red there for a
+    // program that never moved. A substring one (`some label contains livebase-block`) fails the
+    // other way: the twelve HEAD-placed narrow candidates satisfy it with the sunk spelling gone
+    // entirely.
     //
     // So SEARCH for the program and let whichever route produced it own the label. What has to hold
     // is that the narrow admission's bases reach the differ SUNK: the same declarations and the same
@@ -341,13 +340,11 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
         cand.source.indexOf('v0 = 0;') < cand.source.indexOf('p0 = (s32 *)'),
     );
     expect(sunk).toHaveLength(1);
-    // Its label today is `signed/unfolded/volatile` and with that roster row ablated it is
-    // `signed/livebase-block/volatile/sinkinit`. Deliberately NOT asserted: either is the same
-    // program, and pinning one is the defect above. WHICH LEAVES THE ROW ITSELF UNPINNED HERE, and
-    // it was unpinned everywhere until it was measured: deleting `UNFOLDED_ADMISSIONS` from
-    // rank.ts's roster left the whole core suite green. `basecse.test.ts` now owns that subject —
-    // "and the ROSTER offers it" — keyed on the base SET only that row parks. Two tests, two
-    // subjects; this one must stay label-free.
+    // Its label today is `signed/unfolded/volatile`, and `signed/livebase-block/volatile/sinkinit`
+    // with that roster row ablated. Deliberately NOT asserted: either is the same program. That
+    // leaves the ROSTER ROW unpinned here by design — `basecse.test.ts`'s "and the ROSTER offers
+    // it" owns that subject, keyed on the base SET only that row parks. Two tests, two subjects;
+    // this one stays label-free.
   });
 
   test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {

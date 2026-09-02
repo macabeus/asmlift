@@ -208,14 +208,12 @@ ${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
     // a merge decides is about SCORE and never about meaning. Widen the readership — promote either
     // rule into `BASECSE_GATES` — and it goes.
     //
-    // WHAT THE BOUND IS NOT, because this note asserted it for two rounds after it stopped being
-    // true: "`unfoldedOffset` has exactly one reader". It has TWO, and the second one shipped
-    // without this file being opened. `BASEFOLD_GATES` EXEMPTS `single-use` on the flag;
-    // `UNFOLDED_GATES` REQUIRES it. So the population a merge can move is `/basefold*` AND
-    // `/unfolded*`, and the two move on DISJOINT shapes — the readership census below is the
-    // assertion that would have caught the drift. It fails when one of these two stops reading the
-    // field, and — because it DISCOVERS its tables rather than listing them — when a third starts;
-    // as first written it listed today's five by hand, which is the same blind spot one level up.
+    // THE READERSHIP IS TWO TABLES, NOT ONE, and a sentence naming them is what goes stale: the
+    // second reader can ship without this file being opened. `BASEFOLD_GATES` EXEMPTS `single-use`
+    // on the flag; `UNFOLDED_GATES` REQUIRES it. So the population a merge can move is
+    // `/basefold*` AND `/unfolded*`, and the two move on DISJOINT shapes. The readership census
+    // below is the assertion rather than this paragraph — it DISCOVERS its tables, so it fails
+    // both when one of the two stops reading the field and when a third starts.
     //
     // The two directions are NOT symmetric, and reading them as one is how this note first got
     // written. A flag the merge INVENTS offers an extra candidate, and `compareScored` orders by
@@ -249,10 +247,10 @@ ${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
       admittedBases(shape(fromOperand), gates).join() !== admittedBases(shape({}), gates).join();
 
     // The population is DISCOVERED, not listed, or this census cannot see the drift it is for: a
-    // hand-written list of today's five tables stays green when a SIXTH starts reading the field,
-    // which is the same shape as the "exactly one reader" sentence above going stale. Every gate
-    // table this file exports, then — `Gate<BaseKey>` tables live only here, and `withholdingKey`
-    // (l3/homesplit.ts) composes over a caller's table and inherits its readership.
+    // hand-written list of today's five tables stays green when a SIXTH starts reading the field.
+    // Every gate table this file exports, then — `Gate<BaseKey>` tables live only here, and
+    // `withholdingKey` (l3/homesplit.ts) composes over a caller's table and inherits its
+    // readership.
     const tables = Object.entries(basecse).filter(
       (e): e is [string, readonly Gate<BaseKey>[]] =>
         Array.isArray(e[1]) &&
@@ -829,14 +827,11 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
   });
 
   test('and the ROSTER offers it — where the target declares the fold, and only there', () => {
-    // THE TABLE IS NOT THE LEVER. `rank.ts`'s `UNFOLDED_ADMISSIONS` is, and nothing pinned it:
-    // measured by deleting that one roster row — the whole `/unfolded` family gone from the ranked
-    // path, `synthetic:unfoldpark`'s fan back to the 36 candidates it had before the lever — the
-    // core suite stayed 1963/1963 GREEN. The assertion that HAD covered it lived in
-    // `sinkinit.test.ts` and was
-    // replaced, correctly, by a label-free program check; but whichever route emits that program
-    // satisfies it, so the substitution was sound about its own subject and silently gave up this
-    // one. Two tests, two subjects: that one owns the sunk PROGRAM, this one owns the ROW.
+    // THE TABLE IS NOT THE LEVER — `rank.ts`'s `UNFOLDED_ADMISSIONS` is, and it needs its own pin:
+    // delete that one roster row and the whole `/unfolded` family leaves the ranked path
+    // (`synthetic:unfoldpark`'s fan 44 → 36) without any table in `basecse.ts` changing its answer.
+    // `sinkinit.test.ts` owns the sunk PROGRAM and must stay label-free to do it, so it cannot own
+    // this: whichever route emits that program satisfies it. Two tests, two subjects.
     //
     // Program-keyed for the same reason, so `seen`'s first-label-wins cannot decide it: what only
     // this row reaches is a candidate parking EXACTLY the two evidenced bases and leaving
