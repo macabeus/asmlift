@@ -53,11 +53,14 @@
 //     u16 *p = (u16 *)&gTbl; p[i]                        base first  ┘
 //     ((u16 *)&gTbl)[i]                                  index first  — a different object
 //
-// So the order half licenses the HOME on its own, at every element width the declaration half
-// cannot describe — which is the whole population it adds: a 28-byte struct element has no
-// `intType`, reads its members at a DISPLACEMENT, and is refused for the declaration by
-// `interior-or-non-access` while saying exactly as much about the order as a clean access does.
-// That is why `ADDRESS_GATES` is assembled from two halves below rather than written as one list.
+// So the order half licenses the HOME on its own, for every name the declaration half refuses for a
+// reason that is NOT about the order. Censused map-less and map-ful over the artifact's agbcc rows,
+// that population is two shapes and `interior-or-non-access` refuses both: the STRUCT ELEMENT,
+// which has no `intType` and reads its members at a displacement (7 of the 8 rows the home axis
+// reaches), and a plain scalar element of a symbol the function ALSO reads at a displacement
+// somewhere else (`kleod:UpdateCameraScroll`'s `gSineTable`, the eighth). Neither says any less
+// about the order than a clean access does. `ADDRESS_GATES` below is therefore two halves: the
+// ELEMENT rules, which both consumers ask, and the DECLARATION rule, which only the first does.
 //
 // WHAT REFUSES — and the list is DOWN THERE, not here. The refusals are two `Gate<Ctx>` tables
 // (`ADDRESS_GATES` and `SHAPE_GATES`, below), each rule carrying its own `why` and the test that
@@ -734,11 +737,10 @@ export function inferGlobalArrays(
  *  A SUPERSET of the names `inferGlobalArrays` shapes: a name that one shapes has no interior
  *  consumer at all (`interior-or-non-access` refused every symbol that does), so both derivations
  *  see the identical accesses and this one asks strictly fewer rules of them. The difference is the
- *  point — a name read at a DISPLACEMENT, which is what a struct element is and what has neither an
- *  `intType` nor a whole-element subscript, is licensed here and refused there. The declaration derivation is unchanged, and so is what it
- *  claims: this set is not a declaration and travels through no honesty channel, because a pointer
- *  local over `&gSym` reproduces the bytes under any declaration of `gSym`, exactly as the cast
- *  spelling it re-homes does.
+ *  point — a name read at a DISPLACEMENT, a struct element among them, is licensed here and refused
+ *  there. What this set is NOT is a declaration: it travels through no honesty channel, because a
+ *  pointer local over `&gSym` reproduces the bytes under any declaration of `gSym`, exactly as the
+ *  cast spelling it re-homes does.
  *
  *  A GENERATOR, never a classifier. Its consumer (`l3/basecse.ts`'s `order-licensed`, reached from
  *  rank's `/orderbase` roster row) uses it to OFFER a candidate beside the inline spelling, which

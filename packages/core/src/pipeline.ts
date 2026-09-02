@@ -150,8 +150,8 @@ function runTower(
   // was materialized before the index was scaled — is destroyed by the raising tower below
   // (raise/globalshape.ts's module note). Empty unless the target opts in.
   const inferredSymbols = inferGlobalArrays(fn, target);
-  // …and the ORDER half of the same reading, for globals no shape describes (a struct element is
-  // licensed here and shaped nowhere). Read off the same lifted fn, for the same reason.
+  // …and the ORDER half of the same reading, which reaches names the shape derivation refuses (a
+  // struct element among them). Read off the same lifted fn, for the same reason.
   const orderLicensed = orderLicensedGlobals(fn, target);
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),

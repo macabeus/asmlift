@@ -328,7 +328,7 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
   {
     // FIRST, so a cast base attributes here rather than to whichever use-count rule it also trips.
     // Every table derived from this one inherits it, which is what keeps the widened
-    // `isHoistableBase` inert: the shape is now collectable and no shipped admission binds it.
+    // `isHoistableBase` inert: the shape is collectable and no shipped admission binds it.
     id: 'cast-base',
     why: 'a struct element’s reinterpret cast is the inline spelling unless the assembly says the base had a home',
     sound: false,
@@ -552,8 +552,9 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  WHY `single-use` GOES. The rule's theory is that one access re-materializes as cheaply as a
  *  named local, which is a guess about the source in the absence of evidence; here there is
  *  evidence, and `synthetic:bgarr` is a one-access function whose target loads the pool word first.
- *  It is ablated rather than exempted so `without(ORDERBASE_GATES, 'order-licensed')` prices the
- *  licence on its own — the handle `BASEFOLD_GATES`' fused exemption cannot have.
+ *  The licence is its OWN gate rather than an exemption folded into a relaxed `single-use`, so
+ *  `without(ORDERBASE_GATES, 'order-licensed')` prices it — the handle `BASEFOLD_GATES`' fused
+ *  exemption cannot have.
  *
  *  `loop` and `repeated-const-offset` STAY. Neither is about the base's identity and both are fan
  *  control; ablating them is `/livebase`'s axis, already on the roster, and a row that wants the
@@ -643,9 +644,8 @@ export function hoistBaseLocals(
   const hoistStmts: BaseInit[] = [];
   for (const k of hoisted) {
     const m = meta.get(k)!;
-    // A CAST base already wears the pointer type its element needs — a struct element's, which
-    // `scalarTypeForAccess` cannot spell at all (a 28-byte element has no `intType`) — so the local
-    // takes that type and the cast the structurer wrote becomes the initializer unchanged.
+    // A CAST base already wears the pointer type its element needs, so the local takes that type
+    // and the cast the structurer wrote becomes the initializer unchanged.
     const ptrType = m.base.k === 'cast' ? m.base.to : T.ptr(scalarTypeForAccess(m.width, m.signed));
     const nm = fresh();
     localFor.set(k, nm);

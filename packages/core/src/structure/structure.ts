@@ -1122,11 +1122,14 @@ export interface StructureOptions {
   orderLicensedGlobals?: ReadonlySet<string>;
 }
 
-/** The named global an `index` node's base LEAF denotes, or undefined. Two shapes reach this pass
- *  with a symbol under them: the bare `&gSym` an ordinary element access indexes, and the
- *  `(struct S *)&gSym` an array-of-struct element indexes — the reinterpret cast is the base's
- *  spelling, not a different base. Anything else (a numeric address, a local, arithmetic) names no
- *  global and can carry no order licence. */
+/** The named global an `index` node's base denotes DIRECTLY, or undefined: the bare `&gSym` an
+ *  ordinary element access indexes, and the `(struct S *)&gSym` an array-of-struct element indexes
+ *  — the reinterpret cast is the base's spelling, not a different base.
+ *
+ *  Deliberately not a search. A symbol buried inside a base's arithmetic is a base this licence has
+ *  nothing to say about — the order fact is about the address the pool word materialized, and what
+ *  a home would bind there is the sum, not the symbol — so it goes unstamped, which costs a
+ *  candidate and never a wrong one. The same two shapes are what `l3/basecse.ts` can hoist. */
 function indexBaseSymbol(e: Expr): string | undefined {
   if (e.k === 'addr') {
     return e.name;
@@ -1138,9 +1141,9 @@ function indexBaseSymbol(e: Expr): string | undefined {
  *  the L1 order fact enters the L3 tree.
  *
  *  A post-pass over the finished body rather than a `...fromOrder` at each construction site: the
- *  index node is built at six of them (memAccess's three spellings, arrayAccess's three), the
- *  licence is per SYMBOL and not per site, and a walk is exhaustive by construction where a
- *  seventh site would silently carry no evidence. */
+ *  index node is built across `ptrMemberElement`, `memAccess` and `arrayAccess` at more sites than
+ *  `operandOff` itself reaches, the licence is per SYMBOL rather than per site, and a walk is
+ *  exhaustive by construction where a new site would silently carry no evidence. */
 function stampOrderedBases(body: Stmt[], licensed: ReadonlySet<string> | undefined): Stmt[] {
   if (licensed === undefined || licensed.size === 0) {
     return body;

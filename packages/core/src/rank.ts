@@ -550,10 +550,11 @@ const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *  is a plain leaf reached twice, `/livebase` already binds exactly that set at this placement and
  *  this row declines rather than restating it under a second label.
  *
- *  ONE PLACEMENT, and the row that earned it says both are the same answer: on `synthetic:bgarr`
- *  the emitted spelling scores 0 at the head and 0 at `first-use`, compiled through that row's own
- *  decomp.yaml command. A second row is one line and no new table; add it when a row scores better
- *  with it, which none does.
+ *  ONE PLACEMENT, and the row that earned it does not ask the question: on `synthetic:bgarr` the
+ *  two placements emit the IDENTICAL source — the hoist has nothing to sit above — scoring 0
+ *  against that row's own object through its own decomp.yaml command, where the inline cast it
+ *  replaces scores 8. So a second roster row would be a rename `seen` collapses, not a spelling. It
+ *  is one line and no new table; add it when a row scores better with it.
  *
  *  `pairings: false` for the field's own reason — a product is added for a row that demands the
  *  joint spelling, and the row that earned this entry demands none. */

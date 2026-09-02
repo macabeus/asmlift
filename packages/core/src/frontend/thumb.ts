@@ -3396,8 +3396,8 @@ export function lift(
       // same table whose `params` this file already trusts to decide a call's arity — and trusting
       // it there is the stronger commitment, since a wrong arity DROPS an argument where a wrong
       // void-ness only re-models a stack slot. It is asked of EVERY callee that took the address at
-      // argument 0: one that is undeclared, declared non-void, or has no target symbol at all
-      // leaves the ambiguity standing and the refusal fires.
+      // argument 0, because the object gets one decision: one callee undeclared or declared
+      // non-void leaves the ambiguity standing and the refusal fires.
       //
       // The residual cost is stated rather than hidden: an OUTPUT-only parameter taken at argument
       // 0 of a callee the project has NOT declared is still byte-for-byte a struct return, and
