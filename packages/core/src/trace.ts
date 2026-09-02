@@ -76,11 +76,12 @@ export interface TraceOptions {
   symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Score probe at pattern boundaries (cli report's objdiff hook). One call per boundary:
-   *  pattern N's after-score is pattern N+1's before-score. Absent ⇒ score fields stay unset. */
-  /** Score a mid-tower clone. The DERIVED ARRAY SHAPES travel with it: they are read once off the
-   *  lift (`stage:globalshape`) and change the default spelling of every indexed global, so a
-   *  probe that structures without them attributes its per-pattern delta to a source the main path
-   *  does not emit. */
+   *  pattern N's after-score is pattern N+1's before-score. Absent ⇒ score fields stay unset.
+   *
+   *  THE DERIVED ARRAY SHAPES TRAVEL WITH THE CLONE: they are read once off the lift
+   *  (`stage:globalshape`) and change the default spelling of every indexed global, so a probe
+   *  that structures without them attributes its per-pattern delta to a source the main path does
+   *  not emit. */
   probeScore?: (fn: Fn, inferredSymbols: Map<string, SymbolInfo>) => number | undefined;
 }
 
