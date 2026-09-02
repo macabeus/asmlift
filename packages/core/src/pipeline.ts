@@ -29,7 +29,7 @@ import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from '.
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
 import { StructureError, structure } from './structure/structure';
-import { type SymbolMap, symbolsByName } from './symbols';
+import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
 /** How a gap (a construct asmlift cannot faithfully model) degrades:
@@ -88,6 +88,23 @@ export interface DecompileResult {
    *  where the plain call above it passes with a warning. Declaring an address-taken unknown
    *  callee would close it — an emitter change, moving source bytes on every row that has one. */
   diagnostics: Diagnostic[];
+  /** THE SHAPES THIS SOURCE'S SPELLING ASSUMES, which no symbol map supplied (raise/globalshape.ts).
+   *
+   *  Everything else a backend emits is byte-correct under ANY declaration of the names it spells
+   *  — that is exactly why `((T *)&gSym)[i]` is the fallback (structure/globalaccess.ts). A bare
+   *  `gSym[i]` is not: it means what the DECLARATION of `gSym` says it means, and where that
+   *  declaration was derived from the assembly rather than read from the project's map, the
+   *  emitted source is right about the target's bytes only beside the declaration derived with it.
+   *  The element SIGNEDNESS is the sharp case, and it is an assumption rather than a reading:
+   *  compiled through the benchmark's own agbcc command, `(u16)gS[i]` over `extern const s16 gS[]`
+   *  and `gS[i]` over `extern const u16 gS[]` are the SAME OBJECT, so the assembly cannot say which
+   *  the source wrote — asmlift picks the one its own declaration block states.
+   *
+   *  So this travels with the source on every path that can emit it: the scoring layer renders it
+   *  (declare.ts, and main.ts's `[declared]` block), and a caller that shows the source alone must
+   *  show these too, or it is publishing a spelling whose meaning it has not stated. Empty on every
+   *  run that assumed nothing. */
+  assumedSymbols: SymbolInfo[];
 }
 
 export function decompile(
@@ -154,7 +171,14 @@ function runTower(
   // (5) lower + print: neutral AST → target language
   const source = backend.emit(sfn);
 
-  return { source, sfn, ir: { raw, folded, recovered }, patternHits, diagnostics: collectMarkers(sfn) };
+  return {
+    source,
+    sfn,
+    ir: { raw, folded, recovered },
+    patternHits,
+    diagnostics: collectMarkers(sfn),
+    assumedSymbols: [...inferredSymbols.values()],
+  };
 }
 
 // ── the shared raising tower ────────────────────────────────────────────────────────────────
@@ -363,6 +387,8 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
     ir: { raw: '', folded: '', recovered: '' },
     patternHits: 0,
     diagnostics: [{ stage, reason: msg }],
+    // A stub spells no global, so it assumes nothing about one.
+    assumedSymbols: [],
   };
 }
 

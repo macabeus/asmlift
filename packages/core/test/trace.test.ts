@@ -18,12 +18,20 @@ test('trace: stage sequence, pattern event, and source parity with decompile()',
   expect(source).toBe(decompile('half', HALF_ASM, ARMV4T_AGBCC).source);
   expect(report.trace.map((s) => s.id)).toEqual([
     'stage:lift',
+    // The one stage whose product is not IR: the array shapes the assembly evidences for globals
+    // no map describes (raise/globalshape.ts). It carries no `irDump` — its output is the symbol
+    // shapes reported as `assumedSymbols` — but it is a stage, and a spelling change with no line
+    // in the trail is a change attributable to nothing.
+    'stage:globalshape',
     'stage:idiom',
     'stage:recover',
     'stage:structure',
     'stage:emit',
   ]);
   expect(report.trace.every((s) => s.verified)).toBe(true);
+  // this asm names no global, so the stage assumes nothing and says so
+  expect(report.assumedSymbols).toEqual([]);
+  expect(report.trace.find((s) => s.id === 'stage:globalshape')?.note).toContain('nothing evidenced');
 
   expect(report.patternEvents).toHaveLength(1);
   const ev = report.patternEvents[0];

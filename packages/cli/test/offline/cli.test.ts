@@ -187,3 +187,29 @@ test("docs/ranked-repro.md's canonical command spells --proto a way the CLI acce
   const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', concrete);
   expect(r.code, `docs/ranked-repro.md's command spells --proto ${spelled}`).toBe(0);
 });
+
+test('a bare array subscript is published WITH the declaration it assumes', async () => {
+  // Every other spelling asmlift emits for a named global — `((T *)&gSym)[i]` — reproduces the
+  // target's bytes under ANY declaration of that name, so the source alone is the whole answer.
+  // The bare `gSym[i]` is not: it means what the declaration of `gSym` says it means, and this
+  // path (no `--score-against`) prints no declarations at all. Compiled through the benchmark's
+  // own agbcc command, `(u16)gS[i]` over `extern const s16 gS[]` and `gS[i]` over
+  // `extern const u16 gS[]` are the SAME object — so the element signedness below is asmlift's
+  // pick, and a user pasting the subscript into a project whose header disagrees would otherwise
+  // be told nothing.
+  const asm =
+    '\t.code\t16\n.text\n\t.align\t2, 0\n\t.globl\tharr\n\t.thumb_func\nharr:\n' +
+    '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n' +
+    '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgTbl\n';
+  const r = await runCli(['harr.s', '--target', 'agbcc'], () => asm);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain('return gTbl[a0];');
+  expect(r.stderr).toContain('[assumed] 1 array shape(s) derived from this assembly');
+  expect(r.stderr).toContain('extern u16 gTbl[];');
+});
+
+test('a source that assumes no derived shape prints no `[assumed]` line', async () => {
+  // The absence is the assertion: a line that is always there says nothing.
+  const r = await run('agbcc-clamp0.s', '--target', 'agbcc');
+  expect(r.stderr).not.toContain('[assumed]');
+});

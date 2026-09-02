@@ -1,6 +1,7 @@
 import { cBackend } from '@asmlift/core/backend/c';
 import { cppBackend } from '@asmlift/core/backend/cpp';
 import { pascalBackend } from '@asmlift/core/backend/pascal';
+import { renderDeclarations } from '@asmlift/core/declare';
 import { detectName } from '@asmlift/core/detect';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type DecompileResult, decompile } from '@asmlift/core/pipeline';
@@ -236,6 +237,11 @@ export function Playground({
 
   const ok = result !== null && !('error' in result);
   const diagnostics = ok ? result.diagnostics : [];
+  // The array shapes this source's spelling ASSUMES (raise/globalshape.ts). Shown beside the
+  // source because a bare `gTbl[i]` means what the declaration of `gTbl` says it means, and this
+  // pane prints no declarations — every other spelling asmlift emits for a global reproduces the
+  // bytes under any declaration, so this is the one place the source alone is not the whole answer.
+  const assumed = ok ? result.assumedSymbols : [];
 
   // In-browser ranking — agbcc/ARMv4T + C backend only (the one target whose textual `.s` can be
   // reassembled and whose compiler exists as wasm). Async, worker-driven, stale-guarded (H1). For
@@ -484,6 +490,17 @@ export function Playground({
               <Pipeline report={pipelineReport.report} ranking={ranking} />
             )}
           </div>
+          {assumed.length > 0 && (
+            <div className="rounded-lg border border-sky-900/60 bg-sky-950/30 p-3 text-xs leading-relaxed">
+              <p className="mb-1.5 font-semibold text-sky-300">
+                {assumed.length} array shape{assumed.length > 1 ? 's' : ''} derived from this assembly — the source
+                spells {assumed.length > 1 ? 'them' : 'it'} BARE, so it means what these declarations mean:
+              </p>
+              <pre className="font-mono text-sky-200/90">
+                {renderDeclarations(assumed.map((info) => ({ name: info.name, info }))).trimEnd()}
+              </pre>
+            </div>
+          )}
           {diagnostics.length > 0 && (
             <div className="rounded-lg border border-amber-900/60 bg-amber-950/30 p-3 text-xs leading-relaxed">
               <p className="mb-1.5 font-semibold text-amber-300">

@@ -14,6 +14,7 @@ import type { Block, Fn, Value } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import type { FnProto } from '@asmlift/core/proto';
+import type { SymbolInfo } from '@asmlift/core/symbols';
 import { type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
 import { type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
 
@@ -51,7 +52,8 @@ export function decompileWithReport(
   const backend = opts.backend ?? cBackend;
   const returnsVoid = opts.prototypes?.[name]?.returnsVoid ?? false;
   const probeScore = targetObj
-    ? (fn: Fn) => tryScore(backend, fn, target, name, targetObj, returnsVoid, compile, opts.prototypes?.[name])
+    ? (fn: Fn, inferredSymbols: Map<string, SymbolInfo>) =>
+        tryScore(backend, fn, target, name, targetObj, returnsVoid, compile, opts.prototypes?.[name], inferredSymbols)
     : undefined;
 
   const { source, report } = decompileTraced(name, asm, target, { ...traceOpts, probeScore });
@@ -107,6 +109,7 @@ function tryScore(
   returnsVoid: boolean,
   compile: CandidateCompiler | undefined,
   self: FnProto | undefined,
+  inferredSymbols: Map<string, SymbolInfo>,
 ): number | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -115,7 +118,14 @@ function tryScore(
     // so it is verifier-gated like every other path: a corrupt clone yields `undefined`, never
     // a garbage delta.
     raiseRecovered(clone, target, {}, self);
-    const sfn = structureChecked(clone, structureOptionsFor(target, returnsVoid));
+    // …structured with the SAME derived array shapes the main path uses (raise/globalshape.ts).
+    // Without them this probe scores `((T *)&gSym)[i]` on every function the derivation reaches
+    // while the report's headline source says `gSym[i]` — a per-pattern delta measured on a
+    // program asmlift does not emit.
+    const sfn = structureChecked(clone, {
+      ...structureOptionsFor(target, returnsVoid),
+      ...(inferredSymbols.size ? { inferredSymbols } : {}),
+    });
     return scoreSource(backend.emit(sfn), name, obj, target, backend.id, compile).score;
   } catch {
     return undefined;
