@@ -311,27 +311,39 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
 
   test('the joint spelling reaches the differ, over the whole admission roster', () => {
     expect(labels).toContain('signed/livebase/sinkinit');
-    // The NARROW admission's sunk spelling arrives under `/unfolded` here, not under the pairing:
-    // on this fixture `/unfolded` binds the same register file `/livebase-block` does, its roster
-    // row is enumerated before the product loops, and it places at first use — so it emits that
-    // source first and `seen` keeps its label. Same program, one label — and no label in this fan
-    // carries both `livebase-block` and `sinkinit`.
+    // PINNED AS A PROGRAM, because a label is not an attribution (see the `seen` dedup in rank.ts)
+    // — and the first attempt at this pin got that WRONG IN ITS OWN FIX. It replaced
+    // "some label contains livebase-block" (satisfied by the twelve HEAD-placed narrow candidates
+    // the fixture also emits, so green with the sunk spelling gone entirely) with a program check
+    // KEYED ON `signed/unfolded/volatile`. Which route emits the sunk narrow program is exactly
+    // what `seen` decides: on this fixture `/unfolded` binds the same register file
+    // `/livebase-block` does, its roster row runs before the `/livebase ×` product loops, and it
+    // places at first use — so it wins the label. Ablate the `/unfolded` roster row and the fan is
+    // the same 60 distinct sources with the same sunk program in it, now labelled
+    // `signed/livebase-block/volatile/sinkinit` — and the label-keyed pin goes red for a program
+    // that never moved.
     //
-    // PINNED AS A PROGRAM, because a label is not an attribution (see the `seen` dedup in rank.ts).
-    // The predicate this replaces — "some label contains livebase-block" — is satisfied by the
-    // twelve HEAD-placed narrow candidates the fixture also emits, so it would have stayed green
-    // with the sunk narrow spelling gone entirely. What has to hold is that the narrow admission's
-    // bases reach the differ SUNK: the same declarations and the same statements as the
-    // head-placed narrow candidate, differing only in where the base init sits relative to the
-    // loop counter's `v0 = 0;`.
-    expect(labels).toContain('signed/unfolded/volatile');
+    // So SEARCH for the program and let whichever route produced it own the label. What has to hold
+    // is that the narrow admission's bases reach the differ SUNK: the same declarations and the same
+    // statements as the head-placed narrow candidate, differing only in where the base init sits
+    // relative to the loop counter's `v0 = 0;`. Ablating the narrow family itself (`single-cell` out
+    // of LIVEBASE_BLOCK_GATES) takes `head` away and this goes red, which is the regression it is
+    // for.
     const head = sourceOf('signed/livebase-block/volatile');
-    const sunk = sourceOf('signed/unfolded/volatile');
     expect(head).toBeDefined();
-    expect(sunk!.split('\n').sort()).toEqual(head!.split('\n').sort());
-    expect(sunk).not.toEqual(head);
-    expect(sunk!.indexOf('v0 = 0;')).toBeLessThan(sunk!.indexOf('p0 = (s32 *)'));
     expect(head!.indexOf('v0 = 0;')).toBeGreaterThan(head!.indexOf('p0 = (s32 *)'));
+    const sameLines = (a: string, b: string): boolean =>
+      a.split('\n').sort().join('\n') === b.split('\n').sort().join('\n');
+    const sunk = fan.filter(
+      (cand) =>
+        cand.source !== head &&
+        sameLines(cand.source, head!) &&
+        cand.source.indexOf('v0 = 0;') < cand.source.indexOf('p0 = (s32 *)'),
+    );
+    expect(sunk).toHaveLength(1);
+    // Its label today is `signed/unfolded/volatile` and with that roster row ablated it is
+    // `signed/livebase-block/volatile/sinkinit`. Deliberately NOT asserted: either is the same
+    // program, and pinning one is the defect above.
   });
 
   test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {

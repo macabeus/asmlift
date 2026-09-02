@@ -202,23 +202,65 @@ ${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
   });
 
   test('the blast radius is bounded to the roster: the COMMITTED table cannot read the flag', () => {
-    // `unfoldedOffset` has exactly one reader — `BASEFOLD_GATES`' `single-use-unfolded` rule, which
-    // only `rank.ts`'s roster asks for. So whatever a merge decides, `structureChecked`'s own hoist
-    // binds the same bases either way: that is the bound, and it is about MEANING, not about
-    // score. Widen the readership — promote the exemption into `BASECSE_GATES` — and it goes.
+    // The bound is that `structureChecked`'s own hoist binds the same bases either way, so whatever
+    // a merge decides is about SCORE and never about meaning. Widen the readership — promote either
+    // rule into `BASECSE_GATES` — and it goes.
+    //
+    // WHAT THE BOUND IS NOT, because this note asserted it for two rounds after it stopped being
+    // true: "`unfoldedOffset` has exactly one reader". It has TWO, and the second one shipped
+    // without this file being opened. `BASEFOLD_GATES` EXEMPTS `single-use` on the flag;
+    // `UNFOLDED_GATES` REQUIRES it. So the population a merge can move is `/basefold*` AND
+    // `/unfolded*`, and the two move on DISJOINT shapes — the readership census below is the
+    // assertion that would have caught the drift, and it fails the moment a third table reads the
+    // field or one of these two stops.
     //
     // The two directions are NOT symmetric, and reading them as one is how this note first got
     // written. A flag the merge INVENTS offers an extra candidate, and `compareScored` orders by
     // score, so that costs a compile and nothing else. A flag it EATS withholds one, and
-    // withholding a `/basefold*` candidate costs whatever that candidate would have won: deleting
-    // the sunk roster row turns `synthetic:foldsink` and `sa3:sub_803213C` from MATCH into diff:2
-    // (ablated through the harness). So "it can only offer or withhold a candidate" is a bound on
-    // meaning and not on matches.
-    // Its reach today is zero, which is a measurement and not an argument: over the whole artifact
-    // (1140 observations, five toolchains, both symbol-map configurations) `mergeCommonTails`
-    // peels 25 tails and NONE of them is a pair of arms differing only in `operandOff`.
+    // withholding a roster candidate costs whatever that candidate would have won: deleting the
+    // sunk `/basefold` roster row turns `synthetic:foldsink` and `sa3:sub_803213C` from MATCH into
+    // diff:2 (ablated through the harness). So "it can only offer or withhold a candidate" is a
+    // bound on meaning and not on matches — and it is now two families' worth of candidates, not
+    // one.
+    // The merge's reach today is zero, which is a measurement and not an argument: over the whole
+    // artifact (1140 observations, five toolchains, both symbol-map configurations)
+    // `mergeCommonTails` peels 25 tails and NONE of them is a pair of arms differing only in
+    // `operandOff`.
     expect(admittedBases(structureChecked(parse(twoArms(true)), {}), BASECSE_GATES)).toEqual([]);
     expect(admittedBases(structureChecked(parse(twoArms(false)), {}), BASECSE_GATES)).toEqual([]);
+  });
+
+  test('the readership is exactly two tables, and they read the flag in OPPOSITE directions', () => {
+    // Feed each table the same tree twice, once with the evidence and once without, and the tables
+    // that MOVE are the ones that read it. Two shapes, because the two readers are reached by
+    // disjoint ones: a key reached TWICE (past `single-use`, which is what `/unfolded` keeps) and a
+    // key reached ONCE (which is what `/basefold` exempts).
+    const twice = (evidence: object): SFn =>
+      fn([
+        { k: 'exprstmt', value: idx('gSym', c(3), 1, evidence) },
+        { k: 'exprstmt', value: idx('gSym', c(4), 1) },
+      ]);
+    const once = (evidence: object): SFn => fn([{ k: 'exprstmt', value: idx('gSym', c(3), 1, evidence) }]);
+    const K = 'a:gSym 1 false';
+    const moves = (shape: (e: object) => SFn, gates: Parameters<typeof admittedBases>[1]): boolean =>
+      admittedBases(shape(fromOperand), gates).join() !== admittedBases(shape({}), gates).join();
+
+    // reached twice: only UNFOLDED_GATES changes its answer
+    expect(admittedBases(twice(fromOperand), UNFOLDED_GATES)).toEqual([K]);
+    expect(admittedBases(twice({}), UNFOLDED_GATES)).toEqual([]);
+    expect(moves(twice, BASECSE_GATES)).toBe(false);
+    expect(moves(twice, LIVEBASE_GATES)).toBe(false);
+    expect(moves(twice, LIVEBASE_BLOCK_GATES)).toBe(false);
+    expect(moves(twice, BASEFOLD_GATES)).toBe(false);
+
+    // reached once: only BASEFOLD_GATES changes its answer — the opposite question, so the two
+    // readers never both move on one key.
+    expect(admittedBases(once(fromOperand), BASEFOLD_GATES)).toEqual([K]);
+    expect(admittedBases(once({}), BASEFOLD_GATES)).toEqual([]);
+    expect(moves(once, BASECSE_GATES)).toBe(false);
+    expect(moves(once, LIVEBASE_GATES)).toBe(false);
+    expect(moves(once, LIVEBASE_BLOCK_GATES)).toBe(false);
+    expect(moves(once, UNFOLDED_GATES)).toBe(false);
   });
 });
 
