@@ -5050,8 +5050,22 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // Today, agbcc only, map-less, fan 2 on every scored row, BOTH candidates of every fan scoring
   // identically, winning label `unsigned` on every scored row, one declaration synthesized on
-  // each — each figure from
-  // `pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial`:
+  // each. THOSE FIGURES COME FROM THREE DIFFERENT COMMANDS, and the row's score is the only one
+  // `bench run` prints — an earlier cut of this block attributed all four to it, which hands a
+  // future round a command that cannot reproduce three of them:
+  //   • THE SCORE — `pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial`.
+  //     Note `--only` is a SUBSTRING filter. Run for all seven syms, `harr` is the ONE that does
+  //     not isolate — it also runs `harridx`, printing `[1/2]` and `[2/2]`; the other six each
+  //     print `[1/1]`.
+  //   • FAN SIZE, WINNING LABEL, SYNTHESIZED COUNT — the CLI against a built target,
+  //     `asmlift <sym>.s --target agbcc --score-against <sym>.o`. Its `[declared]` line reads
+  //     `1 declaration(s) synthesized from the target asm`; its `[ranked]` line reads
+  //     `2 candidate(s) scored, 0 dropped, 0 withheld, 1 synthesized, best unsigned: <score>`.
+  //   • EVERY CANDIDATE'S SCORE — `[ranked]` prints only the WINNER, so this needs a third call:
+  //     `decompileRanked(sym, asm, tc.targetDesc, obj, { compile: benchCompilerFor('agbcc') })`,
+  //     walking its result list. Measured, `unsigned` and `signed` tie on all six scored rows —
+  //     2/2, 5/5, 8/8, 3/3, 0/0, 0/0. THIS is the enumeration both controls below require, and
+  //     no `bench` subcommand substitutes for it.
   //
   //   harr      2      width > 1, no constant term. Base local OR array subscript reaches it
   //   harridx   5      a constant term at width 1 — target pool word `.word gTbl` plus
