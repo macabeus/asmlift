@@ -237,18 +237,15 @@ export interface BaseKey {
    *
    *      A GROUP OF TWO OR MORE ACCESSES PAST THE RANGE INVERTS THE SENSE, which is worse than
    *      blind: the fold SHIFTS the literal and the displacements resume relative to the shifted
-   *      base, so it is the INLINE spelling that sets the flag. That claim is only about trees a
-   *      table is CONSULTED on, which here means a key `BASECSE_GATES` REJECTS — `inLoop` or
-   *      `repeatedConstOffset`, the two rejections `LIVEBASE_GATES` ablates — because the default
-   *      hoist binds anything else before a roster table sees it. The straight-line pair is
-   *      therefore no evidence about this gate at all: `admittedBases` is EMPTY on both its
-   *      spellings for every table in this file and for an EMPTY gate list. In a loop
-   *      (`for (i = 0; i < n; i++) { sink(((u16 *)&gBgInfo)[36]); sink(((u16 *)&gBgInfo)[37]); }`)
-   *      the inline spelling emits `.word gBgInfo+0x48` + `ldrh [r5]` + `ldrh [r5, #0x2]` against
-   *      the pointer-local twin's `.word gBgInfo` + `add r6, r6, #0x48` + `add r5, r5, #0x4a` +
-   *      `ldrh [r6]` + `ldrh [r5]` — no operand offset at all; lifted, `UNFOLDED_GATES` admits
-   *      `a:gBgInfo 2 false` on the INLINE one (2 of its 8 candidates carry `/unfolded`) and
-   *      admits NOTHING on the local one. So on such a group `folded-offset` admits the key the
+   *      base, so it is the INLINE spelling that sets the flag. It bites only where a table is
+   *      CONSULTED — a key `BASECSE_GATES` rejects, i.e. one reached inside a loop, since the
+   *      default hoist binds anything else first; on a straight-line pair `admittedBases` is empty
+   *      for every table here and for an EMPTY gate list, so that shape says nothing either way.
+   *      In a loop over `((u16 *)&gBgInfo)[36]` and `[37]` the inline spelling emits
+   *      `.word gBgInfo+0x48` + `ldrh [r5]` + `ldrh [r5, #0x2]` while the pointer-local twin emits
+   *      `.word gBgInfo` + two `add`s and no operand offset at all; lifted, `UNFOLDED_GATES`
+   *      admits `a:gBgInfo 2 false` on the INLINE one (2 of its 8 candidates carry `/unfolded`)
+   *      and NOTHING on the local one. So on such a group `folded-offset` admits the key the
    *      reference spelled inline and refuses the key it parked — backwards, costing fan and a
    *      tie-break and never meaning, since the inline spelling is enumerated beside it. The two
    *      spellings still differ in the asm — a bare `.word` plus an `add` against a `.word` with
@@ -373,21 +370,18 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  row's bases set-for-set at `first-use`, so with THIS gate ablated alone the row is still MATCH
  *  and brackets nothing; ablate both and it goes diff:6. Re-run every number in this paragraph
  *  whenever an admission is added to or removed from the roster.
- *  HOW: filter this table at its definition and the roster at its one use site, both behind a
- *  temporary env read, `ASMLIFT_CANDCACHE=0`, and revert (the recipe on BASEFOLD_ADMISSIONS).
- *  THAT RECIPE EDITS A FILE IN A WORKTREE THAT IS NOT SINGLE-WRITER, and a tap reverted underneath
- *  a running process does not crash — it reports ZEROES, which reads exactly like "the rule never
- *  fires". Prefer the edit-free form for a census: import this array and `splice` the gate out of
- *  it before the first `enumerateCandidates` call, since the roster holds a reference to this very
- *  object. If you do edit, hash the file before and after the measurement window and quote both.
+ *  HOW: prefer the edit-free form — import this array and `splice` the gate out of it before the
+ *  first `enumerateCandidates` call, since the roster holds a reference to this very object. The
+ *  env-read recipe on BASEFOLD_ADMISSIONS edits files instead, and a tap reverted underneath a
+ *  running process reports ZEROES rather than crashing, which reads exactly like "the rule never
+ *  fires"; if you use it, hash the tree either side of the window and quote both hashes.
  *
- *  A CENSUS OVER WINNING LABELS CANNOT STAND IN FOR THAT. "Only a row whose winner carries
- *  `/livebase-block` can move" is unsound, because `seen` (rank.ts) keeps the FIRST producer's
- *  label for a source two routes emit — a label census counts ROUTES, not mechanisms — and it
- *  cannot even separate a rename from a respelling: of the two rows that left this table's
- *  winning-label census when `/unfolded` shipped, `synthetic:foldpark` left by RENAME
- *  (byte-identical source, MATCH either side) and `synthetic:unfoldpark` left because its winning
- *  SPELLING changed, 402 bytes at diff:9 to 397 at MATCH.
+ *  A CENSUS OVER WINNING LABELS CANNOT STAND IN FOR THAT — "only a row whose winner carries
+ *  `/livebase-block` can move" is unsound for the reason rank.ts's `seen` dedup spells out. This
+ *  table's own winning-label census reads 5 rows and read 7 before `/unfolded` shipped, and the
+ *  two that left differ: `synthetic:foldpark` by RENAME (byte-identical source, MATCH either
+ *  side), `synthetic:unfoldpark` because its winning SPELLING changed, 402 bytes at diff:9 to 397
+ *  at MATCH.
  *
  *  WHICH ROWS THE ABLATION REACHES, since "found by running it" is only an instruction until
  *  someone runs it. Enumeration only, no compiles, both arms — `single-cell` spliced out of this
@@ -453,10 +447,7 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
  *  `decompile()`'s default structuring, map-less, over the artifact's 363 agbcc rows (23
  *  unstructurable): 8 keys on 7 functions go to `/livebase-block` alone and 5 keys on 5 functions
  *  to this table alone, and `kleod:ProcessInputAndUpdateEntities` crosses BOTH ways on one tree.
- *  The roster is five hand-picked SUBSETS, only two of which are ordered by inclusion — not a
- *  narrowness-ordered chain — which is why `sameBases` compares sets and never subsets, and why
- *  WHICH bases a function parks stays a per-key question the differ referees rather than one this
- *  file answers.
+ *  That is why `sameBases` compares sets and never subsets (see COVERAGE in the header).
  *
  *  The evidence is not proof and the gate never treats it as such — what it produces is a
  *  candidate beside the other admissions, refereed by the differ. Two counterexamples, both

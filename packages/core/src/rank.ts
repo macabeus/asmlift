@@ -484,38 +484,34 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  it binds the reused bases an operand offset says a pointer local strode and leaves the ones the
  *  pool already carried folded. `/livebase` and `/livebase-block` are a chain — all the reused
  *  bases, or those minus the scalar cells — and a source that parked one numeric base and spelled
- *  another inline is at neither end of it.
- *
- *  IT IS NOT ITSELF ON THAT CHAIN — it is beside it. `singleCell` and `unfoldedOffset` are
- *  independent, so this table and `LIVEBASE_BLOCK_GATES` are lattice-incomparable and each binds
- *  keys the other refuses: 8 keys on 7 functions one way, 5 on 5 the other, at the scope
- *  UNFOLDED_GATES' note states. Read the roster as five hand-picked subsets of which only two are
- *  ordered by inclusion, never as a narrowness ranking.
+ *  another inline is at neither end of it. This row is not a third link in that chain but beside
+ *  it: `singleCell` and `unfoldedOffset` are independent fields, so each of the two tables binds
+ *  keys the other refuses (censused, with its scope, in UNFOLDED_GATES' own note). Read the roster
+ *  as five hand-picked subsets, never as a narrowness ranking.
  *
  *  LAST on the roster, so `seen` and `sameBases` between them keep it from restating an earlier
- *  ROSTER row — but only ONE of the two does any work here, and it is `seen`. `sameBases` declines
- *  a row that binds what an EARLIER row binds AT THE SAME PLACEMENT, and the only earlier `first-use` row is `/basefold/sinkinit`, whose table keeps the
- *  two gates this one ablates; instrumented over every agbcc row, it fires on 0 of 5541 roster
- *  observations for this entry (33 distinct functions), against 3939 for `/livebase-block`. So the
- *  shadow is available and vacuous, and what actually keeps this row from restating anything is
- *  `seen`, which keeps the FIRST producer's label for a source two routes emit.
- *  THAT MAKES IT A RENAMER, and it renames — the roster loop below runs before the `/livebase ×`
- *  product loops, so a source one of those products would emit later is claimed by this row's
- *  label instead. `synthetic:foldpark` is that case measured: its fan is 34 candidates with this
- *  entry and 34 without, the same source winning at 0 under `signed/unfolded/volatile` here and
- *  `signed/livebase-block/volatile/sinkinit` there. Corpus-wide (map-less, candidates only, over the
- *  artifact's 363 agbcc rows), 21 of the 333 whose distinct-source set is byte-identical with and
- *  without this entry carry `/unfolded`-labelled candidates: 21 pure renames against 7 rows that
- *  really gain sources, and 0 that lose one. A label move with no fan
- *  move is that and not a new spelling — AND A WINNING LABEL IS THEREFORE NOT AN ATTRIBUTION.
- *  Price a family by ABLATING it, never by counting the labels it wins.
+ *  ROSTER row — but only `seen` does any work here. `sameBases` declines a row that binds what an
+ *  EARLIER row binds AT THE SAME PLACEMENT, and the only earlier `first-use` row is
+ *  `/basefold/sinkinit`, whose table keeps the two gates this one ablates; instrumented over every
+ *  agbcc row it fires on 0 of 5541 roster observations for this entry (33 distinct functions),
+ *  against 3939 for `/livebase-block`. So the shadow is available and vacuous, and what keeps this
+ *  row from restating anything is `seen` — WHICH MAKES IT A RENAMER, and it renames: the roster
+ *  loop below runs before the `/livebase ×` product loops, so a source one of those products would
+ *  emit later is claimed by this row's label instead. `synthetic:foldpark` is that case measured —
+ *  fan 34 with this entry and 34 without, the same source winning at 0 under
+ *  `signed/unfolded/volatile` here and `signed/livebase-block/volatile/sinkinit` there.
+ *  Corpus-wide (map-less, candidates only, over the artifact's 363 agbcc rows) 21 of the 333 rows
+ *  whose distinct-source set is byte-identical either way carry `/unfolded`-labelled candidates:
+ *  21 pure renames against 7 rows that really gain sources, and 0 that lose one. What that costs
+ *  any census taken over labels is at the `seen` dedup site below.
  *
- *  ONE placement, unlike the `/basefold` pair, and by measurement rather than by symmetry. Every
- *  one of the four configurations was scored on `synthetic:unfoldpark`, cache off:
- *    first-use, unpaired  fan 44   this row's own candidates 0 — MATCH
- *    first-use, paired    fan 44   0, and no product emits a source the unpaired row does not
- *    head, unpaired       fan 44   9, the score the row already had without any of this
- *    head, paired         fan 48   0, reached only through the `/sinkinit` product
+ *  ONE placement, unlike the `/basefold` pair, and by measurement rather than by symmetry. All
+ *  four configurations scored on `synthetic:unfoldpark`, cache off — the fan, then that fan's best
+ *  score:
+ *    first-use, unpaired  44   0  MATCH — shipped
+ *    first-use, paired    44   0  no product emits a source the unpaired row does not
+ *    head,      unpaired  44   9  the score the row already had without any of this
+ *    head,      paired    48   0  reached only through the `/sinkinit` product
  *  The head is where `/livebase` already offers a spelling for every base this table can bind —
  *  these are bases reached 2+ times — so what the row adds is the SUNK init, which is where a
  *  source that declares its base pointer beside the loop it feeds puts the pool load. On both
@@ -2296,7 +2292,6 @@ export function enumerateCandidates(
             // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
             // scores identically, so it can never change `best` — and it keeps the candidate set to
             // the genuinely distinct spellings.
-            //
             //
             // THE PUBLISHED LABEL IS THEREFORE NOT AN ATTRIBUTION, and every argument in this tree
             // that counts winning labels is unsound to exactly that extent. The label kept is the

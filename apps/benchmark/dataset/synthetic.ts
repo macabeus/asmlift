@@ -4296,8 +4296,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // the reaching population is six and the plain admission wins one of them. A CENSUS SENTENCE IN
   // A COMMENT EXPIRES THE MOMENT A ROW IS ADDED BESIDE IT — re-run it rather than reading it.
   // AND A ROW ADDED TO THE ROSTER EXPIRES IT TOO, not only a row added to the dataset: a fan count
-  // is a fact about the roster it was taken under. Re-enumerated at this commit, candidates only: `dmascope` 24 of 544,
-  // `livepark` 2 of 32, `foldpark` 2 of 34, `unfoldpark` 2 of 44, `dmastride` 2 of 18 — the plain
+  // is a fact about the roster it was taken under. Re-enumerated at this commit, candidates only:
+  // `dmascope` 24 of 544, `livepark` 2 of 32, `foldpark` 2 of 34, `unfoldpark` 2 of 44,
+  // `dmastride` 2 of 18 — the plain
   // admission is reached in the same five fans and the counts under it moved on two of them.
   // `sbscope` is NOT re-run here and its numbers above are the ones this file already carried: a
   // candidates-only rig that does not hand the row its `ctx` enumerates a fan of FOUR for it
@@ -4357,13 +4358,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // ablations can produce it: `hoistBaseLocals` binds `admittedBases(sfn, gates)` wholesale and
   // the two tables are a chain, so ablation only ever widens. `unfoldpark` is that shape at
   // 15 lines.
-  // BOTH TOTALS ABOVE ARE #138's (`84aa4222`) AND NEITHER WAS RE-RUN HERE. That function's fan
-  // was 68,352 then, 102,528 at the commit this family was cut from, and 112,896 at this one — so
-  // a paragraph quoting "the fan of 68,352" reads as a fact about the current tree and is a fact
-  // about a tree two rounds gone. The ZERO is a claim about generated spellings and needs an
-  // enumeration run to restate; the counts are not load-bearing for anything below, but the TOTAL
-  // is the thing that goes stale silently while the delta beside it stays true. Re-run a total
-  // before budgeting against it, and stamp it with the commit when you cannot.
+  // BOTH TOTALS ABOVE ARE #138's (`84aa4222`) AND NEITHER WAS RE-RUN HERE: that function's fan was
+  // 68,352 then and 112,896 at this commit, so the ZERO is a claim about generated spellings that
+  // needs a fresh enumeration to restate. A total goes stale silently while the delta beside it
+  // stays true — re-run one before budgeting against it, and stamp it when you cannot.
   // THE ADMISSION REACHES THAT FUNCTION, which is a census fact and not a score: on its default
   // structuring `UNFOLDED_GATES` admits exactly two keys, `0x040000D4` and `0x03003430`, where
   // `/livebase` admits five, `/livebase-block` one and `/basefold` none. Reaching and COMPOSING
