@@ -14,7 +14,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { RESULTS_DIR } from '../config';
-import { RESULTS_PATH, byId, headContains, readCommitted, scrub, shortSha } from './committed';
+import { RESULTS_PATH, byId, headContains, readCommitted, sameRun, scrub, shortSha } from './committed';
+import { rowsAddedSince } from './regression';
 
 /** The fields a published claim is made of — every one the report shows, or the count this gate
  *  prints is the truth about the LIST and not about the row. `source` is here because a change
@@ -118,8 +119,7 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
  *  (`run/runner.ts` benchMeta). Equal stamps therefore mean no merge has run since the base's
  *  artifact was committed — there are no false positives, and it also catches an artifact edited
  *  by hand rather than measured. */
-export const notRegenerated = (base: BenchOutput, fresh: BenchOutput): boolean =>
-  base.meta.generatedAt === fresh.meta.generatedAt;
+export const notRegenerated = (base: BenchOutput, fresh: BenchOutput): boolean => sameRun(base, fresh);
 
 /** CLI entry: the artifact at `base` vs the freshly merged one. Returns the process exit code —
  *  0 iff not one compared field moved and the row set is identical, 2 if nothing was compared. */
@@ -183,6 +183,13 @@ export function diffGate(base = 'HEAD'): number {
   //
   // Informational, deliberately: additions already make `report.ok` false, so this section moves no
   // exit code. It is the missing NAMES, not a new verdict.
+  //
+  // AND THE SAME WINDOW THE REGRESSION GATE'S HALF HAS: this is a comparison only between
+  // `bench merge` and the commit of the regenerated artifact. After that commit `readCommitted`
+  // hands back the file this gate already read off disk, and the section prints
+  // `0 field change(s)` from a file compared with itself — the vacuity `notRegenerated` above
+  // guards on the BASE side, asked here of the SELF side by the same predicate. It says NOT
+  // CHECKED rather than nothing, and rather than a zero.
   if (base !== 'HEAD') {
     let self: BenchOutput | undefined;
     try {
@@ -190,9 +197,18 @@ export function diffGate(base = 'HEAD'): number {
     } catch {
       console.log(`diff: this branch's own artifact is unreadable — added rows compared against nothing`);
     }
+    if (self !== undefined && sameRun(self, fresh)) {
+      console.log(
+        `diff over rows added since ${base}: NOT CHECKED — this branch's committed artifact carries ` +
+          `the same meta.generatedAt as the fresh one, so it IS this run. Run it after the merge and ` +
+          `BEFORE committing the regenerated artifact.`,
+      );
+      self = undefined;
+    }
     if (self !== undefined) {
-      const baseIds = new Set(committed.results.map((r) => r.id));
-      const added = { ...self, results: self.results.filter((r) => !baseIds.has(r.id)) };
+      // the narrowing the regression gate exports and its tests pin — one implementation, so the
+      // tested one is the one that runs
+      const added = rowsAddedSince(committed, self);
       const selfReport = compareMeasurements(added, fresh);
       for (const c of selfReport.changed) {
         console.log(`CHANGED ${c.id} ${c.field}: ${c.from} → ${c.to}   (row this branch added)`);

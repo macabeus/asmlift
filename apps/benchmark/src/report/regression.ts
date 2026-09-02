@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { RESULTS_DIR } from '../config';
-import { readCommitted } from './committed';
+import { readCommitted, sameRun } from './committed';
 
 export interface OutcomeFlip {
   id: string;
@@ -114,18 +114,41 @@ export function regressionGate(base = 'HEAD'): number {
       `${changed.length} other flips (${committed.results.length} committed rows)`,
   );
 
-  // The branch's OWN rows, which the comparison above cannot see (see rowsAddedSince). Skipped only
-  // when `base` IS this artifact — then the two comparisons are the same one. The population is
-  // always PRINTED, including when it is empty: a gate whose silence reads the same for "nothing
-  // was added" and "this never ran" has reported nothing.
+  // The branch's OWN rows, which the comparison above cannot see (see rowsAddedSince). The
+  // population is always PRINTED, including when it is empty or unavailable: a gate whose silence
+  // reads the same for "nothing was added" and "this never ran" has reported nothing.
+  //
+  // AND IT IS ONLY A COMPARISON INSIDE ONE WINDOW — between `bench merge` and the commit of the
+  // regenerated artifact. After that commit, `readCommitted('HEAD')` hands back the very file this
+  // gate reads off disk, and `compareOutcomes` of a file with itself prints `0 lost` in a
+  // millisecond. That green line is indistinguishable from the one a real comparison produces,
+  // which is the vacuity `diff.ts`'s `notRegenerated` has guarded on the BASE side since that gate
+  // existed; asked here of the SELF side by the same predicate (`committed.ts` sameRun). NOT a
+  // failure — re-verifying a finished branch is a legitimate thing to do, and exiting 1 for it
+  // would be a false alarm — but never a pass either: it prints NOT CHECKED and says which window
+  // to run it in.
   let selfOk = true;
-  if (base !== 'HEAD') {
+  if (base === 'HEAD') {
+    console.log(
+      `added-row regression: not applicable — base is HEAD, so the comparison above already IS the ` +
+        `branch's own artifact. Pass the branch point (--base origin/main) to police the rows it added.`,
+    );
+  } else {
     let self: BenchOutput | undefined;
     try {
       self = readCommitted('HEAD');
     } catch (e) {
       console.error(`added-row regression: SKIPPED — cannot read this branch's own artifact: ${String(e)}`);
       selfOk = false; // a gate that cannot run is not a gate that passed
+    }
+    if (self !== undefined && sameRun(self, fresh)) {
+      console.log(
+        `added-row regression: NOT CHECKED — this branch's committed artifact carries the same ` +
+          `meta.generatedAt (${fresh.meta.generatedAt}) as the fresh one, so it IS this run and the ` +
+          `comparison would be with itself. Run it after the merge and BEFORE committing the ` +
+          `regenerated artifact.`,
+      );
+      self = undefined;
     }
     if (self !== undefined) {
       const added = rowsAddedSince(committed, self);

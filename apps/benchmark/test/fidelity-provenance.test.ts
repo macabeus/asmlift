@@ -80,6 +80,24 @@ describe('a commit that moved no measured code is not "the code moved"', () => {
   test('the exemption needs a positive answer, not the absence of a negative', () => {
     expect(() => tierRows('real.json', at(A), { commit: B, dirty: false }, () => false)).toThrow();
   });
+
+  // THE EXEMPTION'S OWN PREMISE. `sameMeasuredCode` compares two COMMITS, and the scripts fidelity
+  // re-runs go through the working tree — so with an uncommitted edit to measured code the
+  // exemption's sentence ("these rows still measure this code") is false, and it fired anyway: run
+  // against a tree carrying a modified `packages/core/src/rank.ts`, `bench fidelity --only
+  // bfwordread` printed it and reported `2 ok`, where the sha rule this replaced had refused. The
+  // refusal names the tree rather than the commits, which are not what moved.
+  test('a DIRTY tree is refused even when the two commits differ in no measured path', () => {
+    expect(() => tierRows('synthetic.json', at(A), { commit: B, dirty: true }, () => true)).toThrow(
+      /the WORKING TREE is dirty/,
+    );
+  });
+
+  // The control: same inputs, clean tree — the exemption is still reachable, so the refusal above
+  // is a condition and not a switch that turned the exemption off.
+  test('…and the same inputs with a clean tree still load', () => {
+    expect(tierRows('synthetic.json', at(A), { commit: B, dirty: false }, () => true)).toEqual([{ id: 'x' }]);
+  });
 });
 
 // TWO COPIES OF ONE LIST DRIFT, and this one decides both whether a tier file is usable and

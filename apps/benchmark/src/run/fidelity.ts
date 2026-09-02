@@ -60,7 +60,15 @@ const SCRIPT_TIMEOUT_MS = 300_000;
  *  the measured PATHS (`provenance.ts` `sameMeasuredCode`, the same list the provenance script
  *  invalidates the artifact on) and passes only when none of them differs; a `dirty` stamp is
  *  still refused unconditionally, because numbers from code no commit holds are never
- *  certifiable. */
+ *  certifiable.
+ *
+ *  AND THE EXEMPTION ASKS ABOUT NOW'S TREE TOO, which the first version of it did not, so its own
+ *  premise did not hold everywhere it fired. `sameMeasuredCode` compares two COMMITS; it cannot
+ *  see an uncommitted edit, and the scripts fidelity re-runs go through `packages/cli/src` from
+ *  the working tree. Measured: with `packages/core/src/rank.ts` modified and nothing committed,
+ *  the exemption fired and printed "these rows still measure this code" — false as stated, and a
+ *  pass where the sha rule it replaced had refused. So a dirty tree gets its own refusal, naming
+ *  the cause it actually has rather than the commits, which are not the thing that moved. */
 export function tierRows(
   f: string,
   raw: string,
@@ -76,6 +84,13 @@ export function tierRows(
     now.commit !== ran.commit &&
     sameCode(ran.commit, now.commit)
   ) {
+    if (now.dirty) {
+      throw new Error(
+        `${f} was RUN at ${ran.commit} and HEAD is ${now.commit}, which differ in no measured path — but ` +
+          `the WORKING TREE is dirty, so the code these scripts run against is code no commit holds and a ` +
+          `comparison of two commits cannot speak for it. Commit or revert, then re-run fidelity.`,
+      );
+    }
     console.log(
       `[fidelity] ${f} was run at ${ran.commit.slice(0, 7)}, HEAD is ${now.commit.slice(0, 7)} — ` +
         `no measured path differs between them, so these rows still measure this code`,

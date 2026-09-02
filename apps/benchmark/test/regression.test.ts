@@ -3,6 +3,8 @@
 import type { BenchOutput, DecompilerResult, FunctionResult, Outcome } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
+import { sameRun } from '../src/report/committed';
+import { notRegenerated } from '../src/report/diff';
 import { compareOutcomes, rowsAddedSince } from '../src/report/regression';
 
 const res = (outcome: Outcome): DecompilerResult => ({
@@ -116,5 +118,33 @@ describe('rowsAddedSince (the branch own rows, which the base comparison never r
     const r = compareOutcomes(rowsAddedSince(base, self), out(row('a', 'match', 'match')));
     expect(r.ok).toBe(false);
     expect(r.missing).toEqual(['b']);
+  });
+});
+
+// THE WINDOW THE ADDED-ROW COMPARISON IS A COMPARISON IN. `rowsAddedSince` reads the branch's own
+// committed artifact, and after the regenerated artifact is committed that file IS the one the gate
+// reads off disk — so the section compares a file with itself and prints `0 lost` in a millisecond,
+// which reads exactly like the ~30-minute run it is meant to summarise. Reproduced by command
+// before this guard existed: at the branch's artifact commit, with a clean tree,
+// `pnpm bench regression --base origin/main` printed `added-row regression: 0 lost, 0 missing,
+// 0 gained, 0 other flips (6 rows this branch added since origin/main)` and exited 0, having
+// compared nothing. `diff.ts` has guarded the same vacuity on the BASE side since that gate existed
+// (`notRegenerated`); this is the same predicate asked of the SELF side.
+describe('sameRun — the artifact-compared-with-itself guard both added-row sections ask', () => {
+  const at = (generatedAt: string): BenchOutput => ({ meta: { generatedAt }, results: [] }) as unknown as BenchOutput;
+
+  test('equal generatedAt means no merge ran between them — nothing to compare', () => {
+    expect(sameRun(at('2026-09-02T00:46:16.025Z'), at('2026-09-02T00:46:16.025Z'))).toBe(true);
+  });
+
+  test('a merge re-mints it, so a real run is not mistaken for a self-comparison', () => {
+    expect(sameRun(at('2026-09-02T00:46:16.025Z'), at('2026-09-02T01:12:03.881Z'))).toBe(false);
+  });
+
+  // ONE IMPLEMENTATION, not two: `diff.ts`'s long-standing `notRegenerated` is this predicate, so a
+  // change to the rule cannot reach one caller and miss the other.
+  test('diff.ts notRegenerated is this same predicate', () => {
+    expect(notRegenerated(at('x'), at('x'))).toBe(sameRun(at('x'), at('x')));
+    expect(notRegenerated(at('x'), at('y'))).toBe(sameRun(at('x'), at('y')));
   });
 });

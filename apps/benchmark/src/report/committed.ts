@@ -71,5 +71,17 @@ export const scrub = (s: string): string =>
     .replace(/(?:asmlift|bench)-[A-Za-z0-9-]+-[A-Za-z0-9]{6}/g, '<scratch>')
     .replace(/\/host-tmp\S*|\/var\/folders\S*|\/tmp\/\S*/g, '<tmp>');
 
+/** Do two artifacts come out of the SAME merge? `bench merge` re-mints `meta.generatedAt` from
+ *  `new Date()` on every run (`run/runner.ts` benchMeta), so equal stamps mean no merge has run
+ *  between them — they are the same bytes, and any comparison of the two measures nothing.
+ *
+ *  ONE PREDICATE, TWO CALLERS, deliberately. `diff.ts` has asked this of the BASE side since the
+ *  gate existed (`notRegenerated`, and its comment is the argument for why: the cheapest way to
+ *  produce a green neutrality line must not be the one that compares a file with itself). The
+ *  added-row sections of `diff` and `regression` need the same question asked of the SELF side —
+ *  a branch that has already committed its artifact reads it straight back out of `HEAD` — and
+ *  the way two copies of a predicate like this go wrong is that one of them stops being asked. */
+export const sameRun = (a: BenchOutput, b: BenchOutput): boolean => a.meta.generatedAt === b.meta.generatedAt;
+
 /** Every row keyed by id — the shape all three gates walk. */
 export const byId = (o: BenchOutput): Map<string, FunctionResult> => new Map(o.results.map((r) => [r.id, r]));
