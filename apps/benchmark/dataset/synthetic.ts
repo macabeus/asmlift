@@ -5221,17 +5221,26 @@ export const SYNTHETIC: SynthSpec[] = [
   // `fill(&unksp0);` with no declaration of `unksp0`, the same pre-existing class already carried
   // by `stkaddr`, `maskhome` and `dmastride`. What that block called "five one-sided noncompiles
   // bought on a declaration-emission convention" is not what withholding the declaration costs.
-  // MEASURED — m2c run with `--context` naming the array, its output scored with that same context
-  // prepended:
+  // MEASURED — m2c run with `--context` carrying THE ROW'S OWN declaration, its `src` header
+  // verbatim, and its output scored with that same context prepended. An earlier cut of this table
+  // measured `bgarr` with `extern u32 gBgInfo[]` instead: that declares a 4-byte element for an
+  // array whose elements are 28 bytes, so it names the SYMBOL without naming the row's ARRAY.
+  // `bgarr` is the one cell that moves when the mistake is fixed, and it moves to a match:
   //
   //   harr      `return (u32) gTbl[i];`                          score 0, MATCH
   //   arrbias   `return (u32) (gTbl + 1)[i];`                    score 0, MATCH
+  //   bgarr     `return (u32) gBgInfo[i].hLength;`               score 0, MATCH
   //   arrcast   `return (u32) gTbl[i];`                          score 2
   //   tblrank2  `return *((j * 4) + (i * 8) + gPtrTbl);`         score 10
   //   harridx   `return (u32) gTbl[i].unk1;`                     noncompile
-  //   bgarr     `return (u32) ((i * 0x1C) + gBgInfo)->unk10;`    noncompile
   //
-  // So the withheld declaration costs m2c TWO BYTE-EXACT MATCHES, not five noncompiles. Note that
+  // So the withheld declaration costs m2c THREE BYTE-EXACT MATCHES — not the five noncompiles the
+  // first cut of this block claimed, and not the two the correction claimed. And `bgarr`'s match
+  // does NOT rest on handing m2c a struct layout this file's prototypes-only rule withholds: fed
+  // instead asmlift's OWN synthesized element — the padded, member-name-free
+  // `struct Elem0 { u8 _pad0[16]; u16 field_16; u8 _pad1[10]; }` that asmlift derives from the
+  // target asm unaided — m2c emits `gBgInfo[i].field_16` and scores 0 as well. What it needs is
+  // the DECLARATION, not the field names, so the layout rule does not rescue this cell. Note that
   // it is not uniformly a gift either: on `arrcast` m2c emits the same base-first `gTbl[i]` it
   // emits for `harr`, which is the WRONG spelling for that target, so the declaration would move
   // it to 2 rather than to a match — m2c has no more of the axis-2 distinction than asmlift does.
