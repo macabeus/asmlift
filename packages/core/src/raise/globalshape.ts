@@ -76,7 +76,10 @@
 // right beside either header. `pokeemerald:Sin2` and `sa3:sa2__sub_8083504` are two real benchmark
 // rows in exactly that position. This is a fitted declaration in declare.ts's sense — a sound
 // ARTIFACT (the decls and the source really do compile to those bytes) and an unsound CLAIM if the
-// decls are hidden — so it is minted, and it is never hidden.
+// decls are hidden — so it is minted, and it is never hidden. What travels out is the narrower
+// set `assumedShapes` (bottom of this file) computes rather than everything derived here: a shape
+// the structurer did not spell bare, and a name the caller's own map described, are not
+// obligations the reader has — see that function for the two corpus rows that prove each half.
 //
 // LEVEL. L1-derived, L2-shaped, L3-consumed: it runs on the LIFTED function, because the fact it
 // needs — the order the compiler materialized the base in — is destroyed by the raising tower
@@ -96,6 +99,7 @@
 // all was not measured, so the gate is a `compilerBehaviors` opt-in rather than a universal:
 // a compiler earns it by showing the same compiled divergence.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
+import type { SFn } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -529,8 +533,8 @@ function baseFirst(a: Access, pos: Map<Op, { b: number; i: number }>): boolean |
  *  element type and one rank for the name, or none.
  *
  *  The ELEMENT SIGNEDNESS this returns is a PICK, not a reading — see the module note's compiled
- *  pair. It travels out as an assumption (`DecompileResult.assumedSymbols`) rather than being
- *  applied silently. */
+ *  pair. Where the source ends up resting on it, it travels out as an assumption
+ *  (`assumedShapes` → `DecompileResult.assumedSymbols`) rather than being applied silently. */
 function evidenceOf(accs: Access[], pos: Map<Op, { b: number; i: number }>): ShapeEvidence {
   const perAccess = accs.map((a) => {
     const strides = stridesOf(a);
@@ -668,4 +672,44 @@ export function arrayShapeRefusals(
     );
   }
   return out;
+}
+
+/** THE SHAPES THE EMITTED SOURCE ACTUALLY RESTS ON — which is a strictly smaller set than the
+ *  shapes this module DERIVED, and the difference is the whole reason the two are separate
+ *  functions rather than one.
+ *
+ *  `inferGlobalArrays` answers "what does this assembly evidence". The honesty channel
+ *  (`DecompileResult.assumedSymbols`, `TraceReport.assumedSymbols`, the cli's `[assumed]` block,
+ *  the playground's panel) answers a different question: which declarations is the reader obliged
+ *  to check, because the source in front of them is right only beside those declarations. A
+ *  derived shape earns that obligation only where BOTH of these hold, and a shape can fail either
+ *  one:
+ *
+ *  1. THE STRUCTURER ACTUALLY SPELLED THE NAME BARE. A derivation reaching a symbol does not
+ *     make the source depend on it — every consumer of a shape can still refuse, and then the
+ *     access keeps `((T *)&gSym)[i]`, which reproduces the bytes under ANY declaration and
+ *     therefore assumes nothing. `kleod:SetupBG3WindowOverlay` is that case on the corpus: the
+ *     `gBgInfo` shape derives (element 4) and `arrayAccess` declines it (the access carries a
+ *     field offset), so the emitted source casts and the reader has nothing to check.
+ *  2. NO SYMBOL MAP DESCRIBED THE NAME. `structure()` asks the project's map FIRST, so on a
+ *     map-ful function the spelling is the MAP's and the derived shape never reached the source
+ *     — including when the map CONTRADICTS it, which is the sharp case (`sa3:sa2__sub_8083504`
+ *     derives `elemSigned: false` off its own `ldrh` while the vendored map declares
+ *     `const s16 gSineTable[1280]`). Publishing the derivation there tells the reader to check a
+ *     declaration against headers that already answered, and answered differently. Where the map
+ *     AGREES the name may well be spelled bare — but then it is the MAP's declaration the source
+ *     rests on, supplied by the caller, and nothing was assumed.
+ *
+ *  `SFn.globals` IS test (1): `structure()` populates it through `noteGlobal`, which is called at
+ *  exactly the three declaration-dependent bare-array spellings (structure.ts — `bareArrayLead` on
+ *  each of the byte-address and element-index paths, and `declaredSubscripts`) and nowhere else.
+ *  A fourth caller would have to be added to this list too, which is why the coupling is stated
+ *  here rather than left to be rediscovered. */
+export function assumedShapes(
+  inferred: Map<string, SymbolInfo>,
+  sfn: SFn,
+  mapSymbols?: { has(name: string): boolean },
+): SymbolInfo[] {
+  const spelledBare = new Set((sfn.globals ?? []).map((g) => g.name));
+  return [...inferred.values()].filter((i) => spelledBare.has(i.name) && mapSymbols?.has(i.name) !== true);
 }

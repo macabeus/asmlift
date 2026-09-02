@@ -213,3 +213,19 @@ test('a source that assumes no derived shape prints no `[assumed]` line', async 
   const r = await run('agbcc-clamp0.s', '--target', 'agbcc');
   expect(r.stderr).not.toContain('[assumed]');
 });
+
+test('a DERIVED shape the source never spells prints no `[assumed]` line either', async () => {
+  // The line's own sentence — "the source spells them BARE, so it is about these declarations" —
+  // is a claim about the SOURCE, not about the derivation, and the two part company. Here the
+  // element derives (4 bytes, read off the outer `lsl #0x2`) and `recognizeStructArrays` then
+  // rewrites the access into a 28-byte element with a field offset, which has no bare spelling.
+  // `kleod:SetupBG3WindowOverlay` is this shape on the real corpus.
+  const asm =
+    '\t.code\t16\n.text\n\t.align\t2, 0\n\t.globl\tf\n\t.thumb_func\nf:\n' +
+    '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n' +
+    '\tadd\tr1, r1, r2\n\tldr\tr0, [r1]\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgBgInfo\n';
+  const r = await runCli(['f.s', '--target', 'agbcc'], () => asm);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain('((struct Elem0 *)&gBgInfo)[a0].field_0');
+  expect(r.stderr).not.toContain('[assumed]');
+});

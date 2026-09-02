@@ -44,6 +44,26 @@ test('trace: stage sequence, pattern event, and source parity with decompile()',
   expect(ev.scoreDelta).toBeUndefined();
 });
 
+test('trace: the STAGE reports what it derived, the REPORT what the source rests on', () => {
+  // These are two different questions and the trace answers both, because they differ wherever a
+  // consumer refused the shape (`kleod:SetupBG3WindowOverlay` on the corpus) or the caller's own
+  // map already declared the name (`sa3:sa2__sub_8083504`). The stage note is the stage's own
+  // product — a reader following `stage:lift` → `stage:structure` needs to see the shape that was
+  // read — while `assumedSymbols` is the obligation handed to whoever pastes the source.
+  const asm =
+    '\t.code\t16\n.text\n\t.align\t2, 0\n\t.globl\tf\n\t.thumb_func\nf:\n' +
+    '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n' +
+    '\tadd\tr1, r1, r2\n\tldr\tr0, [r1]\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgBgInfo\n';
+  const { source, report } = decompileTraced('f', asm, ARMV4T_AGBCC);
+  // the 28-byte stride is recognized AFTER the derivation, and the struct-element access it
+  // rewrites to has no bare spelling — so the source casts and assumes nothing…
+  expect(source).toContain('((struct Elem0 *)&gBgInfo)[a0].field_0');
+  expect(report.assumedSymbols).toEqual([]);
+  // …while the stage still reports the 4-byte element it read, which is what makes the spelling
+  // decision downstream attributable to a stage rather than to nothing.
+  expect(report.trace.find((s) => s.id === 'stage:globalshape')?.note).toContain('gBgInfo: elem 4');
+});
+
 test('trace: probeScore hook fills the per-boundary score fields', () => {
   const probed: number[] = [7, 3];
   let i = 0;

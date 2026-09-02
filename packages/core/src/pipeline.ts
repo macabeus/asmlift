@@ -23,7 +23,7 @@ import { mergeCommonTails } from './l3/tailmerge';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
-import { inferGlobalArrays } from './raise/globalshape';
+import { assumedShapes, inferGlobalArrays } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
@@ -161,10 +161,11 @@ function runTower(
 
   // (4) structure: IR → neutral AST; boundary contract: no unresolved value leaked (strict), or
   // every unresolved value spelled as a loud ASMLIFT_ERROR marker (annotate).
+  const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
     ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
     onGap,
-    ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+    ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
   });
 
@@ -177,7 +178,10 @@ function runTower(
     ir: { raw, folded, recovered },
     patternHits,
     diagnostics: collectMarkers(sfn),
-    assumedSymbols: [...inferredSymbols.values()],
+    // WHAT THE SOURCE RESTS ON, not what the derivation found: a shape the structurer did not
+    // spell bare, and a name the caller's own map described, are both obligations this reader
+    // does not have (raise/globalshape.ts `assumedShapes`).
+    assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
   };
 }
 

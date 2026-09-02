@@ -14,7 +14,7 @@ import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
-import { inferGlobalArrays } from './raise/globalshape';
+import { assumedShapes, inferGlobalArrays } from './raise/globalshape';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -263,10 +263,11 @@ function traceTower(
 
   // (4) structure → neutral AST; boundary contract: no unresolved value leaked (strict) or
   // spelled as a loud ASMLIFT_ERROR marker (annotate) — same onGap lever as decompile()
+  const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
     ...structureOptionsFor(target, returnsVoid),
     onGap: opts.onGap ?? 'strict',
-    ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+    ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
   });
   trace.push({
@@ -296,7 +297,11 @@ function traceTower(
       trace,
       patternEvents,
       source,
-      assumedSymbols: [...inferredSymbols.values()],
+      // The same narrowing pipeline.ts's `DecompileResult` makes, and for the same reason: the
+      // `stage:globalshape` entry above reports what the STAGE derived, this reports what the
+      // SOURCE rests on, and they differ wherever a consumer refused the shape or the caller's
+      // own map already declared the name (raise/globalshape.ts `assumedShapes`).
+      assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
     },
   };
 }

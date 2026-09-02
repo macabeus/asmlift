@@ -18,7 +18,7 @@ import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
 import { ARRAY_SHAPE_GATES, arrayShapeRefusals, inferGlobalArrays, sameDerivedShape } from '../src/raise/globalshape';
 import { enumerateCandidates } from '../src/rank';
-import { type SymbolMap, arrayInnerExtents } from '../src/symbols';
+import { type SymbolInfo, type SymbolMap, arrayInnerExtents } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
@@ -610,6 +610,64 @@ describe('the assumed declaration is never hidden', () => {
 
   test('a source that assumes nothing says so', () => {
     expect(decompile('f', INDEX_FIRST, ARMV4T_AGBCC, {}).assumedSymbols).toEqual([]);
+  });
+
+  // THE DERIVATION IS NOT THE ASSUMPTION, and the gap between them is where this channel was
+  // wrong. `assumedSymbols` answers "which declarations is the reader obliged to check", and a
+  // derived shape earns that obligation only where the STRUCTURER SPELLED THE NAME BARE and NO
+  // MAP DESCRIBED IT. Both halves have real inhabitants on the corpus, and both published a false
+  // sentence before this narrowing: the CLI told the reader the source spelled a name bare when
+  // it had emitted the cast form, and handed them a declaration to check against the very headers
+  // the map they supplied was built from.
+  const MAP = (si: Partial<SymbolInfo>): SymbolMap =>
+    new Map([[0x0800_0000, [{ name: 'gTbl', kind: 'data', shape: 'array', elemSize: 2, ...si } as SymbolInfo]]]);
+
+  test('a map that CONTRADICTS the derivation: the map spells it, and nothing is assumed', () => {
+    // `sa3:sa2__sub_8083504` is this row on the real corpus — the derivation reads
+    // `elemSigned: false` off the function's own `ldrh` while the vendored map declares
+    // `const s16 gSineTable[1280]`. structure() asks the map FIRST, so the emitted source is the
+    // cast form and assumes nothing; publishing the derivation would send the reader to check
+    // `extern u16 gTbl[];` against headers that already said `s16`.
+    const r = decompile('f', BASE_FIRST, ARMV4T_AGBCC, { symbols: MAP({ elemSigned: true, dims: [4, 64] }) });
+    expect(r.source).toContain('((u16 *)&gTbl)[a0]');
+    expect(derive('f', BASE_FIRST).has('gTbl')).toBe(true); // the derivation still FIRES
+    expect(r.assumedSymbols).toEqual([]); // …and is not what the source rests on
+  });
+
+  test('a map that AGREES: the name is spelled bare, and still nothing is ASSUMED', () => {
+    // The subtler half. The bare subscript is emitted, but the declaration it means what it means
+    // by is the CALLER'S OWN, supplied on the command line — nothing was assumed and there is
+    // nothing to check.
+    const r = decompile('f', BASE_FIRST, ARMV4T_AGBCC, { symbols: MAP({ elemSigned: false }) });
+    expect(r.source).toContain('gTbl[a0]');
+    expect(r.source).not.toContain('&gTbl');
+    expect(r.assumedSymbols).toEqual([]);
+  });
+
+  // `a * 28` as agbcc spells it — `(a << 3) - a`, then the whole thing scaled by the ELEMENT.
+  // The derivation reads the outer `lsl #0x2` as the scale and the multiply below it as one
+  // opaque subscript, so it derives a 4-byte element quite correctly (`gBgInfo[a * 7]` is a
+  // legitimate flat spelling of the same address). `recognizeStructArrays` then runs — AFTER
+  // this derivation, which is taken on the LIFTED fn — and rewrites the access into a 28-byte
+  // element with a field offset, which `arrayAccess` has no bare branch for.
+  const STRUCT_ELEM = thumb(
+    'f',
+    '	ldr	r2, .L3\n	lsl	r1, r0, #0x3\n	sub	r1, r1, r0\n	lsl	r1, r1, #0x2\n	add	r1, r1, r2\n	ldr	r0, [r1]',
+    '.word	gBgInfo',
+  );
+
+  test('a shape DERIVED but never SPELLED assumes nothing — no map involved', () => {
+    // The other half, and it needs no symbol map at all: a derivation reaching a symbol does not
+    // make the SOURCE depend on it. Every consumer of a shape can still refuse, and the access
+    // then keeps `((T *)&gSym)[i]`, which reproduces the bytes under ANY declaration.
+    // `kleod:SetupBG3WindowOverlay` is exactly this row on the real corpus (1 of the 7 map-less
+    // agbcc rows the derivation reaches), and before this narrowing the CLI printed "the source
+    // spells them BARE" beside a source that had emitted the cast form.
+    expect(derive('f', STRUCT_ELEM).get('gBgInfo')?.elemSize).toBe(4);
+    const r = decompile('f', STRUCT_ELEM, ARMV4T_AGBCC, {});
+    expect(r.source).toContain('((struct Elem0 *)&gBgInfo)[a0].field_0');
+    expect(r.sfn.globals ?? []).toEqual([]);
+    expect(r.assumedSymbols).toEqual([]);
   });
 });
 
