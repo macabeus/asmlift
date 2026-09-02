@@ -23,6 +23,7 @@ import { mergeCommonTails } from './l3/tailmerge';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
+import { inferGlobalArrays } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
@@ -125,6 +126,11 @@ function runTower(
   const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
   const raw = print(fn);
+  // (1.5) the ARRAY SHAPES this function's own assembly evidences, for globals the project map
+  // does not describe. Read HERE, off the lifted fn, because the fact it needs — whether the base
+  // was materialized before the index was scaled — is destroyed by the raising tower below
+  // (raise/globalshape.ts's module note). Empty unless the target opts in.
+  const inferredSymbols = inferGlobalArrays(fn, target);
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
@@ -142,6 +148,7 @@ function runTower(
     ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
     onGap,
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+    ...(inferredSymbols.size ? { inferredSymbols } : {}),
   });
 
   // (5) lower + print: neutral AST → target language

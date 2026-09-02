@@ -99,6 +99,15 @@ import { type ArmExit, makeSwitchRecovery } from './switch-recover';
 // the named follow-up; until then no backend pays a tax for the tree cast (Pascal loud-fails
 // `field` regardless, C++ falls through its leaf hook to the shared C spelling).
 
+/** "What does this project know about the global named `n`" — the union of the project's own
+ *  symbol map and the array shapes derived from this function's assembly, asked map-first. Only
+ *  ever probed by name (never iterated or copied), which is what lets the union be a lookup rather
+ *  than a merged Map. */
+interface SymbolLookup {
+  get(name: string): SymbolInfo | undefined;
+  has(name: string): boolean;
+}
+
 /** The symbol-map rendering context threaded into memAccess/arrayAccess: shape facts per
  *  global name, plus a callback registering a global's env type (so the bare `gSym[i]` spelling,
  *  which must pass the stride check uncast, does). Absent ⇒ today's spellings. */
@@ -1090,6 +1099,17 @@ export interface StructureOptions {
    *  bare `gSym[i]` form; `shape:'struct'`+layout spells interiors as `gSym.field`. Absent (or
    *  a symbol not in the map) ⇒ today's usage-inferred behavior, byte-identical. */
   symbols?: Map<string, SymbolInfo>;
+  /** ARRAY SHAPES DERIVED FROM THE INPUT ASSEMBLY (raise/globalshape.ts) for globals the project
+   *  map does not describe — same `SymbolInfo` shape, same readers, LOWER precedence: `symbols`
+   *  wins every name it knows, because a project declaration knows more than an inference off one
+   *  function's strides.
+   *
+   *  A SEPARATE FIELD rather than a pre-merged map, and the separation is load-bearing twice.
+   *  `spellBitfieldMembers` is normalized against `symbols` alone, so a derived shape can never
+   *  switch the named-bitfield spelling on for a map-less row (which would silently delete the
+   *  `/no-bitfield` axis's decline — see bitfield-members.test.ts). And it keeps the derivation
+   *  ATTRIBUTABLE: everything the map does stays keyed on the map. */
+  inferredSymbols?: Map<string, SymbolInfo>;
 }
 
 /** Test-only seams. SEPARATE from `StructureOptions` on purpose: `structureOptionsFor` builds that
@@ -1162,14 +1182,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     coalesceMergeNames = false,
     freshParamMerge = false,
     onGap = 'strict',
-    symbols,
+    symbols: mapSymbols,
+    inferredSymbols,
   } = opts;
+  // THE shape dictionary the rendering context asks, map-first. Built as a lookup rather than a
+  // merged Map because the map is the PROJECT's and is asked by name for a whole project's worth
+  // of symbols — copying it per structuring is work proportional to the project, and a ranked run
+  // structures one function thousands of times (the same argument the `laddr` name minter makes).
+  const symbols: SymbolLookup | undefined =
+    mapSymbols !== undefined || (inferredSymbols !== undefined && inferredSymbols.size > 0)
+      ? {
+          get: (n) => mapSymbols?.get(n) ?? inferredSymbols?.get(n),
+          has: (n) => mapSymbols?.has(n) === true || inferredSymbols?.has(n) === true,
+        }
+      : undefined;
   // Only the MAP makes the named bitfield spelling available, so with no map this is not a choice.
   // Normalized once here rather than left to each reader's own `symCtx &&` guard, because rank.ts's
   // `/no-bitfield` decline rests on both arms structuring the IDENTICAL tree without a map — a
   // second reader added outside that guard would otherwise delete a candidate silently, and nothing
   // reports a candidate that was never enumerated (bitfield-members.test.ts).
-  const spellBitfieldMembers = symbols !== undefined && bitfieldSpellingWanted;
+  // Against the PROJECT MAP alone, never the derived shapes: only a map carries bitfield members,
+  // and keying this on the union would flip the `/no-bitfield` axis's zero point on a map-less row.
+  const spellBitfieldMembers = mapSymbols !== undefined && bitfieldSpellingWanted;
   // These levers all change which edge copies elide as identities (extra materialization does
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
   // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this

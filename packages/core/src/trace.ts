@@ -14,6 +14,7 @@ import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
+import { inferGlobalArrays } from './raise/globalshape';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -147,6 +148,9 @@ function traceTower(
   const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
   trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: print(fn), verified: true });
+  // The array shapes the assembly evidences, off the LIFTED fn — same reading, same reason, as
+  // pipeline.ts's runTower: the fold and the tower below destroy the order the licence reads.
+  const inferredSymbols = inferGlobalArrays(fn, target);
 
   // (2) idiom fold (capability-gated), with an optional probed score per pattern boundary —
   // the SAME default set as decompile()/decompileRanked
@@ -230,6 +234,7 @@ function traceTower(
     ...structureOptionsFor(target, returnsVoid),
     onGap: opts.onGap ?? 'strict',
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+    ...(inferredSymbols.size ? { inferredSymbols } : {}),
   });
   trace.push({
     id: 'stage:structure',

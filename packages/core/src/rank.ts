@@ -54,6 +54,7 @@ import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
+import { inferGlobalArrays } from './raise/globalshape';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import {
@@ -1094,6 +1095,13 @@ export function enumerateCandidates(
   // the totality contract / return-sinking of the full spine are not run on it.)
   const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
+  // The ARRAY SHAPES the input assembly evidences (raise/globalshape.ts), for the DECLARATION
+  // half. Read off the probe's LIFTED form — before the fold below and the tower rewrite it —
+  // because the base-materialization order the derivation's licence reads does not survive them.
+  // Probe-derived like `accessFacts` beside it, and for the same reason: it is a lift-time fact.
+  // The candidate half reads its OWN lift (each symbol variant lifts differently), just as the
+  // spelling axes do.
+  const probeShapes = inferGlobalArrays(probe, target);
   applyIdiomPatterns(probe, target, opts.patterns);
   runPreRecovery(probe, target, () => verify(probe), prototypes[name], {
     shortCircuit: {
@@ -1306,8 +1314,12 @@ export function enumerateCandidates(
   // SCOPE: `declSymbols` is used ONLY here. It must never reach `opts.symbols`/`baseOpts.symbols`
   // or `frontend.lift` — feeding it to the lift would turn on pool promotion, interior
   // attribution and the `/raw-globals` variant, which is a different (and source-moving) change.
+  // THREE halves now, in increasing authority: the name-only pool/reloc symbols, the array shapes
+  // the asm evidences for them (raise/globalshape.ts — an `extern u16 gTbl[];` where the bare
+  // spelling needs one, and the declaration a candidate spelling `gTbl[i]` cannot compile
+  // without), and the project map, which knows more than either.
   const mapSymbols = baseOpts.symbols;
-  const declSymbols = new Map([...bareGlobalSymbols(probe), ...(mapSymbols ?? [])]);
+  const declSymbols = new Map<string, SymbolInfo>([...bareGlobalSymbols(probe), ...probeShapes, ...(mapSymbols ?? [])]);
   const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     // The names THIS tree binds. Computed per tree because the emitter mints local names per
     // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
@@ -2112,6 +2124,7 @@ export function enumerateCandidates(
       ).flatMap((l) => connectiveVariants.map((c) => ({ ...l, ...c, suffix: `${l.suffix}${c.suffix}` })));
       for (const lv of liftVariants) {
         let fn: Fn;
+        let inferredSymbols = new Map<string, SymbolInfo>();
         try {
           // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
           // flags here would leave a fourth axis sharing the primary's already-mutated `base`.
@@ -2120,6 +2133,23 @@ export function enumerateCandidates(
             continue; // nothing to cut after all — the base lift's own candidates already cover it
           }
           verify(fn);
+          // This variant's OWN array-shape evidence, off its own lifted fn (a symbol map promotes
+          // numeric pool words to `gaddr`, so the `/raw-globals` arm genuinely answers differently).
+          //
+          // NEVER A NAME THE PROJECT MAP KNOWS, and the filter is here rather than left to
+          // structure()'s map-first lookup because THE `/raw-globals` ARM STRUCTURES WITH NO MAP
+          // AND DECLARES WITH ONE. `declSymbols` is probe-derived and map-last (the map wins every
+          // name it knows), so on an asm whose pool NAMES its globals the raw arm could spell a
+          // subscript off THIS function's strides — `gFoo[i][j]`, inner extent 2 — while the
+          // declaration beside it came from the map — `extern u32 gFoo[][8];` — and the emitted C
+          // would stride by 8. Compiling, and the wrong address. One name the map describes is
+          // one name this derivation does not claim, on either arm.
+          inferredSymbols = inferGlobalArrays(fn, target);
+          for (const n of [...inferredSymbols.keys()]) {
+            if (baseOpts.symbols?.has(n) === true) {
+              inferredSymbols.delete(n);
+            }
+          }
           applyIdiomPatterns(fn, target, opts.patterns);
           // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile()
           // is the signedness pin, injected between pre-recovery and recoverTypes via the
@@ -2174,6 +2204,7 @@ export function enumerateCandidates(
           try {
             sfn = structureChecked(fn, {
               ...svOpts,
+              ...(inferredSymbols.size ? { inferredSymbols } : {}),
               preserveDivergentBranchSense: s.sense,
               negateJoinedBranchSense: s.join ? !defSense : defSense,
               anchorConstCopies: s.anchor,
