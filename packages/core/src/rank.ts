@@ -24,6 +24,7 @@ import {
   type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
+  ORDERBASE_GATES,
   UNFOLDED_GATES,
   admittedBases,
   hoistBaseLocals,
@@ -488,7 +489,7 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  another inline is at neither end of it. This row is not a third link in that chain but beside
  *  it: `singleCell` and `unfoldedOffset` are independent fields, so each of the two tables binds
  *  keys the other refuses (censused, with its scope, in UNFOLDED_GATES' own note). Read the roster
- *  as five hand-picked subsets, never as a narrowness ranking.
+ *  as hand-picked subsets, never as a narrowness ranking.
  *
  *  LAST on the roster, so `seen` and `sameBases` between them keep it from restating an earlier
  *  ROSTER row — but only `seen` does any work here. `sameBases` declines a row that binds what an
@@ -536,6 +537,28 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  census when one does. */
 const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/unfolded', gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
+];
+
+/** The sixth admission, and the only one whose evidence is the INSTRUCTION ORDER rather than the
+ *  shape of the accesses (l3/basecse.ts, ORDERBASE_GATES). It binds a base the assembly says was
+ *  materialized before the index was scaled — which on agbcc is what a declared array or a pointer
+ *  LOCAL produces and the inline cast of a symbol's address does not — including the
+ *  `(struct S *)&gSym` of an array-of-struct element, which no other table on this roster can even
+ *  see.
+ *
+ *  LAST, so `sameBases` can shadow it and it can shadow nothing: on a function whose licensed base
+ *  is a plain leaf reached twice, `/livebase` already binds exactly that set at this placement and
+ *  this row declines rather than restating it under a second label.
+ *
+ *  ONE PLACEMENT, and the row that earned it says both are the same answer: on `synthetic:bgarr`
+ *  the emitted spelling scores 0 at the head and 0 at `first-use`, compiled through that row's own
+ *  decomp.yaml command. A second row is one line and no new table; add it when a row scores better
+ *  with it, which none does.
+ *
+ *  `pairings: false` for the field's own reason — a product is added for a row that demands the
+ *  joint spelling, and the row that earned this entry demands none. */
+const ORDERBASE_ADMISSIONS: readonly BaseAdmission[] = [
+  { suffix: '/orderbase', gates: ORDERBASE_GATES, placement: 'head', pairings: false },
 ];
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -1798,12 +1821,18 @@ export function enumerateCandidates(
     // hoist-nothing result means the lever has nothing to add and declines.
     // One family per admission row; a row binding exactly what an earlier row bound is the same
     // spelling under a different label, so it declines for that too. `/basefold`'s TWO rows and
-    // `/unfolded` join the roster where the target declares the fold — THREE of the five, so a
-    // target without it is offered the two `/livebase` rows and nothing else. The same fact is
-    // stated at the two POLICY sites above; a roster change repairs all three or none.
-    const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
-      ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS]
-      : LIVEBASE_ADMISSIONS;
+    // `/unfolded` join the roster where the target declares the fold, and `/orderbase` where it
+    // declares the array-shape fork, so a target with neither is offered the two `/livebase` rows
+    // and nothing else. The same fact is stated at the POLICY sites above; a roster change repairs
+    // all of them or none.
+    const admissions: readonly BaseAdmission[] = [
+      ...LIVEBASE_ADMISSIONS,
+      ...(target.compilerBehaviors.foldsConstAddrOffset ? [...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS] : []),
+      // …and the ORDER row where the compiler's subscript expansion forks on the base's array-ness,
+      // which is the same opt-in raise/globalshape.ts carries: with it off nothing is stamped, so
+      // `order-licensed` would refuse every key anyway and this only saves the census.
+      ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_ADMISSIONS : []),
+    ];
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
     // number of products. Memoized on the gate table's identity. The value is a list of key

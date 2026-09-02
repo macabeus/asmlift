@@ -18,7 +18,7 @@
 // the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
 // gate can leave one of them inline while the other binds.
 //
-// COVERAGE: the roster is FIVE rows over FOUR gate tables (`/basefold` and `/basefold/sinkinit`
+// COVERAGE: the roster is SIX rows over FIVE gate tables (`/basefold` and `/basefold/sinkinit`
 // share one, differing only in placement), and it is a set of hand-picked SUBSETS rather than a
 // narrowness ranking — only `/livebase` ⊇ `/livebase-block` are ordered by inclusion. A table
 // whose predicate cuts across the others therefore carves out a PARTIAL answer, which is what
@@ -87,8 +87,9 @@
 // relocation's addend arrives as an explicit `add` where the operand offset arrives as the load's
 // own, so the two are one flag apart at the point the offsets fold together.
 //
-// SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
-// `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — never an
+// SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address), a bare
+// `const` (a numeric pointer address) or a REINTERPRET CAST of one of those (see `isHoistableBase`)
+// is eligible, keyed by (base, width, signedness) — never an
 // AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is never an `index`-of-leaf, so
 // scalar recovery is untouched). Non-leaf bases (a local, a struct-element `p[a0]`,
 // arithmetic) are excluded: agbcc may re-derive those, so hoisting them can
@@ -525,6 +526,47 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
     why: 'no offset survived into the operand, so nothing says a pointer local strode this base',
     sound: false,
     rejects: (c) => !c.unfoldedOffset,
+  },
+];
+
+/** `/orderbase`'s admission (rank.ts): the two rules ABOUT THE BASE ablated — `cast-base` and
+ *  `single-use` — and one rule demanding the ORDER LICENCE in their place.
+ *
+ *  THE EVIDENCE IS THE ASSEMBLY, and it is the only thing here that is. Every other table on this
+ *  roster predicts which spelling the source wrote from the SHAPE of the accesses — how many, at
+ *  what offsets, inside a loop or not — and each prediction has a counterexample this file names.
+ *  This one reads the instruction ORDER: on a compiler whose subscript expansion forks on the
+ *  base's array-ness, a base materialized before the index was scaled is what a declared array or a
+ *  POINTER LOCAL produces, and the inline cast of a symbol's address is what produces the other
+ *  order. Compiled through the benchmark's own agbcc command, against a base-first object:
+ *
+ *      extern u16 gTbl[]; gTbl[i]            0    ┐ the same object
+ *      u16 *p = (u16 *)&gTbl; p[i]           0    ┘
+ *      ((u16 *)&gTbl)[i]                     2      a different one
+ *
+ *  So where `raise/globalshape.ts` derives an array DECLARATION it takes the bare spelling and this
+ *  table never sees the key (the access's base is a `var`); where it refuses one — a struct element,
+ *  which has no `intType` and reads its members at a displacement — the same order fact still says
+ *  the base had a home, and that is this table's whole population.
+ *
+ *  WHY `single-use` GOES. The rule's theory is that one access re-materializes as cheaply as a
+ *  named local, which is a guess about the source in the absence of evidence; here there is
+ *  evidence, and `synthetic:bgarr` is a one-access function whose target loads the pool word first.
+ *  It is ablated rather than exempted so `without(ORDERBASE_GATES, 'order-licensed')` prices the
+ *  licence on its own — the handle `BASEFOLD_GATES`' fused exemption cannot have.
+ *
+ *  `loop` and `repeated-const-offset` STAY. Neither is about the base's identity and both are fan
+ *  control; ablating them is `/livebase`'s axis, already on the roster, and a row that wants the
+ *  product is one roster line. rank.ts offers this row only where
+ *  `compilerBehaviors.arrayShapeFromStride` — the same opt-in the licence itself carries, because
+ *  the fork is agbcc's and no other compiler has been shown to make it. */
+export const ORDERBASE_GATES: readonly Gate<BaseKey>[] = [
+  ...ablateHeuristic(ablateHeuristic(BASECSE_GATES, 'cast-base'), 'single-use'),
+  {
+    id: 'order-licensed',
+    why: 'nothing in the assembly says this base had a home: the index was scaled first, or the order says nothing',
+    sound: false,
+    rejects: (c) => !c.orderLicensed,
   },
 ];
 
