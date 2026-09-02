@@ -151,9 +151,14 @@ interface Access {
 //     mixed-access-width            2      0    0
 //     (the other five)              0      0    0
 //
-// — so twelve of the fourteen rules change nothing on this corpus when removed, and the two that
-// do are not the two the first column would nominate. Co-occurrence is not reach: `no-subscript`
-// would reject 21 symbols and is first for none of them. That does NOT make the twelve
+// — so twelve of the fourteen rules change nothing on this corpus when removed, and the rule the
+// first column nominates loudest is one of them: `address-escapes` rejects 141 symbols, is FIRST
+// for 137, and moves NOTHING. On this corpus the uses it rejects are the symbol's only ones, so
+// with the rule gone they simply contribute no access and the name ends with nothing to shape —
+// same outcome, and the rule's value there is the ATTRIBUTION. It is still `sound`, because a
+// symbol that has a good access ALONGSIDE an escaping one does derive without it, which is a wrong
+// answer and is the fixture the ablation test uses. Co-occurrence is not reach either:
+// `no-subscript` would reject 21 symbols and is first for none of them. That does NOT make the twelve
 // decoration — each is right about a shape, and the ablation test beside this module ablates every
 // rule on a fixture that DOES reach it, where eight of the thirteen are the only thing standing
 // between that fixture and a derivation. What it does mean is that "which refusal protects which
