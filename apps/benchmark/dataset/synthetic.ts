@@ -4982,9 +4982,11 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: BGPTRS_MAP,
   },
   // ── GLOBAL ARRAY SHAPE — the base local, the array-typed subscript, and the pool addend ────────
-  // Seven rows cut from the same graphics translation unit the `value-home` and DMA families above
-  // were cut from, whose body indexes a global array of 28-byte structs through a variable index,
-  // a rank-2 table of pointers, and a rank-3 ROM table. asmlift recovers every one of those as a
+  // Seven rows. Six are cut from the same graphics translation unit the `value-home` and DMA
+  // families above were cut from, whose body indexes a global array of 28-byte structs through a
+  // variable index, a rank-2 table of pointers, and a rank-3 ROM table. The seventh, `arrcast`,
+  // is NOT from that TU — it is a control constructed to guard a direction the other six leave
+  // open (axis 2 below), and it is labelled as such rather than passed off as found code. asmlift recovers every one of those as a
   // CAST over the symbol's address — `((u16 *)&gTbl)[i]` — which scales the index FIRST and loads
   // the base second. FIVE of the six scored targets load the base first (`arrcast` is the one that
   // does not), and the family measures that ordering plus a second, independent axis: where a
