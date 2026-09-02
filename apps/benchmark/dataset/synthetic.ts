@@ -4972,6 +4972,154 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'unsigned short ptrelem(int i);',
     symbols: BGPTRS_MAP,
   },
+  // ── GLOBAL ARRAY SHAPE — the array-typed subscript, the declared rank, and the pool addend ─────
+  // Six rows cut from the same graphics translation unit the `value-home` and DMA families above
+  // were cut from, whose body indexes a global array of 28-byte structs through a variable index,
+  // a rank-2 table of pointers, and a rank-3 ROM table. asmlift recovers every one of those as a
+  // CAST over the symbol's address — `((u16 *)&gTbl)[i]` — never as the array-typed subscript
+  // `gTbl[i]`, and on agbcc the two are DIFFERENT OBJECTS. agbcc's `c-typeck.c` forks the subscript
+  // on `TREE_CODE (TREE_TYPE (array)) == ARRAY_TYPE && TREE_CODE (array) != INDIRECT_REF`: the
+  // array-typed operand loads the base FIRST and scales second, the pointer-typed one scales first.
+  //
+  // Today, agbcc only, map-less, fan 2 on every scored row, winning label `unsigned` on every
+  // scored row, one declaration synthesized on each — each figure from
+  // `pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial` at the revision that
+  // authored them, not quoted from anywhere:
+  //
+  //   harr      2      width > 1, no constant term — target `ldr r1,.L3` BEFORE `lsl r0,#0x1`,
+  //                    asmlift `((u16 *)&gTbl)[a0]`, which is `lsl` before `ldr`
+  //   harridx   5      a constant term at width 1 — target pool word `.word gTbl` plus
+  //                    `add r0,r0,#0x1`, asmlift `((u8 *)&gTbl)[a0 + 1]`, which agbcc folds
+  //                    into a pool word of `.word gTbl+0x1` and no `add`
+  //   bgarr     8      the struct-array member read
+  //   tblrank2  3      the declared rank — AND the additivity gate, below
+  //   arrbias   0      MATCH. THE OVER-FIRE CONTROL — see below before touching any of this
+  //   outparam  none   no score at all: a whole-function DECLINE
+  //
+  // THESE ARE THE FIRST SYNTHETIC ROWS THAT RELOCATE AGAINST A NAMED DATA GLOBAL, and that is
+  // deliberate rather than convenient. The family was planned in the respelled address-macro form
+  // every other synthetic global here uses (`#define gTbl ((u16 *)0x03003430)`), and respelled it
+  // MEASURES NOTHING: all five score 0 today. An array-typed OBJECT requires a SYMBOL, so at a
+  // literal address every available C spelling is a pointer cast or an INDIRECT_REF and takes the
+  // pointer path — bare `gTbl[i]`, `((u16 *)LIT)[i]` and `(*(u16 (*)[])LIT)[i]` compile to ONE
+  // object (md5 61b257461c93f452d7ea79e0778da534 for all three). The addend goes the same way:
+  // respelled, `harridx` and `arrbias` constant-fold to the same `.word 0x3003431` and become the
+  // same row, which would destroy the control. The rows compile because asmlift synthesizes the
+  // declaration itself off the target asm (`[declared] 1 declaration(s) synthesized`), `as` accepts
+  // an undefined `R_ARM_ABS32` in a `.o`, and objdiff pairs relocations BY SYMBOL NAME.
+  //
+  // THE SOUNDNESS RULE THE FAMILY EXISTS TO ENCODE, and `arrbias` is the row that enforces it:
+  //
+  //     The bare array-typed spelling is licensed BY THE ASSEMBLY, never by preference. It is
+  //     available only when the pool word's relocation addend is ZERO. Where the target bakes an
+  //     addend into the pool word, the CAST form is the right answer.
+  //
+  // `arrbias` MATCHES today and is authored as a match, so it is a control from the moment it
+  // lands. Its target pool word is `.word gTbl+0x1` — in the ELF, `R_ARM_ABS32 gTbl` with an
+  // in-place addend of 1 (`.text` bytes at 0x8 are `01 00 00 00`), against `harridx`'s addend of 0
+  // (`00 00 00 00`) on the same symbol. Applying the bare spelling unconditionally —
+  // `extern u8 gTbl[]; return gTbl[a0 + 1];` — scores 5 against `arrbias`'s target, i.e. it LOSES
+  // THE MATCH. The two rows are exactly each other's confusion, and the mirror is byte-level:
+  // asmlift's harridx candidate `((u8 *)&gTbl)[a0 + 1]` assembles to `.text` bytes IDENTICAL to
+  // `arrbias`'s target (`01 49 40 18 00 78 70 47 01 00 00 00`, one `R_ARM_ABS32 gTbl`), and the two
+  // 5s are mirror-image breakdowns — `delete: 2` one way, `insert: 2` the other. One symbol, two
+  // opposite right answers, and the only thing that separates them is the pool word's addend.
+  //
+  // THE ADDITIVITY GATE — `tblrank2`, and this half is a PREDICTION, not a measurement of a
+  // shipped lever. Endpoint-scored object-vs-object at the revision that authored these rows,
+  // half A alone (the array-typed subscript with a flat index, in asmlift's own operand order)
+  // `extern s32 gPtrTbl[]; return gPtrTbl[j + i * 2];` scores 4 — WORSE than the 3 asmlift ranks
+  // today; the other operand order `gPtrTbl[i * 2 + j]` scores 6; both halves together, which is
+  // the row's own spelling, score 0. So the subscript and the declared rank must ship TOGETHER or
+  // this row pays for the half. FALSIFYING COMMAND: ship half A alone, then
+  // `pnpm bench run --tier synthetic --only tblrank2 --toolchain agbcc --serial`; anything other
+  // than a score strictly worse than 3 falsifies the claim.
+  //
+  // TWO THINGS THE ROWS FALSIFIED, said here because it is easy to assume otherwise:
+  //  • `bgarr` needs NO new element-layout capability. asmlift ALREADY synthesizes a correct
+  //    28-byte element and the right member — `struct Elem0 { u8 _pad0[16]; u16 field_16;
+  //    u8 _pad1[10]; }` reached as `((struct Elem0 *)&gBgInfo)[a0].field_16`. Feeding asmlift's
+  //    OWN `Elem0` back through a DECLARED array (`extern struct Elem0 gBgInfo[];
+  //    return gBgInfo[a0].field_16;`) scores 0. The whole 8 is the declaration plus the bare
+  //    subscript; a round that closes it by inventing element layouts is aiming at the wrong gap.
+  //  • `tblrank2`'s rank ARITHMETIC is already recovered. asmlift emits
+  //    `*(s32 *)((a1 << 2) + (a0 << 3) + (u32)&gPtrTbl)` — the rank-preserving scaling, not the
+  //    flat `(i * 2 + j) * 4`. The flat index is a symbol-side SPELLING, not an arithmetic gap.
+  //
+  // `outparam` IS A DIFFERENT KIND OF ROW: it has no score, and its gate is that it keeps
+  // declining with the SAME first blocker after every rebase. It pins the out-parameter idiom
+  // `T v; callee(&v); use(v);` — agbcc's `expand_decl` refuses a register to a local whose address
+  // is taken (`! TREE_THIS_VOLATILE (decl) && ! TREE_ADDRESSABLE (decl)`), so the local becomes a
+  // one-word frame and its address becomes argument 0. ATTRIBUTION, re-triggered rather than
+  // quoted, first blocker `packages/core/src/frontend/thumb.ts:3395`, message verbatim:
+  //     cannot lift 'outparam': address-taken stack local — the one-word frame is handed to a
+  //     callee as argument 0 and never written here, which is how a hidden struct-return pointer
+  //     looks — the callee owning the storage is not provably an addressable local
+  // That is a whole-function decline: zero candidates, no `[ranked]` line, nothing to score.
+  //
+  // THE m2c SIDE, stated because these rows expose a tier asymmetry rather than create one. All
+  // five scored rows are `declined` for m2c on its OWN self-reported gap — it emits `extern ? gTbl;`
+  // and the `? placeholder` is what the classifier reads. `outparam` is `noncompile` for m2c: it
+  // emits `fill(&unksp0);` with no declaration of `unksp0`, the same pre-existing class already
+  // carried by `stkaddr`, `maskhome` and `dmastride`. Neither is context withheld — both tools get
+  // the same information this dataset gives every row, prototypes only (see the file header). But
+  // the SYNTHETIC tier does not prepend `ctx` to m2c's candidate at scoring time the way the real
+  // tier does, so a `ctx` naming the array (`extern u16 gTbl[];`) makes m2c noncompile on
+  // `gTbl undeclared` instead — five one-sided noncompiles bought on a declaration-emission
+  // convention. The `ctx` here is therefore prototypes only, which is this dataset's stated rule;
+  // fixing the tier asymmetry is a harness change and belongs to a harness round.
+  //
+  // agbcc only, as the `read-once`, `uninit-local` and `value-home` families are. Whether ido7.1,
+  // gcc2.7.2kmc and mwcc_242_81 fork the subscript on the operand's array-ness at all was NOT
+  // measured, so those lanes are left off rather than assumed; what would earn one is the same
+  // compiled pair on that toolchain showing the same divergence.
+  {
+    sym: 'harr',
+    src: 'extern u16 gTbl[];\nu32 harr(u32 i){ return gTbl[i]; }',
+    features: ['global', 'array', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 harr(u32 i);',
+  },
+  {
+    sym: 'harridx',
+    src: 'extern u8 gTbl[];\nu32 harridx(u32 i){ return gTbl[i+1]; }',
+    features: ['global', 'array', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 harridx(u32 i);',
+  },
+  {
+    sym: 'bgarr',
+    src:
+      'struct BgInfo { void *pTiles; void *pTilemap; u16 hOfs; u16 vOfs; u16 tileCol; u16 tileRow;\n' +
+      '                u16 hLength; u16 vLength; u16 unk14; u16 unk16; u8 unk18; u8 pad19[3]; };\n' +
+      'extern struct BgInfo gBgInfo[4];\n' +
+      'u32 bgarr(u32 i){ return gBgInfo[i].hLength; }',
+    features: ['global', 'array', 'variable-index', 'struct', 'field'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 bgarr(u32 i);',
+  },
+  {
+    sym: 'tblrank2',
+    src: 'extern const s32 *gPtrTbl[][2];\ns32 tblrank2(u32 i, u32 j){ return (s32)gPtrTbl[i][j]; }',
+    features: ['global', 'array', 'variable-index', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 's32 tblrank2(u32 i, u32 j);',
+  },
+  {
+    sym: 'arrbias',
+    src: 'extern u8 gTbl[];\nu32 arrbias(u32 i){ const u8 *p = &gTbl[1]; return p[i]; }',
+    features: ['global', 'array', 'variable-index', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 arrbias(u32 i);',
+  },
+  {
+    sym: 'outparam',
+    src: 'extern void fill(s32 *p);\ns32 outparam(void){ s32 v; fill(&v); return v; }',
+    features: ['stack-addr', 'uninit-local'],
+    toolchains: ['agbcc'],
+    ctx: 'void fill(s32 *p); s32 outparam(void);',
+    proto: { fill: { params: 1, returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
