@@ -81,11 +81,19 @@ export function decompileWithReport(
   if (targetObj && report.trace.length > 0) {
     try {
       score = scoreSource(source, name, targetObj, target, backend.id, compile);
+      // …and the SAME symbol map, for the same reason the probe above gets it: without it the
+      // `candidates` list is enumerated from a different program family than the report's own
+      // headline and `score`. Measured on a function whose map declares `const s16 gTbl[4][64]`:
+      // the headline emits `((u16 *)&gTbl)[a0]` (the map's element is signed, the access
+      // zero-extends, so the bare form is refused) while every ranked candidate was
+      // `gTbl[a0]` — a bare subscript whose meaning rests on a declaration the caller's own map
+      // contradicts. A candidate list that cannot contain the headline is not a ranking of it.
       const ranked = decompileRanked(name, asm, target, targetObj, {
         patterns: opts.patterns,
         backend,
         prototypes: opts.prototypes,
         asmData: opts.asmData,
+        symbols: opts.symbols,
         compile,
       });
       candidates = ranked.candidates.map((c) => ({
