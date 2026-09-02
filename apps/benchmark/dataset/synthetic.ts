@@ -5091,7 +5091,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // TWO ROWS GUARD THIS, one per axis, and BOTH are authored as matches:
   //  • `arrbias` — AXIS 1, the addend direction. Applying the index-side spelling unconditionally
   //    — `extern u8 gTbl[]; return gTbl[a0 + 1];`, which is exactly what wins `harridx` — scores 5
-  //    here, i.e. it loses the match. One symbol, two opposite right answers. The
+  //    here, i.e. it loses the match. The
   //    mirror is byte-level: asmlift's `harridx` candidate `((u8 *)&gTbl)[a0 + 1]` assembles to
   //    `.text` bytes IDENTICAL to `arrbias`'s target (`01 49 40 18 00 78 70 47 01 00 00 00`, one
   //    `R_ARM_ABS32 gTbl`), and the two 5s are mirror-image breakdowns — `delete: 2` one way,
@@ -5154,7 +5154,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // is the decline message alone and cannot detect a proto regression. The entry is kept because
   // it becomes live the moment the decline is closed.
   //
-  // THE m2c SIDE, and the first cut of this block stated its cost BACKWARDS. All five scored rows
+  // THE m2c SIDE, and the first cut of this block stated its cost BACKWARDS. All six scored rows
   // are `declined` for m2c on its OWN self-reported gap — it emits `extern ? gTbl;` and the
   // `? placeholder` is what the classifier reads. `outparam` is `noncompile` for m2c: it emits
   // `fill(&unksp0);` with no declaration of `unksp0`, the same pre-existing class already carried
@@ -5165,18 +5165,23 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   //   harr      `return (u32) gTbl[i];`                          score 0, MATCH
   //   arrbias   `return (u32) (gTbl + 1)[i];`                    score 0, MATCH
+  //   arrcast   `return (u32) gTbl[i];`                          score 2
   //   tblrank2  `return *((j * 4) + (i * 8) + gPtrTbl);`         score 10
   //   harridx   `return (u32) gTbl[i].unk1;`                     noncompile
   //   bgarr     `return (u32) ((i * 0x1C) + gBgInfo)->unk10;`    noncompile
   //
-  // So the withheld declaration costs m2c TWO BYTE-EXACT MATCHES, not five noncompiles. This is a
+  // So the withheld declaration costs m2c TWO BYTE-EXACT MATCHES, not five noncompiles. Note that
+  // it is not uniformly a gift either: on `arrcast` m2c emits the same base-first `gTbl[i]` it
+  // emits for `harr`, which is the WRONG spelling for that target, so the declaration would move
+  // it to 2 rather than to a match — m2c has no more of the axis-2 distinction than asmlift does.
+  // This is a
   // ONE-SIDED HANDICAP ON EXACTLY THESE ROWS and it should be read that way: asmlift does not need
   // the `ctx` because it synthesizes the declaration off the target asm itself, and m2c cannot.
   // The rows are published anyway, with the cost stated, because the alternative is worse — the
   // SYNTHETIC tier does not prepend `ctx` to m2c's candidate at scoring time the way the real tier
   // does (`makeRealScorer` in `apps/benchmark/src/cases/real.ts` vs `scoreM2c` in
-  // `apps/benchmark/src/eval/evaluate.ts`), so putting the array in `ctx` here yields FIVE
-  // noncompiles and measures even less. Prototypes-only is this dataset's stated rule (see the
+  // `apps/benchmark/src/eval/evaluate.ts`), so putting the array in `ctx` here yields a noncompile
+  // on every scored row and measures even less. Prototypes-only is this dataset's stated rule (see the
   // file header) and is what ships; the m2c column on these seven rows is NOT a fair read of m2c's
   // array-shape ability, and fixing the tier is a harness change that belongs to a harness round.
   //
