@@ -22,9 +22,18 @@
 // else is the cast form — byte-identical under any declaration. Two independent kinds of
 // evidence license it, and they answer at different element widths:
 //
-//   ORDER — the pool load precedes every scaling of the index. Observable only at element width
-//     > 1: at width 1 there is nothing to scale, so the base `ldr` comes first whatever the
-//     source wrote, and the order says nothing.
+//   ORDER — the pool load precedes every scaling of the index, in EVERY access of the name. agbcc
+//     CSEs the pool word, so a function that subscripts one global twice has ONE `ldr` and both
+//     accesses are ordered against it; the earliest scaling is what decides, which is why one
+//     index-first access refuses the whole symbol (`index-materialized-first`). Compiled, that is
+//     the right reading: `gTbl[i] + ((u16 *)gTbl)[j]` is the SAME object as `gTbl[i] + gTbl[j]`,
+//     while `((u16 *)gTbl)[i] + ((u16 *)gTbl)[j]` is a different one — so a mixed function is
+//     decided by its first access and nothing after it is observable
+//     (cli/test/matching/array-shape-licence.test.ts compiles all three).
+//
+//     Observable only at element width > 1: at width 1 there is nothing to scale, so the base
+//     `ldr` comes first whatever the source wrote — measured, `extern u8 g[]; g[i]` and
+//     `((u8 *)g)[i]` are byte-identical — and the order says nothing.
 //   A CONSTANT ON THE INDEX — the address adds a constant to the INDEX at run time while the
 //     pool word's relocation addend stays zero. agbcc folds a constant added to any pointer or
 //     cast base into that addend (`gcc/explow.c plus_constant_wide`, and gcc/thumb.h's
@@ -55,7 +64,7 @@
 // `[declared]` blocks) rather than being applied and forgotten.
 //
 // The element WIDTH is forced by the evidence: a wrong width would have strided differently in the
-// asm, and at width 1 refusal 1 covers the remaining case. The element SIGNEDNESS is NOT — it is a
+// asm, and at width 1 `relocation-addend` covers the remaining case. The element SIGNEDNESS is NOT — it is a
 // PICK, and the two readings are the same object. Compiled through the benchmark's own agbcc
 // command (`-mthumb-interwork -Wimplicit -O2 -fhex-asm -fprologue-bugfix`):
 //
@@ -341,7 +350,7 @@ function positions(fn: Fn): Map<Op, { b: number; i: number }> {
 }
 
 /** Every op that reads `v` as an operand. Successor arguments count as uses too — a value handed
- *  across an edge leaves this function's address arithmetic, which refusal 2 covers. */
+ *  across an edge leaves this function's address arithmetic, which `address-escapes` covers. */
 function useIndex(fn: Fn): Map<Value, Op[]> {
   const uses = new Map<Value, Op[]>();
   const add = (v: Value, op: Op): void => {
