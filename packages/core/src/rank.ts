@@ -2029,6 +2029,7 @@ export function enumerateCandidates(
   // spellings and raw-address macros. So when a map is present the raw-global spelling is ALSO
   // enumerated ('/raw-globals') and the differ referees; the dedup below collapses the pair
   // wherever the map changed nothing, so this never scores worse than either side alone.
+  //
   // Does the `/raw-globals` arm have a RANK of its own to spell? Read off the DERIVED shapes the
   // map does not answer for — the only ones a map-less structuring ever sees — because that is
   // exactly the population `/flat-rank`'s decline just below is about. A superset of what the raw
