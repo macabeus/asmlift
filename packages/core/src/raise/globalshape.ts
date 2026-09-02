@@ -148,11 +148,11 @@ interface Access {
 //     interior-or-non-access      33     24    1
 //     relocation-addend           27     17    0
 //     stride-is-not-the-element    25      0    0
-//     no-positive-evidence         23      6    4
+//     no-positive-evidence         23     10    8
 //     no-subscript                 21      0    0
-//     index-materialized-first      8      5    0
 //     residual-not-a-sum            3      2    0
 //     mixed-access-width            2      0    0
+//     index-materialized-first      1      1    0
 //     (the other five)              0      0    0
 //
 // — so twelve of the fourteen rules change nothing on this corpus when removed, and the rule the
@@ -168,6 +168,17 @@ interface Access {
 // between that fixture and a derivation. What it does mean is that "which refusal protects which
 // row" has to be asked of `arrayShapeRefusals` and never read off a comment: this module's first
 // version enumerated six refusals in prose and put two of them on the wrong rule.
+//
+// The last row of that table used to read `index-materialized-first  8  5  0`, and four of those
+// five first-rejections were a MISATTRIBUTION rather than a refusal: the order licence recorded
+// `false` — the positive claim "the index was scaled first" — for a scaling it merely could not
+// COMPARE, in another block from the pool load. They are `kleod:CopyBGScrollTiles`,
+// `kleod:SetupBG3WindowOverlay`, `sa3:VramGetTotalAllocatedTiles` and `sa3:VramMalloc`, and in
+// every one the base is materialized first. They now route to `no-positive-evidence` (6 → 10
+// first, 4 → 8 moved), which is what "this evidences nothing" is called here. The derived map
+// over all 359 functions is IDENTICAL either way — nine shapes, the same nine — so on this corpus
+// the whole change is which rule is named; the capability it opens is measured on a compiled pair
+// at `baseFirst`.
 
 /** One USE of a symbol's address, reduced to the facts `ADDRESS_GATES` decide over. */
 interface AddressUse {
@@ -330,14 +341,19 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     // ONE index-first access refuses the WHOLE symbol, and that is where this rule is uniquely
     // load-bearing: on a single-access function `no-positive-evidence` would refuse anyway, but a
     // function that subscripts the name twice with only ONE of them index-first has positive
-    // evidence and still must not derive. Compiled: `gTbl[i] + gTbl[j]` and
+    // evidence and still must not derive. "Index-first" means what `baseFirst` can SEE — a
+    // scaling before the pool load in the pool load's own block; a scaling in another block is
+    // not an index-first access, it is no evidence, and it belongs to the rule below.
+    // Compiled: `gTbl[i] + gTbl[j]` and
     // `gTbl[i] + ((u16 *)gTbl)[j]` are the SAME object, while `((u16 *)gTbl)[i] + ((u16 *)gTbl)[j]`
     // is a different one — and agbcc CSEs the pool word, so the first access's order is the only
     // place that difference shows.
     id: 'index-materialized-first',
-    why: 'the index was scaled BEFORE the base was materialized — the pointer path, which is the cast spelling',
+    why: 'a scaling of the index precedes the pool load IN ITS OWN BLOCK — the pointer path, which is the cast spelling',
     sound: true,
-    guardedBy: 'global-array-shape.test.ts: one index-first access refuses a symbol the others license',
+    guardedBy:
+      'global-array-shape.test.ts: one index-first access refuses a symbol the others license; and ' +
+      'the cast-spelled MIX_CAST, whose only comparable access is index-first',
     rejects: (e) => e.perAccess.some((a) => a.baseFirst === false),
   },
   {
@@ -512,20 +528,41 @@ function stridesOf(a: Access): number[] {
   return [...new Set(a.terms.filter((t) => t.v !== null).map((t) => t.scale))].sort((x, y) => x - y);
 }
 
-/** THE ORDER LICENCE for one access, as a three-valued answer: `true` = every scaling of the
- *  index happens AFTER the base was materialized (the array-subscript shape), `false` = at least
- *  one happens before or in another block (the pointer shape, or evidence this walk cannot
- *  compare), `undefined` = nothing is scaled, so the order says nothing at all. */
+/** THE ORDER LICENCE for one access, as a three-valued answer — and the third value is the point.
+ *
+ *  `true` = every scaling of the index this walk CAN compare happens after the base was
+ *  materialized (the array-subscript shape); `false` = at least one comparable scaling happens
+ *  BEFORE it (the pointer shape, which is the cast spelling); `undefined` = there is nothing to
+ *  compare, so the order says nothing at all and the symbol must find its licence elsewhere.
+ *
+ *  ONLY A SCALING IN THE SAME BLOCK AS THE POOL LOAD IS COMPARABLE, and that is a statement about
+ *  agbcc rather than a convenience. The pool `ldr` is CSE'd and placed at the dominator of its
+ *  uses, so once the two sit in different blocks at least one of them has been MOVED relative to
+ *  the expression that wrote it and the function's instruction order no longer records
+ *  `build_array_ref`'s expansion order. Compiled, that is exactly what happens — a loop whose
+ *  only subscript is in the body hoists the `ldr` into the preheader and the two spellings
+ *
+ *      for (i = 0; i < n; i++) s += gTbl[p[i]];
+ *      for (i = 0; i < n; i++) s += ((u16 *)gTbl)[p[i]];
+ *
+ *  become ONE object, byte-identical `.s` included. Recording that as `false` was a positive
+ *  claim ("the index was scaled first") about an access that makes no claim either way, and on
+ *  the benchmark's 359 agbcc target functions it was FOUR of the five symbols
+ *  `index-materialized-first` rejected. It now routes to `no-positive-evidence`, which is what
+ *  "this says nothing" is called in that table — a refusal either way, but the true one.
+ *
+ *  The discrimination the rule exists for is untouched, because it lives in the SAME-BLOCK
+ *  accesses: compiled, a function that subscripts once outside a loop and once inside it is a
+ *  different object under the two spellings, and the difference is at the access outside. */
 function baseFirst(a: Access, pos: Map<Op, { b: number; i: number }>): boolean | undefined {
-  const scalers = a.terms.map((t) => t.scaleOp).filter((o): o is Op => o !== null);
-  if (scalers.length === 0) {
+  const g = pos.get(a.gaddr);
+  if (g === undefined) {
     return undefined;
   }
-  const g = pos.get(a.gaddr);
-  return scalers.every((o) => {
-    const p = pos.get(o);
-    return g !== undefined && p !== undefined && p.b === g.b && p.i > g.i;
-  });
+  const comparable = a.terms
+    .map((t) => (t.scaleOp === null ? undefined : pos.get(t.scaleOp)))
+    .filter((p): p is { b: number; i: number } => p !== undefined && p.b === g.b);
+  return comparable.length === 0 ? undefined : comparable.every((p) => p.i > g.i);
 }
 
 /** The shape one symbol's accesses evidence, or null where `SHAPE_GATES` rejects. Decided over

@@ -58,6 +58,18 @@ const BARE_TWICE = `${DECLS}u32 f(s32 i, s32 j) { return gTbl[i] + gTbl[j]; }\n`
 const MIXED_BARE_FIRST = `${DECLS}u32 f(s32 i, s32 j) { return gTbl[i] + ((u16 *)gTbl)[j]; }\n`;
 const BOTH_CAST = `${DECLS}u32 f(s32 i, s32 j) { return ((u16 *)gTbl)[i] + ((u16 *)gTbl)[j]; }\n`;
 
+// ── the same ORDER claim ACROSS A BLOCK BOUNDARY, where it stops being observable ────────────
+// agbcc CSEs the pool word and places the `ldr` at the dominator of its uses, so a loop whose only
+// subscript is in the body hoists it into the preheader whatever the source wrote — and the two
+// spellings become ONE object. That is what makes a cross-block scaling NO EVIDENCE rather than
+// evidence of the pointer path (`baseFirst` returns `undefined`, and the symbol falls to
+// `no-positive-evidence`). Add ONE access outside the loop and the pair separates again, at that
+// access — which is why narrowing the order rule to same-block costs the discrimination nothing.
+const LOOP_BARE = `${DECLS}u32 f(s32 n, s32 *p) { s32 i; u32 s = 0; for (i = 0; i < n; i++) { s += gTbl[p[i]]; } return s; }\n`;
+const LOOP_CAST = `${DECLS}u32 f(s32 n, s32 *p) { s32 i; u32 s = 0; for (i = 0; i < n; i++) { s += ((u16 *)gTbl)[p[i]]; } return s; }\n`;
+const MIX_BARE = `${DECLS}u32 f(s32 k, s32 n, s32 *p) { s32 i; u32 s = gTbl[k]; for (i = 0; i < n; i++) { s += gTbl[p[i]]; } return s; }\n`;
+const MIX_CAST = `${DECLS}u32 f(s32 k, s32 n, s32 *p) { s32 i; u32 s = ((u16 *)gTbl)[k]; for (i = 0; i < n; i++) { s += ((u16 *)gTbl)[p[i]]; } return s; }\n`;
+
 // ── the ADDEND claim, at element width 1 where the order says nothing ────────────────────────
 const IDX_CONST = `${DECLS}u32 f(s32 i) { return gBytes[i + 1]; }\n`;
 const CAST_CONST = `${DECLS}u32 f(s32 i) { return ((u8 *)gBytes)[i + 1]; }\n`;
@@ -78,6 +90,10 @@ describe.runIf(HAVE)('the ARRAY-SHAPE licence, compiled (checkout-gated)', () =>
     ['bare-twice', BARE_TWICE],
     ['mixed-bare-first', MIXED_BARE_FIRST],
     ['both-cast', BOTH_CAST],
+    ['loop-bare', LOOP_BARE],
+    ['loop-cast', LOOP_CAST],
+    ['mix-bare', MIX_BARE],
+    ['mix-cast', MIX_CAST],
     ['idx-const', IDX_CONST],
     ['cast-const', CAST_CONST],
     ['base-folded', BASE_FOLDED],
@@ -146,6 +162,21 @@ describe.runIf(HAVE)('the ARRAY-SHAPE licence, compiled (checkout-gated)', () =>
     // index-first access must refuse the whole symbol (`index-materialized-first`).
     expect(hex.get('mixed-bare-first')).toBe(hex.get('bare-twice'));
     expect(hex.get('both-cast')).not.toBe(hex.get('bare-twice'));
+  });
+
+  test('ACROSS A BLOCK BOUNDARY the two spellings COLLAPSE — so a cross-block scaling is no evidence', () => {
+    // The premise of the same-block narrowing, compiled. With the only subscript inside the loop,
+    // the pool `ldr` is hoisted into the preheader either way and the array and cast spellings are
+    // one object — so recording "the index was scaled first" there is a claim about a function
+    // that makes no claim. On the benchmark's 359 agbcc target functions this was FOUR of the five
+    // symbols `index-materialized-first` first-rejected.
+    expect(hex.get('loop-bare')).toBe(hex.get('loop-cast'));
+  });
+
+  test('…and ONE access outside the loop separates them again, which is where the rule still decides', () => {
+    // The narrowing costs the discrimination nothing: add a subscript outside the loop and the
+    // pair is two objects again, differing at that access — the one `baseFirst` can compare.
+    expect(hex.get('mix-bare')).not.toBe(hex.get('mix-cast'));
   });
 
   test('SIGNEDNESS is a pick, not a reading: the two declarations are the SAME object', () => {

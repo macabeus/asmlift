@@ -441,6 +441,171 @@ describe('refusals: which rule decided, and what it is worth', () => {
   });
 });
 
+// ── a scaling in ANOTHER block is not evidence, in either direction ───────────────────────────
+//
+// The order licence can only read a scaling the pool load can be COMPARED to, and across a block
+// boundary it cannot: agbcc CSEs the pool `ldr` and places it at the dominator of its uses, so a
+// loop whose only subscript is in the body has the load in the preheader whatever the source
+// wrote. Compiled through the benchmark's own agbcc command, LOOP_ONLY below is what BOTH of
+//
+//     for (i = 0; i < n; i++) s += gTbl[p[i]];
+//     for (i = 0; i < n; i++) s += ((u16 *)gTbl)[p[i]];
+//
+// compile to — ONE object, byte-identical `.s` included. Recording that as `false` (the positive
+// claim "the index was scaled first") is how this rule came to be the FIRST rejection of four
+// corpus symbols whose base is materialized first: `kleod:CopyBGScrollTiles`,
+// `kleod:SetupBG3WindowOverlay`, `sa3:VramGetTotalAllocatedTiles`, `sa3:VramMalloc`. All four now
+// route to `no-positive-evidence`, which is what "this says nothing" is called; the derived map
+// over the whole corpus is unchanged either way (9 shapes over 359 functions).
+//
+// MIX_* are the real agbcc output for one function that subscripts the name ONCE OUTSIDE the loop
+// and once inside it. Those two ARE different objects, the difference is at the access outside,
+// and scored against each other's targets the two spellings are 7 vs 9 in both directions — so
+// the discrimination this rule exists for lives entirely in the same-block accesses and is
+// untouched by the narrowing.
+const LOOP_ONLY = `	.code	16
+.text
+	.align	2, 0
+	.globl	pureloop
+	.type	 pureloop,function
+	.thumb_func
+pureloop:
+	push	{r4, lr}
+	mov	r3, #0x0
+	cmp	r3, r0
+	bge	.L4	@cond_branch
+	ldr	r4, .L8
+	add	r2, r0, #0
+.L6:
+	ldmia	r1!, {r0}
+	lsl	r0, r0, #0x1
+	add	r0, r0, r4
+	ldrh	r0, [r0]
+	add	r3, r3, r0
+	sub	r2, r2, #0x1
+	cmp	r2, #0
+	bne	.L6	@cond_branch
+.L4:
+	add	r0, r3, #0
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.L9:
+	.align	2, 0
+.L8:
+	.word	gTbl
+.Lfe1:
+	.size	 pureloop,.Lfe1-pureloop
+`;
+
+/** `s = gTbl[k]; for (...) s += gTbl[p[i]];` — the pool load precedes the outside access's `lsl`
+ *  in its own block, and the loop body's `lsl` is in another. */
+const MIX_ARRAY = `	.code	16
+.text
+	.align	2, 0
+	.globl	mix
+	.type	 mix,function
+	.thumb_func
+mix:
+	push	{r4, lr}
+	ldr	r4, .L8
+	lsl	r0, r0, #0x1
+	add	r0, r0, r4
+	ldrh	r3, [r0]
+	cmp	r1, #0
+	ble	.L4	@cond_branch
+.L6:
+	ldmia	r2!, {r0}
+	lsl	r0, r0, #0x1
+	add	r0, r0, r4
+	ldrh	r0, [r0]
+	add	r3, r3, r0
+	sub	r1, r1, #0x1
+	cmp	r1, #0
+	bne	.L6	@cond_branch
+.L4:
+	add	r0, r3, #0
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.L9:
+	.align	2, 0
+.L8:
+	.word	gTbl
+.Lfe1:
+	.size	 mix,.Lfe1-mix
+`;
+
+/** The same function with both accesses cast-spelled: the outside access scales BEFORE the pool
+ *  load, in the same block. That is the observable difference, and it is the one that must refuse. */
+const MIX_CAST = `	.code	16
+.text
+	.align	2, 0
+	.globl	mix
+	.type	 mix,function
+	.thumb_func
+mix:
+	push	{r4, r5, lr}
+	add	r4, r2, #0
+	lsl	r0, r0, #0x1
+	ldr	r2, .L8
+	add	r0, r0, r2
+	ldrh	r3, [r0]
+	cmp	r1, #0
+	ble	.L4	@cond_branch
+	add	r5, r2, #0
+	add	r2, r4, #0
+.L6:
+	ldmia	r2!, {r0}
+	lsl	r0, r0, #0x1
+	add	r0, r0, r5
+	ldrh	r0, [r0]
+	add	r3, r3, r0
+	sub	r1, r1, #0x1
+	cmp	r1, #0
+	bne	.L6	@cond_branch
+.L4:
+	add	r0, r3, #0
+	pop	{r4, r5}
+	pop	{r1}
+	bx	r1
+.L9:
+	.align	2, 0
+.L8:
+	.word	gTbl
+.Lfe1:
+	.size	 mix,.Lfe1-mix
+`;
+
+describe('the order licence reads only what it can compare', () => {
+  test('a loop-only subscript says NOTHING, and says so under the right name', () => {
+    // Not `index-materialized-first`: the base IS materialized first here, in an earlier block.
+    // The honest verdict is that the two spellings are one object, so there is no evidence.
+    expect(refusals('pureloop', LOOP_ONLY)).toEqual([['gTbl', 'no-positive-evidence']]);
+    expect(derive('pureloop', LOOP_ONLY).size).toBe(0);
+    expect(sourceOf('pureloop', LOOP_ONLY)).toContain('&gTbl');
+  });
+
+  test('one comparable base-first access licenses the symbol its loop body cannot speak for', () => {
+    expect(refusals('mix', MIX_ARRAY)).toEqual([['gTbl', null]]);
+    expect(derive('mix', MIX_ARRAY).get('gTbl')).toEqual({
+      name: 'gTbl',
+      kind: 'data',
+      shape: 'array',
+      elemSize: 2,
+      elemSigned: false,
+    });
+    // both accesses take the bare form — the loop body's evidences nothing, and a declaration is
+    // per SYMBOL, so a name licensed once is spelled bare everywhere it is reached
+    expect(sourceOf('mix', MIX_ARRAY)).not.toContain('&gTbl');
+  });
+
+  test('…and the same function cast-spelled still refuses, on the access that CAN be compared', () => {
+    expect(refusals('mix', MIX_CAST)).toEqual([['gTbl', 'index-materialized-first']]);
+    expect(derive('mix', MIX_CAST).size).toBe(0);
+  });
+});
+
 // ── which refusals actually DECIDE, as a committed measurement ────────────────────────────────
 //
 // The header's list of refusals is prose; this is the part a reviewer can check. For each rule:
