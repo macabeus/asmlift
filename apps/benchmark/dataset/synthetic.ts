@@ -5010,9 +5010,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //     arrcast    `((u16 *)&gTbl)[a0]`                   index-first     INDEX-first
   //
   // FIVE of the six scored TARGETS load the base first (`arrcast` is the one that does not), and
-  // asmlift's candidate mismatches that order on FOUR of those five, not on all five. `harridx`
-  // and `arrbias` are already base-first with no index scaling at all, because agbcc folds their
-  // `+1` into the pool word and the scaling goes with it (axis 1 below). That is precisely why
+  // asmlift's candidate mismatches that order on THREE of those five — `harr`, `bgarr`,
+  // `tblrank2` — not on all five. `harridx` and `arrbias` are already base-first with no index
+  // scaling at all, because agbcc folds their `+1` into the pool word and the scaling goes with
+  // it (axis 1 below). That is precisely why
   // `arrbias` is a MATCH and a control rather than a gap — do not read it as a row exposed to an
   // index-first default. The family measures this ordering plus a second, independent axis: where
   // a constant term ends up, in the pool word's relocation addend or in a runtime `add`.
@@ -5066,6 +5067,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //     walking its result list. Measured, `unsigned` and `signed` tie on all six scored rows —
   //     2/2, 5/5, 8/8, 3/3, 0/0, 0/0. THIS is the enumeration both controls below require, and
   //     no `bench` subcommand substitutes for it.
+  //
+  // The scores those commands report today, and what each row is for:
   //
   //   harr      2      width > 1, no constant term. Base local OR array subscript reaches it
   //   harridx   5      a constant term at width 1 — target pool word `.word gTbl` plus
