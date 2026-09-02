@@ -14,10 +14,11 @@
 import { describe, expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
+import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
-import { inferGlobalArrays } from '../src/raise/globalshape';
+import { ARRAY_SHAPE_GATES, arrayShapeRefusals, inferGlobalArrays, sameDerivedShape } from '../src/raise/globalshape';
 import { enumerateCandidates } from '../src/rank';
-import type { SymbolMap } from '../src/symbols';
+import { type SymbolMap, arrayInnerExtents } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
@@ -39,8 +40,30 @@ ${body}
 	.size	 ${name},.Lfe1-${name}
 `;
 
-const derive = (name: string, asm: string) =>
-  inferGlobalArrays(frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, undefined), ARMV4T_AGBCC);
+const lift = (name: string, asm: string) =>
+  frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, undefined);
+
+const derive = (name: string, asm: string) => inferGlobalArrays(lift(name, asm), ARMV4T_AGBCC);
+
+/** WHICH RULE decided, per symbol — `firstRejection` over the two gate tables. The refusals are
+ *  DATA (raise/globalshape.ts's `ADDRESS_GATES` / `SHAPE_GATES`) precisely so a test can assert the
+ *  attribution rather than a reviewer reading one off a comment: two of this module's original
+ *  prose attributions were wrong, and both are pinned below. */
+const refusals = (name: string, asm: string) => [...arrayShapeRefusals(lift(name, asm), ARMV4T_AGBCC)];
+
+/** The same derivation with ONE named rule removed — the real predicate on real input, no
+ *  test-only branch in the shipped path. This is what makes a gate's price a measurement: a guard
+ *  that admits the same thing with and without it is a guard that is not doing the work its
+ *  `guardedBy` claims. */
+const deriveWithout = (id: string, name: string, asm: string) =>
+  inferGlobalArrays(lift(name, asm), ARMV4T_AGBCC, {
+    address: ARRAY_SHAPE_GATES.address.some((g) => g.id === id)
+      ? without(ARRAY_SHAPE_GATES.address, id)
+      : ARRAY_SHAPE_GATES.address,
+    shape: ARRAY_SHAPE_GATES.shape.some((g) => g.id === id)
+      ? without(ARRAY_SHAPE_GATES.shape, id)
+      : ARRAY_SHAPE_GATES.shape,
+  });
 
 const sourceOf = (name: string, asm: string) => decompile(name, asm, ARMV4T_AGBCC, {}).source;
 
@@ -69,6 +92,30 @@ describe('the order of the pool load licenses the bare array subscript', () => {
     // would fire here and emit a source that does not reproduce this assembly.
     expect(derive('f', INDEX_FIRST).size).toBe(0);
     expect(sourceOf('f', INDEX_FIRST)).toContain('((u16 *)&gTbl)[a0]');
+  });
+
+  test('one index-first access refuses a symbol the others license', () => {
+    // WHY THE ORDER RULE IS ASKED OF EVERY ACCESS AND NOT JUST OF THE FIRST. agbcc CSEs the pool
+    // word, so a function that subscripts one name twice has ONE `gaddr` and the second access is
+    // ordered against the same load. Compiled through the benchmark's own agbcc command:
+    //
+    //   gTbl[i] + gTbl[j]                        \  the same object (md5 e5521e36…): a bare
+    //   gTbl[i] + ((u16 *)gTbl)[j]               /   subscript here would be right either way
+    //   ((u16 *)gTbl)[i] + ((u16 *)gTbl)[j]          a DIFFERENT object (md5 0c8ba2e7…)
+    //
+    // and only the third moves the first access's `lsl` ahead of the `ldr`. So the licence is
+    // decided by the earliest scaling, and one index-first access refuses the whole symbol — even
+    // though the LATER access is base-first and would satisfy `no-positive-evidence` on its own.
+    // That second access is exactly what makes this rule uniquely load-bearing.
+    const mixedOrder = thumb(
+      'f',
+      '\tlsl\tr0, r0, #0x1\n\tldr\tr2, .L3\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]\n\tlsl\tr1, r1, #0x1\n' +
+        '\tadd\tr1, r1, r2\n\tldrh\tr1, [r1]\n\tadd\tr0, r0, r1',
+      '.word\tgTbl',
+    );
+    expect(refusals('f', mixedOrder)).toEqual([['gTbl', 'index-materialized-first']]);
+    expect(derive('f', mixedOrder).size).toBe(0);
+    expect(deriveWithout('index-materialized-first', 'f', mixedOrder).size).toBe(1);
   });
 
   test('the two lift to DIFFERENT IR and would otherwise recover to the same', () => {
@@ -160,67 +207,256 @@ describe('nested strides recover the declared rank, and ship WITH the element ha
   });
 });
 
-// ── the refusals that keep a loud fallback instead of a silent wrong answer ───────────────────
-
-describe('refusals', () => {
-  test('an element stride wider than the access width claims nothing', () => {
-    // A 28-byte element read 2 bytes at a time (`gBgInfo[i].hLength`). Relaxing this conjunct is
-    // what emits a flat 16-bit subscript on a 28-byte-element array — out of bounds against the
-    // project's own header. The cast spelling stands instead.
-    const structElem = thumb(
+// ── the refusals, each attributed to the rule that decided ───────────────────────────────────
+//
+// ONE FIXTURE PER GATE, in one table, so the per-rule tests below and the whole-table measurement
+// at the end cannot drift apart. Every test does two things: it asserts which rule FIRST rejected
+// (`arrayShapeRefusals`, off the tables' own `firstRejection`), and — where that rule is the only
+// thing standing between the fixture and a derivation — it ablates that one rule and shows the
+// derivation then admits.
+//
+// This module shipped two attributions of exactly the kind that measurement catches: the module
+// note credited the element-stride rule with the `bgarr` shape (`interior-or-non-access` decides
+// it, one rule earlier) and the relocation-addend rule with `arrbias` (it fires first and decides
+// nothing — `no-subscript` refuses the same symbol without it). Both rules are still right; the
+// sentence about what each was doing was not.
+const GATE_FIXTURES: readonly (readonly [string, string])[] = [
+  [
+    // A declaration is per SYMBOL, not per access: one use this spelling does not model and the
+    // name keeps the cast form everywhere.
+    'address-escapes',
+    `\t.code\t16
+.text
+\t.align\t2, 0
+\t.globl\tf
+\t.type\t f,function
+\t.thumb_func
+f:
+\tpush\t{r4, lr}
+\tldr\tr4, .L3
+\tlsl\tr0, r0, #0x1
+\tadd\tr0, r0, r4
+\tldrh\tr0, [r0]
+\tmov\tr0, r4
+\tbl\tsink
+\tpop\t{r4}
+\tpop\t{r1}
+\tbx\tr1
+.L4:
+\t.align\t2, 0
+.L3:
+\t.word\tgTbl
+.Lfe1:
+\t.size\t f,.Lfe1-f
+`,
+  ],
+  // The `arrbias` control: the constant lives in the pool word, not on the index.
+  ['relocation-addend', CONST_IN_ADDEND],
+  // `i * 4 - i` is a stride of 3 spelled as a difference. Opening the `sub` would make each term's
+  // sign depend on the walk, and a negative stride is not a subscript this spelling has.
+  [
+    'residual-not-a-sum',
+    thumb(
       'f',
-      '	ldr	r2, .L3\n	lsl	r1, r0, #0x3\n	sub	r1, r1, r0\n	lsl	r1, r1, #0x2\n	add	r1, r1, r2\n	ldrh	r0, [r1, #0x10]',
-      '.word	gBgInfo',
-    );
-    expect(derive('f', structElem).size).toBe(0);
-    expect(sourceOf('f', structElem)).toContain('&gBgInfo');
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x2\n\tsub\tr1, r1, r0\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1]',
+      '.word\tgTbl',
+    ),
+  ],
+  // The `bgarr` shape: a 28-byte element read 2 bytes at a time (`gBgInfo[i].hLength`). Emitting a
+  // flat 16-bit subscript here would be out of bounds against the project's own header.
+  [
+    'interior-or-non-access',
+    thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+      '.word\tgBgInfo',
+    ),
+  ],
+  [
+    'mixed-access-width',
+    thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x1\n\tadd\tr1, r1, r2\n\tldrh\tr1, [r1]\n\tlsl\tr0, r0, #0x2\n' +
+        '\tadd\tr0, r0, r2\n\tldr\tr0, [r0]\n\tadd\tr0, r0, r1',
+      '.word\tgTbl',
+    ),
+  ],
+  // The bare spelling carries no cast, so the declared element type is the only thing in the
+  // emitted C saying how a sub-word read fills — and this name is read both ways. The
+  // register-offset form is not decoration: Thumb has no immediate-offset `ldrsh`, so the signed
+  // narrow load's address IS the base add. Spelled with a separate index register the load's
+  // operand is a second `add` and `interior-or-non-access` refuses one rule earlier, which is why
+  // this gate first-rejects on none of the 359 benchmark target functions that lift.
+  [
+    'mixed-extension',
+    thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x1\n\tadd\tr1, r1, r2\n\tldrh\tr1, [r1]\n\tlsl\tr0, r0, #0x1\n' +
+        '\tldrsh\tr0, [r0, r2]\n\tadd\tr0, r0, r1',
+      '.word\tgTbl',
+    ),
+  ],
+  // `&gTbl + 4` reached through a scaled CONSTANT rather than through the relocation addend: there
+  // is no subscript here to be right or wrong about.
+  [
+    'no-subscript',
+    thumb(
+      'f',
+      '\tmov\tr0, #0x2\n\tlsl\tr0, r0, #0x1\n\tldr\tr1, .L3\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]',
+      '.word\tgTbl',
+    ),
+  ],
+  // Base-first, `off=0`, one clean stride — and the stride is 4 where the load reads 2. This is
+  // the shape the element-stride rule is actually for; nothing else in either table rejects it.
+  [
+    'stride-is-not-the-element',
+    thumb('f', '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x2\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]', '.word\tgTbl'),
+  ],
+  // element 4, outer stride 6: no C declaration produces that pair, so nothing is claimed.
+  [
+    'strides-do-not-nest',
+    thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r1, #0x2\n\tmov\tr3, #0x6\n\tmul\tr0, r3\n\tadd\tr1, r1, r0\n\tadd\tr1, r1, r2\n\tldr\tr0, [r1]',
+      '.word\tgTbl',
+    ),
+  ],
+  // One address at stride 4, one nesting 4 into 8. Unioning the strides ACROSS accesses would
+  // declare `extern s32 gTbl[][2]` off a table nothing says is two-dimensional, and spell
+  // `gTbl[0][i]` — which stops compiling against the project's own header.
+  [
+    'ranks-disagree',
+    thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr0, r0, #0x2\n\tlsl\tr1, r1, #0x3\n\tadd\tr3, r1, r0\n\tadd\tr3, r3, r2\n' +
+        '\tldr\tr3, [r3]\n\tadd\tr0, r0, r2\n\tldr\tr0, [r0]\n\tadd\tr0, r3, r0',
+      '.word\tgTbl',
+    ),
+  ],
+  // width 2 with `+ 1` on the index: a mid-element displacement, which no subscript spells.
+  [
+    'mid-element-constant',
+    thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, #0x1\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]',
+      '.word\tgTbl',
+    ),
+  ],
+  // WHY THE ORDER RULE IS ASKED OF EVERY ACCESS AND NOT JUST OF THE FIRST. agbcc CSEs the pool
+  // word, so a function that subscripts one name twice has ONE `gaddr` and both accesses are
+  // ordered against the same load. Compiled through the benchmark's own agbcc command:
+  //
+  //   gTbl[i] + gTbl[j]                      \  the SAME object (md5 e5521e36…), so a bare
+  //   gTbl[i] + ((u16 *)gTbl)[j]             /  subscript would be right either way
+  //   ((u16 *)gTbl)[i] + ((u16 *)gTbl)[j]       a DIFFERENT object (md5 0c8ba2e7…)
+  //
+  // and only the third moves a `lsl` ahead of the `ldr`. So the licence is decided by the earliest
+  // scaling, one index-first access refuses the whole symbol, and the SECOND (base-first) access
+  // here is what makes this rule uniquely load-bearing — alone, `no-positive-evidence` would have
+  // refused anyway.
+  [
+    'index-materialized-first',
+    thumb(
+      'f',
+      '\tlsl\tr0, r0, #0x1\n\tldr\tr2, .L3\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]\n\tlsl\tr1, r1, #0x1\n' +
+        '\tadd\tr1, r1, r2\n\tldrh\tr1, [r1]\n\tadd\tr0, r0, r1',
+      '.word\tgTbl',
+    ),
+  ],
+  // Both spellings are byte-identical at width 1 with no constant, so there is nothing to win and
+  // a derivation would be a guess. It stays the cast form.
+  ['no-positive-evidence', thumb('f', '\tldr\tr1, .L3\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]', '.word\tgTbl')],
+];
+
+const fixture = (id: string): string => GATE_FIXTURES.find(([g]) => g === id)![1];
+
+describe('refusals: which rule decided, and what it is worth', () => {
+  test.each(GATE_FIXTURES.map(([id]) => id))('%s is the rule that first rejects its own fixture', (id) => {
+    const sym = fixture(id).includes('gBgInfo') ? 'gBgInfo' : 'gTbl';
+    expect(refusals('f', fixture(id))).toEqual([[sym, id]]);
+    expect(derive('f', fixture(id)).size).toBe(0);
   });
 
-  test('no evidence at all — width 1, no constant — claims nothing', () => {
-    // Both spellings are byte-identical here, so there is nothing to win and a derivation would
-    // be a guess. It stays the cast form.
-    const noEvidence = thumb('f', '	ldr	r1, .L3\n	add	r0, r0, r1\n	ldrb	r0, [r0]', '.word	gTbl');
-    expect(derive('f', noEvidence).size).toBe(0);
+  test('an element read at a displacement INSIDE it keeps the cast spelling', () => {
+    // The refusal's OUTPUT, not just its verdict: every rejection falls back to a form that is
+    // byte-identical under any declaration.
+    expect(sourceOf('f', fixture('interior-or-non-access'))).toContain('&gBgInfo');
+  });
+
+  test('two access widths under one name refuse', () => {
+    expect(refusals('f', fixture('mixed-access-width'))).toEqual([['gTbl', 'mixed-access-width']]);
+  });
+
+  test('one name read signed and unsigned refuses', () => {
+    expect(refusals('f', fixture('mixed-extension'))).toEqual([['gTbl', 'mixed-extension']]);
+  });
+
+  test('an access with no variable term refuses', () => {
+    expect(refusals('f', fixture('no-subscript'))).toEqual([['gTbl', 'no-subscript']]);
+  });
+
+  test('a subtracted term in the residual refuses', () => {
+    expect(refusals('f', fixture('residual-not-a-sum'))).toEqual([['gTbl', 'residual-not-a-sum']]);
+  });
+
+  test('an index pre-scaled past the element refuses', () => {
+    expect(refusals('f', fixture('stride-is-not-the-element'))).toEqual([['gTbl', 'stride-is-not-the-element']]);
+  });
+
+  test('a constant that is not a whole element refuses', () => {
+    expect(refusals('f', fixture('mid-element-constant'))).toEqual([['gTbl', 'mid-element-constant']]);
+  });
+
+  test('two accesses at different strides are not a rank', () => {
+    // Ablated, the derivation takes the FIRST access's rank and publishes it for the name: a
+    // `extern s32 gTbl[][2];` in the `[declared]` block off a table whose second access strides by
+    // one element. The addresses still come out right — what is fabricated is the CLAIM about the
+    // object, which is the half a project user compiling against their own header pays for.
+    expect(deriveWithout('ranks-disagree', 'f', fixture('ranks-disagree')).get('gTbl')?.dims).toEqual([null, 2]);
+  });
+
+  test('one index-first access refuses a symbol the others license', () => {
+    expect(refusals('f', fixture('index-materialized-first'))).toEqual([['gTbl', 'index-materialized-first']]);
   });
 
   test('the address escaping to a callee refuses the whole symbol', () => {
-    // A declaration is per SYMBOL, not per access: one use this spelling does not model and the
-    // name keeps the cast form everywhere.
-    const escapes = `	.code	16
-.text
-	.align	2, 0
-	.globl	f
-	.type	 f,function
-	.thumb_func
-f:
-	push	{r4, lr}
-	ldr	r4, .L3
-	lsl	r0, r0, #0x1
-	add	r0, r0, r4
-	ldrh	r0, [r0]
-	mov	r0, r4
-	bl	sink
-	pop	{r4}
-	pop	{r1}
-	bx	r1
-.L4:
-	.align	2, 0
-.L3:
-	.word	gTbl
-.Lfe1:
-	.size	 f,.Lfe1-f
-`;
-    expect(derive('f', escapes).size).toBe(0);
+    expect(refusals('f', fixture('address-escapes'))).toEqual([['gTbl', 'address-escapes']]);
   });
 
-  test('two access widths under one name refuse: the element type would be a guess', () => {
-    const twoWidths = thumb(
-      'f',
-      '	ldr	r2, .L3\n	lsl	r1, r0, #0x1\n	add	r1, r1, r2\n	ldrh	r1, [r1]\n	lsl	r0, r0, #0x2\n' +
-        '	add	r0, r0, r2\n	ldr	r0, [r0]\n	add	r0, r0, r1',
-      '.word	gTbl',
-    );
-    expect(derive('f', twoWidths).size).toBe(0);
+  test('no evidence at all — width 1, no constant — claims nothing', () => {
+    expect(refusals('f', fixture('no-positive-evidence'))).toEqual([['gTbl', 'no-positive-evidence']]);
+  });
+});
+
+// ── which refusals actually DECIDE, as a committed measurement ────────────────────────────────
+//
+// The header's list of refusals is prose; this is the part a reviewer can check. For each rule:
+// remove that ONE rule from the table and re-run the real derivation on the real fixture. Six are
+// ATTRIBUTING — right about their shape, first because they name the real cause, subsumed by a
+// later rule if removed — and eight are the only thing standing between their fixture and a
+// derivation. `sound` records exactly that split, so the classification is re-measured on every
+// run rather than asserted once in a comment.
+
+describe('every gate: which rule decides, and whether it is uniquely load-bearing', () => {
+  test('`sound` says exactly which rules nothing else would have caught', () => {
+    const gates = [...ARRAY_SHAPE_GATES.address, ...ARRAY_SHAPE_GATES.shape];
+    const measured = GATE_FIXTURES.map(([id, asm]) => [id, deriveWithout(id, 'f', asm).size > 0]);
+    expect(measured).toEqual(GATE_FIXTURES.map(([id]) => [id, gates.find((g) => g.id === id)!.sound]));
+    // …and the split is not degenerate in either direction
+    expect(measured.filter(([, u]) => u === true).length).toBe(8);
+    expect(measured.filter(([, u]) => u === false).length).toBe(5);
+  });
+
+  test('every gate in both tables has a fixture here', () => {
+    // A rule with no reaching input is a rule nothing has shown to be about anything. The one
+    // exception is stated rather than skipped.
+    const covered = new Set(GATE_FIXTURES.map(([id]) => id));
+    const missing = [...ARRAY_SHAPE_GATES.address, ...ARRAY_SHAPE_GATES.shape]
+      .map((g) => g.id)
+      .filter((id) => !covered.has(id));
+    // `address-unused` rejects an element address with no reader; the lifted IR the derivation
+    // runs on has none, so it is defensive and marked `sound: false`.
+    expect(missing).toEqual(['address-unused']);
   });
 });
 
@@ -278,6 +514,137 @@ describe('both symbol-variant arms agree about a name the map does NOT know', ()
       expect(c.source).toContain('gTbl[a0]');
       expect(c.symbolRefs?.find((r) => r.name === 'gTbl')?.info).toMatchObject({ shape: 'array', elemSize: 2 });
     }
+  });
+});
+
+// ── the dims ↔ strides round trip ─────────────────────────────────────────────────────────────
+//
+// The conversion is written TWICE, in two files, in opposite directions: this module reads inner
+// EXTENTS out of ascending strides (`extentsOf`), and `structure/globalaccess.ts`'s
+// `declaredSubscripts` reconstructs the STRIDES from the extents to divide the residual back into
+// subscripts (`inner.slice(p).reduce((a, b) => a * b, width)`). If the two ever disagree
+// numerically, the emitted subscript addresses a different object than the assembly did — and the
+// only inhabitant on the corpus is rank 2 with an inner extent of 2, which is the one case that is
+// hard to get wrong. So the round trip is asserted over a range instead.
+
+describe('the derived rank survives the round trip back into strides', () => {
+  test('every rank asmlift can derive re-divides the residual into the same subscripts', () => {
+    let derived = 0;
+    for (const width of [1, 2, 4]) {
+      for (const inner of [[2], [3], [8], [2, 2], [4, 3], [2, 8, 5]]) {
+        // the strides a declaration `T g[][inner…]` produces, innermost first — the shape the asm
+        // presents to `extentsOf`
+        const strides = [width];
+        for (let k = inner.length - 1; k >= 0; k--) {
+          strides.push(strides[strides.length - 1] * inner[k]);
+        }
+        const asm = thumb(
+          'f',
+          `\tldr\tr7, .L3\n${strides
+            .map((st, n) => `\tmov\tr6, #${st}\n\tmul\tr${n}, r6\n`)
+            .join('')}\tmov\tr5, r0\n${strides
+            .slice(1)
+            .map((_, n) => `\tadd\tr5, r5, r${n + 1}\n`)
+            .join('')}\tadd\tr5, r5, r7\n\tldr${width === 1 ? 'b' : width === 2 ? 'h' : ''}\tr0, [r5]`,
+          '.word\tgTbl',
+        );
+        const si = derive('f', asm).get('gTbl');
+        // Every generated shape is derivable here (the base loads first and every scale follows),
+        // and the dims it carries must reproduce exactly the strides it was read from —
+        // `arrayInnerExtents` is the shared reader both sides call. Ranks 1 through 3 at all three
+        // element widths, which is 17 shapes more than the corpus has.
+        expect([width, inner, si === undefined]).toEqual([width, inner, false]);
+        derived++;
+        const back = [width];
+        for (const e of [...(arrayInnerExtents(si!) ?? [])].reverse()) {
+          back.push(back[back.length - 1] * e);
+        }
+        expect([width, inner, back]).toEqual([width, inner, strides]);
+      }
+    }
+    // …and the loop really ran: a property test whose population is empty asserts nothing.
+    expect(derived).toBe(18);
+  });
+
+  test('…and the generator is not vacuous: at least one shape really derives', () => {
+    // Otherwise the loop above asserts nothing, which is the failure mode a guarded property test
+    // has and a plain one does not.
+    expect(derive('f', RANK2).get('gPtrTbl')?.dims).toEqual([null, 2]);
+    expect(arrayInnerExtents(derive('f', RANK2).get('gPtrTbl')!)).toEqual([2]);
+  });
+});
+
+// ── the shape travels with the source ────────────────────────────────────────────────────────
+
+describe('the assumed declaration is never hidden', () => {
+  test('a source that spells a bare subscript reports the shape it assumes', () => {
+    // `((T *)&gSym)[i]` reproduces the target's bytes under ANY declaration of the name; the bare
+    // `gSym[i]` means what the declaration says it means. So the derived shape leaves every entry
+    // path with the source, and a consumer showing one without the other is publishing a spelling
+    // whose meaning it has not stated. The element SIGNEDNESS is the sharp case: compiled through
+    // the benchmark's own agbcc command, `(u16)gS[i]` over `extern const s16 gS[]` and `gS[i]`
+    // over `extern const u16 gS[]` are the SAME object, so this `elemSigned: false` is a pick.
+    const r = decompile('f', BASE_FIRST, ARMV4T_AGBCC, {});
+    expect(r.source).toContain('gTbl[a0]');
+    expect(r.assumedSymbols).toEqual([{ name: 'gTbl', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false }]);
+  });
+
+  test('a source that assumes nothing says so', () => {
+    expect(decompile('f', INDEX_FIRST, ARMV4T_AGBCC, {}).assumedSymbols).toEqual([]);
+  });
+});
+
+// ── the spelling and the declaration are never derived from different lifts ───────────────────
+
+describe('sameDerivedShape: what "the declaration will carry this" means', () => {
+  // rank.ts spells from a per-variant derivation and declares from a probe-derived dictionary. The
+  // `/raw-globals` arm structures with NO map and declares with one, so the two can be read off
+  // different lifts — and a candidate that spells `gTbl[i][j]` beside `extern u32 gTbl[][8];`
+  // addresses a different object than the assembly did, compiling either way. This is the
+  // predicate that keeps the raw arm from spelling a shape its declaration will not carry.
+  const arr = { name: 'gTbl', kind: 'data' as const, shape: 'array' as const, elemSize: 2, elemSigned: false };
+
+  test('agrees on the fields the bare subscript reads, and only those', () => {
+    expect(sameDerivedShape(arr, { ...arr })).toBe(true);
+    // `elemSigned` absent defaults the same way `bareArrayElement` defaults it
+    expect(sameDerivedShape(arr, { name: 'gTbl', kind: 'data', shape: 'array', elemSize: 2 })).toBe(true);
+    // …and a different NAME is not a disagreement about the object: the caller keys by name
+    expect(sameDerivedShape(arr, { ...arr, name: 'gOther' })).toBe(true);
+  });
+
+  test('disagrees on every field that moves an address', () => {
+    expect(sameDerivedShape(arr, { ...arr, elemSize: 4 })).toBe(false);
+    expect(sameDerivedShape(arr, { ...arr, elemSigned: true })).toBe(false);
+    expect(sameDerivedShape(arr, { ...arr, dims: [null, 8] })).toBe(false);
+    expect(sameDerivedShape(arr, { name: 'gTbl', kind: 'data' })).toBe(false);
+    expect(sameDerivedShape(arr, undefined)).toBe(false);
+    expect(sameDerivedShape(undefined, undefined)).toBe(true);
+  });
+});
+
+// ── the axes the derived rank re-opens ───────────────────────────────────────────────────────
+
+describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does', () => {
+  // `/flat-rank` exists BECAUSE the asm underdetermines the choice between `g[r][i]` and the flat
+  // byte arithmetic (matching/array-rank-axis.test.ts compiles the pair). Its enumeration gate
+  // used to ask the PROJECT MAP, on the premise that structure() builds the symbol render context
+  // only from one — a premise this derivation falsified: the context is now the union of the map
+  // and the shapes the asm evidences. Supplying the rank from a new place does not make the choice
+  // determined, and nothing reports a candidate that was never enumerated.
+  test('both arms are enumerated, and they are genuinely different spellings', () => {
+    const cands = enumerateCandidates('f', RANK2, ARMV4T_AGBCC);
+    expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/flat-rank', 'signed', 'signed/flat-rank']);
+    const on = cands.filter((c) => !c.label.includes('flat-rank'));
+    const off = cands.filter((c) => c.label.includes('flat-rank'));
+    expect(on.every((c) => c.source.includes('gPtrTbl[a0][a1]'))).toBe(true);
+    expect(off.every((c) => c.source.includes('(u32)&gPtrTbl'))).toBe(true);
+    expect(off.every((c) => !c.source.includes('gPtrTbl[a0]'))).toBe(true);
+  });
+
+  test('a rank-1 derivation opens no arm — the axis has nothing to turn off', () => {
+    // The gate is asked of the EVIDENCE, not of the derivation's mere existence: a symbol with no
+    // declared rank spells the same tree either way, and the pair would be dedup fodder.
+    expect(enumerateCandidates('f', BASE_FIRST, ARMV4T_AGBCC).map((c) => c.label)).toEqual(['unsigned', 'signed']);
   });
 });
 

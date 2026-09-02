@@ -54,7 +54,7 @@ import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
-import { inferGlobalArrays } from './raise/globalshape';
+import { inferGlobalArrays, sameDerivedShape } from './raise/globalshape';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import {
@@ -1235,12 +1235,21 @@ export function enumerateCandidates(
   // `symbolsUsed`, where a row with no winner is invisible. RE-DERIVE THIS PAIR RATHER THAN
   // RE-ANCHORING IT: adding one map-bearing row moves it, and one of the nine is exactly that —
   // `synthetic:sbscope:agbcc`, whose map declares `dims: [4, 1024]`.
-  const fnNamesMultidimArray =
-    byName !== undefined &&
-    [...bareGlobalSymbols(probe).keys()].some((n) => {
-      const i = byName.get(n);
-      return i !== undefined && i.shape === 'array' && (arrayInnerExtents(i)?.length ?? 0) > 0;
-    });
+  //
+  // THE GATE READS THE MAP **OR** THE DERIVED SHAPES, and the map half alone was a live bug: since
+  // raise/globalshape.ts, `structure()` builds the symbol render context from the UNION of the
+  // project map and the shapes the asm evidences, so a MAP-LESS function whose own strides nest
+  // (`synthetic:tblrank2:agbcc`) now spells `gPtrTbl[a0][a1]` by default while its flat sibling
+  // `*(s32 *)((a1 << 2) + (a0 << 3) + (u32)&gPtrTbl)` — a genuinely different tree — was
+  // enumerated nowhere. An axis exists BECAUSE the asm underdetermines the choice; supplying the
+  // rank from a new place does not make it determined, and nothing reports a candidate that was
+  // never enumerated. Map first, exactly as everywhere else: a name the map knows is answered by
+  // the map.
+  const derivedOrMapped = (n: string): SymbolInfo | undefined => byName?.get(n) ?? probeShapes.get(n);
+  const fnNamesMultidimArray = [...bareGlobalSymbols(probe).keys()].some((n) => {
+    const i = derivedOrMapped(n);
+    return i !== undefined && i.shape === 'array' && (arrayInnerExtents(i)?.length ?? 0) > 0;
+  });
   const declRankCands = fnNamesMultidimArray
     ? [...ptrElemCands, ...ptrElemCands.map((s) => ({ ...s, suffix: `${s.suffix}/flat-rank`, declRank: false }))]
     : ptrElemCands;
@@ -2020,6 +2029,14 @@ export function enumerateCandidates(
   // spellings and raw-address macros. So when a map is present the raw-global spelling is ALSO
   // enumerated ('/raw-globals') and the differ referees; the dedup below collapses the pair
   // wherever the map changed nothing, so this never scores worse than either side alone.
+  // Does the `/raw-globals` arm have a RANK of its own to spell? Read off the DERIVED shapes the
+  // map does not answer for — the only ones a map-less structuring ever sees — because that is
+  // exactly the population `/flat-rank`'s decline just below is about. A superset of what the raw
+  // arm's own lift derives (it is read off the probe's), for the reason the axis gate above is one
+  // too: this only ADDS an OFF arm, and where the arm changes nothing the tree dedup collapses it.
+  const rawDerivesRank = [...probeShapes].some(
+    ([n, i]) => byName?.get(n) === undefined && (arrayInnerExtents(i)?.length ?? 0) > 0,
+  );
   const symbolVariants: { suffix: string; symbols?: typeof opts.symbols }[] = opts.symbols
     ? [
         { suffix: '', symbols: opts.symbols },
@@ -2037,10 +2054,16 @@ export function enumerateCandidates(
     // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
     // …and `/no-ptr-elem` names a spelling only the MAP makes available, for the same reason:
     // structure() normalizes `spellPtrMemberElements` to false without `symbols`, so both arms
-    // structure the identical tree on the raw variant. `/flat-rank` is the third: the declared
-    // subscripts come off the symbol RENDER CONTEXT, which structure() builds only from a map, so
-    // its OFF arm is the raw variant's only spelling already.
-    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields && s.ptrElems && s.declRank);
+    // structure the identical tree on the raw variant. `/flat-rank` USED TO BE the third, on the
+    // premise that the declared subscripts come off a render context structure() builds only from
+    // a map — a premise raise/globalshape.ts falsified: the context is now the UNION of the map and
+    // the shapes this function's own strides evidence, and the raw arm derives its own. So the
+    // decline is asked of the EVIDENCE rather than of the map: it stands only where no derived
+    // shape carries a rank for the raw arm to spell, which is the condition under which both arms
+    // really do structure the identical tree.
+    const svCands = sv.symbols
+      ? axisCands
+      : axisCands.filter((s) => s.bitfields && s.ptrElems && (s.declRank || rawDerivesRank));
     const treeOwnedFold = treeOwnedIn(sv.symbols);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
@@ -2144,9 +2167,17 @@ export function enumerateCandidates(
           // declaration beside it came from the map — `extern u32 gFoo[][8];` — and the emitted C
           // would stride by 8. Compiling, and the wrong address. One name the map describes is
           // one name this derivation does not claim, on either arm.
+          //
+          // AND NEVER A SHAPE THE DECLARATION BLOCK WILL NOT CARRY, which is the same hazard one
+          // step further out. `declSymbols` is built ONCE, off the probe's lift; this map is built
+          // per variant, off the variant's own. Where the two lifts disagree about a name the map
+          // does NOT know, the map-precedence delete above says nothing and the raw arm would
+          // again spell from one shape and declare from another. So the test is not "the map
+          // knows this name" but "whatever will be DECLARED for this name says the same thing" —
+          // a name the two answer differently keeps the cast form, which needs no declaration.
           inferredSymbols = inferGlobalArrays(fn, target);
-          for (const n of [...inferredSymbols.keys()]) {
-            if (baseOpts.symbols?.has(n) === true) {
+          for (const [n, si] of [...inferredSymbols]) {
+            if (baseOpts.symbols?.has(n) === true || !sameDerivedShape(declSymbols.get(n), si)) {
               inferredSymbols.delete(n);
             }
           }
