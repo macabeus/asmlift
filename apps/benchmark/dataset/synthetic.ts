@@ -4983,6 +4983,37 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: BGPTRS_MAP,
   },
   // ── GLOBAL ARRAY SHAPE — the base local, the array-typed subscript, and the pool addend ────────
+  // 2026-09-02 — WHAT THIS FAMILY NOW MEASURES, because everything below it is the state at
+  // AUTHORING TIME and three of the scores have moved. `raise/globalshape.ts` derives a global's
+  // array shape from the assembly's own stride evidence (the ORDER of the pool load against the
+  // index scale, or a constant on the INDEX against a zero relocation addend) and routes it to the
+  // structurer and to the declaration synthesis:
+  //
+  //   harr      2 → MATCH      harridx  5 → MATCH      tblrank2  3 → MATCH
+  //   bgarr     8 → 8   still open: its 28-byte element needs an element TYPE the declaration
+  //                     synthesis has no way to name (`declare.ts` `intType` is null at stride 28)
+  //   arrbias   MATCH held     arrcast  MATCH held     outparam declined, unchanged
+  //
+  // BOTH CONTROLS HELD AT THE ENUMERATION, which is the only place they bind (their fans are 2
+  // with both candidates at 0, so the published score cannot see an over-fire): enumerated,
+  // 0 of 2 candidates on `arrbias` and 0 of 2 on `arrcast` carry the bare subscript, and both
+  // keep the `extern u32 gTbl;` declaration of the cast spelling.
+  //
+  // FAN COST IS ZERO ON SIX OF THE SEVEN AND 2 -> 4 ON `tblrank2`. The derivation REPLACES the
+  // default spelling rather than adding a candidate, so where the shape is rank-1 the fan does not
+  // move: measured with `arrayShapeFromStride` off and on, `harr`, `harridx`, `bgarr`, `arrbias`
+  // and `arrcast` enumerate `unsigned, signed` either way. A DERIVED RANK is the exception, and it
+  // is a lever this branch deliberately re-opened: `dims` satisfies the enumeration gate of
+  // `/flat-rank`, an axis that map-less had nothing to turn off, so `tblrank2` enumerates
+  // `unsigned, unsigned/flat-rank, signed, signed/flat-rank`. The axis exists because the asm
+  // underdetermines `g[r][i]` against the flat byte arithmetic, and it is pinned by
+  // `packages/core/test/global-array-shape.test.ts` ("a derived rank enumerates `/flat-rank`").
+  // Corpus-wide that is +2 candidates on ONE function: `tblrank2` is the only row of the 964
+  // whose derived shape carries `dims` at all.
+  //
+  // The AUTHORING-TIME figures below are kept verbatim rather than rewritten: they are what the
+  // rows were cut to measure, and the "today"s in them mean that day, not this one.
+  //
   // Seven rows. FIVE — `harr`, `harridx`, `bgarr`, `tblrank2`, `arrbias` — are modelled on array
   // shapes the same graphics translation unit the `value-home` and DMA families above were cut
   // from actually indexes, which is why they are modelled rather than invented: a bare extern

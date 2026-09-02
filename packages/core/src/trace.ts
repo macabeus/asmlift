@@ -14,7 +14,8 @@ import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
-import { type SymbolMap, symbolsByName } from './symbols';
+import { assumedShapes, inferGlobalArrays } from './raise/globalshape';
+import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
 export interface StageTrace {
@@ -52,6 +53,22 @@ export interface TraceReport {
   /** Set ONLY on the annotate-mode stub path (empty trace): the failure reason, machine-readable —
    *  so a consumer of the reasoning trail is not reduced to parsing the stub's source comments. */
   declineReason?: string;
+  /** The shapes the emitted source's spelling ASSUMES, derived from the assembly rather than read
+   *  from a map — pipeline.ts `DecompileResult.assumedSymbols`, and the same obligation: a
+   *  consumer showing the source must show these, because a bare `gSym[i]` means what the
+   *  declaration of `gSym` says it means.
+   *
+   *  NARROWER THAN THE `stage:globalshape` ENTRY ABOVE, on purpose. That entry reports what the
+   *  stage DERIVED, so a spelling decision downstream is attributable to a stage; this reports
+   *  what the SOURCE rests on, and a shape the structurer refused or a name the caller's own map
+   *  described is not an obligation the reader has (raise/globalshape.ts `assumedShapes`). */
+  assumedSymbols: SymbolInfo[];
+}
+
+/** `; dims [_][2]` for a derived rank, or '' for rank 1 — the trace note's tail. */
+function dimsNote(i: SymbolInfo): string {
+  const inner = i.shape === 'array' ? (i.dims ?? []).slice(1) : [];
+  return inner.length === 0 ? '' : `, dims [_]${inner.map((d) => `[${d ?? '?'}]`).join('')}`;
 }
 
 // Every knob decompile() takes must exist here with the SAME default — a surface that disagrees
@@ -64,8 +81,13 @@ export interface TraceOptions {
   symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Score probe at pattern boundaries (cli report's objdiff hook). One call per boundary:
-   *  pattern N's after-score is pattern N+1's before-score. Absent ⇒ score fields stay unset. */
-  probeScore?: (fn: Fn) => number | undefined;
+   *  pattern N's after-score is pattern N+1's before-score. Absent ⇒ score fields stay unset.
+   *
+   *  THE DERIVED ARRAY SHAPES TRAVEL WITH THE CLONE: they are read once off the lift
+   *  (`stage:globalshape`) and change the default spelling of every indexed global, so a probe
+   *  that structures without them attributes its per-pattern delta to a source the main path does
+   *  not emit. */
+  probeScore?: (fn: Fn, inferredSymbols: Map<string, SymbolInfo>) => number | undefined;
 }
 
 // The report's per-pass trace stage id + title, keyed by the shared PreRecoveryPass.id. Kept HERE
@@ -121,6 +143,7 @@ export function decompileTraced(
         asm,
         trace: [],
         patternEvents: [],
+        assumedSymbols: [],
         source: stub.source,
         declineReason: e instanceof Error ? e.message : String(e),
       },
@@ -147,6 +170,25 @@ function traceTower(
   const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
   trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: print(fn), verified: true });
+  // The array shapes the assembly evidences, off the LIFTED fn — same reading, same reason, as
+  // pipeline.ts's runTower: the fold and the tower below destroy the order the licence reads.
+  //
+  // IT GETS ITS OWN TRACE ENTRY because it is the one stage whose product is not the IR: it
+  // changes the DEFAULT spelling of every indexed global and leaves no mark in any `irDump`, so
+  // without a line here a reader following the trail from `stage:lift` to `stage:structure` sees
+  // `gTbl[i]` appear with nothing that produced it, and a wrong shape is attributable to no stage.
+  const inferredSymbols = inferGlobalArrays(fn, target);
+  trace.push({
+    id: 'stage:globalshape',
+    title: 'Array shape from stride evidence (globals no symbol map describes)',
+    verified: true,
+    note:
+      inferredSymbols.size === 0
+        ? 'nothing evidenced — every indexed global keeps `((T *)&gSym)[i]`, valid under any declaration'
+        : [...inferredSymbols.values()]
+            .map((i) => `${i.name}: elem ${i.elemSize} ${i.elemSigned ? 'signed' : 'unsigned'}${dimsNote(i)}`)
+            .join('; '),
+  });
 
   // (2) idiom fold (capability-gated), with an optional probed score per pattern boundary —
   // the SAME default set as decompile()/decompileRanked
@@ -154,7 +196,7 @@ function traceTower(
   // Probe economy: ONE probe per pattern boundary — pattern N's after-score IS pattern N+1's
   // before-score (the state is identical), and each probe costs a full clone + tower + external
   // compile + objdiff. Zero-hit patterns emit NO event (the IR is unchanged).
-  let scoreBefore = opts.probeScore?.(fn);
+  let scoreBefore = opts.probeScore?.(fn, inferredSymbols);
   for (const p of active) {
     const beforeIr = print(fn);
     const hits = applyPattern(fn, p);
@@ -164,7 +206,7 @@ function traceTower(
       continue;
     }
     const afterIr = print(fn);
-    const scoreAfter = opts.probeScore?.(fn);
+    const scoreAfter = opts.probeScore?.(fn, inferredSymbols);
     patternEvents.push({
       id: `pattern:${p.id}`,
       patternId: p.id,
@@ -226,10 +268,12 @@ function traceTower(
 
   // (4) structure → neutral AST; boundary contract: no unresolved value leaked (strict) or
   // spelled as a loud ASMLIFT_ERROR marker (annotate) — same onGap lever as decompile()
+  const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
     ...structureOptionsFor(target, returnsVoid),
     onGap: opts.onGap ?? 'strict',
-    ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+    ...(mapSymbols ? { symbols: mapSymbols } : {}),
+    ...(inferredSymbols.size ? { inferredSymbols } : {}),
   });
   trace.push({
     id: 'stage:structure',
@@ -258,6 +302,11 @@ function traceTower(
       trace,
       patternEvents,
       source,
+      // The same narrowing pipeline.ts's `DecompileResult` makes, and for the same reason: the
+      // `stage:globalshape` entry above reports what the STAGE derived, this reports what the
+      // SOURCE rests on, and they differ wherever a consumer refused the shape or the caller's
+      // own map already declared the name (raise/globalshape.ts `assumedShapes`).
+      assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
     },
   };
 }

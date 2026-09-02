@@ -26,9 +26,10 @@
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
 //     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
-//     Three exceptions are read off the target directly, their consumers not being the
-//     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers) and
-//     `hoistsSingleSetArm` (raise/pre-recovery.ts, a raising pass). The field names are a
+//     Four exceptions are read off the target directly, their consumers not being the
+//     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers),
+//     `hoistsSingleSetArm` (raise/pre-recovery.ts, a raising pass) and `arrayShapeFromStride`
+//     (raise/globalshape.ts, run on the LIFTED fn). The field names are a
 //     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
@@ -160,6 +161,19 @@ export interface TargetDescription {
     // there, the clause reaches 0 of its benchmark rows, and `docs/level-tower.md`'s rule for an
     // unmeasured per-compiler default is to claim nothing.
     hoistsSingleSetArm?: boolean;
+    // A subscript over a DECLARED ARRAY OBJECT expands its base ahead of the index, where every
+    // pointer or cast base expands it last — so the instruction order in the target's own assembly
+    // says which of the two the source wrote, and `raise/globalshape.ts` may derive an array shape
+    // for a global no symbol map describes. Absent ⇒ the derivation is empty and every indexed
+    // global keeps today's `((T *)&gSym)[i]` cast spelling.
+    //
+    // Set on agbcc, where the fork is `gcc/c-typeck.c build_array_ref`'s
+    // `TREE_CODE (TREE_TYPE (array)) == ARRAY_TYPE && TREE_CODE (array) != INDIRECT_REF` and both
+    // spellings were compiled against the same target. NOT set anywhere else: whether ido, kmc or
+    // mwcc distinguish them at all is unmeasured, and `docs/level-tower.md`'s rule for an
+    // unmeasured per-compiler default is to claim nothing. Read off the target by a raising pass
+    // (`inferGlobalArrays`), not by the structurer.
+    arrayShapeFromStride?: boolean;
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation.
@@ -284,6 +298,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchAllowsBoundCase: true,
     switchArmsFollowLayout: true,
     hoistsSingleSetArm: true,
+    arrayShapeFromStride: true,
   },
 };
 

@@ -23,12 +23,13 @@ import { mergeCommonTails } from './l3/tailmerge';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
+import { assumedShapes, inferGlobalArrays } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
 import { StructureError, structure } from './structure/structure';
-import { type SymbolMap, symbolsByName } from './symbols';
+import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
 /** How a gap (a construct asmlift cannot faithfully model) degrades:
@@ -87,6 +88,25 @@ export interface DecompileResult {
    *  where the plain call above it passes with a warning. Declaring an address-taken unknown
    *  callee would close it — an emitter change, moving source bytes on every row that has one. */
   diagnostics: Diagnostic[];
+  /** THE SHAPES THIS SOURCE'S SPELLING ASSUMES, which no symbol map supplied (raise/globalshape.ts).
+   *
+   *  Everything else a backend emits is byte-correct under ANY declaration of the names it spells
+   *  — that is exactly why `((T *)&gSym)[i]` is the fallback (structure/globalaccess.ts). A bare
+   *  `gSym[i]` is not: it means what the DECLARATION of `gSym` says it means, and where that
+   *  declaration was derived from the assembly rather than read from the project's map, the
+   *  emitted source is right about the target's bytes only beside the declaration derived with it.
+   *  The element SIGNEDNESS is the sharp case, and it is an assumption rather than a reading:
+   *  compiled through the benchmark's own agbcc command, `(u16)gS[i]` over `extern const s16 gS[]`
+   *  and `gS[i]` over `extern const u16 gS[]` are the SAME OBJECT, so the assembly cannot say which
+   *  the source wrote — asmlift picks the one its own declaration block states.
+   *
+   *  So this travels with the source on every path that can emit it: the scoring layer renders it
+   *  (declare.ts, and main.ts's `[declared]` block), and a caller that shows the source alone must
+   *  show these too, or it is publishing a spelling whose meaning it has not stated. Empty on every
+   *  run that assumed nothing — which includes every derived shape the structurer did not spell
+   *  bare, and every name the caller's own map described (raise/globalshape.ts `assumedShapes`
+   *  computes that narrowing and names the corpus row behind each half). */
+  assumedSymbols: SymbolInfo[];
 }
 
 export function decompile(
@@ -125,6 +145,11 @@ function runTower(
   const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
   const raw = print(fn);
+  // (1.5) the ARRAY SHAPES this function's own assembly evidences, for globals the project map
+  // does not describe. Read HERE, off the lifted fn, because the fact it needs — whether the base
+  // was materialized before the index was scaled — is destroyed by the raising tower below
+  // (raise/globalshape.ts's module note). Empty unless the target opts in.
+  const inferredSymbols = inferGlobalArrays(fn, target);
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
@@ -138,16 +163,28 @@ function runTower(
 
   // (4) structure: IR → neutral AST; boundary contract: no unresolved value leaked (strict), or
   // every unresolved value spelled as a loud ASMLIFT_ERROR marker (annotate).
+  const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
     ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
     onGap,
-    ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+    ...(mapSymbols ? { symbols: mapSymbols } : {}),
+    ...(inferredSymbols.size ? { inferredSymbols } : {}),
   });
 
   // (5) lower + print: neutral AST → target language
   const source = backend.emit(sfn);
 
-  return { source, sfn, ir: { raw, folded, recovered }, patternHits, diagnostics: collectMarkers(sfn) };
+  return {
+    source,
+    sfn,
+    ir: { raw, folded, recovered },
+    patternHits,
+    diagnostics: collectMarkers(sfn),
+    // WHAT THE SOURCE RESTS ON, not what the derivation found: a shape the structurer did not
+    // spell bare, and a name the caller's own map described, are both obligations this reader
+    // does not have (raise/globalshape.ts `assumedShapes`).
+    assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
+  };
 }
 
 // ── the shared raising tower ────────────────────────────────────────────────────────────────
@@ -356,6 +393,8 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
     ir: { raw: '', folded: '', recovered: '' },
     patternHits: 0,
     diagnostics: [{ stage, reason: msg }],
+    // A stub spells no global, so it assumes nothing about one.
+    assumedSymbols: [],
   };
 }
 

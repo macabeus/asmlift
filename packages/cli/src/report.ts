@@ -14,6 +14,7 @@ import type { Block, Fn, Value } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import type { FnProto } from '@asmlift/core/proto';
+import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
 import { type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
 import { type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
 
@@ -50,8 +51,25 @@ export function decompileWithReport(
   const { targetObj, compile, ...traceOpts } = opts;
   const backend = opts.backend ?? cBackend;
   const returnsVoid = opts.prototypes?.[name]?.returnsVoid ?? false;
+  // THE PROJECT'S OWN MAP GOES TO THE PROBE TOO, and it is not an optional refinement: the
+  // main path structures with it, and a probe that structures without it measures its deltas on
+  // a program asmlift does not emit. Built once here rather than per probe — `symbolsByName`
+  // walks the whole project map, and a probe fires at every pattern boundary.
+  const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const probeScore = targetObj
-    ? (fn: Fn) => tryScore(backend, fn, target, name, targetObj, returnsVoid, compile, opts.prototypes?.[name])
+    ? (fn: Fn, inferredSymbols: Map<string, SymbolInfo>) =>
+        tryScore(
+          backend,
+          fn,
+          target,
+          name,
+          targetObj,
+          returnsVoid,
+          compile,
+          opts.prototypes?.[name],
+          inferredSymbols,
+          mapSymbols,
+        )
     : undefined;
 
   const { source, report } = decompileTraced(name, asm, target, { ...traceOpts, probeScore });
@@ -63,11 +81,19 @@ export function decompileWithReport(
   if (targetObj && report.trace.length > 0) {
     try {
       score = scoreSource(source, name, targetObj, target, backend.id, compile);
+      // …and the SAME symbol map, for the same reason the probe above gets it: without it the
+      // `candidates` list is enumerated from a different program family than the report's own
+      // headline and `score`. Measured on a function whose map declares `const s16 gTbl[4][64]`:
+      // the headline emits `((u16 *)&gTbl)[a0]` (the map's element is signed, the access
+      // zero-extends, so the bare form is refused) while every ranked candidate was
+      // `gTbl[a0]` — a bare subscript whose meaning rests on a declaration the caller's own map
+      // contradicts. A candidate list that cannot contain the headline is not a ranking of it.
       const ranked = decompileRanked(name, asm, target, targetObj, {
         patterns: opts.patterns,
         backend,
         prototypes: opts.prototypes,
         asmData: opts.asmData,
+        symbols: opts.symbols,
         compile,
       });
       candidates = ranked.candidates.map((c) => ({
@@ -107,6 +133,8 @@ function tryScore(
   returnsVoid: boolean,
   compile: CandidateCompiler | undefined,
   self: FnProto | undefined,
+  inferredSymbols: Map<string, SymbolInfo>,
+  mapSymbols: Map<string, SymbolInfo> | undefined,
 ): number | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -115,7 +143,19 @@ function tryScore(
     // so it is verifier-gated like every other path: a corrupt clone yields `undefined`, never
     // a garbage delta.
     raiseRecovered(clone, target, {}, self);
-    const sfn = structureChecked(clone, structureOptionsFor(target, returnsVoid));
+    // …structured with the SAME SYMBOL FACTS the main path uses, which is TWO dictionaries and
+    // not one: the project's own map AND the derived array shapes (raise/globalshape.ts), asked
+    // in that order, exactly as `decompileTraced` asks them. Either one missing here measures the
+    // delta on a program asmlift does not emit — without the derived shapes the probe scores
+    // `((T *)&gSym)[i]` on every function the derivation reaches while the headline says
+    // `gSym[i]`, and without the MAP it scores the reverse and worse: on a map-ful function the
+    // probe would spell a bare `gSym[i]` whose meaning rests on a derived `extern u16 gSym[]`
+    // while the map beside it — and the headline source — say `const s16 gSym[4][64]`.
+    const sfn = structureChecked(clone, {
+      ...structureOptionsFor(target, returnsVoid),
+      ...(mapSymbols ? { symbols: mapSymbols } : {}),
+      ...(inferredSymbols.size ? { inferredSymbols } : {}),
+    });
     return scoreSource(backend.emit(sfn), name, obj, target, backend.id, compile).score;
   } catch {
     return undefined;

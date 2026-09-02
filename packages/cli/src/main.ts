@@ -619,8 +619,32 @@ export async function runCli(
   const onGap: OnGap = flags.has('strict') ? 'strict' : 'annotate';
   try {
     const result = decompile(name, asm, target, { backend, onGap, asmData, prototypes, symbols });
+    // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other
+    // spelling asmlift emits for a named global — `((T *)&gSym)[i]` — reproduces the target's
+    // bytes under ANY declaration of that name, so the source alone is the whole answer. A bare
+    // `gSym[i]` is not: it means what the DECLARATION of `gSym` says, and where that shape was
+    // derived from the assembly (raise/globalshape.ts) rather than read from a symbol map, the
+    // element's SIGNEDNESS in particular is a pick and not a reading — `(u16)gS[i]` over an
+    // `extern const s16 gS[]` and `gS[i]` over an `extern const u16 gS[]` compile to the same
+    // object under agbcc. The ranked path already states this in `[declared]`; without this line
+    // the plain path would hand a user a subscript to paste into a project whose own header may
+    // mean something else by it, with nothing said.
+    const assumedNote =
+      result.assumedSymbols.length === 0
+        ? ''
+        : `asmlift: [assumed] ${result.assumedSymbols.length} array shape(s) derived from this assembly — the ` +
+          `source spells them BARE, so it is about these declarations; check them against your headers:\n` +
+          renderDeclarations(result.assumedSymbols.map((info) => ({ name: info.name, info })))
+            .split('\n')
+            .filter((l) => l.trim() !== '')
+            .map((l) => `asmlift:   ${l}\n`)
+            .join('');
     const stderr =
-      targetTrace + warn + result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') + protoNote;
+      targetTrace +
+      warn +
+      result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
+      assumedNote +
+      protoNote;
     return { code: result.diagnostics.length === 0 ? 0 : 1, stdout: result.source, stderr };
   } catch (e) {
     const kind = isDecline(e) ? 'declined' : 'internal error';
