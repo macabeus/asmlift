@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { enforceCheckoutPin } from '../cases/checkout';
 import { loadManifestsForVendor, resolveProjectRoot } from '../cases/manifests';
 import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
-import { asmliftProvenance } from '../provenance';
+import { asmliftProvenance, sameMeasuredCode } from '../provenance';
 import { checkTierProvenance } from '../report/merge';
 import { asmliftScript, m2cScript } from '../report/repro-scripts';
 import { checkSymbolMapDrift, vendoredMapPath } from './symbol-drift';
@@ -50,13 +50,38 @@ const SCRIPT_TIMEOUT_MS = 300_000;
  *  So the refusal is borrowed rather than re-spelled, and it stays a refusal about PROVENANCE. It
  *  is still not a code-versus-artifact check — nothing here re-runs the harness — and
  *  `scripts/check-artifact-provenance.sh` remains the only gate that asks whether a later commit
- *  moved something the artifact measures. */
+ *  moved something the artifact measures.
+ *
+ *  ONE CASE IS EXEMPT, and leaving it in was this check's own first defect. `checkTierProvenance`
+ *  compares SHAS, so committing the regenerated artifact — the very next step in the documented
+ *  order — moves HEAD and made fidelity refuse with "the code moved between run and merge" for a
+ *  commit that moved no code. A loud refusal whose stated cause is FALSE is the same class of
+ *  wrong answer as the published error marker two commits ago. So a commit DIFFERENCE is asked of
+ *  the measured PATHS (`provenance.ts` `sameMeasuredCode`, the same list the provenance script
+ *  invalidates the artifact on) and passes only when none of them differs; a `dirty` stamp is
+ *  still refused unconditionally, because numbers from code no commit holds are never
+ *  certifiable. */
 export function tierRows(
   f: string,
   raw: string,
   now: { commit: string; dirty: boolean } | undefined,
+  sameCode: (a: string, b: string) => boolean = sameMeasuredCode,
 ): FunctionResult[] {
   const out = JSON.parse(raw) as BenchOutput;
+  const ran = out.meta.asmlift;
+  if (
+    ran !== undefined &&
+    !ran.dirty &&
+    now !== undefined &&
+    now.commit !== ran.commit &&
+    sameCode(ran.commit, now.commit)
+  ) {
+    console.log(
+      `[fidelity] ${f} was run at ${ran.commit.slice(0, 7)}, HEAD is ${now.commit.slice(0, 7)} — ` +
+        `no measured path differs between them, so these rows still measure this code`,
+    );
+    return out.results;
+  }
   checkTierProvenance(f, out, now);
   return out.results;
 }

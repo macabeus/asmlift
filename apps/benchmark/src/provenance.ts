@@ -41,6 +41,38 @@ export function codeDirtyFrom(porcelain: string): boolean {
   });
 }
 
+/** The repo paths a benchmark measurement depends on — the SAME list
+ *  `scripts/check-artifact-provenance.sh` invalidates the committed artifact on, kept in step by
+ *  `provenance-paths.test.ts` because two copies of a list like this drift silently and the
+ *  drift is only ever discovered by a gate that should have fired. Deliberately the WIDE list
+ *  (`paths`, not `measures`): asking "could this commit have changed a number" must err toward
+ *  yes. */
+export const MEASURED_PATHS = [
+  'packages/core/src',
+  'packages/cli/src',
+  'packages/toolchains/src',
+  'apps/benchmark/src',
+  'apps/benchmark/dataset',
+];
+
+/** Do two commits hold the SAME measured code? `false` when git cannot say — a question git
+ *  declines is not a yes.
+ *
+ *  This is what separates "the code moved between the run and now", which invalidates a tier
+ *  file, from "the artifact was committed since the run", which does not: an artifact-only
+ *  commit changes HEAD's sha and nothing a run computes. A check that compares SHAS calls both
+ *  of those the same thing, and then reports "the code moved" for a commit that moved no code —
+ *  a published error naming a cause the run does not have. */
+export function sameMeasuredCode(a: string, b: string): boolean {
+  if (a === b) {
+    return true;
+  }
+  const r = spawnSync('git', ['-C', REPO_ROOT, 'diff', '--quiet', a, b, '--', ...MEASURED_PATHS], {
+    encoding: 'utf8',
+  });
+  return r.status === 0;
+}
+
 const SAMPLE_INTERVAL_MS = 2000;
 let lastSample = 0;
 let sticky: { commit: string; dirty: boolean } | undefined;
