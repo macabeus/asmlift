@@ -4986,7 +4986,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // families above were cut from, whose body indexes a global array of 28-byte structs through a
   // variable index, a rank-2 table of pointers, and a rank-3 ROM table. The seventh, `arrcast`,
   // is NOT from that TU — it is a control constructed to guard a direction the other six leave
-  // open (axis 2 below), and it is labelled as such rather than passed off as found code. asmlift recovers every one of those as a
+  // open (axis 2 below), and it is labelled as such rather than passed off as found code.
+  //
+  // asmlift recovers every one of those as a
   // CAST over the symbol's address — `((u16 *)&gTbl)[i]` — which scales the index FIRST and loads
   // the base second. FIVE of the six scored targets load the base first (`arrcast` is the one that
   // does not), and the family measures that ordering plus a second, independent axis: where a
@@ -5098,12 +5100,18 @@ export const SYNTHETIC: SynthSpec[] = [
   //    `.text` bytes IDENTICAL to `arrbias`'s target (`01 49 40 18 00 78 70 47 01 00 00 00`, one
   //    `R_ARM_ABS32 gTbl`), and the two 5s are mirror-image breakdowns — `delete: 2` one way,
   //    `insert: 2` the other. One symbol, two opposite right answers, separated only by the addend.
-  //  • `arrcast` — AXIS 2, the zero-addend direction, and the reason it exists is that the first cut of
-  //    this family had no row here at all. Its target is `((u16 *)gTbl)[i]`: `R_ARM_ABS32 gTbl` at
-  //    an in-place addend of `00 00 00 00`, yet `lsl` before `ldr`. Both base-first spellings lose
-  //    it — bare `gTbl[i]` scores 2 and the base local `const u16 *p = gTbl; p[i]` scores 2 (they
-  //    are the same object). A rule implemented as "addend zero, therefore base-first" over-fires
-  //    on exactly this shape, and before this row nothing in the dataset caught it.
+  //  • `arrcast` — AXIS 2, the zero-addend direction, and the reason it exists is that the first
+  //    cut of this family had no row here at all. It is a MINIMAL PAIR with `harr`: same symbol,
+  //    same `u16` width, same single `R_ARM_ABS32 gTbl` at an in-place addend of `00 00 00 00`,
+  //    same index — the sources differ by nothing but a cast, and the objects differ by nothing
+  //    but instruction order:
+  //        harr     `gTbl[i]`            ldr r1,.L / lsl r0,#1 / add / ldrh
+  //        arrcast  `((u16 *)gTbl)[i]`   lsl r0,#1 / ldr r1,.L / add / ldrh
+  //    So the two rows are each other's over-fire control on this axis, and nothing else varies.
+  //    Both base-first spellings lose `arrcast` — bare `gTbl[i]` scores 2 and the base local
+  //    `const u16 *p = gTbl; p[i]` scores 2 (they are the same object). A rule implemented as
+  //    "addend zero, therefore base-first" over-fires on exactly this shape, and before this row
+  //    nothing in the dataset caught it.
   //
   // HOW BOTH CONTROLS ACTUALLY BIND, because their fans make the obvious reading wrong. `rankBy`
   // sorts and returns `results[0]` (`packages/core/src/rank.ts`), so the published score is the
