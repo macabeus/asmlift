@@ -538,9 +538,9 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sw_fallmem(int,int*);',
     proto: { sw_fallmem: { returnsVoid: true } },
   },
-  // A chain that runs on into `default:`, with a CLOSED arm between the two chains — so the arms
-  // cannot simply be emitted in one block-layout run, and where the default's label goes is decided
-  // by the fall-through rather than by where its body is laid out.
+  // Two chains: `case 0` runs on into `case 1`, which closes, and `case 2` runs on into `default:`.
+  // So where the default's label goes is decided by the fall-through rather than by where its body
+  // is laid out, and one of the two `break`s a four-arm switch could carry is genuinely absent.
   {
     sym: 'sw_falldef',
     src: 'void sw_falldef(int x,int *p){ switch(x){case 0:*p=1;case 1:*p+=2;break;case 2:*p+=3;default:*p+=4;} }',
@@ -549,8 +549,8 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sw_falldef(int,int*);',
     proto: { sw_falldef: { returnsVoid: true } },
   },
-  // A closed arm on either side of the chain: three arms in the middle of four, and only the middle
-  // pair is one chain.
+  // The mirror: four arms, of which only the middle pair is a chain, so a closed arm sits on either
+  // side of it.
   {
     sym: 'sw_fallmid',
     src: 'void sw_fallmid(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p+=2;case 2:*p+=3;break;case 3:*p=7;} }',

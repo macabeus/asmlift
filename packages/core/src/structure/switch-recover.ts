@@ -631,7 +631,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // sibling it reaches, which `chainArms` then places directly under it. `unstructurable` is a
     // shape no single linear switch spells — a body reaching two siblings, or a sibling on one path
     // and the switch's end on another — and Regime A declines to if-recovery, which spells every
-    // one of those edges. (Regime B reads the same verdicts and fails LOUD on that last one.)
+    // one of those edges. (Regime B reads the same verdicts and fails LOUD on either.)
     const merge = ipdom.get(b) ?? stop;
     const targets = new Set<Block>([...caseBlocks, ...(defaultBlk ? [defaultBlk] : [])]);
     const siblings = new Set([...targets].filter((t) => t !== merge));

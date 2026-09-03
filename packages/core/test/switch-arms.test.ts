@@ -693,10 +693,11 @@ test('…and `default:` still lands where the LAYOUT puts it, counted in arms', 
 });
 
 // ── fall-through arms ────────────────────────────────────────────────────────────────────────────
-// Where the arms below come from: each is agbcc's own output for the C in its comment, compiled at
-// TOOLCHAIN.agbccFlags. A falling arm is spelled by OMITTING the `break;`, which is a positional
-// fact — control drops into whatever arm is emitted NEXT (the l3/ast.ts non-neutrality note) — so
-// recovery is not free to order the arms by layout or by case value where a chain says otherwise.
+// The two fixtures here are agbcc's own output for the C in their comments, compiled at
+// TOOLCHAIN.agbccFlags; the declining shapes further down are hand-built, because no C produces
+// them. A falling arm is spelled by OMITTING the `break;`, which is a positional fact — control
+// drops into whatever arm is emitted NEXT (the l3/ast.ts non-neutrality note) — so recovery is not
+// free to order the arms by layout or by case value where a chain says otherwise.
 //
 // `switch (x) { case 3: *p = 1; case 2: *p += 2; case 1: *p += 3; }` — no `break` anywhere.
 const fallChain =
@@ -774,7 +775,9 @@ const threeCase = (c0: string, c1: string, c2: string) =>
   `.Lc1:\n${c1}` +
   `.Lc2:\n${c2}` +
   // The merge has a BODY — statements after the switch. An arm leaving to it is therefore a
-  // switch-scoped `break;`, not a `return`, which is the distinction the third fixture rests on.
+  // switch-scoped `break;` rather than a `return`, which is what the END-on-another-path shape
+  // below rests on: `analyzeArmExit` counts a `ret` as leaving, so an arm returning on one path
+  // still falls through on the other and is not the shape that fixture wants.
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
 
 test('TWO arms falling into ONE decline — C reaches an arm from above only once', () => {

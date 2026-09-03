@@ -3,8 +3,9 @@
 // Sinking rewrites `br ^merge(v)` into `ret v` in every unconditional predecessor. A merge also
 // reached by a `cond_br` keeps that one edge — a conditional branch cannot carry a `ret` — so the
 // block survives with a single predecessor, and a block parameter with one in-edge is no longer a
-// join. The asm below is agbcc's own output for a fall-through switch: `.L3` is reached by `b .L3`
-// (twice, through a shared block) and by `bne .L3`.
+// join. The asm below is agbcc's own output for a fall-through switch: `.L3` is reached by a
+// `b .L3`, by falling out of `.L6` — which has two predecessors of its own, the shared arm the
+// sinking gate looks for — and by a `bne .L3` that cannot be rewritten.
 import { expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
@@ -58,7 +59,7 @@ const ASM_RET =
 
 test('the stranded alias is not spelled as a copy', () => {
   // Left in place, the structurer destroys the alias into a local of its own and emits
-  // `v2 = 0; return v2;` — a variable the asm never had, on the one path that reaches the
+  // `v = 0; return v;` — a variable the asm never had, on the one path that reaches the
   // residual block.
   const out = decompile('g', ASM_RET, ARMV4T_AGBCC, {}).source;
   expect(out).toContain('return 0;');
