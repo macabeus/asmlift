@@ -1842,6 +1842,31 @@ export function enumerateCandidates(
       // `order-licensed` would refuse every key anyway and this only saves the census.
       ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_ADMISSIONS : []),
     ];
+    // AND THE SAME SKIP KEYED ON THE LICENCE ITSELF BUYS NOTHING, which is worth one paragraph here
+    // because this row is where the next reader will propose it. `orderLicensedGlobals` is decidable
+    // on the lifted fn, so the row could also be dropped wherever THAT set is empty. It would be
+    // sound, and it would be inert, for the same one reason: an empty licence stamps no
+    // `baseOrdered` (structure.ts `stampOrderedBases`), so `order-licensed` refuses every key, so
+    // `hoist` returns null and this row's three emission sites — two `respell`s and the `enumerate`
+    // whose generator fans over volatile SUBSETS, so the third is a set and not one spelling — emit
+    // nothing. Which GENERALIZES to every axis carrying a licence — a skip like it is sound exactly
+    // where the axis would have emitted no candidate, so a sound one shrinks the fan by zero, so it
+    // removes no COMPILE, and compiling candidates is where a ranked run's cost is; what it saves is
+    // one `admittedBases` walk per tree.
+    // Measured on `LoadBGTilemapData` — the klonoa `gfx` function whose fan raised the
+    // question, a standalone repro rather than a benchmark row — the licence is empty on every lift
+    // variant of BOTH symbol-map arms: four named symbols DO reach the licence table map-ful and the
+    // ADDRESS gates refuse all four, so "the pool spells no names" is not the reason. The skip would
+    // fire on every tree there and remove not one candidate. Over 108 enumerations of smaller
+    // klonoa functions across both arms it fired 1,830 of 1,941 asks and lost none of the 77
+    // `/orderbase` candidates the axis contributes to that population.
+    //
+    // IF IT IS EVER BUILT ANYWAY, the licence is per LIFT VARIANT and never per function:
+    // `/setup-args` narrows the lift and can license a name the base lift does not, so reading one
+    // variant's licence for the whole function deletes four live candidates on `sub_806800C` in the
+    // sa3 checkout — again a checkout function, not a row — namely `unsigned/setup-args/orderbase`
+    // and its `/flip-join`, `/derived-home` and `/flip-join/derived-home` siblings, in both arms.
+
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
     // number of products. Memoized on the gate table's identity. The value is a list of key
