@@ -3427,8 +3427,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   // ── Regime-A switch recovery (structure/switch-recover.ts): the recognizer's case bodies call
-  // back into structureRegion, and Regime B (switch_br, below) shares its fall-through predicate.
-  const { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos } = makeSwitchRecovery({
+  // back into structureRegion, and Regime B (switch_br, below) reads FOUR things from it — the
+  // per-arm exit, the layout index, the chain linearization and where the `default:` label goes —
+  // so neither regime states any of those four facts twice.
+  const { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms } = makeSwitchRecovery({
     fn,
     defs,
     dom,
@@ -3521,13 +3523,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // lay their bodies out in that order under an ascending table), the bodies' layout is the
       // evidence and the arms take it.
       //
-      // Only when NO arm falls through. Here — unlike Regime A, which declines fall-through
-      // outright — emission order is load-bearing for correctness (the l3/ast.ts non-neutrality
-      // note): a falling arm must be emitted directly above the one it falls into, so its position
-      // is not free to move. `analyzeArmExit` does not depend on emission order, so the exits can
-      // be settled first and reused below. Grouping by target already gives every arm a DISTINCT
-      // entry block, so no two sort keys can be equal and the tie-break Regime A needs on shared
-      // bodies has nothing to decide here.
+      // The policy orders the chain HEADS. A FALLING arm's position is not free — emission order is
+      // load-bearing for correctness (the l3/ast.ts non-neutrality note), so it must sit directly
+      // above the arm it falls into — and `chainArms` below re-threads it for exactly those, which
+      // is the same per-SITE reading Regime A makes of the same declaration. `analyzeArmExit` does
+      // not depend on emission order, so the exits can be settled first and reused below. Grouping
+      // by target already gives every arm a DISTINCT entry block, so no two sort keys can be equal
+      // and the tie-break Regime A needs on shared bodies has nothing to decide here.
       const exitOf = new Map<Block, ArmExit>();
       for (const entry of [...arms.map((a) => a.entry), defEdge.block]) {
         if (!exitOf.has(entry)) {
@@ -3544,27 +3546,45 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             `language has no fall-through in its case statement`,
         );
       }
-      const armsFollowLayout = switchArmsFollowLayout && [...exitOf.values()].every((e) => e.kind === 'break');
-      if (armsFollowLayout) {
+      if (switchArmsFollowLayout) {
         arms.sort((x, y) => layoutIndex(x.entry) - layoutIndex(y.entry));
       }
+      // …and then the CHAIN re-threads that order for the falling arms, exactly as it does for the
+      // comparison tree: ONE definition (`chainArms`) for the linearization, the adjacency it
+      // guarantees, and the three shapes no linear order spells. The arm-order policy above is read
+      // for the chain HEADS only — which is the same per-SITE reading Regime A makes, and replaces
+      // the whole-switch "layout only where every arm is closed" gate this used to carry.
+      const preChain = arms.map((a) => a.entry);
+      // A table whose default block is ALSO a case target is that case's arm, not a separate one:
+      // it is already in `preChain`, and `defaultLayoutPos` withholds the label's position for it.
+      const dfltArm = defEdge.block !== merge && !armOf.has(defEdge.block) ? defEdge.block : null;
+      const chained = chainArms(preChain, dfltArm, exitOf);
+      if (chained === null) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': the jump table's case arms do not linearize — two arms fall ` +
+            `into one, the default arm falls into a case, or the fall-through is a cycle`,
+        );
+      }
+      const armByEntry = new Map(arms.map((a) => [a.entry, a]));
+      const ordered = chained.map((e) => armByEntry.get(e)!);
+      const orderIntact = chained.every((e, i) => e === preChain[i]);
       // The `default:` arm carries that evidence too, and a table hands it over the same way: the
       // range check BRANCHES to the default (`bhi .Ldefault`), so its block is never one the
       // dispatch ran into — measured, a 5-arm table lays the default's body at each of the six
       // positions the source can write it in exactly there. `defaultLayoutPos` states the refusals.
       const defaultAt =
-        armsFollowLayout && defEdge.block !== merge
+        defEdge.block !== merge
           ? defaultLayoutPos(
               defEdge.block,
-              arms.map((a) => a.entry),
-              false,
+              ordered.map((a) => ({ entry: a.entry, fallsThrough: exitOf.get(a.entry)!.kind === 'fallthrough' })),
+              { placedByDispatch: false, orderIntact },
             )
           : undefined;
       // ONE emission order for the whole statement: the case arms, then the default. Adjacency is
       // read off this array, so "falls into the next arm" needs no separate rule for a case that
       // falls into the default (it is the arm after the last case, and legal C). Where the LABEL is
       // printed is `defaultAt`, which the emission order does not follow.
-      const emitOrder = [...arms, { entry: defEdge.block, edge: defEdge, values: null as number[] | null }];
+      const emitOrder = [...ordered, { entry: defEdge.block, edge: defEdge, values: null as number[] | null }];
       // Each arm's switch-edge copies, computed ONCE and in emission order: `argAssignsFor` mints
       // swap-cycle temp names, so calling it twice for one edge burns a temp number and changes the
       // output (the same reason emitDoWhile reuses its `updates`).
@@ -3576,6 +3596,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
         const ft = exit.kind === 'fallthrough';
         const next = emitOrder[i + 1];
+        // `chainArms` already placed every falling arm above its target, so this re-reads the fact
+        // off the EMISSION array rather than trusting the ordering — the seam where a position
+        // acquires control-flow meaning, checked on the same side of it as Regime A's.
         if (ft && next?.entry !== exit.to) {
           throw new StructureError(
             `cannot structure '${fn.name}': ${a.values ? `case ${a.values.join('/')}` : 'the default arm'} falls ` +
@@ -3601,7 +3624,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           fallsThrough: ft,
         };
       });
-      const outCases: SwitchCase[] = arms.map((a, i) => ({ values: a.values, ...bodies[i] }));
+      const outCases: SwitchCase[] = ordered.map((a, i) => ({ values: a.values!, ...bodies[i] }));
       // An EMPTY default arm is not a default at all: it is where the switch ends, which is where
       // an unmatched scrutinee goes anyway. Emitting the label with nothing under it says nothing
       // and is not even valid C89 (a label needs a statement).

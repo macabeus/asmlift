@@ -559,6 +559,39 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sw_fallmid(int,int*);',
     proto: { sw_fallmid: { returnsVoid: true } },
   },
+  // A `default:` written BETWEEN two closed arms while a chain runs beside it. Where the label goes
+  // is a POSITION: the two arms it sits between are closed, so it diverts nothing — the chain two
+  // arms further down says nothing about it. Reading the evidence per position rather than per
+  // switch is what this row prices (spelled with the label last it is a nonmatch on agbcc).
+  {
+    sym: 'sw_defmid',
+    src: 'void sw_defmid(int x,int *p){ switch(x){case 0:*p=1;break;default:*p=9;break;case 1:*p+=2;case 2:*p+=3;break;} }',
+    features: ['fallthrough'],
+    toolchains: ALL,
+    ctx: 'void sw_defmid(int,int*);',
+    proto: { sw_defmid: { returnsVoid: true } },
+  },
+  // The DENSE half of the fall-through family: eight contiguous cases compile to a real jump table,
+  // so these two exercise the switch_br regime rather than the comparison tree. `sw_jtfall`'s chain
+  // runs WITH the table's ascending order; `sw_jtfalldesc`'s runs against it — case 3 falls into
+  // case 2 — so the emitted arm order has to be re-threaded rather than read off either the table
+  // or ascending case value.
+  {
+    sym: 'sw_jtfall',
+    src: 'void sw_jtfall(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p=2;break;case 2:*p+=3;case 3:*p+=4;break;case 4:*p=5;break;case 5:*p=6;break;case 6:*p=7;break;case 7:*p=8;break;} }',
+    features: ['fallthrough', 'dense'],
+    toolchains: ALL,
+    ctx: 'void sw_jtfall(int,int*);',
+    proto: { sw_jtfall: { returnsVoid: true } },
+  },
+  {
+    sym: 'sw_jtfalldesc',
+    src: 'void sw_jtfalldesc(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p=2;break;case 3:*p+=4;case 2:*p+=3;break;case 4:*p=5;break;case 5:*p=6;break;case 6:*p=7;break;case 7:*p=8;break;} }',
+    features: ['fallthrough', 'dense'],
+    toolchains: ALL,
+    ctx: 'void sw_jtfalldesc(int,int*);',
+    proto: { sw_jtfalldesc: { returnsVoid: true } },
+  },
   {
     sym: 'sw_sparse',
     src: 'int sw_sparse(int x){ switch(x){case 1:return 1;case 10:return 2;case 100:return 3;case 1000:return 4;default:return 0;} }',

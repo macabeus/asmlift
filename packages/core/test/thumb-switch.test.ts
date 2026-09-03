@@ -167,9 +167,6 @@ test('overlaps C cannot spell DECLINE instead of being silently closed or duplic
   const fallsTo = (n: number) => `\tb\t.Lc${n}\n`;
   const armB = '\tbl\tsideB\n' + LEAVE,
     armC = '\tbl\tsideC\n' + LEAVE;
-  // (a) falls into a case that is not the next one emitted: C fall-through can only reach the
-  // following case, and reordering the arms would change which values reach which body.
-  expect(sw([CALL_A + fallsTo(2), armB, armC])).toThrow(/falls through into an arm that is not the next one emitted/);
   // (b) reaches a sibling on one path and the switch's end on another. C CAN spell this — with a
   // switch-scoped `break` in the case body — so the decline names asmlift's own missing piece
   // rather than blaming C.
@@ -178,6 +175,22 @@ test('overlaps C cannot spell DECLINE instead of being silently closed or duplic
   );
   // (c) reaches two different siblings.
   expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC])).toThrow(/reaches several sibling cases/);
+});
+
+test('an arm falling into a case the table does not put next is CHAINED, not declined', () => {
+  // Case 0 jumps into case 2. A `case` LABEL carries its own value, so moving an arm changes
+  // nothing about which value reaches which body — only fall-through makes a position mean
+  // anything, and `chainArms` is what makes the position follow the exit. So the emitted order is
+  // 0, 2, 1: the chain, then the arm it displaced, each still under its own label.
+  const tail = '.Lend:\n\tbl\tsideZ\n\tbx\tlr\n';
+  const out = decompile(
+    'f',
+    conv([CALL_A + '\tb\t.Lc2\n', '\tbl\tsideB\n' + LEAVE, '\tbl\tsideC\n' + LEAVE], tail),
+    ARMV4T_AGBCC,
+  ).source;
+  expect([...out.matchAll(/case (\d+):/g)].map((m) => Number(m[1]))).toEqual([0, 2, 1]);
+  expect(out).toMatch(/case 0:[\s\S]*?\n\s*case 2:/); // no `break;` between them
+  expect(out.match(/sideC\(/g)).toHaveLength(1); // emitted once, not duplicated into case 0
 });
 
 test('near-miss dispatches DECLINE — a mis-recovered table runs the wrong block', () => {

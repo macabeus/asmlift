@@ -44,10 +44,12 @@ export interface SwitchRecoverDeps {
  *   - `break`        every path out of the arm reaches the switch's merge (or returns / loops
  *                    inside the arm). The ordinary closed arm.
  *   - `fallthrough`  every path out leaves into exactly ONE sibling arm's entry: C's fall-through.
- *                    Only spellable when that sibling is the arm emitted NEXT (the caller checks
- *                    emission adjacency — see the l3/ast.ts non-neutrality note).
+ *                    Only spellable when that sibling is the arm emitted NEXT, which `chainArms`
+ *                    below arranges and both regimes then re-read off the emission array (see the
+ *                    l3/ast.ts non-neutrality note).
  *   - `unstructurable`  anything else: two different siblings, or a mix of "into a sibling" and
- *                    "out to the merge". C needs a `goto` for those, so callers decline LOUD. */
+ *                    "out to the merge". C needs a `goto` for those. Regime A declines to
+ *                    if-recovery on this verdict; Regime B, having no fallback, fails LOUD. */
 export type ArmExit = { kind: 'break' } | { kind: 'fallthrough'; to: Block } | { kind: 'unstructurable'; why: string };
 
 export interface SwitchRecovery {
@@ -59,9 +61,18 @@ export interface SwitchRecovery {
   /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
    *  regimes read it from one definition (and one statement of what it rests on). */
   layoutIndex: (blk: Block) => number;
-  /** where the `default:` label goes among `armEntries`, or `undefined` for C's last position —
-   *  shared with Regime B so both regimes state that refusal once. */
-  defaultLayoutPos: (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean) => number | undefined;
+  /** where the `default:` label goes among the EMITTED arms, or `undefined` for C's last position —
+   *  shared with Regime B so both regimes state those refusals once. */
+  defaultLayoutPos: (
+    defaultBlk: Block,
+    arms: readonly { entry: Block; fallsThrough: boolean }[],
+    opts: { placedByDispatch: boolean; orderIntact: boolean },
+  ) => number | undefined;
+  /** ONE linear emission order for a set of arms, re-threaded so every falling arm sits directly
+   *  above the one it falls into — or null when no linear order spells them. Shared with Regime B,
+   *  so the chain, the adjacency it guarantees and the three refusals below it have one definition
+   *  (Regime A maps null to if-recovery, Regime B to a loud StructureError). */
+  chainArms: (order: Block[], dflt: Block | null, exitOf: Map<Block, ArmExit>) => Block[] | null;
 }
 
 export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
@@ -137,14 +148,41 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     arm the source wrote FIRST. That reading holds only while a second subtree still names the
   //     label: a two-case chain names it once, and agbcc then lays that block right after the tests
   //     whatever the source wrote, both spellings compiling to identical instructions.
-  const defaultLayoutPos = (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean): number | undefined =>
-    !switchArmsFollowLayout || isBareExit(defaultBlk) || armEntries.includes(defaultBlk) || placedByDispatch
-      ? undefined
-      : armEntries.filter((e) => layoutIndex(e) < layoutIndex(defaultBlk)).length;
+  //
+  // THREE further withholdings, all about fall-through and all stated here so both regimes state
+  // them once. Each is about a POSITION, which is what the count is:
+  //   - the chain RE-THREADED the arm order (`orderIntact` false), so the emitted list is not the
+  //     one the layout count describes and the number would index the wrong slot;
+  //   - the LAST emitted arm falls through, which can only be into the default (the adjacency
+  //     check leaves no other target) — the label must then be last, which IS `undefined`;
+  //   - the position lands directly after a falling arm, where printing the label would divert
+  //     that arm into the default. cfamily.ts fails loud on exactly that, and this is the producer
+  //     side of the same rule.
+  // A switch with a chain elsewhere keeps its evidence: the reason to withhold is the position,
+  // never "some arm somewhere falls".
+  const defaultLayoutPos = (
+    defaultBlk: Block,
+    arms: readonly { entry: Block; fallsThrough: boolean }[],
+    opts: { placedByDispatch: boolean; orderIntact: boolean },
+  ): number | undefined => {
+    if (
+      !switchArmsFollowLayout ||
+      isBareExit(defaultBlk) ||
+      arms.some((a) => a.entry === defaultBlk) ||
+      opts.placedByDispatch ||
+      !opts.orderIntact ||
+      arms[arms.length - 1]?.fallsThrough
+    ) {
+      return undefined;
+    }
+    const at = arms.filter((a) => layoutIndex(a.entry) < layoutIndex(defaultBlk)).length;
+    return at > 0 && arms[at - 1].fallsThrough ? undefined : at;
+  };
 
   // --- Regime A: comparison-tree switch recovery ----------------------------------------------------
   // Every ambiguity declines. Four preconditions are enforced below, annotated PRE1..PRE4:
-  // scrutinee identity/dominance, no fall-through, concrete interval consistency, test purity.
+  // scrutinee identity/dominance, ARM EXITS (per site: `break`, `fallthrough` — which `chainArms`
+  // then places — or a decline), concrete interval consistency, test purity.
 
   // Fold a value that is a compile-time constant (a `const`, or a synthesized immediate like agbcc's
   // `250 << 2` for a large sparse case) to a number — else null.
@@ -727,10 +765,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     // The `default:` arm is a chain member too — an arm may run on into it, and C prints it last.
     const dfltArm = defaultBlk !== null && defaultBlk !== merge ? defaultBlk : null;
-    const entries = chainArms([...armsByBlock.keys()], dfltArm, exitOf);
+    const preChain = [...armsByBlock.keys()];
+    const entries = chainArms(preChain, dfltArm, exitOf);
     if (entries === null) {
       return null;
     }
+    // Did the chain move anything? The arm-order POLICY above produced `preChain`; where the chain
+    // left it alone, every position still means what that policy said it meant.
+    const orderIntact = entries.every((e, i) => e === preChain[i]);
     const fallsInto = (blk: Block): Block | null => {
       const x = exitOf.get(blk);
       return x?.kind === 'fallthrough' ? x.to : null;
@@ -745,6 +787,16 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       if (to !== null && to !== (entries[i + 1] ?? dfltArm)) {
         return null;
       }
+      // The arm fallen INTO must take NO block parameters. Its only source of them would be the
+      // dispatch's own edge copies, which collapsing the tree discards — so on the fall-through
+      // path they would be lost and on its own case value they would be missing. Regime B states
+      // the same refusal loud (structure.ts, `edgeCopies[i + 1].length`). Regime A has none to
+      // emit today because `asLeafOrTest` refuses a param-carrying case entry outright, and this
+      // is that invariant restated AT THE SEAM where breaking it would be silent — so admitting
+      // such an entry (the booked hoist) cannot quietly land one inside a chain.
+      if (to !== null && to.params.length) {
+        return null;
+      }
       outCases.push({
         values: armsByBlock.get(blk)!,
         body: structureRegion(blk, to ?? merge),
@@ -755,9 +807,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // would carry no statement, which says nothing and is not valid C89.
     const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
     // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
-    // (`defaultLayoutPos`). Every arm here is closed, so the label diverts nothing wherever it lands.
-    // The dispatch placed that block itself when the last test simply RAN OUT into it and no other
-    // subtree jumps there — the two references the tree walk can count.
+    // (`defaultLayoutPos`). The dispatch placed that block itself when the last test simply RAN OUT
+    // into it and no other subtree jumps there — the two references the tree walk can count.
     const dispatchTargets = [...seen].flatMap((t) =>
       t.ops[t.ops.length - 1].successors.map((e) => forwardingTarget(e.block)),
     );
@@ -766,14 +817,17 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         const succ = t.ops[t.ops.length - 1].successors;
         return succ.length > 1 && succ[1].block === blk;
       }) && dispatchTargets.filter((e) => e === blk).length < 2;
-    // Placed among CLOSED arms only. `defaultLayoutPos` counts the arms laid out before the
-    // default's block, and where a chain has re-threaded that order the count no longer indexes the
-    // list it counted — so the label takes C's conventional last position instead. (Which is also
-    // the position an arm falling INTO the default needs.)
-    const defaultAt =
-      defaultBlk && !outCases.some((c) => c.fallsThrough)
-        ? defaultLayoutPos(defaultBlk, entries, ranOutInto(defaultBlk))
-        : undefined;
+    // `defaultLayoutPos` owns which POSITIONS a chain makes unreadable — see its three
+    // fall-through withholdings. A chain elsewhere in the switch does not delete the evidence for
+    // where the label goes, and reading it off the emitted arms is what lets a `default:` written
+    // between two closed arms keep its place while a chain runs beside it.
+    const defaultAt = defaultBlk
+      ? defaultLayoutPos(
+          defaultBlk,
+          entries.map((e, i) => ({ entry: e, fallsThrough: outCases[i].fallsThrough })),
+          { placedByDispatch: ranOutInto(defaultBlk), orderIntact },
+        )
+      : undefined;
     const sw: Stmt = {
       k: 'switch',
       scrutinee: scrutExpr,
@@ -786,5 +840,5 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     return out;
   };
-  return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos };
+  return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms };
 }
