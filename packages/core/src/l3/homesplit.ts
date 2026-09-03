@@ -41,7 +41,7 @@
 import { addrConst, inRange } from './address';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs, stmtLists } from './ast';
-import { type BaseKey, baseSites, hoistBaseLocals } from './basecse';
+import { type BaseKey, baseSites, hoistBaseLocals, parseBaseKey } from './basecse';
 import { type Gate, firstRejection } from './gates';
 import type { HoistPlacement } from './hoist';
 import { applyScopedBasePlan, planScopedBases, scopedBaseKey } from './scopebase';
@@ -62,25 +62,27 @@ export const withholdingKey = (gates: readonly Gate<BaseKey>[], key: string): re
 /** The withheld key as a LABEL token: `c:67109076 4 true` → `0x40000d4.4s`. Width and signedness
  *  ride because they are part of the key — two keys over one address are two different spellings.
  *
- *  READ FROM THE END, because a base id is not one space-free word: `l3/basecse.ts`'s `baseId`
- *  spells a CAST base as `a:gEnigmaBerries <struct Elem5 *>`, and splitting from the front read
- *  that type as the width and the width as the signedness
- *  (`a:gEnigmaBerries <Elem5*> 28 false` → `gEnigmaBerries.<Elem5*>u`). No shipped table admits a
- *  cast base outside `/orderbase`, and `/orderbase` carries `pairings: false`, so no such key
- *  reaches this function today — but a candidate LABEL is an identity (`bench diff` and
- *  docs/ranked-repro.md compare candidates by it), and one roster line is all that stands between
- *  the two. The sibling half of the same hazard is already guarded in `splitHomeBases`, which
- *  translates a cast base to no region key and declines. */
+ *  PARSED BY THE KEY'S PRODUCER (`l3/basecse.ts`'s `parseBaseKey`, beside `keyOf`), because a base
+ *  id is not one space-free word and knowing that here is what went wrong twice. `baseId` spells a
+ *  CAST base as `a:gEnigmaBerries <Elem5*>` — one space, the grammar's own separator, since no type
+ *  `typeToString` produces contains one. Splitting from the FRONT read the type as the width and
+ *  the width as the signedness; splitting from the END fixed the `a:` form and left the `c:` form
+ *  running `Number` over `67109076 <u16*>`, tagging every cast over a numeric base `0xNaN` and
+ *  collapsing distinct keys onto one label. No shipped table admits a cast base outside
+ *  `/orderbase`, and `/orderbase` carries `pairings: false`, so no such key reaches this function
+ *  today — but a candidate LABEL is an identity (`bench diff` and docs/ranked-repro.md compare
+ *  candidates by it), and one roster line is all that stands between the two. The sibling half of
+ *  the same hazard is already guarded in `splitHomeBases`, which translates a cast base to no
+ *  region key and declines. */
 export function homeSplitTag(key: string): string {
-  const parts = key.split(' ');
-  const signed = parts.pop() ?? '';
-  const width = parts.pop() ?? '';
-  const id = parts.join(' ');
-  const base = id.startsWith('c:') ? `0x${Number(id.slice(2)).toString(16)}` : id.slice(id.indexOf(':') + 1);
+  const { leaf, castType, width, signed } = parseBaseKey(key);
+  const base = leaf.startsWith('c:') ? `0x${Number(leaf.slice(2)).toString(16)}` : leaf.slice(leaf.indexOf(':') + 1);
   // The cast's element type stays in the token — it is part of the key's identity, since two casts
-  // over one symbol are two locals that stride differently — with its spaces squeezed out, because
-  // a label is one whitespace-free word everywhere it is read.
-  return `${base.replace(/\s+/g, '')}.${width}${signed === 'true' ? 's' : 'u'}`;
+  // over one symbol are two locals that stride differently. Whitespace is squeezed defensively
+  // rather than because any type spells one: a label is one whitespace-free word everywhere it is
+  // read, and that has to hold whatever `typeToString` grows.
+  const type = castType === null ? '' : `<${castType}>`;
+  return `${`${base}${type}`.replace(/\s+/g, '')}.${width}${signed ? 's' : 'u'}`;
 }
 
 /** The FUNCTION-level half of the admission: how many keys the caller's table binds on this tree.

@@ -140,6 +140,39 @@ const baseId = (b: HoistableBase): string => (b.k === 'cast' ? `${leafId(b.e)} <
 /** The (base, access-shape) key an `index`-of-hoistable-base shares with its reuse siblings. */
 const keyOf = (base: HoistableBase, width: number, signed: boolean): string => `${baseId(base)} ${width} ${signed}`;
 
+/** The key's own grammar, read back — `<leafId>[ <type>] <width> <signed>`.
+ *
+ *  IT LIVES BESIDE `keyOf` BECAUSE THAT IS THE ONLY THING THAT MAKES IT SAFE. The key is a string
+ *  and its readers are elsewhere (`l3/homesplit.ts` builds a candidate LABEL out of it), so the
+ *  grammar was known in two files and the cast form broke the far one: `homeSplitTag` popped width
+ *  and signedness off the end and then read what was left as a leaf id, which for a CAST over a
+ *  numeric base — `c:67109076 <u16*>` — ran `Number` over the type token too and tagged every such
+ *  key `0xNaN`. Two distinct keys, one label, and a label is a candidate's identity.
+ *
+ *  The one space inside a cast's base id is this grammar's own separator, not the type's: no type
+ *  `typeToString` can produce contains a space (`u16*`, `Struct0`, `u8[4]`). */
+export interface BaseKeyParts {
+  /** the hoistable leaf, `a:<symbol>` or `c:<numeric address>` */
+  readonly leaf: string;
+  /** the reinterpret cast's target type as `typeToString` spells it, or null for a bare leaf */
+  readonly castType: string | null;
+  readonly width: number;
+  readonly signed: boolean;
+}
+export function parseBaseKey(key: string): BaseKeyParts {
+  const parts = key.split(' ');
+  const signed = parts.pop() === 'true';
+  const width = Number(parts.pop());
+  const id = parts.join(' ');
+  const lt = id.indexOf(' <');
+  return {
+    leaf: lt === -1 ? id : id.slice(0, lt),
+    castType: lt === -1 ? null : id.slice(lt + 2, -1),
+    width,
+    signed,
+  };
+}
+
 interface Collected {
   count: Map<string, number>;
   order: string[];

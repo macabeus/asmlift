@@ -14,9 +14,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { T } from '../src/ir/types';
+import { T, typeToString } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { LIVEBASE_BLOCK_GATES, admittedBases, hoistBaseLocals } from '../src/l3/basecse';
+import { LIVEBASE_BLOCK_GATES, admittedBases, baseSites, hoistBaseLocals, parseBaseKey } from '../src/l3/basecse';
 import { without } from '../src/l3/gates';
 import {
   HOMESPLIT_FAN_GATES,
@@ -246,11 +246,76 @@ describe('the label names the withheld key, because a label is an identity', () 
     expect(homeSplitTag(DMA_KEY)).toBe('0x40000d4.4s');
     expect(homeSplitTag(IWRAM_KEY)).toBe('0x3004000.4s');
     expect(homeSplitTag('a:REG_DMA3SAD 4 false')).toBe('REG_DMA3SAD.4u');
-    // …and a CAST base, whose id carries the element type and therefore a space. Split from the
-    // front this read `gEnigmaBerries.<struct Elem5 *>u` — the type as the width, the width as the
-    // signedness. Unreachable today (no shipped table admits a cast base except `/orderbase`, which
-    // carries `pairings: false`) and pinned anyway, because a label is a candidate's identity.
-    expect(homeSplitTag('a:gEnigmaBerries <struct Elem5 *> 28 false')).toBe('gEnigmaBerries<structElem5*>.28u');
+  });
+
+  // BOTH CAST FORMS, ON KEYS `baseId` CAN ACTUALLY PRODUCE. `l3/basecse.ts` spells a cast base
+  // `<leafId> <typeToString(to)>`, and `typeToString` emits `Elem5*` — no space, no `struct`
+  // keyword — so the one space is the key grammar's own separator and it is there for a cast over
+  // a NUMERIC base too. Reading the tag from the end fixed the `a:` half and left the `c:` half
+  // running `Number` over `67109076 <u16*>`: every such key tagged `0xNaN`, two keys one label.
+  test('a cast base keeps its element type, over a symbol and over a numeric address', () => {
+    expect(homeSplitTag(`a:gEnigmaBerries <${typeToString(T.ptr(T.struct('Elem5', [])))}> 28 false`)).toBe(
+      'gEnigmaBerries<Elem5*>.28u',
+    );
+    expect(homeSplitTag(`c:${DEVICE} <${typeToString(T.ptr(T.u(16)))}> 2 false`)).toBe('0x40000d4<u16*>.2u');
+  });
+
+  // The property the label has to have, asked of the REAL producer rather than of a literal: two
+  // bases that `baseSites` keys apart must tag apart. A hand-written expectation cannot catch a
+  // collision, because the collision is between two keys neither of which the assertion names.
+  test("distinct keys tag distinctly, over `baseSites`' own output", () => {
+    const u16p = T.ptr(T.u(16));
+    const cast = (e: Expr): Expr => ({ k: 'cast', to: u16p, e });
+    const cell = (base: Expr): Expr => ({ k: 'index', base, idx: { k: 'const', value: 0 }, width: 2, signed: false });
+    const tree = fn([
+      {
+        k: 'return',
+        value: {
+          k: 'bin',
+          op: '+',
+          l: cell(cast({ k: 'const', value: DEVICE })),
+          r: {
+            k: 'bin',
+            op: '+',
+            l: cell(cast({ k: 'const', value: IWRAM })),
+            r: cell(cast({ k: 'addr', name: 'gTbl' })),
+          },
+        },
+      },
+    ]);
+    const keys = [...baseSites(tree).keys()];
+    expect(keys).toEqual([`c:${DEVICE} <u16*> 2 false`, `c:${IWRAM} <u16*> 2 false`, 'a:gTbl <u16*> 2 false']);
+    const tags = keys.map(homeSplitTag);
+    expect(tags).toEqual(['0x40000d4<u16*>.2u', '0x3004000<u16*>.2u', 'gTbl<u16*>.2u']);
+    expect(new Set(tags).size).toBe(keys.length);
+  });
+});
+
+describe('the key grammar is parsed by the module that writes it', () => {
+  test('`parseBaseKey` reads back both leaf forms and the cast form', () => {
+    expect(parseBaseKey(DMA_KEY)).toEqual({ leaf: `c:${DEVICE}`, castType: null, width: 4, signed: true });
+    expect(parseBaseKey('a:gTbl 2 false')).toEqual({ leaf: 'a:gTbl', castType: null, width: 2, signed: false });
+    expect(parseBaseKey('a:gBgInfo <Elem0*> 28 false')).toEqual({
+      leaf: 'a:gBgInfo',
+      castType: 'Elem0*',
+      width: 28,
+      signed: false,
+    });
+  });
+
+  test('every key `baseSites` mints round-trips through it', () => {
+    // The producer and the parser are one file apart on purpose; this is what says they agree.
+    const u16p = T.ptr(T.u(16));
+    const cell = (base: Expr): Expr => ({ k: 'index', base, idx: { k: 'const', value: 0 }, width: 2, signed: false });
+    const tree = fn([
+      { k: 'return', value: cell({ k: 'cast', to: u16p, e: { k: 'addr', name: 'gBgInfo' } }) },
+      { k: 'return', value: cell({ k: 'const', value: IWRAM }) },
+    ]);
+    for (const [key, meta] of baseSites(tree)) {
+      const p = parseBaseKey(key);
+      expect([key, p.width, p.signed]).toEqual([key, meta.width, meta.signed]);
+      expect([key, p.castType]).toEqual([key, meta.base.k === 'cast' ? typeToString(meta.base.to) : null]);
+    }
   });
 });
 
