@@ -143,7 +143,14 @@ interface Term {
  *  spellable. Keeping the store's answer in the same set is what makes "every access of this
  *  symbol spells bare" a single `size === 1` test. */
 interface Access {
-  width: number;
+  /** The width of the ELEMENT this access reads whole, or `null` for an INTERIOR access — one at a
+   *  non-zero displacement, which the order consumer records (`interiorIsEvidence`) and the
+   *  declaration consumer never sees. Nullable rather than "the load's width" because the two are
+   *  not the same fact: a `ldrh [r1, #0x10]` two bytes into a 28-byte element evidences the order
+   *  and nothing whatever about the element, and a rule that read `2` out of it would be reading a
+   *  fabricated element width. Any rule that wants a width has to spell the null case, which is
+   *  what keeps a future widening of `ORDER_SHAPE_GATES` a refusal instead of a wrong answer. */
+  elementWidth: number | null;
   signed: boolean;
   isLoad: boolean;
   terms: Term[];
@@ -275,8 +282,10 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [...ELEMENT_ADDRESS_GA
  *  over. Per-access fields stay per-access on purpose: a rank is a property of ONE address
  *  expression, never of the union of several (see `ranks-disagree`). */
 interface ShapeEvidence {
-  /** distinct access widths under this name */
-  readonly widths: number[];
+  /** Distinct ELEMENT widths under this name — `null` among them where an access reads an interior
+   *  of the element and so evidences no element width at all (`Access.elementWidth`). Every rule
+   *  below that reads a width spells that case, and spells it as a REFUSAL. */
+  readonly widths: (number | null)[];
   /** distinct extensions, a store's implicit `false` included */
   readonly signs: boolean[];
   readonly perAccess: readonly {
@@ -293,8 +302,6 @@ interface ShapeEvidence {
   readonly constOnIndex: boolean;
 }
 
-/** Does ONE array declaration describe every access of this name? Each rejection falls back to
- *  `((T *)&gSym)[i]`, which is byte-identical under any declaration. */
 /** THE TWO ORDER PREDICATES, shared by the declaration table below and by `ORDER_SHAPE_GATES`.
  *  Shared as FUNCTIONS rather than as rule OBJECTS: the predicate really is the same question in
  *  both places, while `sound`, `why` and the guard are not — see `ORDER_SHAPE_GATES`, where the
@@ -303,6 +310,8 @@ interface ShapeEvidence {
 const anIndexFirstAccess = (e: ShapeEvidence): boolean => e.perAccess.some((a) => a.baseFirst === false);
 const noOrderEvidence = (e: ShapeEvidence): boolean => !e.perAccess.some((a) => a.baseFirst === true);
 
+/** Does ONE array declaration describe every access of this name? Each rejection falls back to
+ *  `((T *)&gSym)[i]`, which is byte-identical under any declaration. */
 export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   {
     // Attributing on the fixture below: with it removed the width collapses to the first access's
@@ -322,7 +331,7 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     why: 'the declared element type is the only thing in the emitted C saying how a sub-word read fills',
     sound: true,
     guardedBy: 'global-array-shape.test.ts: one name read signed and unsigned refuses',
-    rejects: (e) => e.widths[0] < 4 && e.signs.length !== 1,
+    rejects: (e) => e.widths[0] === null || (e.widths[0] < 4 && e.signs.length !== 1),
   },
   {
     // Attributing: an address with no variable term also has no stride, so
@@ -340,7 +349,7 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     why: 'the innermost stride must BE the element the access reads whole, or the subscript scales by the wrong thing',
     sound: true,
     guardedBy: 'global-array-shape.test.ts: an index pre-scaled past the element refuses',
-    rejects: (e) => e.perAccess.some((a) => a.strides[0] !== e.widths[0]),
+    rejects: (e) => e.widths[0] === null || e.perAccess.some((a) => a.strides[0] !== e.widths[0]),
   },
   {
     id: 'strides-do-not-nest',
@@ -603,7 +612,7 @@ function accessesBySymbol(
         // never manufacture a fact.
         for (const c of consumers.filter((x) => (interiorIsEvidence ? x.isLoad || x.isStore : x.isElementAccess))) {
           record(sym, {
-            width: c.m.attrs.width as number,
+            elementWidth: c.isElementAccess ? (c.m.attrs.width as number) : null,
             signed: c.isLoad && (c.m.attrs.signed as boolean) === true,
             isLoad: c.isLoad,
             terms: terms ?? [],
@@ -673,17 +682,19 @@ function evidenceOf(accs: Access[], pos: Map<Op, { b: number; i: number }>): Sha
   const perAccess = accs.map((a) => {
     const strides = stridesOf(a);
     // `width` is only meaningful once `mixed-access-width` has admitted; that gate runs first,
-    // so a mid-element test computed against the first width is never the one that decides.
-    const width = accs[0].width;
+    // so a mid-element test computed against the first width is never the one that decides. Null
+    // — an interior access, which only the order consumer records — is no element width, so there
+    // is no whole number of elements for a constant to be, and the answer is the refusal.
+    const width = accs[0].elementWidth;
     return {
       strides,
       extents: extentsOf(strides),
-      midElementConst: a.terms.some((t) => t.v === null && t.konst % width !== 0),
+      midElementConst: width === null || a.terms.some((t) => t.v === null && t.konst % width !== 0),
       baseFirst: baseFirst(a, pos),
     };
   });
   return {
-    widths: [...new Set(accs.map((a) => a.width))],
+    widths: [...new Set(accs.map((a) => a.elementWidth))],
     signs: [...new Set(accs.map((a) => a.signed))],
     perAccess,
     constOnIndex: accs.some((a) => a.terms.some((t) => t.v === null && t.konst !== 0)),
@@ -703,11 +714,19 @@ function shapeOf(
   // already refused a name whose loads disagree at a width where it shows.
   const loadSigns = new Set(accs.filter((a) => a.isLoad).map((a) => a.signed));
   const dims = perAccess[0].extents ?? [];
+  const elemSize = accs[0].elementWidth;
+  if (elemSize === null) {
+    // Unreachable on the shipped declaration path — `interior-or-non-access` refuses every symbol
+    // with an interior access, and only the ORDER consumer passes `interiorIsEvidence`, which does
+    // not call this function. Spelled anyway rather than asserted away, because the alternative is
+    // a declaration carrying a sub-word read's width as if it were the element's.
+    return null;
+  }
   return {
     name: (accs[0].gaddr.attrs.sym as string) ?? '',
     kind: 'data',
     shape: 'array',
-    elemSize: accs[0].width,
+    elemSize,
     elemSigned: loadSigns.size === 1 ? [...loadSigns][0] : false,
     ...(dims.length ? { dims: [null, ...dims] } : {}),
   };

@@ -1020,6 +1020,28 @@ describe('the order licence, split out for the value-home consumer', () => {
     expect([...licensed('f', constShaped)]).toEqual([]);
   });
 
+  test('an interior access carries no element width, so a width rule refuses instead of guessing', () => {
+    // `interiorIsEvidence` widens WHICH accesses are recorded, and an interior one — `ldrh [r1,
+    // #0x10]`, two bytes into a 28-byte element — evidences the ORDER and no element width at all.
+    // It is recorded with `elementWidth: null` rather than with the load's 2, so a rule added to
+    // the order table later reads a refusal rather than a fabricated element. Pinned by adding one:
+    // `stride-is-not-the-element` compares the innermost stride against the element width, and here
+    // the stride really is 28 and the load really is 2 — reading the load's width would have made
+    // that comparison a lie in the licence's favour on some other input.
+    const structElem = thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n' +
+        '\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+      '.word\tgBgInfo',
+    );
+    expect([...licensed('f', structElem)]).toEqual(['gBgInfo']);
+    const withAWidthRule = {
+      address: ELEMENT_ADDRESS_GATES,
+      shape: [...ORDER_SHAPE_GATES, ...SHAPE_GATES.filter((g) => g.id === 'stride-is-not-the-element')],
+    };
+    expect([...orderLicensedGlobals(lift('f', structElem), ARMV4T_AGBCC, withAWidthRule)]).toEqual([]);
+  });
+
   test('a target that has not opted in licenses nothing', () => {
     const off = {
       ...ARMV4T_AGBCC,
