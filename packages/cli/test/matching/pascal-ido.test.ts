@@ -99,3 +99,27 @@ test('a comparison enumerates for Pascal: the unspellable candidates drop, the r
   expect(candidates.every((k) => !k.label.startsWith('unsigned'))).toBe(true);
   expect(candidates.every((k) => k.source.includes('a0: Integer'))).toBe(true);
 });
+
+// A FALL-THROUGH switch, which this backend cannot spell at all: `case-of` has no fall-through, so
+// `pascalBackend.emit` loud-fails a `fallsThrough` arm. That refusal is TERMINAL — it costs the whole
+// function, not one candidate — and a comparison-tree switch has a SECOND, behaviourally identical
+// recovery (plain if-nesting) that this backend prints fine. So recovery asks the backend first
+// (`LanguageBackend.spellsSwitchFallthrough`), and only C gets the falling `switch`.
+test('a fall-through switch comes back as the if-recovery for Pascal, not as a stub', () => {
+  const c = 'void swf(int x,int *p){ switch(x){case 3:*p=1;case 2:*p+=2;case 1:*p+=3;} }';
+  const { asm } = compileMipsTarget(c, 'swf');
+  const prototypes = { swf: { params: 2, returnsVoid: true } };
+  // THE CONTROL: the same assembly, for C, is one `switch` whose arms run on into each other.
+  const cOut = decompile('swf', asm, MIPS_IDO, { prototypes }).source;
+  expect(cOut).toContain('switch (');
+  expect(cOut).toMatch(/case 3:[\s\S]*?\n\s*case 2:/);
+
+  const pas = decompile('swf', asm, MIPS_IDO, { prototypes, backend: pascalBackend }).source;
+  expect(pas).toContain('procedure swf(');
+  expect(pas).not.toContain('could not decompile');
+  expect(pas).not.toContain('case ');
+  expect(pas).toContain('if (');
+  // …and the ranked fan is not empty either, which is the sharper form of the same loss.
+  const cands = enumerateCandidates('swf', asm, MIPS_IDO, { prototypes, backend: pascalBackend });
+  expect(cands.length).toBeGreaterThan(0);
+});

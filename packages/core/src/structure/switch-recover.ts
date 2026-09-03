@@ -789,8 +789,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
       // The arm fallen INTO must take NO block parameters. Its only source of them would be the
       // dispatch's own edge copies, which collapsing the tree discards — so on the fall-through
-      // path they would be lost and on its own case value they would be missing. Regime B states
-      // the same refusal loud (structure.ts, `edgeCopies[i + 1].length`). Regime A has none to
+      // path they would be lost and on its own case value they would be missing. Regime B pays for
+      // the same hazard LOUD, one step later (structure.ts refuses when the copies it computed for
+      // the fallen-into edge are non-empty, which is the same fact after naming). Regime A has none to
       // emit today because `asLeafOrTest` refuses a param-carrying case entry outright, and this
       // is that invariant restated AT THE SEAM where breaking it would be silent — so admitting
       // such an entry (the booked hoist) cannot quietly land one inside a chain.

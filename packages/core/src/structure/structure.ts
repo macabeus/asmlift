@@ -3624,7 +3624,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           fallsThrough: ft,
         };
       });
-      const outCases: SwitchCase[] = ordered.map((a, i) => ({ values: a.values!, ...bodies[i] }));
+      const outCases: SwitchCase[] = ordered.map((a, i) => ({ values: a.values, ...bodies[i] }));
       // An EMPTY default arm is not a default at all: it is where the switch ends, which is where
       // an unmatched scrutinee goes anyway. Emitting the label with nothing under it says nothing
       // and is not even valid C89 (a label needs a statement).
