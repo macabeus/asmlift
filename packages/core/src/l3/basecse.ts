@@ -306,11 +306,26 @@ export interface BaseKey {
    *  spelling of a struct element is the inline cast, and homing it is a candidate `/orderbase`
    *  offers where the assembly licenses it. */
   castBase: boolean;
-  /** Every access through this base was materialized BEFORE the index was scaled (l3/ast.ts
-   *  `index.baseOrdered`, from raise/globalshape.ts). On agbcc that is the order a POINTER LOCAL
-   *  produces and the inline cast does not, so it is the evidence a home is what the source wrote.
-   *  Read only by `ORDERBASE_GATES` (rank.ts); false for every base a compiler that has not opted
-   *  in produced, which is what keeps the axis off those targets. */
+  /** No access through this base scaled the index before the base was materialized, and at least
+   *  one materialized the base first (l3/ast.ts `index.baseOrdered`, from raise/globalshape.ts).
+   *
+   *  NOT "every access", which is what this doc used to say and what `Collected.ordered`'s `&&`
+   *  looks like it enforces. The licence admits an access that carries no order fact at all — a
+   *  scaling in another block is not comparable, so it answers `undefined` rather than `false` —
+   *  and 4 of the corpus's licensed symbols have one (`kleod:EntityDeathAnimation`'s
+   *  `gEntityArray` is 11 of 28 accesses). Per SYMBOL is the right grain here and not a shortcut:
+   *  agbcc CSEs the pool word, so one `ldr` is shared by every access of the name and there is one
+   *  order fact to have. The `&&` is therefore vacuous BY CONSTRUCTION — `stampOrderedBases` stamps
+   *  per symbol, so a key's accesses cannot disagree — and what it is really guarding is a pass
+   *  that rebuilt one node and dropped the stamp, which it turns into a refusal rather than a
+   *  half-homed base.
+   *
+   *  On agbcc a base-first order is what a declared array produces (`build_array_ref`'s fork) and
+   *  what a pointer local's own initializer STATEMENT produces (see raise/globalshape.ts's header
+   *  for the compile that separates the two), while the inline cast produces the other order — so
+   *  it is evidence a home is what the source wrote. Read only by `ORDERBASE_GATES` (rank.ts);
+   *  false for every base a compiler that has not opted in produced, which is what keeps the axis
+   *  off those targets. */
   orderLicensed: boolean;
 }
 
@@ -535,19 +550,28 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  THE EVIDENCE IS THE ASSEMBLY, and it is the only thing here that is. Every other table on this
  *  roster predicts which spelling the source wrote from the SHAPE of the accesses — how many, at
  *  what offsets, inside a loop or not — and each prediction has a counterexample this file names.
- *  This one reads the instruction ORDER: on a compiler whose subscript expansion forks on the
- *  base's array-ness, a base materialized before the index was scaled is what a declared array or a
- *  POINTER LOCAL produces, and the inline cast of a symbol's address is what produces the other
- *  order. Compiled through the benchmark's own agbcc command, against a base-first object:
+ *  This one reads the instruction ORDER: a base materialized before the index was scaled is what a
+ *  declared array produces (agbcc's `build_array_ref` forks on the base's array-ness) and what a
+ *  pointer local produces for a DIFFERENT reason (its initializer is a statement of its own,
+ *  evaluated first) — while the inline cast of a symbol's address produces the other order. The two
+ *  mechanisms are separated by a compile in raise/globalshape.ts's header; what matters here is
+ *  that they share the observable. Compiled through the benchmark's own agbcc command, against a
+ *  base-first object:
  *
  *      extern u16 gTbl[]; gTbl[i]            0    ┐ the same object
  *      u16 *p = (u16 *)&gTbl; p[i]           0    ┘
  *      ((u16 *)&gTbl)[i]                     2      a different one
  *
  *  So where `raise/globalshape.ts` derives an array DECLARATION it takes the bare spelling and this
- *  table never sees the key (the access's base is a `var`); where it refuses one — a struct element,
- *  which has no `intType` and reads its members at a displacement — the same order fact still says
- *  the base had a home, and that is this table's whole population.
+ *  table never sees the key (the access's base is a `var`); where it refuses one, the same order
+ *  fact still says the base had a home. That population is TWO shapes, not one, and both arms are
+ *  quoted because they differ: map-less 8 rows / 10 keys, map-ful 10 rows / 12 keys. Most of it is
+ *  the struct element, which has no `intType` and reads its members at a displacement — 9 keys
+ *  map-less, 10 map-ful, and the only shape `cast-base`'s ablation reaches. The rest is a PLAIN
+ *  SCALAR LEAF the function also reads at a displacement somewhere else, which no cast is involved
+ *  in and which only `single-use`'s ablation admits: `kleod:UpdateCameraScroll`'s `gSineTable` in
+ *  both arms, `pokeemerald:Sin2`'s `gSineDegreeTable` in the map-ful one. A reader deciding whether
+ *  `single-use` can be put back needs that second shape named.
  *
  *  WHY `single-use` GOES. The rule's theory is that one access re-materializes as cheaply as a
  *  named local, which is a guess about the source in the absence of evidence; here there is
@@ -558,7 +582,16 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *
  *  `loop` and `repeated-const-offset` STAY. Neither is about the base's identity and both are fan
  *  control; ablating them is `/livebase`'s axis, already on the roster, and a row that wants the
- *  product is one roster line. rank.ts offers this row only where
+ *  product is one roster line. THE PRICE OF THAT IS A HOLE, and it is named rather than left for a
+ *  reader to find: a licensed base with a use inside a loop is admitted by NO table on the roster —
+ *  this one refuses it on `loop`, and every table that ablates `loop` refuses it on `cast-base` or
+ *  `single-use` — which is the "a base set that is no row's stays unreachable" debt
+ *  docs/level-tower.md books against a roster of hand-picked subsets. Measured over the artifact's
+ *  370 agbcc rows in both symbol-map arms, `admittedBases(sfn, without(ORDERBASE_GATES, 'loop'))`
+ *  minus everything any shipped table admits is 0 rows, so the hole is structural and unpopulated.
+ *  Folding the licence into `cast-base` and `single-use` as an EXEMPTION would close it and reach
+ *  every table, at the cost of the ablation handle below — the trade `BASEFOLD_GATES`' fused
+ *  exemption already made once, and not one to make for a class with no inhabitant. rank.ts offers this row only where
  *  `compilerBehaviors.arrayShapeFromStride` — the same opt-in the licence itself carries, because
  *  the fork is agbcc's and no other compiler has been shown to make it. */
 export const ORDERBASE_GATES: readonly Gate<BaseKey>[] = [

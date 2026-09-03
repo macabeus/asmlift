@@ -541,20 +541,29 @@ const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
 
 /** The sixth admission, and the only one whose evidence is the INSTRUCTION ORDER rather than the
  *  shape of the accesses (l3/basecse.ts, ORDERBASE_GATES). It binds a base the assembly says was
- *  materialized before the index was scaled — which on agbcc is what a declared array or a pointer
- *  LOCAL produces and the inline cast of a symbol's address does not — including the
- *  `(struct S *)&gSym` of an array-of-struct element, which no other table on this roster can even
- *  see.
+ *  materialized before the index was scaled — which on agbcc is what a declared array produces
+ *  (`build_array_ref`'s fork) and what a pointer local produces for a different reason (its
+ *  initializer is a statement of its own, evaluated first), while the inline cast of a symbol's
+ *  address produces the other order — including the `(struct S *)&gSym` of an array-of-struct
+ *  element, which no other table on this roster can even see. The compile separating the two
+ *  mechanisms is in raise/globalshape.ts's header.
  *
  *  LAST, so `sameBases` can shadow it and it can shadow nothing: on a function whose licensed base
  *  is a plain leaf reached twice, `/livebase` already binds exactly that set at this placement and
  *  this row declines rather than restating it under a second label.
  *
- *  ONE PLACEMENT, and the row that earned it does not ask the question: on `synthetic:bgarr` the
- *  two placements emit the IDENTICAL source — the hoist has nothing to sit above — scoring 0
- *  against that row's own object through its own decomp.yaml command, where the inline cast it
- *  replaces scores 8. So a second roster row would be a rename `seen` collapses, not a spelling. It
- *  is one line and no new table; add it when a row scores better with it.
+ *  ONE PLACEMENT, AND IT IS A MEASURED ZERO — not, as this note first claimed, a question the
+ *  admission does not raise. `synthetic:bgarr` emits the identical source at both placements (the
+ *  hoist has nothing to sit above), but generalizing from that one row was wrong: over the
+ *  artifact's agbcc rows the two placements emit DIFFERENT source on 3 of the 8 rows this admission
+ *  binds map-less and 4 of the 10 map-ful — `kleod:SetupBG3WindowOverlay`,
+ *  `kleod:UpdateCameraScroll`, `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful
+ *  `kleod:StreamCmd_SetBGScroll`. A second entry at `placement: 'first-use'` was therefore built
+ *  and RUN through the harness on all four: 146 → 146, noncompile → noncompile, MATCH → MATCH,
+ *  noncompile → noncompile. Zero rows, against +1129 candidates over those rows' 15167 (+7.4%) and
+ *  `kleod:UpdateCameraScroll` 224 s → 278 s. So the second row is not shipped for the reason
+ *  `pairings: false` is not flipped — a measured zero on the corpus, not an unasked question. Add
+ *  it when a row scores better with it, and re-run those four when one does.
  *
  *  `pairings: false` for the field's own reason — a product is added for a row that demands the
  *  joint spelling, and the row that earned this entry demands none. */

@@ -167,6 +167,16 @@ export interface TargetDescription {
     // for a global no symbol map describes. Absent ⇒ the derivation is empty and every indexed
     // global keeps today's `((T *)&gSym)[i]` cast spelling.
     //
+    // "Expands it last" is about the SUBSCRIPT, and a second consumer reads the same flag for a
+    // question that is not: `orderLicensedGlobals` asks only where the base was materialized, and a
+    // pointer LOCAL materializes it in its own initializer STATEMENT, before the subscript runs —
+    // so `u16 *p = (u16 *)&gTbl; p[i]` is base-first in the object while `(p = (u16 *)&gTbl)[i]` is
+    // index-first, both through this same fork (compiled; raise/globalshape.ts's header carries the
+    // four-way table). This flag is therefore NARROWER than that consumer's mechanism — statement
+    // ordering needs no fork, only a compiler that does not schedule — so the home axis is denied
+    // to ido/kmc/mwcc for a reason that is not its own. Under-reach, unmeasured, and the fix when a
+    // row asks for it is a datum of its own rather than a widening of this one.
+    //
     // Set on agbcc, where the fork is `gcc/c-typeck.c build_array_ref`'s
     // `TREE_CODE (TREE_TYPE (array)) == ARRAY_TYPE && TREE_CODE (array) != INDIRECT_REF` and both
     // spellings were compiled against the same target. NOT set anywhere else: whether ido, kmc or

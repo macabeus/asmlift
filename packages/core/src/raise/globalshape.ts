@@ -44,23 +44,46 @@
 // `inferGlobalArrays` asks "how is this name DECLARED", which needs the order licence AND a
 // whole-element subscript to spell. `orderLicensedGlobals` (bottom of this file) asks only "was the
 // base materialized before the index was scaled", which is what decides whether the address has a
-// HOME — a pointer local `T *p = (T *)&gSym; p[i]` — or is re-derived inline at each access. Those
-// are the SAME `build_array_ref` fork: an array-typed object and a pointer local both expand their
-// base ahead of the subscript, and only the cast of the symbol's address expands it last. Compiled
-// through the benchmark's own agbcc command, at element width 2:
+// HOME — a pointer local `T *p = (T *)&gSym; p[i]` — or is re-derived inline at each access.
 //
-//     extern u16 gTbl[];  gTbl[i]                        base first  ┐ byte-identical
-//     u16 *p = (u16 *)&gTbl; p[i]                        base first  ┘
-//     ((u16 *)&gTbl)[i]                                  index first  — a different object
+// THE TWO CONSUMERS DO NOT SHARE A MECHANISM, and the first cut of this paragraph said they did
+// ("the SAME `build_array_ref` fork: an array-typed object and a pointer local both expand their
+// base ahead of the subscript"). That is FALSE for the pointer local, and one more compile settles
+// it. Through the benchmark's own agbcc command, at element width 2:
+//
+//     A  extern u16 gTbl[];  return gTbl[i];               ldr / lsl / add   base first
+//     B  u16 *p = (u16 *)&gTbl; return p[i];               ldr / lsl / add   base first
+//     C  return ((u16 *)&gTbl)[i];                         lsl / ldr / add   INDEX first
+//     F  u16 *p; return (p = (u16 *)&gTbl)[i];             lsl / ldr / add   INDEX first
+//
+// F is the discriminator. `build_array_ref` takes the same pointer branch for `p` in B and in F —
+// the two differ only in whether the assignment is a SEPARATE STATEMENT — and only B is base-first.
+// So the fork explains A against C, and STATEMENT ORDERING explains B: the initializer is a
+// statement of its own, evaluated before the subscript, and on a compiler with no instruction
+// scheduler that ordering survives into the object. Both roads lead to the same observable, which
+// is why one licence serves both consumers, and the observable is what the licence reads. Two
+// consequences follow and are stated rather than hidden: the opt-in datum this module reads
+// (`compilerBehaviors.arrayShapeFromStride`, whose own doc in target.ts describes the FORK and is
+// correct about it) is narrower than the second consumer's mechanism, so the home axis is denied to
+// compilers that have the statement ordering without the fork — under-reach, unmeasured, and a
+// datum of its own is what would fix it; and `index-materialized-first` is SOUND for the
+// declaration (index-first ⇒ not a declared array, which F does not touch) and only a heuristic for
+// the home (F is a home that compiles index-first), which is why `ORDER_SHAPE_GATES` below owns its
+// rules instead of selecting that one.
 //
 // So the order half licenses the HOME on its own, for every name the declaration half refuses for a
-// reason that is NOT about the order. Censused map-less and map-ful over the artifact's agbcc rows,
-// that population is two shapes and `interior-or-non-access` refuses both: the STRUCT ELEMENT,
-// which has no `intType` and reads its members at a displacement (7 of the 8 rows the home axis
-// reaches), and a plain scalar element of a symbol the function ALSO reads at a displacement
-// somewhere else (`kleod:UpdateCameraScroll`'s `gSineTable`, the eighth). Neither says any less
-// about the order than a clean access does. `ADDRESS_GATES` below is therefore two halves: the
-// ELEMENT rules, which both consumers ask, and the DECLARATION rule, which only the first does.
+// reason that is NOT about the order. Censused over the artifact's 370 agbcc rows in BOTH symbol-map
+// arms — the arms differ, so both numbers are quoted rather than one labelled as if it were both:
+//
+//     map-less   8 rows, 10 keys — 9 a STRUCT ELEMENT's cast base, 1 a plain scalar leaf
+//     map-ful   10 rows, 12 keys — 10 cast bases, 2 plain scalar leaves
+//
+// `interior-or-non-access` refuses both shapes. The STRUCT ELEMENT has no `intType` and reads its
+// members at a displacement. The plain scalar leaf is an element of a symbol the function ALSO
+// reads at a displacement somewhere else — `kleod:UpdateCameraScroll`'s `gSineTable` in both arms,
+// and `pokeemerald:Sin2`'s `gSineDegreeTable` only in the map-ful one. Neither says any less about
+// the order than a clean access does. `ADDRESS_GATES` below is therefore two halves: the ELEMENT
+// rules, which both consumers ask, and the DECLARATION rule, which only the first does.
 //
 // WHAT REFUSES — and the list is DOWN THERE, not here. The refusals are two `Gate<Ctx>` tables
 // (`ADDRESS_GATES` and `SHAPE_GATES`, below), each rule carrying its own `why` and the test that
