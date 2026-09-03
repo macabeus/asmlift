@@ -246,6 +246,11 @@ describe('the label names the withheld key, because a label is an identity', () 
     expect(homeSplitTag(DMA_KEY)).toBe('0x40000d4.4s');
     expect(homeSplitTag(IWRAM_KEY)).toBe('0x3004000.4s');
     expect(homeSplitTag('a:REG_DMA3SAD 4 false')).toBe('REG_DMA3SAD.4u');
+    // …and a CAST base, whose id carries the element type and therefore a space. Split from the
+    // front this read `gEnigmaBerries.<struct Elem5 *>u` — the type as the width, the width as the
+    // signedness. Unreachable today (no shipped table admits a cast base except `/orderbase`, which
+    // carries `pairings: false`) and pinned anyway, because a label is a candidate's identity.
+    expect(homeSplitTag('a:gEnigmaBerries <struct Elem5 *> 28 false')).toBe('gEnigmaBerries<structElem5*>.28u');
   });
 });
 
