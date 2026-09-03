@@ -298,6 +298,14 @@ export interface StructType {
  *  comment spelling. */
 export interface LanguageBackend {
   readonly id: 'c' | 'cpp' | 'pascal';
+  /** Can this language spell a `switch` arm that RUNS ON into the next one (`fallsThrough`)?
+   *  C and C++ can; Pascal's `case-of` cannot, and its backend loud-fails the node (see the
+   *  non-neutrality note on `Stmt`'s `switch`). Declared here rather than inferred from `id`
+   *  because it is what RECOVERY must ask: a comparison-tree switch has a second, behaviourally
+   *  identical recovery (plain if-nesting), so minting a `fallsThrough` arm for a backend that
+   *  cannot print it turns a whole function that used to decompile into a loud stub. The
+   *  structurer reads it through `StructureOptions.spellSwitchFallthrough`. */
+  readonly spellsSwitchFallthrough: boolean;
   emit(fn: SFn): string;
   // Spell ONE LINE of text as a comment in this language (C block comments, Pascal `(* … *)`).
   // Used by the annotate-mode stub path to carry the failure reason + the original asm

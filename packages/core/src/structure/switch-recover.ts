@@ -23,6 +23,10 @@ export interface SwitchRecoverDeps {
   switchAllowsBoundCase: boolean;
   /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
   switchArmsFollowLayout: boolean;
+  /** may the emitted SOURCE say "this arm runs on into the next one"? False for a language whose
+   *  `case` cannot fall through (Pascal), and then Regime A declines a falling arm to if-recovery
+   *  — the behaviourally identical recovery that backend CAN print. See StructureOptions. */
+  spellSwitchFallthrough: boolean;
   /** does emitting this block's ops carry a statement beyond the ops themselves? Collapsing a
    *  test block into a `switch` re-renders its ops at their uses and emits no side effects for it,
    *  so any op that renders as a STATEMENT of its own loses that statement. Two produce one: a
@@ -72,6 +76,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     switchAllowsNeqCase,
     switchAllowsBoundCase,
     switchArmsFollowLayout,
+    spellSwitchFallthrough,
     emitsOwnStatement,
     expr,
     structureRegion,
@@ -639,7 +644,16 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     for (const t of siblings) {
       exitOf.set(t, analyzeArmExit(t, b, merge, siblings));
     }
-    if ([...exitOf.values()].some((e) => e.kind === 'unstructurable')) {
+    // A language with no fall-through in its `case` (Pascal) cannot print a falling arm at all, so
+    // for it a falling arm is exactly as unspellable as an `unstructurable` one — and takes the
+    // same exit: if-recovery, which that backend prints fine. Asked HERE rather than left to the
+    // backend because the backend's refusal is terminal (the whole function becomes a stub) while
+    // this one costs nothing but the `switch` spelling.
+    if (
+      [...exitOf.values()].some(
+        (e) => e.kind === 'unstructurable' || (!spellSwitchFallthrough && e.kind === 'fallthrough'),
+      )
+    ) {
       return null;
     }
 

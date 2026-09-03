@@ -272,6 +272,7 @@ function traceTower(
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
     ...structureOptionsFor(target, returnsVoid),
+    spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
     onGap: opts.onGap ?? 'strict',
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),

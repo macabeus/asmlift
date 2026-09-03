@@ -7,12 +7,14 @@ import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { emitCFamily } from '../src/backend/cfamily';
+import { pascalBackend } from '../src/backend/pascal';
 import { frontendFor } from '../src/frontend/registry';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { stmtChildren } from '../src/l3/ast';
 import type { SFn, Stmt } from '../src/l3/ast';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
@@ -817,4 +819,35 @@ test('a body reaching a sibling on one path and the switch END on another declin
   );
   expect(armOrder(out)).not.toContain(1);
   expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+});
+
+// ── what the TARGET LANGUAGE can spell is a recovery input ───────────────────────────────────────
+// Regime A has TWO behaviourally identical recoveries of a fall-through tree: the `switch` with a
+// falling arm, and plain if-nesting. Pascal's `case-of` prints only the second, and its backend
+// loud-fails a `fallsThrough` arm (l3/ast.ts's non-neutrality note) — so minting one for that
+// backend does not cost the `switch`, it costs the whole FUNCTION. The recovery asks first.
+
+test('a language with no case fall-through gets the if-recovery, not a stub', () => {
+  const out = decompile('f', fallChain, ARMV4T_AGBCC, {
+    prototypes: { f: { returnsVoid: true } },
+    backend: pascalBackend,
+  }).source;
+  expect(out).toContain('procedure f(');
+  expect(out).toContain('if (');
+  expect(out).not.toContain('case ');
+  // the body is really there — an if-recovery duplicates the fallen-into arms rather than losing them
+  expect(count(out, 'a1^ := (a1^ + 3);')).toBeGreaterThan(1);
+});
+
+test('…and the SAME assembly still recovers the falling switch for C', () => {
+  expect(of(fallChain)).toContain('switch (a0)');
+});
+
+test('a candidate fan for that backend is not empty', () => {
+  const cands = enumerateCandidates('f', fallChain, ARMV4T_AGBCC, {
+    prototypes: { f: { returnsVoid: true } },
+    backend: pascalBackend,
+  });
+  expect(cands.length).toBeGreaterThan(0);
+  expect(cands.every((c) => !c.source.includes('could not decompile'))).toBe(true);
 });

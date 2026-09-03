@@ -270,6 +270,10 @@ function makePrinter(vt: VarTypes) {
 
 export const pascalBackend: LanguageBackend = {
   id: 'pascal',
+  // `case-of` has no fall-through, and `ps` below loud-fails a `fallsThrough` arm. Declared so
+  // RECOVERY never mints one for this backend: a comparison-tree switch also spells as plain
+  // if-nesting, which Pascal prints, so the choice is between a decompiled function and a stub.
+  spellsSwitchFallthrough: false,
   emit(fn: SFn): string {
     // Same env discipline as the C family (cfamily.ts cFamilyBody): the printer judges derefs
     // against the exact declarations it emits.

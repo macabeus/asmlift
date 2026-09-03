@@ -153,6 +153,7 @@ function tryScore(
     // while the map beside it — and the headline source — say `const s16 gSym[4][64]`.
     const sfn = structureChecked(clone, {
       ...structureOptionsFor(target, returnsVoid),
+      spellSwitchFallthrough: backend.spellsSwitchFallthrough,
       ...(mapSymbols ? { symbols: mapSymbols } : {}),
       ...(inferredSymbols.size ? { inferredSymbols } : {}),
     });

@@ -950,6 +950,13 @@ export interface StructureOptions {
   // basic blocks nor schedules across them, so the layout it produced IS the order the source
   // wrote. Default false: absent, the arms keep the ascending spelling.
   switchArmsFollowLayout?: boolean;
+  // Does the TARGET LANGUAGE spell a `switch` arm that runs on into the next one? Set from the
+  // caller's LanguageBackend (`spellsSwitchFallthrough`), not from the compiler target: it is a
+  // property of what the emitted source may say, and the only reason the structurer needs it is
+  // that a fall-through switch has a SECOND, behaviourally identical recovery. Regime A declines
+  // to if-recovery when it is false (which is what Pascal used to get, before fall-through was
+  // recoverable at all); Regime B, having no fallback, fails loud. Default true.
+  spellSwitchFallthrough?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -1211,6 +1218,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchAllowsNeqCase = true,
     switchAllowsBoundCase = false,
     switchArmsFollowLayout = false,
+    spellSwitchFallthrough = true,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -3431,6 +3439,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchAllowsNeqCase,
     switchAllowsBoundCase,
     switchArmsFollowLayout,
+    spellSwitchFallthrough,
     emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
@@ -3524,6 +3533,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         if (!exitOf.has(entry)) {
           exitOf.set(entry, analyzeArmExit(entry, b, merge, siblings));
         }
+      }
+      // A language whose `case` cannot fall through (Pascal) has no spelling for this shape, and
+      // Regime B has no second recovery to fall back on — so it fails LOUD, as it does for every
+      // other unspellable jump table. (Regime A, which does have a fallback, declines to
+      // if-recovery instead: switch-recover.ts's PRE2.)
+      if (!spellSwitchFallthrough && [...exitOf.values()].some((e) => e.kind === 'fallthrough')) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': a jump-table case runs on into the next case, and the target ` +
+            `language has no fall-through in its case statement`,
+        );
       }
       const armsFollowLayout = switchArmsFollowLayout && [...exitOf.values()].every((e) => e.kind === 'break');
       if (armsFollowLayout) {

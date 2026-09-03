@@ -169,6 +169,10 @@ function runTower(
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
   const sfn = structureChecked(fn, {
     ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
+    // What the EMITTED LANGUAGE can say is a structuring input wherever two recoveries of one
+    // shape are behaviourally identical and only one of them is printable (switch fall-through
+    // vs plain if-nesting): recovery must not mint a tree this backend would refuse.
+    spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     onGap,
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
