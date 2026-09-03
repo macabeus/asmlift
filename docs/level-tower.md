@@ -167,8 +167,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   sound exactly where the axis would have emitted no candidate — so a sound licence skip shrinks the
   fan by zero, and the fan is what compiles. All it can save is the enumeration-time gate walk, and
   enumeration is a small fraction of a ranked run beside one compile per candidate: on
-  `LoadBGTilemapData` the widest such skip fires on every tree and leaves 112,896 candidates at
-  112,896, the compile phase untouched. So a round out to buy compile CPU has to remove candidates
+  `LoadBGTilemapData` the one such skip that was built fires on every tree and leaves 112,896
+  candidates at 112,896, the compile phase untouched. So a round out to buy compile CPU has to remove candidates
   that WOULD have compiled, which is not a licence question. `rank.ts`'s
   `ORDERBASE_ADMISSIONS` carries the worked case, and with it the three wrong readings of one such
   predicate, each of which deletes live candidates — two of them the row's own neighbours in the
