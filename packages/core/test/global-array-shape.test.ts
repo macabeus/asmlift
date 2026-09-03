@@ -1016,8 +1016,11 @@ describe('the order licence, split out for the value-home consumer', () => {
     // ASKED OF THE FIXTURES THAT SHAPE. The first cut of this loop ran over `GATE_FIXTURES`, and
     // every one of those is a REFUSAL fixture — the per-rule test above asserts `derive(...).size`
     // is 0 for all thirteen — so the body executed on the single appended input and the "every
-    // fixture below but one" it claimed was a coverage of one. These four are the file's shaping
-    // inputs, and the count is asserted so a fixture rename cannot quietly empty the loop again.
+    // fixture below but one" it claimed was a coverage of one. The file's top-level fixtures that
+    // DERIVE are four (measured: `BASE_FIRST`, `RANK2`, `MIX_ARRAY`, `CONST_ON_INDEX`; `LOOP_ONLY`,
+    // `MIX_CAST`, `INDEX_FIRST` and `CONST_IN_ADDEND` derive nothing) — the three that license are
+    // below, the fourth is the stop, and the count is asserted so a rename cannot empty the loop
+    // again.
     const shaping = [
       ['f', BASE_FIRST],
       ['f', RANK2],
@@ -1067,8 +1070,9 @@ describe('the order licence, split out for the value-home consumer', () => {
     // one rule on one shape and the guarantee it was written for is positional. `widths[0] ===
     // null` says "the FIRST recorded access has no element width", and where a CLEAN access is
     // recorded ahead of the interior one — `interior-or-non-access`'s own fixture, and
-    // `kleod:UpdateCameraScroll`'s shape on the corpus — all three rules read the clean access's 2,
-    // applied it to the access that has none, and licensed the name.
+    // `kleod:TransformSingleEntityToScreen`'s `gUnk_03002920` on the corpus (`widths` `[2, null]`,
+    // both symbol-map arms) — all three rules read the clean access's 2, applied it to the access
+    // that has none, and licensed the name.
     const widthRules = ['stride-is-not-the-element', 'mixed-extension', 'mid-element-constant'];
     for (const asm of [structElem, fixture('interior-or-non-access')]) {
       for (const id of widthRules) {
@@ -1147,8 +1151,10 @@ const LICENCE_FIXTURES: readonly (readonly [string, string])[] = [
       '.word\tgTbl',
     ),
   ],
-  // One index-first access and one base-first access under one name: the ONLY input on which
-  // `order-index-first` and `no-order-evidence` disagree.
+  // One index-first access and one base-first access under one name. The two rules disagree on
+  // exactly this shape and no other — `order-index-first` wants no access saying `false`,
+  // `no-order-evidence` wants one saying `true`, so only a symbol carrying both can satisfy the
+  // second and fail the first.
   ['order-index-first', fixture('index-materialized-first')],
   // Width 1, no constant, nothing scaled: no access says the base was materialized first.
   ['no-order-evidence', fixture('no-positive-evidence')],

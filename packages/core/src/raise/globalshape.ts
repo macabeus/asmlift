@@ -250,8 +250,9 @@ interface AddressUse {
  *  the one shared sound rule is `address-escapes`.
  *
  *  A SHARED RULE OBJECT IS NOT SHARED COVERAGE, and this table went one branch with none: every
- *  `guardedBy` below names a test that ablates the rule out of `inferGlobalArrays`, which measures
- *  what it is worth to the DECLARATION and says nothing about the licence. Measured rather than
+ *  `guardedBy` below names a test in the DECLARATION's suite, and the sweep that prices those rules
+ *  by ablation runs `inferGlobalArrays` — which measures what a rule is worth to the declaration
+ *  and says nothing about the licence. Measured rather than
  *  argued, `address-escapes` is uniquely load-bearing for the licence too — on its own fixture
  *  `orderLicensedGlobals` returns nothing and returns `gTbl` with the rule removed — so the hole
  *  was real, and the `arrbias` case an earlier revision of this comment claimed as the order
