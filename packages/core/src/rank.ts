@@ -1889,8 +1889,9 @@ export function enumerateCandidates(
     //     SEVEN functions in the sweep above license a name and shape none — six in `gfx`, one in
     //     `code_1`, so it is not a `gfx` habit — and SIX of them carry `/orderbase` candidates, 45
     //     of the sweep's 77. Counted over functions that ENUMERATE, which is the denominator the
-    //     claim needs: one more licenses a name and then declines at lift, and a function with no
-    //     fan loses nothing.
+    //     claim needs: one more licenses a name and then declines at STRUCTURING — never at lift,
+    //     since the licence is read off the LIFTED `fn`, so a function that licences anything has
+    //     already lifted — and a function with no fan loses nothing.
     //   · the licence RECOMPUTED after `raiseRecovered` — which is not the next statement but the
     //     third, ten lines down, past the map-precedence delete over `inferredSymbols` and
     //     `applyIdiomPatterns`. `raise/globalshape.ts` says in its own module note that the raising
