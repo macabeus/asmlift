@@ -106,13 +106,21 @@ test('a comparison enumerates for Pascal: the unspellable candidates drop, the r
 // recovery (plain if-nesting) that this backend prints fine. So recovery asks the backend first
 // (`LanguageBackend.spellsSwitchFallthrough`), and only C gets the falling `switch`.
 test('a fall-through switch comes back as the if-recovery for Pascal, not as a stub', () => {
-  const c = 'void swf(int x,int *p){ switch(x){case 3:*p=1;case 2:*p+=2;case 1:*p+=3;} }';
+  // The CONTROL half has to be a shape IDO's own output recovers as a `switch` for C, or the test
+  // passes while proving nothing — both backends would be taking the same if-recovery for reasons
+  // that have nothing to do with the fall-through knob. A descending no-break chain
+  // (`case 3: … case 2: … case 1:`, the `sw_fallmem` row) is NOT that shape on MIPS: measured, C
+  // takes the if-recovery for it too, which is why `synthetic:sw_fallmem:ido7.1` is a nonmatch.
+  // One arm falling into the next, between two closed ones (the `sw_fallmid` row, MATCH on
+  // ido7.1), is.
+  const c = 'void swf(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p+=2;case 2:*p+=3;break;case 3:*p=7;} }';
   const { asm } = compileMipsTarget(c, 'swf');
   const prototypes = { swf: { params: 2, returnsVoid: true } };
-  // THE CONTROL: the same assembly, for C, is one `switch` whose arms run on into each other.
+  // THE CONTROL: the same assembly, for C, is one `switch` whose `case 1` runs on into `case 2`
+  // with no `break;` between them.
   const cOut = decompile('swf', asm, MIPS_IDO, { prototypes }).source;
   expect(cOut).toContain('switch (');
-  expect(cOut).toMatch(/case 3:[\s\S]*?\n\s*case 2:/);
+  expect(cOut).toMatch(/case 1:(?![\s\S]*?\b(?:break|return)\b[\s\S]*?case 2:)[\s\S]*?\n\s*case 2:/);
 
   const pas = decompile('swf', asm, MIPS_IDO, { prototypes, backend: pascalBackend }).source;
   expect(pas).toContain('procedure swf(');
