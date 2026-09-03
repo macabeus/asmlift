@@ -247,9 +247,23 @@ interface AddressUse {
  *  across is a `sound: true` here — soundness is a claim about the DECLARATION, and for the licence
  *  an over-admission costs a candidate. `address-escapes` and `interior-or-non-access` are the two
  *  sound entries in this file's address half, and only the second is in the declaration half, so
- *  the one shared sound rule is `address-escapes`. The order consumer's own coverage of this table
- *  is the `arrbias` case ("the addend belongs to the base, so `arrbias` is refused here too"), which
- *  ablates through `orderLicensedGlobals` rather than through `inferGlobalArrays`. */
+ *  the one shared sound rule is `address-escapes`.
+ *
+ *  A SHARED RULE OBJECT IS NOT SHARED COVERAGE, and this table went one branch with none: every
+ *  `guardedBy` below names a test that ablates the rule out of `inferGlobalArrays`, which measures
+ *  what it is worth to the DECLARATION and says nothing about the licence. Measured rather than
+ *  argued, `address-escapes` is uniquely load-bearing for the licence too — on its own fixture
+ *  `orderLicensedGlobals` returns nothing and returns `gTbl` with the rule removed — so the hole
+ *  was real, and the `arrbias` case an earlier revision of this comment claimed as the order
+ *  consumer's coverage is not coverage at all: it contains no ablation, and ablating EVERY rule in
+ *  both halves still licenses nothing there, because the addend `add`'s only consumer is the index
+ *  `add`, so that fixture records no access to license. The coverage is now the licence's own
+ *  per-rule ablation sweep beside this module ('the order licence: which rule decides…'), which
+ *  runs `orderLicensedGlobals` with one rule removed on a fixture that REACHES the licence — for
+ *  the two address rules that means a clean base-first access beside the rejected use, the same
+ *  "the fixture is part of the claim" the declaration sweep already states. All five rules any
+ *  input reaches measure uniquely load-bearing there; `address-unused` is the sixth and has no
+ *  reaching fixture in either consumer. */
 export const ELEMENT_ADDRESS_GATES: readonly Gate<AddressUse>[] = [
   {
     id: 'address-escapes',
@@ -474,10 +488,20 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
  *  one that ablates the rule against THIS consumer rather than against the declaration. */
 export const ORDER_SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   {
+    // ITS GUARD HAS TO BE THE MIXED SHAPE, and naming the minimal pair instead was a guard that
+    // priced nothing: on BOTH halves of `base-first licenses, index-first does not` this rule can
+    // be removed and the licence is unchanged, because on the index-first half the single access
+    // has `baseFirst === false` and `no-order-evidence` — which wants ONE access that says `true` —
+    // refuses anyway. The input where the two rules come apart is a name with one index-first
+    // access AND one base-first access: there `no-order-evidence` is satisfied and only this rule
+    // refuses. Over the artifact's 370 agbcc rows (359 lift) that shape has no inhabitant — this
+    // rule alone blocks 0 names on BOTH symbol-map arms, where `no-order-evidence` blocks 13 — so
+    // it is kept for the class rather than for a row, and the fixture is what shows the class is
+    // real. Compiled, `((u16 *)gTbl)[i] + gTbl[j]` is a different object from `gTbl[i] + gTbl[j]`.
     id: 'order-index-first',
     why: 'a scaling of the index precedes the pool load in its own block — the inline pointer path, which has no home',
     sound: false,
-    guardedBy: 'global-array-shape.test.ts: base-first licenses, index-first does not — the same minimal pair',
+    guardedBy: 'global-array-shape.test.ts: one index-first access refuses a name the licence would otherwise grant',
     rejects: anIndexFirstAccess,
   },
   {
