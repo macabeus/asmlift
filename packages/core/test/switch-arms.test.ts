@@ -990,16 +990,16 @@ test('\u2026and a jump table that falls through fails LOUD for it, naming the ta
   expect(of(pasTable(true))).toMatch(/case 0:[\s\S]*?\n\s*case 1:/);
 });
 
-// ── where the `default:` label may be read off the layout ────────────────────────────────────────
-// `defaultLayoutPos` is the one definition both regimes read, and three of its six withholdings
-// answer for shapes no corpus row reaches — a whole tier of 736 rows decides 5,418 calls on the
-// other three. A refusal with no row is pinned here instead, at the seam itself.
+// ── where the `default:` label may be read off the layout ───────────────────────────────
+// `defaultLayoutPos` is the one definition both regimes read, and it states SEVEN withholdings.
+// Three of them decide nothing across the synthetic tier's 5,418 calls, so they have no row and
+// are pinned here instead — at the seam itself, one call each, beside the four that do.
 
 test('every withholding on the `default:` position, one call each', () => {
   const body = (): Block => ({ params: [], ops: [mkOp('const', { attrs: { value: 0 } }), mkOp('br')] });
   const [a0, a1, dflt, a2] = [body(), body(), body(), body()];
   // Layout: a0, a1, default, a2 — so a default read off the layout sits after TWO arms.
-  const rec = makeSwitchRecovery({
+  const deps = {
     fn: { name: 'f', blocks: [a0, a1, dflt, a2] },
     defs: new Map(),
     dom: new Map(),
@@ -1014,16 +1014,22 @@ test('every withholding on the `default:` position, one call each', () => {
     emitsOwnStatement: () => false,
     expr: () => ZERO,
     structureRegion: () => [],
-  });
+  };
+  const rec = makeSwitchRecovery(deps);
   const arms = (falls: number) => [a0, a1, a2].map((entry, i) => ({ entry, fallsThrough: i === falls }));
   const intact = { placedByDispatch: false, orderIntact: true };
   expect(rec.defaultLayoutPos(dflt, arms(-1), intact)).toBe(2);
-  // the three the corpus reaches
-  expect(rec.defaultLayoutPos(dflt, [...arms(-1), { entry: dflt, fallsThrough: false }], intact)).toBeUndefined();
+  // The four that decide the tier's calls. A bare exit is a block the dispatch minted rather than
+  // an arm body, and is the one that decides most of them.
+  expect(rec.defaultLayoutPos({ params: [], ops: [mkOp('br')] }, arms(-1), intact)).toBeUndefined();
+  expect(
+    makeSwitchRecovery({ ...deps, switchArmsFollowLayout: false }).defaultLayoutPos(dflt, arms(-1), intact),
+  ).toBeUndefined();
   expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, placedByDispatch: true })).toBeUndefined();
   expect(rec.defaultLayoutPos(dflt, arms(2), intact)).toBeUndefined(); // the LAST arm falls
-  // …and the three it does not. A bare exit is a block the dispatch minted, not an arm body.
-  expect(rec.defaultLayoutPos({ params: [], ops: [mkOp('br')] }, arms(-1), intact)).toBeUndefined();
+  // …and the three that decide none of them: a default the walk also read as an arm (which never
+  // even co-occurs), a re-threaded order, and a position landing after a falling arm.
+  expect(rec.defaultLayoutPos(dflt, [...arms(-1), { entry: dflt, fallsThrough: false }], intact)).toBeUndefined();
   expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, orderIntact: false })).toBeUndefined();
   expect(rec.defaultLayoutPos(dflt, arms(1), intact)).toBeUndefined(); // the label would land after a1
 });
