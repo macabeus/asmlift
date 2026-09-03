@@ -9,6 +9,8 @@ import { cBackend } from '../src/backend/c';
 import { emitCFamily } from '../src/backend/cfamily';
 import { pascalBackend } from '../src/backend/pascal';
 import { frontendFor } from '../src/frontend/registry';
+import { mkOp } from '../src/ir/core';
+import type { Block } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { stmtChildren } from '../src/l3/ast';
@@ -17,6 +19,7 @@ import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
+import { makeSwitchRecovery } from '../src/structure/switch-recover';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
 // agbcc's own output for `switch (mode) { case 0..3 }` with the arms in `order`, reduced to the
@@ -956,4 +959,71 @@ test('a candidate fan for that backend is not empty', () => {
   });
   expect(cands.length).toBeGreaterThan(0);
   expect(cands.every((c) => !c.source.includes('could not decompile'))).toBe(true);
+});
+
+/** A dense 0..2 table over a pointer parameter, with a `default:`, whose every arm the Pascal
+ *  backend can print — so the refusal a falling one draws is the fall-through's and not the
+ *  fixture's. `fall` drops case 0's `b .Le`, running it on into case 1. */
+const pasTable = (fall: boolean) =>
+  'f:\n' +
+  '\tcmp\tr0, #0x2\n\tbhi\t.Ld\t@cond_branch\n' +
+  '\tlsl\tr0, r0, #0x2\n\tldr\tr3, .Lp\n\tadd\tr0, r0, r3\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+  '.Lq:\n\t.align\t2, 0\n.Lp:\n\t.word\t.Lt\n\t.align\t2, 0\n' +
+  '.Lt:\n\t.word\t.La\n\t.word\t.Lb\n\t.word\t.Lc\n' +
+  '.La:\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n' +
+  (fall ? '' : '\tb\t.Le\n') +
+  '.Lb:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Le\n' +
+  '.Lc:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Le\n' +
+  '.Ld:\n\tmov\tr0, #0x63\n\tstr\tr0, [r1]\n' +
+  '.Le:\n\tbx\tlr\n';
+
+test('\u2026and a jump table that falls through fails LOUD for it, naming the table', () => {
+  // Regime B has no second recovery — the arms ARE the table's slots — so the same question gets an
+  // error rather than a fallback. Asked in the recovery so the message names the shape: the backend
+  // refuses the printed arm too, with a message of its own, and both end the whole function, so
+  // nothing downstream would notice this rule going missing.
+  const pas = { prototypes: { f: { returnsVoid: true } }, backend: pascalBackend };
+  expect(() => decompile('f', pasTable(true), ARMV4T_AGBCC, pas)).toThrow(/no fall-through in its case statement/);
+  // CONTROLS: every arm of the closed table prints for that backend, and the SAME falling assembly
+  // recovers the falling switch for C.
+  expect(decompile('f', pasTable(false), ARMV4T_AGBCC, pas).source).toContain('case a0 of');
+  expect(of(pasTable(true))).toMatch(/case 0:[\s\S]*?\n\s*case 1:/);
+});
+
+// ── where the `default:` label may be read off the layout ────────────────────────────────────────
+// `defaultLayoutPos` is the one definition both regimes read, and three of its six withholdings
+// answer for shapes no corpus row reaches — a whole tier of 736 rows decides 5,418 calls on the
+// other three. A refusal with no row is pinned here instead, at the seam itself.
+
+test('every withholding on the `default:` position, one call each', () => {
+  const body = (): Block => ({ params: [], ops: [mkOp('const', { attrs: { value: 0 } }), mkOp('br')] });
+  const [a0, a1, dflt, a2] = [body(), body(), body(), body()];
+  // Layout: a0, a1, default, a2 — so a default read off the layout sits after TWO arms.
+  const rec = makeSwitchRecovery({
+    fn: { name: 'f', blocks: [a0, a1, dflt, a2] },
+    defs: new Map(),
+    dom: new Map(),
+    ipdom: new Map(),
+    opBlock: new Map(),
+    isNamed: () => false,
+    isCmpOpcode: () => false,
+    switchAllowsNeqCase: false,
+    switchAllowsBoundCase: false,
+    switchArmsFollowLayout: true,
+    spellSwitchFallthrough: true,
+    emitsOwnStatement: () => false,
+    expr: () => ZERO,
+    structureRegion: () => [],
+  });
+  const arms = (falls: number) => [a0, a1, a2].map((entry, i) => ({ entry, fallsThrough: i === falls }));
+  const intact = { placedByDispatch: false, orderIntact: true };
+  expect(rec.defaultLayoutPos(dflt, arms(-1), intact)).toBe(2);
+  // the three the corpus reaches
+  expect(rec.defaultLayoutPos(dflt, [...arms(-1), { entry: dflt, fallsThrough: false }], intact)).toBeUndefined();
+  expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, placedByDispatch: true })).toBeUndefined();
+  expect(rec.defaultLayoutPos(dflt, arms(2), intact)).toBeUndefined(); // the LAST arm falls
+  // …and the three it does not. A bare exit is a block the dispatch minted, not an arm body.
+  expect(rec.defaultLayoutPos({ params: [], ops: [mkOp('br')] }, arms(-1), intact)).toBeUndefined();
+  expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, orderIntact: false })).toBeUndefined();
+  expect(rec.defaultLayoutPos(dflt, arms(1), intact)).toBeUndefined(); // the label would land after a1
 });
