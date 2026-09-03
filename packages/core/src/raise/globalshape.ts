@@ -239,7 +239,17 @@ interface AddressUse {
  *  adds, is the residual readable as a sum, and does anything read the result? The half that asks
  *  about the ADDRESS, which is the half BOTH consumers of this module need (see THE ORDER LICENCE
  *  HAS TWO CONSUMERS in the header). Order is the attribution: the first rejection is the rule that
- *  decided. */
+ *  decided.
+ *
+ *  THESE RULE OBJECTS ARE SHARED BY BOTH CONSUMERS, unlike `ORDER_SHAPE_GATES`', and the reason
+ *  they may be is that the question really is identical: "does the base own these bytes" has one
+ *  answer whether the caller goes on to declare an array or to home a pointer. What does NOT carry
+ *  across is a `sound: true` here — soundness is a claim about the DECLARATION, and for the licence
+ *  an over-admission costs a candidate. `address-escapes` and `interior-or-non-access` are the two
+ *  sound entries in this file's address half, and only the second is in the declaration half, so
+ *  the one shared sound rule is `address-escapes`. The order consumer's own coverage of this table
+ *  is the `arrbias` case ("the addend belongs to the base, so `arrbias` is refused here too"), which
+ *  ablates through `orderLicensedGlobals` rather than through `inferGlobalArrays`. */
 export const ELEMENT_ADDRESS_GATES: readonly Gate<AddressUse>[] = [
   {
     id: 'address-escapes',
