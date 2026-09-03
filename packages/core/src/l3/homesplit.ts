@@ -156,7 +156,17 @@ export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
 ];
 
 /** The keys this tree offers as withholds — one candidate each, or none at all. The caller asks
- *  ONCE per (tree, admission table) and loops over the answer. */
+ *  ONCE per (tree, admission table) and loops over the answer.
+ *
+ *  IT IS A KEY-COUNT FACT AND NEVER A SYMBOL-MAP ONE, which is worth stating because a round
+ *  looking for axes to skip proposed exactly that prune off a census taken on one function.
+ *  `leafBaseId` above spells a numeric base `c:<const>`, so a tree lifted with NO map reaches this
+ *  door on plain addresses: enumerated map-less, `EntityHitReaction` in the klonoa `code_1`
+ *  checkout — a checkout function, not a row — yields 512 `/homesplit` candidates over 512 distinct
+ *  sources, keyed `0x3004c20.1u` and `0x40000d4.4s`. So "no map, so this product cannot fire" is a
+ *  fact about `LoadBGTilemapData`, whose keys happen to be named globals, and a skip built on it
+ *  deletes live candidates. The same claim was the census's own arm-distinction control, which is
+ *  the transferable half: a control drawn from ONE function's labels controls that function. */
 export function homeSplitWithholds(
   keys: readonly string[],
   admission: readonly Gate<HomeSplitFanCtx>[] = HOMESPLIT_FAN_GATES,
