@@ -526,6 +526,39 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['fallthrough'],
     toolchains: ALL,
   },
+  // Fall-through with nothing crossing the arms: each body reads and writes through the pointer, so
+  // no value is handed from one arm to the next and the recovered `switch` needs no variable the
+  // dispatch did not already give it. `sw_fall` above is the harder half of the pair — there the
+  // accumulator crosses every arm as a block parameter, which the dispatch edges also write.
+  {
+    sym: 'sw_fallmem',
+    src: 'void sw_fallmem(int x,int *p){ switch(x){case 3:*p=1;case 2:*p+=2;case 1:*p+=3;} }',
+    features: ['fallthrough'],
+    toolchains: ALL,
+    ctx: 'void sw_fallmem(int,int*);',
+    proto: { sw_fallmem: { returnsVoid: true } },
+  },
+  // A chain that runs on into `default:`, with a CLOSED arm between the two chains — so the arms
+  // cannot simply be emitted in one block-layout run, and where the default's label goes is decided
+  // by the fall-through rather than by where its body is laid out.
+  {
+    sym: 'sw_falldef',
+    src: 'void sw_falldef(int x,int *p){ switch(x){case 0:*p=1;case 1:*p+=2;break;case 2:*p+=3;default:*p+=4;} }',
+    features: ['fallthrough'],
+    toolchains: ALL,
+    ctx: 'void sw_falldef(int,int*);',
+    proto: { sw_falldef: { returnsVoid: true } },
+  },
+  // A closed arm on either side of the chain: three arms in the middle of four, and only the middle
+  // pair is one chain.
+  {
+    sym: 'sw_fallmid',
+    src: 'void sw_fallmid(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p+=2;case 2:*p+=3;break;case 3:*p=7;} }',
+    features: ['fallthrough'],
+    toolchains: ALL,
+    ctx: 'void sw_fallmid(int,int*);',
+    proto: { sw_fallmid: { returnsVoid: true } },
+  },
   {
     sym: 'sw_sparse',
     src: 'int sw_sparse(int x){ switch(x){case 1:return 1;case 10:return 2;case 100:return 3;case 1000:return 4;default:return 0;} }',

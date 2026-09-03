@@ -691,3 +691,127 @@ test('…and `default:` still lands where the LAYOUT puts it, counted in arms', 
   expect(out.indexOf('default:')).toBeGreaterThan(out.indexOf('case 1:'));
   expect(out.indexOf('default:')).toBeLessThan(out.indexOf('case 3:'));
 });
+
+// ── fall-through arms ────────────────────────────────────────────────────────────────────────────
+// Where the arms below come from: each is agbcc's own output for the C in its comment, compiled at
+// TOOLCHAIN.agbccFlags. A falling arm is spelled by OMITTING the `break;`, which is a positional
+// fact — control drops into whatever arm is emitted NEXT (the l3/ast.ts non-neutrality note) — so
+// recovery is not free to order the arms by layout or by case value where a chain says otherwise.
+//
+// `switch (x) { case 3: *p = 1; case 2: *p += 2; case 1: *p += 3; }` — no `break` anywhere.
+const fallChain =
+  'f:\n' +
+  '\tcmp\tr0, #0x2\n\tbeq\t.L5\t@cond_branch\n' +
+  '\tcmp\tr0, #0x2\n\tbgt\t.L9\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.L6\t@cond_branch\n' +
+  '\tb\t.L3\n' +
+  '.L9:\n\tcmp\tr0, #0x3\n\tbne\t.L3\t@cond_branch\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n' +
+  '.L5:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x2\n\tstr\tr0, [r1]\n' +
+  '.L6:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n\tstr\tr0, [r1]\n' +
+  '.L3:\n\tbx\tlr\n';
+
+test('a chain of falling arms is ONE switch, and the fallen-into arm is emitted once', () => {
+  const out = of(fallChain);
+  expect(out).toContain('switch (a0)');
+  expect(out).not.toContain('else'); // not the if-recovery fallback
+  expect(armOrder(out)).toEqual([3, 2, 1]);
+  // Each body appears exactly once — if-recovery reaches `case 1`'s body on three paths and emits
+  // it three times, which is what the fall-through spelling replaces.
+  expect(count(out, '*a1 = *a1 + 3;')).toBe(1);
+  expect(count(out, 'break;')).toBe(0); // every arm falls, and the last one ends the switch
+});
+
+test('the CHAIN orders the arms, not the case values, on a compiler with no layout rule', () => {
+  // Ascending case value is the neutral order for a compiler that has not declared
+  // `switchArmsFollowLayout`, and it would emit 1, 2, 3 — which reverses the chain and makes
+  // `case 3` fall into `case 2` by writing it BELOW it. The order is forced by the exits.
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchArmsFollowLayout;
+  const out = decompile('f', fallChain, undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(armOrder(out)).toEqual([3, 2, 1]);
+});
+
+// `switch (x) { case 0: *p = 1; case 1: *p += 2; break; case 2: *p += 3; default: *p += 4; }`
+const fallIntoDefault =
+  'f:\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbgt\t.L9\t@cond_branch\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n' +
+  '\tb\t.L7\n' +
+  '.L9:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tb\t.L7\n' +
+  '.L4:\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n' +
+  '.L5:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x2\n\tb\t.L10\n' +
+  '.L6:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n\tstr\tr0, [r1]\n' +
+  '.L7:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x4\n' +
+  '.L10:\n\tstr\tr0, [r1]\n\tbx\tlr\n';
+
+test('an arm falling into the DEFAULT is emitted directly above it', () => {
+  // C prints `default:` where `defaultAt` says, and an arm falling into it needs it directly
+  // below — so the chain that ends in the default takes the LAST position and the label keeps C's
+  // conventional one. `case 1` closes in the middle, which is what makes the placement observable.
+  const out = of(fallIntoDefault);
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 1, 2]);
+  // `case 2` runs straight on into the default — no `break;` between the two…
+  expect(out).toMatch(/case 2:[\s\S]*?\n\s*default:/);
+  expect(out).not.toMatch(/case 2:[\s\S]*?break;[\s\S]*?default:/);
+  // …while the closed arm between the two chains keeps the only `break;` in the switch.
+  expect(count(out, 'break;')).toBe(1);
+});
+
+// ── the shapes that still decline ────────────────────────────────────────────────────────────────
+// Regime A's fallback is if-recovery, which spells every edge the assembly has — so each of these
+// comes back as if-nesting rather than as a `switch` that guesses. What the assertions read is that
+// the arm at the far end of the offending edge never gets a `case` label of the recovered switch,
+// and that its body is DUPLICATED into the arms reaching it — the honest, costly spelling.
+const threeCase = (c0: string, c1: string, c2: string) =>
+  'f:\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Lend\n' +
+  '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Lend\n' +
+  `.Lc0:\n${c0}` +
+  `.Lc1:\n${c1}` +
+  `.Lc2:\n${c2}` +
+  // The merge has a BODY — statements after the switch. An arm leaving to it is therefore a
+  // switch-scoped `break;`, not a `return`, which is the distinction the third fixture rests on.
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
+
+test('TWO arms falling into ONE decline — C reaches an arm from above only once', () => {
+  const out = of(
+    threeCase(
+      '\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
+      '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+      '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
+    ),
+  );
+  expect(armOrder(out)).not.toContain(1);
+  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+});
+
+test('a body reaching TWO sibling arms declines — C fall-through reaches only one', () => {
+  const out = of(
+    threeCase(
+      '\tcmp\tr1, #0\n\tbeq\t.Lc1\t@cond_branch\n\tb\t.Lc2\n',
+      '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+      '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+    ),
+  );
+  expect(armOrder(out)).not.toContain(1);
+  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+});
+
+test('a body reaching a sibling on one path and the switch END on another declines', () => {
+  // The shape that needs a switch-scoped `break;` inside a case body, which l3 does not emit
+  // (`{k:'break'}` is loop-scoped). Widening fall-through to swallow it would divert the exiting
+  // path into the next arm.
+  const out = of(
+    threeCase(
+      '\tcmp\tr1, #0\n\tbeq\t.Lend\t@cond_branch\n\tb\t.Lc1\n',
+      '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+      '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+    ),
+  );
+  expect(armOrder(out)).not.toContain(1);
+  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+});

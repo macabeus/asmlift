@@ -48,8 +48,9 @@ export type ArmExit = { kind: 'break' } | { kind: 'fallthrough'; to: Block } | {
 
 export interface SwitchRecovery {
   recognizeSwitch: (b: Block, stop: Block | null) => Stmt[] | null;
-  /** shared with the Regime-B (`switch_br`) path in structure.ts, which recovers the fall-through
-   *  this returns; Regime A only accepts `break` arms and otherwise declines to if-recovery. */
+  /** shared with the Regime-B (`switch_br`) path in structure.ts. Both regimes recover the
+   *  fall-through this returns; on an `unstructurable` verdict Regime A declines to if-recovery and
+   *  Regime B, which has no fallback, fails loud. */
   analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>) => ArmExit;
   /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
    *  regimes read it from one definition (and one statement of what it rests on). */
@@ -397,11 +398,59 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     };
   };
 
-  /** Every arm closed (`break`)? The precondition Regime A needs — it has a behaviourally identical
-   *  fallback (if-recovery), so it declines on anything else instead of recovering fall-through. */
-  const allArmsClosed = (targets: Set<Block>, b: Block, merge: Block | null): boolean => {
-    const siblings = new Set([...targets].filter((t) => t !== merge));
-    return [...siblings].every((t) => analyzeArmExit(t, b, merge, siblings).kind === 'break');
+  /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
+   *  fall-through chain is emitted contiguously and takes the position of its HEAD in `order`,
+   *  which is the caller's own arm-order policy — so with no fall-through every chain is a
+   *  singleton and `order` comes back unchanged. `dflt` is the `default:` arm's block when it has
+   *  one, and it is pinned LAST because that is where C prints the label.
+   *
+   *  THREE REFUSALS (null ⇒ the caller declines), each a shape no single linear order spells:
+   *    - two arms falling into the SAME arm — C drops into an arm from above along one edge only;
+   *    - the `default:` arm falling into a case, since nothing is emitted below it;
+   *    - a fall-through CYCLE, whose members are all fallen-into and so are never a chain head. */
+  const chainArms = (order: Block[], dflt: Block | null, exitOf: Map<Block, ArmExit>): Block[] | null => {
+    const next = new Map<Block, Block>();
+    const fallenInto = new Set<Block>();
+    for (const e of [...order, ...(dflt ? [dflt] : [])]) {
+      const x = exitOf.get(e);
+      if (x?.kind !== 'fallthrough') {
+        continue;
+      }
+      if (e === dflt || fallenInto.has(x.to)) {
+        return null;
+      }
+      fallenInto.add(x.to);
+      next.set(e, x.to);
+    }
+    const chains: Block[][] = [];
+    const seen = new Set<Block>();
+    let intoDefault = -1;
+    for (const head of order) {
+      if (fallenInto.has(head)) {
+        continue;
+      }
+      const chain: Block[] = [];
+      for (
+        let cur: Block | undefined = head;
+        cur !== undefined && cur !== dflt && !seen.has(cur);
+        cur = next.get(cur)
+      ) {
+        seen.add(cur);
+        chain.push(cur);
+      }
+      if (dflt !== null && next.get(chain[chain.length - 1]) === dflt) {
+        intoDefault = chains.length;
+      }
+      chains.push(chain);
+    }
+    // A cycle's every member is fallen-into, so none of them is a head and none is walked.
+    if (seen.size !== order.length) {
+      return null;
+    }
+    if (intoDefault >= 0) {
+      chains.push(...chains.splice(intoDefault, 1));
+    }
+    return chains.flat();
   };
 
   const recognizeSwitch = (b: Block, stop: Block | null): Stmt[] | null => {
@@ -578,13 +627,19 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return null;
     }
 
-    // PRE2 (fall-through): only NON-fall-through switches are handled — decline if any case body
-    // can reach ANOTHER case body (or a default that has its own block) while staying inside the
-    // region. (The SAME analysis serves the Regime-B path, which RECOVERS the adjacent-sibling
-    // case as C fall-through instead of declining; A has if-recovery to fall back on, B does not.)
+    // PRE2 (arm exits), per SITE. A `break` arm closes; a `fallthrough` arm runs on into the one
+    // sibling it reaches, which `chainArms` then places directly under it. `unstructurable` is a
+    // shape no single linear switch spells — a body reaching two siblings, or a sibling on one path
+    // and the switch's end on another — and Regime A declines to if-recovery, which spells every
+    // one of those edges. (Regime B reads the same verdicts and fails LOUD on that last one.)
     const merge = ipdom.get(b) ?? stop;
     const targets = new Set<Block>([...caseBlocks, ...(defaultBlk ? [defaultBlk] : [])]);
-    if (!allArmsClosed(targets, b, merge)) {
+    const siblings = new Set([...targets].filter((t) => t !== merge));
+    const exitOf = new Map<Block, ArmExit>();
+    for (const t of siblings) {
+      exitOf.set(t, analyzeArmExit(t, b, merge, siblings));
+    }
+    if ([...exitOf.values()].some((e) => e.kind === 'unstructurable')) {
       return null;
     }
 
@@ -598,10 +653,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
 
-    // ARM ORDER. Every arm here is CLOSED (`allArmsClosed`) and the case values are disjoint (PRE3),
-    // so the order carries no meaning and is pure matching evidence: ascending case VALUE is the
-    // neutral spelling, and where a compiler has declared `switchArmsFollowLayout` the layout of
-    // the bodies is the SOURCE's arm order instead.
+    // ARM ORDER. The case values are disjoint (PRE3), so where no arm falls through the order
+    // carries no meaning and is pure matching evidence: ascending case VALUE is the neutral
+    // spelling, and where a compiler has declared `switchArmsFollowLayout` the layout of the bodies
+    // is the SOURCE's arm order instead. A FALLING arm's position is not free, and `chainArms`
+    // below re-threads this order for those — reading it for the chain HEADS only.
     //
     // TWO arms the layout cannot order, both falling back rather than recovering:
     //   - two case VALUES sharing one body block share its index, so the tie is one the merge (or
@@ -655,11 +711,32 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         armsByBlock.set(blk, [k]);
       }
     }
-    const outCases: SwitchCase[] = [...armsByBlock.entries()].map(([blk, values]) => ({
-      values,
-      body: structureRegion(blk, merge),
-      fallsThrough: false,
-    }));
+    // The `default:` arm is a chain member too — an arm may run on into it, and C prints it last.
+    const dfltArm = defaultBlk !== null && defaultBlk !== merge ? defaultBlk : null;
+    const entries = chainArms([...armsByBlock.keys()], dfltArm, exitOf);
+    if (entries === null) {
+      return null;
+    }
+    const fallsInto = (blk: Block): Block | null => {
+      const x = exitOf.get(blk);
+      return x?.kind === 'fallthrough' ? x.to : null;
+    };
+    // Bodies are structured in EMISSION order — `argAssignsFor` mints swap-cycle temp names as it
+    // goes, so building them out of order changes the output — and each falling arm's target is
+    // re-read off that order rather than trusted from the ordering above: this is the seam where a
+    // POSITION acquires control-flow meaning (the l3/ast.ts non-neutrality note).
+    const outCases: SwitchCase[] = [];
+    for (const [i, blk] of entries.entries()) {
+      const to = fallsInto(blk);
+      if (to !== null && to !== (entries[i + 1] ?? dfltArm)) {
+        return null;
+      }
+      outCases.push({
+        values: armsByBlock.get(blk)!,
+        body: structureRegion(blk, to ?? merge),
+        fallsThrough: to !== null,
+      });
+    }
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
     const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
@@ -675,9 +752,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         const succ = t.ops[t.ops.length - 1].successors;
         return succ.length > 1 && succ[1].block === blk;
       }) && dispatchTargets.filter((e) => e === blk).length < 2;
-    const defaultAt = defaultBlk
-      ? defaultLayoutPos(defaultBlk, [...armsByBlock.keys()], ranOutInto(defaultBlk))
-      : undefined;
+    // Placed among CLOSED arms only. `defaultLayoutPos` counts the arms laid out before the
+    // default's block, and where a chain has re-threaded that order the count no longer indexes the
+    // list it counted — so the label takes C's conventional last position instead. (Which is also
+    // the position an arm falling INTO the default needs.)
+    const defaultAt =
+      defaultBlk && !outCases.some((c) => c.fallsThrough)
+        ? defaultLayoutPos(defaultBlk, entries, ranOutInto(defaultBlk))
+        : undefined;
     const sw: Stmt = {
       k: 'switch',
       scrutinee: scrutExpr,
