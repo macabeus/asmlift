@@ -1013,14 +1013,28 @@ describe('the order licence, split out for the value-home consumer', () => {
   });
 
   test('a shaped name is not always licensed — the superset claim, and where it stops', () => {
-    // It holds wherever the shape rests on an ORDER fact, which is every fixture below but one…
-    for (const [, asm] of [...GATE_FIXTURES, ['licence', BASE_FIRST] as const]) {
-      for (const name of derive('f', asm).keys()) {
-        if (asm !== fixture('no-positive-evidence')) {
-          expect([...licensed('f', asm)]).toContain(name);
-        }
+    // ASKED OF THE FIXTURES THAT SHAPE. The first cut of this loop ran over `GATE_FIXTURES`, and
+    // every one of those is a REFUSAL fixture — the per-rule test above asserts `derive(...).size`
+    // is 0 for all thirteen — so the body executed on the single appended input and the "every
+    // fixture below but one" it claimed was a coverage of one. These four are the file's shaping
+    // inputs, and the count is asserted so a fixture rename cannot quietly empty the loop again.
+    const shaping = [
+      ['f', BASE_FIRST],
+      ['f', RANK2],
+      ['mix', MIX_ARRAY],
+    ] as const;
+    let checked = 0;
+    for (const [fname, asm] of shaping) {
+      for (const name of derive(fname, asm).keys()) {
+        expect([...licensed(fname, asm)]).toContain(name);
+        checked++;
       }
     }
+    expect(checked).toBe(3);
+    // …and it stops at the fourth, which shapes on the index-side CONSTANT alone: `gTbl[a0 + 1]`
+    // is derived and licensed for no home, the same answer as the literal below.
+    expect([...derive('f', CONST_ON_INDEX).keys()]).toEqual(['gTbl']);
+    expect([...licensed('f', CONST_ON_INDEX)]).toEqual([]);
     // …and it stops at a name shaped by the index-side CONSTANT alone, which says nothing about
     // the order. `synthetic:harridx` is that row in the corpus. Nothing is lost by refusing it:
     // a shaped name is spelled bare, so its index base is a `var` and no home key exists to bind.
