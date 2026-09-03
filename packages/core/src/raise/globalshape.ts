@@ -521,10 +521,14 @@ export const ORDER_SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     // has `baseFirst === false` and `no-order-evidence` — which wants ONE access that says `true` —
     // refuses anyway. The input where the two rules come apart is a name with one index-first
     // access AND one base-first access: there `no-order-evidence` is satisfied and only this rule
-    // refuses. Over the artifact's 370 agbcc rows (359 lift) that shape has no inhabitant — this
-    // rule alone blocks 0 names on BOTH symbol-map arms, where `no-order-evidence` blocks 13 — so
-    // it is kept for the class rather than for a row, and the fixture is what shows the class is
-    // real. Compiled, `((u16 *)gTbl)[i] + gTbl[j]` is a different object from `gTbl[i] + gTbl[j]`.
+    // refuses. Over the artifact's 370 agbcc rows (359 lift) that shape has no inhabitant, and both
+    // readings of "no inhabitant" were measured on BOTH symbol-map arms rather than one inferred
+    // from the other: of the 33 symbols that reach this table, 1 has an index-first access and 0
+    // have accesses in both orders, and this rule alone blocks 0 names where `no-order-evidence`
+    // blocks 13. So it is kept for the class rather than for a row, and the fixture is what shows
+    // the class is real: compiled through the benchmark's own agbcc command,
+    // `((u16 *)gTbl)[i] + gTbl[j]` is a different object from `gTbl[i] + gTbl[j]` (and the same one
+    // as `((u16 *)gTbl)[i] + ((u16 *)gTbl)[j]`), so the first access's order really does decide.
     id: 'order-index-first',
     why: 'a scaling of the index precedes the pool load in its own block — the inline pointer path, which has no home',
     sound: false,
