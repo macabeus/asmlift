@@ -80,6 +80,19 @@ const deriveWithout = (id: string, name: string, asm: string) =>
       : ARRAY_SHAPE_GATES.shape,
   });
 
+/** …and WHICH rule decides once one is removed. `deriveWithout` says a symbol is still refused;
+ *  this says by what, which is the half an attributing comment actually claims. */
+const refusalsWithout = (id: string, name: string, asm: string) => [
+  ...arrayShapeRefusals(lift(name, asm), ARMV4T_AGBCC, {
+    address: ARRAY_SHAPE_GATES.address.some((g) => g.id === id)
+      ? without(ARRAY_SHAPE_GATES.address, id)
+      : ARRAY_SHAPE_GATES.address,
+    shape: ARRAY_SHAPE_GATES.shape.some((g) => g.id === id)
+      ? without(ARRAY_SHAPE_GATES.shape, id)
+      : ARRAY_SHAPE_GATES.shape,
+  }),
+];
+
 const sourceOf = (name: string, asm: string) => decompile(name, asm, ARMV4T_AGBCC, {}).source;
 
 // ── the minimal pair: one instruction's ORDER, two spellings ─────────────────────────────────
@@ -280,7 +293,9 @@ f:
   // alongside it or the rule looks unnecessary: with an interior read alone, ablating the rule
   // records no access at all (an interior read is not evidence) and the symbol is refused anyway.
   // With a clean access beside it, ablating derives `elemSize 2` off a name the function also
-  // reads at +4 — the wrong declaration. `kleod:UpdateCameraScroll` is that shape on the corpus.
+  // reads at +4 — the wrong declaration. `kleod:UpdateCameraScroll` is the corpus inhabitant of
+  // the ABLATION result (`gSineTable` derives `elemSize 2` without the rule) but not of this
+  // fixture's shape: its rejected use is the rule's NON-ACCESS half, pinned separately below.
   [
     'interior-or-non-access',
     thumb(
@@ -410,8 +425,56 @@ describe('refusals: which rule decided, and what it is worth', () => {
     expect(sourceOf('f', structElem)).toContain('&gBgInfo');
   });
 
+  // THE RULE'S OTHER HALF, which its own fixture does not exercise: `interior-or-non-access`
+  // rejects a use whose consumers are not all whole-element accesses, and "not a whole-element
+  // access" is EITHER a load/store at a displacement OR something that is not a load or a store at
+  // all. Only the first is an interior read. The corpus shape is the second — `kleod:UpdateCameraScroll`'s
+  // `gSineTable`, read once cleanly at width 2 with its element address also an operand of another
+  // `add` — and it is what makes that name a plain scalar leaf the licence keeps and the
+  // declaration refuses, with NO null width anywhere in the order consumer's evidence.
+  test('a non-access use refuses the declaration too — and it is not an interior read', () => {
+    const nonAccess = thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r2\n\tldrh\tr3, [r0]\n' +
+        '\tadd\tr0, r0, r1\n\tadd\tr0, r0, r3',
+      '.word\tgTbl',
+    );
+    expect(refusals('f', nonAccess)).toEqual([['gTbl', 'interior-or-non-access']]);
+    expect(derive('f', nonAccess).size).toBe(0);
+    // …and the licence keeps it, because where the base was materialized is answered by the one
+    // clean access that IS recorded.
+    expect([...licensed('f', nonAccess)]).toEqual(['gTbl']);
+    // The discriminator against the interior half, asked of the rules that read a width: on the
+    // interior fixture all three refuse the licence (the test that composes them says so); here
+    // all three ADMIT, because no access under this name was recorded with a null element width.
+    for (const id of ['stride-is-not-the-element', 'mixed-extension', 'mid-element-constant']) {
+      const composed = {
+        address: ELEMENT_ADDRESS_GATES,
+        shape: [...ORDER_SHAPE_GATES, ...SHAPE_GATES.filter((g) => g.id === id)],
+      };
+      expect([id, [...orderLicensedGlobals(lift('f', nonAccess), ARMV4T_AGBCC, composed)]]).toEqual([id, ['gTbl']]);
+    }
+  });
+
   test('two access widths under one name refuse', () => {
     expect(refusals('f', fixture('mixed-access-width'))).toEqual([['gTbl', 'mixed-access-width']]);
+  });
+
+  test("…and what refuses in its place once it is ablated — the rule's attribution, not its comment", () => {
+    // `mixed-access-width` is `sound: false`, so the sweep below asserts something else refuses.
+    // WHICH something is the claim its own comment makes, and that comment named a mechanism the
+    // width rules no longer have: they read each access's own `elementWidth` now, so nothing
+    // collapses to the first access's. Pinned rather than re-described — the substitute is
+    // `mixed-extension`, on a disagreement about the EXTENSION that survives the change…
+    const asm = fixture('mixed-access-width');
+    expect(refusalsWithout('mixed-access-width', 'f', asm)).toEqual([['gTbl', 'mixed-extension']]);
+    // …while the rule the collapse used to make refuse here now derives on its own, because each
+    // access's stride IS its own width. Ordering is the only thing keeping the attribution put.
+    const strideOnly = {
+      address: ARRAY_SHAPE_GATES.address,
+      shape: SHAPE_GATES.filter((g) => g.id === 'stride-is-not-the-element'),
+    };
+    expect([...inferGlobalArrays(lift('f', asm), ARMV4T_AGBCC, strideOnly).keys()]).toEqual(['gTbl']);
   });
 
   test('one name read signed and unsigned refuses', () => {

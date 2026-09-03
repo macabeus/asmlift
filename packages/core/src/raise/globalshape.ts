@@ -72,18 +72,30 @@
 // rules instead of selecting that one.
 //
 // So the order half licenses the HOME on its own, for every name the declaration half refuses for a
-// reason that is NOT about the order. Censused over the artifact's 370 agbcc rows in BOTH symbol-map
-// arms — the arms differ, so both numbers are quoted rather than one labelled as if it were both:
+// reason that is NOT about the order. Censused over the artifact's 370 agbcc rows (359 lift) in
+// BOTH symbol-map arms — and the two arms come out IDENTICAL name for name and key for key, which
+// is the opposite of what an earlier revision of this paragraph claimed. It quoted two different
+// pairs of numbers as if the arms differed, and mis-split the one arm it had; both readings of
+// "key" are therefore spelled out here, because the population narrows once and the sentence has
+// to say which step it is counting:
 //
-//     map-less   8 rows, 10 keys — 9 a STRUCT ELEMENT's cast base, 1 a plain scalar leaf
-//     map-ful   10 rows, 12 keys — 10 cast bases, 2 plain scalar leaves
+//     licence-only NAMES                        11 names on 9 rows, both arms
+//     …their base keys in the L3 tree           10 keys on 8 rows — 8 a STRUCT ELEMENT's cast
+//                                               base, 2 a plain scalar leaf, both arms
+//     …of those, keys `ORDERBASE_GATES` admits   9 keys on 7 rows — 8 cast, 1 leaf, both arms
 //
-// `interior-or-non-access` refuses both shapes. The STRUCT ELEMENT has no `intType` and reads its
-// members at a displacement. The plain scalar leaf is an element of a symbol the function ALSO
-// reads at a displacement somewhere else — `kleod:UpdateCameraScroll`'s `gSineTable` in both arms,
-// and `pokeemerald:Sin2`'s `gSineDegreeTable` only in the map-ful one. Neither says any less about
-// the order than a clean access does. `ADDRESS_GATES` below is therefore two halves: the ELEMENT
-// rules, which both consumers ask, and the DECLARATION rule, which only the first does.
+// `interior-or-non-access` refuses all eleven, and it is the rule's TWO HALVES that make the two
+// shapes, not one half twice. The STRUCT ELEMENT has no `intType` and reads its members at a
+// displacement — the INTERIOR half; `kleod:EntityItemDrop`'s `gEntity` is a plain scalar leaf
+// refused the same way (a `store` at +15). The other leaf is refused on the NON-ACCESS half
+// instead: `kleod:UpdateCameraScroll`'s `gSineTable` is read once, cleanly, at width 2, and its
+// element address is also an operand of another `add`, so nothing there is at a displacement at
+// all — which is why the ORDER consumer records ONE access under that name and no null width.
+// (`pokeemerald:Sin2`'s `gSineDegreeTable`, which the earlier revision named here, is not in this
+// population on either arm: it DERIVES, so the declaration half refuses it nothing.) Neither shape
+// says any less about the order than a clean access does. `ADDRESS_GATES` below is therefore two
+// halves: the ELEMENT rules, which both consumers ask, and the DECLARATION rule, which only the
+// first does.
 //
 // WHAT REFUSES — and the list is DOWN THERE, not here. The refusals are two `Gate<Ctx>` tables
 // (`ADDRESS_GATES` and `SHAPE_GATES`, below), each rule carrying its own `why` and the test that
@@ -311,9 +323,12 @@ export const DECLARATION_ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     // It is uniquely load-bearing only where the symbol ALSO has a clean access: with an interior read alone,
     // removing the rule records no access at all (an interior read is not evidence, and is
     // filtered out) and the symbol is refused anyway, while beside a clean access removing it
-    // derives an element type off a name the function reads at a displacement.
+    // derives an element type off a name one of whose uses this spelling does not model.
     // `kleod:UpdateCameraScroll` is that shape on the corpus — `gSineTable` derives `elemSize 2`
-    // without this rule — which is why its fixture carries both accesses.
+    // without this rule — which is why its fixture carries both accesses. Its rejected use there
+    // is the NON-ACCESS half rather than the interior one (the element address is an operand of
+    // another `add`, and nothing under that name is read at a displacement), which is a second
+    // shape and has a test of its own: 'a non-access use refuses the declaration too'.
     id: 'interior-or-non-access',
     why: 'a non-zero displacement reads an INTERIOR of the element, which a whole-element subscript cannot spell',
     sound: true,
@@ -389,9 +404,16 @@ const noOrderEvidence = (e: ShapeEvidence): boolean => !e.perAccess.some((a) => 
  *  `((T *)&gSym)[i]`, which is byte-identical under any declaration. */
 export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   {
-    // Attributing on the fixture below: with it removed the width collapses to the first access's
-    // and `mixed-extension` refuses the same symbol (measured). It is first because "one name, two
-    // element types" is the reason and the extension disagreement is a symptom of it.
+    // Attributing on the fixture below: with it removed `mixed-extension` refuses the same symbol
+    // (measured). The MECHANISM stated here used to be "the width collapses to the first access's",
+    // and that stopped being true when the width rules were made to read each access's own
+    // `elementWidth`; re-measured on the fixture, `widths` is `[2, 4]` and `signs` is
+    // `[false, true]`, so `mixed-extension` refuses on `some(w < 4) && signs.length !== 1` — the
+    // sub-word read really does disagree about its extension — while `stride-is-not-the-element`,
+    // which the collapse used to make refuse, now DERIVES there on its own (each access's stride is
+    // its own width). Only the order of the two rules keeps the attribution where it was. It is
+    // first because "one name, two element types" is the reason and the extension disagreement is a
+    // symptom of it.
     id: 'mixed-access-width',
     why: 'two widths under one name have no single element type to declare',
     sound: false,
