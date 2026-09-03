@@ -1860,14 +1860,21 @@ export function enumerateCandidates(
     // question, a standalone repro rather than a benchmark row — the licence is empty on every lift
     // variant of BOTH symbol-map arms: four named symbols DO reach the licence table map-ful and the
     // ADDRESS gates refuse all four, so "the pool spells no names" is not the reason. The skip would
-    // fire on every tree there and remove not one candidate. Over the wider population — the 103
-    // klonoa `asm/nonmatchings` functions under 4 KB, of the 182 there, the 54 that lift, both
-    // symbol-map arms, so 108 enumerations — it lost none of the 77 `/orderbase` candidates the
-    // axis contributes to it. ONE ARM CARRIES THAT CONTROL AND THE OTHER CANNOT: all 77 are
-    // map-ful, so the 54 map-less enumerations show the skip harmless where the axis has no
-    // inhabitant to lose, which is not evidence that the predicate is right. (Its firing counts —
-    // 1,298 of 1,409 asks map-ful, 532 of 532 map-less — needed a scratch patch that is not in this
-    // tree; the candidate counts are re-derivable from `enumerateCandidates` alone.)
+    // fire on every tree there and remove not one candidate. Over the wider population — the 104
+    // klonoa `asm/nonmatchings` functions whose `.s` is under 4,096 BYTES, of the 182 there, the 55
+    // that enumerate on each symbol-map arm, so 110 enumerations — it lost none of the 77
+    // `/orderbase` candidates the axis contributes to it. The cap is spelled in BYTES on purpose:
+    // "4 KB" resolves two ways, and the other reading is a DIFFERENT population — 103 files, one
+    // function fewer — so a re-run that disagrees with the counts here should check its cap before
+    // it reads a regression. ONE ARM CARRIES THAT CONTROL AND THE OTHER CANNOT: all 77 are map-ful,
+    // so the 55 map-less enumerations show the skip harmless where the axis has no inhabitant to
+    // lose, which is not evidence that the predicate is right. NOR DOES THIS SWEEP CONTROL THE
+    // PER-FUNCTION READING BELOW: that one's counterexample needs a `/setup-args` variant licensing
+    // a name the base lift does not, and no function here has one, so it is inert over all 110 of
+    // them and broken all the same — which is what "absence of a counterexample is not proof" costs
+    // when the population is chosen before the failure shape is known. (The firing counts — 1,354
+    // of 1,465 asks map-ful, 548 of 548 map-less — needed a scratch patch that is not in this tree;
+    // the candidate counts are re-derivable from `enumerateCandidates` alone.)
     //
     // IF IT IS EVER BUILT ANYWAY, IT IS `orderLicensedGlobals(fn, target)` READ AT THE SITE BELOW
     // that hands `orderLicensed` to the structuring call, per LIFT VARIANT — never per function,
@@ -1879,14 +1886,28 @@ export function enumerateCandidates(
     //     not, so the first variant's answer is not the function's.
     //   · `inferGlobalArrays`, seven lines above the licence call and off the same `fn` — a
     //     documented strict SUBSET (`raise/globalshape.ts`), and empty where the licence is not:
-    //     three klonoa `gfx` functions in the sweep above license a name and shape none, so this
-    //     reading deletes every `/orderbase` candidate on them. It is also the one wrong reading a
-    //     corpus gate would catch, because it deletes the exact source `synthetic:bgarr:agbcc`
-    //     publishes as its MATCH — which the per-function reading does not, so passing that gate
-    //     says nothing about this row's other two neighbours.
-    //   · the licence RECOMPUTED after `raiseRecovered`, the next statement — `raise/globalshape.ts`
-    //     says in its own module note that the raising tower destroys the order evidence, so it
-    //     reads empty everywhere and the skip fires on every tree.
+    //     SEVEN functions in the sweep above license a name and shape none — six in `gfx`, one in
+    //     `code_1`, so it is not a `gfx` habit — and SIX of them carry `/orderbase` candidates, 45
+    //     of the sweep's 77. Counted over functions that ENUMERATE, which is the denominator the
+    //     claim needs: one more licenses a name and then declines at lift, and a function with no
+    //     fan loses nothing.
+    //   · the licence RECOMPUTED after `raiseRecovered` — which is not the next statement but the
+    //     third, ten lines down, past the map-precedence delete over `inferredSymbols` and
+    //     `applyIdiomPatterns`. `raise/globalshape.ts` says in its own module note that the raising
+    //     tower destroys the order evidence, and the tempting next step — "so it reads empty
+    //     everywhere and the skip fires on every tree" — was measured FALSE: on the sweep's
+    //     `EntityPickupCollect` the recomputed set is non-empty and the skip fires on 36 of 52 asks,
+    //     and all 16 of that function's `/orderbase` candidates die anyway. This reading takes all
+    //     77 of the sweep's. Firing less often is not a defence.
+    //
+    // AND A CORPUS GATE SEES TWO OF THE THREE, NOT ONE — which is the only reason to keep the other
+    // two written down. Both the `inferGlobalArrays` reading and the post-raise one delete
+    // `unsigned/orderbase` off `synthetic:bgarr:agbcc`, the exact source that row publishes as its
+    // score-0 MATCH, on BOTH arms: a per-row label/source diff fails loudly on either. The
+    // PER-FUNCTION reading is the one that gate cannot see. Its counterexample needs `/setup-args`
+    // AND `/orderbase` in one label, and of the corpus's 742 published winner labels three carry
+    // `/orderbase`, six carry `/setup-args` and NONE carries both — so passing obligation 1 is
+    // evidence about two of these neighbours and none at all about the third.
 
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
