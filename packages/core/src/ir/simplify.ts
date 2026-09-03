@@ -27,51 +27,6 @@ import { Block, Fn, Successor, Value, replaceAllUsesWith } from './core';
  * `onRemoved` lets a caller drop its own bookkeeping for the retired param (the frontend's phi-block
  * map); it is called once per removal, before the param is spliced out.
  */
-/**
- * "Is there a block parameter `simplifyTrivialPhis` would remove?" — the same predicate, asked
- * without mutating. Returns the first such param and its block, or null.
- *
- * The POSTCONDITION form of the pass above, for the one place a caller can state it as one: after
- * the raising tower has stopped moving the CFG (pipeline.ts `raiseRecovered`), no pass may leave a
- * trivial phi behind. A pass that retires an in-edge leaves one, and the damage does not surface
- * where it was made — `raise/retsink.ts` left a single-predecessor merge whose alias the structurer
- * destroyed into a local of its own, which Regime-A switch recovery then read as a SECOND `default`
- * candidate and declined every fall-through tree over. `ir/verify.ts` checks arity, not this, and
- * `PRE_RECOVERY_PASSES` legitimately leaves trivial phis BETWEEN its passes — so this is not a
- * `verify()` rule and not a pre-recovery one. It is a boundary check, at the boundary.
- */
-export function firstTrivialPhi(fn: Fn): { block: Block; param: Value } | null {
-  // ONE pass over the successor edges, indexed by target — the pass above rescans the whole
-  // function per block, which is fine for a mutating fixpoint and not for a check on the raising
-  // tower's hot path (a candidate fan re-raises the same function once per lift variant).
-  const incomingOf = new Map<Block, Successor[]>();
-  for (const pb of fn.blocks) {
-    for (const op of pb.ops) {
-      for (const s of op.successors) {
-        const prev = incomingOf.get(s.block);
-        if (prev) {
-          prev.push(s);
-        } else {
-          incomingOf.set(s.block, [s]);
-        }
-      }
-    }
-  }
-  for (const b of fn.blocks) {
-    if (b === fn.blocks[0]) {
-      continue;
-    }
-    const incoming = incomingOf.get(b) ?? [];
-    for (let i = 0; i < b.params.length; i++) {
-      const param = b.params[i];
-      if (new Set(incoming.map((s) => s.args[i]).filter((v) => v !== param)).size === 1) {
-        return { block: b, param };
-      }
-    }
-  }
-  return null;
-}
-
 export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void): number {
   const edgesTo = (b: Block): Successor[] => {
     const out: Successor[] = [];
@@ -114,6 +69,53 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
       return removed;
     }
   }
+}
+
+/**
+ * "Is there a block parameter `simplifyTrivialPhis` would remove?" — the same predicate, asked
+ * without mutating. Returns the first such param and its block, or null.
+ *
+ * A BOUNDARY postcondition rather than an IR invariant, which is why `ir/verify.ts` is the wrong
+ * home for it: a trivial phi is well-formed IR, and two places mint one deliberately and clear it
+ * within their own scope — Braun's construction in `frontend/ssa.ts`, and the `addrnum`
+ * pre-recovery pass, whose numbering half leaves one for its own cleanup half. What no pass may do
+ * is leave one STANDING once the CFG stops moving (pipeline.ts `raiseRecovered`), because from
+ * there down the structurer reads a block parameter as a JOIN and gives it a local of its own.
+ * That is how a CFG-motion pass does its damage three stages away: `raise/retsink.ts` stranded a
+ * single-predecessor merge, the structurer spelled its alias as `v0 = 0; return v0;`, and Regime-A
+ * switch recovery read the block as a SECOND `default` candidate and declined every fall-through
+ * tree over it.
+ */
+export function firstTrivialPhi(fn: Fn): { block: Block; param: Value } | null {
+  // ONE pass over the successor edges, indexed by target — `simplifyTrivialPhis` rescans the
+  // whole function per block, which is fine for a mutating fixpoint and not for a check on the
+  // raising tower's hot path (a candidate fan re-raises the same function once per lift variant).
+  const incomingOf = new Map<Block, Successor[]>();
+  for (const pb of fn.blocks) {
+    for (const op of pb.ops) {
+      for (const s of op.successors) {
+        const prev = incomingOf.get(s.block);
+        if (prev) {
+          prev.push(s);
+        } else {
+          incomingOf.set(s.block, [s]);
+        }
+      }
+    }
+  }
+  for (const b of fn.blocks) {
+    if (b === fn.blocks[0]) {
+      continue;
+    }
+    const incoming = incomingOf.get(b) ?? [];
+    for (let i = 0; i < b.params.length; i++) {
+      const param = b.params[i];
+      if (new Set(incoming.map((s) => s.args[i]).filter((v) => v !== param)).size === 1) {
+        return { block: b, param };
+      }
+    }
+  }
+  return null;
 }
 
 /**

@@ -278,8 +278,8 @@ export function raiseRecovered(
   // CFG-motion pass does its damage three stages away rather than where it happened: retsink's own
   // stranded merge was destroyed into `v0 = 0; return v0;` and read by Regime-A switch recovery as a
   // SECOND `default` candidate, declining every fall-through tree. This names it at retsink.
-  // `verify()` cannot carry the rule — it also runs BETWEEN the pre-recovery passes, which are
-  // allowed to leave trivial phis for each other's cleanup.
+  // Not an `ir/verify.ts` rule: a trivial phi is well-formed IR, and both SSA construction and the
+  // `addrnum` pass mint one and clear it inside their own scope (see `firstTrivialPhi`).
   const stranded = firstTrivialPhi(fn);
   if (stranded) {
     throw new Error(

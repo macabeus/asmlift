@@ -954,8 +954,7 @@ export interface StructureOptions {
   // caller's LanguageBackend (`spellsSwitchFallthrough`), not from the compiler target: it is a
   // property of what the emitted source may say, and the only reason the structurer needs it is
   // that a fall-through switch has a SECOND, behaviourally identical recovery. Regime A declines
-  // to if-recovery when it is false (which is what Pascal used to get, before fall-through was
-  // recoverable at all); Regime B, having no fallback, fails loud. Default true.
+  // to if-recovery when it is false; Regime B, having no fallback, fails loud. Default true.
   spellSwitchFallthrough?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
@@ -3552,8 +3551,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // …and then the CHAIN re-threads that order for the falling arms, exactly as it does for the
       // comparison tree: ONE definition (`chainArms`) for the linearization, the adjacency it
       // guarantees, and the three shapes no linear order spells. The arm-order policy above is read
-      // for the chain HEADS only — which is the same per-SITE reading Regime A makes, and replaces
-      // the whole-switch "layout only where every arm is closed" gate this used to carry.
+      // for the chain HEADS only — the same per-SITE reading Regime A makes of the same
+      // declaration, rather than a whole-switch gate on every arm being closed.
       const preChain = arms.map((a) => a.entry);
       // A table whose default block is ALSO a case target is that case's arm, not a separate one:
       // it is already in `preChain`, and `defaultLayoutPos` withholds the label's position for it.
@@ -3596,9 +3595,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
         const ft = exit.kind === 'fallthrough';
         const next = emitOrder[i + 1];
-        // `chainArms` already placed every falling arm above its target, so this re-reads the fact
-        // off the EMISSION array rather than trusting the ordering — the seam where a position
-        // acquires control-flow meaning, checked on the same side of it as Regime A's.
+        // Re-read off the EMISSION array rather than trusted from `chainArms` — the seam where a
+        // position acquires control-flow meaning, checked on the same side of it as Regime A's.
         if (ft && next?.entry !== exit.to) {
           throw new StructureError(
             `cannot structure '${fn.name}': ${a.values ? `case ${a.values.join('/')}` : 'the default arm'} falls ` +

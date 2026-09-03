@@ -365,27 +365,18 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
     case 'continue':
       return [`${indent}continue;`];
     case 'switch': {
-      // A `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in C —
-      // printing one between `case` labels rebinds it, which changes the program and reads as
-      // perfectly ordinary C. Recovery never produces one (a switch inside a loop whose arm carries
-      // a loop break fails loud in loop recovery today), so this is a producer bug like the
-      // `defaultAt` placement below, and it is stated HERE because the printer is where the
-      // rebinding happens — for every producer, not just the two switch regimes.
+      // A `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in C,
+      // so printing one between `case` labels rebinds it — a changed program that reads as ordinary
+      // C. Refused HERE because the rebinding is the printer's, for every producer rather than for
+      // the two switch regimes. No recovery reaches it today (both regimes decline a loop-exiting
+      // arm first, loudly), so it is a contract on the next one.
       //
-      // `continue;` is NOT rebound and is NOT refused: C binds it to the smallest enclosing
-      // ITERATION statement, which a `switch` is not, so it means exactly what L3 means by it.
-      // THREE passes re-spell a loop into one whose `continue` would run a different increment,
-      // not one, and each scans switch arms for the node before it fires:
-      //   · structure.ts `recognizeForLoops`  `while` → `for`     — `hasEnclosingContinue`
-      //   · l3/reindex.ts `respellCountdown`  `dowhile` → `for`   — the `body-exit` gate
-      //   · l3/unreduce.ts                    loop → closed form  — the `continue-in-body` gate
-      // (backend/pascal.ts desugars `for` → `while` with the increment appended, which moves a
-      // `continue` past it — harmless only because that backend loud-fails every `continue`.)
-      // ABLATED rather than read: dropping either of the last two fails a test naming `continue`;
-      // dropping the first leaves the whole suite green, because NOTHING MINTS THE NODE — the only
-      // `{ k: 'continue' }` in packages/*/src is its own declaration in l3/ast.ts, and the one
-      // dataset symbol whose C carries a `continue` (`continueloop`) is recovered without one. So
-      // every rule here is a contract on a future producer, this printer's silence included.
+      // `continue;` is deliberately NOT refused: C binds it to the smallest enclosing ITERATION
+      // statement, which a `switch` is not, so it already means what L3 means. What a loop-respelling
+      // pass must preserve is exactly that — the three that can re-spell a loop into one whose
+      // `continue` would run a different increment (`recognizeForLoops` in structure.ts,
+      // `respellCountdown` in l3/reindex.ts, and l3/unreduce.ts) each scan switch arms for the node
+      // before firing, and a fourth must too.
       for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {
         if (switchBoundBreakIn(body)) {
           throw new Error('c backend: a switch arm carries a loop-scoped `break;`, which C would bind to the switch');
@@ -451,8 +442,8 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
 }
 
 /** Does this arm body carry a `break` C would bind to the enclosing SWITCH rather than to the loop
- *  L3 meant? A loop opened INSIDE the arm captures its own, so its body is not walked, and a nested
- *  `switch` captures one too and is checked by its own printing. */
+ *  L3 meant? A loop opened inside the arm captures its own, so its body is not walked; a nested
+ *  `switch` captures one too and is checked when it is printed. */
 function switchBoundBreakIn(body: Stmt[]): boolean {
   return body.some(
     (s) => s.k === 'break' || (s.k === 'if' && (switchBoundBreakIn(s.then) || switchBoundBreakIn(s.else))),

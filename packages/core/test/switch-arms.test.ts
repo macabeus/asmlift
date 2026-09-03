@@ -345,9 +345,10 @@ test('a default placed after a FALLING case is refused by the printer, not silen
 
 test('a loop-scoped `break` inside a case arm is refused, and `continue` is not', () => {
   // L3's `{k:'break'}` is the innermost LOOP's (l3/ast.ts); C's, printed between `case` labels, is
-  // the switch's. Nothing produces one today — a switch inside a loop whose arm carries a loop break
-  // fails loud in loop recovery — but the rebinding happens in the PRINTER, so the refusal belongs
-  // there, for every producer rather than for the two switch regimes.
+  // the switch's. Nothing produces one today — a loop-exiting arm is declined first, by loop
+  // recovery for a comparison tree and by `analyzeArmExit` for a jump table — but the rebinding
+  // happens in the PRINTER, so the refusal belongs there, for every producer rather than for the
+  // two switch regimes.
   //
   // `continue` is the CONTROL on that refusal's premise: C binds it to the smallest enclosing
   // iteration statement, and a `switch` is not one, so it already means what L3 means and printing
@@ -992,8 +993,8 @@ test('\u2026and a jump table that falls through fails LOUD for it, naming the ta
 
 // ── where the `default:` label may be read off the layout ───────────────────────────────
 // `defaultLayoutPos` is the one definition both regimes read, and it states SEVEN withholdings.
-// Three of them decide nothing across the synthetic tier's 5,418 calls, so they have no row and
-// are pinned here instead — at the seam itself, one call each, beside the four that do.
+// Three of them decide no call the benchmark makes, so they have no row to guard them and are
+// pinned here instead — at the seam itself, one call each, beside the four that do.
 
 test('every withholding on the `default:` position, one call each', () => {
   const body = (): Block => ({ params: [], ops: [mkOp('const', { attrs: { value: 0 } }), mkOp('br')] });

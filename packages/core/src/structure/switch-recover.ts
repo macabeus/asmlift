@@ -797,15 +797,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       // dispatch's own edge copies, which collapsing the tree discards — so on the fall-through
       // path they would be lost and on its own case value they would be missing.
       //
-      // Regime B refuses the same HAZARD one step later and LOUD, but on a WEAKER predicate: the
-      // copies `argAssignsFor` actually produced for that edge. It returns none for a param-carrying
-      // edge on three documented paths — a const anchored at its def site, an identity copy, and an
-      // `undef` that carries nothing — and each of those means the edge has nothing to re-run, so
-      // the weaker test is the one that fits the hazard. This one is the conservative
-      // over-approximation, and it costs nothing today because `asLeafOrTest` refuses a
-      // param-carrying case entry outright: it is that refusal restated AT THE SEAM where breaking
-      // it would be silent, so admitting such an entry (the booked hoist) cannot quietly land one
-      // inside a chain. The hoist inherits two different rules here, not one.
+      // Regime B refuses the same HAZARD one step later and LOUD, on a WEAKER predicate: the copies
+      // `argAssignsFor` actually produced for that edge, which are none on three documented paths
+      // (a const anchored at its def site, an identity copy, an `undef` that carries nothing) —
+      // each meaning the edge has nothing to re-run. That is the test which fits the hazard; this
+      // one is the conservative over-approximation, and it costs nothing while `asLeafOrTest`
+      // refuses a param-carrying case entry outright. It is that refusal restated AT THE SEAM where
+      // breaking it would be silent, so admitting such an entry (the booked hoist) cannot quietly
+      // land one inside a chain — the hoist inherits both rules, not one.
       if (to !== null && to.params.length) {
         return null;
       }

@@ -71,8 +71,8 @@ test('the stranded alias is not spelled as a copy', () => {
 // The fix above is one line inside `sinkReturns`, and the next pass to retire an in-edge will
 // re-create the same debris three stages from where it surfaces. `raiseRecovered` states it as a
 // BOUNDARY rule instead: above that line passes move the CFG, below it the structurer reads a block
-// parameter as a JOIN. `verify()` cannot carry the rule — it also runs between the pre-recovery
-// passes, which are allowed to leave trivial phis for each other's cleanup.
+// parameter as a JOIN. `verify()` cannot carry the rule: a trivial phi is well-formed IR, and SSA
+// construction and the `addrnum` pass both mint one and clear it inside their own scope.
 
 test('`firstTrivialPhi` is the pass’s own predicate, asked without mutating', () => {
   const fn = frontendFor(ARMV4T_AGBCC).lift('g', ASM_RET, ARMV4T_AGBCC, {});

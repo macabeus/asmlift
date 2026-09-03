@@ -234,12 +234,10 @@ export type Stmt =
   // loud-fails `field`/`cast`. Recovery must therefore only set `fallsThrough` when the fall-through
   // target is the emission-adjacent case.
   //
-  // COUNT ITS INHABITANTS BY INSTRUMENTING THE PRINTER, NEVER BY GREPPING THE TOKEN. A source grep
-  // for `fallsThrough: true` finds only hand-written fixtures by construction, because recovery
-  // computes the flag rather than spelling it — so reading that grep as "no assembly produces one"
-  // is wrong. The jump-table regime has spelled a real one on the corpus since before the round
-  // that gave the comparison-tree regime its own producer: `case 4:` of
-  // `kleod:UpdateWorldMapNodeAnim`, whose emitted source that round left byte-identical.
+  // Recovery COMPUTES this flag rather than spelling it, so a source grep for `fallsThrough: true`
+  // finds hand-written fixtures and nothing else, whatever the corpus does — count its inhabitants
+  // by instrumenting the printer. Both regimes produce them: the jump table spells `case 4:` of
+  // `kleod:UpdateWorldMapNodeAnim`, the comparison tree `synthetic:sw_fallmem:agbcc`.
   | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[]; defaultAt?: number }
   | { k: 'return'; value?: Expr };
 
