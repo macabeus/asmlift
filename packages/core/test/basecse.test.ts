@@ -14,13 +14,14 @@ import {
   type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
+  ORDERBASE_GATES,
   UNFOLDED_GATES,
   admittedBases,
   hoistBaseLocals,
 } from '../src/l3/basecse';
 import { type Gate, without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
-import { structureChecked } from '../src/pipeline';
+import { decompile, structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -1004,5 +1005,132 @@ describe('the block admission is WIRED into enumeration', () => {
     expect(src('signed/defsite/loop-entry/livebase-block/volatile/nearbase')).not.toEqual(
       src('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit'),
     );
+  });
+});
+
+// ── the reinterpret-cast base ─────────────────────────────────────────────────────────────────
+//
+// An array of STRUCTS indexes `((struct S *)&gSym)[i]`, where the cast is the base's spelling and
+// not a different base. `isHoistableBase` collects that key, and every shipped table then refuses
+// it — `cast-base` — because the DEFAULT spelling of a struct element is the inline cast. What
+// licenses the home is the assembly's own base/index order, which `ORDERBASE_GATES` (rank.ts) asks
+// and no table here does.
+
+describe('a struct element’s reinterpret-cast base', () => {
+  // `gBgInfo[i].field_16` over a 28-byte element, pool word loaded FIRST.
+  const BGARR = `\t.code\t16
+.text
+\t.align\t2, 0
+\t.globl\tf
+\t.type\t f,function
+\t.thumb_func
+f:
+\tldr\tr2, .L3
+\tlsl\tr1, r0, #0x3
+\tsub\tr1, r1, r0
+\tlsl\tr1, r1, #0x2
+\tadd\tr1, r1, r2
+\tldrh\tr0, [r1, #0x10]
+\tbx\tlr
+.L4:
+\t.align\t2, 0
+.L3:
+\t.word\tgBgInfo
+.Lfe1:
+\t.size\t f,.Lfe1-f
+`;
+  const tree = (): SFn => decompile('f', BGARR, ARMV4T_AGBCC, {}).sfn;
+  const KEY = 'a:gBgInfo <Elem0*> 28 false';
+
+  test('is a key, and the cast’s target type is part of its identity', () => {
+    // Two casts over one symbol stride differently and are two locals, so the type is in the key.
+    expect([...basecse.baseSites(tree()).keys()]).toEqual([KEY]);
+  });
+
+  test('and no shipped admission binds it', () => {
+    // The widening is INERT: `cast-base` sits in `BASECSE_GATES`, from which the other four tables
+    // are derived, so all five refuse and the committed spelling is unchanged.
+    for (const gates of [BASECSE_GATES, BASEFOLD_GATES, LIVEBASE_GATES, LIVEBASE_BLOCK_GATES, UNFOLDED_GATES]) {
+      expect(admittedBases(tree(), gates)).toEqual([]);
+    }
+  });
+
+  test('ablating `cast-base` and the use count admits it, and the local takes the cast’s own type', () => {
+    // The two rules holding it are priced by ablation, not asserted — and what comes out is a
+    // struct pointer, which `scalarTypeForAccess` could not have produced at a 28-byte stride.
+    const ablated = without(without(BASECSE_GATES, 'cast-base'), 'single-use');
+    expect(admittedBases(tree(), ablated)).toEqual([KEY]);
+    const src = cBackend.emit(hoistBaseLocals(tree(), ablated, 'head'));
+    expect(src).toContain('struct Elem0 * p0;');
+    expect(src).toContain('p0 = (struct Elem0 *)&gBgInfo;');
+    expect(src).toContain('return p0[a0].field_16;');
+  });
+});
+
+// ── `/orderbase`: the admission whose evidence is the instruction ORDER ───────────────────────
+//
+// Every other table on this roster predicts the source's spelling from the SHAPE of the accesses.
+// This one reads what the assembly did: a base materialized before the index was scaled is what a
+// declared array or a pointer LOCAL produces on agbcc, and the inline cast of a symbol's address is
+// what produces the other order (raise/globalshape.ts's compiled triple). `arrcast` is the row that
+// makes the rule cost something — the same access, the pool word loaded LAST.
+
+describe('the order-licensed base admission', () => {
+  const thumbFn = (body: string, pool: string): string => `\t.code\t16
+.text
+\t.align\t2, 0
+\t.globl\tf
+\t.type\t f,function
+\t.thumb_func
+f:
+${body}
+\tbx\tlr
+.L4:
+\t.align\t2, 0
+.L3:
+\t${pool}
+.Lfe1:
+\t.size\t f,.Lfe1-f
+`;
+  const SCALE = '\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2';
+  // `gBgInfo[i].field_16`, pool word FIRST — the base had a home.
+  const ORDERED = thumbFn(`\tldr\tr2, .L3\n${SCALE}\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]`, '.word\tgBgInfo');
+  // the same seven instructions, pool word LAST — the pointer path, which is the inline cast
+  const NOT_ORDERED = thumbFn(`${SCALE}\n\tldr\tr2, .L3\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]`, '.word\tgBgInfo');
+  const tree = (asm: string): SFn => decompile('f', asm, ARMV4T_AGBCC, {}).sfn;
+  const KEY = 'a:gBgInfo <Elem0*> 28 false';
+
+  test('binds a licensed base, cast and single-use notwithstanding', () => {
+    expect(admittedBases(tree(ORDERED), ORDERBASE_GATES)).toEqual([KEY]);
+    expect(cBackend.emit(hoistBaseLocals(tree(ORDERED), ORDERBASE_GATES, 'head'))).toContain(
+      'p0 = (struct Elem0 *)&gBgInfo;',
+    );
+  });
+
+  test('and refuses the same access with the index materialized first', () => {
+    expect(admittedBases(tree(NOT_ORDERED), ORDERBASE_GATES)).toEqual([]);
+  });
+
+  test('`order-licensed` is what refuses it — priced by ablation, not asserted', () => {
+    // The table's other two rules (`loop`, `repeated-const-offset`) admit this key either way, so
+    // removing the licence rule alone is what lets the index-first spelling through.
+    expect(admittedBases(tree(NOT_ORDERED), without(ORDERBASE_GATES, 'order-licensed'))).toEqual([KEY]);
+  });
+
+  test('a target that has not opted in stamps nothing, so the table binds nothing', () => {
+    // The opt-in lives once, on the licence (raise/globalshape.ts). With it off no access carries
+    // `baseOrdered` and this table refuses every key without rank needing a second condition.
+    const off = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, arrayShapeFromStride: false },
+    };
+    expect(admittedBases(decompile('f', ORDERED, off, {}).sfn, ORDERBASE_GATES)).toEqual([]);
+  });
+
+  test('the lever is on the roster and wins the row it was built for', () => {
+    const labels = enumerateCandidates('f', ORDERED, ARMV4T_AGBCC).map((c) => c.label);
+    expect(labels).toContain('unsigned/orderbase');
+    // …and it is not offered where the order says otherwise
+    expect(enumerateCandidates('f', NOT_ORDERED, ARMV4T_AGBCC).map((c) => c.label)).not.toContain('unsigned/orderbase');
   });
 });

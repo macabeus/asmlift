@@ -14,7 +14,7 @@ import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
-import { assumedShapes, inferGlobalArrays } from './raise/globalshape';
+import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -178,6 +178,7 @@ function traceTower(
   // without a line here a reader following the trail from `stage:lift` to `stage:structure` sees
   // `gTbl[i]` appear with nothing that produced it, and a wrong shape is attributable to no stage.
   const inferredSymbols = inferGlobalArrays(fn, target);
+  const orderLicensed = orderLicensedGlobals(fn, target);
   trace.push({
     id: 'stage:globalshape',
     title: 'Array shape from stride evidence (globals no symbol map describes)',
@@ -274,6 +275,7 @@ function traceTower(
     onGap: opts.onGap ?? 'strict',
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
+    ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
   });
   trace.push({
     id: 'stage:structure',

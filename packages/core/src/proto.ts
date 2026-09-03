@@ -27,8 +27,23 @@ export interface FnProto {
    *  `protoArity`; only the typed form carries a width. Omit to let the frontend fall back to its
    *  contiguous-arg-register heuristic. */
   params?: number | ParamType[];
-  /** the declared return type is `void`, so a trailing `bx lr` leaves a meaningless
-   *  return register that must not surface as a `return` value. */
+  /** The declared return type is `void`. Read for the function under decompilation, where a
+   *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
+   *  value — and, since the out-parameter path landed, for a CALLEE, where it is the only thing
+   *  that tells an out-parameter frame from a hidden struct-return pointer.
+   *
+   *  THAT SECOND READER IS LOAD-BEARING AND THE FIELD IS UNCHECKED DATA, which is worth knowing
+   *  before authoring one. `validatePrototypes` type-checks the boolean and can check no more:
+   *  nothing in the assembly distinguishes the two frames, which is why the refusal exists. So a
+   *  callee wrongly declared `void` turns a loud decline into a compiling, plausible, wrong
+   *  program — measured on the shape the guard is for, `struct S4 mk(int); struct S4 s = mk(x);`
+   *  lifts as `mk(&sp0); return (u8)sp0;` when `mk` is declared `returnsVoid` — where a callee
+   *  wrongly declared NON-void, or left undeclared, only costs the lift. Under-declaring is the
+   *  safe direction and this project has already shipped one wrong entry (a dataset row declaring
+   *  `returnsVoid: true` for a function whose own reference returns `void *`).
+   *
+   *  Both readers see one field through two trust levels: caller-supplied on `--proto`, and
+   *  machine-derived from DWARF through `prototypesFromSymbols`. Neither is distinguished here. */
   returnsVoid?: boolean;
 }
 

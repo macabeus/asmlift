@@ -3302,6 +3302,11 @@ export function lift(
       // `bl` arm reads r0..r<argc-1> in order), so an address handed over at r1 or above is an
       // argument the source wrote.
       const passedAboveArg0 = new Set<number>();
+      // …and WHICH CALLEE took it at argument 0, because that callee's declared RETURN TYPE is the
+      // one fact that tells an out-parameter from a hidden struct return. `null` is the narrowing of
+      // an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and reads as a
+      // callee nothing can be declared about, so it refuses.
+      const arg0Callees = new Map<number, Set<string | null>>();
       for (const off of objects.keys()) {
         accesses.set(off, []);
       }
@@ -3343,6 +3348,11 @@ export function lift(
                 passedToCallee.add(off);
                 if (idx > 0) {
                   passedAboveArg0.add(off);
+                } else {
+                  const t = op.attrs.target;
+                  const cs = arg0Callees.get(off) ?? new Set<string | null>();
+                  cs.add(typeof t === 'string' ? t : null);
+                  arg0Callees.set(off, cs);
                 }
               } else {
                 published.add(off); // written to memory — the DMA idiom's `*dmaReg = &tmp`
@@ -3373,15 +3383,45 @@ export function lift(
       // sp,#-4 / mov r0,sp / bl mk / ldr r0,[sp]`, instruction for instruction an out-parameter
       // call. Left alone that lifted as `mk(&sp0, a0)` — a call the real prototype rejects.
       //
-      // Two facts rule it out and either will do, because a return temp is storage the CALLEE owns
-      // outright: it is written only by the callee, and its pointer is argument 0, always
+      // THREE facts rule it out and any one will do, because a return temp is storage the CALLEE
+      // owns outright: it is written only by the callee, its pointer is argument 0, always
       // (compiled — `struct S4 mk3(int,int,int)` puts sp in r0 and shifts all three real arguments
-      // up). So a store of our own says the object is one this function fills, and an address
-      // handed over at r1 or above says the same by position.
+      // up), and the callee RETURNS the struct. So a store of our own says the object is one this
+      // function fills; an address handed over at r1 or above says the same by position; and a
+      // callee the project declares `void` says it by the ABI — a function that returns nothing has
+      // no hidden return pointer to be given, whatever sits in r0.
       //
-      // The cost is stated rather than hidden: an OUTPUT-only parameter taken at argument 0 is
-      // byte-for-byte a struct return and declines with it. Separating those needs the callee's
-      // real signature, which is what the arity refusal above cannot get either.
+      // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and it is the ONLY refusal this frontend
+      // switches off on something other than the instruction stream. `FnProto.returnsVoid` is the
+      // project's own header fact, arriving through the same table whose `params` this file already
+      // trusts to decide a call's arity. It is asked of EVERY callee that took the address at
+      // argument 0, because the object gets one decision: one callee undeclared or declared
+      // non-void leaves the ambiguity standing and the refusal fires.
+      //
+      // WHAT IT COSTS WHEN THE DECLARATION IS WRONG, measured rather than compared. On the `sret`
+      // shape above, with `mk` (which really returns `struct S4`) declared `params: 1,
+      // returnsVoid: true`, the lift succeeds and emits `s32 sret(s32 a0) { s32 sp0; mk(&sp0);
+      // return (u8)sp0; }` — a compiling, plausible, WRONG program with the real argument dropped,
+      // where a loud decline stood. Not a smaller cost than a wrong ARITY, either: the same entry
+      // supplies both facts, so a wrong `returnsVoid` drops the argument too, and the frame re-model
+      // is the silent half. The trade is accepted because there IS no other discriminator: compiled
+      // through
+      // the benchmark's own agbcc command, the hidden struct return and the out-parameter emit the
+      // same instructions in the same order, the slot is read back at a scalar width in both, and
+      // in both the value read back is what the function returns — so an asm-side corroboration
+      // would be a rule with no discriminating input. The mitigation is that under-declaring is the
+      // safe direction (an undeclared or non-void callee still declines) and that `FnProto` says
+      // so at the field.
+      //
+      // The residual cost is stated rather than hidden: an OUTPUT-only parameter taken at argument
+      // 0 of a callee the project has NOT declared is still byte-for-byte a struct return, and
+      // still declines with it.
+      const arg0AllDeclaredVoid = (off: number): boolean => {
+        const cs = arg0Callees.get(off);
+        return (
+          cs !== undefined && cs.size > 0 && [...cs].every((c) => c !== null && prototypes[c]?.returnsVoid === true)
+        );
+      };
       if (capturedObjectIsTheWholeFrame) {
         if (!passedToCallee.has(0)) {
           fail(
@@ -3389,10 +3429,11 @@ export function lift(
               'no call in the lifted function takes it — so nothing rules out an outgoing stack argument at [sp,#0]',
           );
         }
-        if (!accesses.get(0)?.some((a) => !a.isLoad) && !passedAboveArg0.has(0)) {
+        if (!accesses.get(0)?.some((a) => !a.isLoad) && !passedAboveArg0.has(0) && !arg0AllDeclaredVoid(0)) {
           fail(
             'the one-word frame is handed to a callee as argument 0 and never written here, which ' +
-              'is how a hidden struct-return pointer looks — the callee owning the storage is not provably an addressable local',
+              'is how a hidden struct-return pointer looks — and the callee is not declared `void`, so ' +
+              'nothing says it does not own the storage',
           );
         }
       }

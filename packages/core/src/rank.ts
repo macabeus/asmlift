@@ -24,6 +24,7 @@ import {
   type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
+  ORDERBASE_GATES,
   UNFOLDED_GATES,
   admittedBases,
   hoistBaseLocals,
@@ -54,7 +55,7 @@ import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
-import { inferGlobalArrays, sameDerivedShape } from './raise/globalshape';
+import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import {
@@ -488,7 +489,7 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  another inline is at neither end of it. This row is not a third link in that chain but beside
  *  it: `singleCell` and `unfoldedOffset` are independent fields, so each of the two tables binds
  *  keys the other refuses (censused, with its scope, in UNFOLDED_GATES' own note). Read the roster
- *  as five hand-picked subsets, never as a narrowness ranking.
+ *  as hand-picked subsets, never as a narrowness ranking.
  *
  *  LAST on the roster, so `seen` and `sameBases` between them keep it from restating an earlier
  *  ROSTER row — but only `seen` does any work here. `sameBases` declines a row that binds what an
@@ -536,6 +537,33 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  census when one does. */
 const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/unfolded', gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
+];
+
+/** The sixth admission, and the only one whose evidence is the INSTRUCTION ORDER rather than the
+ *  shape of the accesses (l3/basecse.ts, ORDERBASE_GATES). It binds a base the assembly says was
+ *  materialized before the index was scaled — including the `(struct S *)&gSym` of an
+ *  array-of-struct element, which no other table on this roster can even see.
+ *
+ *  LAST, so `sameBases` can shadow it and it can shadow nothing: on a function whose licensed base
+ *  is a plain leaf reached twice, `/livebase` already binds exactly that set at this placement and
+ *  this row declines rather than restating it under a second label.
+ *
+ *  ONE PLACEMENT, AND IT IS A MEASURED ZERO rather than a question the admission does not raise.
+ *  `synthetic:bgarr` emits the identical source at both placements (the hoist has nothing to sit
+ *  above) and that one row generalizes to nothing: over the artifact's agbcc rows `head` and
+ *  `first-use` emit DIFFERENT source on 3 of the 8 rows this admission binds map-less and 4 of the
+ *  10 map-ful — `kleod:SetupBG3WindowOverlay`, `kleod:UpdateCameraScroll`,
+ *  `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful `kleod:StreamCmd_SetBGScroll`. Run
+ *  through the harness on all four, a second entry at `placement: 'first-use'` scores nothing:
+ *  146 → 146, noncompile → noncompile, MATCH → MATCH, noncompile → noncompile, against +1129
+ *  candidates over those rows' 15167 (+7.4%) and `kleod:UpdateCameraScroll` 224 s → 278 s. So the
+ *  second row is withheld for the reason `pairings: false` is — a measured zero on the corpus. Add
+ *  it when a row scores better with it, and re-run those four when one does.
+ *
+ *  `pairings: false` for the field's own reason — a product is added for a row that demands the
+ *  joint spelling, and the row that earned this entry demands none. */
+const ORDERBASE_ADMISSIONS: readonly BaseAdmission[] = [
+  { suffix: '/orderbase', gates: ORDERBASE_GATES, placement: 'head', pairings: false },
 ];
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -1798,12 +1826,18 @@ export function enumerateCandidates(
     // hoist-nothing result means the lever has nothing to add and declines.
     // One family per admission row; a row binding exactly what an earlier row bound is the same
     // spelling under a different label, so it declines for that too. `/basefold`'s TWO rows and
-    // `/unfolded` join the roster where the target declares the fold — THREE of the five, so a
-    // target without it is offered the two `/livebase` rows and nothing else. The same fact is
-    // stated at the two POLICY sites above; a roster change repairs all three or none.
-    const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
-      ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS]
-      : LIVEBASE_ADMISSIONS;
+    // `/unfolded` join the roster where the target declares the fold, and `/orderbase` where it
+    // declares the array-shape fork, so a target with neither is offered the two `/livebase` rows
+    // and nothing else. The same fact is stated at the POLICY sites above; a roster change repairs
+    // all of them or none.
+    const admissions: readonly BaseAdmission[] = [
+      ...LIVEBASE_ADMISSIONS,
+      ...(target.compilerBehaviors.foldsConstAddrOffset ? [...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS] : []),
+      // …and the ORDER row where the compiler's subscript expansion forks on the base's array-ness,
+      // which is the same opt-in raise/globalshape.ts carries: with it off nothing is stamped, so
+      // `order-licensed` would refuse every key anyway and this only saves the census.
+      ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_ADMISSIONS : []),
+    ];
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
     // number of products. Memoized on the gate table's identity. The value is a list of key
@@ -2149,6 +2183,7 @@ export function enumerateCandidates(
       for (const lv of liftVariants) {
         let fn: Fn;
         let inferredSymbols = new Map<string, SymbolInfo>();
+        let orderLicensed: ReadonlySet<string> = new Set<string>();
         try {
           // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
           // flags here would leave a fourth axis sharing the primary's already-mutated `base`.
@@ -2177,6 +2212,13 @@ export function enumerateCandidates(
           // knows this name" but "whatever will be DECLARED for this name says the same thing" —
           // a name the two answer differently keeps the cast form, which needs no declaration.
           inferredSymbols = inferGlobalArrays(fn, target);
+          // The ORDER half, off the same variant lift. NO map-precedence filter, and the
+          // asymmetry is the point: a shape is a DECLARATION, so a name the map describes must
+          // not be spelled from this function's strides — a licence declares nothing, and the
+          // spelling it enables keeps the cast (`(T *)&gSym`), which is byte-correct under any
+          // declaration. A map that names the symbol an array takes the access to a bare `var`
+          // base anyway, which carries no licence: the two never meet.
+          orderLicensed = orderLicensedGlobals(fn, target);
           for (const [n, si] of [...inferredSymbols]) {
             if (baseOpts.symbols?.has(n) === true || !sameDerivedShape(declSymbols.get(n), si)) {
               inferredSymbols.delete(n);
@@ -2237,6 +2279,7 @@ export function enumerateCandidates(
             sfn = structureChecked(fn, {
               ...svOpts,
               ...(inferredSymbols.size ? { inferredSymbols } : {}),
+              ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
               preserveDivergentBranchSense: s.sense,
               negateJoinedBranchSense: s.join ? !defSense : defSense,
               anchorConstCopies: s.anchor,

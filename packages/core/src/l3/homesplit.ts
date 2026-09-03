@@ -41,7 +41,7 @@
 import { addrConst, inRange } from './address';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs, stmtLists } from './ast';
-import { type BaseKey, baseSites, hoistBaseLocals } from './basecse';
+import { type BaseKey, baseSites, hoistBaseLocals, parseBaseKey } from './basecse';
 import { type Gate, firstRejection } from './gates';
 import type { HoistPlacement } from './hoist';
 import { applyScopedBasePlan, planScopedBases, scopedBaseKey } from './scopebase';
@@ -60,11 +60,29 @@ export const withholdingKey = (gates: readonly Gate<BaseKey>[], key: string): re
 ];
 
 /** The withheld key as a LABEL token: `c:67109076 4 true` → `0x40000d4.4s`. Width and signedness
- *  ride because they are part of the key — two keys over one address are two different spellings. */
+ *  ride because they are part of the key — two keys over one address are two different spellings.
+ *
+ *  PARSED BY THE KEY'S PRODUCER (`l3/basecse.ts`'s `parseBaseKey`, beside `keyOf`), because a base
+ *  id is not one space-free word and a local split here gets it wrong in both directions. `baseId`
+ *  spells a CAST base as `a:gEnigmaBerries <Elem5*>` — one space, and it is the grammar's own
+ *  separator rather than the type's. Split from the FRONT, the type reads as the width and the
+ *  width as the signedness; split from the END, the `a:` form comes out right and the `c:` form
+ *  runs `Number` over `67109076 <u16*>`, tagging every cast over a numeric base `0xNaN` and
+ *  collapsing distinct keys onto one label. No shipped table admits a cast base outside
+ *  `/orderbase`, and `/orderbase` carries `pairings: false`, so no such key reaches this function
+ *  today — but a candidate LABEL is an identity (`bench diff` and docs/ranked-repro.md compare
+ *  candidates by it), and one roster line is all that stands between the two. The sibling half of
+ *  the same hazard is already guarded in `splitHomeBases`, which translates a cast base to no
+ *  region key and declines. */
 export function homeSplitTag(key: string): string {
-  const [id = '', width = '', signed = ''] = key.split(' ');
-  const base = id.startsWith('c:') ? `0x${Number(id.slice(2)).toString(16)}` : id.slice(id.indexOf(':') + 1);
-  return `${base}.${width}${signed === 'true' ? 's' : 'u'}`;
+  const { leaf, castType, width, signed } = parseBaseKey(key);
+  const base = leaf.startsWith('c:') ? `0x${Number(leaf.slice(2)).toString(16)}` : leaf.slice(leaf.indexOf(':') + 1);
+  // The cast's element type stays in the token — it is part of the key's identity, since two casts
+  // over one symbol are two locals that stride differently. Whitespace is squeezed defensively
+  // rather than because any type spells one: a label is one whitespace-free word everywhere it is
+  // read, and that has to hold whatever `typeToString` grows.
+  const type = castType === null ? '' : `<${castType}>`;
+  return `${`${base}${type}`.replace(/\s+/g, '')}.${width}${signed ? 's' : 'u'}`;
 }
 
 /** The FUNCTION-level half of the admission: how many keys the caller's table binds on this tree.
@@ -215,9 +233,12 @@ export function splitHomeBases(sfn: SFn, opts: HomeSplitOpts): { homed: SFn; spl
   const homed = hoistBaseLocals(sfn, withholdingKey(opts.gates, opts.key), opts.placement);
   // The withheld key in the REGION pass's vocabulary. The two passes key on the same address but
   // spell an `addr` base's identity differently, so the translation is explicit — a string compare
-  // across them would silently never match for an `addr` base.
+  // across them would silently never match for an `addr` base. A CAST base (an array-of-struct
+  // element's `(struct S *)&gSym`) has no spelling in the region pass at all — its `LeafBase` is
+  // the leaf kinds only — so it translates to nothing and the pairing declines, which is the same
+  // answer the region planner would have given.
   const meta = baseSites(sfn).get(opts.key);
-  const scoped = meta ? scopedBaseKey(meta.base, meta.width, meta.signed) : null;
+  const scoped = meta && meta.base.k !== 'cast' ? scopedBaseKey(meta.base, meta.width, meta.signed) : null;
   // ONE plan, then its applier — the count below and the rewrite read the same decision rather than
   // two runs of the planner that a future rule could make disagree.
   const plan = planScopedBases(homed, { regions: 'per-region' });

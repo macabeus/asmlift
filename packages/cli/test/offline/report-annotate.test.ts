@@ -145,8 +145,13 @@ test('…and so does the candidate RANKING beside it, through decompileWithRepor
     },
   });
   expect(report.candidates?.length).toBeGreaterThan(0);
+  // NOT "every candidate spells the cast form" — the ranking legitimately carries respellings of
+  // the headline that are neither the bare name nor the cast (`/orderbase` homes the base in a
+  // pointer local). What the forwarding claim is about is the BARE form, which only a map-less
+  // enumeration could produce here, so that is what is asserted per candidate.
+  expect(report.candidates!.some((c) => c.source.includes('((u16 *)&gTbl)[a0]'))).toBe(true);
   for (const c of report.candidates!) {
-    expect(c.source).toContain('((u16 *)&gTbl)[a0]');
+    expect(c.source).not.toMatch(/[^&]gTbl\[/);
   }
   // …and nothing anywhere in the run — headline, probe or candidate — compiled the bare form
   expect(seen.filter((x) => /[^&]gTbl\[/.test(x))).toEqual([]);

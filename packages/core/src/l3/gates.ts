@@ -42,6 +42,14 @@ export function without<Ctx>(gates: readonly Gate<Ctx>[], id: string): readonly 
   return gates.filter((g) => g.id !== id);
 }
 
+// NO `just(table, ids)` SELECTOR, deliberately. Selecting rule OBJECTS by id shares the predicate
+// AND the `sound` claim AND the `guardedBy` guard, and a second consumer of a rule wants only the
+// first of the three: a rule that is sound for a declaration is a heuristic for a generated
+// candidate, and the guard the contract test then checks ablates the rule against the OTHER
+// consumer. What a second consumer shares is a PREDICATE — an ordinary function — and what it owns
+// is its own rule objects. `ORDER_SHAPE_GATES` (raise/globalshape.ts) is the worked example, with
+// the over-admission id-selection would carry.
+
 /** `without` for SHIPPED code. A test may ablate any gate — that is how `guardedBy` differential
  *  tests work — but a pass that re-runs itself with an ablated table as a ranked candidate may
  *  only drop a HEURISTIC: ablating a `sound: true` gate would ship semantically wrong candidates,

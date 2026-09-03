@@ -9,7 +9,14 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { BASECSE_GATES, BASEFOLD_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES, UNFOLDED_GATES } from '../src/l3/basecse';
+import {
+  BASECSE_GATES,
+  BASEFOLD_GATES,
+  LIVEBASE_BLOCK_GATES,
+  LIVEBASE_GATES,
+  ORDERBASE_GATES,
+  UNFOLDED_GATES,
+} from '../src/l3/basecse';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { HOMESPLIT_FAN_GATES, HOMESPLIT_GATES, withholdingKey } from '../src/l3/homesplit';
@@ -21,7 +28,7 @@ import { REGIONBASE_GATES, SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES } from '../src
 import { UNREDUCE_GATES } from '../src/l3/unreduce';
 import { VOL_SLOT_GATES } from '../src/l3/volatileval';
 import { VOL_STORE_GATES } from '../src/l3/volstore';
-import { ADDRESS_GATES, SHAPE_GATES } from '../src/raise/globalshape';
+import { ADDRESS_GATES, ELEMENT_ADDRESS_GATES, ORDER_SHAPE_GATES, SHAPE_GATES } from '../src/raise/globalshape';
 import { LATCH_GATES } from '../src/raise/latch';
 import { MEMBER_ARRAY_GATES } from '../src/raise/memberarrays';
 import { NARROW_LOCAL_GATES } from '../src/raise/narrowlocal';
@@ -43,10 +50,15 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   LIVEBASE_GATES: LIVEBASE_GATES as readonly Gate<never>[],
   LIVEBASE_BLOCK_GATES: LIVEBASE_BLOCK_GATES as readonly Gate<never>[],
   UNFOLDED_GATES: UNFOLDED_GATES as readonly Gate<never>[],
+  ORDERBASE_GATES: ORDERBASE_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
   ADDRESS_GATES: ADDRESS_GATES as readonly Gate<never>[],
   SHAPE_GATES: SHAPE_GATES as readonly Gate<never>[],
+  // the two halves `ORDER_LICENCE_GATES` ships — an address table minus the declaration rule, and
+  // the shape rules that read the order fact
+  ELEMENT_ADDRESS_GATES: ELEMENT_ADDRESS_GATES as readonly Gate<never>[],
+  ORDER_SHAPE_GATES: ORDER_SHAPE_GATES as readonly Gate<never>[],
   MEMBER_ARRAY_GATES: MEMBER_ARRAY_GATES as readonly Gate<never>[],
   NARROW_LOCAL_GATES: NARROW_LOCAL_GATES as readonly Gate<never>[],
   PARAM_WIDTH_GATES: PARAM_WIDTH_GATES as readonly Gate<never>[],

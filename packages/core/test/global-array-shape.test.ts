@@ -14,9 +14,22 @@
 import { describe, expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
+import { type Expr, type Stmt, exprChildren, stmtChildren, stmtExprs } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
-import { ARRAY_SHAPE_GATES, arrayShapeRefusals, inferGlobalArrays, sameDerivedShape } from '../src/raise/globalshape';
+import {
+  ADDRESS_GATES,
+  ARRAY_SHAPE_GATES,
+  DECLARATION_ADDRESS_GATES,
+  ELEMENT_ADDRESS_GATES,
+  ORDER_LICENCE_GATES,
+  ORDER_SHAPE_GATES,
+  SHAPE_GATES,
+  arrayShapeRefusals,
+  inferGlobalArrays,
+  orderLicensedGlobals,
+  sameDerivedShape,
+} from '../src/raise/globalshape';
 import { enumerateCandidates } from '../src/rank';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
@@ -45,6 +58,9 @@ const lift = (name: string, asm: string) =>
 
 const derive = (name: string, asm: string) => inferGlobalArrays(lift(name, asm), ARMV4T_AGBCC);
 
+/** The ORDER half alone — the names a value HOME may be spelled over (raise/globalshape.ts). */
+const licensed = (name: string, asm: string) => orderLicensedGlobals(lift(name, asm), ARMV4T_AGBCC);
+
 /** WHICH RULE decided, per symbol — `firstRejection` over the two gate tables. The refusals are
  *  DATA (raise/globalshape.ts's `ADDRESS_GATES` / `SHAPE_GATES`) precisely so a test can assert the
  *  attribution rather than a reviewer reading one off a comment. */
@@ -63,6 +79,19 @@ const deriveWithout = (id: string, name: string, asm: string) =>
       ? without(ARRAY_SHAPE_GATES.shape, id)
       : ARRAY_SHAPE_GATES.shape,
   });
+
+/** …and WHICH rule decides once one is removed. `deriveWithout` says a symbol is still refused;
+ *  this says by what, which is the half an attributing comment actually claims. */
+const refusalsWithout = (id: string, name: string, asm: string) => [
+  ...arrayShapeRefusals(lift(name, asm), ARMV4T_AGBCC, {
+    address: ARRAY_SHAPE_GATES.address.some((g) => g.id === id)
+      ? without(ARRAY_SHAPE_GATES.address, id)
+      : ARRAY_SHAPE_GATES.address,
+    shape: ARRAY_SHAPE_GATES.shape.some((g) => g.id === id)
+      ? without(ARRAY_SHAPE_GATES.shape, id)
+      : ARRAY_SHAPE_GATES.shape,
+  }),
+];
 
 const sourceOf = (name: string, asm: string) => decompile(name, asm, ARMV4T_AGBCC, {}).source;
 
@@ -264,7 +293,9 @@ f:
   // alongside it or the rule looks unnecessary: with an interior read alone, ablating the rule
   // records no access at all (an interior read is not evidence) and the symbol is refused anyway.
   // With a clean access beside it, ablating derives `elemSize 2` off a name the function also
-  // reads at +4 — the wrong declaration. `kleod:UpdateCameraScroll` is that shape on the corpus.
+  // reads at +4 — the wrong declaration. `kleod:UpdateCameraScroll` is the corpus inhabitant of
+  // the ABLATION result (`gSineTable` derives `elemSize 2` without the rule) but not of this
+  // fixture's shape: its rejected use is the rule's NON-ACCESS half, pinned separately below.
   [
     'interior-or-non-access',
     thumb(
@@ -394,8 +425,55 @@ describe('refusals: which rule decided, and what it is worth', () => {
     expect(sourceOf('f', structElem)).toContain('&gBgInfo');
   });
 
+  // THE RULE'S OTHER HALF, which its own fixture does not exercise: `interior-or-non-access`
+  // rejects a use whose consumers are not all whole-element accesses, and "not a whole-element
+  // access" is EITHER a load/store at a displacement OR something that is not a load or a store at
+  // all. Only the first is an interior read. The corpus shape is the second — `kleod:UpdateCameraScroll`'s
+  // `gSineTable`, read once cleanly at width 2 with its element address also an operand of another
+  // `add` — and it is what makes that name a plain scalar leaf the licence keeps and the
+  // declaration refuses, with NO null width anywhere in the order consumer's evidence.
+  test('a non-access use refuses the declaration too — and it is not an interior read', () => {
+    const nonAccess = thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r2\n\tldrh\tr3, [r0]\n' +
+        '\tadd\tr0, r0, r1\n\tadd\tr0, r0, r3',
+      '.word\tgTbl',
+    );
+    expect(refusals('f', nonAccess)).toEqual([['gTbl', 'interior-or-non-access']]);
+    expect(derive('f', nonAccess).size).toBe(0);
+    // …and the licence keeps it, because where the base was materialized is answered by the one
+    // clean access that IS recorded.
+    expect([...licensed('f', nonAccess)]).toEqual(['gTbl']);
+    // The discriminator against the interior half, asked of the rules that read a width: on the
+    // interior fixture all three refuse the licence (the test that composes them says so); here
+    // all three ADMIT, because no access under this name was recorded with a null element width.
+    for (const id of ['stride-is-not-the-element', 'mixed-extension', 'mid-element-constant']) {
+      const composed = {
+        address: ELEMENT_ADDRESS_GATES,
+        shape: [...ORDER_SHAPE_GATES, ...SHAPE_GATES.filter((g) => g.id === id)],
+      };
+      expect([id, [...orderLicensedGlobals(lift('f', nonAccess), ARMV4T_AGBCC, composed)]]).toEqual([id, ['gTbl']]);
+    }
+  });
+
   test('two access widths under one name refuse', () => {
     expect(refusals('f', fixture('mixed-access-width'))).toEqual([['gTbl', 'mixed-access-width']]);
+  });
+
+  test("…and what refuses in its place once it is ablated — the rule's attribution, not its comment", () => {
+    // `mixed-access-width` is `sound: false`, so the sweep below asserts something else refuses.
+    // WHICH something is the claim its own comment makes, and a claim about an ablation belongs in
+    // an ablation rather than in prose: the substitute is `mixed-extension`, on a disagreement
+    // about the EXTENSION…
+    const asm = fixture('mixed-access-width');
+    expect(refusalsWithout('mixed-access-width', 'f', asm)).toEqual([['gTbl', 'mixed-extension']]);
+    // …while `stride-is-not-the-element` DERIVES here on its own, because each access's stride IS
+    // its own element width. Rule ORDER is the only thing keeping the attribution where it is.
+    const strideOnly = {
+      address: ARRAY_SHAPE_GATES.address,
+      shape: SHAPE_GATES.filter((g) => g.id === 'stride-is-not-the-element'),
+    };
+    expect([...inferGlobalArrays(lift('f', asm), ARMV4T_AGBCC, strideOnly).keys()]).toEqual(['gTbl']);
   });
 
   test('one name read signed and unsigned refuses', () => {
@@ -900,5 +978,374 @@ describe('the licence is a per-compiler behaviour, never a universal', () => {
       compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, arrayShapeFromStride: false },
     };
     expect(inferGlobalArrays(frontendFor(ARMV4T_AGBCC).lift('f', BASE_FIRST, ARMV4T_AGBCC, {}), off).size).toBe(0);
+  });
+});
+
+// ── the ORDER half, on its own ────────────────────────────────────────────────────────────────
+//
+// `orderLicensedGlobals` answers the question a VALUE HOME asks — was the base materialized before
+// the index was scaled — where `inferGlobalArrays` answers the one a DECLARATION asks. They read
+// the same `baseFirst` FACT, which is what lets a struct element (read at a displacement, no
+// `intType`, no whole-element subscript) be licensed for a home and still refused for a decl.
+//
+// THEY DO NOT SHARE THE SHAPE RULE OBJECTS, and the assertion below is what holds that apart.
+// Selecting `SHAPE_GATES`' pair by id — "drop every rule that is about the element" — keeps
+// `no-positive-evidence`, a disjunction whose second half (a constant on the index) is about the
+// SUBSCRIPT rather than the element or the order, and so licenses names with no order fact at all.
+// The address half IS shared, object for object, because "does the base own these bytes" has one
+// answer for both questions.
+
+describe('the order licence, split out for the value-home consumer', () => {
+  test('the declaration derivation asks exactly the rules it always did', () => {
+    // The split is a partition of one list, so `inferGlobalArrays`' attribution cannot have moved.
+    expect(ADDRESS_GATES.map((g) => g.id)).toEqual([
+      'address-escapes',
+      'relocation-addend',
+      'residual-not-a-sum',
+      'address-unused',
+      'interior-or-non-access',
+    ]);
+    expect(ADDRESS_GATES).toEqual([...ELEMENT_ADDRESS_GATES, ...DECLARATION_ADDRESS_GATES]);
+    // The shape half is the order table's OWN two rules — see `ORDER_SHAPE_GATES`. Pinned as ids
+    // so the table cannot quietly become a selection out of `SHAPE_GATES`: that would carry
+    // `no-positive-evidence`'s index-constant disjunct, which is not about the order.
+    // `SHAPE_GATES` owning either of these would mean the declaration derivation had grown a rule,
+    // which is the change this assertion is here to catch.
+    expect(ORDER_SHAPE_GATES.map((g) => g.id)).toEqual(['order-index-first', 'no-order-evidence']);
+    expect(ORDER_SHAPE_GATES.some((g) => SHAPE_GATES.includes(g))).toBe(false);
+    // and neither is `sound` here: the licence GENERATES a candidate, so being wrong costs fan
+    expect(ORDER_SHAPE_GATES.every((g) => g.sound === false)).toBe(true);
+  });
+
+  test('a struct element read at a displacement is licensed for a home and refused for a decl', () => {
+    // The `bgarr` shape: a 28-byte element read 2 bytes in (`gBgInfo[i].field_16`), pool word
+    // FIRST. No array declaration describes it — and none is needed to know where the base lived.
+    const structElem = thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+      '.word\tgBgInfo',
+    );
+    expect(derive('f', structElem).size).toBe(0);
+    expect([...licensed('f', structElem)]).toEqual(['gBgInfo']);
+  });
+
+  test('base-first licenses, index-first does not — the same minimal pair', () => {
+    expect([...licensed('f', BASE_FIRST)]).toEqual(['gTbl']);
+    expect([...licensed('f', INDEX_FIRST)]).toEqual([]);
+  });
+
+  test('the addend belongs to the base, so `arrbias` is refused here too', () => {
+    // `relocation-addend` stays in the ELEMENT half: a constant baked into the pool word says the
+    // address the source named is not `&gTbl`, whatever order it was materialized in.
+    //
+    // AN OUTCOME, NOT A PRICE, and not this rule's coverage for the licence either: there is no
+    // ablation here, and ablating the whole of both tables leaves this fixture licensing nothing
+    // anyway, because the addend `add`'s only consumer is the index `add` so no access is recorded.
+    // The rule's price for the licence is measured in the sweep below, on a fixture that records
+    // one.
+    expect([...licensed('f', fixture('relocation-addend'))]).toEqual([]);
+  });
+
+  test('a constant on the index is not an order fact', () => {
+    // The rule `no-order-evidence` exists for, and the reason the order table is not a selection
+    // out of `SHAPE_GATES`. Every access here is width 1, so there is no scaling to
+    // compare against the pool load and `baseFirst` is `undefined` throughout; the runtime `+ 1`
+    // on the index is positive evidence of a SUBSCRIPT and none at all about where the base was
+    // materialized. The declaration derivation is right to shape it and the licence is right to
+    // refuse it — the same evidence, two different questions.
+    //
+    // Real agbcc output for `extern u8 gTbl[]; u32 f(u32 i, u32 j) { s8 *p = (s8 *)gTbl; return
+    // gTbl[i + 1] + p[j]; }`, through the benchmark's own command.
+    const constOnIndex = thumb(
+      'f',
+      '\tadd\tr2, r0, #0\n\tldr\tr0, .L3\n\tadd\tr2, r2, #0x1\n\tadd\tr2, r2, r0\n' +
+        '\tadd\tr1, r1, r0\n\tmov\tr0, #0x0\n\tldrsb\tr0, [r1, r0]\n\tldrb\tr2, [r2]\n\tadd\tr0, r0, r2',
+      '.word\tgTbl',
+    );
+    expect([...licensed('f', constOnIndex)]).toEqual([]);
+    // …and the rule is priced by ablation rather than asserted: without it the name IS licensed,
+    // which is what a table selecting `no-positive-evidence` does here.
+    expect([
+      ...orderLicensedGlobals(lift('f', constOnIndex), ARMV4T_AGBCC, {
+        address: ELEMENT_ADDRESS_GATES,
+        shape: without(ORDER_SHAPE_GATES, 'no-order-evidence'),
+      }),
+    ]).toEqual(['gTbl']);
+  });
+
+  test('a shaped name is not always licensed — the superset claim, and where it stops', () => {
+    // ASKED OF THE FIXTURES THAT SHAPE, which is not `GATE_FIXTURES`: every one of those is a
+    // REFUSAL fixture (the per-rule test above asserts `derive(...).size` is 0 for all thirteen),
+    // so a loop over them would run its body on nothing and claim coverage of everything. The
+    // file's top-level fixtures that DERIVE are four (measured: `BASE_FIRST`, `RANK2`, `MIX_ARRAY`,
+    // `CONST_ON_INDEX`; `LOOP_ONLY`, `MIX_CAST`, `INDEX_FIRST` and `CONST_IN_ADDEND` derive
+    // nothing) — the three that license are below, the fourth is the stop, and the count is
+    // asserted so a rename cannot empty the loop.
+    const shaping = [
+      ['f', BASE_FIRST],
+      ['f', RANK2],
+      ['mix', MIX_ARRAY],
+    ] as const;
+    let checked = 0;
+    for (const [fname, asm] of shaping) {
+      for (const name of derive(fname, asm).keys()) {
+        expect([...licensed(fname, asm)]).toContain(name);
+        checked++;
+      }
+    }
+    expect(checked).toBe(3);
+    // …and it stops at the fourth, which shapes on the index-side CONSTANT alone: `gTbl[a0 + 1]`
+    // is derived and licensed for no home, the same answer as the literal below.
+    expect([...derive('f', CONST_ON_INDEX).keys()]).toEqual(['gTbl']);
+    expect([...licensed('f', CONST_ON_INDEX)]).toEqual([]);
+    // …and it stops at a name shaped by the index-side CONSTANT alone, which says nothing about
+    // the order. `synthetic:harridx` is that row in the corpus. Nothing is lost by refusing it:
+    // a shaped name is spelled bare, so its index base is a `var` and no home key exists to bind.
+    const constShaped = thumb(
+      'f',
+      '\tldr\tr1, .L3\n\tadd\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]',
+      '.word\tgTbl',
+    );
+    expect(derive('f', constShaped).get('gTbl')?.shape).toBe('array');
+    expect([...licensed('f', constShaped)]).toEqual([]);
+  });
+
+  test('an interior access carries no element width, so a width rule refuses instead of guessing', () => {
+    // `interiorIsEvidence` widens WHICH accesses are recorded, and an interior one — `ldrh [r1,
+    // #0x10]`, two bytes into a 28-byte element — evidences the ORDER and no element width at all.
+    // It is recorded with `elementWidth: null` rather than with the load's 2, so a rule added to
+    // the order table later reads a refusal rather than a fabricated element. Pinned by adding one:
+    // `stride-is-not-the-element` compares the innermost stride against the element width, and here
+    // the stride really is 28 and the load really is 2 — reading the load's width would have made
+    // that comparison a lie in the licence's favour on some other input.
+    const structElem = thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n' +
+        '\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+      '.word\tgBgInfo',
+    );
+    expect([...licensed('f', structElem)]).toEqual(['gBgInfo']);
+
+    // ASKED OF EVERY WIDTH-READING RULE, ON BOTH SHAPES, because the guarantee is positional and
+    // one rule on one shape does not pin it. `widths[0] === null` says "the FIRST recorded access
+    // has no element width", and where a CLEAN access is recorded ahead of the interior one —
+    // `interior-or-non-access`'s own fixture, and `kleod:TransformSingleEntityToScreen`'s
+    // `gUnk_03002920` on the corpus (`widths` `[2, null]`, both symbol-map arms) — a positional
+    // read takes the clean access's 2, applies it to the access that has none, and licenses the
+    // name.
+    const widthRules = ['stride-is-not-the-element', 'mixed-extension', 'mid-element-constant'];
+    for (const asm of [structElem, fixture('interior-or-non-access')]) {
+      for (const id of widthRules) {
+        const withAWidthRule = {
+          address: ELEMENT_ADDRESS_GATES,
+          shape: [...ORDER_SHAPE_GATES, ...SHAPE_GATES.filter((g) => g.id === id)],
+        };
+        expect([id, [...orderLicensedGlobals(lift('f', asm), ARMV4T_AGBCC, withAWidthRule)]]).toEqual([id, []]);
+      }
+    }
+    // …and the boundary is exact: `mixed-access-width` reads the SET's shape and no width value,
+    // so on a name read only at interiors (`widths` = `[null]`, one entry) it admits. That is the
+    // right answer — "one name, two element types" is not what such a symbol violates — and it is
+    // pinned so the invariant above cannot be read as covering a rule it does not.
+    const countRule = {
+      address: ELEMENT_ADDRESS_GATES,
+      shape: [...ORDER_SHAPE_GATES, ...SHAPE_GATES.filter((g) => g.id === 'mixed-access-width')],
+    };
+    expect([...orderLicensedGlobals(lift('f', structElem), ARMV4T_AGBCC, countRule)]).toEqual(['gBgInfo']);
+    expect([...orderLicensedGlobals(lift('f', fixture('interior-or-non-access')), ARMV4T_AGBCC, countRule)]).toEqual(
+      [],
+    );
+  });
+
+  test('a target that has not opted in licenses nothing', () => {
+    const off = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, arrayShapeFromStride: false },
+    };
+    expect(orderLicensedGlobals(lift('f', BASE_FIRST), off).size).toBe(0);
+  });
+});
+
+// ── the same discipline, for the SECOND consumer ─────────────────────────────────────────────
+//
+// The sweep above ('every gate: which rule decides…') ablates one rule at a time out of
+// `inferGlobalArrays`, so it prices a rule against the DECLARATION and says nothing about the
+// licence — including for the rules the two consumers share. This is the licence's own sweep. Two
+// rules need it and nothing else gives it to them: `order-index-first`, whose guard has to be a
+// shape `no-order-evidence` does not already refuse, and `address-escapes`, a `sound: true` rule
+// in both tables.
+//
+// THE FIXTURE IS PART OF THE CLAIM HERE TOO, and more sharply than above: the two address rules
+// reject a USE, and a fixture whose only use is the rejected one records no access at all — so
+// with the rule removed there is still nothing to license and the ablation reads "worth nothing".
+// `relocation-addend`'s declaration fixture is exactly that shape: ablating EVERY rule in both
+// halves licenses nothing there, because the addend `add`'s only consumer is the index `add`.
+// Its licence fixture therefore carries a CLEAN base-first access beside the rejected use, which
+// is the shape the corpus has — that rule alone blocks three real names (`kleod:EntityItemDrop`'s
+// `gItemDropParamTable`, `kleod:UpdateWorldMapNodeTile`'s `gUnk_08116748`,
+// `pokeemerald:TrySetCantSelectMoveBattleScript`'s `gBattleMons`) on both symbol-map arms.
+
+const LICENCE_FIXTURES: readonly (readonly [string, string])[] = [
+  // The one `sound: true` rule both tables share. Its declaration fixture reaches the licence as
+  // it stands: the name has a clean base-first access AND a use that hands the address to a callee.
+  ['address-escapes', fixture('address-escapes')],
+  // `mov #4; add base, #4` — a constant added straight to the base, beside a clean base-first
+  // access. The corpus shape; `relocation-addend`'s own declaration fixture does not reach here.
+  [
+    'relocation-addend',
+    thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]\n' +
+        '\tmov\tr1, #0x4\n\tadd\tr1, r2, r1\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1',
+      '.word\tgTbl',
+    ),
+  ],
+  // A `sub` in the second access's residual, beside a clean base-first access — same reason.
+  [
+    'residual-not-a-sum',
+    thumb(
+      'f',
+      '\tldr\tr2, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r2\n\tldrh\tr0, [r0]\n' +
+        '\tlsl\tr1, r1, #0x2\n\tsub\tr1, r1, r3\n\tadd\tr1, r1, r2\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1',
+      '.word\tgTbl',
+    ),
+  ],
+  // One index-first access and one base-first access under one name. The two rules disagree on
+  // exactly this shape and no other — `order-index-first` wants no access saying `false`,
+  // `no-order-evidence` wants one saying `true`, so only a symbol carrying both can satisfy the
+  // second and fail the first.
+  ['order-index-first', fixture('index-materialized-first')],
+  // Width 1, no constant, nothing scaled: no access says the base was materialized first.
+  ['no-order-evidence', fixture('no-positive-evidence')],
+];
+
+/** The licence with ONE named rule removed — `orderLicensedGlobals` on real input, no test-only
+ *  branch, and the counterpart of `deriveWithout` for the second consumer. */
+const licensedWithout = (id: string, name: string, asm: string): string[] => [
+  ...orderLicensedGlobals(lift(name, asm), ARMV4T_AGBCC, {
+    address: ELEMENT_ADDRESS_GATES.some((g) => g.id === id)
+      ? without(ELEMENT_ADDRESS_GATES, id)
+      : ELEMENT_ADDRESS_GATES,
+    shape: ORDER_SHAPE_GATES.some((g) => g.id === id) ? without(ORDER_SHAPE_GATES, id) : ORDER_SHAPE_GATES,
+  }),
+];
+
+describe('the order licence: which rule decides, and whether it is uniquely load-bearing', () => {
+  test('every rule the licence reaches is priced by ablating it out of `orderLicensedGlobals`', () => {
+    const measured = LICENCE_FIXTURES.map(([id, asm]) => [
+      id,
+      [...licensed('f', asm)].length === 0 && licensedWithout(id, 'f', asm).length > 0,
+    ]);
+    // All five, which is a stronger result than the declaration half's nine-of-thirteen and is the
+    // point of choosing the fixtures by what REACHES this consumer rather than reusing the others.
+    expect(measured).toEqual(LICENCE_FIXTURES.map(([id]) => [id, true]));
+  });
+
+  test('every rule in both halves of `ORDER_LICENCE_GATES` has a licence fixture here', () => {
+    const covered = new Set(LICENCE_FIXTURES.map(([id]) => id));
+    const missing = [...ORDER_LICENCE_GATES.address, ...ORDER_LICENCE_GATES.shape]
+      .map((g) => g.id)
+      .filter((id) => !covered.has(id));
+    // The same single exception the declaration sweep states: no lifted IR this derivation runs on
+    // computes an element address nothing reads.
+    expect(missing).toEqual(['address-unused']);
+  });
+
+  test('one index-first access refuses a name the licence would otherwise grant', () => {
+    // `order-index-first`'s OWN guard, and the reason it cannot be the minimal pair: on
+    // `INDEX_FIRST` the single access says `false`, so `no-order-evidence` refuses with or without
+    // this rule and the ablation prices nothing. Here the base-first access satisfies
+    // `no-order-evidence` and only this rule stands between the name and a home.
+    const mixed = fixture('index-materialized-first');
+    expect([...licensed('f', mixed)]).toEqual([]);
+    expect(licensedWithout('order-index-first', 'f', mixed)).toEqual(['gTbl']);
+    expect(licensedWithout('no-order-evidence', 'f', mixed)).toEqual([]);
+    // …and on the minimal pair the same two ablations are indistinguishable, which is why the
+    // guard has to be the mixed shape above.
+    expect(licensedWithout('order-index-first', 'f', INDEX_FIRST)).toEqual([]);
+    expect(licensedWithout('no-order-evidence', 'f', INDEX_FIRST)).toEqual([]);
+  });
+
+  test('the one sound rule both tables share is load-bearing for the licence too', () => {
+    // `address-escapes` is `sound: true` for the DECLARATION and its `guardedBy` names the test
+    // that ablates it there — a different consumer, so this measures it here. It is not
+    // decoration: the address handed to a callee leaves this function's arithmetic, so a home
+    // spelled over the name would be a pointer local the callee never sees.
+    const esc = fixture('address-escapes');
+    expect([...licensed('f', esc)]).toEqual([]);
+    expect(licensedWithout('address-escapes', 'f', esc)).toEqual(['gTbl']);
+  });
+
+  test('a fixture that records no access prices nothing, however many rules are removed', () => {
+    // Why `relocation-addend` and `residual-not-a-sum` get their own licence fixtures instead of
+    // reusing the declaration ones. On `CONST_IN_ADDEND` the addend `add`'s only consumer is the
+    // index `add`, so no access is recorded and the licence is empty with the WHOLE of both tables
+    // ablated — an ablation that cannot fail is not a price.
+    expect([...orderLicensedGlobals(lift('f', CONST_IN_ADDEND), ARMV4T_AGBCC, { address: [], shape: [] })]).toEqual([]);
+    // The licence fixture for the same rule does record one, and there the ablation bites.
+    const reaching = LICENCE_FIXTURES.find(([id]) => id === 'relocation-addend')![1];
+    expect([...orderLicensedGlobals(lift('f', reaching), ARMV4T_AGBCC, { address: [], shape: [] })]).toEqual(['gTbl']);
+  });
+});
+
+// ── the licence's route into the L3 tree ──────────────────────────────────────────────────────
+//
+// The order fact is read at L1 and consumed at L3 (l3/basecse.ts decides whether a base gets a
+// HOME), so it travels on the access node — `index.baseOrdered`, stamped once at the structure
+// seam. These pin the route rather than the rule: that the stamp lands where the licence says and
+// nowhere else, and that it is still there after the rewrites `structureChecked` runs on its own
+// output — which is the tree rank hands the lever.
+
+/** Every `index` node in the emitted tree, as `<base symbol or shape> ordered=<bool>`. */
+const stamps = (name: string, asm: string): string[] => {
+  const out: string[] = [];
+  const walk = (e: Expr): void => {
+    if (e.k === 'index') {
+      const b = e.base;
+      const sym = b.k === 'addr' ? `&${b.name}` : b.k === 'cast' && b.e.k === 'addr' ? `(T *)&${b.e.name}` : b.k;
+      out.push(`${sym} ordered=${e.baseOrdered === true}`);
+    }
+    exprChildren(e).forEach(walk);
+  };
+  const walkS = (s: Stmt): void => {
+    stmtExprs(s).forEach(walk);
+    stmtChildren(s).forEach(walkS);
+  };
+  decompile(name, asm, ARMV4T_AGBCC, {}).sfn.body.forEach(walkS);
+  return out;
+};
+
+describe('the licence reaches L3 on the access node', () => {
+  // The `bgarr` pair: the SAME seven instructions, differing only in where the pool load sits.
+  const STRUCT_BASE_FIRST = thumb(
+    'f',
+    '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+    '.word\tgBgInfo',
+  );
+  const STRUCT_INDEX_FIRST = thumb(
+    'f',
+    '\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tldr\tr2, .L3\n\tadd\tr1, r1, r2\n\tldrh\tr0, [r1, #0x10]',
+    '.word\tgBgInfo',
+  );
+
+  test('a struct element over a licensed base is stamped', () => {
+    // …and it survives `structureChecked`'s own rewrites — tail merging, dead-store elimination and
+    // the DEFAULT base hoist all run between the stamp and this tree, which is the one rank reads.
+    expect(stamps('f', STRUCT_BASE_FIRST)).toEqual(['(T *)&gBgInfo ordered=true']);
+  });
+
+  test('the same access with the index materialized first is not', () => {
+    expect(stamps('f', STRUCT_INDEX_FIRST)).toEqual(['(T *)&gBgInfo ordered=false']);
+  });
+
+  test('a name the DECLARATION derivation shaped has no `&gSym` base left to stamp', () => {
+    // Where the shape derives, the access spells the bare `gTbl[i]` and its base is a `var`. The
+    // two consumers do not overlap on one access — the home question only arises where the
+    // declaration one was refused.
+    expect(stamps('f', BASE_FIRST)).toEqual(['var ordered=false']);
+  });
+
+  test('an unlicensed cast base is left alone', () => {
+    expect(stamps('f', INDEX_FIRST)).toEqual(['&gTbl ordered=false']);
   });
 });
