@@ -970,6 +970,10 @@ export function enumerateCandidates(
   const frontend = frontendFor(target);
   const baseOpts = {
     ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
+    // See the same line in pipeline.ts: a backend that cannot print switch fall-through must not
+    // be handed a tree carrying one, because its refusal costs the whole candidate (and, when
+    // every candidate carries it, the whole row).
+    spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
   };
   // Branch-sense is a differ-ranked LEVER, the same class as param signedness: a divergent `if`

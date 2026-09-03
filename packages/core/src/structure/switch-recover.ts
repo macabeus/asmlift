@@ -23,6 +23,10 @@ export interface SwitchRecoverDeps {
   switchAllowsBoundCase: boolean;
   /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
   switchArmsFollowLayout: boolean;
+  /** may the emitted SOURCE say "this arm runs on into the next one"? False for a language whose
+   *  `case` cannot fall through (Pascal), and then Regime A declines a falling arm to if-recovery
+   *  — the behaviourally identical recovery that backend CAN print. See StructureOptions. */
+  spellSwitchFallthrough: boolean;
   /** does emitting this block's ops carry a statement beyond the ops themselves? Collapsing a
    *  test block into a `switch` re-renders its ops at their uses and emits no side effects for it,
    *  so any op that renders as a STATEMENT of its own loses that statement. Two produce one: a
@@ -40,23 +44,35 @@ export interface SwitchRecoverDeps {
  *   - `break`        every path out of the arm reaches the switch's merge (or returns / loops
  *                    inside the arm). The ordinary closed arm.
  *   - `fallthrough`  every path out leaves into exactly ONE sibling arm's entry: C's fall-through.
- *                    Only spellable when that sibling is the arm emitted NEXT (the caller checks
- *                    emission adjacency — see the l3/ast.ts non-neutrality note).
+ *                    Only spellable when that sibling is the arm emitted NEXT, which `chainArms`
+ *                    below arranges and both regimes then re-read off the emission array (see the
+ *                    l3/ast.ts non-neutrality note).
  *   - `unstructurable`  anything else: two different siblings, or a mix of "into a sibling" and
- *                    "out to the merge". C needs a `goto` for those, so callers decline LOUD. */
+ *                    "out to the merge". C needs a `goto` for those. Regime A declines to
+ *                    if-recovery on this verdict; Regime B, having no fallback, fails LOUD. */
 export type ArmExit = { kind: 'break' } | { kind: 'fallthrough'; to: Block } | { kind: 'unstructurable'; why: string };
 
 export interface SwitchRecovery {
   recognizeSwitch: (b: Block, stop: Block | null) => Stmt[] | null;
-  /** shared with the Regime-B (`switch_br`) path in structure.ts, which recovers the fall-through
-   *  this returns; Regime A only accepts `break` arms and otherwise declines to if-recovery. */
+  /** shared with the Regime-B (`switch_br`) path in structure.ts. Both regimes recover the
+   *  fall-through this returns; on an `unstructurable` verdict Regime A declines to if-recovery and
+   *  Regime B, which has no fallback, fails loud. */
   analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>) => ArmExit;
   /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
    *  regimes read it from one definition (and one statement of what it rests on). */
   layoutIndex: (blk: Block) => number;
-  /** where the `default:` label goes among `armEntries`, or `undefined` for C's last position —
-   *  shared with Regime B so both regimes state that refusal once. */
-  defaultLayoutPos: (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean) => number | undefined;
+  /** where the `default:` label goes among the EMITTED arms, or `undefined` for C's last position —
+   *  shared with Regime B so both regimes state those refusals once. */
+  defaultLayoutPos: (
+    defaultBlk: Block,
+    arms: readonly { entry: Block; fallsThrough: boolean }[],
+    opts: { placedByDispatch: boolean; orderIntact: boolean },
+  ) => number | undefined;
+  /** ONE linear emission order for a set of arms, re-threaded so every falling arm sits directly
+   *  above the one it falls into — or null when no linear order spells them. Shared with Regime B,
+   *  so the chain, the adjacency it guarantees and the three refusals below it have one definition
+   *  (Regime A maps null to if-recovery, Regime B to a loud StructureError). */
+  chainArms: (order: Block[], dflt: Block | null, exitOf: Map<Block, ArmExit>) => Block[] | null;
 }
 
 export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
@@ -71,6 +87,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     switchAllowsNeqCase,
     switchAllowsBoundCase,
     switchArmsFollowLayout,
+    spellSwitchFallthrough,
     emitsOwnStatement,
     expr,
     structureRegion,
@@ -131,14 +148,47 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     arm the source wrote FIRST. That reading holds only while a second subtree still names the
   //     label: a two-case chain names it once, and agbcc then lays that block right after the tests
   //     whatever the source wrote, both spellings compiling to identical instructions.
-  const defaultLayoutPos = (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean): number | undefined =>
-    !switchArmsFollowLayout || isBareExit(defaultBlk) || armEntries.includes(defaultBlk) || placedByDispatch
-      ? undefined
-      : armEntries.filter((e) => layoutIndex(e) < layoutIndex(defaultBlk)).length;
+  //
+  // THREE further withholdings, all about fall-through and all stated here so both regimes state
+  // them once. The first is about the LIST the count would index; the other two are about the
+  // POSITION it names:
+  //   - the chain RE-THREADED the arm order (`orderIntact` false), so the emitted list is no longer
+  //     the one the layout count describes and no position in it means what the count says. This
+  //     one is whole-switch because the re-threading is. A per-position reading — bracket the label
+  //     between the two arms that straddle it in LAYOUT, then map that into the emitted list — is
+  //     possible and unbuilt, and hard to need: a compiler that lays bodies out in source order
+  //     already writes a falling arm directly above its target, so the order it declares is a chain
+  //     order too;
+  //   - the LAST emitted arm falls through, which can only be into the default (the adjacency
+  //     check leaves no other target) — the label must then be last, which IS `undefined`;
+  //   - the position lands directly after a falling arm, where printing the label would divert
+  //     that arm into the default. cfamily.ts fails loud on exactly that, and this is the producer
+  //     side of the same rule.
+  // A switch with a chain elsewhere keeps its evidence: the reason to withhold is the position,
+  // never "some arm somewhere falls".
+  const defaultLayoutPos = (
+    defaultBlk: Block,
+    arms: readonly { entry: Block; fallsThrough: boolean }[],
+    opts: { placedByDispatch: boolean; orderIntact: boolean },
+  ): number | undefined => {
+    if (
+      !switchArmsFollowLayout ||
+      isBareExit(defaultBlk) ||
+      arms.some((a) => a.entry === defaultBlk) ||
+      opts.placedByDispatch ||
+      !opts.orderIntact ||
+      arms[arms.length - 1]?.fallsThrough
+    ) {
+      return undefined;
+    }
+    const at = arms.filter((a) => layoutIndex(a.entry) < layoutIndex(defaultBlk)).length;
+    return at > 0 && arms[at - 1].fallsThrough ? undefined : at;
+  };
 
   // --- Regime A: comparison-tree switch recovery ----------------------------------------------------
   // Every ambiguity declines. Four preconditions are enforced below, annotated PRE1..PRE4:
-  // scrutinee identity/dominance, no fall-through, concrete interval consistency, test purity.
+  // scrutinee identity/dominance, ARM EXITS (per site: `break`, `fallthrough` — which `chainArms`
+  // then places — or a decline), concrete interval consistency, test purity.
 
   // Fold a value that is a compile-time constant (a `const`, or a synthesized immediate like agbcc's
   // `250 << 2` for a large sparse case) to a number — else null.
@@ -397,11 +447,59 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     };
   };
 
-  /** Every arm closed (`break`)? The precondition Regime A needs — it has a behaviourally identical
-   *  fallback (if-recovery), so it declines on anything else instead of recovering fall-through. */
-  const allArmsClosed = (targets: Set<Block>, b: Block, merge: Block | null): boolean => {
-    const siblings = new Set([...targets].filter((t) => t !== merge));
-    return [...siblings].every((t) => analyzeArmExit(t, b, merge, siblings).kind === 'break');
+  /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
+   *  fall-through chain is emitted contiguously and takes the position of its HEAD in `order`,
+   *  which is the caller's own arm-order policy — so with no fall-through every chain is a
+   *  singleton and `order` comes back unchanged. `dflt` is the `default:` arm's block when it has
+   *  one, and it is pinned LAST because that is where C prints the label.
+   *
+   *  THREE REFUSALS (null ⇒ the caller declines), each a shape no single linear order spells:
+   *    - two arms falling into the SAME arm — C drops into an arm from above along one edge only;
+   *    - the `default:` arm falling into a case, since nothing is emitted below it;
+   *    - a fall-through CYCLE, whose members are all fallen-into and so are never a chain head. */
+  const chainArms = (order: Block[], dflt: Block | null, exitOf: Map<Block, ArmExit>): Block[] | null => {
+    const next = new Map<Block, Block>();
+    const fallenInto = new Set<Block>();
+    for (const e of [...order, ...(dflt ? [dflt] : [])]) {
+      const x = exitOf.get(e);
+      if (x?.kind !== 'fallthrough') {
+        continue;
+      }
+      if (e === dflt || fallenInto.has(x.to)) {
+        return null;
+      }
+      fallenInto.add(x.to);
+      next.set(e, x.to);
+    }
+    const chains: Block[][] = [];
+    const seen = new Set<Block>();
+    let intoDefault = -1;
+    for (const head of order) {
+      if (fallenInto.has(head)) {
+        continue;
+      }
+      const chain: Block[] = [];
+      for (
+        let cur: Block | undefined = head;
+        cur !== undefined && cur !== dflt && !seen.has(cur);
+        cur = next.get(cur)
+      ) {
+        seen.add(cur);
+        chain.push(cur);
+      }
+      if (dflt !== null && next.get(chain[chain.length - 1]) === dflt) {
+        intoDefault = chains.length;
+      }
+      chains.push(chain);
+    }
+    // A cycle's every member is fallen-into, so none of them is a head and none is walked.
+    if (seen.size !== order.length) {
+      return null;
+    }
+    if (intoDefault >= 0) {
+      chains.push(...chains.splice(intoDefault, 1));
+    }
+    return chains.flat();
   };
 
   const recognizeSwitch = (b: Block, stop: Block | null): Stmt[] | null => {
@@ -578,13 +676,28 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return null;
     }
 
-    // PRE2 (fall-through): only NON-fall-through switches are handled — decline if any case body
-    // can reach ANOTHER case body (or a default that has its own block) while staying inside the
-    // region. (The SAME analysis serves the Regime-B path, which RECOVERS the adjacent-sibling
-    // case as C fall-through instead of declining; A has if-recovery to fall back on, B does not.)
+    // PRE2 (arm exits), per SITE. A `break` arm closes; a `fallthrough` arm runs on into the one
+    // sibling it reaches, which `chainArms` then places directly under it. `unstructurable` is a
+    // shape no single linear switch spells — a body reaching two siblings, or a sibling on one path
+    // and the switch's end on another — and Regime A declines to if-recovery, which spells every
+    // one of those edges. (Regime B reads the same verdicts and fails LOUD on either.)
     const merge = ipdom.get(b) ?? stop;
     const targets = new Set<Block>([...caseBlocks, ...(defaultBlk ? [defaultBlk] : [])]);
-    if (!allArmsClosed(targets, b, merge)) {
+    const siblings = new Set([...targets].filter((t) => t !== merge));
+    const exitOf = new Map<Block, ArmExit>();
+    for (const t of siblings) {
+      exitOf.set(t, analyzeArmExit(t, b, merge, siblings));
+    }
+    // A language with no fall-through in its `case` (Pascal) cannot print a falling arm at all, so
+    // for it a falling arm is exactly as unspellable as an `unstructurable` one — and takes the
+    // same exit: if-recovery, which that backend prints fine. Asked HERE rather than left to the
+    // backend because the backend's refusal is terminal (the whole function becomes a stub) while
+    // this one costs nothing but the `switch` spelling.
+    if (
+      [...exitOf.values()].some(
+        (e) => e.kind === 'unstructurable' || (!spellSwitchFallthrough && e.kind === 'fallthrough'),
+      )
+    ) {
       return null;
     }
 
@@ -598,10 +711,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
 
-    // ARM ORDER. Every arm here is CLOSED (`allArmsClosed`) and the case values are disjoint (PRE3),
-    // so the order carries no meaning and is pure matching evidence: ascending case VALUE is the
-    // neutral spelling, and where a compiler has declared `switchArmsFollowLayout` the layout of
-    // the bodies is the SOURCE's arm order instead.
+    // ARM ORDER. The case values are disjoint (PRE3), so where no arm falls through the order
+    // carries no meaning and is pure matching evidence: ascending case VALUE is the neutral
+    // spelling, and where a compiler has declared `switchArmsFollowLayout` the layout of the bodies
+    // is the SOURCE's arm order instead. A FALLING arm's position is not free, and `chainArms`
+    // below re-threads this order for those — reading it for the chain HEADS only.
     //
     // TWO arms the layout cannot order, both falling back rather than recovering:
     //   - two case VALUES sharing one body block share its index, so the tie is one the merge (or
@@ -655,18 +769,57 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         armsByBlock.set(blk, [k]);
       }
     }
-    const outCases: SwitchCase[] = [...armsByBlock.entries()].map(([blk, values]) => ({
-      values,
-      body: structureRegion(blk, merge),
-      fallsThrough: false,
-    }));
+    // The `default:` arm is a chain member too — an arm may run on into it, and C prints it last.
+    const dfltArm = defaultBlk !== null && defaultBlk !== merge ? defaultBlk : null;
+    const preChain = [...armsByBlock.keys()];
+    const entries = chainArms(preChain, dfltArm, exitOf);
+    if (entries === null) {
+      return null;
+    }
+    // Did the chain move anything? The arm-order POLICY above produced `preChain`; where the chain
+    // left it alone, every position still means what that policy said it meant.
+    const orderIntact = entries.every((e, i) => e === preChain[i]);
+    const fallsInto = (blk: Block): Block | null => {
+      const x = exitOf.get(blk);
+      return x?.kind === 'fallthrough' ? x.to : null;
+    };
+    // Bodies are structured in EMISSION order — `argAssignsFor` mints swap-cycle temp names as it
+    // goes, so building them out of order changes the output — and each falling arm's target is
+    // re-read off that order rather than trusted from the ordering above: this is the seam where a
+    // POSITION acquires control-flow meaning (the l3/ast.ts non-neutrality note).
+    const outCases: SwitchCase[] = [];
+    for (const [i, blk] of entries.entries()) {
+      const to = fallsInto(blk);
+      if (to !== null && to !== (entries[i + 1] ?? dfltArm)) {
+        return null;
+      }
+      // The arm fallen INTO must take NO block parameters. Its only source of them would be the
+      // dispatch's own edge copies, which collapsing the tree discards — so on the fall-through
+      // path they would be lost and on its own case value they would be missing.
+      //
+      // Regime B refuses the same HAZARD one step later and LOUD, on a WEAKER predicate: the copies
+      // `argAssignsFor` actually produced for that edge, which are none on three documented paths
+      // (a const anchored at its def site, an identity copy, an `undef` that carries nothing) —
+      // each meaning the edge has nothing to re-run. That is the test which fits the hazard; this
+      // one is the conservative over-approximation, and it costs nothing while `asLeafOrTest`
+      // refuses a param-carrying case entry outright. It is that refusal restated AT THE SEAM where
+      // breaking it would be silent, so admitting such an entry (the booked hoist) cannot quietly
+      // land one inside a chain — the hoist inherits both rules, not one.
+      if (to !== null && to.params.length) {
+        return null;
+      }
+      outCases.push({
+        values: armsByBlock.get(blk)!,
+        body: structureRegion(blk, to ?? merge),
+        fallsThrough: to !== null,
+      });
+    }
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
     const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
     // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
-    // (`defaultLayoutPos`). Every arm here is closed, so the label diverts nothing wherever it lands.
-    // The dispatch placed that block itself when the last test simply RAN OUT into it and no other
-    // subtree jumps there — the two references the tree walk can count.
+    // (`defaultLayoutPos`). The dispatch placed that block itself when the last test simply RAN OUT
+    // into it and no other subtree jumps there — the two references the tree walk can count.
     const dispatchTargets = [...seen].flatMap((t) =>
       t.ops[t.ops.length - 1].successors.map((e) => forwardingTarget(e.block)),
     );
@@ -675,8 +828,16 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         const succ = t.ops[t.ops.length - 1].successors;
         return succ.length > 1 && succ[1].block === blk;
       }) && dispatchTargets.filter((e) => e === blk).length < 2;
+    // `defaultLayoutPos` owns which POSITIONS a chain makes unreadable — see its three
+    // fall-through withholdings. A chain elsewhere in the switch does not delete the evidence for
+    // where the label goes, and reading it off the emitted arms is what lets a `default:` written
+    // between two closed arms keep its place while a chain runs beside it.
     const defaultAt = defaultBlk
-      ? defaultLayoutPos(defaultBlk, [...armsByBlock.keys()], ranOutInto(defaultBlk))
+      ? defaultLayoutPos(
+          defaultBlk,
+          entries.map((e, i) => ({ entry: e, fallsThrough: outCases[i].fallsThrough })),
+          { placedByDispatch: ranOutInto(defaultBlk), orderIntact },
+        )
       : undefined;
     const sw: Stmt = {
       k: 'switch',
@@ -690,5 +851,5 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     return out;
   };
-  return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos };
+  return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms };
 }

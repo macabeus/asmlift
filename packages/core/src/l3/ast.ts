@@ -220,10 +220,11 @@ export type Stmt =
   // moving the label in front of a falling arm would divert that arm into the default. The C-family
   // printer terminates a non-final default with `break;` for the mirror-image reason.
   //
-  // Unlike `fallsThrough` below, `defaultAt` is a SPELLING: every arm it can sit between is closed,
-  // so a backend with no positional default (Pascal's `otherwise`) may ignore it and still emit the
-  // same program — the one placement that would change one is the falling arm the rule above already
-  // refuses, and which that backend loud-fails anyway.
+  // Unlike `fallsThrough` below, `defaultAt` is a SPELLING: the arm BEFORE the label is closed (the
+  // rule above) and so is the default body itself (the C-family printer terminates a non-final one),
+  // so a backend with no positional default (Pascal's `otherwise`) may ignore the count and still
+  // emit the same program. The arm AFTER the label is under no such rule and MAY fall through — it
+  // falls into the arm below it, which the label does not stand between.
   //
   // NON-NEUTRALITY NOTE (like the `index` node above): `fallsThrough` encodes a C/C++ control-flow
   // concept POSITIONALLY — `cases[i].fallsThrough === true` means control continues into
@@ -232,6 +233,11 @@ export type Stmt =
   // Pascal backend MUST loud-fail a `fallsThrough` case (it has no faithful spelling), exactly as it
   // loud-fails `field`/`cast`. Recovery must therefore only set `fallsThrough` when the fall-through
   // target is the emission-adjacent case.
+  //
+  // Recovery COMPUTES this flag rather than spelling it, so a source grep for `fallsThrough: true`
+  // finds hand-written fixtures and nothing else, whatever the corpus does — count its inhabitants
+  // by instrumenting the printer. Both regimes produce them: the jump table spells `case 4:` of
+  // `kleod:UpdateWorldMapNodeAnim`, the comparison tree `synthetic:sw_fallmem:agbcc`.
   | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[]; defaultAt?: number }
   | { k: 'return'; value?: Expr };
 
@@ -298,6 +304,14 @@ export interface StructType {
  *  comment spelling. */
 export interface LanguageBackend {
   readonly id: 'c' | 'cpp' | 'pascal';
+  /** Can this language spell a `switch` arm that RUNS ON into the next one (`fallsThrough`)?
+   *  C and C++ can; Pascal's `case-of` cannot, and its backend loud-fails the node (see the
+   *  non-neutrality note on `Stmt`'s `switch`). Declared here rather than inferred from `id`
+   *  because it is what RECOVERY must ask: a comparison-tree switch has a second, behaviourally
+   *  identical recovery (plain if-nesting), so minting a `fallsThrough` arm for a backend that
+   *  cannot print it turns a whole function that used to decompile into a loud stub. The
+   *  structurer reads it through `StructureOptions.spellSwitchFallthrough`. */
+  readonly spellsSwitchFallthrough: boolean;
   emit(fn: SFn): string;
   // Spell ONE LINE of text as a comment in this language (C block comments, Pascal `(* … *)`).
   // Used by the annotate-mode stub path to carry the failure reason + the original asm

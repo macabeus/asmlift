@@ -22,6 +22,7 @@
 // This does NOT recover the boolean-VALUE form `return a && b` — that is shortcircuit.ts's job
 // (the `logic_and`/`logic_or` connective plus agbcc's `(-b|b)>>31` = `b!=0` normalisation).
 import { Block, Fn, defOpMap, mkOp, predecessors } from '../ir/core';
+import { simplifyTrivialPhis } from '../ir/simplify';
 
 /** The fused short-circuit connectives (raise/shortcircuit.ts). A `cond_br` on one of these is the
  *  post-fusion record of the ≥2 conditions that used to reach a shared arm. */
@@ -97,6 +98,15 @@ export function sinkReturns(fn: Fn): boolean {
     if (brPreds.length === ps.length && fn.blocks[0] !== m) {
       fn.blocks = fn.blocks.filter((b) => b !== m);
     }
+  }
+  // Sinking RETIRES in-edges. A merge also reached by a `cond_br` keeps that one — a conditional
+  // branch cannot carry a `ret` — and so survives with a SINGLE predecessor, where its parameter is
+  // no longer a join but an alias of that edge's argument. Left standing, the structurer destroys
+  // the alias into a local of its own (`v0 = 0; return v0;`) and Regime-A switch recovery reads the
+  // block as a second, distinct default candidate. The cleanup is `ir/simplify.ts`'s own; it simply
+  // has no other caller downstream of here.
+  if (changed) {
+    simplifyTrivialPhis(fn);
   }
   return changed;
 }

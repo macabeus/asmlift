@@ -38,6 +38,7 @@ export function cppSymbol(spec: CppFnSpec): string {
 export function cppBackend(spec: CppFnSpec): LanguageBackend {
   return {
     id: 'cpp',
+    spellsSwitchFallthrough: true,
     emit(fn: SFn): string {
       // Map each lifted param var → its C++ meaning: `this` (bare member access) or a named param
       // (a pointer-to-class param uses `->`). A pointer-to-known-class param is a member receiver.

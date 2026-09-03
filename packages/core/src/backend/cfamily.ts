@@ -365,6 +365,23 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
     case 'continue':
       return [`${indent}continue;`];
     case 'switch': {
+      // A `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in C,
+      // so printing one between `case` labels rebinds it — a changed program that reads as ordinary
+      // C. Refused HERE because the rebinding is the printer's, for every producer rather than for
+      // the two switch regimes. No recovery reaches it today (both regimes decline a loop-exiting
+      // arm first, loudly), so it is a contract on the next one.
+      //
+      // `continue;` is deliberately NOT refused: C binds it to the smallest enclosing ITERATION
+      // statement, which a `switch` is not, so it already means what L3 means. What a loop-respelling
+      // pass must preserve is exactly that — the three that can re-spell a loop into one whose
+      // `continue` would run a different increment (`recognizeForLoops` in structure.ts,
+      // `respellCountdown` in l3/reindex.ts, and l3/unreduce.ts) each scan switch arms for the node
+      // before firing, and a fourth must too.
+      for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {
+        if (switchBoundBreakIn(body)) {
+          throw new Error('c backend: a switch arm carries a loop-scoped `break;`, which C would bind to the switch');
+        }
+      }
       const out = [`${indent}switch (${pe(s.scrutinee, 99)}) {`];
       const ci = indent + '    '; // case-label indent
       const bi = indent + '        '; // case-body indent
@@ -422,6 +439,15 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       return out;
     }
   }
+}
+
+/** Does this arm body carry a `break` C would bind to the enclosing SWITCH rather than to the loop
+ *  L3 meant? A loop opened inside the arm captures its own, so its body is not walked; a nested
+ *  `switch` captures one too and is checked when it is printed. */
+function switchBoundBreakIn(body: Stmt[]): boolean {
+  return body.some(
+    (s) => s.k === 'break' || (s.k === 'if' && (switchBoundBreakIn(s.then) || switchBoundBreakIn(s.else))),
+  );
 }
 
 // Does a statement list end in a control-flow terminator (so a trailing `break;` would be dead)?

@@ -12,6 +12,7 @@ export { cComment }; // re-export: the shared spelling lives in cfamily.ts
 
 export const cBackend: LanguageBackend = {
   id: 'c',
+  spellsSwitchFallthrough: true,
   emit(fn: SFn): string {
     const params = fn.params.map((p) => `${cType(p.type)} ${p.name}`).join(', ') || 'void';
     return emitCFamily(`${cType(fn.retType)} ${fn.name}(${params})`, fn);

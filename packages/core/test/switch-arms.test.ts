@@ -7,14 +7,19 @@ import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { emitCFamily } from '../src/backend/cfamily';
+import { pascalBackend } from '../src/backend/pascal';
 import { frontendFor } from '../src/frontend/registry';
+import { mkOp } from '../src/ir/core';
+import type { Block } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { stmtChildren } from '../src/l3/ast';
 import type { SFn, Stmt } from '../src/l3/ast';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
+import { makeSwitchRecovery } from '../src/structure/switch-recover';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
 // agbcc's own output for `switch (mode) { case 0..3 }` with the arms in `order`, reduced to the
@@ -338,6 +343,53 @@ test('a default placed after a FALLING case is refused by the printer, not silen
   expect(() => emitCFamily('void f(s32 x)', sw(3))).toThrow(/places its default at arm 3 of 2/);
 });
 
+test('a loop-scoped `break` inside a case arm is refused, and `continue` is not', () => {
+  // L3's `{k:'break'}` is the innermost LOOP's (l3/ast.ts); C's, printed between `case` labels, is
+  // the switch's. Nothing produces one today — a loop-exiting arm is declined first, by loop
+  // recovery for a comparison tree and by `analyzeArmExit` for a jump table — but the rebinding
+  // happens in the PRINTER, so the refusal belongs there, for every producer rather than for the
+  // two switch regimes.
+  //
+  // `continue` is the CONTROL on that refusal's premise: C binds it to the smallest enclosing
+  // iteration statement, and a `switch` is not one, so it already means what L3 means and printing
+  // it is correct. Compiled both ways, `for(...){switch(i){case 2: continue;} n++;}` and
+  // `for(...){if(i==2) continue; n++;}` leave the same counter.
+  const armed = (body: Stmt[]): SFn => ({
+    name: 'f',
+    params: [{ name: 'x', type: T.s(32) }],
+    locals: [{ name: 'w', type: T.s(32) }],
+    retType: T.void(),
+    body: [
+      {
+        k: 'while',
+        cond: { k: 'var', name: 'x' },
+        body: [
+          { k: 'switch', scrutinee: { k: 'var', name: 'x' }, cases: [{ values: [0], body, fallsThrough: false }] },
+        ],
+      },
+    ],
+  });
+  const set: Stmt = { k: 'assign', name: 'w', value: ZERO };
+  expect(() => emitCFamily('void f(s32 x)', armed([set, { k: 'break' }]))).toThrow(/loop-scoped `break;`/);
+  expect(emitCFamily('void f(s32 x)', armed([set, { k: 'continue' }]))).toContain('continue;');
+  // …including one nested in an `if`, which is the shape a guarded loop exit actually takes.
+  expect(() =>
+    emitCFamily('void f(s32 x)', armed([{ k: 'if', cond: { k: 'var', name: 'x' }, then: [{ k: 'break' }], else: [] }])),
+  ).toThrow(/loop-scoped `break;`/);
+  // …and one nested a second switch deep, where the outer walk deliberately does not look: the
+  // inner switch prints it itself, and must reach the same verdict.
+  const nested = (inner: Stmt[]): Stmt[] => [
+    { k: 'switch', scrutinee: { k: 'var', name: 'x' }, cases: [{ values: [1], body: inner, fallsThrough: false }] },
+  ];
+  expect(() => emitCFamily('void f(s32 x)', armed(nested([{ k: 'break' }])))).toThrow(/loop-scoped `break;`/);
+  expect(emitCFamily('void f(s32 x)', armed(nested([{ k: 'continue' }])))).toContain('continue;');
+  // CONTROL: an ordinary arm, and a loop OPENED INSIDE the arm, which captures its own `break`.
+  expect(emitCFamily('void f(s32 x)', armed([set]))).toContain('case 0:');
+  expect(
+    emitCFamily('void f(s32 x)', armed([{ k: 'while', cond: { k: 'var', name: 'x' }, body: [set, { k: 'break' }] }])),
+  ).toContain('case 0:');
+});
+
 test('`stmtChildren` lists a mid-placed default where the backend prints it', () => {
   // The walkers' document order and the printer's are the same order — `collectMarkers` reports one
   // per marker in it, so an ASMLIFT_ERROR inside a default that prints second must not be reported
@@ -363,9 +415,9 @@ test('`stmtChildren` lists a mid-placed default where the backend prints it', ()
 // them in table order spells the arms 0..4 — while the bodies are laid out in the order the arms
 // were written, exactly as in the comparison tree above. Recompiling the layout spelling with agbcc
 // reproduces the target and the ascending spelling does not.
-const table = (tail = '\tb\t.L3\n', defaultAfter = 5) => {
+const table = (tail = '\tb\t.L3\n', defaultAfter = 5, c3 = '\tadd\tr1, r2, #0x4\n') => {
   const bodies = [
-    `.L4:\n\tadd\tr1, r2, #0x4\n${tail}`, // case 3 — written FIRST, so laid out first
+    `.L4:\n${c3}${tail}`, // case 3 — written FIRST, so laid out first
     '.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n', // case 0
     '.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n', // case 4
     '.L7:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n', // case 1
@@ -434,13 +486,45 @@ test('a default the table also reaches as a CASE has that arm\u2019s index, not 
   ]);
 });
 
-test('a jump-table arm that FALLS THROUGH is not reordered', () => {
-  // Regime B's emission order is load-bearing where Regime A's is not: a falling arm must be
-  // emitted directly above the one it falls into (the l3/ast.ts note), so its position is not free.
-  // Drop case 3's `b .L3` and it falls into case 0 — which layout order would put next, but that is
-  // the reordering this refuses. Table order keeps case 3 next to case 4, so the shape declines
-  // LOUD instead. Recovering it is a separate capability with its own evidence to gather.
-  expect(() => of(table(''))).toThrow(/falls through into an arm that is not the next one emitted/);
+// A case-3 body with a LIVE effect — a store, so nothing downstream can delete it. Case 3's own
+// `add r1, r2, #4` would be dead under the fall-through (case 0 overwrites r1 immediately), which
+// makes the two slots one arm with stacked labels instead of a chain: a correct spelling, and the
+// wrong fixture for reading arm ORDER off.
+const liveFall = '\tmov\tr3, #0x80\n\tlsl\tr3, r3, #0x13\n\tstr\tr2, [r3]\n';
+
+test('a jump-table arm that FALLS THROUGH is chained, like a comparison tree\u2019s', () => {
+  // Drop case 3's `b .L3` and it falls into case 0. Both regimes read the arm-order policy for the
+  // chain HEADS and let the chain place the rest — ONE definition (`chainArms`), so a jump table is
+  // no longer strictly behind a tree on the same shape. Here layout order already puts case 0 right
+  // after case 3, so the chain leaves the order alone and only the `break;` moves.
+  const out = of(table('', 5, liveFall));
+  expect(armOrder(out)).toEqual([3, 0, 4, 1, 2]);
+  expect(out).toMatch(/case 3:[\s\S]*?\n\s*case 0:/);
+  expect(out).not.toMatch(/case 3:[\s\S]*?break;[\s\S]*?case 0:/);
+  expect(out).toContain('*(s32 *)(128 << 19) = a1;'); // the falling arm's own effect, emitted once
+});
+
+test('\u2026and on a compiler with no layout rule the CHAIN re-threads the table order', () => {
+  // Table order is ascending — 0, 1, 2, 3, 4 — which writes case 3 BELOW the arm it falls into.
+  // The chain forces 3 directly above 0 and the untouched arms keep their policy positions, so the
+  // emitted order is 1, 2, 3, 0, 4: the re-threading branch, on a jump table.
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchArmsFollowLayout;
+  const out = decompile('f', table('', 5, liveFall), undeclared, {
+    prototypes: { f: { returnsVoid: true } },
+  }).source;
+  expect(armOrder(out)).toEqual([1, 2, 3, 0, 4]);
+  expect(out).toMatch(/case 3:[\s\S]*?\n\s*case 0:/);
+});
+
+test('TWO jump-table arms falling into ONE still fails LOUD', () => {
+  // Regime B has no second recovery, so a shape no linear order spells is an error, not a
+  // fallback — the same three refusals `chainArms` states for the comparison tree.
+  const twoIntoOne = table('', 5, liveFall).replace(
+    '.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n',
+    '.L6:\n' + liveFall + '\tb\t.L5\n',
+  );
+  expect(() => of(twoIntoOne)).toThrow(/do not linearize/);
 });
 
 // ── the case a RELATIONAL test pins ──────────────────────────────────────────────────────────────
@@ -690,4 +774,263 @@ test('…and `default:` still lands where the LAYOUT puts it, counted in arms', 
   expect(armOrder(out)).toEqual([0, 2, 1, 3]);
   expect(out.indexOf('default:')).toBeGreaterThan(out.indexOf('case 1:'));
   expect(out.indexOf('default:')).toBeLessThan(out.indexOf('case 3:'));
+});
+
+// ── fall-through arms ────────────────────────────────────────────────────────────────────────────
+// The two fixtures here are agbcc's own output for the C in their comments, compiled at
+// TOOLCHAIN.agbccFlags; the declining shapes further down are hand-built, because no C produces
+// them. A falling arm is spelled by OMITTING the `break;`, which is a positional fact — control
+// drops into whatever arm is emitted NEXT (the l3/ast.ts non-neutrality note) — so recovery is not
+// free to order the arms by layout or by case value where a chain says otherwise.
+//
+// `switch (x) { case 3: *p = 1; case 2: *p += 2; case 1: *p += 3; }` — no `break` anywhere.
+const fallChain =
+  'f:\n' +
+  '\tcmp\tr0, #0x2\n\tbeq\t.L5\t@cond_branch\n' +
+  '\tcmp\tr0, #0x2\n\tbgt\t.L9\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.L6\t@cond_branch\n' +
+  '\tb\t.L3\n' +
+  '.L9:\n\tcmp\tr0, #0x3\n\tbne\t.L3\t@cond_branch\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n' +
+  '.L5:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x2\n\tstr\tr0, [r1]\n' +
+  '.L6:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n\tstr\tr0, [r1]\n' +
+  '.L3:\n\tbx\tlr\n';
+
+test('a chain of falling arms is ONE switch, and the fallen-into arm is emitted once', () => {
+  const out = of(fallChain);
+  expect(out).toContain('switch (a0)');
+  expect(out).not.toContain('else'); // not the if-recovery fallback
+  expect(armOrder(out)).toEqual([3, 2, 1]);
+  // Each body appears exactly once — if-recovery reaches `case 1`'s body on three paths and emits
+  // it three times, which is what the fall-through spelling replaces.
+  expect(count(out, '*a1 = *a1 + 3;')).toBe(1);
+  expect(count(out, 'break;')).toBe(0); // every arm falls, and the last one ends the switch
+});
+
+test('the CHAIN orders the arms, not the case values, on a compiler with no layout rule', () => {
+  // Ascending case value is the neutral order for a compiler that has not declared
+  // `switchArmsFollowLayout`, and it would emit 1, 2, 3 — which reverses the chain and makes
+  // `case 3` fall into `case 2` by writing it BELOW it. The order is forced by the exits.
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchArmsFollowLayout;
+  const out = decompile('f', fallChain, undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(armOrder(out)).toEqual([3, 2, 1]);
+});
+
+// `switch (x) { case 0: *p = 1; case 1: *p += 2; break; case 2: *p += 3; default: *p += 4; }`
+const fallIntoDefault =
+  'f:\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbgt\t.L9\t@cond_branch\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n' +
+  '\tb\t.L7\n' +
+  '.L9:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tb\t.L7\n' +
+  '.L4:\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n' +
+  '.L5:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x2\n\tb\t.L10\n' +
+  '.L6:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n\tstr\tr0, [r1]\n' +
+  '.L7:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x4\n' +
+  '.L10:\n\tstr\tr0, [r1]\n\tbx\tlr\n';
+
+test('an arm falling into the DEFAULT is emitted directly above it', () => {
+  // C prints `default:` where `defaultAt` says, and an arm falling into it needs it directly
+  // below — so the chain that ends in the default takes the LAST position and the label keeps C's
+  // conventional one. `case 1` closes in the middle, which is what makes the placement observable.
+  const out = of(fallIntoDefault);
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 1, 2]);
+  // `case 2` runs straight on into the default — no `break;` between the two…
+  expect(out).toMatch(/case 2:[\s\S]*?\n\s*default:/);
+  expect(out).not.toMatch(/case 2:[\s\S]*?break;[\s\S]*?default:/);
+  // …while the closed arm between the two chains keeps the only `break;` in the switch.
+  expect(count(out, 'break;')).toBe(1);
+});
+
+// agbcc's own output for
+// `switch (x) { case 0: *p = 1; break; default: *p = 9; break; case 1: *p += 2; case 2: *p += 3; break; }`
+// — a `default:` written BETWEEN two closed arms, with a chain two arms below it.
+const defaultAmongClosed =
+  'f:\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.L6\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbgt\t.L9\t@cond_branch\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n' +
+  '\tb\t.L5\n' +
+  '.L9:\n\tcmp\tr0, #0x2\n\tbeq\t.L7\t@cond_branch\n\tb\t.L5\n' +
+  '.L4:\n\tmov\tr0, #0x1\n\tb\t.L10\n' +
+  '.L5:\n\tmov\tr0, #0x9\n\tb\t.L10\n' +
+  '.L6:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x2\n\tstr\tr0, [r1]\n' +
+  '.L7:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n' +
+  '.L10:\n\tstr\tr0, [r1]\n\tbx\tlr\n';
+
+test('a chain elsewhere does not delete the evidence for where `default:` was written', () => {
+  // Where the label goes is a POSITION, and the two arms it sits between are both closed — it
+  // diverts nothing. Withholding it for any switch that carries a chain anywhere is a per-SWITCH
+  // predicate answering a per-POSITION question; measured against this row's own object, the label
+  // last scores 6 and the label here MATCHES (`synthetic:sw_defmid:agbcc`).
+  const out = of(defaultAmongClosed);
+  expect(out).toContain('switch (a0)');
+  expect([...out.matchAll(/case (\d+):|(default):/g)].map((m) => m[1] ?? m[2])).toEqual(['0', 'default', '1', '2']);
+  // …and the chain below it is still a chain: `case 1` runs on into `case 2`.
+  expect(out).not.toMatch(/case 1:[\s\S]*?break;[\s\S]*?case 2:/);
+});
+
+// ── the shapes that still decline ────────────────────────────────────────────────────────────────
+// Regime A's fallback is if-recovery, which spells every edge the assembly has — so each of these
+// comes back as if-nesting rather than as a `switch` that guesses. What the assertions read is that
+// the arm at the far end of the offending edge never gets a `case` label of the recovered switch,
+// and that its body is DUPLICATED into the arms reaching it — the honest, costly spelling.
+const threeCase = (c0: string, c1: string, c2: string) =>
+  'f:\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Lend\n' +
+  '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Lend\n' +
+  `.Lc0:\n${c0}` +
+  `.Lc1:\n${c1}` +
+  `.Lc2:\n${c2}` +
+  // The merge has a BODY — statements after the switch. An arm leaving to it is therefore a
+  // switch-scoped `break;` rather than a `return`, which is what the END-on-another-path shape
+  // below rests on: `analyzeArmExit` counts a `ret` as leaving, so an arm returning on one path
+  // still falls through on the other and is not the shape that fixture wants.
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
+
+test('TWO arms falling into ONE decline — C reaches an arm from above only once', () => {
+  const out = of(
+    threeCase(
+      '\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
+      '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+      '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lc1\n',
+    ),
+  );
+  expect(armOrder(out)).not.toContain(1);
+  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+});
+
+test('a body reaching TWO sibling arms declines — C fall-through reaches only one', () => {
+  const out = of(
+    threeCase(
+      '\tcmp\tr1, #0\n\tbeq\t.Lc1\t@cond_branch\n\tb\t.Lc2\n',
+      '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+      '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+    ),
+  );
+  expect(armOrder(out)).not.toContain(1);
+  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+});
+
+test('a body reaching a sibling on one path and the switch END on another declines', () => {
+  // The shape that needs a switch-scoped `break;` inside a case body, which l3 does not emit
+  // (`{k:'break'}` is loop-scoped). Widening fall-through to swallow it would divert the exiting
+  // path into the next arm.
+  const out = of(
+    threeCase(
+      '\tcmp\tr1, #0\n\tbeq\t.Lend\t@cond_branch\n\tb\t.Lc1\n',
+      '\tmov\tr0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+      '\tmov\tr0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Lend\n',
+    ),
+  );
+  expect(armOrder(out)).not.toContain(1);
+  expect(count(out, '*a1 = 2;')).toBeGreaterThan(1);
+});
+
+// ── what the TARGET LANGUAGE can spell is a recovery input ───────────────────────────────────────
+// Regime A has TWO behaviourally identical recoveries of a fall-through tree: the `switch` with a
+// falling arm, and plain if-nesting. Pascal's `case-of` prints only the second, and its backend
+// loud-fails a `fallsThrough` arm (l3/ast.ts's non-neutrality note) — so minting one for that
+// backend does not cost the `switch`, it costs the whole FUNCTION. The recovery asks first.
+
+test('a language with no case fall-through gets the if-recovery, not a stub', () => {
+  const out = decompile('f', fallChain, ARMV4T_AGBCC, {
+    prototypes: { f: { returnsVoid: true } },
+    backend: pascalBackend,
+  }).source;
+  expect(out).toContain('procedure f(');
+  expect(out).toContain('if (');
+  expect(out).not.toContain('case ');
+  // the body is really there — an if-recovery duplicates the fallen-into arms rather than losing them
+  expect(count(out, 'a1^ := (a1^ + 3);')).toBeGreaterThan(1);
+});
+
+test('…and the SAME assembly still recovers the falling switch for C', () => {
+  expect(of(fallChain)).toContain('switch (a0)');
+});
+
+test('a candidate fan for that backend is not empty', () => {
+  const cands = enumerateCandidates('f', fallChain, ARMV4T_AGBCC, {
+    prototypes: { f: { returnsVoid: true } },
+    backend: pascalBackend,
+  });
+  expect(cands.length).toBeGreaterThan(0);
+  expect(cands.every((c) => !c.source.includes('could not decompile'))).toBe(true);
+});
+
+/** A dense 0..2 table over a pointer parameter, with a `default:`, whose every arm the Pascal
+ *  backend can print — so the refusal a falling one draws is the fall-through's and not the
+ *  fixture's. `fall` drops case 0's `b .Le`, running it on into case 1. */
+const pasTable = (fall: boolean) =>
+  'f:\n' +
+  '\tcmp\tr0, #0x2\n\tbhi\t.Ld\t@cond_branch\n' +
+  '\tlsl\tr0, r0, #0x2\n\tldr\tr3, .Lp\n\tadd\tr0, r0, r3\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+  '.Lq:\n\t.align\t2, 0\n.Lp:\n\t.word\t.Lt\n\t.align\t2, 0\n' +
+  '.Lt:\n\t.word\t.La\n\t.word\t.Lb\n\t.word\t.Lc\n' +
+  '.La:\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n' +
+  (fall ? '' : '\tb\t.Le\n') +
+  '.Lb:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x2\n\tstr\tr0, [r1]\n\tb\t.Le\n' +
+  '.Lc:\n\tldr\tr0, [r1]\n\tadd\tr0, r0, #0x3\n\tstr\tr0, [r1]\n\tb\t.Le\n' +
+  '.Ld:\n\tmov\tr0, #0x63\n\tstr\tr0, [r1]\n' +
+  '.Le:\n\tbx\tlr\n';
+
+test('\u2026and a jump table that falls through fails LOUD for it, naming the table', () => {
+  // Regime B has no second recovery — the arms ARE the table's slots — so the same question gets an
+  // error rather than a fallback. Asked in the recovery so the message names the shape: the backend
+  // refuses the printed arm too, with a message of its own, and both end the whole function, so
+  // nothing downstream would notice this rule going missing.
+  const pas = { prototypes: { f: { returnsVoid: true } }, backend: pascalBackend };
+  expect(() => decompile('f', pasTable(true), ARMV4T_AGBCC, pas)).toThrow(/no fall-through in its case statement/);
+  // CONTROLS: every arm of the closed table prints for that backend, and the SAME falling assembly
+  // recovers the falling switch for C.
+  expect(decompile('f', pasTable(false), ARMV4T_AGBCC, pas).source).toContain('case a0 of');
+  expect(of(pasTable(true))).toMatch(/case 0:[\s\S]*?\n\s*case 1:/);
+});
+
+// ── where the `default:` label may be read off the layout ───────────────────────────────
+// `defaultLayoutPos` is the one definition both regimes read, and it states SEVEN withholdings.
+// Three of them decide no call the benchmark makes, so they have no row to guard them and are
+// pinned here instead — at the seam itself, one call each, beside the four that do.
+
+test('every withholding on the `default:` position, one call each', () => {
+  const body = (): Block => ({ params: [], ops: [mkOp('const', { attrs: { value: 0 } }), mkOp('br')] });
+  const [a0, a1, dflt, a2] = [body(), body(), body(), body()];
+  // Layout: a0, a1, default, a2 — so a default read off the layout sits after TWO arms.
+  const deps = {
+    fn: { name: 'f', blocks: [a0, a1, dflt, a2] },
+    defs: new Map(),
+    dom: new Map(),
+    ipdom: new Map(),
+    opBlock: new Map(),
+    isNamed: () => false,
+    isCmpOpcode: () => false,
+    switchAllowsNeqCase: false,
+    switchAllowsBoundCase: false,
+    switchArmsFollowLayout: true,
+    spellSwitchFallthrough: true,
+    emitsOwnStatement: () => false,
+    expr: () => ZERO,
+    structureRegion: () => [],
+  };
+  const rec = makeSwitchRecovery(deps);
+  const arms = (falls: number) => [a0, a1, a2].map((entry, i) => ({ entry, fallsThrough: i === falls }));
+  const intact = { placedByDispatch: false, orderIntact: true };
+  expect(rec.defaultLayoutPos(dflt, arms(-1), intact)).toBe(2);
+  // The four that decide the tier's calls. A bare exit is a block the dispatch minted rather than
+  // an arm body, and is the one that decides most of them.
+  expect(rec.defaultLayoutPos({ params: [], ops: [mkOp('br')] }, arms(-1), intact)).toBeUndefined();
+  expect(
+    makeSwitchRecovery({ ...deps, switchArmsFollowLayout: false }).defaultLayoutPos(dflt, arms(-1), intact),
+  ).toBeUndefined();
+  expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, placedByDispatch: true })).toBeUndefined();
+  expect(rec.defaultLayoutPos(dflt, arms(2), intact)).toBeUndefined(); // the LAST arm falls
+  // …and the three that decide none of them: a default the walk also read as an arm (which never
+  // even co-occurs), a re-threaded order, and a position landing after a falling arm.
+  expect(rec.defaultLayoutPos(dflt, [...arms(-1), { entry: dflt, fallsThrough: false }], intact)).toBeUndefined();
+  expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, orderIntact: false })).toBeUndefined();
+  expect(rec.defaultLayoutPos(dflt, arms(1), intact)).toBeUndefined(); // the label would land after a1
 });
