@@ -9,7 +9,8 @@
 import { expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
-import { simplifyTrivialPhis } from '../src/ir/simplify';
+import type { Value } from '../src/ir/core';
+import { firstTrivialPhi, simplifyTrivialPhis } from '../src/ir/simplify';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -64,4 +65,40 @@ test('the stranded alias is not spelled as a copy', () => {
   const out = decompile('g', ASM_RET, ARMV4T_AGBCC, {}).source;
   expect(out).toContain('return 0;');
   expect(out).not.toMatch(/v\d+ = 0;\n\s*return v\d+;/);
+});
+
+// ── the postcondition, rather than the pass ──────────────────────────────────────────────────────
+// The fix above is one line inside `sinkReturns`, and the next pass to retire an in-edge will
+// re-create the same debris three stages from where it surfaces. `raiseRecovered` states it as a
+// BOUNDARY rule instead: above that line passes move the CFG, below it the structurer reads a block
+// parameter as a JOIN. `verify()` cannot carry the rule — it also runs between the pre-recovery
+// passes, which are allowed to leave trivial phis for each other's cleanup.
+
+test('`firstTrivialPhi` is the pass’s own predicate, asked without mutating', () => {
+  const fn = frontendFor(ARMV4T_AGBCC).lift('g', ASM_RET, ARMV4T_AGBCC, {});
+  applyIdiomPatterns(fn, ARMV4T_AGBCC);
+  raiseRecovered(fn, ARMV4T_AGBCC, {});
+  expect(firstTrivialPhi(fn)).toBeNull();
+  // …and it agrees with the pass on the same function: neither finds anything to do.
+  expect(simplifyTrivialPhis(fn)).toBe(0);
+});
+
+test('a stranded alias put BACK is caught at the boundary, not three stages later', () => {
+  // Re-create retsink's debris by hand — a second parameter every in-edge feeds the same value —
+  // in the `afterRetsink` hook — after every pass that has a cleanup of its own has run, which is
+  // where a NEW CFG-motion pass's debris would sit. Injected earlier it is simply cleaned up, which
+  // is itself the point: the check fires only on debris nothing collects.
+  const fn = frontendFor(ARMV4T_AGBCC).lift('g', ASM_RET, ARMV4T_AGBCC, {});
+  applyIdiomPatterns(fn, ARMV4T_AGBCC);
+  const strand = () => {
+    const edgesOf = (b: (typeof fn.blocks)[number]) =>
+      fn.blocks.flatMap((p) => p.ops.flatMap((o) => o.successors)).filter((s) => s.block === b);
+    const join = fn.blocks.find((b) => b !== fn.blocks[0] && edgesOf(b).length > 0)!;
+    const alias: Value = { type: fn.blocks[0].params[0].type };
+    join.params.push(alias);
+    for (const e of edgesOf(join)) {
+      e.args.push(fn.blocks[0].params[0]);
+    }
+  };
+  expect(() => raiseRecovered(fn, ARMV4T_AGBCC, { afterRetsink: strand })).toThrow(/raising left a trivial phi/);
 });

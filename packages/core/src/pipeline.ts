@@ -14,6 +14,7 @@ import { FrontendUnsupportedError } from './frontend/errors';
 import { frontendFor } from './frontend/registry';
 import { type Block, type Fn, successorsOf } from './ir/core';
 import { print } from './ir/print';
+import { firstTrivialPhi } from './ir/simplify';
 import { T } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
 import { Expr, LanguageBackend, SFn, Stmt, exprChildren, gapReasonFor, stmtChildren, stmtExprs } from './l3/ast';
@@ -270,6 +271,22 @@ export function raiseRecovered(
   if (foldEmptyLatches(fn)) {
     verify(fn);
     hooks.afterLatchFold?.();
+  }
+  // THE BOUNDARY POSTCONDITION. Above this line passes move the CFG; below it nothing does, and the
+  // structurer reads a block parameter as a JOIN — a name it must give a local of its own. A param
+  // whose every in-edge carries one value is not a join, and leaving one standing is how a
+  // CFG-motion pass does its damage three stages away rather than where it happened: retsink's own
+  // stranded merge was destroyed into `v0 = 0; return v0;` and read by Regime-A switch recovery as a
+  // SECOND `default` candidate, declining every fall-through tree. This names it at retsink.
+  // `verify()` cannot carry the rule — it also runs BETWEEN the pre-recovery passes, which are
+  // allowed to leave trivial phis for each other's cleanup.
+  const stranded = firstTrivialPhi(fn);
+  if (stranded) {
+    throw new Error(
+      `internal: raising left a trivial phi — block #${fn.blocks.indexOf(stranded.block)} takes ` +
+        `'${stranded.param}', whose every in-edge carries one value. A pass that retires an in-edge ` +
+        `must run simplifyTrivialPhis after it.`,
+    );
   }
 }
 

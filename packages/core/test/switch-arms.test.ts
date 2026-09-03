@@ -340,6 +340,40 @@ test('a default placed after a FALLING case is refused by the printer, not silen
   expect(() => emitCFamily('void f(s32 x)', sw(3))).toThrow(/places its default at arm 3 of 2/);
 });
 
+test('a loop-scoped `break` inside a case arm is refused, not silently rebound', () => {
+  // L3's `{k:'break'}` is the innermost LOOP's (l3/ast.ts); C's, printed between `case` labels, is
+  // the switch's. Nothing produces one today — a switch inside a loop whose arm carries a loop exit
+  // fails loud in loop recovery — but the rebinding happens in the PRINTER, so the refusal belongs
+  // there, for every producer rather than for the two switch regimes.
+  const armed = (body: Stmt[]): SFn => ({
+    name: 'f',
+    params: [{ name: 'x', type: T.s(32) }],
+    locals: [{ name: 'w', type: T.s(32) }],
+    retType: T.void(),
+    body: [
+      {
+        k: 'while',
+        cond: { k: 'var', name: 'x' },
+        body: [
+          { k: 'switch', scrutinee: { k: 'var', name: 'x' }, cases: [{ values: [0], body, fallsThrough: false }] },
+        ],
+      },
+    ],
+  });
+  const set: Stmt = { k: 'assign', name: 'w', value: ZERO };
+  expect(() => emitCFamily('void f(s32 x)', armed([set, { k: 'break' }]))).toThrow(/loop-scoped `break;`/);
+  expect(() => emitCFamily('void f(s32 x)', armed([set, { k: 'continue' }]))).toThrow(/loop-scoped `continue;`/);
+  // …including one nested in an `if`, which is the shape a guarded loop exit actually takes.
+  expect(() =>
+    emitCFamily('void f(s32 x)', armed([{ k: 'if', cond: { k: 'var', name: 'x' }, then: [{ k: 'break' }], else: [] }])),
+  ).toThrow(/loop-scoped `break;`/);
+  // CONTROL: an ordinary arm, and a loop OPENED INSIDE the arm, which captures its own `break`.
+  expect(emitCFamily('void f(s32 x)', armed([set]))).toContain('case 0:');
+  expect(
+    emitCFamily('void f(s32 x)', armed([{ k: 'while', cond: { k: 'var', name: 'x' }, body: [set, { k: 'break' }] }])),
+  ).toContain('case 0:');
+});
+
 test('`stmtChildren` lists a mid-placed default where the backend prints it', () => {
   // The walkers' document order and the printer's are the same order — `collectMarkers` reports one
   // per marker in it, so an ASMLIFT_ERROR inside a default that prints second must not be reported

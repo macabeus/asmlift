@@ -365,6 +365,20 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
     case 'continue':
       return [`${indent}continue;`];
     case 'switch': {
+      // A `break;`/`continue;` in an arm BODY is loop-scoped in L3 (l3/ast.ts) and switch-scoped in
+      // C — printing one between `case` labels rebinds it, which changes the program and reads as
+      // perfectly ordinary C. Recovery never produces one (a switch inside a loop whose arm carries
+      // a loop exit fails loud in loop recovery today), so this is a producer bug like the
+      // `defaultAt` placement below, and it is stated HERE because the printer is where the
+      // rebinding happens — for every producer, not just the two switch regimes.
+      for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {
+        const bound = loopExitIn(body);
+        if (bound) {
+          throw new Error(
+            `c backend: a switch arm carries a loop-scoped \`${bound};\`, which C would bind to the switch`,
+          );
+        }
+      }
       const out = [`${indent}switch (${pe(s.scrutinee, 99)}) {`];
       const ci = indent + '    '; // case-label indent
       const bi = indent + '        '; // case-body indent
@@ -422,6 +436,26 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       return out;
     }
   }
+}
+
+/** The first `break`/`continue` in this arm body that C would bind to the enclosing SWITCH rather
+ *  than to the loop L3 meant, or null. A loop opened INSIDE the arm captures both, so its body is
+ *  not walked; a nested `switch` captures a `break` and is checked by its own printing, while a
+ *  `continue` inside one still binds to the loop and is correct — so nested switches are not walked
+ *  either. */
+function loopExitIn(body: Stmt[]): 'break' | 'continue' | null {
+  for (const s of body) {
+    if (s.k === 'break' || s.k === 'continue') {
+      return s.k;
+    }
+    if (s.k === 'if') {
+      const found = loopExitIn(s.then) ?? loopExitIn(s.else);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return null;
 }
 
 // Does a statement list end in a control-flow terminator (so a trailing `break;` would be dead)?
