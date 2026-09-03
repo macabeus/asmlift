@@ -3391,13 +3391,27 @@ export function lift(
       // callee the project declares `void` says it by the ABI — a function that returns nothing has
       // no hidden return pointer to be given, whatever sits in r0.
       //
-      // THE THIRD IS A DECLARATION, NOT AN INFERENCE, which is why it is allowed to switch a
-      // refusal off. `FnProto.returnsVoid` is the project's own header fact, arriving through the
-      // same table whose `params` this file already trusts to decide a call's arity — and trusting
-      // it there is the stronger commitment, since a wrong arity DROPS an argument where a wrong
-      // void-ness only re-models a stack slot. It is asked of EVERY callee that took the address at
+      // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and it is the ONLY refusal this frontend
+      // switches off on something other than the instruction stream. `FnProto.returnsVoid` is the
+      // project's own header fact, arriving through the same table whose `params` this file already
+      // trusts to decide a call's arity. It is asked of EVERY callee that took the address at
       // argument 0, because the object gets one decision: one callee undeclared or declared
       // non-void leaves the ambiguity standing and the refusal fires.
+      //
+      // WHAT IT COSTS WHEN THE DECLARATION IS WRONG, measured rather than compared. On the `sret`
+      // shape above, with `mk` (which really returns `struct S4`) declared `params: 1,
+      // returnsVoid: true`, the lift succeeds and emits `s32 sret(s32 a0) { s32 sp0; mk(&sp0);
+      // return (u8)sp0; }` — a compiling, plausible, WRONG program with the real argument dropped,
+      // where a loud decline stood. An earlier version of this note argued the opposite ("a wrong
+      // arity DROPS an argument where a wrong void-ness only re-models a stack slot"); both halves
+      // of that are false, since the same entry supplies both facts and the frame re-model is the
+      // silent one. The trade is accepted because there IS no other discriminator: compiled through
+      // the benchmark's own agbcc command, the hidden struct return and the out-parameter emit the
+      // same instructions in the same order, the slot is read back at a scalar width in both, and
+      // in both the value read back is what the function returns — so an asm-side corroboration
+      // would be a rule with no discriminating input. The mitigation is that under-declaring is the
+      // safe direction (an undeclared or non-void callee still declines) and that `FnProto` says
+      // so at the field.
       //
       // The residual cost is stated rather than hidden: an OUTPUT-only parameter taken at argument
       // 0 of a callee the project has NOT declared is still byte-for-byte a struct return, and
