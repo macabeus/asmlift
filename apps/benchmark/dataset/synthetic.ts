@@ -4990,9 +4990,31 @@ export const SYNTHETIC: SynthSpec[] = [
   // structurer and to the declaration synthesis:
   //
   //   harr      2 → MATCH      harridx  5 → MATCH      tblrank2  3 → MATCH
-  //   bgarr     8 → 8   still open: its 28-byte element needs an element TYPE the declaration
-  //                     synthesis has no way to name (`declare.ts` `intType` is null at stride 28)
-  //   arrbias   MATCH held     arrcast  MATCH held     outparam declined, unchanged
+  //   arrbias   MATCH held     arrcast  MATCH held
+  //
+  // 2026-09-03 — AND THE LAST TWO CLOSED, both by capabilities this block predicted wrongly:
+  //
+  //   bgarr     8 → MATCH   outparam   declined → MATCH
+  //
+  // `bgarr`'s attribution above is REFUTED and kept here rather than deleted, because it is the
+  // hypothesis a later round would otherwise rebuild. The row does NOT need an element type. What
+  // closed it is `/orderbase` (rank.ts) — a value HOME for the base, `struct Elem0 *p = (struct
+  // Elem0 *)&gBgInfo; return p[a0].field_16;` — licensed by the ORDER half of this same
+  // derivation, split out for a second consumer that asks only "was the base materialized before
+  // the index was scaled" and needs no declaration to answer. Priced as a lattice of whole
+  // spellings compiled through this row's own command: the base HOME is worth 9 of the 8 points
+  // and the element TYPE 1, because `u8 *p = (u8 *)&gBgInfo; return *(u16 *)(p + a0*28 + 16);`
+  // already scores 0 with no struct and no array declaration at all. `declare.ts`'s array branch
+  // is never even reached on this row — the emitter prints the scalar `extern u32 gBgInfo;` — and
+  // the flat `extern u8 gBgInfo[]` spelling the element-type fork would need scores 10, WORSE than
+  // the 8 it would replace, and is out of bounds against the project's own header. The home keeps
+  // the cast, so it adds nothing to `assumedSymbols`.
+  //
+  // `outparam` closed on the CALLEE's declared return type: a function declared `void` owns no
+  // hidden struct-return pointer, whatever sits in r0. The refusal survives narrowed — an
+  // undeclared or non-void callee still declines — and the price is stated at
+  // `FnProto.returnsVoid`, since nothing in the assembly distinguishes the two frames and a wrong
+  // manifest entry therefore buys a wrong program.
   //
   // BOTH CONTROLS HELD AT THE ENUMERATION, which is the only place they bind (their fans are 2
   // with both candidates at 0, so the published score cannot see an over-fire): enumerated,
