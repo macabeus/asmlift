@@ -1048,11 +1048,35 @@ describe('the order licence, split out for the value-home consumer', () => {
       '.word\tgBgInfo',
     );
     expect([...licensed('f', structElem)]).toEqual(['gBgInfo']);
-    const withAWidthRule = {
+
+    // ASKED OF EVERY WIDTH-READING RULE, ON BOTH SHAPES, because the first cut of this test asked
+    // one rule on one shape and the guarantee it was written for is positional. `widths[0] ===
+    // null` says "the FIRST recorded access has no element width", and where a CLEAN access is
+    // recorded ahead of the interior one — `interior-or-non-access`'s own fixture, and
+    // `kleod:UpdateCameraScroll`'s shape on the corpus — all three rules read the clean access's 2,
+    // applied it to the access that has none, and licensed the name.
+    const widthRules = ['stride-is-not-the-element', 'mixed-extension', 'mid-element-constant'];
+    for (const asm of [structElem, fixture('interior-or-non-access')]) {
+      for (const id of widthRules) {
+        const withAWidthRule = {
+          address: ELEMENT_ADDRESS_GATES,
+          shape: [...ORDER_SHAPE_GATES, ...SHAPE_GATES.filter((g) => g.id === id)],
+        };
+        expect([id, [...orderLicensedGlobals(lift('f', asm), ARMV4T_AGBCC, withAWidthRule)]]).toEqual([id, []]);
+      }
+    }
+    // …and the boundary is exact: `mixed-access-width` reads the SET's shape and no width value,
+    // so on a name read only at interiors (`widths` = `[null]`, one entry) it admits. That is the
+    // right answer — "one name, two element types" is not what such a symbol violates — and it is
+    // pinned so the invariant above cannot be read as covering a rule it does not.
+    const countRule = {
       address: ELEMENT_ADDRESS_GATES,
-      shape: [...ORDER_SHAPE_GATES, ...SHAPE_GATES.filter((g) => g.id === 'stride-is-not-the-element')],
+      shape: [...ORDER_SHAPE_GATES, ...SHAPE_GATES.filter((g) => g.id === 'mixed-access-width')],
     };
-    expect([...orderLicensedGlobals(lift('f', structElem), ARMV4T_AGBCC, withAWidthRule)]).toEqual([]);
+    expect([...orderLicensedGlobals(lift('f', structElem), ARMV4T_AGBCC, countRule)]).toEqual(['gBgInfo']);
+    expect([...orderLicensedGlobals(lift('f', fixture('interior-or-non-access')), ARMV4T_AGBCC, countRule)]).toEqual(
+      [],
+    );
   });
 
   test('a target that has not opted in licenses nothing', () => {

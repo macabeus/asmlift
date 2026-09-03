@@ -331,11 +331,27 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [...ELEMENT_ADDRESS_GA
 interface ShapeEvidence {
   /** Distinct ELEMENT widths under this name — `null` among them where an access reads an interior
    *  of the element and so evidences no element width at all (`Access.elementWidth`). Every rule
-   *  below that reads a width spells that case, and spells it as a REFUSAL. */
+   *  below that reads a width spells that case, and spells it as a REFUSAL.
+   *
+   *  A RULE MUST NOT ASK THIS SET POSITIONALLY. `widths[0] === null` is not "no access has an
+   *  element width" — it is "the FIRST recorded access has none", and the two come apart the
+   *  moment a clean access is recorded before an interior one, which is `interior-or-non-access`'s
+   *  own fixture. Measured on it, three width rules composed onto `ORDER_SHAPE_GATES` read the
+   *  clean access's 2, applied it to the access that has no element width, and ADMITTED. So the
+   *  null case is spelled over the whole set (`widths.includes(null)`) or, where the rule is
+   *  really about one address, off that access's own `elementWidth` below.
+   *
+   *  The invariant is about rules that read a width VALUE. `mixed-access-width` reads only this
+   *  set's shape (`length !== 1`), and on a symbol read ONLY at interiors — `[null]` — it admits,
+   *  correctly: "one name, two element types" is not what that symbol violates, and every rule
+   *  that would then go on to read the null refuses. */
   readonly widths: (number | null)[];
   /** distinct extensions, a store's implicit `false` included */
   readonly signs: boolean[];
   readonly perAccess: readonly {
+    /** THIS access's element width, or null for an interior read — the per-address counterpart of
+     *  `widths`, so a rule about one address never reads another's. */
+    readonly elementWidth: number | null;
     /** ascending distinct strides of the non-constant terms; `[]` = the address names no subscript */
     readonly strides: number[];
     /** the inner extents those strides nest into, or null when they do not nest */
@@ -378,7 +394,7 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     why: 'the declared element type is the only thing in the emitted C saying how a sub-word read fills',
     sound: true,
     guardedBy: 'global-array-shape.test.ts: one name read signed and unsigned refuses',
-    rejects: (e) => e.widths[0] === null || (e.widths[0] < 4 && e.signs.length !== 1),
+    rejects: (e) => e.widths.includes(null) || (e.widths.some((w) => w !== null && w < 4) && e.signs.length !== 1),
   },
   {
     // Attributing: an address with no variable term also has no stride, so
@@ -396,7 +412,7 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     why: 'the innermost stride must BE the element the access reads whole, or the subscript scales by the wrong thing',
     sound: true,
     guardedBy: 'global-array-shape.test.ts: an index pre-scaled past the element refuses',
-    rejects: (e) => e.widths[0] === null || e.perAccess.some((a) => a.strides[0] !== e.widths[0]),
+    rejects: (e) => e.perAccess.some((a) => a.elementWidth === null || a.strides[0] !== a.elementWidth),
   },
   {
     id: 'strides-do-not-nest',
@@ -663,10 +679,14 @@ function accessesBySymbol(
           refuse(sym, rejected);
           break;
         }
-        // Only the whole-element accesses are evidence. Filtered rather than assumed: with
+        // WHICH ACCESSES ARE EVIDENCE, and it is a different set per consumer. The DECLARATION
+        // takes the whole-element ones only — filtered rather than assumed, because with
         // `interior-or-non-access` ABLATED (a test does exactly that) an interior read would
-        // otherwise be recorded with an undefined width, and an ablation must remove a REFUSAL,
-        // never manufacture a fact.
+        // otherwise join the evidence and an ablation must remove a REFUSAL, never manufacture a
+        // fact. The ORDER consumer passes `interiorIsEvidence` and takes every load and store,
+        // because a read two bytes into the element says exactly as much about where the base was
+        // materialized as a whole-element one does — and says nothing about the element, which is
+        // why it is recorded with `elementWidth: null` rather than with the load's own width.
         for (const c of consumers.filter((x) => (interiorIsEvidence ? x.isLoad || x.isStore : x.isElementAccess))) {
           record(sym, {
             elementWidth: c.isElementAccess ? (c.m.attrs.width as number) : null,
@@ -738,12 +758,16 @@ function baseFirst(a: Access, pos: Map<Op, { b: number; i: number }>): boolean |
 function evidenceOf(accs: Access[], pos: Map<Op, { b: number; i: number }>): ShapeEvidence {
   const perAccess = accs.map((a) => {
     const strides = stridesOf(a);
-    // `width` is only meaningful once `mixed-access-width` has admitted; that gate runs first,
-    // so a mid-element test computed against the first width is never the one that decides. Null
-    // — an interior access, which only the order consumer records — is no element width, so there
-    // is no whole number of elements for a constant to be, and the answer is the refusal.
-    const width = accs[0].elementWidth;
+    // THIS access's own width, never the first one's. Reading `accs[0]` was safe only behind
+    // `mixed-access-width`, which is in the declaration table and NOT in the order table — so on
+    // the second consumer a clean access recorded ahead of an interior one lent the interior one
+    // its width, and a mid-element test against a fabricated element is a lie in the licence's
+    // favour. Null — an interior access, which only the order consumer records — is no element
+    // width, so there is no whole number of elements for a constant to be, and the answer is the
+    // refusal.
+    const width = a.elementWidth;
     return {
+      elementWidth: width,
       strides,
       extents: extentsOf(strides),
       midElementConst: width === null || a.terms.some((t) => t.v === null && t.konst % width !== 0),
