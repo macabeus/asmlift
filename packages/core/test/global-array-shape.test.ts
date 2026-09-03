@@ -937,8 +937,16 @@ describe('the order licence, split out for the value-home consumer', () => {
       'interior-or-non-access',
     ]);
     expect(ADDRESS_GATES).toEqual([...ELEMENT_ADDRESS_GATES, ...DECLARATION_ADDRESS_GATES]);
-    // the shape half is SELECTED, not restated — the same objects, so a predicate edit reaches both
-    expect(ORDER_SHAPE_GATES.every((g) => SHAPE_GATES.includes(g))).toBe(true);
+    // The shape half is the order table's OWN two rules — see `ORDER_SHAPE_GATES`. They share the
+    // PREDICATES and not the rule objects, because `no-positive-evidence` is a disjunction whose
+    // second half (a constant on the index) is about the SUBSCRIPT and not about the order, and
+    // selecting it licensed names with no order fact at all. Pinned as ids so the table cannot
+    // quietly go back to being a selection: `SHAPE_GATES` owning either of these would mean the
+    // declaration derivation had grown a rule, which is the change this assertion is here to catch.
+    expect(ORDER_SHAPE_GATES.map((g) => g.id)).toEqual(['order-index-first', 'no-order-evidence']);
+    expect(ORDER_SHAPE_GATES.some((g) => SHAPE_GATES.includes(g))).toBe(false);
+    // and neither is `sound` here: the licence GENERATES a candidate, so being wrong costs fan
+    expect(ORDER_SHAPE_GATES.every((g) => g.sound === false)).toBe(true);
   });
 
   test('a struct element read at a displacement is licensed for a home and refused for a decl', () => {
@@ -964,14 +972,52 @@ describe('the order licence, split out for the value-home consumer', () => {
     expect([...licensed('f', fixture('relocation-addend'))]).toEqual([]);
   });
 
-  test('every name the declaration derivation shapes is licensed for a home', () => {
-    // The superset claim, measured on the fixtures rather than argued: a shaped name has no
-    // interior consumer, so both derivations see the same accesses and this one asks fewer rules.
+  test('a constant on the index is not an order fact', () => {
+    // The rule `no-order-evidence` exists for, and the reason the order table stopped being a
+    // selection out of `SHAPE_GATES`. Every access here is width 1, so there is no scaling to
+    // compare against the pool load and `baseFirst` is `undefined` throughout; the runtime `+ 1`
+    // on the index is positive evidence of a SUBSCRIPT and none at all about where the base was
+    // materialized. The declaration derivation is right to shape it and the licence is right to
+    // refuse it — the same evidence, two different questions.
+    //
+    // Real agbcc output for `extern u8 gTbl[]; u32 f(u32 i, u32 j) { s8 *p = (s8 *)gTbl; return
+    // gTbl[i + 1] + p[j]; }`, through the benchmark's own command.
+    const constOnIndex = thumb(
+      'f',
+      '\tadd\tr2, r0, #0\n\tldr\tr0, .L3\n\tadd\tr2, r2, #0x1\n\tadd\tr2, r2, r0\n' +
+        '\tadd\tr1, r1, r0\n\tmov\tr0, #0x0\n\tldrsb\tr0, [r1, r0]\n\tldrb\tr2, [r2]\n\tadd\tr0, r0, r2',
+      '.word\tgTbl',
+    );
+    expect([...licensed('f', constOnIndex)]).toEqual([]);
+    // …and the rule is priced by ablation rather than asserted: without it the name IS licensed,
+    // which is exactly what the shipped table used to do through `no-positive-evidence`.
+    expect([
+      ...orderLicensedGlobals(lift('f', constOnIndex), ARMV4T_AGBCC, {
+        address: ELEMENT_ADDRESS_GATES,
+        shape: without(ORDER_SHAPE_GATES, 'no-order-evidence'),
+      }),
+    ]).toEqual(['gTbl']);
+  });
+
+  test('a shaped name is not always licensed — the superset claim, and where it stops', () => {
+    // It holds wherever the shape rests on an ORDER fact, which is every fixture below but one…
     for (const [, asm] of [...GATE_FIXTURES, ['licence', BASE_FIRST] as const]) {
       for (const name of derive('f', asm).keys()) {
-        expect([...licensed('f', asm)]).toContain(name);
+        if (asm !== fixture('no-positive-evidence')) {
+          expect([...licensed('f', asm)]).toContain(name);
+        }
       }
     }
+    // …and it stops at a name shaped by the index-side CONSTANT alone, which says nothing about
+    // the order. `synthetic:harridx` is that row in the corpus. Nothing is lost by refusing it:
+    // a shaped name is spelled bare, so its index base is a `var` and no home key exists to bind.
+    const constShaped = thumb(
+      'f',
+      '\tldr\tr1, .L3\n\tadd\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]',
+      '.word\tgTbl',
+    );
+    expect(derive('f', constShaped).get('gTbl')?.shape).toBe('array');
+    expect([...licensed('f', constShaped)]).toEqual([]);
   });
 
   test('a target that has not opted in licenses nothing', () => {

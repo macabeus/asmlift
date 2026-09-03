@@ -122,7 +122,7 @@
 // a compiler earns it by showing the same compiled divergence.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import type { SFn } from '../l3/ast';
-import { type Gate, firstRejection, just } from '../l3/gates';
+import { type Gate, firstRejection } from '../l3/gates';
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
 
@@ -295,6 +295,14 @@ interface ShapeEvidence {
 
 /** Does ONE array declaration describe every access of this name? Each rejection falls back to
  *  `((T *)&gSym)[i]`, which is byte-identical under any declaration. */
+/** THE TWO ORDER PREDICATES, shared by the declaration table below and by `ORDER_SHAPE_GATES`.
+ *  Shared as FUNCTIONS rather than as rule OBJECTS: the predicate really is the same question in
+ *  both places, while `sound`, `why` and the guard are not — see `ORDER_SHAPE_GATES`, where the
+ *  first cut of that table shared the objects and inherited a disjunct that is not about the
+ *  order at all. */
+const anIndexFirstAccess = (e: ShapeEvidence): boolean => e.perAccess.some((a) => a.baseFirst === false);
+const noOrderEvidence = (e: ShapeEvidence): boolean => !e.perAccess.some((a) => a.baseFirst === true);
+
 export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   {
     // Attributing on the fixture below: with it removed the width collapses to the first access's
@@ -379,24 +387,65 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     // that subscripts the name once outside a loop and once inside it. It is not named in
     // `guardedBy` because that field is matched against a single test title (gate-contract.ts).
     guardedBy: 'global-array-shape.test.ts: one index-first access refuses a symbol the others license',
-    rejects: (e) => e.perAccess.some((a) => a.baseFirst === false),
+    rejects: anIndexFirstAccess,
   },
   {
     id: 'no-positive-evidence',
     why: 'no order fact and no index-side constant: the two spellings are the same object, so a shape would be a guess',
     sound: true,
     guardedBy: 'global-array-shape.test.ts: no evidence at all — width 1, no constant — claims nothing',
-    rejects: (e) => !(e.perAccess.some((a) => a.baseFirst === true) || e.constOnIndex),
+    rejects: (e) => noOrderEvidence(e) && !e.constOnIndex,
   },
 ];
 
-/** The rules that read the ORDER LICENCE and nothing else — `orderLicensedGlobals`' shape half.
- *  Selected out of `SHAPE_GATES` by id rather than restated, so the two consumers share the RULE
- *  OBJECTS: an edit to either predicate reaches both, and a rename throws at import. */
-export const ORDER_SHAPE_GATES: readonly Gate<ShapeEvidence>[] = just(SHAPE_GATES, [
-  'index-materialized-first',
-  'no-positive-evidence',
-]);
+/** The rules that decide the ORDER LICENCE — `orderLicensedGlobals`' shape half.
+ *
+ *  ITS OWN TWO RULES, sharing the PREDICATES above and nothing else, because the first cut of this
+ *  table selected `SHAPE_GATES`' pair by id and that was a real over-admission rather than a style
+ *  point. `no-positive-evidence` is a DISJUNCTION — an order fact OR a constant on the index — and
+ *  only the first disjunct is about the order. A constant on the index evidences a SUBSCRIPT (see
+ *  the header: agbcc folds a constant added to a pointer or cast base into the relocation addend,
+ *  so a runtime `add` against a bare `.word gSym` is a shape only the array form produces); it says
+ *  nothing whatever about where the base was materialized, and the inline cast `((u16 *)&g)[i + 1]`
+ *  scales that constant exactly as `g[i + 1]` does. Compiled through the benchmark's own agbcc
+ *  command, `extern u8 gTbl[]; s8 *p = (s8 *)gTbl; return gTbl[i + 1] + p[j];` has no scaling
+ *  anywhere — every access is width 1 — so `baseFirst` is `undefined` at every access, and the
+ *  selected table licensed `gTbl` on the constant alone, handing `/orderbase` a home the assembly
+ *  never evidenced. Over the artifact's 370 agbcc rows the shipped difference is ONE name
+ *  (`synthetic:harridx`'s `gTbl`, licensed with no access whose `baseFirst` is `true`, and shaped
+ *  there so the structurer spells it bare); the compiled counterexample is what says the class is
+ *  not that one row.
+ *
+ *  SHARING RULE OBJECTS DOES NOT SHARE PREMISES, and `sound` is where the two consumers part
+ *  company. In `SHAPE_GATES` both rules are sound: what is derived there is a DECLARATION, and a
+ *  wrong one changes the meaning of every access to the name. Here nothing is declared — the
+ *  licence only OFFERS `/orderbase` a candidate beside the inline spelling, which the differ then
+ *  referees — so an over-licensed name costs fan and a tie-break, never meaning, and these two are
+ *  heuristics. Under-licensing is a lost candidate for the same reason, and this table really does
+ *  under-license: a pointer local whose initializer is NOT a separate statement,
+ *  `u16 *p; return (p = (u16 *)&gTbl)[i];`, compiles INDEX-first (measured, same command), so
+ *  `order-index-first` declines a home that is really there. That is the direction the table is
+ *  allowed to be wrong in, and it is why neither rule is `sound` here.
+ *
+ *  What IS shared is the predicate, so an edit to either reaches both consumers — while each rule
+ *  object carries its own `sound`, `why` and `guardedBy`, so the guard the contract test checks is
+ *  one that ablates the rule against THIS consumer rather than against the declaration. */
+export const ORDER_SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
+  {
+    id: 'order-index-first',
+    why: 'a scaling of the index precedes the pool load in its own block — the inline pointer path, which has no home',
+    sound: false,
+    guardedBy: 'global-array-shape.test.ts: base-first licenses, index-first does not — the same minimal pair',
+    rejects: anIndexFirstAccess,
+  },
+  {
+    id: 'no-order-evidence',
+    why: 'no access materialized the base before scaling the index, so nothing here says the base had a home',
+    sound: false,
+    guardedBy: 'global-array-shape.test.ts: a constant on the index is not an order fact',
+    rejects: noOrderEvidence,
+  },
+];
 
 /** The two tables together, so a caller ablates one rule by name without knowing which stage owns
  *  it. Defaulted on `inferGlobalArrays`; a test passes an ablated pair. */

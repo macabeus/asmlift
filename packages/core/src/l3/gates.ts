@@ -42,19 +42,14 @@ export function without<Ctx>(gates: readonly Gate<Ctx>[], id: string): readonly 
   return gates.filter((g) => g.id !== id);
 }
 
-/** The named gates, in the order given — the positive counterpart of `without`, for a SECOND
- *  consumer that asks a SUBSET of one table's questions rather than the same questions minus one.
- *  Throws on an unknown id for the reason `without` does: a rule renamed underneath a selection
- *  would leave that consumer silently asking fewer questions than its author wrote. */
-export function just<Ctx>(gates: readonly Gate<Ctx>[], ids: readonly string[]): readonly Gate<Ctx>[] {
-  return ids.map((id) => {
-    const g = gates.find((x) => x.id === id);
-    if (g === undefined) {
-      throw new Error(`no gate '${id}' to select (have: ${gates.map((x) => x.id).join(', ')})`);
-    }
-    return g;
-  });
-}
+// NO `just(table, ids)` SELECTOR. One shipped consumer asked for it — the order half of
+// raise/globalshape.ts's shape rules — and selecting rule OBJECTS by id turned out to be the wrong
+// sharing: it shares the predicate AND the `sound` claim AND the `guardedBy` guard, and the second
+// consumer needed only the first of the three (the guard the contract test then checks ablates the
+// rule against the OTHER consumer, and a rule that is sound for a declaration is a heuristic for a
+// generated candidate). What a second consumer shares is a PREDICATE — an ordinary function — and
+// what it owns is its own rule objects. See `ORDER_SHAPE_GATES` for the over-admission the object
+// sharing hid.
 
 /** `without` for SHIPPED code. A test may ablate any gate — that is how `guardedBy` differential
  *  tests work — but a pass that re-runs itself with an ablated table as a ranked candidate may
