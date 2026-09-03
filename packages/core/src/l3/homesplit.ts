@@ -158,19 +158,16 @@ export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
 /** The keys this tree offers as withholds — one candidate each, or none at all. The caller asks
  *  ONCE per (tree, admission table) and loops over the answer.
  *
- *  IT IS A KEY-COUNT FACT AND NEVER A SYMBOL-MAP ONE, which is worth stating because a round
- *  looking for axes to skip proposed exactly that prune off a census taken on one function.
- *  These keys are not spelled here at all: they arrive from `l3/basecse.ts`, whose `leafId`/`keyOf`
- *  render a leaf base as `c:<const>` wherever it is not a named `a:<sym>`, and `homeSplitTag` above
- *  prints that half as `0x…`. (This module's own `leafBaseId`, BELOW, is a different reader — it
- *  identifies bases inside `baseReads`/`splitHomeBases` and never produces the argument.) So a tree
- *  lifted with NO map reaches this door on plain addresses: enumerated map-less, `EntityHitReaction`
- *  in the klonoa `code_1` checkout — a checkout function, not a row — yields 512 `/homesplit`
- *  candidates over 512 distinct sources, keyed `0x3004c20.1u` and `0x40000d4.4s` — TWO numeric
- *  keys, not one. So "no map, so this product cannot fire" is a fact about `LoadBGTilemapData`,
- *  whose keys happen to be named globals, and a skip built on it deletes live candidates.
- *  The same claim was the census's own arm-distinction control, which is
- *  the transferable half: a control drawn from ONE function's labels controls that function. */
+ *  IT IS A KEY-COUNT FACT AND NEVER A SYMBOL-MAP ONE. The keys are not spelled here: they arrive
+ *  from `l3/basecse.ts`, whose `leafId`/`keyOf` render a leaf base as `c:<const>` wherever it is
+ *  not a named `a:<sym>`, and `homeSplitTag` above prints that half as `0x…`. (This module's own
+ *  `leafBaseId`, BELOW, is a different reader — it identifies bases inside
+ *  `baseReads`/`splitHomeBases` and never produces the argument.) So a tree lifted with NO map
+ *  reaches this door on plain addresses: enumerated map-less, `EntityHitReaction` in the klonoa
+ *  `code_1` checkout yields 512 `/homesplit` candidates over 512 distinct sources, keyed
+ *  `0x3004c20.1u` and `0x40000d4.4s` — TWO numeric keys. "No map, so this product cannot fire" is
+ *  therefore a fact about whichever function was censused, not about the arm, and a skip built on
+ *  it deletes live candidates. */
 export function homeSplitWithholds(
   keys: readonly string[],
   admission: readonly Gate<HomeSplitFanCtx>[] = HOMESPLIT_FAN_GATES,

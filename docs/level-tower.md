@@ -165,12 +165,11 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   **The corollary a "shrink the fan" round wants, and it is that round's whole answer: an axis's own
   LICENCE cannot prune it for CPU.** Skipping an axis wherever a predicate proves it cannot fire is
   sound exactly where the axis would have emitted no candidate — so a sound licence skip shrinks the
-  fan by zero, and the fan is what compiles. What it can save is the enumeration-time gate walk,
-  which on a ranked run is a rounding error beside the compiles: on `LoadBGTilemapData` the widest
-  such skip leaves 112,896 candidates at 112,896 and the compile phase untouched, and skipping EVERY
-  axis that contributes no candidate there — including the composed ones no predicate can decide —
-  was measured at under half a percent of the wall. So a round out to buy compile CPU has to remove
-  candidates that WOULD have compiled, which is not a licence question. `rank.ts`'s
+  fan by zero, and the fan is what compiles. All it can save is the enumeration-time gate walk, and
+  enumeration is a small fraction of a ranked run beside one compile per candidate: on
+  `LoadBGTilemapData` the widest such skip fires on every tree and leaves 112,896 candidates at
+  112,896, the compile phase untouched. So a round out to buy compile CPU has to remove candidates
+  that WOULD have compiled, which is not a licence question. `rank.ts`'s
   `ORDERBASE_ADMISSIONS` carries the worked case, and with it the three wrong readings of one such
   predicate, each of which deletes live candidates — two of them the row's own neighbours in the
   same loop.

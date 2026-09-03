@@ -1842,73 +1842,46 @@ export function enumerateCandidates(
       // `order-licensed` would refuse every key anyway and this only saves the census.
       ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_ADMISSIONS : []),
     ];
-    // AND THE SAME SKIP KEYED ON THE LICENCE ITSELF BUYS NOTHING, which is worth one paragraph here
+    // AND THE SAME SKIP KEYED ON THE LICENCE ITSELF WOULD BUY NOTHING, which is worth a paragraph
     // because this row is where the next reader will propose it. `orderLicensedGlobals` is decidable
     // on the lifted fn, so the row could also be dropped wherever THAT set is empty. It would be
     // sound, and it would be inert, for the same one reason: an empty licence stamps no
     // `baseOrdered` (structure.ts `stampOrderedBases`), so `order-licensed` refuses every key, so
     // `hoist` returns null and this row's three emission sites — two `respell`s and the `enumerate`
     // whose generator fans over volatile SUBSETS, so the third is a set and not one spelling — emit
-    // nothing. Which GENERALIZES to every axis carrying a licence — a skip like it is sound exactly
+    // nothing. Which GENERALIZES to every axis carrying a licence: a skip like it is sound exactly
     // where the axis would have emitted no candidate, so a sound one shrinks the fan by zero, so it
-    // removes no COMPILE, and compiling candidates is where a ranked run's cost is; what it saves is
-    // one `admittedBases` walk per tree. That is the licence-shaped case of the cost rule
-    // `docs/level-tower.md` already states for the whole ranked population — an inert axis pays no
-    // re-spellings and no compiles — which is the paragraph a round that sets out to shrink this
-    // fan starts from, so the specialisation is cross-referenced there rather than only here.
-    // Measured on `LoadBGTilemapData` — the klonoa `gfx` function whose fan raised the
-    // question, a standalone repro rather than a benchmark row — the licence is empty on every lift
-    // variant of BOTH symbol-map arms: four named symbols DO reach the licence table map-ful and the
-    // ADDRESS gates refuse all four, so "the pool spells no names" is not the reason. The skip would
-    // fire on every tree there and remove not one candidate. Over the wider population — the 104
-    // klonoa `asm/nonmatchings` functions whose `.s` is under 4,096 BYTES, of the 182 there, the 55
-    // that enumerate on each symbol-map arm, so 110 enumerations — it lost none of the 77
-    // `/orderbase` candidates the axis contributes to it. The cap is spelled in BYTES on purpose:
-    // "4 KB" resolves two ways, and the other reading is a DIFFERENT population — 103 files, one
-    // function fewer — so a re-run that disagrees with the counts here should check its cap before
-    // it reads a regression. ONE ARM CARRIES THAT CONTROL AND THE OTHER CANNOT: all 77 are map-ful,
-    // so the 55 map-less enumerations show the skip harmless where the axis has no inhabitant to
-    // lose, which is not evidence that the predicate is right. NOR DOES THIS SWEEP CONTROL THE
-    // PER-FUNCTION READING BELOW: that one's counterexample needs a `/setup-args` variant licensing
-    // a name the base lift does not, and no function here has one, so it is inert over all 110 of
-    // them and broken all the same — which is what "absence of a counterexample is not proof" costs
-    // when the population is chosen before the failure shape is known. (The firing counts — 1,354
-    // of 1,465 asks map-ful, 548 of 548 map-less — needed a scratch patch that is not in this tree;
-    // the candidate counts are re-derivable from `enumerateCandidates` alone.)
+    // removes no COMPILE, and one compile per candidate is where a ranked run's cost is; what it
+    // saves is one `admittedBases` walk per tree. `docs/level-tower.md` carries the general form.
+    // Measured on klonoa's `LoadBGTilemapData`, the checkout function whose 112,896-candidate fan
+    // raises the question: the licence is empty on every lift variant of BOTH symbol-map arms —
+    // four named symbols DO reach the licence table map-ful and the ADDRESS gates refuse all four,
+    // so "the pool spells no names" is not the reason — and the skip fires on every tree there and
+    // removes not one candidate.
     //
     // IF IT IS EVER BUILT ANYWAY, IT IS `orderLicensedGlobals(fn, target)` READ AT THE SITE BELOW
-    // that hands `orderLicensed` to the structuring call, per LIFT VARIANT — never per function,
-    // and never either of the two predicates standing beside it there. All three wrong readings
-    // delete the SAME four live candidates on `sub_806800C` in the sa3 checkout — again a checkout
-    // function, not a row — in BOTH arms: `unsigned/setup-args/orderbase` and its `/flip-join`,
-    // `/derived-home` and `/flip-join/derived-home` siblings.
+    // that hands `orderLicensed` to the structuring call, PER LIFT VARIANT — never per function,
+    // and never either of the two predicates standing beside it in that same loop. All three wrong
+    // readings delete the SAME four live candidates on `sub_806800C` in the sa3 checkout, in BOTH
+    // arms: `unsigned/setup-args/orderbase` and its `/flip-join`, `/derived-home` and
+    // `/flip-join/derived-home` siblings.
     //   · PER FUNCTION — `/setup-args` narrows the lift and can license a name the base lift does
     //     not, so the first variant's answer is not the function's.
     //   · `inferGlobalArrays`, seven lines above the licence call and off the same `fn` — a
-    //     documented strict SUBSET (`raise/globalshape.ts`), and empty where the licence is not:
-    //     SEVEN functions in the sweep above license a name and shape none — six in `gfx`, one in
-    //     `code_1`, so it is not a `gfx` habit — and SIX of them carry `/orderbase` candidates, 45
-    //     of the sweep's 77. Counted over functions that ENUMERATE, which is the denominator the
-    //     claim needs: one more licenses a name and then declines at STRUCTURING — never at lift,
-    //     since the licence is read off the LIFTED `fn`, so a function that licences anything has
-    //     already lifted — and a function with no fan loses nothing.
-    //   · the licence RECOMPUTED after `raiseRecovered` — which is not the next statement but the
-    //     third, ten lines down, past the map-precedence delete over `inferredSymbols` and
+    //     documented strict SUBSET (`raise/globalshape.ts`), and measurably empty on functions
+    //     where the licence is not, several of them carrying `/orderbase` candidates.
+    //   · the licence RECOMPUTED after `raiseRecovered` — not the next statement but the third,
+    //     ten lines down, past the map-precedence delete over `inferredSymbols` and
     //     `applyIdiomPatterns`. `raise/globalshape.ts` says in its own module note that the raising
-    //     tower destroys the order evidence, and the tempting next step — "so it reads empty
-    //     everywhere and the skip fires on every tree" — was measured FALSE: on the sweep's
-    //     `EntityPickupCollect` the recomputed set is non-empty and the skip fires on 36 of 52 asks,
-    //     and all 16 of that function's `/orderbase` candidates die anyway. This reading takes all
-    //     77 of the sweep's. Firing less often is not a defence.
-    //
-    // AND A CORPUS GATE SEES TWO OF THE THREE, NOT ONE — which is the only reason to keep the other
-    // two written down. Both the `inferGlobalArrays` reading and the post-raise one delete
-    // `unsigned/orderbase` off `synthetic:bgarr:agbcc`, the exact source that row publishes as its
-    // score-0 MATCH, on BOTH arms: a per-row label/source diff fails loudly on either. The
-    // PER-FUNCTION reading is the one that gate cannot see. Its counterexample needs `/setup-args`
-    // AND `/orderbase` in one label, and of the corpus's 742 published winner labels three carry
-    // `/orderbase`, six carry `/setup-args` and NONE carries both — so passing obligation 1 is
-    // evidence about two of these neighbours and none at all about the third.
+    //     tower destroys the order evidence, but the tempting next step — "so it reads empty
+    //     everywhere and the skip is free" — is FALSE: it reads NON-empty on a function whose
+    //     `/orderbase` candidates it then deletes anyway. Firing less often is not a defence.
+    // A per-row label/source diff catches the last two, and CANNOT catch the first. Both of those
+    // delete `unsigned/orderbase` off `synthetic:bgarr:agbcc`, the exact source that row publishes
+    // as its score-0 MATCH, on BOTH arms. The per-function reading needs `/setup-args` AND
+    // `/orderbase` in ONE label, and of the corpus's 742 published winner labels three carry
+    // `/orderbase`, six carry `/setup-args` and NONE carries both — so a green corpus gate is
+    // evidence about two of these readings and none at all about the third.
 
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
