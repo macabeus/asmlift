@@ -365,18 +365,20 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
     case 'continue':
       return [`${indent}continue;`];
     case 'switch': {
-      // A `break;`/`continue;` in an arm BODY is loop-scoped in L3 (l3/ast.ts) and switch-scoped in
-      // C — printing one between `case` labels rebinds it, which changes the program and reads as
+      // A `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in C —
+      // printing one between `case` labels rebinds it, which changes the program and reads as
       // perfectly ordinary C. Recovery never produces one (a switch inside a loop whose arm carries
-      // a loop exit fails loud in loop recovery today), so this is a producer bug like the
+      // a loop break fails loud in loop recovery today), so this is a producer bug like the
       // `defaultAt` placement below, and it is stated HERE because the printer is where the
       // rebinding happens — for every producer, not just the two switch regimes.
+      //
+      // `continue;` is NOT rebound and is NOT refused: C binds it to the smallest enclosing
+      // ITERATION statement, which a `switch` is not, so it means exactly what L3 means by it. The
+      // one transform that could change that — folding a `while` into a `for`, where `continue`
+      // runs the increment — already scans switch arms for it (`hasEnclosingContinue`).
       for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {
-        const bound = loopExitIn(body);
-        if (bound) {
-          throw new Error(
-            `c backend: a switch arm carries a loop-scoped \`${bound};\`, which C would bind to the switch`,
-          );
+        if (switchBoundBreakIn(body)) {
+          throw new Error('c backend: a switch arm carries a loop-scoped `break;`, which C would bind to the switch');
         }
       }
       const out = [`${indent}switch (${pe(s.scrutinee, 99)}) {`];
@@ -438,24 +440,13 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
   }
 }
 
-/** The first `break`/`continue` in this arm body that C would bind to the enclosing SWITCH rather
- *  than to the loop L3 meant, or null. A loop opened INSIDE the arm captures both, so its body is
- *  not walked; a nested `switch` captures a `break` and is checked by its own printing, while a
- *  `continue` inside one still binds to the loop and is correct — so nested switches are not walked
- *  either. */
-function loopExitIn(body: Stmt[]): 'break' | 'continue' | null {
-  for (const s of body) {
-    if (s.k === 'break' || s.k === 'continue') {
-      return s.k;
-    }
-    if (s.k === 'if') {
-      const found = loopExitIn(s.then) ?? loopExitIn(s.else);
-      if (found) {
-        return found;
-      }
-    }
-  }
-  return null;
+/** Does this arm body carry a `break` C would bind to the enclosing SWITCH rather than to the loop
+ *  L3 meant? A loop opened INSIDE the arm captures its own, so its body is not walked, and a nested
+ *  `switch` captures one too and is checked by its own printing. */
+function switchBoundBreakIn(body: Stmt[]): boolean {
+  return body.some(
+    (s) => s.k === 'break' || (s.k === 'if' && (switchBoundBreakIn(s.then) || switchBoundBreakIn(s.else))),
+  );
 }
 
 // Does a statement list end in a control-flow terminator (so a trailing `break;` would be dead)?

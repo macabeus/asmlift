@@ -340,11 +340,16 @@ test('a default placed after a FALLING case is refused by the printer, not silen
   expect(() => emitCFamily('void f(s32 x)', sw(3))).toThrow(/places its default at arm 3 of 2/);
 });
 
-test('a loop-scoped `break` inside a case arm is refused, not silently rebound', () => {
+test('a loop-scoped `break` inside a case arm is refused, and `continue` is not', () => {
   // L3's `{k:'break'}` is the innermost LOOP's (l3/ast.ts); C's, printed between `case` labels, is
-  // the switch's. Nothing produces one today — a switch inside a loop whose arm carries a loop exit
+  // the switch's. Nothing produces one today — a switch inside a loop whose arm carries a loop break
   // fails loud in loop recovery — but the rebinding happens in the PRINTER, so the refusal belongs
   // there, for every producer rather than for the two switch regimes.
+  //
+  // `continue` is the CONTROL on that refusal's premise: C binds it to the smallest enclosing
+  // iteration statement, and a `switch` is not one, so it already means what L3 means and printing
+  // it is correct. Compiled both ways, `for(...){switch(i){case 2: continue;} n++;}` and
+  // `for(...){if(i==2) continue; n++;}` leave the same counter.
   const armed = (body: Stmt[]): SFn => ({
     name: 'f',
     params: [{ name: 'x', type: T.s(32) }],
@@ -362,11 +367,18 @@ test('a loop-scoped `break` inside a case arm is refused, not silently rebound',
   });
   const set: Stmt = { k: 'assign', name: 'w', value: ZERO };
   expect(() => emitCFamily('void f(s32 x)', armed([set, { k: 'break' }]))).toThrow(/loop-scoped `break;`/);
-  expect(() => emitCFamily('void f(s32 x)', armed([set, { k: 'continue' }]))).toThrow(/loop-scoped `continue;`/);
+  expect(emitCFamily('void f(s32 x)', armed([set, { k: 'continue' }]))).toContain('continue;');
   // …including one nested in an `if`, which is the shape a guarded loop exit actually takes.
   expect(() =>
     emitCFamily('void f(s32 x)', armed([{ k: 'if', cond: { k: 'var', name: 'x' }, then: [{ k: 'break' }], else: [] }])),
   ).toThrow(/loop-scoped `break;`/);
+  // …and one nested a second switch deep, where the outer walk deliberately does not look: the
+  // inner switch prints it itself, and must reach the same verdict.
+  const nested = (inner: Stmt[]): Stmt[] => [
+    { k: 'switch', scrutinee: { k: 'var', name: 'x' }, cases: [{ values: [1], body: inner, fallsThrough: false }] },
+  ];
+  expect(() => emitCFamily('void f(s32 x)', armed(nested([{ k: 'break' }])))).toThrow(/loop-scoped `break;`/);
+  expect(emitCFamily('void f(s32 x)', armed(nested([{ k: 'continue' }])))).toContain('continue;');
   // CONTROL: an ordinary arm, and a loop OPENED INSIDE the arm, which captures its own `break`.
   expect(emitCFamily('void f(s32 x)', armed([set]))).toContain('case 0:');
   expect(
