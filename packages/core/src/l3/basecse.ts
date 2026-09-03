@@ -149,8 +149,11 @@ const keyOf = (base: HoistableBase, width: number, signed: boolean): string => `
  *  numeric base — `c:67109076 <u16*>` — ran `Number` over the type token too and tagged every such
  *  key `0xNaN`. Two distinct keys, one label, and a label is a candidate's identity.
  *
- *  The one space inside a cast's base id is this grammar's own separator, not the type's: no type
- *  `typeToString` can produce contains a space (`u16*`, `Struct0`, `u8[4]`). */
+ *  The one space inside a cast's base id is this grammar's own separator, not the type's: every
+ *  type this pass can put there spells without one (`u16*`, `Struct0`, `u8[4]`). A struct's name is
+ *  DATA, though — synthetic today, DWARF later — so the parse below reads the type as everything
+ *  between the separator and the closing `>` rather than as one word, and `homeSplitTag` squeezes
+ *  whitespace out of the label defensively. */
 export interface BaseKeyParts {
   /** the hoistable leaf, `a:<symbol>` or `c:<numeric address>` */
   readonly leaf: string;

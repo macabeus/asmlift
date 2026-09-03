@@ -341,6 +341,17 @@ interface ShapeEvidence {
    *  null case is spelled over the whole set (`widths.includes(null)`) or, where the rule is
    *  really about one address, off that access's own `elementWidth` below.
    *
+   *  THE SHAPE HAS A CORPUS INHABITANT, and it is not the one the fix's own first draft named.
+   *  Instrumented over the artifact's 370 agbcc rows on BOTH symbol-map arms, three licensed
+   *  symbols record a clean access and an interior one under one name — `kleod:EntityDeathAnimation`'s
+   *  `gEntityArray` (`widths` `[null, 2]`), `kleod:EntityItemDrop`'s `gEntity` (`[null, 2, 1]`) and
+   *  `kleod:TransformSingleEntityToScreen`'s `gUnk_03002920` (`[2, null]`). Only the third records
+   *  the clean access FIRST, so it alone is the shape the positional read got wrong.
+   *  `kleod:UpdateCameraScroll` is NOT one of them: it is the DECLARATION half's worked example
+   *  (`interior-or-non-access` ablated derives `elemSize 2` there), and in the order consumer its
+   *  `gSineTable` records no interior access at all — every width rule composed onto the licence,
+   *  `mixed-access-width` included, still admits it.
+   *
    *  The invariant is about rules that read a width VALUE. `mixed-access-width` reads only this
    *  set's shape (`length !== 1`), and on a symbol read ONLY at interiors — `[null]` — it admits,
    *  correctly: "one name, two element types" is not what that symbol violates, and every rule
