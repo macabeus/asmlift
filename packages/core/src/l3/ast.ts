@@ -220,10 +220,11 @@ export type Stmt =
   // moving the label in front of a falling arm would divert that arm into the default. The C-family
   // printer terminates a non-final default with `break;` for the mirror-image reason.
   //
-  // Unlike `fallsThrough` below, `defaultAt` is a SPELLING: every arm it can sit between is closed,
-  // so a backend with no positional default (Pascal's `otherwise`) may ignore it and still emit the
-  // same program — the one placement that would change one is the falling arm the rule above already
-  // refuses, and which that backend loud-fails anyway.
+  // Unlike `fallsThrough` below, `defaultAt` is a SPELLING: the arm BEFORE the label is closed (the
+  // rule above) and so is the default body itself (the C-family printer terminates a non-final one),
+  // so a backend with no positional default (Pascal's `otherwise`) may ignore the count and still
+  // emit the same program. The arm AFTER the label is under no such rule and MAY fall through — it
+  // falls into the arm below it, which the label does not stand between.
   //
   // NON-NEUTRALITY NOTE (like the `index` node above): `fallsThrough` encodes a C/C++ control-flow
   // concept POSITIONALLY — `cases[i].fallsThrough === true` means control continues into

@@ -150,9 +150,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     whatever the source wrote, both spellings compiling to identical instructions.
   //
   // THREE further withholdings, all about fall-through and all stated here so both regimes state
-  // them once. Each is about a POSITION, which is what the count is:
-  //   - the chain RE-THREADED the arm order (`orderIntact` false), so the emitted list is not the
-  //     one the layout count describes and the number would index the wrong slot;
+  // them once. The first is about the LIST the count would index; the other two are about the
+  // POSITION it names:
+  //   - the chain RE-THREADED the arm order (`orderIntact` false), so the emitted list is no longer
+  //     the one the layout count describes and no position in it means what the count says. This
+  //     one is whole-switch because the re-threading is; a per-position reading (bracket the label
+  //     between the two arms that straddle it in layout, then map that into the emitted list) is
+  //     possible and unbuilt — nothing has needed it, since a compiler that lays bodies out in
+  //     source order writes a falling arm directly above its target and so re-threads nothing;
   //   - the LAST emitted arm falls through, which can only be into the default (the adjacency
   //     check leaves no other target) — the label must then be last, which IS `undefined`;
   //   - the position lands directly after a falling arm, where printing the label would divert
@@ -789,12 +794,17 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
       // The arm fallen INTO must take NO block parameters. Its only source of them would be the
       // dispatch's own edge copies, which collapsing the tree discards — so on the fall-through
-      // path they would be lost and on its own case value they would be missing. Regime B pays for
-      // the same hazard LOUD, one step later (structure.ts refuses when the copies it computed for
-      // the fallen-into edge are non-empty, which is the same fact after naming). Regime A has none to
-      // emit today because `asLeafOrTest` refuses a param-carrying case entry outright, and this
-      // is that invariant restated AT THE SEAM where breaking it would be silent — so admitting
-      // such an entry (the booked hoist) cannot quietly land one inside a chain.
+      // path they would be lost and on its own case value they would be missing.
+      //
+      // Regime B refuses the same HAZARD one step later and LOUD, but on a WEAKER predicate: the
+      // copies `argAssignsFor` actually produced for that edge. It returns none for a param-carrying
+      // edge on three documented paths — a const anchored at its def site, an identity copy, and an
+      // `undef` that carries nothing — and each of those means the edge has nothing to re-run, so
+      // the weaker test is the one that fits the hazard. This one is the conservative
+      // over-approximation, and it costs nothing today because `asLeafOrTest` refuses a
+      // param-carrying case entry outright: it is that refusal restated AT THE SEAM where breaking
+      // it would be silent, so admitting such an entry (the booked hoist) cannot quietly land one
+      // inside a chain. The hoist inherits two different rules here, not one.
       if (to !== null && to.params.length) {
         return null;
       }
