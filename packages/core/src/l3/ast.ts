@@ -98,16 +98,14 @@ export type Expr =
   //
   // `baseOrdered` is the SECOND evidence field, and it answers about the base rather than the
   // offset: the input assembly materialized this access's base BEFORE it scaled the index
-  // (raise/globalshape.ts `orderLicensedGlobals`, stamped at the structure seam). On agbcc that is
-  // the order a declared array produces (`build_array_ref` forks on the base's array-ness) and the
-  // order a POINTER LOCAL produces for a different reason (its initializer is a statement of its
-  // own, evaluated first — the two are separated by a compile in raise/globalshape.ts's header),
-  // while the inline cast of a symbol's address produces the other one — so it is what says a base
-  // may be given a HOME (`l3/basecse.ts`'s `order-licensed`). Absent means "no such evidence",
-  // never "the index came first": a scaling in another block is not comparable, and a compiler that
-  // has not opted in stamps nothing. `exprEquals` ignores it for `operandOff`'s reason — both
-  // spellings denote the same cell — and it is per SYMBOL, so every access of one name carries the
-  // same answer, which is right for agbcc because one CSEd pool load serves them all.
+  // (raise/globalshape.ts `orderLicensedGlobals`, stamped at the structure seam; that module's
+  // header carries the compiles saying which source spellings produce which order). It is what
+  // says a base may be given a HOME — `l3/basecse.ts`'s `order-licensed`. Absent means "no such
+  // evidence", never "the index came first": a scaling in another block is not comparable, and a
+  // compiler that has not opted in stamps nothing. `exprEquals` ignores it for `operandOff`'s
+  // reason — both spellings denote the same cell — and it is per SYMBOL, so every access of one
+  // name carries the same answer, which is right for agbcc because one CSEd pool load serves
+  // them all.
   | {
       k: 'index';
       base: Expr;

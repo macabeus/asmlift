@@ -63,11 +63,11 @@ export const withholdingKey = (gates: readonly Gate<BaseKey>[], key: string): re
  *  ride because they are part of the key — two keys over one address are two different spellings.
  *
  *  PARSED BY THE KEY'S PRODUCER (`l3/basecse.ts`'s `parseBaseKey`, beside `keyOf`), because a base
- *  id is not one space-free word and knowing that here is what went wrong twice. `baseId` spells a
- *  CAST base as `a:gEnigmaBerries <Elem5*>` — one space, and it is the grammar's own separator
- *  rather than the type's. Splitting from the FRONT read the type as the width and
- *  the width as the signedness; splitting from the END fixed the `a:` form and left the `c:` form
- *  running `Number` over `67109076 <u16*>`, tagging every cast over a numeric base `0xNaN` and
+ *  id is not one space-free word and a local split here gets it wrong in both directions. `baseId`
+ *  spells a CAST base as `a:gEnigmaBerries <Elem5*>` — one space, and it is the grammar's own
+ *  separator rather than the type's. Split from the FRONT, the type reads as the width and the
+ *  width as the signedness; split from the END, the `a:` form comes out right and the `c:` form
+ *  runs `Number` over `67109076 <u16*>`, tagging every cast over a numeric base `0xNaN` and
  *  collapsing distinct keys onto one label. No shipped table admits a cast base outside
  *  `/orderbase`, and `/orderbase` carries `pairings: false`, so no such key reaches this function
  *  today — but a candidate LABEL is an identity (`bench diff` and docs/ranked-repro.md compare

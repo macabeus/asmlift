@@ -3402,10 +3402,10 @@ export function lift(
       // shape above, with `mk` (which really returns `struct S4`) declared `params: 1,
       // returnsVoid: true`, the lift succeeds and emits `s32 sret(s32 a0) { s32 sp0; mk(&sp0);
       // return (u8)sp0; }` — a compiling, plausible, WRONG program with the real argument dropped,
-      // where a loud decline stood. An earlier version of this note argued the opposite ("a wrong
-      // arity DROPS an argument where a wrong void-ness only re-models a stack slot"); both halves
-      // of that are false, since the same entry supplies both facts and the frame re-model is the
-      // silent one. The trade is accepted because there IS no other discriminator: compiled through
+      // where a loud decline stood. Not a smaller cost than a wrong ARITY, either: the same entry
+      // supplies both facts, so a wrong `returnsVoid` drops the argument too, and the frame re-model
+      // is the silent half. The trade is accepted because there IS no other discriminator: compiled
+      // through
       // the benchmark's own agbcc command, the hidden struct return and the out-parameter emit the
       // same instructions in the same order, the slot is read back at a scalar width in both, and
       // in both the value read back is what the function returns — so an asm-side corroboration

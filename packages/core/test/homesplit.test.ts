@@ -251,8 +251,8 @@ describe('the label names the withheld key, because a label is an identity', () 
   // BOTH CAST FORMS, ON KEYS `baseId` CAN ACTUALLY PRODUCE. `l3/basecse.ts` spells a cast base
   // `<leafId> <typeToString(to)>`, and `typeToString` emits `Elem5*` — no space, no `struct`
   // keyword — so the one space is the key grammar's own separator and it is there for a cast over
-  // a NUMERIC base too. Reading the tag from the end fixed the `a:` half and left the `c:` half
-  // running `Number` over `67109076 <u16*>`: every such key tagged `0xNaN`, two keys one label.
+  // a NUMERIC base too. A tag read from the END gets the `a:` half right and runs `Number` over
+  // `67109076 <u16*>` for the `c:` half: every such key tagged `0xNaN`, two keys one label.
   test('a cast base keeps its element type, over a symbol and over a numeric address', () => {
     expect(homeSplitTag(`a:gEnigmaBerries <${typeToString(T.ptr(T.struct('Elem5', [])))}> 28 false`)).toBe(
       'gEnigmaBerries<Elem5*>.28u',

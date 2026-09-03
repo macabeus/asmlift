@@ -1011,11 +1011,10 @@ describe('the block admission is WIRED into enumeration', () => {
 // ── the reinterpret-cast base ─────────────────────────────────────────────────────────────────
 //
 // An array of STRUCTS indexes `((struct S *)&gSym)[i]`, where the cast is the base's spelling and
-// not a different base. Until now this pass could not even SEE that key: `isHoistableBase` took the
-// bare leaves only, so a struct element had no home available at any admission. It is collectable
-// now, and every shipped table still refuses it — `cast-base` — because the DEFAULT spelling of a
-// struct element is the inline cast. What licenses the home is the assembly's own base/index order,
-// which `ORDERBASE_GATES` (rank.ts) asks and no table here does.
+// not a different base. `isHoistableBase` collects that key, and every shipped table then refuses
+// it — `cast-base` — because the DEFAULT spelling of a struct element is the inline cast. What
+// licenses the home is the assembly's own base/index order, which `ORDERBASE_GATES` (rank.ts) asks
+// and no table here does.
 
 describe('a struct element’s reinterpret-cast base', () => {
   // `gBgInfo[i].field_16` over a 28-byte element, pool word loaded FIRST.

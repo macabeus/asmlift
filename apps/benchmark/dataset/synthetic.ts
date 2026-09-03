@@ -5002,9 +5002,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // Elem0 *)&gBgInfo; return p[a0].field_16;` — licensed by the ORDER half of this same
   // derivation, split out for a second consumer that asks only "was the base materialized before
   // the index was scaled" and needs no declaration to answer. Priced as a lattice of whole
-  // spellings compiled through this row's own command: the base HOME is worth 9 of the 8 points
-  // and the element TYPE 1, because `u8 *p = (u8 *)&gBgInfo; return *(u16 *)(p + a0*28 + 16);`
-  // already scores 0 with no struct and no array declaration at all. `declare.ts`'s array branch
+  // spellings compiled through this row's own command, over two axes (HOME inline/local × ELEM
+  // flat/struct) whose worst corner scores 10 and whose best scores 0: Shapley gives the base HOME
+  // 9 of those 10 points and the element TYPE 1, because `u8 *p = (u8 *)&gBgInfo; return
+  // *(u16 *)(p + a0*28 + 16);` already scores 0 with no struct and no array declaration at all.
+  // `declare.ts`'s array branch
   // is never even reached on this row — the emitter prints the scalar `extern u32 gBgInfo;` — and
   // the flat `extern u8 gBgInfo[]` spelling the element-type fork would need scores 10, WORSE than
   // the 8 it would replace, and is out of bounds against the project's own header. The home keeps

@@ -119,15 +119,13 @@ import { type BaseInit, type HoistPlacement, nameAllocator, placeBaseLocals } fr
 // wearing the pointer type its element needs. The structurer emits it for an array of STRUCTS
 // (structure.ts arrayAccess's `fieldOff` path), where the scalar `scalarTypeForAccess` this pass
 // otherwise mints is meaningless — a 28-byte element has no `intType`. The cast is the base's
-// SPELLING rather than a different base, so it hoists to `struct S *p = (struct S *)&gSym` and the
-// accesses stride it exactly as a scalar key's do. Refused when the cast's target is not a pointer
-// (nothing an index can stride) and when it is `volatile`: dropping that qualifier onto a
-// non-volatile local would make every access through the local a plain one, which is a silent
+// SPELLING rather than a different base, so it hoists to `struct S *p = (struct S *)&gSym`, the
+// accesses stride it exactly as a scalar key's do, and the KEY carries the cast's target type
+// because two casts over one symbol stride differently and are two locals. Refused when the cast's
+// target is not a pointer (nothing an index can stride) and when it is `volatile`: dropping that
+// qualifier onto a non-volatile local makes every access through the local a plain one, a silent
 // change of meaning rather than of bytes — volatility on a hoisted local is `l3/volatileptr.ts`'s
 // question, asked of the local and not of the leaf.
-//
-// The KEY carries the cast's target type, because two casts over one symbol stride differently and
-// are two locals.
 type HoistableLeaf = Extract<Expr, { k: 'addr' } | { k: 'const' }>;
 type HoistableCast = Extract<Expr, { k: 'cast' }> & { e: HoistableLeaf };
 type HoistableBase = HoistableLeaf | HoistableCast;
@@ -143,17 +141,14 @@ const keyOf = (base: HoistableBase, width: number, signed: boolean): string => `
 /** The key's own grammar, read back — `<leafId>[ <type>] <width> <signed>`.
  *
  *  IT LIVES BESIDE `keyOf` BECAUSE THAT IS THE ONLY THING THAT MAKES IT SAFE. The key is a string
- *  and its readers are elsewhere (`l3/homesplit.ts` builds a candidate LABEL out of it), so the
- *  grammar was known in two files and the cast form broke the far one: `homeSplitTag` popped width
- *  and signedness off the end and then read what was left as a leaf id, which for a CAST over a
- *  numeric base — `c:67109076 <u16*>` — ran `Number` over the type token too and tagged every such
- *  key `0xNaN`. Two distinct keys, one label, and a label is a candidate's identity.
+ *  and its readers are elsewhere — `l3/homesplit.ts` builds a candidate LABEL out of it, and a
+ *  label is a candidate's identity — so a second file knowing this grammar is a collision waiting
+ *  for the next base kind (`homeSplitTag` states the one the cast form causes).
  *
  *  The one space inside a cast's base id is this grammar's own separator, not the type's: every
  *  type this pass can put there spells without one (`u16*`, `Struct0`, `u8[4]`). A struct's name is
  *  DATA, though — synthetic today, DWARF later — so the parse below reads the type as everything
- *  between the separator and the closing `>` rather than as one word, and `homeSplitTag` squeezes
- *  whitespace out of the label defensively. */
+ *  between the separator and the closing `>` rather than as one word. */
 export interface BaseKeyParts {
   /** the hoistable leaf, `a:<symbol>` or `c:<numeric address>` */
   readonly leaf: string;
@@ -345,11 +340,11 @@ export interface BaseKey {
   /** No access through this base scaled the index before the base was materialized, and at least
    *  one materialized the base first (l3/ast.ts `index.baseOrdered`, from raise/globalshape.ts).
    *
-   *  NOT "every access", which is what this doc used to say and what `Collected.ordered`'s `&&`
-   *  looks like it enforces. The licence admits an access that carries no order fact at all — a
-   *  scaling in another block is not comparable, so it answers `undefined` rather than `false` —
-   *  and 4 of the corpus's licensed symbols have one (`kleod:EntityDeathAnimation`'s
-   *  `gEntityArray` is 11 of 28 accesses). Per SYMBOL is the right grain here and not a shortcut:
+   *  NOT "every access", whatever `Collected.ordered`'s `&&` looks like it enforces. The licence
+   *  admits an access that carries no order fact at all — a scaling in another block is not
+   *  comparable, so it answers `undefined` rather than `false` — and 4 of the corpus's licensed
+   *  symbols have one on both symbol-map arms (`kleod:EntityDeathAnimation`'s `gEntityArray` is 11
+   *  of 28 accesses). Per SYMBOL is the right grain here and not a shortcut:
    *  agbcc CSEs the pool word, so one `ldr` is shared by every access of the name and there is one
    *  order fact to have. The `&&` is therefore vacuous BY CONSTRUCTION — `stampOrderedBases` stamps
    *  per symbol, so a key's accesses cannot disagree — and what it is really guarding is a pass
@@ -586,28 +581,36 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  THE EVIDENCE IS THE ASSEMBLY, and it is the only thing here that is. Every other table on this
  *  roster predicts which spelling the source wrote from the SHAPE of the accesses — how many, at
  *  what offsets, inside a loop or not — and each prediction has a counterexample this file names.
- *  This one reads the instruction ORDER: a base materialized before the index was scaled is what a
- *  declared array produces (agbcc's `build_array_ref` forks on the base's array-ness) and what a
- *  pointer local produces for a DIFFERENT reason (its initializer is a statement of its own,
- *  evaluated first) — while the inline cast of a symbol's address produces the other order. The two
- *  mechanisms are separated by a compile in raise/globalshape.ts's header; what matters here is
- *  that they share the observable. Compiled through the benchmark's own agbcc command, against a
- *  base-first object:
+ *  This one reads the instruction ORDER (raise/globalshape.ts's header carries the compiles behind
+ *  it, and why a declared array and a pointer LOCAL reach the same order by different routes).
+ *  Compiled through the benchmark's own agbcc command, against a base-first object:
  *
  *      extern u16 gTbl[]; gTbl[i]            0    ┐ the same object
  *      u16 *p = (u16 *)&gTbl; p[i]           0    ┘
  *      ((u16 *)&gTbl)[i]                     2      a different one
  *
- *  So where `raise/globalshape.ts` derives an array DECLARATION it takes the bare spelling and this
- *  table never sees the key (the access's base is a `var`); where it refuses one, the same order
- *  fact still says the base had a home. That population is TWO shapes, not one, and both arms are
- *  quoted because they differ: map-less 8 rows / 10 keys, map-ful 10 rows / 12 keys. Most of it is
- *  the struct element, which has no `intType` and reads its members at a displacement — 9 keys
- *  map-less, 10 map-ful, and the only shape `cast-base`'s ablation reaches. The rest is a PLAIN
- *  SCALAR LEAF the function also reads at a displacement somewhere else, which no cast is involved
- *  in and which only `single-use`'s ablation admits: `kleod:UpdateCameraScroll`'s `gSineTable` in
- *  both arms, `pokeemerald:Sin2`'s `gSineDegreeTable` in the map-ful one. A reader deciding whether
- *  `single-use` can be put back needs that second shape named.
+ *  A DERIVED DECLARATION IS NOT THE SAME AS A BARE SPELLING, which is the thing to know before
+ *  reading the population: where `raise/globalshape.ts` shapes a name the structurer usually spells
+ *  it bare and no key exists here at all — but a shape is ONE element type for the whole name, so an
+ *  access that strides something else keeps its cast and its key. `kleod:SetupBG3WindowOverlay`'s
+ *  `gBgInfo` derives `elemSize 4` and still reaches this table at stride 28, in both arms.
+ *
+ *  What this table admits, censused over the artifact's 370 agbcc rows: map-less 8 rows / 10 keys,
+ *  map-ful 10 rows / 12 keys. TWO shapes, and the arms differ:
+ *
+ *    • the STRUCT ELEMENT — no `intType`, members read at a displacement — 9 keys map-less, 10
+ *      map-ful, and the only shape `cast-base`'s ablation reaches. The map-ful extra is
+ *      `kleod:StreamCmd_SetBGScroll`'s `gBgInfo`, a pool word the map-less lift leaves NUMERIC: the
+ *      map is what makes it a named global, not anything the licence read from the map.
+ *    • a PLAIN SCALAR LEAF with no cast anywhere, which only `single-use`'s ablation admits — and a
+ *      reader deciding whether `single-use` can be put back needs it named. Both inhabitants reach
+ *      this table for a reason that is NOT an interior read. `kleod:UpdateCameraScroll`'s
+ *      `gSineTable` (both arms) is refused a declaration on `interior-or-non-access`'s NON-ACCESS
+ *      half: one clean load, and the same element address feeding three other `add`s.
+ *      `pokeemerald:Sin2`'s `gSineDegreeTable` (map-ful only) is refused nothing — it DERIVES
+ *      `elemSize 2` unsigned, and map-less that is what it is spelled as, so there is no key. The
+ *      symbol map declares the same element SIGNED, map-first wins, and an unsigned load through a
+ *      signed declaration cannot be spelled bare, so the cast comes back and with it the key.
  *
  *  WHY `single-use` GOES. The rule's theory is that one access re-materializes as cheaply as a
  *  named local, which is a guess about the source in the absence of evidence; here there is

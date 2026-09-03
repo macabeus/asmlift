@@ -42,14 +42,13 @@
 //
 // THE ORDER LICENCE HAS TWO CONSUMERS, and they are asking different questions of the same fact.
 // `inferGlobalArrays` asks "how is this name DECLARED", which needs the order licence AND a
-// whole-element subscript to spell. `orderLicensedGlobals` (bottom of this file) asks only "was the
+// whole-element subscript to spell. `orderLicensedGlobals` asks only "was the
 // base materialized before the index was scaled", which is what decides whether the address has a
 // HOME — a pointer local `T *p = (T *)&gSym; p[i]` — or is re-derived inline at each access.
 //
-// THE TWO CONSUMERS DO NOT SHARE A MECHANISM, and the first cut of this paragraph said they did
-// ("the SAME `build_array_ref` fork: an array-typed object and a pointer local both expand their
-// base ahead of the subscript"). That is FALSE for the pointer local, and one more compile settles
-// it. Through the benchmark's own agbcc command, at element width 2:
+// THE TWO CONSUMERS DO NOT SHARE A MECHANISM — they share an OBSERVABLE, and the difference
+// matters because only one of the two mechanisms is what the opt-in datum below names. Compiled
+// through the benchmark's own agbcc command, at element width 2:
 //
 //     A  extern u16 gTbl[];  return gTbl[i];               ldr / lsl / add   base first
 //     B  u16 *p = (u16 *)&gTbl; return p[i];               ldr / lsl / add   base first
@@ -62,39 +61,39 @@
 // statement of its own, evaluated before the subscript, and on a compiler with no instruction
 // scheduler that ordering survives into the object. Both roads lead to the same observable, which
 // is why one licence serves both consumers, and the observable is what the licence reads. Two
-// consequences follow and are stated rather than hidden: the opt-in datum this module reads
-// (`compilerBehaviors.arrayShapeFromStride`, whose own doc in target.ts describes the FORK and is
-// correct about it) is narrower than the second consumer's mechanism, so the home axis is denied to
-// compilers that have the statement ordering without the fork — under-reach, unmeasured, and a
-// datum of its own is what would fix it; and `index-materialized-first` is SOUND for the
-// declaration (index-first ⇒ not a declared array, which F does not touch) and only a heuristic for
-// the home (F is a home that compiles index-first), which is why `ORDER_SHAPE_GATES` below owns its
-// rules instead of selecting that one.
+// consequences follow: the opt-in datum this module reads is about the FORK alone, so it is
+// narrower than the home consumer's mechanism (target.ts `arrayShapeFromStride` states that
+// under-reach); and `index-materialized-first` is SOUND for the declaration (index-first ⇒ not a
+// declared array, which F does not touch) and only a heuristic for the home (F is a home that
+// compiles index-first), which is why `ORDER_SHAPE_GATES` below owns its rules instead of
+// selecting that one.
 //
 // So the order half licenses the HOME on its own, for every name the declaration half refuses for a
-// reason that is NOT about the order. Censused over the artifact's 370 agbcc rows (359 lift) in
-// BOTH symbol-map arms — and the two arms come out IDENTICAL name for name and key for key, which
-// is the opposite of what an earlier revision of this paragraph claimed. It quoted two different
-// pairs of numbers as if the arms differed, and mis-split the one arm it had; both readings of
-// "key" are therefore spelled out here, because the population narrows once and the sentence has
-// to say which step it is counting:
+// reason that is NOT about the order. Censused over the artifact's 370 agbcc rows in BOTH
+// symbol-map arms. The population narrows twice, so each line says which step it counts:
 //
-//     licence-only NAMES                        11 names on 9 rows, both arms
-//     …their base keys in the L3 tree           10 keys on 8 rows — 8 a STRUCT ELEMENT's cast
-//                                               base, 2 a plain scalar leaf, both arms
-//     …of those, keys `ORDERBASE_GATES` admits   9 keys on 7 rows — 8 cast, 1 leaf, both arms
+//                                                MAP-LESS                MAP-FUL
+//     licence-only NAMES                         10 on 8 rows            11 on 9 rows
+//     …their base keys in the L3 tree            10 keys on 8 rows       11 keys on 9 rows
+//                                                8 cast, 2 plain leaf    9 cast, 2 plain leaf
+//     …of those, keys `ORDERBASE_GATES` admits    9 keys on 7 rows       10 keys on 8 rows
+//                                                8 cast, 1 plain leaf    9 cast, 1 plain leaf
 //
-// `interior-or-non-access` refuses all eleven, and it is the rule's TWO HALVES that make the two
-// shapes, not one half twice. The STRUCT ELEMENT has no `intType` and reads its members at a
-// displacement — the INTERIOR half; `kleod:EntityItemDrop`'s `gEntity` is a plain scalar leaf
-// refused the same way (a `store` at +15). The other leaf is refused on the NON-ACCESS half
-// instead: `kleod:UpdateCameraScroll`'s `gSineTable` is read once, cleanly, at width 2, and its
-// element address is also an operand of another `add`, so nothing there is at a displacement at
-// all — which is why the ORDER consumer records ONE access under that name and no null width.
-// (`pokeemerald:Sin2`'s `gSineDegreeTable`, which the earlier revision named here, is not in this
-// population on either arm: it DERIVES, so the declaration half refuses it nothing.) Neither shape
-// says any less about the order than a clean access does. `ADDRESS_GATES` below is therefore two
-// halves: the ELEMENT rules, which both consumers ask, and the DECLARATION rule, which only the
+// THE ARMS DIFFER BY ONE NAME, and not because the licence reads the map — it never does. The map
+// resolves a pool word the map-less lift leaves NUMERIC, so `kleod:StreamCmd_SetBGScroll`'s
+// `gBgInfo` is a named global on one arm and no global at all on the other. Every other name is
+// identical across the two.
+//
+// `interior-or-non-access` is the FIRST refusal of every name in that population, on both arms, and
+// it is the rule's TWO HALVES that make the two shapes rather than one half twice. The STRUCT
+// ELEMENT has no `intType` and reads its members at a displacement — the INTERIOR half;
+// `kleod:EntityItemDrop`'s `gEntity` is a plain scalar leaf refused the same way (stores at +2, +8,
+// +9, +12, +15, +16 and +20). The other leaf is refused on the NON-ACCESS half instead:
+// `kleod:UpdateCameraScroll`'s `gSineTable` is read once, cleanly, at width 2, and its element
+// address is also an operand of three other `add`s, so nothing under that name is at a displacement
+// at all — which is why the ORDER consumer records ONE access there and no null width. Neither
+// shape says any less about the order than a clean access does. `ADDRESS_GATES` below is therefore
+// two halves: the ELEMENT rules, which both consumers ask, and the DECLARATION rule, which only the
 // first does.
 //
 // WHAT REFUSES — and the list is DOWN THERE, not here. The refusals are two `Gate<Ctx>` tables
@@ -261,22 +260,15 @@ interface AddressUse {
  *  sound entries in this file's address half, and only the second is in the declaration half, so
  *  the one shared sound rule is `address-escapes`.
  *
- *  A SHARED RULE OBJECT IS NOT SHARED COVERAGE, and this table went one branch with none: every
- *  `guardedBy` below names a test in the DECLARATION's suite, and the sweep that prices those rules
- *  by ablation runs `inferGlobalArrays` — which measures what a rule is worth to the declaration
- *  and says nothing about the licence. Measured rather than
- *  argued, `address-escapes` is uniquely load-bearing for the licence too — on its own fixture
- *  `orderLicensedGlobals` returns nothing and returns `gTbl` with the rule removed — so the hole
- *  was real, and the `arrbias` case an earlier revision of this comment claimed as the order
- *  consumer's coverage is not coverage at all: it contains no ablation, and ablating EVERY rule in
- *  both halves still licenses nothing there, because the addend `add`'s only consumer is the index
- *  `add`, so that fixture records no access to license. The coverage is now the licence's own
- *  per-rule ablation sweep beside this module ('the order licence: which rule decides…'), which
- *  runs `orderLicensedGlobals` with one rule removed on a fixture that REACHES the licence — for
- *  the two address rules that means a clean base-first access beside the rejected use, the same
- *  "the fixture is part of the claim" the declaration sweep already states. All five rules any
- *  input reaches measure uniquely load-bearing there; `address-unused` is the sixth and has no
- *  reaching fixture in either consumer. */
+ *  A SHARED RULE OBJECT IS NOT SHARED COVERAGE. Every `guardedBy` below names a test in the
+ *  DECLARATION's suite, and those ablations run `inferGlobalArrays` — which prices a rule against
+ *  the declaration and says nothing about the licence. The licence has its own per-rule sweep
+ *  beside this module ('the order licence: which rule decides…'), running `orderLicensedGlobals`
+ *  with one rule removed on fixtures that REACH it: for an address rule that means a clean
+ *  base-first access BESIDE the rejected use, since a fixture whose only use is the rejected one
+ *  records no access either way and prices nothing. All five rules any input reaches measure
+ *  uniquely load-bearing there; `address-unused` is the sixth and has no reaching fixture in
+ *  either consumer. */
 export const ELEMENT_ADDRESS_GATES: readonly Gate<AddressUse>[] = [
   {
     id: 'address-escapes',
@@ -337,8 +329,8 @@ export const DECLARATION_ADDRESS_GATES: readonly Gate<AddressUse>[] = [
   },
 ];
 
-/** The two halves in the order they were always asked, so the shape derivation's attribution is
- *  rule-for-rule what it was before the split. */
+/** Both halves, ELEMENT first: the one ordered table `inferGlobalArrays` asks, and the order the
+ *  declaration's attribution is stated in. */
 export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [...ELEMENT_ADDRESS_GATES, ...DECLARATION_ADDRESS_GATES];
 
 /** Everything one symbol's surviving accesses evidence, reduced to the facts `SHAPE_GATES` decide
@@ -357,8 +349,8 @@ interface ShapeEvidence {
    *  null case is spelled over the whole set (`widths.includes(null)`) or, where the rule is
    *  really about one address, off that access's own `elementWidth` below.
    *
-   *  THE SHAPE HAS A CORPUS INHABITANT, and it is not the one the fix's own first draft named.
-   *  Instrumented over the artifact's 370 agbcc rows on BOTH symbol-map arms, three licensed
+   *  THE SHAPE HAS A CORPUS INHABITANT. Instrumented over the artifact's 370 agbcc rows on BOTH
+   *  symbol-map arms, three licensed
    *  symbols record a clean access and an interior one under one name — `kleod:EntityDeathAnimation`'s
    *  `gEntityArray` (`widths` `[null, 2]`), `kleod:EntityItemDrop`'s `gEntity` (`[null, 2, 1]`) and
    *  `kleod:TransformSingleEntityToScreen`'s `gUnk_03002920` (`[2, null]`). Only the third records
@@ -394,9 +386,9 @@ interface ShapeEvidence {
 
 /** THE TWO ORDER PREDICATES, shared by the declaration table below and by `ORDER_SHAPE_GATES`.
  *  Shared as FUNCTIONS rather than as rule OBJECTS: the predicate really is the same question in
- *  both places, while `sound`, `why` and the guard are not — see `ORDER_SHAPE_GATES`, where the
- *  first cut of that table shared the objects and inherited a disjunct that is not about the
- *  order at all. */
+ *  both places, while `sound`, `why` and the guard are not — and sharing a rule OBJECT would also
+ *  carry `no-positive-evidence`'s second disjunct, which is not about the order (`ORDER_SHAPE_GATES`
+ *  states what that admits). */
 const anIndexFirstAccess = (e: ShapeEvidence): boolean => e.perAccess.some((a) => a.baseFirst === false);
 const noOrderEvidence = (e: ShapeEvidence): boolean => !e.perAccess.some((a) => a.baseFirst === true);
 
@@ -404,16 +396,13 @@ const noOrderEvidence = (e: ShapeEvidence): boolean => !e.perAccess.some((a) => 
  *  `((T *)&gSym)[i]`, which is byte-identical under any declaration. */
 export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   {
-    // Attributing on the fixture below: with it removed `mixed-extension` refuses the same symbol
-    // (measured). The MECHANISM stated here used to be "the width collapses to the first access's",
-    // and that stopped being true when the width rules were made to read each access's own
-    // `elementWidth`; re-measured on the fixture, `widths` is `[2, 4]` and `signs` is
-    // `[false, true]`, so `mixed-extension` refuses on `some(w < 4) && signs.length !== 1` — the
-    // sub-word read really does disagree about its extension — while `stride-is-not-the-element`,
-    // which the collapse used to make refuse, now DERIVES there on its own (each access's stride is
-    // its own width). Only the order of the two rules keeps the attribution where it was. It is
-    // first because "one name, two element types" is the reason and the extension disagreement is a
-    // symptom of it.
+    // Attributing on the fixture below: with it removed `mixed-extension` refuses the same symbol.
+    // Measured there, `widths` is `[2, 4]` and `signs` is `[false, true]`, so the substitute refuses
+    // on `some(w < 4) && signs.length !== 1` — the sub-word read really does disagree about its
+    // extension — while `stride-is-not-the-element` DERIVES on that fixture (each access's stride IS
+    // its own element width, which is what reading `perAccess[i].elementWidth` buys). Only the order
+    // of the two rules keeps the attribution here. It is first because "one name, two element types"
+    // is the reason and the extension disagreement is a symptom of it.
     id: 'mixed-access-width',
     why: 'two widths under one name have no single element type to declare',
     sound: false,
@@ -506,9 +495,9 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
 
 /** The rules that decide the ORDER LICENCE — `orderLicensedGlobals`' shape half.
  *
- *  ITS OWN TWO RULES, sharing the PREDICATES above and nothing else, because the first cut of this
- *  table selected `SHAPE_GATES`' pair by id and that was a real over-admission rather than a style
- *  point. `no-positive-evidence` is a DISJUNCTION — an order fact OR a constant on the index — and
+ *  ITS OWN TWO RULES, sharing the PREDICATES above and nothing else. Selecting `SHAPE_GATES`' pair
+ *  by id instead is an over-admission rather than a style point:
+ *  `no-positive-evidence` is a DISJUNCTION — an order fact OR a constant on the index — and
  *  only the first disjunct is about the order. A constant on the index evidences a SUBSCRIPT (see
  *  the header: agbcc folds a constant added to a pointer or cast base into the relocation addend,
  *  so a runtime `add` against a bare `.word gSym` is a shape only the array form produces); it says
@@ -516,42 +505,41 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
  *  scales that constant exactly as `g[i + 1]` does. Compiled through the benchmark's own agbcc
  *  command, `extern u8 gTbl[]; s8 *p = (s8 *)gTbl; return gTbl[i + 1] + p[j];` has no scaling
  *  anywhere — every access is width 1 — so `baseFirst` is `undefined` at every access, and the
- *  selected table licensed `gTbl` on the constant alone, handing `/orderbase` a home the assembly
- *  never evidenced. Over the artifact's 370 agbcc rows the shipped difference is ONE name
- *  (`synthetic:harridx`'s `gTbl`, licensed with no access whose `baseFirst` is `true`, and shaped
- *  there so the structurer spells it bare); the compiled counterexample is what says the class is
- *  not that one row.
+ *  selected table licenses `gTbl` on the constant alone, handing `/orderbase` a home the assembly
+ *  never evidenced. Over the artifact's 370 agbcc rows the difference between the two tables is ONE
+ *  name on both symbol-map arms (`synthetic:harridx`'s `gTbl`, licensed by the selection with no
+ *  access whose `baseFirst` is `true`, and shaped there so the structurer spells it bare); the
+ *  compiled counterexample is what says the class is not that one row.
  *
- *  SHARING RULE OBJECTS DOES NOT SHARE PREMISES, and `sound` is where the two consumers part
- *  company. In `SHAPE_GATES` both rules are sound: what is derived there is a DECLARATION, and a
+ *  `sound` IS WHERE THE TWO CONSUMERS PART COMPANY. In `SHAPE_GATES` both rules are sound: what is
+ *  derived there is a DECLARATION, and a
  *  wrong one changes the meaning of every access to the name. Here nothing is declared — the
  *  licence only OFFERS `/orderbase` a candidate beside the inline spelling, which the differ then
  *  referees — so an over-licensed name costs fan and a tie-break, never meaning, and these two are
  *  heuristics. Under-licensing is a lost candidate for the same reason, and this table really does
- *  under-license: a pointer local whose initializer is NOT a separate statement,
- *  `u16 *p; return (p = (u16 *)&gTbl)[i];`, compiles INDEX-first (measured, same command), so
- *  `order-index-first` declines a home that is really there. That is the direction the table is
- *  allowed to be wrong in, and it is why neither rule is `sound` here.
+ *  under-license: row F of the header's compile table is a home that comes out INDEX-first, so
+ *  `order-index-first` declines it. That is the direction the table is allowed to be wrong in, and
+ *  it is why neither rule is `sound` here.
  *
  *  What IS shared is the predicate, so an edit to either reaches both consumers — while each rule
  *  object carries its own `sound`, `why` and `guardedBy`, so the guard the contract test checks is
  *  one that ablates the rule against THIS consumer rather than against the declaration. */
 export const ORDER_SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   {
-    // ITS GUARD HAS TO BE THE MIXED SHAPE, and naming the minimal pair instead was a guard that
-    // priced nothing: on BOTH halves of `base-first licenses, index-first does not` this rule can
-    // be removed and the licence is unchanged, because on the index-first half the single access
-    // has `baseFirst === false` and `no-order-evidence` — which wants ONE access that says `true` —
-    // refuses anyway. The input where the two rules come apart is a name with one index-first
-    // access AND one base-first access: there `no-order-evidence` is satisfied and only this rule
-    // refuses. Over the artifact's 370 agbcc rows (359 lift) that shape has no inhabitant, and both
-    // readings of "no inhabitant" were measured on BOTH symbol-map arms rather than one inferred
-    // from the other: of the 33 symbols that reach this table, 1 has an index-first access and 0
-    // have accesses in both orders, and this rule alone blocks 0 names where `no-order-evidence`
-    // blocks 13. So it is kept for the class rather than for a row, and the fixture is what shows
-    // the class is real: compiled through the benchmark's own agbcc command,
-    // `((u16 *)gTbl)[i] + gTbl[j]` is a different object from `gTbl[i] + gTbl[j]` (and the same one
-    // as `((u16 *)gTbl)[i] + ((u16 *)gTbl)[j]`), so the first access's order really does decide.
+    // ITS GUARD HAS TO BE THE MIXED SHAPE. On BOTH halves of the minimal pair `base-first licenses,
+    // index-first does not` this rule can be removed and the licence is unchanged, because on the
+    // index-first half the single access has `baseFirst === false` and `no-order-evidence` — which
+    // wants ONE access that says `true` — refuses anyway. The input where the two rules come apart
+    // is a name with one index-first access AND one base-first access: there `no-order-evidence` is
+    // satisfied and only this rule refuses. Over the artifact's 370 agbcc rows that shape has no
+    // inhabitant, and "no inhabitant" is two censuses rather than one inferred from the other, both
+    // taken on BOTH symbol-map arms: of the symbols that reach this table (33 map-less, 34 map-ful)
+    // 1 has an index-first access and 0 have accesses in both orders, and this rule alone blocks 0
+    // names where `no-order-evidence` blocks 13. So it is kept for the class rather than for a row,
+    // and the fixture is what shows the class is real: compiled through the benchmark's own agbcc
+    // command, `((u16 *)gTbl)[i] + gTbl[j]` is a different object from `gTbl[i] + gTbl[j]` (and the
+    // same one as `((u16 *)gTbl)[i] + ((u16 *)gTbl)[j]`), so the first access's order really does
+    // decide.
     id: 'order-index-first',
     why: 'a scaling of the index precedes the pool load in its own block — the inline pointer path, which has no home',
     sound: false,
@@ -796,10 +784,10 @@ function baseFirst(a: Access, pos: Map<Op, { b: number; i: number }>): boolean |
 function evidenceOf(accs: Access[], pos: Map<Op, { b: number; i: number }>): ShapeEvidence {
   const perAccess = accs.map((a) => {
     const strides = stridesOf(a);
-    // THIS access's own width, never the first one's. Reading `accs[0]` was safe only behind
+    // THIS access's own width, never the first one's. `accs[0]` is safe only behind
     // `mixed-access-width`, which is in the declaration table and NOT in the order table — so on
-    // the second consumer a clean access recorded ahead of an interior one lent the interior one
-    // its width, and a mid-element test against a fabricated element is a lie in the licence's
+    // the second consumer a clean access recorded ahead of an interior one would lend the interior
+    // one its width, and a mid-element test against a fabricated element is a lie in the licence's
     // favour. Null — an interior access, which only the order consumer records — is no element
     // width, so there is no whole number of elements for a constant to be, and the answer is the
     // refusal.
