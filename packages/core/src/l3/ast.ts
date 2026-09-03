@@ -233,6 +233,13 @@ export type Stmt =
   // Pascal backend MUST loud-fail a `fallsThrough` case (it has no faithful spelling), exactly as it
   // loud-fails `field`/`cast`. Recovery must therefore only set `fallsThrough` when the fall-through
   // target is the emission-adjacent case.
+  //
+  // COUNT ITS INHABITANTS BY INSTRUMENTING THE PRINTER, NEVER BY GREPPING THE TOKEN. A source grep
+  // for `fallsThrough: true` finds only hand-written fixtures by construction, because recovery
+  // computes the flag rather than spelling it — so reading that grep as "no assembly produces one"
+  // is wrong. The jump-table regime has spelled a real one on the corpus since before the round
+  // that gave the comparison-tree regime its own producer: `case 4:` of
+  // `kleod:UpdateWorldMapNodeAnim`, whose emitted source that round left byte-identical.
   | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[]; defaultAt?: number }
   | { k: 'return'; value?: Expr };
 

@@ -373,9 +373,19 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       // rebinding happens — for every producer, not just the two switch regimes.
       //
       // `continue;` is NOT rebound and is NOT refused: C binds it to the smallest enclosing
-      // ITERATION statement, which a `switch` is not, so it means exactly what L3 means by it. The
-      // one transform that could change that — folding a `while` into a `for`, where `continue`
-      // runs the increment — already scans switch arms for it (`hasEnclosingContinue`).
+      // ITERATION statement, which a `switch` is not, so it means exactly what L3 means by it.
+      // THREE passes re-spell a loop into one whose `continue` would run a different increment,
+      // not one, and each scans switch arms for the node before it fires:
+      //   · structure.ts `recognizeForLoops`  `while` → `for`     — `hasEnclosingContinue`
+      //   · l3/reindex.ts `respellCountdown`  `dowhile` → `for`   — the `body-exit` gate
+      //   · l3/unreduce.ts                    loop → closed form  — the `continue-in-body` gate
+      // (backend/pascal.ts desugars `for` → `while` with the increment appended, which moves a
+      // `continue` past it — harmless only because that backend loud-fails every `continue`.)
+      // ABLATED rather than read: dropping either of the last two fails a test naming `continue`;
+      // dropping the first leaves the whole suite green, because NOTHING MINTS THE NODE — the only
+      // `{ k: 'continue' }` in packages/*/src is its own declaration in l3/ast.ts, and the one
+      // dataset symbol whose C carries a `continue` (`continueloop`) is recovered without one. So
+      // every rule here is a contract on a future producer, this printer's silence included.
       for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {
         if (switchBoundBreakIn(body)) {
           throw new Error('c backend: a switch arm carries a loop-scoped `break;`, which C would bind to the switch');
