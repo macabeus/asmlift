@@ -1878,7 +1878,8 @@ export function enumerateCandidates(
     //     `/orderbase` candidates it then deletes anyway. Firing less often is not a defence.
     // A per-row label/source diff catches the last two, and CANNOT catch the first. Both of those
     // delete `unsigned/orderbase` off `synthetic:bgarr:agbcc`, the exact source that row publishes
-    // as its score-0 MATCH, on BOTH arms. The per-function reading needs `/setup-args` AND
+    // as its score-0 MATCH — a row carrying no symbol map, so its single arm is the one the gate
+    // actually runs. The per-function reading needs `/setup-args` AND
     // `/orderbase` in ONE label, and of the corpus's 742 published winner labels three carry
     // `/orderbase`, six carry `/setup-args` and NONE carries both — so a green corpus gate is
     // evidence about two of these readings and none at all about the third.
