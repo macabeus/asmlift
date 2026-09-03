@@ -154,10 +154,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // POSITION it names:
   //   - the chain RE-THREADED the arm order (`orderIntact` false), so the emitted list is no longer
   //     the one the layout count describes and no position in it means what the count says. This
-  //     one is whole-switch because the re-threading is; a per-position reading (bracket the label
-  //     between the two arms that straddle it in layout, then map that into the emitted list) is
-  //     possible and unbuilt — nothing has needed it, since a compiler that lays bodies out in
-  //     source order writes a falling arm directly above its target and so re-threads nothing;
+  //     one is whole-switch because the re-threading is. A per-position reading — bracket the label
+  //     between the two arms that straddle it in LAYOUT, then map that into the emitted list — is
+  //     possible and unbuilt, and hard to need: a compiler that lays bodies out in source order
+  //     already writes a falling arm directly above its target, so the order it declares is a chain
+  //     order too;
   //   - the LAST emitted arm falls through, which can only be into the default (the adjacency
   //     check leaves no other target) — the label must then be last, which IS `undefined`;
   //   - the position lands directly after a falling arm, where printing the label would divert
