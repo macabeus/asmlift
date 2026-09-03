@@ -1852,20 +1852,41 @@ export function enumerateCandidates(
     // nothing. Which GENERALIZES to every axis carrying a licence — a skip like it is sound exactly
     // where the axis would have emitted no candidate, so a sound one shrinks the fan by zero, so it
     // removes no COMPILE, and compiling candidates is where a ranked run's cost is; what it saves is
-    // one `admittedBases` walk per tree.
+    // one `admittedBases` walk per tree. That is the licence-shaped case of the cost rule
+    // `docs/level-tower.md` already states for the whole ranked population — an inert axis pays no
+    // re-spellings and no compiles — which is the paragraph a round that sets out to shrink this
+    // fan starts from, so the specialisation is cross-referenced there rather than only here.
     // Measured on `LoadBGTilemapData` — the klonoa `gfx` function whose fan raised the
     // question, a standalone repro rather than a benchmark row — the licence is empty on every lift
     // variant of BOTH symbol-map arms: four named symbols DO reach the licence table map-ful and the
     // ADDRESS gates refuse all four, so "the pool spells no names" is not the reason. The skip would
-    // fire on every tree there and remove not one candidate. Over 108 enumerations of smaller
-    // klonoa functions across both arms it fired 1,830 of 1,941 asks and lost none of the 77
-    // `/orderbase` candidates the axis contributes to that population.
+    // fire on every tree there and remove not one candidate. Over the wider population — the 103
+    // klonoa `asm/nonmatchings` functions under 4 KB, of the 182 there, the 54 that lift, both
+    // symbol-map arms, so 108 enumerations — it lost none of the 77 `/orderbase` candidates the
+    // axis contributes to it. ONE ARM CARRIES THAT CONTROL AND THE OTHER CANNOT: all 77 are
+    // map-ful, so the 54 map-less enumerations show the skip harmless where the axis has no
+    // inhabitant to lose, which is not evidence that the predicate is right. (Its firing counts —
+    // 1,298 of 1,409 asks map-ful, 532 of 532 map-less — needed a scratch patch that is not in this
+    // tree; the candidate counts are re-derivable from `enumerateCandidates` alone.)
     //
-    // IF IT IS EVER BUILT ANYWAY, the licence is per LIFT VARIANT and never per function:
-    // `/setup-args` narrows the lift and can license a name the base lift does not, so reading one
-    // variant's licence for the whole function deletes four live candidates on `sub_806800C` in the
-    // sa3 checkout — again a checkout function, not a row — namely `unsigned/setup-args/orderbase`
-    // and its `/flip-join`, `/derived-home` and `/flip-join/derived-home` siblings, in both arms.
+    // IF IT IS EVER BUILT ANYWAY, IT IS `orderLicensedGlobals(fn, target)` READ AT THE SITE BELOW
+    // that hands `orderLicensed` to the structuring call, per LIFT VARIANT — never per function,
+    // and never either of the two predicates standing beside it there. All three wrong readings
+    // delete the SAME four live candidates on `sub_806800C` in the sa3 checkout — again a checkout
+    // function, not a row — in BOTH arms: `unsigned/setup-args/orderbase` and its `/flip-join`,
+    // `/derived-home` and `/flip-join/derived-home` siblings.
+    //   · PER FUNCTION — `/setup-args` narrows the lift and can license a name the base lift does
+    //     not, so the first variant's answer is not the function's.
+    //   · `inferGlobalArrays`, seven lines above the licence call and off the same `fn` — a
+    //     documented strict SUBSET (`raise/globalshape.ts`), and empty where the licence is not:
+    //     three klonoa `gfx` functions in the sweep above license a name and shape none, so this
+    //     reading deletes every `/orderbase` candidate on them. It is also the one wrong reading a
+    //     corpus gate would catch, because it deletes the exact source `synthetic:bgarr:agbcc`
+    //     publishes as its MATCH — which the per-function reading does not, so passing that gate
+    //     says nothing about this row's other two neighbours.
+    //   · the licence RECOMPUTED after `raiseRecovered`, the next statement — `raise/globalshape.ts`
+    //     says in its own module note that the raising tower destroys the order evidence, so it
+    //     reads empty everywhere and the skip fires on every tree.
 
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
