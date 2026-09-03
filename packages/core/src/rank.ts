@@ -1842,6 +1842,48 @@ export function enumerateCandidates(
       // `order-licensed` would refuse every key anyway and this only saves the census.
       ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_ADMISSIONS : []),
     ];
+    // AND THE SAME SKIP KEYED ON THE LICENCE ITSELF WOULD BUY NOTHING, which is worth a paragraph
+    // because this row is where the next reader will propose it. `orderLicensedGlobals` is decidable
+    // on the lifted fn, so the row could also be dropped wherever THAT set is empty. It would be
+    // sound, and it would be inert, for the same one reason: an empty licence stamps no
+    // `baseOrdered` (structure.ts `stampOrderedBases`), so `order-licensed` refuses every key, so
+    // `hoist` returns null and this row's three emission sites — two `respell`s and the `enumerate`
+    // whose generator fans over volatile SUBSETS, so the third is a set and not one spelling — emit
+    // nothing. Which GENERALIZES to every axis carrying a licence: a skip like it is sound exactly
+    // where the axis would have emitted no candidate, so a sound one shrinks the fan by zero, so it
+    // removes no COMPILE, and one compile per candidate is where a ranked run's cost is; what it
+    // saves is one `admittedBases` walk per tree. `docs/level-tower.md` carries the general form.
+    // Measured on klonoa's `LoadBGTilemapData`, the checkout function whose 112,896-candidate fan
+    // raises the question: the licence is empty on every lift variant of BOTH symbol-map arms —
+    // four named symbols DO reach the licence table map-ful and the ADDRESS gates refuse all four,
+    // so "the pool spells no names" is not the reason — and the skip fires on every tree there and
+    // removes not one candidate.
+    //
+    // IF IT IS EVER BUILT ANYWAY, IT IS `orderLicensedGlobals(fn, target)` READ AT THE SITE BELOW
+    // that hands `orderLicensed` to the structuring call, PER LIFT VARIANT — never per function,
+    // and never either of the two predicates standing beside it in that same loop. All three wrong
+    // readings delete the SAME four live candidates on `sub_806800C` in the sa3 checkout, in BOTH
+    // arms: `unsigned/setup-args/orderbase` and its `/flip-join`, `/derived-home` and
+    // `/flip-join/derived-home` siblings.
+    //   · PER FUNCTION — `/setup-args` narrows the lift and can license a name the base lift does
+    //     not, so the first variant's answer is not the function's.
+    //   · `inferGlobalArrays`, seven lines above the licence call and off the same `fn` — a
+    //     documented strict SUBSET (`raise/globalshape.ts`), and measurably empty on functions
+    //     where the licence is not, several of them carrying `/orderbase` candidates.
+    //   · the licence RECOMPUTED after `raiseRecovered` — not the next statement but the third,
+    //     ten lines down, past the map-precedence delete over `inferredSymbols` and
+    //     `applyIdiomPatterns`. `raise/globalshape.ts` says in its own module note that the raising
+    //     tower destroys the order evidence, but the tempting next step — "so it reads empty
+    //     everywhere and the skip is free" — is FALSE: it reads NON-empty on a function whose
+    //     `/orderbase` candidates it then deletes anyway. Firing less often is not a defence.
+    // A per-row label/source diff catches the last two, and CANNOT catch the first. Both of those
+    // delete `unsigned/orderbase` off `synthetic:bgarr:agbcc`, the exact source that row publishes
+    // as its score-0 MATCH — a row carrying no symbol map, so its single arm is the one the gate
+    // actually runs. The per-function reading needs `/setup-args` AND
+    // `/orderbase` in ONE label, and of the corpus's 756 published winner labels three carry
+    // `/orderbase`, six carry `/setup-args` and NONE carries both — so a green corpus gate is
+    // evidence about two of these readings and none at all about the third.
+
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
     // number of products. Memoized on the gate table's identity. The value is a list of key
