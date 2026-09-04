@@ -3219,7 +3219,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   ): Stmt[] => {
     const target = succ.block;
     const argExpr = sub ? exprWith(sub) : expr;
-    const copies: { name: string; value: Expr; arg: Value }[] = [];
+    const copies: { name: string; value: Expr; arg: Value; param: Value }[] = [];
     const suppressed = suppressedArgs.get(succ);
     target.params.forEach((p, i) => {
       if (suppressed?.has(i) || !keepSlot(i)) {
@@ -3234,20 +3234,37 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         droppedUndefCopies.push({ name, pred });
         return;
       }
-      copies.push({ name, value: intoDeclaredTemp(name, argExpr(arg)), arg });
+      copies.push({ name, value: intoDeclaredTemp(name, argExpr(arg)), arg, param: p });
     });
-    // Emit in the order the args are COMPUTED in `pred` — a compiler that lays the defining ops
-    // (and thus the copies that read them) out in that order matches with no spurious arg-swap.
-    // This is a per-compiler behavior (orderArgCopiesByComputation), not a universal: a compiler
-    // that emits copies in source/param order sets it false. Dependency ordering (sequentialize)
-    // still has the final say regardless.
+    // Emit in the order the pred WROTE the destinations — a compiler that lays the copies out in
+    // that order matches with no spurious arg-swap. This is a per-compiler behavior
+    // (orderArgCopiesByComputation), not a universal: a compiler that emits copies in source/param
+    // order sets it false. Dependency ordering (sequentialize) still has the final say regardless —
+    // and it is why the order matters beyond cosmetics: in a CYCLIC copy `sequentialize` spills the
+    // FIRST pending destination, and the register the compiler overwrote first is exactly the one
+    // whose old value it had to save (the others still read it), so the machine's write order makes
+    // that spill the compiler's own temp.
+    //
+    // The write order is the frontend's measurement (ir/core.ts `WriteOrder`): the value graph
+    // cannot show it, because a copy is the same SSA value under a new key. A pred no builder
+    // measured — parsed IR, a block a pass minted — keeps the def-position proxy, which puts an
+    // in-block def after every incoming param and so, on a cycle between a param and a def, always
+    // spills the param's destination; that is a guess the record replaces, not a rule it refines.
     if (orderArgCopiesByComputation) {
-      // opIndex is only valid for a def IN this block; a def elsewhere keeps indexOf's -1 (sorts first).
-      const pos = (v: Value) => {
-        const d = defs.get(v);
-        return d && opBlock.get(d) === pred ? opIndex.get(d)! : -1;
-      };
-      copies.sort((a, b) => pos(a.arg) - pos(b.arg));
+      const written = fn.writeOrder?.writes.has(pred) ? fn.writeOrder.lastWrite.get(pred) : undefined;
+      if (fn.writeOrder?.writes.has(pred)) {
+        // a destination the pred never wrote takes -1: the arg passes through, and it sorts first
+        // exactly where the proxy below put an outside def
+        const at = (p: Value) => written?.get(p) ?? -1;
+        copies.sort((a, b) => at(a.param) - at(b.param));
+      } else {
+        // opIndex is only valid for a def IN this block; a def elsewhere keeps indexOf's -1 (sorts first).
+        const pos = (v: Value) => {
+          const d = defs.get(v);
+          return d && opBlock.get(d) === pred ? opIndex.get(d)! : -1;
+        };
+        copies.sort((a, b) => pos(a.arg) - pos(b.arg));
+      }
     }
     return sequentialize(
       copies.map(({ name, value }) => ({ name, value })),

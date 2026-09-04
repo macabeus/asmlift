@@ -165,6 +165,57 @@ const CASES: OfflineCase[] = [
     note: 'cmpwi vs 0 + conditional return — divergent-if against an immediate (emit pinned; this is a live near-miss on recompile, ppc-mwcc.test)',
     expect: 's32 clamp0(s32 a0) {\n    if (a0 < 0) {\n        return 0;\n    } else {\n        return a0;\n    }\n}\n',
   },
+
+  // ── gcd on every ISA: the latch's parallel copy is spelled in the COMPILER's write order ──────
+  // `while (b) { t = b; b = a % b; a = t; }` — a cyclic copy at the latch, which `sequentialize`
+  // breaks by spilling the first pending destination. Every one of these compilers overwrote the
+  // DIVISOR's register first (`bl __modsi3`→r0, `mfhi a1`, `subf r4`) and copied its old value to a
+  // scratch beforehand, so the temp must be `t0 = <divisor>`; the def-position proxy spilled the
+  // dividend on all four. The frontend's write-order record (ir/core.ts `WriteOrder`) is what the
+  // structurer reads to get this right, and on agbcc it also orders the ENTRY copies (`add r2, r0`
+  // before `add r0, r1` ⇒ `v1 = a0; v0 = a1;`). All four are benchmark rows: synthetic:gcd:agbcc,
+  // synthetic:gcd:gcc2.7.2kmc, synthetic:gcd:ido7.1 and synthetic:gcd:mwcc_242_81 — the first,
+  // third and fourth score MATCH with exactly this text; kmc's residual is the loop-init home
+  // (`coalesceLoopInit`), not the latch.
+  {
+    file: 'agbcc-gcd.s',
+    sym: 'gcd',
+    target: ARMV4T_AGBCC,
+    note: 'gcd — latch cycle spills the divisor (write order), entry copies dividend-first',
+    expect:
+      's32 gcd(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 t0;\n    v1 = a0;\n    v0 = a1;\n' +
+      '    while (v0 != 0) {\n        t0 = v0;\n        v0 = v1 % v0;\n        v1 = t0;\n    }\n' +
+      '    a0 = v1;\n    return a0;\n}\n',
+  },
+  {
+    file: 'gcc-gcd.asm',
+    sym: 'gcd',
+    target: MIPS_GCC,
+    note: 'gcd — latch cycle spills the divisor; the delay-slot `move a0,v0` is the LAST write',
+    expect:
+      's32 gcd(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 t0;\n    if (a1 != 0) {\n' +
+      '        v0 = a1;\n        v1 = a0;\n        do {\n            t0 = v0;\n            v0 = v1 % v0;\n' +
+      '            v1 = t0;\n        } while (v0 != 0);\n        a0 = v1;\n    }\n    return a0;\n}\n',
+  },
+  {
+    file: 'ido-gcd.asm',
+    sym: 'gcd',
+    target: MIPS_IDO,
+    note: 'gcd — latch cycle spills the divisor, loop homed on the parameters (coalesceLoopInit)',
+    expect:
+      's32 gcd(s32 a0, s32 a1) {\n    s32 t0;\n    if (a1 != 0) {\n        do {\n            t0 = a1;\n' +
+      '            a1 = a0 % a1;\n            a0 = t0;\n        } while (a1 != 0);\n    }\n    return a0;\n}\n',
+  },
+  {
+    file: 'ppc-gcd.asm',
+    sym: 'gcd',
+    target: PPC_MWCC,
+    note: 'gcd — latch cycle spills the divisor (`subf r4` before `mr r3, r5`)',
+    expect:
+      's32 gcd(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 t0;\n    v0 = a1;\n    v1 = a0;\n' +
+      '    while (v0 != 0) {\n        t0 = v0;\n        v0 = v1 % v0;\n        v1 = t0;\n    }\n' +
+      '    return v1;\n}\n',
+  },
 ];
 
 describe('offline corpus: committed disassembly → decompile → golden C (no toolchain)', () => {

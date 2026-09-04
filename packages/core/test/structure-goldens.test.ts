@@ -178,3 +178,34 @@ test('pool-global recovery + base-CSE hoist, as emitted C (full pipeline)', () =
       '    p0[2] = 3;\n    return 3;\n}\n',
   );
 });
+
+// The SAME swap cycle with the frontend's write-order record attached (ir/core.ts `WriteOrder`):
+// the latch wrote v1's register FIRST, then v0's, then v2's. `sequentialize` spills the first
+// pending destination, so the record decides WHICH member becomes the temp — here v1, where the
+// def-position proxy above (a param sorts before an in-block def) always picks v0. The parsed
+// golden above stays as it is: a parsed Fn carries no record, and that refusal is what it pins.
+test('a swap cycle with a write-order record spills the member the pred wrote first', () => {
+  const fn = parse(SWAP_CYCLE);
+  verify(fn);
+  recoverTypes(fn);
+  const [, header, latch] = fn.blocks;
+  const [v0, v1, v2] = header.params;
+  fn.writeOrder = {
+    lastWrite: new Map([
+      [
+        latch,
+        new Map([
+          [v1, 0],
+          [v0, 1],
+          [v2, 2],
+        ]),
+      ],
+    ]),
+    writes: new Map([[latch, 3]]),
+  };
+  expect(cBackend.emit(structure(fn))).toBe(
+    's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
+      '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
+      '        t0 = v1;\n        v1 = v0;\n        v0 = t0;\n    }\n    return v0;\n}\n',
+  );
+});
