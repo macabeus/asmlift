@@ -754,7 +754,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // the one asmlift has nowhere to put. When agbcc runs out of registers, the locals that lose
   // global allocation each get a frame slot, and WHICH slot is decided by declaration order:
   // reload hands out slots walking pseudos in ascending number (gcc/reload1.c:769-770), a user
-  // local's pseudo is numbered at its `expand_decl` (gcc/stmt.c:3324), and the frame grows upward
+  // local's pseudo is numbered at its `expand_decl` (gcc/stmt.c:3323-3324; line numbers are the
+  // real toolchain's, not an instrumented copy's), and the frame grows upward
   // (gcc/function.c:703-757; thumb.h:569 has FRAME_GROWS_DOWNWARD commented out). So the k-th
   // spilled local BY DECLARATION sits at the k-th slot, above any volatile/address-taken local
   // (those get their slot at declaration time, gcc/stmt.c:3312, and sit below every spill).
@@ -774,7 +775,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //   • `spillorder_rev` is the CONTROL: the identical body with the declaration list reversed in
   //     the source, so the target's slot order is the one asmlift's walk already emits. It
   //     MATCHES, which proves the six rows are the order alone. It is also the zero-flip read for
-  //     the rule once it ships: an agreeing order must be a no-op.
+  //     the rule once it ships: an agreeing order must be a no-op. Its limit: it detects a sort
+  //     that DISAGREES with the target (its target differs from `spillorder`'s in exactly six
+  //     `[sp,#k]` lines), but it cannot tell a correct sort from no sort, so it scores 0 today and
+  //     pins nothing on its own — `spillorder` is the row that moves.
   //
   // Attribution: `spillorder` declines nothing — it lifts, structures and ranks 40 candidates —
   // and its 6 is a missing per-target DEFAULT, not a missing axis: no site sorts a candidate's
@@ -782,10 +786,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // hand compiles to 0. The same hand reorder of `dma_fill_uninit`'s published candidate takes
   // its 12 (twelve `[sp,#k]` rows) to 0, and on the klonoa function this family was cut from,
   // LoadBGTilemapData, permuting the six spilled locals of the winning candidate in place takes
-  // 386 → 376 against `build/src/gfx.o` (of its stack-slot classes, 12 + 17 rows, the permutation
-  // leaves 2 + 2, a reload eviction; the 194 register rows stay). It is the one source-visible
-  // property of a declaration list this
-  // round found the allocator answering deterministically: count, scope, type and address-taking
+  // 386 → 376 against `build/src/gfx.o` (of its stack-slot classes, 12 `stack slot` + 17 `register +
+  // stack slot` rows, the permutation leaves 2 + 2, a reload eviction; the other 15 mixed rows
+  // become register-only rows, 179 → 194, and no register row is fixed). It is the one
+  // source-visible property of a declaration list this round found the allocator answering deterministically: count, scope, type and address-taking
   // all move a score too, but through the compiler's own temporaries, whose registers no
   // declaration list predicts (34 reorderings of the project's reference, 0 named locals rehomed).
   // That register half is a published null and gets NO row, because the capability that would
@@ -803,7 +807,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // saves — nothing spills) and its frontend declines both objects earlier anyway (`branch to
   // 0xbc is not a block boundary`, a MIPS-frontend blocker seven ido rows already carry);
   // gcc2.7.2kmc compiles each to 50 instructions with zero `(sp)` accesses; mwcc_242_81 emits
-  // only `stwu r1,-32(r1)` and `stw r0,36(r1)`. On those lanes the rows would pin another
+  // only `stwu r1,-32(r1)` and `stw r0,36(r1)`, and on that lane asmlift declines both at the PPC
+  // frontend's frame gate before any candidate is compiled (`stack pointer r1 used as data
+  // (address-taken local / frame arithmetic) — not supported`; each row smoked once widened to
+  // mwcc_242_81, 0.1–0.6 s, m2c declined too). On those lanes the rows would pin another
   // family's blocker or nothing, so they are left off. The DIRECTION of the law differs by
   // compiler (a call-carrying probe of 14 locals, 24 on mwcc: ascending on agbcc and both
   // gcc 2.7.2 lanes, DESCENDING on ido7.1 and mwcc_242_81), which is why the capability is a per-target datum and
@@ -825,7 +832,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9];' +
       ' break; default: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];' +
       'v9=p[19]; break; } for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
-    features: ['value-home'],
+    features: ['value-home', 'array'],
     toolchains: ['agbcc'],
     ctx: 'int spillorder(int k, int *p);',
   },
@@ -836,7 +843,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9];' +
       ' break; default: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];' +
       'v9=p[19]; break; } for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
-    features: ['value-home'],
+    features: ['value-home', 'array'],
     toolchains: ['agbcc'],
     ctx: 'int spillorder_rev(int k, int *p);',
   },
@@ -2200,20 +2207,37 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // `spill10` is the DECLINING row for the multi-word shape the STILL MISSING paragraph names,
   // selected by residual shape rather than by subject: ten locals loaded from `p[0..9]` and read
-  // across a `callee(i)` loop, no address taken anywhere. agbcc spills three of them ([sp],
-  // [sp,#4], [sp,#8]) and each store reaches the `bl` unread with its lower slots supplied — the
-  // exact outgoing-argument ambiguity the refusal models, except that here every slot is a spill
-  // and the refusal is a false alarm. asmlift declines it with `stack pointer used as data — the
+  // across a `callee(i)` loop, no address taken anywhere. agbcc gives three user locals a frame
+  // slot — two of the ten, `v3` at [sp] and `v4` at [sp,#4], plus the accumulator `s` at [sp,#8] —
+  // and the 0x18 frame's other three slots are compiler temporaries: the loop-invariant products
+  // `p[0]*3` / `p[1]*5` at [sp,#0xc] / [sp,#0x10] and a caller-save of `v9` at [sp,#0x14] around
+  // the `bl`. So every slot is a spill, none is address-taken, and each store reaches the `bl`
+  // unread with its lower slots supplied — the exact outgoing-argument ambiguity the refusal
+  // models, and here a false alarm. asmlift declines it with `stack pointer used as data — the
   // store to [sp,#0] reaches \`bl callee\` unread with its lower slots supplied — it may be that
-  // call's outgoing stack argument`. That line is the first blocker of 9 of the 51 klonoa
-  // functions ranked in the LoadBGTilemapData round and of all four stack-heavy siblings it tried,
-  // so the row pins a population, not one function; and once the gate opens the row becomes a
-  // spill-slot-order inhabitant (`spillorder`, in the uninit-local block): the source declares
-  // its three spilled locals in one order and asmlift's naming walk will emit another.
+  // call's outgoing stack argument`. That line is the first blocker of 7 of the 51 klonoa
+  // functions selected in the LoadBGTilemapData round (11 of the 51 declined; two more decline on
+  // sibling sp refusals, one address-taken and one declared-arity), so the row pins a population,
+  // not one function. The four stack-heavy siblings that round also ran decline on OTHER links of
+  // the same stack-addr chain, which this row does not measure: two on the declared-arity refusal
+  // (`callee \`SetupOAMSprite\` is declared with 9 arguments`, `stkarg`'s shape), one address-taken
+  // (`a store at [+4] through the captured address`), one `sp moves in a block that neither
+  // returns nor is the entry`.
+  // What sits behind the refusal was MEASURED by ablating it (the `prefixStored` branch in
+  // frontend/thumb.ts forced false, bundle rebuilt, cache OFF): the row then lifts and ranks 16
+  // candidates, best 24 — 19 register rows and 5 loop-entry rows (a `[sp,#8]` store deleted and
+  // a reload replaced, an inserted `mov`, `cmp r1,r10` vs `cmp r0,#0`, `bge` vs `ble`: the `for`
+  // rendered as `if (0 >= a0)` + `do {} while`) and NO row whose difference is a `[sp,#k]`
+  // offset. The naming walk emits `v0..v9, v10, v11` and the target's slots are `v3@[sp]
+  // v4@[sp,#4] s@[sp,#8]`, the same order. So this row pins the multi-word refusal ONLY; it is
+  // NOT a spill-slot-order inhabitant (`spillorder`, in the uninit-local block, is), and once the
+  // gate opens its residual belongs to the register half of value-home.
   // agbcc only, by measurement: ido7.1 and gcc2.7.2kmc decline it at the call (`function call
-  // 'jal' … MIPS calls not yet modelled`, a blocker of 6 ido / 32 kmc declined rows) and
-  // mwcc_242_81 does not spill it at all (52 instructions, `stwu`/`stw r0` only), so those lanes
-  // would pin another family's blocker or nothing. Its `value-home` tag is the judgement that
+  // 'jal' … MIPS calls not yet modelled`, a blocker of 6 ido / 32 kmc declined rows), and on
+  // mwcc_242_81 asmlift declines it at the PPC frontend's frame gate before any candidate is
+  // compiled (`stack pointer r1 used as data (address-taken local / frame arithmetic) — not
+  // supported`; smoked once with the row widened to that lane, 0.7 s, m2c declined too), so those
+  // lanes would pin another family's blocker. Its `value-home` tag is the judgement that
   // the diff, once it lifts, is WHERE the ten locals live; it cannot carry `stack-addr`, whose
   // floor is a unary `&` the source does not contain.
   // m2c NONCOMPILES it on the identical `ctx` (``unksp8' undeclared (first use in this function)`):
@@ -2291,7 +2315,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '    }\n' +
       '    return s;\n' +
       '}',
-    features: ['value-home'],
+    features: ['value-home', 'array'],
     toolchains: ['agbcc'],
     ctx: 'int callee(int); int spill10(int k, int *p);',
     proto: { callee: { params: 1 } },
