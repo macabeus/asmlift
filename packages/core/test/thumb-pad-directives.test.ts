@@ -230,17 +230,23 @@ _e:
     expect(() => d('am', asm)).toThrow(/pc-relative load at item 2 → 0x22222222/);
   });
 
-  test('`.align 2` with no fill operand STILL declines loud (unknown fill bytes)', () => {
-    const asm = `	thumb_func_start nf
+  test('an UNMODELLED fill still declines loud — those bytes are real instructions', () => {
+    // The fill VALUE, not the size: `-(base + at) mod 4` is the same arithmetic whatever the fill
+    // is. 0xFFFF is not padding, so there is no pad instruction to put in the stream and the
+    // directive stays out of the layout entirely — which is what the message says.
+    const asm = (dir: string) => `	thumb_func_start nf
 nf:
 	ldr r0, [pc, #0x000]
 	b _e
-	.align 2
+${dir}
 	.4byte 0x030052A4
 _e:
 	bx lr
 `;
-    expect(() => d('nf', asm)).toThrow(/'\.align' makes item sizes unknowable/);
+    expect(() => d('nf', asm('	.align 2, 0xFF'))).toThrow(FrontendUnsupportedError);
+    expect(() => d('nf', asm('	.align 2, 0xFF'))).toThrow(/'\.align' fills with bytes this frontend does not model/);
+    // …and with no fill operand the assembler's own code fill IS a pad encoding, so it lifts.
+    expect(d('nf', asm('	.align 2')).source).toBe('s32 nf(void) {\n    return 50352804;\n}\n');
   });
 
   test('`.align 3, 0` STILL declines loud — the base is only knowable mod 4', () => {
@@ -282,7 +288,7 @@ nz:
 _e:
 	bx lr
 `;
-    expect(() => d('nz', asm)).toThrow(/'\.align' makes item sizes unknowable/);
+    expect(() => d('nz', asm)).toThrow(/'\.align' fills with bytes this frontend does not model/);
   });
 
   test('`.balign` and `.p2align` are the same directive and are sized the same way', () => {
@@ -341,8 +347,12 @@ ${dir}
 _e:
 	bx lr
 `;
-    for (const dir of ['	.balign 4', '	.p2align 2', '	.balign 8, 0', '	.p2align 3, 0', '	.balign 3, 0', '	.balign 4, 0, 2']) {
+    for (const dir of ['	.balign 8, 0', '	.p2align 3, 0', '	.balign 3, 0', '	.balign 4, 0, 2']) {
       expect(() => d('nf', withDir(dir))).toThrow(/makes item sizes unknowable/);
+    }
+    // …and the sizable ones read as the same 4-byte alignment `.align 2, 0` spells.
+    for (const dir of ['	.balign 4', '	.p2align 2', '	.align 2, 0']) {
+      expect(d('nf', withDir(dir)).source).toBe('s32 nf(void) {\n    return 50352804;\n}\n');
     }
   });
 
@@ -468,13 +478,17 @@ _end:
     expect(d('q', f('	.align 2, 0')).source).toBe(asInstr);
   });
 
-  test('an UNSIZABLE alignment over reachable bytes declines, whatever else the slice needs', () => {
-    // None of these four forms can be sized (no fill operand, a nonzero fill, a max-skip limit, an
-    // alignment wider than the base is known to), and all four emit bytes into the instruction
-    // stream at a point control reaches. The check used to live inside the byte-layout branch, so
-    // a function with a labelled pool and no pc-relative load skipped it entirely and lifted with
+  test('an alignment this pass cannot READ over reachable bytes declines, whatever the slice needs', () => {
+    // These forms emit bytes into the instruction stream at a point control reaches, and leave one
+    // of the two questions open. The check used to live inside the byte-layout branch, so a
+    // function with a labelled pool and no pc-relative load skipped it entirely and lifted with
     // the directive's bytes missing — and decoding the `.2byte 0x0000` pad at parse time took the
     // last shape that forced that branch away with it.
+    //
+    // The two questions are separate, and the refusal says which one it tested. `.align 2, 0, 4`
+    // and `.align 3, 0` leave the byte COUNT open (a max-skip threshold; a base known only mod 4).
+    // `.align 2, 0xFF` is perfectly sizable — the count is `-(base + at) mod 4` and does not
+    // depend on the fill — but 0xFFFF is a real undefined instruction, not padding.
     const hz = (dir: string) => `	thumb_func_start hz
 hz:
 	ldr r0, _p
@@ -484,10 +498,38 @@ ${dir}
 _p: .4byte 0x030052A4
 `;
     expect(d('hz', hz('')).source).toBe('s32 hz(void) {\n    return 50352804;\n}\n');
-    for (const dir of ['	.align 2', '	.align 2, 0, 4', '	.align 3, 0', '	.align 2, 0xFF', '	.balign 4']) {
+    for (const dir of ['	.align 2, 0, 4', '	.align 3, 0', '	.balign 8', '	.p2align 3, 0']) {
       expect(() => d('hz', hz(dir))).toThrow(FrontendUnsupportedError);
       expect(() => d('hz', hz(dir))).toThrow(/makes item sizes unknowable/);
     }
+    for (const dir of ['	.align 2, 0xFF', '	.balign 4, 0x20']) {
+      expect(() => d('hz', hz(dir))).toThrow(FrontendUnsupportedError);
+      expect(() => d('hz', hz(dir))).toThrow(/fill bytes are not a pad encoding/);
+    }
+  });
+
+  test('an alignment with NO fill operand is the assembler nop, not an unsizable form', () => {
+    // Ground truth, `arm-none-eabi-as` + objdump: `movs r0, #1` then `.align 2` in a `.thumb`
+    // `.text` assembles to `0120 c046` — gas fills a code section with 0x46C0, the ARM7TDMI nop
+    // that is already PAD_ENCODINGS[1]. So the size is plain arithmetic and the fill is a pad
+    // encoding this frontend models; refusing it as "unsizable" described neither the code nor the
+    // assembler. The `, 0` spelling of the SAME directive fills with 0x0000 — `lsls r0, r0, #0`,
+    // which sets the flags — so the two must NOT lift to the same C, and they do not.
+    const f = (pad: string) => `	thumb_func_start rf
+rf:
+	b _c
+	.4byte 0x11111111
+_c:
+	movs r1, #0x05
+${pad}
+	bx lr
+`;
+    const asNop = d('rf', f('	nop')).source;
+    expect(asNop).toBe('s32 rf(s32 a0) {\n    return a0;\n}\n');
+    for (const dir of ['	.align 2', '	.balign 4', '	.p2align 2']) {
+      expect(d('rf', f(dir)).source).toBe(asNop);
+    }
+    expect(d('rf', f('	.align 2, 0')).source).toBe('s32 rf(s32 a0) {\n    return a0 << 0;\n}\n');
   });
 
   test('an unsizable alignment SEALED off by a branch is still not a refusal', () => {

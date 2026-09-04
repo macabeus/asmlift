@@ -442,9 +442,11 @@ interface FlatItem {
   instr?: Instr;
   /** a data directive's payload, kept in-stream so byte layout is computable */
   data?: { halfwords: boolean; values: string[]; inCode: boolean };
-  /** a `.align pow, 0` whose zero-fill byte count depends on the function's base alignment —
-   *  resolved into pad instructions by the layout pass, which is the first place that knows it */
-  align?: { pow: number };
+  /** an alignment directive whose fill byte count depends on the function's base alignment —
+   *  resolved into pad instructions by the layout pass, which is the first place that knows it.
+   *  `fill` is the halfword encoding the assembler repeats: 0x0000 for an explicit `, 0`, 0x46C0
+   *  (the Thumb nop) for no fill operand. Both are PAD_ENCODINGS entries. */
+  align?: { pow: number; fill: number };
 }
 
 /** One hypothesis about a function's base alignment, laid out: the item stream with every
@@ -491,7 +493,11 @@ function decode(
   // cannot be lifted at all, whatever else the slice needs. A labelled data table's bytes are
   // data: they can only shift the offsets of what follows, which matters only when something in
   // the slice actually needs byte-accurate offsets.
-  const hazards: { at: number; what: string; code: boolean }[] = [];
+  //
+  // `why` says which question the directive left unanswered, so the refusal can state the fact it
+  // actually tested: 'size' (how many fill bytes) or 'fill' (which bytes they are). A data
+  // directive leaves only the first open.
+  const hazards: { at: number; what: string; code: boolean; why?: 'size' | 'fill' }[] = [];
   let dataLabel: string | null = null;
   let pendingFn = false;
   let pendingArm = false;
@@ -577,32 +583,53 @@ function decode(
         hazards.push({ at: flat.length - 1, what: `.${raw[1]}`, code: false }); // size unknown / non-word
         continue;
       }
-      // `.align N, 0` emits (-address) mod 2^N ZERO bytes — the pad, spelled as the directive
-      // that produces it. Kept as an item so the layout walk can size it (below); its byte count
-      // is not knowable here, which is why it was a hazard before. Every OTHER form stays a
-      // hazard: without an explicit 0 fill the bytes are not necessarily zero (GNU as pads
-      // `.text` with nop patterns), and a third operand is a max-skip that suppresses the
-      // padding entirely past a threshold this frontend does not model.
+      // `.align N[, fill]` emits (-address) mod 2^N bytes of `fill` — the pad, spelled as the
+      // directive that produces it. Kept as an item so the layout walk can size it (below); its
+      // byte count is not knowable here, which is why it was a hazard before.
+      //
+      // It asks TWO questions, and fusing them is what made the old refusal describe neither the
+      // code nor the assembler ("makes item sizes unknowable" for a form whose size is plain
+      // arithmetic). HOW MANY bytes is `-(base + at) mod 2^N` and does not depend on the fill at
+      // all; WHICH bytes those are is the fill operand. Only the second can make a sizable
+      // alignment unliftable, and only when something can execute the bytes.
+      //
+      //   size unknown  — a max-skip third operand (padding suppressed past a threshold this
+      //                   frontend does not model), a non-numeric N, or N above the 4-byte
+      //                   boundary the base is recovered to. This bound is load-bearing rather
+      //                   than cautious: the layout pass recovers the function's base address only
+      //                   MOD 4 (from 4-aligned pool words), so sizing `.align 3, 0` would mean
+      //                   picking one of four base residues the input says nothing about.
+      //   fill unknown  — an explicit fill this pass cannot map to a pad encoding (`.align 2, 0xFF`
+      //                   emits a real, undefined instruction, not padding).
+      //
+      // The two fills it CAN map are ground truth from `arm-none-eabi-as`, not inference: an
+      // explicit `, 0` gives 0x0000 (`lsls r0, r0, #0`), and NO fill operand in a Thumb code
+      // section gives 0x46C0 — `movs r0, #1` then `.align 2` assembles to `0120 c046`, the nop
+      // that is already PAD_ENCODINGS[1]. (gas pads to the next even offset with 0x00 first, but
+      // base ∈ {0, 2} and every item size is even, so the fill is always whole halfwords.) Both
+      // are pad encodings, so the fill enters the stream as the same `Instr` item the other two
+      // spellings produce and `isPadInstr` + the reachability prune decide it the same way.
       //
       // `.p2align` is `.align` with the power-of-two reading made explicit and `.balign` is the
       // same directive counting BYTES; GNU as emits identical fill for all three. They are read
       // here for the same reason the pad halfword is decoded above: a directive this pass does not
       // recognise contributes ZERO bytes to the layout while emitting real ones, which silently
       // retargets every branch and pool load after it.
-      //
-      // N > 2 stays a hazard, and this bound is load-bearing rather than cautious: the layout pass
-      // recovers the function's base address only MOD 4 (from 4-aligned pool words), so it can
-      // size a fill to a 4-byte boundary and no further. Sizing `.align 3, 0` would mean picking
-      // one of four base residues the input says nothing about.
       const ad = rest.match(/^\.(align|balign|p2align)\b\s*(.*)$/);
       if (ad) {
-        const am = ad[2].trim().match(/^(\d{1,3})\s*,\s*0$/);
+        const am = ad[2].trim().match(/^(\d{1,3})(?:\s*,\s*([^,]*?))?\s*$/); // N [, fill]; max-skip → no match
         const n = am ? Number(am[1]) : NaN;
         const pow = ad[1] === 'balign' ? Math.log2(n) : n;
-        if (Number.isInteger(pow) && pow <= 2) {
-          flat.push({ align: { pow } });
+        // No fill operand → the assembler's own code-section fill; `, 0` → zeros. Anything else
+        // (including an empty `.align 2,`) is a fill this pass does not model.
+        const fillText = am?.[2]?.trim();
+        const fill = fillText === undefined ? 0x46c0 : /^0[xX]?0*$/.test(fillText) ? 0x0000 : null;
+        if (!(Number.isInteger(pow) && pow <= 2)) {
+          hazards.push({ at: flat.length - 1, what: `.${ad[1]}`, code: true, why: 'size' });
+        } else if (fill === null) {
+          hazards.push({ at: flat.length - 1, what: `.${ad[1]}`, code: true, why: 'fill' });
         } else {
-          hazards.push({ at: flat.length - 1, what: `.${ad[1]}`, code: true });
+          flat.push({ align: { pow, fill } });
         }
       }
       continue; // other directives skipped
@@ -768,8 +795,9 @@ function decode(
       return true;
     };
     const sealedFill = flat.map((f, i) => f.align !== undefined && !fillIsReachable(i));
-    // An alignment directive this pass could NOT size (no fill operand, a nonzero fill, a max-skip
-    // limit, an alignment wider than the base is known to) records a hazard instead of an item —
+    // An alignment directive this pass could not READ — its byte count unknown (a max-skip limit,
+    // an alignment wider than the base is known to) or its fill bytes unknown (a fill that is not
+    // a pad encoding) — records a hazard instead of an item,
     // and its fill bytes are still in the instruction stream. If anything can execute them the
     // function cannot be lifted, whether or not the slice needs byte offsets for another reason;
     // reading the size question as a LAYOUT question only is what let a `.2byte 0x0000` pad, once
@@ -788,18 +816,27 @@ function decode(
     );
     if (liveHazard) {
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': '${liveHazard.what}' emits fill into the code stream and makes item sizes unknowable`,
+        `cannot lift '${name}': '${liveHazard.what}' emits fill into the code stream and ` +
+          (liveHazard.why === 'fill'
+            ? `its fill bytes are not a pad encoding this frontend models — they are real instructions`
+            : `makes item sizes unknowable`),
       );
     }
     const needsLayout = flat.some(
       (f, i) => (f.data?.inCode ?? false) || isPcRelLdr(f.instr) || (f.align !== undefined && !sealedFill[i]),
     );
     if (needsLayout) {
-      // Only a hazard WITHIN this function's slice makes its layout unknowable.
+      // Only a hazard WITHIN this function's slice makes its layout unknowable. A fill this pass
+      // cannot model keeps the directive out of the item stream entirely, so it contributes no
+      // size here even though its count is arithmetic — a different fact from an unknown count,
+      // and the message says which one it is.
       const sliceHazard = hazards.find((h) => h.at >= sliceStart && h.at < boundaries[boundaryIdx]);
       if (sliceHazard) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': raw-encoded input needs byte-accurate layout, but '${sliceHazard.what}' makes item sizes unknowable`,
+          `cannot lift '${name}': raw-encoded input needs byte-accurate layout, but '${sliceHazard.what}' ` +
+            (sliceHazard.why === 'fill'
+              ? `fills with bytes this frontend does not model, so it contributes no size to the layout`
+              : `makes item sizes unknowable`),
         );
       }
       // ── the function's base alignment is SOLVED, not derived ─────────────────────────────────
@@ -837,7 +874,7 @@ function decode(
             for (let k = 0; k < fill; k += 2) {
               offs.push(at + k);
               from.push(-1);
-              items.push({ instr: padHalfword(0)! });
+              items.push({ instr: padHalfword(f.align.fill)! });
             }
             at += fill;
             return;
