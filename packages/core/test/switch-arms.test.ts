@@ -150,27 +150,90 @@ test('a compiler that has not declared layout-order arms keeps the ascending spe
   }
 });
 
-test('a default entry the DISPATCH hands a value to still declines, and keeps the write', () => {
-  // The other refusal in the same neighbourhood, pinned. Here `bne` branches straight to the
-  // merge, so the default entry is a block with a PARAMETER and the edge into it carries `w = 0`.
-  // Collapsing the tree discards that edge, and an edge's only emission is its copy — so a
-  // `switch` with no default would drop the write and look entirely ordinary doing it. Recovery
-  // declines to if-nesting, which spells every copy the assembly performs.
-  //
-  // Structural on purpose, not "would this copy elide anyway": it costs nothing, because agbcc
-  // reaches its default through a jump of its own (the collapsed `b .Ldefault` blocks above),
-  // which carries the copies into the default ARM instead of onto a dispatch branch.
+// ── THE DISPATCH HOIST ───────────────────────────────────────────────────────────────────────────
+// Collapsing a comparison tree discards its edges, and an edge's only emission is its parallel
+// copy — so an entry the DISPATCH hands values to used to decline the whole recovery, at three
+// separate sites (a case entry with a phi, a default entry with parameters, an arm fallen into
+// with parameters). All three now read one rule: merge those copies and emit them ONCE above the
+// `switch`, which is where the target's own layout puts them. The pair below is the shape and its
+// refusal; `hoistedDispatchAssigns` (structure.ts) states what the refusal is.
+
+/** `bne` branches straight to the merge, so the default entry is a block with a PARAMETER and the
+ *  edge into it carries `w = 0` — the exact shape the three refusals shared. */
+const hoistedDefault =
+  'f:\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tcmp\tr0, #0x2\n\tbne\t.Lend\t@cond_branch\n' +
+  '.Lc2:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+  '.Lc1:\n\tadd\tr2, r1, #0x1\n' +
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+
+test('a default entry the DISPATCH hands a value to is recovered, with the write hoisted above', () => {
+  const out = of(hoistedDefault);
+  expect(out).toContain('switch (a0)');
+  // the write the collapsed edge carried, re-emitted ONCE and ABOVE the switch
+  expect(out).toMatch(/v0 = 0;\s*\n\s*switch \(a0\)/);
+  expect(count(out, 'v0 = 0;')).toBe(1);
+  expect(out).toContain('v0 = a1 + 2;');
+  expect(out).toContain('v0 = a1 + 1;');
+});
+
+test('two dispatch edges handing one entry DIFFERENT values decline — no hoisted statement says both', () => {
+  // The refusal that makes the admission an admission. Both `bne`s land on the merge, whose
+  // parameter they bind to 0 on one path and to 9 on the other. Which one runs depends on which
+  // test fell through, and one statement above the tree cannot depend on that — so recovery goes
+  // back to if-nesting, which spells both.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n\tmov\tr3, #0x9\n' +
+      '\tcmp\tr0, #0x2\n\tbgt\t.Lhi\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbne\t.Lend\t@cond_branch\n' +
+      '.Lc1:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lhi:\n\tmov\tr2, r3\n\tcmp\tr0, #0x3\n\tbne\t.Lend\t@cond_branch\n' +
+      '.Lc3:\n\tadd\tr2, r1, #0x3\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('= 9;'); // both values survive, each on the path that writes it
+  expect(out).toContain('= 0;');
+});
+
+test('a hoisted argument computed INSIDE the collapsed tree declines — the hoist may not speculate', () => {
+  // The availability rule. `.Lt` is a test block the tree would collapse, and it computes the
+  // value its own dispatch edge hands the merge. Evaluating that at the ROOT runs it on every path
+  // through the dispatch, including the ones the original never took it on — so recovery declines
+  // rather than move it. (PRE4 licenses re-rendering a collapsed op AT ITS USE, which is dominated
+  // by the def; the hoist's position is not, which is why it asks separately.)
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '.Lt:\n\tlsl\tr2, r1, #0x2\n\tcmp\tr0, #0x2\n\tbne\t.Lend\t@cond_branch\n' +
+      '.Lc2:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Lc1:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('a1 << 2'); // the shift stays on the path that reaches it
+});
+
+test('a hoisted write that would CLOBBER a name still live in an arm declines', () => {
+  // The third refusal, and the one whose absence is a miscompile rather than a nonmatch. The
+  // merge's parameter adopts the name `a1` (case 1's edge hands it exactly that value), and the
+  // fall-out edge binds the same parameter to 0 — so the hoist would write `a1 = 0;` above the
+  // switch, where `case 2:` still reads the PARAMETER: `a1 + 2` would compute `2`. The naming
+  // walk's own interference check cannot see it, because it judged a write ON THE EDGE and the
+  // hoist moves that write above the dispatch. Declining gives back the if-nesting, which writes
+  // the name only on the path that reaches it.
   const out = of(
     'f:\n\tmov\tr2, #0x0\n' +
       '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
       '\tcmp\tr0, #0x2\n\tbne\t.Lend\t@cond_branch\n' +
       '.Lc2:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
-      '.Lc1:\n\tadd\tr2, r1, #0x1\n' +
+      '.Lc1:\n\tmov\tr2, r1\n\tb\t.Lend\n' +
       '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
   );
-  expect(out).not.toContain('switch');
-  expect(out).toContain('v0 = 0;'); // the write the discarded edge carried
-  expect(out).toContain('v0 = a1 + 2;');
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('a1 = a1 + 2;'); // the parameter is still the parameter where it is read
+  expect(out).not.toMatch(/a1 = 0;\s*\n\s*switch/);
 });
 
 test('two case values sharing ONE body have the same layout index, and stay in value order', () => {
@@ -1013,6 +1076,7 @@ test('every withholding on the `default:` position, one call each', () => {
     switchArmsFollowLayout: true,
     spellSwitchFallthrough: true,
     emitsOwnStatement: () => false,
+    hoistDispatchCopies: () => [],
     expr: () => ZERO,
     structureRegion: () => [],
   };

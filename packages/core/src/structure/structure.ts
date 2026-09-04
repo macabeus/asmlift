@@ -3281,15 +3281,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return !(anchoredHome.get(name) ?? []).some(writesBefore);
   };
   const tempCounter = { n: 0 }; // per-function swap-cycle temp names (sequentialize)
-  // The copies for ONE specific successor record — the workhorse behind argAssigns, taken
-  // directly by the switch_br path, whose duplicate case targets successorTo cannot
-  // disambiguate.
-  const argAssignsFor = (
+  /** One record per parameter slot an edge ACTUALLY carries, in the order the copies are to be
+   *  laid out — everything `argAssignsFor` does except `sequentialize`. Split out because Regime-A
+   *  switch recovery merges the records of a whole DISPATCH's edges and sequentializes the union
+   *  ONCE (`hoistedDispatchAssigns` below); sequentializing per edge and then deduping would mint
+   *  a swap-cycle temp per edge and spell a different program. */
+  const edgeCopyRecords = (
     pred: Block,
     succ: { block: Block; args: Value[] },
     sub: Map<Value, string> | null = null,
     keepSlot: (i: number) => boolean = () => true,
-  ): Stmt[] => {
+  ): { name: string; value: Expr; arg: Value; param: Value }[] => {
     const target = succ.block;
     const argExpr = sub ? exprWith(sub) : expr;
     const copies: { name: string; value: Expr; arg: Value; param: Value }[] = [];
@@ -3375,8 +3377,77 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             };
       copies.sort((a, b) => rank(a) - rank(b));
     }
+    return copies;
+  };
+  // The copies for ONE specific successor record — the workhorse behind argAssigns, taken
+  // directly by the switch_br path, whose duplicate case targets successorTo cannot
+  // disambiguate.
+  const argAssignsFor = (
+    pred: Block,
+    succ: { block: Block; args: Value[] },
+    sub: Map<Value, string> | null = null,
+    keepSlot: (i: number) => boolean = () => true,
+  ): Stmt[] =>
+    sequentialize(
+      edgeCopyRecords(pred, succ, sub, keepSlot).map(({ name, value }) => ({ name, value })),
+      varType,
+      tempCounter,
+      fn.name,
+    );
+  /** THE DISPATCH HOIST (Regime-A switch recovery). Recovering a comparison tree COLLAPSES its
+   *  test blocks, and an edge's only emission is its parallel copy — so every copy the dispatch's
+   *  edges carried would be discarded with the tree. This re-emits them ONCE, above the `switch`,
+   *  which is where the target's own layout puts them (agbcc opens `sw_fall` with `mov r1, #0`,
+   *  IDO's third instruction is `move v1,zero`) and the only position that survives a fall-through
+   *  chain: per-arm copies RE-RUN on the fall path and overwrite what the falling arm computed,
+   *  the hazard Regime B states at its own `switch_br` refusal.
+   *
+   *  Null (⇒ the caller declines to if-recovery, which spells every copy the asm performs) on the
+   *  two things one hoisted statement cannot say. Both are stated over NAMES, because the name is
+   *  what the statement writes:
+   *
+   *    - DISAGREEING EDGES. Two edges binding one name to different values: which one runs depends
+   *      on which test fell through, and a single statement above the tree cannot depend on that.
+   *      Order-independent, so no emission order hides it.
+   *    - A CLOBBERED LIVE NAME. The hoisted write runs on EVERY path through the dispatch,
+   *      including into arms whose own edge did not carry it. If any value under that name is
+   *      live where the switch begins, or into one of its arms, the hoist would overwrite a value
+   *      those readers still want. (An arm's own parameters are not at risk: `liveIn` kills them
+   *      at their block, and binding them is what the hoist is for.)
+   *
+   *  What it does NOT re-check is that evaluating an arg AT THE ROOT rather than on its edge is
+   *  value-preserving. That rests on the collapsed blocks being pure (switch-recover.ts's PRE4)
+   *  and on every hoisted arg being available at the root, which the caller establishes before
+   *  calling — the hoist depends on those rules, it does not weaken them. */
+  const hoistedDispatchAssigns = (
+    edges: readonly { pred: Block; succ: { block: Block; args: Value[] } }[],
+    liveAt: readonly Block[],
+  ): Stmt[] | null => {
+    const merged = new Map<string, { name: string; value: Expr; arg: Value; param: Value }>();
+    for (const { pred, succ } of edges) {
+      for (const c of edgeCopyRecords(pred, succ)) {
+        const prev = merged.get(c.name);
+        if (prev === undefined) {
+          merged.set(c.name, c);
+        } else if (prev.arg !== c.arg) {
+          return null; // disagreeing edges
+        }
+      }
+    }
+    if (merged.size === 0) {
+      return [];
+    }
+    const bound = new Set([...merged.values()].map((c) => c.param));
+    for (const blk of liveAt) {
+      for (const v of liveIn.get(blk) ?? []) {
+        const nm = varName.get(v);
+        if (nm !== undefined && merged.has(nm) && !bound.has(v)) {
+          return null; // a clobbered live name
+        }
+      }
+    }
     return sequentialize(
-      copies.map(({ name, value }) => ({ name, value })),
+      [...merged.values()].map(({ name, value }) => ({ name, value })),
       varType,
       tempCounter,
       fn.name,
@@ -3568,6 +3639,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchArmsFollowLayout,
     spellSwitchFallthrough,
     emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
+    hoistDispatchCopies: (edges, liveAt) => hoistedDispatchAssigns(edges, liveAt),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
   });
