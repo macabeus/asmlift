@@ -17,7 +17,9 @@ import { expect, test } from 'vitest';
 import { frontendFor } from '../src/frontend/registry';
 import type { Value } from '../src/ir/core';
 import { firstTrivialPhi, simplifyTrivialPhis } from '../src/ir/simplify';
+import { type Gate, without } from '../src/l3/gates';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { FALL_IN_GATES, type FallInCandidate, sinkReturns } from '../src/raise/retsink';
 import { ARMV4T_AGBCC } from '../src/target';
 
 /** A two-condition chain converging on a shared `return 0` arm, with a store between the
@@ -208,4 +210,77 @@ test('a stranded alias put BACK is caught at the boundary, not three stages late
     }
   };
   expect(() => raiseRecovered(fn, ARMV4T_AGBCC, { afterRetsink: strand })).toThrow(/raising left a trivial phi/);
+});
+
+// ── the gate is about a DISPATCH, so it says nothing where there is none ─────────────────────────
+
+/** agbcc's own output for `if (a) { if (b) { c += 2; } return c; } return 0;` — an `if` with NO
+ *  `else`, and not a switch in sight. `.L4` is the inner join: it and the `add r2, r2, #2` block
+ *  above it are THE TWO SUCCESSORS OF ONE `cond_br`, and the block above falls into it. Reading
+ *  "both are the target of SOME conditional branch" as the fall-in signal subtracts that arrival,
+ *  drops `.L4` to one, and refuses to sink — where sinking is what byte-matches. Measured on 79
+ *  generated switch-free shapes: that reading changed 35 of them and lost 18 matches. */
+const IF_NO_ELSE =
+  'g0:\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.L3\t@cond_branch\n' +
+  '\tcmp\tr1, #0\n\tbeq\t.L4\t@cond_branch\n' +
+  '\tadd\tr2, r2, #0x2\n' +
+  '.L4:\n\tadd\tr0, r2, #0\n\tb\t.L5\n' +
+  '.L3:\n\tmov\tr0, #0x0\n' +
+  '.L5:\n\tbx\tlr\n';
+
+test('the join of an `if` with no `else` is a decision arriving, not an arm running on', () => {
+  // Two successors of ONE test are never siblings of a dispatch: a fall-in needs two DIFFERENT
+  // tests on one scrutinee. Nothing is subtracted here, so the merge sinks exactly as it did
+  // before any of the switch work — the early returns, not a merge variable.
+  const out = decompile('g0', IF_NO_ELSE, ARMV4T_AGBCC, {}).source;
+  expect(out).toContain('return 0;');
+  expect(out).not.toMatch(/return v\d+;/);
+});
+
+/** agbcc's own output for `int r = y; if (y > 0) goto L; switch (x) { case 3: r = 1; case 2: r++;
+ *  case 1: r++; } L: return r;` — `sw_fall`'s dispatch, one `goto` away. `.L4` is the shared
+ *  return, and the GUARD reaches it too, by a `bgt` that tests `y` and not the scrutinee. The
+ *  local pred shape is indistinguishable from `SWITCH_RET`'s (`.L8` has two preds, one of them
+ *  `.L7` running on), and the right answer is the opposite one: refusing to sink leaves the merge
+ *  standing, Regime-A recovery declines on it, and if-recovery duplicates the tails anyway. */
+const GUARDED_SWITCH =
+  'w9:\n' +
+  '\tadd\tr2, r0, #0\n\tadd\tr0, r1, #0\n' +
+  '\tcmp\tr0, #0\n\tbgt\t.L4\t@cond_branch\n' +
+  '\tcmp\tr2, #0x2\n\tbeq\t.L7\t@cond_branch\n' +
+  '\tcmp\tr2, #0x2\n\tbgt\t.L11\t@cond_branch\n' +
+  '\tcmp\tr2, #0x1\n\tbeq\t.L8\t@cond_branch\n' +
+  '\tb\t.L4\n' +
+  '.L11:\n\tcmp\tr2, #0x3\n\tbne\t.L4\t@cond_branch\n\tmov\tr0, #0x1\n' +
+  '.L7:\n\tadd\tr0, r0, #0x1\n' +
+  '.L8:\n\tadd\tr0, r0, #0x1\n' +
+  '.L4:\n\tbx\tlr\n';
+
+test('a merge the dispatch SHARES with an outside guard is sunk, not kept', () => {
+  // `ownedBy`: the guard's `bgt` is a predecessor of the merge that belongs to no test on the
+  // scrutinee, so this dispatch does not own its return and nothing is subtracted. 19 of 140
+  // generated shapes of this family byte-match with this clause and none without it.
+  const out = decompile('w9', GUARDED_SWITCH, ARMV4T_AGBCC, { prototypes: { w9: { params: 3 } } }).source;
+  expect(out).toContain('switch (a0)');
+  expect(out.match(/return /g)!.length).toBeGreaterThan(1); // the tails ARE sunk
+});
+
+test('ablating the dispatch gate reads an `if` join, and a guarded switch, as fall-ins', () => {
+  // The ablation this round had to run as three patched source trees, as a test. Dropping
+  // `one-dispatch-owning-the-merge` leaves "both are the target of SOME conditional branch",
+  // which is the reading that lost 18 byte-matches over 79 generated switch-free shapes: both
+  // fixtures stop sinking, which is the wrong answer for both.
+  const sinks = (sym: string, asm: string, gates?: readonly Gate<FallInCandidate>[]) => {
+    const fn = frontendFor(ARMV4T_AGBCC).lift(sym, asm, ARMV4T_AGBCC, {});
+    applyIdiomPatterns(fn, ARMV4T_AGBCC);
+    return sinkReturns(fn, gates ?? FALL_IN_GATES);
+  };
+  for (const [sym, asm] of [
+    ['g0', IF_NO_ELSE],
+    ['w9', GUARDED_SWITCH],
+  ] as const) {
+    expect(sinks(sym, asm)).toBe(true);
+    expect(sinks(sym, asm, without(FALL_IN_GATES, 'one-dispatch-owning-the-merge'))).toBe(false);
+  }
 });

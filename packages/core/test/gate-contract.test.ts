@@ -33,6 +33,7 @@ import { LATCH_GATES } from '../src/raise/latch';
 import { MEMBER_ARRAY_GATES } from '../src/raise/memberarrays';
 import { NARROW_LOCAL_GATES } from '../src/raise/narrowlocal';
 import { PARAM_WIDTH_GATES } from '../src/raise/paramwidth';
+import { FALL_IN_GATES } from '../src/raise/retsink';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { FRESH_MERGE_GATES } from '../src/structure/structure';
@@ -53,6 +54,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   ORDERBASE_GATES: ORDERBASE_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
+  FALL_IN_GATES: FALL_IN_GATES as readonly Gate<never>[],
   ADDRESS_GATES: ADDRESS_GATES as readonly Gate<never>[],
   SHAPE_GATES: SHAPE_GATES as readonly Gate<never>[],
   // the two halves `ORDER_LICENCE_GATES` ships — an address table minus the declaration rule, and
