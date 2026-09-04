@@ -16,20 +16,27 @@
 // merge, but there the compiler emits the MERGE-VARIABLE form, which is what byte-matches — sinking it
 // would REGRESS those. The distinguishing signal is structural: a short-circuit chain converges on a
 // SHARED arm — the common early-exit reached from ≥2 CONDITIONS — whereas a simple diamond's arms are
-// each reached from one. So sink only when some branch-predecessor of the merge is reached by two
-// conditional branches; every simple select stays a merge var.
+// each reached from one. So sink only when some branch-predecessor of the merge is ARRIVED at from
+// two places; every simple select stays a merge var.
 //
 // READ THE QUANTITY AS ARRIVALS, NOT AS PREDECESSORS. The gate long said "≥2 preds", which is a
 // wider set, and a FALL-THROUGH switch arm is in the difference: `case 2: r++; case 1: r++;` gives
 // case 1's body two predecessors — the dispatch's `beq`, and case 2's body running on — for a
 // reason that has nothing to do with a chain of conditions. Sinking there tail-duplicates a
 // switch's SHARED RETURN into all five of its paths, which agbcc then constant-folds per arm
-// (`synthetic:sw_fall:agbcc`: measured 5 of its 11 differing rows). The second predecessor
-// COMPUTED the accumulator and ran on; a decision arriving computes nothing on the way.
+// (`synthetic:sw_fall:agbcc`: measured 5 of its 11 differing rows).
+//
+// So one predecessor is SUBTRACTED, and only one kind: the previous arm RUNNING ON into this one
+// (`fellInto` below). It is subtracted for what it IS, not for what it computed — "this pred
+// computed something" is a proxy for the same intuition and it does not hold: the two arms of
+// `if (a) { … return 0; } if (b) { … return 0; }` both compute and both jump to the shared exit,
+// and that is the chain this pass exists for (measured: reading the proxy halved the pass's reach,
+// 20 firings → 9 over the synthetic corpus and 14 → 8 over the real one, and cost
+// `kleod:EntityItemDrop:agbcc` a `switch` it recovers).
 //
 // This does NOT recover the boolean-VALUE form `return a && b` — that is shortcircuit.ts's job
 // (the `logic_and`/`logic_or` connective plus agbcc's `(-b|b)>>31` = `b!=0` normalisation).
-import { Block, Fn, defOpMap, mkOp, predecessors } from '../ir/core';
+import { Block, Fn, defOpMap, isBodyless, mkOp, predecessors } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 
 /** The fused short-circuit connectives (raise/shortcircuit.ts). A `cond_br` on one of these is the
@@ -44,6 +51,18 @@ export function sinkReturns(fn: Fn): boolean {
   let changed = false;
   const preds = predecessors(fn);
   const defs = defOpMap(fn);
+  /** Every block some CONDITIONAL branch can reach: the arms of the function's decisions. A block
+   *  in this set was jumped to BECAUSE a test went one way, which is what makes it a candidate
+   *  sibling of another such block. */
+  const armTarget = new Set<Block>();
+  for (const b of fn.blocks) {
+    const t = b.ops[b.ops.length - 1];
+    if (t?.opcode === 'cond_br') {
+      for (const e of t.successors) {
+        armTarget.add(e.block);
+      }
+    }
+  }
   const isBrTo = (p: Block, m: Block) => {
     const t = p.ops[p.ops.length - 1];
     return t.opcode === 'br' && t.successors.length === 1 && t.successors[0].block === m;
@@ -69,8 +88,9 @@ export function sinkReturns(fn: Fn): boolean {
     // SHORT-CIRCUIT GATE, in two shapes — the chain must be visible in the CFG or in the value domain.
     //
     //   (a) UNFUSED: at least one branch-pred is ARRIVED AT from ≥2 places — the common early-exit
-    //       reached from every condition of the chain. What counts as arriving is stated at
-    //       `arrivals` below, and it is the whole of this gate's content.
+    //       reached from every condition of the chain. Everything that reaches it counts EXCEPT the
+    //       previous arm running on; that subtraction is stated at `fellInto` below, and it is the
+    //       whole of this gate's content.
     //   (b) FUSED: `branch-shortcircuit` (raise/shortcircuit.ts) rewrites the head's condition into a
     //       `logic_and`/`logic_or` and collapses the second condition block into it. That leaves both
     //       arms single-pred, so (a) cannot see the chain any more — but the CONNECTIVE is now the
@@ -94,17 +114,44 @@ export function sinkReturns(fn: Fn): boolean {
         return t.opcode === 'cond_br' && CONNECTIVES.has(defs.get(t.operands[0])?.opcode ?? '');
       });
     const fusedDiamond = brPreds.length >= 2 && brPreds.some(selectedByConnective);
-    // A predecessor ARRIVES at the shared arm — it is one of the decisions the chain converges
-    // from — when it transfers control and computes nothing on the way: a `cond_br`, which is the
-    // condition itself, or a block holding nothing but the jump, which is the record gcc leaves of
-    // a condition that ran out (`emit_case_nodes` mints a `b .Ldefault` per subtree, and
-    // `synthetic:sw_op:agbcc`'s shared `mov r0,#0` arm is reached by two of them).
+    // `q` FELL INTO `p`: it is the previous arm of the same dispatch, running on. Three clauses,
+    // each measured against the rows it keeps (`arrivals` counts every OTHER predecessor):
     //
-    // A predecessor that COMPUTED something and then ran on is not another decision. It is the
-    // previous arm falling in, which is what `case 2: r++; case 1: r++;` makes of case 1's body —
-    // the shape that gave the old "≥2 predecessors" reading its false positive.
-    const arrivals = (p: Block) =>
-      (preds.get(p) ?? []).filter((q) => q.ops[q.ops.length - 1].opcode === 'cond_br' || q.ops.length === 1).length;
+    //   - `q` leaves by an UNCONDITIONAL branch to `p`. A `cond_br` pred chose `p`; that is a
+    //     decision arriving, never a fall-in.
+    //   - BOTH are arms — targets of some conditional branch. This is the clause that separates a
+    //     fall-in from the shape the pass exists for: `if (a) { … return 0; } if (b) { … return 0; }`
+    //     converges two computing arms on a shared exit that NO conditional branch targets, so
+    //     neither is subtracted and the chain is still seen. Dropping this clause and subtracting
+    //     any adjacent computing pred costs five real-tier sites their sinking
+    //     (`kleod:EntityItemDrop`, `marioparty3:HuPrcChildUnlink`, `pokeemerald:ModifyStatByNature`,
+    //     `pokeemerald:SetMauvilleOldManLanguage`, `pokeemerald:DoForcedMovement`) plus
+    //     `synthetic:armshare:agbcc` — measured, by counting firings over both corpora.
+    //   - `q` has a BODY (`isBodyless` is the shared spelling of the negation). A bodyless arm is
+    //     the record gcc leaves of a decision that RAN OUT — `emit_case_nodes` mints a `b .Ldefault`
+    //     per exhausted subtree — and it arrives rather than falls in. Dropping this clause costs
+    //     `synthetic:llshr:gcc2.7.2kmc` its sinking. The parameter half of `isBodyless` is what
+    //     keeps an EMPTY case arm (one op, but it binds the accumulator) on the fall-in side.
+    //
+    // Layout adjacency — `q` sitting immediately above `p`, which is what "fell through" means in
+    // the assembly — was measured as well and changes NOTHING over 991 corpus functions, so it is
+    // not a clause here: it would be an unpaid premise about `fn.blocks` still being address order.
+    //
+    // Terminators are read with `?.`: `ir/verify.ts` rejects an empty block and `pipeline.ts`
+    // verifies before calling this, but `sinkReturns` is exported and its tests build blocks by
+    // hand, where a refusal is a better answer than a TypeError.
+    const fellInto = (q: Block, target: Block) => {
+      const t = q.ops[q.ops.length - 1];
+      return (
+        t?.opcode === 'br' &&
+        t.successors.length === 1 &&
+        t.successors[0].block === target &&
+        armTarget.has(q) &&
+        armTarget.has(target) &&
+        !isBodyless(q)
+      );
+    };
+    const arrivals = (p: Block) => (preds.get(p) ?? []).filter((q) => !fellInto(q, p)).length;
     if (!brPreds.some((p) => arrivals(p) >= 2) && !fusedDiamond) {
       continue;
     }

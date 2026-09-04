@@ -179,6 +179,22 @@ export function dominators(fn: Fn): Map<Block, Set<Block>> {
   return dom;
 }
 
+/** A block with NO BODY OF ITS OWN: it declares no parameters and holds a single op, which is
+ *  therefore its terminator. Whatever it does is transfer control — it computes nothing and it
+ *  binds nothing. Three sites ask this same question and each adds its own clause to it
+ *  (`forwardingTarget` below wants a `br` carrying no args; switch-recover.ts's `isBareExit`
+ *  admits a `ret` as well; raise/retsink.ts asks it of a predecessor, to tell a decision that RAN
+ *  OUT from an arm that ran ON), so the shared half is stated once, here.
+ *
+ *  THE PARAMETER CLAUSE IS THE LOAD-BEARING HALF, and the reason this is not spelled
+ *  `ops.length === 1`: a case ENTRY whose arm is EMPTY is also one op — the jump onwards — but it
+ *  takes the accumulator as a block parameter, so it is a real arm of a dispatch and not a
+ *  forwarder. Reading it as bodyless is what let a fall-through switch with an empty arm have its
+ *  shared return duplicated anyway. */
+export function isBodyless(blk: Block): boolean {
+  return blk.params.length === 0 && blk.ops.length === 1;
+}
+
 /** Where a chain of TRANSPARENT forwarding blocks lands — no params, a lone `br`, no block args.
  *
  *  A compiler that cannot reach a target from a conditional branch emits the real branch separately
@@ -194,7 +210,7 @@ export function dominators(fn: Fn): Map<Block, Set<Block>> {
 export function forwardingTarget(b: Block): Block {
   const seen = new Set<Block>();
   let cur = b;
-  while (cur.params.length === 0 && cur.ops.length === 1 && !seen.has(cur)) {
+  while (isBodyless(cur) && !seen.has(cur)) {
     seen.add(cur);
     const t = cur.ops[0];
     if (t.opcode !== 'br' || t.successors[0].args.length > 0) {

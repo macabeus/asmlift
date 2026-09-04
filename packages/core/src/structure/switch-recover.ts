@@ -4,7 +4,7 @@
 // factory takes its dependencies EXPLICITLY (`SwitchRecoverDeps`); `expr`/`structureRegion` are
 // late-bound callbacks into the emission phase, so case bodies reuse the ordinary structuring
 // machinery (loops/ifs inside cases, the onStack guard).
-import { Block, Fn, Op, Value, forwardingTarget, successorsOf } from '../ir/core';
+import { Block, Fn, Op, Value, forwardingTarget, isBodyless, successorsOf } from '../ir/core';
 import { ORDER_SENSITIVE_OPS } from '../ir/opcodes';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
 
@@ -134,7 +134,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
    *  body has two dispatch preds, which is exactly the shape that makes retsink sink the merge's
    *  return into every leaf, the fall-out jumps included. */
   const isBareExit = (blk: Block): boolean =>
-    blk.params.length === 0 && blk.ops.length === 1 && (blk.ops[0].opcode === 'br' || blk.ops[0].opcode === 'ret');
+    isBodyless(blk) && (blk.ops[0].opcode === 'br' || blk.ops[0].opcode === 'ret');
 
   /** Are these two blocks the SAME bare exit — the same jump with the same args, or the same return
    *  of the same values? Neither has a body, so two of them are indistinguishable at emission. */

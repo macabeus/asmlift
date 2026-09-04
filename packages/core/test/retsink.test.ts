@@ -123,6 +123,57 @@ test('a fall-through case arm is a fall-IN, not a chain, and its shared return s
   expect(out).not.toContain('return 0;'); // …not the sunk default arm
 });
 
+/** agbcc's own output for `if (a > 0) { p[0] = 1; return 0; } if (b > 0) { p[1] = 2; return 0; }
+ *  return 5;` — TWO ARMS that each compute and then jump to a shared `mov r0, #0`. Both
+ *  predecessors of `.L6` have a body, and one of them (`.L4`) even falls straight through into it,
+ *  so a gate that subtracts "a predecessor that computed something and ran on" sees no chain here
+ *  at all. It is the chain: the two arms are the two conditions' early exits, and `.L6` is the
+ *  shared one. Five real-tier sites have this shape. */
+const TWO_ARMS =
+  'm1:\n' +
+  '\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n' +
+  '\tmov\tr0, #0x1\n\tstr\tr0, [r2]\n\tb\t.L6\n' +
+  '.L3:\n\tcmp\tr1, #0\n\tbgt\t.L4\t@cond_branch\n\tmov\tr0, #0x5\n\tb\t.L5\n' +
+  '.L4:\n\tmov\tr0, #0x2\n\tstr\tr0, [r2, #0x4]\n' +
+  '.L6:\n\tmov\tr0, #0x0\n' +
+  '.L5:\n\tbx\tlr\n';
+
+test('two arms that each COMPUTE and converge on a shared exit are still a chain', () => {
+  // The discriminator is what a predecessor IS, not what it computed. Reading "computed something
+  // and ran on" as the fall-in signal refuses this — and it is the pass's own reason to exist, so
+  // that reading halved its reach (measured: 14 firings → 8 over the real corpus, taking
+  // `kleod:EntityItemDrop:agbcc`'s recovered `switch` with it).
+  const out = decompile('m1', TWO_ARMS, ARMV4T_AGBCC, {}).source;
+  expect(out.match(/return 0;/g)).toHaveLength(2); // sunk into BOTH arms
+  expect(out).toContain('return 5;');
+  expect(out).not.toMatch(/return v\d+;/); // no merge variable
+});
+
+/** `SWITCH_RET` with case 2's body EMPTY — the arm is one op, the jump onwards, and it still binds
+ *  the accumulator as a block parameter. A fall-in is not "a predecessor holding more than a
+ *  jump": the arm below reads the value this one was handed either way. */
+const SWITCH_EMPTY_ARM =
+  'g:\n' +
+  '\tmov\tr1, #0x0\n' +
+  '\tcmp\tr0, #0x2\n\tbeq\t.L5\t@cond_branch\n' +
+  '\tcmp\tr0, #0x2\n\tbgt\t.L9\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.L6\t@cond_branch\n' +
+  '\tb\t.L3\n' +
+  '.L9:\n\tcmp\tr0, #0x3\n\tbne\t.L3\t@cond_branch\n\tmov\tr1, #0x1\n' +
+  '.L5:\n\tb\t.L6\n' +
+  '.L6:\n\tadd\tr1, r1, #0x1\n' +
+  '.L3:\n\tadd\tr0, r1, #0x0\n\tbx\tlr\n';
+
+test('an EMPTY fall-through arm is still an arm, and the shared return still survives', () => {
+  // `.L5` binds the accumulator and hands it on; only its BODY is empty. Counting a one-op
+  // predecessor as an arrival duplicates the shared `return r;` again — the same defect, on the
+  // shape a proxy for "computes nothing" cannot see (`ir/core.ts isBodyless` is the parameter-aware
+  // spelling that can).
+  const out = decompile('g', SWITCH_EMPTY_ARM, ARMV4T_AGBCC, {}).source;
+  expect(out).toContain('switch (a0)');
+  expect(out.match(/return /g)).toHaveLength(1);
+});
+
 // ── the postcondition, rather than the pass ──────────────────────────────────────────────────────
 // The fix above is one line inside `sinkReturns`, and the next pass to retire an in-edge will
 // re-create the same debris three stages from where it surfaces. `raiseRecovered` states it as a
