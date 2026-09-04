@@ -113,10 +113,12 @@ One family, one block comment, modeled on the existing families in `dataset/synt
 uninit-local block is the reference): what each row isolates, which are controls, and an
 attribution line for every decline naming its first blocker. Constraints learned the hard way:
 
-- **No extern data globals.** Synthetic candidates have no ELF to synthesize declarations from,
-  so a row whose asm relocates against a named global fails candidate compilation. Spell shapes
-  with absolute addresses (pointer locals, `#define` address macros) — codegen-equivalent for
-  these purposes and self-contained.
+- **Extern data globals are fine, and respelling them to absolute addresses destroys the row.**
+  A candidate synthesizes its declarations from the target asm's own relocations (the CLI says
+  `[declared] N declaration(s) synthesized from the target asm`), so a named global compiles. The
+  earlier rule here said the opposite; obeying it collapses the very distinctions such a family
+  exists to pin — at an absolute address the bare, cast and array-typed spellings become one
+  object and a baked addend constant-folds away, so every row scores 0 and pins nothing.
 - The reference source in `src` is the definition of the target. Keep it verbatim from your
   Phase-3/4 probes so the row measures exactly what you measured. Never tune it toward either
   decompiler.
