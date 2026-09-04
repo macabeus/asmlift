@@ -3316,8 +3316,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     //     records come from a pred that wrote that key more than once, in 312 of the 464 functions
     //     that record anything. Both alternatives were priced over the 736 synthetic rows and both
     //     cost matches and gain none: recording the FIRST write instead loses `bgsplit`,
-    //     `bgswitch`, `bgswsplit` and `hipress` (all agbcc); REFUSING the record for a key written
-    //     more than once loses those three plus `dmascope2`, `hipress` and `swmulti`.
+    //     `bgswitch`, `bgswsplit` and `hipress` (all agbcc, 482 → 478); REFUSING the record for a
+    //     key written more than once loses those four and `dmascope2` and `swmulti` too
+    //     (482 → 476).
     //  2. ACYCLIC copy sets — a SECOND, separately-licensed claim: that the compiler LAID THE
     //     COPIES OUT in the order it wrote them. No instruction states it, and it is two-sided.
     //     Restricting the record to cyclic sets was measured over the 736 synthetic rows: it takes
@@ -3348,8 +3349,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // UNMEASURED (undefined) is not "wrote nothing": parsed IR and a block a pass minted have no
       // record at all, and their edges keep the def-position proxy. A MEASURED pred that recorded
       // no destination of this edge is a different thing, and gets an empty record.
-      const predIsMeasured = !preferDefPosCopyOrder && (fn.writeOrder?.writes.has(pred) ?? false);
-      const record = predIsMeasured ? (fn.writeOrder!.lastWrite.get(pred) ?? NO_WRITTEN_DESTINATIONS) : undefined;
+      const predIsMeasured = fn.writeOrder?.writes.has(pred) ?? false;
+      // `preferDefPosCopyOrder` is the `/copy-defpos` candidate asking for the proxy on an edge the
+      // frontend DID measure — the one place the two questions ("is there a record" and "use it")
+      // come apart.
+      const record =
+        predIsMeasured && !preferDefPosCopyOrder
+          ? (fn.writeOrder!.lastWrite.get(pred) ?? NO_WRITTEN_DESTINATIONS)
+          : undefined;
       const rank =
         record !== undefined
           ? (c: (typeof copies)[number]) => record.get(c.param) ?? NO_RECORD
