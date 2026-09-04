@@ -42,6 +42,32 @@ export interface Block {
 export interface Fn {
   name: string;
   blocks: Block[];
+  /** L1 SIDE DATA (see {@link WriteOrder}); set by the SSA builder, absent on parsed IR. */
+  writeOrder?: WriteOrder;
+}
+
+/** The order in which each block WROTE the keys its successors' block-params stand for — a
+ *  measurement the SSA builder makes and nothing downstream can recover, because the value graph
+ *  keeps no trace of it: a register copy is the same SSA value under a new key, and once a key's
+ *  value is a successor's edge argument the write that put it there has no op of its own.
+ *
+ *  The structurer needs it to spell a parallel copy in the compiler's own order. The compiler wrote
+ *  the header's registers in SOME order, and in a cyclic copy the register it overwrote FIRST is
+ *  the one whose old value it had to save beforehand — the temp. Sorting an edge's copies by this
+ *  record puts that copy first, so the sequentializer's first-copy spill reproduces the compiler's
+ *  temp instead of guessing from def positions (where an in-block def and an incoming param have no
+ *  common scale, and the param always sorts first).
+ *
+ *  Keyed by OBJECTS (the predecessor block, the destination param), never by arg position, so the
+ *  param splices in `ir/simplify.ts` cannot leave it stale. A pass that moves one block's ops into
+ *  another owes `foldWriteOrder`; a block no builder measured has no entry in `writes` and a reader
+ *  must treat its edges as unmeasured rather than as written-nowhere. */
+export interface WriteOrder {
+  /** pred → (param of a successor → ordinal, among the pred's writes, of its LAST write to the key
+   *  that param stands for). No entry ⇒ the pred did not write the key; the arg passes through. */
+  lastWrite: Map<Block, Map<Value, number>>;
+  /** Every measured block → how many writes it made. Membership is the "measured" test. */
+  writes: Map<Block, number>;
 }
 
 export function mkValue(type: IrType): Value {
