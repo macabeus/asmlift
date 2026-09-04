@@ -18,6 +18,13 @@ import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
+/** EVERY stage dump carries the write-order record (ir/print.ts `PrintOptions`) — not just
+ *  `stage:lift`, even though only the frontend measures it. Two reasons: the raising folds MUTATE
+ *  it (`foldWriteOrder`), so a stage that changes it and nothing else has something to show; and
+ *  the Pipeline tab dims a stage whose dump equals the previous one, which is a claim about the
+ *  whole program state and would be false if one dump carried the record and the next did not. */
+const irDump = (fn: Fn): string => print(fn, { writeOrder: true });
+
 export interface StageTrace {
   id: string; // stable localization anchor: "stage:lift", "stage:recover", …
   title: string; // human label = the transform this stage performs
@@ -169,7 +176,7 @@ function traceTower(
   // (1) lift → typed-SSA IR
   const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
-  trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: print(fn), verified: true });
+  trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: irDump(fn), verified: true });
   // The array shapes the assembly evidences, off the LIFTED fn — same reading, same reason, as
   // pipeline.ts's runTower: the fold and the tower below destroy the order the licence reads.
   //
@@ -199,14 +206,14 @@ function traceTower(
   // compile + objdiff. Zero-hit patterns emit NO event (the IR is unchanged).
   let scoreBefore = opts.probeScore?.(fn, inferredSymbols);
   for (const p of active) {
-    const beforeIr = print(fn);
+    const beforeIr = irDump(fn);
     const hits = applyPattern(fn, p);
     dce(fn);
     verify(fn);
     if (hits === 0) {
       continue;
     }
-    const afterIr = print(fn);
+    const afterIr = irDump(fn);
     const scoreAfter = opts.probeScore?.(fn, inferredSymbols);
     patternEvents.push({
       id: `pattern:${p.id}`,
@@ -224,7 +231,7 @@ function traceTower(
     trace.push({
       id: 'stage:idiom',
       title: `Idiom fold (${active.length} pattern(s), capability-gated)`,
-      irDump: print(fn),
+      irDump: irDump(fn),
       verified: true,
     });
   }
@@ -245,22 +252,27 @@ function traceTower(
           stage: `stage:${pass.id}`,
           title: () => `${pass.id} (pre-recovery pass)`,
         };
-        trace.push({ id: t.stage, title: t.title(result), irDump: print(fn), verified: true });
+        trace.push({ id: t.stage, title: t.title(result), irDump: irDump(fn), verified: true });
       },
       afterRecover: () =>
-        trace.push({ id: 'stage:recover', title: 'Type recovery (in-place on IR)', irDump: print(fn), verified: true }),
+        trace.push({
+          id: 'stage:recover',
+          title: 'Type recovery (in-place on IR)',
+          irDump: irDump(fn),
+          verified: true,
+        }),
       afterRetsink: () =>
         trace.push({
           id: 'stage:retsink',
           title: 'Return-sinking (tail-duplicate return-only merge)',
-          irDump: print(fn),
+          irDump: irDump(fn),
           verified: true,
         }),
       afterLatchFold: () =>
         trace.push({
           id: 'stage:latchfold',
           title: 'Empty-latch folding (splice out an SSA-emptied back-edge block)',
-          irDump: print(fn),
+          irDump: irDump(fn),
           verified: true,
         }),
     },

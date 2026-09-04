@@ -7,7 +7,17 @@
 import type { AttrVal, Block, Fn, Value } from './core';
 import { typeToString } from './types';
 
-export function print(fn: Fn): string {
+/** WRITE-ORDER ANNOTATION (`ir/core.ts` WriteOrder) — OFF by default and deliberately not part of
+ *  the round-trip artifact. The record is a measurement `parse` cannot reconstruct, and a parsed fn
+ *  that came back MEASURED would structure differently from every other parsed fn, so the text form
+ *  never carries it back in. It is printed for the per-stage DUMPS, where its absence was the gap:
+ *  two functions with identical `stage:lift` output emit different C, and attributing that took a
+ *  temporary printf where a dump diff should have shown it. */
+export interface PrintOptions {
+  writeOrder?: boolean;
+}
+
+export function print(fn: Fn, opts: PrintOptions = {}): string {
   const blockLabel = new Map<Block, string>();
   fn.blocks.forEach((b, i) => blockLabel.set(b, `bb${i}`));
 
@@ -31,10 +41,14 @@ export function print(fn: Fn): string {
   }
   const ref = (v: Value) => name.get(v) ?? '%<undef>';
 
+  // Present only when asked for AND measured — an unmeasured fn prints exactly as before, which is
+  // the distinction a reader of the dump most needs to see.
+  const order = opts.writeOrder ? fn.writeOrder : undefined;
   const lines: string[] = [`fn ${fn.name} {`];
   for (const b of fn.blocks) {
     const params = b.params.map((p) => `${ref(p)}: ${typeToString(p.type)}`).join(', ');
-    lines.push(`^${blockLabel.get(b)}(${params}):`);
+    const writes = order?.writes.get(b);
+    lines.push(`^${blockLabel.get(b)}(${params}):` + (writes === undefined ? '' : `  ; writes=${writes}`));
     for (const op of b.ops) {
       let s = '  ';
       if (op.results.length) {
@@ -52,6 +66,17 @@ export function print(fn: Fn): string {
         s += ' ' + args.join(', ');
       }
       s += fmtAttrs(op.attrs);
+      // Per SUCCESSOR, the ordinal of this block's last write to each destination param's key —
+      // the exact numbers `structure.ts`'s edge-copy sort reads, in successor-arg order, with `-`
+      // for a destination this block never wrote.
+      if (order?.writes.has(b) && op.successors.length) {
+        const rec = order.lastWrite.get(b);
+        s +=
+          '  ; order ' +
+          op.successors
+            .map((su) => `^${blockLabel.get(su.block)}(${su.block.params.map((p) => rec?.get(p) ?? '-').join(', ')})`)
+            .join(' ');
+      }
       lines.push(s);
     }
   }

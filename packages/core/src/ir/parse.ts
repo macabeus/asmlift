@@ -4,6 +4,9 @@
 // both the debug dump and the test oracle. The parser builds the graph but enforces NO
 // semantics — that is the verifier's job — so malformed-but-well-formed-syntax IR can be
 // constructed and then rejected by verify().
+// The write-order annotation `print(fn, { writeOrder: true })` adds is OUTSIDE that round trip and
+// is never read back: the record is a measurement of the machine that only a frontend can make, and
+// a parsed fn that came back measured would structure differently from every other parsed fn.
 // ROUND-TRIP DOMAIN: parse(print(fn)) holds for L1/scalar types only — `unkN`/`sN`/`uN` and
 // `*`-pointers to them. STRUCT/ARRAY/VOID types print (typeToString) but do NOT parse back; a
 // post-type-recovery dump is a one-way debugging artifact, not a test oracle.
