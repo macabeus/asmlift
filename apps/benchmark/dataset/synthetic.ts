@@ -750,6 +750,97 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
 
+  // SPILL-SLOT ORDER — the one property of a declaration list the allocator answers by a law, and
+  // the one asmlift has nowhere to put. When agbcc runs out of registers, the locals that lose
+  // global allocation each get a frame slot, and WHICH slot is decided by declaration order:
+  // reload hands out slots walking pseudos in ascending number (gcc/reload1.c:769-770), a user
+  // local's pseudo is numbered at its `expand_decl` (gcc/stmt.c:3324), and the frame grows upward
+  // (gcc/function.c:703-757; thumb.h:569 has FRAME_GROWS_DOWNWARD commented out). So the k-th
+  // spilled local BY DECLARATION sits at the k-th slot, above any volatile/address-taken local
+  // (those get their slot at declaration time, gcc/stmt.c:3312, and sit below every spill).
+  // Verified by compiling: the body below with its ten locals declared `v0..v9` puts the two that
+  // spill at [sp] and [sp,#4] one way, declared `v9..v0` the other way, and nothing else moves.
+  //
+  // asmlift's declaration list is the naming walk's insertion order (structure/structure.ts), and
+  // backend/cfamily.ts renders it verbatim; the Thumb frontend keys every `[sp,#k]` value by its
+  // offset (frontend/thumb.ts), but the offset never reaches the structurer, so the emitted order
+  // agrees with the target's slot order only by accident. These two rows pin that:
+  //
+  //   • `spillorder` is `uninit_spill` (above) with ONE token changed, `case 1:` → `default:`, so
+  //     every path defines every local — no undef, no fabricated parameter, no DMA, which are the
+  //     two machineries `uninit_spill` and `dma_fill_uninit` carry. Two locals spill; asmlift's
+  //     walk declares them in the reverse of the target's slot order and the winner scores 6 —
+  //     six `[sp,#k]` operand rows and nothing else (recompiled and classified: no other class).
+  //   • `spillorder_rev` is the CONTROL: the identical body with the declaration list reversed in
+  //     the source, so the target's slot order is the one asmlift's walk already emits. It
+  //     MATCHES, which proves the six rows are the order alone. It is also the zero-flip read for
+  //     the rule once it ships: an agreeing order must be a no-op.
+  //
+  // Attribution: `spillorder` declines nothing — it lifts, structures and ranks 40 candidates —
+  // and its 6 is a missing per-target DEFAULT, not a missing axis: no site sorts a candidate's
+  // slot-homed locals by the target's frame offsets. Reordering the winner's two declarations by
+  // hand compiles to 0. The same hand reorder of `dma_fill_uninit`'s published candidate takes
+  // its 12 (twelve `[sp,#k]` rows) to 0, and on the klonoa function this family was cut from,
+  // LoadBGTilemapData, permuting the six spilled locals of the winning candidate in place takes
+  // 386 → 376 against `build/src/gfx.o` (of its stack-slot classes, 12 + 17 rows, the permutation
+  // leaves 2 + 2, a reload eviction; the 194 register rows stay). It is the one source-visible
+  // property of a declaration list this
+  // round found the allocator answering deterministically: count, scope, type and address-taking
+  // all move a score too, but through the compiler's own temporaries, whose registers no
+  // declaration list predicts (34 reorderings of the project's reference, 0 named locals rehomed).
+  // That register half is a published null and gets NO row, because the capability that would
+  // move it is the compiler's allocator, which asmlift answers by compiling.
+  //
+  // WHY a second gate beside `dma_fill_uninit` (whose block comment, at "NO ROW HERE for
+  // declaration order", once named it THE gate): that row is confounded — it carries the undef envelope (a `switch`
+  // with no `default`) and the DMA family, so a change in either moves its 12 for a reason that is
+  // not this one. This pair carries neither. The pair cannot tell head placement from an in-place
+  // permutation of the slot locals (both compile to 0 here; on LoadBGTilemapData they differ by
+  // one register row, 375 vs 376); a discriminating row needs a non-slot local between two spilled
+  // ones and a spilled compiler temporary — not authored.
+  //
+  // agbcc only, by measurement: ido7.1 keeps all ten locals in s0–s5 (six `sw`, all prologue
+  // saves — nothing spills) and its frontend declines both objects earlier anyway (`branch to
+  // 0xbc is not a block boundary`, a MIPS-frontend blocker seven ido rows already carry);
+  // gcc2.7.2kmc compiles each to 50 instructions with zero `(sp)` accesses; mwcc_242_81 emits
+  // only `stwu r1,-32(r1)` and `stw r0,36(r1)`. On those lanes the rows would pin another
+  // family's blocker or nothing, so they are left off. The DIRECTION of the law differs by
+  // compiler (a call-carrying probe of 14 locals, 24 on mwcc: ascending on agbcc and both
+  // gcc 2.7.2 lanes, DESCENDING on ido7.1 and mwcc_242_81), which is why the capability is a per-target datum and
+  // not a boolean — and why no non-agbcc value can be refereed today: the only shape that spills
+  // under a 32-GPR compiler carries a call, and the MIPS frontend declines every call.
+  // m2c NONCOMPILES both, on the identical `ctx` (it renders `s32 spillorder(s32 k, s32 *p)`, so the
+  // prototype reached it): it names each spill slot `unksp0` / `unksp4` and never declares it
+  // (``unksp0' undeclared (first use in this function)`), the same slot handling the stack-addr
+  // family records — and, interestingly, it reads the two slots in the target's order on both
+  // rows (`unksp0` first on `spillorder`, `unksp4` first on `spillorder_rev`), so a version that
+  // declared them would face exactly this family's question. It also types `p` as a struct
+  // (`var_r1->unk0`) against the `int *p` it was told. `uninit_spill` above is DECLINED by m2c
+  // rather than noncompiled (an `M2C_ERROR(/* Read from unset register $r12 */)` marker on the
+  // undef path), which is one more way the pair is cleaner than that row.
+  {
+    sym: 'spillorder',
+    src:
+      'int spillorder(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0;' +
+      ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9];' +
+      ' break; default: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];' +
+      'v9=p[19]; break; } for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
+    features: ['value-home'],
+    toolchains: ['agbcc'],
+    ctx: 'int spillorder(int k, int *p);',
+  },
+  {
+    sym: 'spillorder_rev',
+    src:
+      'int spillorder_rev(int k,int *p){ int v9,v8,v7,v6,v5,v4,v3,v2,v1,v0; int i,s=0;' +
+      ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9];' +
+      ' break; default: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];' +
+      'v9=p[19]; break; } for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
+    features: ['value-home'],
+    toolchains: ['agbcc'],
+    ctx: 'int spillorder_rev(int k, int *p);',
+  },
+
   // A LOOP VARIABLE READ AT ITS PRE-UPDATE VALUE. agbcc hoists an induction update above the exit
   // test, so something still wants the variable one iteration back. The structurer treats every
   // such read as a hazard and declines the whole function — correct, because rendering it under
@@ -2107,6 +2198,29 @@ export const SYNTHETIC: SynthSpec[] = [
   // `pokeemerald:GetMoveTarget:agbcc` (consuming stack call arguments) and
   // `sa3:ProcessOamBuffers:agbcc` (only a plain `mov rD, sp` capture is modelled).
   //
+  // `spill10` is the DECLINING row for the multi-word shape the STILL MISSING paragraph names,
+  // selected by residual shape rather than by subject: ten locals loaded from `p[0..9]` and read
+  // across a `callee(i)` loop, no address taken anywhere. agbcc spills three of them ([sp],
+  // [sp,#4], [sp,#8]) and each store reaches the `bl` unread with its lower slots supplied — the
+  // exact outgoing-argument ambiguity the refusal models, except that here every slot is a spill
+  // and the refusal is a false alarm. asmlift declines it with `stack pointer used as data — the
+  // store to [sp,#0] reaches \`bl callee\` unread with its lower slots supplied — it may be that
+  // call's outgoing stack argument`. That line is the first blocker of 9 of the 51 klonoa
+  // functions ranked in the LoadBGTilemapData round and of all four stack-heavy siblings it tried,
+  // so the row pins a population, not one function; and once the gate opens the row becomes a
+  // spill-slot-order inhabitant (`spillorder`, in the uninit-local block): the source declares
+  // its three spilled locals in one order and asmlift's naming walk will emit another.
+  // agbcc only, by measurement: ido7.1 and gcc2.7.2kmc decline it at the call (`function call
+  // 'jal' … MIPS calls not yet modelled`, a blocker of 6 ido / 32 kmc declined rows) and
+  // mwcc_242_81 does not spill it at all (52 instructions, `stwu`/`stw r0` only), so those lanes
+  // would pin another family's blocker or nothing. Its `value-home` tag is the judgement that
+  // the diff, once it lifts, is WHERE the ten locals live; it cannot carry `stack-addr`, whose
+  // floor is a unary `&` the source does not contain.
+  // m2c NONCOMPILES it on the identical `ctx` (``unksp8' undeclared (first use in this function)`):
+  // it renders every spill slot as an undeclared `unkspN` and reads the loop-invariant products
+  // `p[0]*3`, `p[1]*5` out of slots `unkspC`/`unksp10` the same way — so it REACHES the shape
+  // asmlift refuses, and stalls one gate later on the declaration it never emits.
+  //
   // agbcc only. The CSE-barrier half is a fact about gcc 2.9's alias handling, established by
   // compiling the pairs above; ido7.1, gcc2.7.2kmc and mwcc_242_81 were NOT measured, and the
   // outgoing-argument shape the refusal models is AAPCS's, so those lanes are left off rather than
@@ -2164,6 +2278,23 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void use(s32 *p); void stkclamp(u32 i);',
     proto: { use: { params: 1, returnsVoid: true }, stkclamp: { returnsVoid: true } },
+  },
+  {
+    sym: 'spill10',
+    src:
+      'int callee(int);\n' +
+      'int spill10(int k, int *p) {\n' +
+      '    int v0, v1, v2, v3, v4, v5, v6, v7, v8, v9; int i, s = 0;\n' +
+      '    v0 = p[0]; v1 = p[1]; v2 = p[2]; v3 = p[3]; v4 = p[4]; v5 = p[5]; v6 = p[6]; v7 = p[7]; v8 = p[8]; v9 = p[9];\n' +
+      '    for (i = 0; i < k; i++) {\n' +
+      '        s += callee(i) + v0 * 3 + v1 * 5 + v2 * 7 + v3 * 11 + v4 * 13 + v5 * 17 + v6 * 19 + v7 * 23 + v8 * 29 + v9 * 31;\n' +
+      '    }\n' +
+      '    return s;\n' +
+      '}',
+    features: ['value-home'],
+    toolchains: ['agbcc'],
+    ctx: 'int callee(int); int spill10(int k, int *p);',
+    proto: { callee: { params: 1 } },
   },
 
   // WHERE A CONSTANT OFFSET LIVES. The value-home family above asks which register or slot holds a
@@ -4708,11 +4839,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // handed a map and a `gaddr` CAN form. The rows in THIS family still carry none, so the gap is
   // unreached here — but it is reachable now by a synthetic row, not only by a real-tier one.
   //
-  // NO ROW for declaration order either, because one already exists: permuting the 14 declarations
+  // NO ROW HERE for declaration order, because one already exists: permuting the 14 declarations
   // of asmlift's own winning `dma_fill_uninit` candidate and recompiling gives 0 / 6 / 9 / 12 over
   // 40 random orders — one of them a byte MATCH — and the order asmlift ships sits at the worst of
-  // the four, which is the 12 that row publishes. So `dma_fill_uninit` is the gate for that
-  // capability and this family adds nothing to it.
+  // the four, which is the 12 that row publishes. That 12 is twelve `[sp,#k]` operand rows and
+  // nothing else, and moving the accumulator's declaration after the three spilled locals (or
+  // permuting the four in place into the target's slot order) compiles to 0. The LAW behind it —
+  // spill slots are handed out in declaration order — and the gate that isolates it from this
+  // family's DMA machinery and from the undef envelope are the `spillorder` / `spillorder_rev`
+  // pair in the uninit-local block; `dma_fill_uninit` is that capability's second read, not its
+  // only gate, so a change here that moves it is attributed to whichever of the three machineries
+  // the pair says.
   //
   // NO ROW for reusing ONE local across several disjoint loops, which is the largest single gap
   // the LoadBGTilemapData ladder priced. `coalesceCandidates` (l3/coalesce.ts) is documented as
