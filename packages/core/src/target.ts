@@ -351,6 +351,21 @@ export const MIPS_GCC: TargetDescription = {
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,
   // and the row it comes from matches only with the parameters as the loop's homes. The other
   // structuring levers take the universal default until a KMC fixture says otherwise.
+  //
+  // THIS IS A COMPILER-WIDE GUESS STANDING IN FOR A PER-FUNCTION OBSERVATION, and it is the one
+  // place in this file where that is true of something the assembly states outright: whether the
+  // compiler kept a loop's induction variable in its argument register is visible in every
+  // function, one function at a time. The observation is "the header param's register key IS the
+  // key the entry value already lives in" — known to the SSA builder (`frontend/ssa.ts` `phiKey`)
+  // and to this file (`argRegs`), and unexposed for the same reason the write order was unexposed
+  // until this round. Exposing it would replace two booleans (here and PPC_MWCC's "false until a
+  // CW loop fixture says otherwise") with a measurement.
+  // NOT the nearby proxy, which was built and measured: adopting the entry value's name exactly
+  // when the forward predecessor did not WRITE the param's key — a question the write-order record
+  // already answers — moves 36 of the 736 synthetic rows and costs four matches net (continueloop,
+  // countpos and loopif on mwcc plus dmafill, dmaptrsrc and dmastride on agbcc lost; maxarr and
+  // preupdate_exit_call on agbcc gained). The proxy is not the observation: a pred that computes
+  // the initial value INTO the param's own register wrote the key and still coalesces.
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   compilerBehaviors: { coalesceLoopInit: true, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
 };
@@ -369,7 +384,8 @@ export const PPC_MWCC: TargetDescription = {
   returnReg: 'r3',
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: true },
   // CodeWarrior's structuring levers are UNKNOWN until fixtures reveal them — safe universal
-  // defaults; coalesceLoopInit false until a CW loop fixture says otherwise.
+  // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
+  // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
   compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
 };
 
