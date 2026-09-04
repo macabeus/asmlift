@@ -431,6 +431,28 @@ interface FlatItem {
   align?: { pow: number };
 }
 
+/** One hypothesis about a function's base alignment, laid out: the item stream with every
+ *  alignment directive replaced by the pad instructions its fill bytes ARE, each item's byte
+ *  offset, where each item came from in the unexpanded stream (-1 = an inserted fill), and the
+ *  fill sites themselves. Two of these — base 0 and base 2 — are built for every slice. */
+interface Candidate {
+  base: number;
+  items: FlatItem[];
+  offs: number[];
+  from: number[];
+  fills: { site: number; start: number; bytes: number }[];
+}
+
+/** A candidate that survived resolution: the rewritten stream, the literal pools it discovered,
+ *  and the WITNESS — every fact this layout decided, phrased so two candidates can be COMPARED
+ *  rather than merely counted. */
+interface Resolved {
+  base: number;
+  items: FlatItem[];
+  pools: Map<string, string[]>;
+  witness: string[];
+}
+
 function decode(
   name: string,
   asm: string,
@@ -677,7 +699,49 @@ function decode(
     // frontend already models; anything the decoder cannot prove declines loud.
     const isPcRelLdr = (ins?: Instr) =>
       ins?.mnemonic === 'ldr' && /^\[pc,\s*#(0x[0-9a-fA-F]+|\d+)\]$/.test(ins.ops[1] ?? '');
-    const needsLayout = flat.some((f) => (f.data?.inCode ?? false) || isPcRelLdr(f.instr));
+    // An alignment directive's fill bytes are INSTRUCTIONS in the code stream, not decoration: on
+    // ARM7TDMI `.align 2, 0` emits the halfword 0x0000, which IS `lsls r0, r0, #0` and sets the
+    // flags. They are padding only when nothing can execute them. When something CAN, their count
+    // is part of the answer and the slice needs the byte-accurate layout below, exactly as a raw
+    // branch halfword does — so this predicate, not the accident of whether some other item needed
+    // offsets, is what decides. Scanning back from the align: a label means a branch can land on
+    // the fill, an open or conditional instruction means control falls into it, and nothing at all
+    // means the fill sits at the function's entry. Only an unconditional transfer seals it off —
+    // and a label seals nothing, so a label ON the fill re-opens it, but ONLY if something in the
+    // slice names that label. agbcc writes a dead `.L10:` in front of every pool alignment and
+    // nothing ever branches there; reading that as a way in would send every agbcc function
+    // through the base solver for a fill no instruction can execute.
+    const named = new Set<string>(); // labels an operand or a data word names — the branch targets
+    const labelShape = /^([A-Za-z_.$][\w.$]*)/;
+    for (const f of flat) {
+      for (const tok of [...(f.instr?.ops ?? []), ...(f.data?.values ?? [])]) {
+        const m = tok.match(labelShape);
+        if (m) {
+          named.add(m[1]);
+        }
+      }
+    }
+    const fillIsReachable = (upto: number) => {
+      for (let j = upto - 1; j >= 0; j--) {
+        const g = flat[j];
+        if (g.label !== undefined) {
+          if (named.has(g.label)) {
+            return true;
+          }
+          continue; // a label nothing names cannot bring control here
+        }
+        if (g.instr) {
+          const k = classifyXfer(g.instr);
+          return k === null || k === 'cond';
+        }
+        // data: not executed — keep looking for the instruction whose flow reaches this point
+      }
+      return true;
+    };
+    const sealedFill = flat.map((f, i) => f.align !== undefined && !fillIsReachable(i));
+    const needsLayout = flat.some(
+      (f, i) => (f.data?.inCode ?? false) || isPcRelLdr(f.instr) || (f.align !== undefined && !sealedFill[i]),
+    );
     if (needsLayout) {
       // Only a hazard WITHIN this function's slice makes its layout unknowable.
       const sliceHazard = hazards.find((h) => h.at >= sliceStart && h.at < boundaries[boundaryIdx]);
@@ -706,11 +770,13 @@ function decode(
       // item the other two spellings of a pad produce. Every other item is an even byte count and
       // `base` is even, so the fill is a whole number of halfwords; that is asserted rather than
       // assumed, because a half-consumed fill would shift every pc-relative load after it.
-      const expandAligns = (base: number): { items: FlatItem[]; offs: number[] } => {
+      const expandAligns = (base: number): Candidate => {
         const items: FlatItem[] = [];
         const offs: number[] = [];
+        const from: number[] = []; // items[k] came from flat[from[k]]; -1 marks an inserted fill
+        const fills: { site: number; start: number; bytes: number }[] = [];
         let at = 0;
-        for (const f of flat) {
+        flat.forEach((f, i) => {
           if (f.align) {
             const fill = -(base + at) & ((1 << f.align.pow) - 1);
             if (fill % 2 !== 0) {
@@ -718,22 +784,25 @@ function decode(
                 `cannot lift '${name}': '.align ${f.align.pow}, 0' pads ${fill} bytes here, which is not a whole number of Thumb instructions`,
               );
             }
+            fills.push({ site: i, start: at, bytes: fill });
             for (let k = 0; k < fill; k += 2) {
               offs.push(at + k);
+              from.push(-1);
               items.push({ instr: padHalfword(0)! });
             }
             at += fill;
-            continue;
+            return;
           }
           offs.push(at);
+          from.push(i);
           items.push({ ...f }); // cloned: pass 2 replaces `instr` on the chosen candidate's items
           at += itemSize(f);
-        }
-        return { items, offs };
+        });
+        return { base, items, offs, from, fills };
       };
       // The one invariant that costs nothing to check: every literal-pool word is 4-aligned in the
       // ROM. This IS the old `basePar` derivation, read as a filter instead of an assignment.
-      const laid = [0, 2].map((base) => ({ base, ...expandAligns(base) }));
+      const laid = [0, 2].map(expandAligns);
       const viable = laid.filter(({ base, items, offs }) =>
         items.every((f, i) => !f.data || f.data.halfwords || (base + offs[i]) % 4 === 0),
       );
@@ -747,14 +816,23 @@ function decode(
       const candidates = viable.filter((c, i) => viable.findIndex((o) => o.offs.join() === c.offs.join()) === i);
 
       // Everything from here down is the resolution of ONE candidate layout: byte offsets, raw
-      // branch decode, pc-relative pool loads. It reads `items`/`itemOff` and returns the rewritten
+      // branch decode, pc-relative pool loads. It reads the candidate and returns the rewritten
       // stream; it must not touch anything shared, or a rejected candidate would leave its marks.
+      //
+      // It also returns a WITNESS: every fact about the input this layout decided — which pool
+      // word each pc-relative load reads, which item each raw branch targets, and how many fill
+      // bytes each align emits WHEN those bytes are observable. Two candidate bases are compared
+      // by their witnesses, so "they disagree" is something the code establishes rather than
+      // asserts. A sealed fill (nothing can execute it) that no branch targets is left out: those
+      // pad instructions form an all-pad block the unreachable-pad prune below deletes, so their
+      // count cannot reach the answer.
       const resolveAt = (
-        items: FlatItem[],
-        itemOff: number[],
+        { base, items, offs: itemOff, from, fills }: Candidate,
         basePar: number | undefined,
-      ): { items: FlatItem[]; pools: Map<string, string[]> } => {
+      ): Resolved => {
         const pools = new Map<string, string[]>();
+        const observed: string[] = [];
+        const fillEntered = new Set<number>(); // fill sites a raw branch lands inside
         const labelOff = new Map<string, number>();
         const codeStart = new Set<number>(); // offsets that begin an instruction or carry a label
         items.forEach((f, i) => {
@@ -823,6 +901,16 @@ function decode(
             const lab = labelAt.get(br.target) ?? synthLabels.get(br.target) ?? `.Lraw_${br.target.toString(16)}`;
             synthLabels.set(br.target, lab);
             decoded.set(i, { mnemonic: br.mnemonic, ops: [lab] });
+            const inFill = fills.find((fl) => br.target >= fl.start && br.target < fl.start + fl.bytes);
+            if (inFill) {
+              fillEntered.add(inFill.site);
+            }
+            // The branch is witnessed by WHICH item it lands on, not by the byte offset: the
+            // offsets of one layout mean nothing in the other.
+            const ti = items.findIndex((_g, j) => itemOff[j] === br.target);
+            observed.push(
+              `raw branch at item ${from[i]} → ${ti < 0 ? '?' : from[ti] < 0 ? 'alignment fill' : `item ${from[ti]}`}`,
+            );
           });
         });
         // Pass 2: pc-relative literal loads → rewrite to a synthesized pool label so the existing
@@ -864,6 +952,7 @@ function decode(
           const poolLab = `.Lpcpool_${wordOff.toString(16)}`;
           pools.set(poolLab, [value]);
           f.instr = { mnemonic: 'ldr', ops: [f.instr!.ops[0], poolLab] };
+          observed.push(`pc-relative load at item ${from[i]} → ${value}`);
         });
         // Pass 3: rebuild the stream — insert synthesized target labels, replace decoded halfwords.
         const next: FlatItem[] = [];
@@ -879,17 +968,22 @@ function decode(
             next.push(f);
           }
         });
-        return { items: next, pools };
+        for (const fl of fills) {
+          if (fl.bytes > 0 && (!sealedFill[fl.site] || fillEntered.has(fl.site))) {
+            observed.push(`alignment fill at item ${fl.site} is ${fl.bytes} bytes`);
+          }
+        }
+        return { base, items: next, pools, witness: observed.sort() };
       };
 
-      const resolved: { items: FlatItem[]; pools: Map<string, string[]> }[] = [];
+      const resolved: Resolved[] = [];
       const refusals: Error[] = [];
       for (const c of candidates) {
         // A slice with no pool word leaves the base unobservable, exactly as before: `basePar`
         // stays undefined and a pc-relative load declines for want of a pool to resolve into.
         const hasPool = c.items.some((f) => f.data && !f.data.halfwords);
         try {
-          resolved.push(resolveAt(c.items, c.offs, hasPool ? c.base : undefined));
+          resolved.push(resolveAt(c, hasPool ? c.base : undefined));
         } catch (e) {
           refusals.push(e as Error);
         }
@@ -897,10 +991,19 @@ function decode(
       if (resolved.length === 0) {
         throw refusals[0];
       }
-      if (resolved.length > 1) {
+      // More than one base can survive and still decide EVERY question the same way — an align
+      // whose fill is unreachable padding moves the two layouts apart without moving the answer,
+      // which is the ordinary shape, not a corner. Only a difference in what the layouts decided
+      // is a refusal, and the message quotes the difference it found.
+      const other = resolved.find((r) => r.witness.join('\n') !== resolved[0].witness.join('\n'));
+      if (other) {
+        const only = (a: Resolved, b: Resolved) => a.witness.filter((w) => !b.witness.includes(w));
+        const say = (w: string[]) => (w.length > 0 ? w.join('; ') : 'nothing');
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': '.align' padding depends on the function's base alignment, which this input ` +
-            `does not determine — both 0 and 2 mod 4 decode consistently, and they disagree`,
+          `cannot lift '${name}': alignment padding depends on the function's base alignment, which this ` +
+            `input does not determine — base ${resolved[0].base} and base ${other.base} both decode ` +
+            `consistently but disagree: base ${resolved[0].base} has ${say(only(resolved[0], other))}, ` +
+            `base ${other.base} has ${say(only(other, resolved[0]))}`,
         );
       }
       for (const [lab, words] of resolved[0].pools) {
@@ -908,9 +1011,10 @@ function decode(
       }
       flat = resolved[0].items;
     } else {
-      // Nothing in this slice needs byte-accurate layout, so nothing needs the align's size, and
-      // the block builder below has no use for an item that carries no instruction. Dropping it
-      // is what happened to every `.align` before this pass existed.
+      // Every align in this slice is sealed off by an unconditional transfer (see `sealedFill`),
+      // so its fill is pool padding no instruction can execute — the same verdict the prune below
+      // reaches for a pad block it finds unreachable, arrived at before the layout is needed. Its
+      // bytes cannot move any answer, so the item is dropped and no base is solved.
       flat = flat.filter((f) => !f.align);
     }
 

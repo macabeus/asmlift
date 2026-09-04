@@ -224,7 +224,9 @@ _e:
 	bx lr
 `;
     expect(() => d('am', asm)).toThrow(FrontendUnsupportedError);
-    expect(() => d('am', asm)).toThrow(/'\.align' padding depends on the function's base alignment/);
+    expect(() => d('am', asm)).toThrow(/base 0 and base 2 both decode consistently but disagree/);
+    // The message names the difference it actually found, rather than asserting one.
+    expect(() => d('am', asm)).toThrow(/pc-relative load at item 2 → 0x22222222/);
   });
 
   test('`.align 2` with no fill operand STILL declines loud (unknown fill bytes)', () => {
@@ -357,9 +359,11 @@ _e:
     expect(() => d('ic', asm)).toThrow(/literal pools at inconsistent alignments/);
   });
 
-  test('a function that needs no byte-accurate layout is untouched by any of this', () => {
-    // The common shape: labelled pool, no pc-relative load, no raw halfword. The align never
-    // needed sizing here and still does not.
+  test('a function whose align is sealed off by a branch needs no layout at all', () => {
+    // The common shape: labelled pool, no pc-relative load, no raw halfword — and the align sits
+    // behind an unconditional `b`, so nothing can execute its fill. Those bytes cannot move any
+    // answer, so no base is solved and the item is dropped, exactly as before this pass existed.
+    // What makes that safe is the SEAL, not the absence of other layout work: see the next test.
     const asm = `	thumb_func_start nl
 nl:
 	ldr r0, _p
@@ -370,5 +374,81 @@ _e:
 	bx lr
 `;
     expect(d('nl', asm).source).toBe('s32 nl(void) {\n    return 50352804;\n}\n');
+  });
+
+  test('a REACHABLE fill is code: all three spellings lift to the SAME C', () => {
+    // Nothing here needs byte offsets for its own sake — no pc-relative load, no raw branch — so
+    // this is the path that used to DELETE the align unsized. Its fill is reachable (control
+    // falls straight into it) and the in-code pool word pins the base at 2, which makes the fill
+    // exactly one pad instruction: the same two bytes the other two spellings write out.
+    const f = (pad: string) => `	thumb_func_start rf
+rf:
+	b _c
+	.4byte 0x11111111
+_c:
+	movs r1, #0x05
+${pad}
+	bx lr
+`;
+    const asInstr = d('rf', f('	lsls r0, r0, #0x00')).source;
+    expect(asInstr).toBe('s32 rf(s32 a0) {\n    return a0 << 0;\n}\n');
+    expect(d('rf', f('	.2byte 0x0000')).source).toBe(asInstr);
+    expect(d('rf', f('	.align 2, 0')).source).toBe(asInstr);
+    // …and the pad is not free: without it the function is the identity.
+    expect(d('rf', f('')).source).toBe('s32 rf(s32 a0) {\n    return a0;\n}\n');
+  });
+
+  test('a reachable fill the input cannot size declines — it never silently vanishes', () => {
+    // Same reachable position, but no pool pins the base, so the input genuinely does not say
+    // whether those two bytes are there. The two instruction spellings say they are and lift; the
+    // directive cannot, and refuses rather than dropping bytes the other spellings execute.
+    const f = (pad: string) => `	thumb_func_start rp
+rp:
+	movs r1, #0x05
+${pad}
+	bx lr
+`;
+    expect(d('rp', f('	lsls r0, r0, #0x00')).source).toContain('a0 << 0');
+    expect(d('rp', f('	.2byte 0x0000')).source).toContain('a0 << 0');
+    expect(() => d('rp', f('	.align 2, 0'))).toThrow(FrontendUnsupportedError);
+    expect(() => d('rp', f('	.align 2, 0'))).toThrow(/alignment fill at item 2 is 2 bytes/);
+  });
+
+  test('two bases that decide every question the same way are NOT a refusal', () => {
+    // Both 0 and 2 mod 4 survive every invariant here: the align emits a pad at one and nothing at
+    // the other, and that pad is unreachable padding the prune deletes either way. The load
+    // resolves to the same word under both. Refusing this would cost a lift for no disagreement —
+    // the survivors are COMPARED, not counted.
+    const f = (pad: string) => `	thumb_func_start q
+q:
+	ldr r0, [pc, #0x04]
+	movs r1, #0x01
+	b _end
+${pad}
+	.4byte 0xDEADBEEF
+	.4byte 0x030052A4
+_end:
+	bx lr
+`;
+    const asInstr = d('q', f('	lsls r0, r0, #0x00')).source;
+    expect(asInstr).toBe('s32 q(void) {\n    return 3735928559;\n}\n');
+    expect(d('q', f('')).source).toBe(asInstr);
+    expect(d('q', f('	.align 2, 0')).source).toBe(asInstr);
+  });
+
+  test("agbcc's dead pool label does not re-open a sealed fill", () => {
+    // agbcc writes `.L10:` in front of every literal-pool alignment and never branches there. A
+    // label is only a way into the fill if something in the slice NAMES it — reading every label
+    // as one would send every agbcc function through the base solver for bytes nothing executes.
+    const asm = `	thumb_func_start fb
+fb:
+	ldr r0, .L9
+	bx lr
+.L10:
+	.align 2, 0
+.L9:
+	.word 0x3001000
+`;
+    expect(d('fb', asm).source).toBe('s32 fb(void) {\n    return 50335744;\n}\n');
   });
 });
