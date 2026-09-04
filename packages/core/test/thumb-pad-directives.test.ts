@@ -15,6 +15,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { FrontendUnsupportedError } from '../src/frontend/errors';
+import { PAD_ENCODINGS, isPadInstr } from '../src/frontend/thumb';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -345,6 +346,37 @@ _e:
     }
   });
 
+  test('a single pool an align moves gets its OWN refusal, not the multi-pool one', () => {
+    // One `.4byte`, and neither base puts it on a 4-byte boundary once the align's own fill is
+    // counted. Nothing is inconsistent with anything here — the pre-existing message would send a
+    // reader hunting for a second pool that does not exist.
+    const asm = `	thumb_func_start r
+r:
+	ldr r0, [pc, #0x00]
+	.align 2, 0
+	bx lr
+	.4byte 0x030052A4
+`;
+    expect(() => d('r', asm)).toThrow(/no base alignment \(0 or 2 mod 4\) puts every literal pool word/);
+  });
+
+  test('when NEITHER base fits, the refusal names the search and both hypotheses', () => {
+    // Reporting candidate 0's message alone states one hypothesis as fact, byte offsets included —
+    // and `onGap: 'annotate'` writes those strings into the emitted artifact.
+    const asm = `	thumb_func_start b
+b:
+	ldr r0, [pc, #0x020]
+	b _e
+	.align 2, 0
+	.4byte 0x11111111
+	.4byte 0x22222222
+_e:
+	bx lr
+`;
+    expect(() => d('b', asm)).toThrow(/neither base alignment fits/);
+    expect(() => d('b', asm)).toThrow(/base 0: .*0x24.*base 2: .*0x22/);
+  });
+
   test('inconsistent literal pools keep their own refusal', () => {
     const asm = `	thumb_func_start ic
 ic:
@@ -507,5 +539,22 @@ fb:
 	.word 0x3001000
 `;
     expect(d('fb', asm).source).toBe('s32 fb(void) {\n    return 50335744;\n}\n');
+  });
+});
+
+describe('the pad encodings are one table', () => {
+  test('every instruction padHalfword can emit is one isPadInstr recognises', () => {
+    // The knowledge "which bytes are alignment fill" is spelled twice — as encodings in
+    // PAD_ENCODINGS and as instruction shapes in isPadInstr. A third encoding added to one and
+    // forgotten in the other would produce a pad the prune never removes, silently.
+    expect(PAD_ENCODINGS.length).toBeGreaterThan(1);
+    for (const e of PAD_ENCODINGS) {
+      expect(isPadInstr({ mnemonic: e.mnemonic, ops: [...e.ops] })).toBe(true);
+    }
+  });
+
+  test('and the predicate does not accept just anything', () => {
+    expect(isPadInstr({ mnemonic: 'mov', ops: ['r0', 'r1'] })).toBe(false);
+    expect(isPadInstr({ mnemonic: 'lsls', ops: ['r0', 'r0', '#0x01'] })).toBe(false);
   });
 });

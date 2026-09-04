@@ -133,19 +133,34 @@ const COND_OPCODE: Record<string, Opcode> = {
 // goto / register tail call), which this frontend does not model and must LOUD-FAIL rather than
 // silently drop — mirroring the MIPS `jr` and PPC `bctr` guards. (agbcc dispatches a dense switch
 // via `mov pc, rN`.)
-// The halfword encodings that ARE alignment fill, and the instruction each one is: 0x0000 is
-// `lsls r0, r0, #0`, and 0x46C0 is the ARM7TDMI Thumb NOP — what `nop` assembles to, and what
-// objdump prints as `nop @ (mov r8, r8)`. It is decoded as `nop`, NOT as `mov r8, r8`: the two
-// spell the same encoding, but `mov r8, r8` is modelled downstream as a READ of a callee-saved
-// register, which invents a parameter — the same two bytes would then get a signature the object
-// does not have. Both readings are pad to isPadInstr; only one of them is inert.
-// Returns a FRESH Instr per call: later passes rewrite operands in place.
+// The halfword encodings that ARE alignment fill, and the instruction each one is. 0x0000 is
+// `lsls r0, r0, #0`; 0x46C0 is the ARM7TDMI Thumb NOP — what `nop` assembles to, and what objdump
+// prints as `nop @ (mov r8, r8)`. It is decoded as `nop`, NOT as `mov r8, r8`: the two spell the
+// same encoding, but `mov r8, r8` is modelled downstream as a READ of a callee-saved register,
+// which invents a parameter — the same two bytes would then carry a signature the object does not
+// have.
 //
-// A splitter that writes the pad as data (`.2byte 0x0000`) and one that writes it as an
-// instruction are describing the SAME two bytes, so turning the halfword into the instruction it
-// encodes is a decode, not a fabrication — the same move the raw-BRANCH decoder below already
-// makes for `.2byte 0xD10E`. Everything that decides what padding MEANS (isPadInstr, the
-// reachability prune) then sees one representation instead of three spellings.
+// ONE table, because this knowledge is spelled twice: here as encodings, and in `isPadInstr` below
+// as instruction shapes. A third encoding added to one and forgotten in the other would produce a
+// pad nothing ever prunes, silently and with no test failing — so a test walks this table through
+// that predicate.
+export const PAD_ENCODINGS: { hw: number; mnemonic: string; ops: string[] }[] = [
+  { hw: 0x0000, mnemonic: 'lsls', ops: ['r0', 'r0', '#0x00'] },
+  { hw: 0x46c0, mnemonic: 'nop', ops: [] },
+];
+
+/** Is this instruction alignment fill, however a splitter spelled it? A block made ONLY of these
+ *  is pool/section padding when unreachable — pruned in `decode`. A REACHABLE pad block is a real
+ *  (degenerate) instruction and is kept. `nop` and `mov r8, r8` are both ways of writing 0x46C0;
+ *  `lsl`/`lsls r0, r0, #0` is how 0x0000 is written. */
+export const isPadInstr = (i: Instr) =>
+  i.mnemonic === 'nop' ||
+  ((i.mnemonic === 'lsl' || i.mnemonic === 'lsls') &&
+    i.ops[0] === 'r0' &&
+    i.ops[1] === 'r0' &&
+    /^#0x?0*$/.test(i.ops[2] ?? '')) ||
+  ((i.mnemonic === 'mov' || i.mnemonic === 'movs') && i.ops[0] === 'r8' && i.ops[1] === 'r8');
+
 // A `.2byte`/`.hword`/`.short` operand this pass may read as an ENCODING: a complete 16-bit hex
 // literal and nothing else. `parseInt` stops at the first character it cannot use, so `0x0000+2`
 // parsed as 0x0000 and `0xD001+2` as 0xD001 — an expression, a relocation or a symbol would have
@@ -155,14 +170,15 @@ function halfwordLiteral(text: string): number | null {
   return /^0[xX][0-9a-fA-F]{1,4}$/.test(text) ? parseInt(text, 16) : null;
 }
 
+// A splitter that writes the pad as data (`.2byte 0x0000`) and one that writes it as an
+// instruction are describing the SAME two bytes, so turning the halfword into the instruction it
+// encodes is a decode, not a fabrication — the same move the raw-BRANCH decoder below already
+// makes for `.2byte 0xD10E`. Everything that decides what padding MEANS (isPadInstr, the
+// reachability prune) then sees one representation instead of three spellings.
+// Returns a FRESH Instr per call: later passes rewrite operands in place.
 function padHalfword(v: number): Instr | null {
-  if (v === 0x0000) {
-    return { mnemonic: 'lsls', ops: ['r0', 'r0', '#0x00'] };
-  }
-  if (v === 0x46c0) {
-    return { mnemonic: 'nop', ops: [] };
-  }
-  return null;
+  const e = PAD_ENCODINGS.find((p) => p.hw === v);
+  return e ? { mnemonic: e.mnemonic, ops: [...e.ops] } : null;
 }
 
 type XferKind = 'return' | 'uncond' | 'cond' | 'indirect';
@@ -710,13 +726,13 @@ function decode(
     // flags. They are padding only when nothing can execute them. When something CAN, their count
     // is part of the answer and the slice needs the byte-accurate layout below, exactly as a raw
     // branch halfword does — so this predicate, not the accident of whether some other item needed
-    // offsets, is what decides. Scanning back from the align: a label means a branch can land on
-    // the fill, an open or conditional instruction means control falls into it, and nothing at all
-    // means the fill sits at the function's entry. Only an unconditional transfer seals it off —
-    // and a label seals nothing, so a label ON the fill re-opens it, but ONLY if something in the
-    // slice names that label. agbcc writes a dead `.L10:` in front of every pool alignment and
-    // nothing ever branches there; reading that as a way in would send every agbcc function
-    // through the base solver for a fill no instruction can execute.
+    // offsets, is what decides. Scanning back from the align: an open or conditional instruction
+    // means control falls into the fill, a label something in the slice NAMES means a branch can
+    // land on it, and nothing at all means the fill sits at the function's entry. Only an
+    // unconditional transfer seals it off, and a label nothing names does not re-open it — agbcc
+    // writes a dead `.L10:` in front of every literal-pool alignment and never branches there, so
+    // reading every label as a way in sends every agbcc function through the base solver for a
+    // fill no instruction can execute (measured: 75 of 253 benchmark reference functions lost).
     const named = new Set<string>(); // labels an operand or a data word names — the branch targets
     const labelShape = /^([A-Za-z_.$][\w.$]*)/;
     for (const f of flat) {
@@ -789,9 +805,11 @@ function decode(
       const itemSize = (f: FlatItem) =>
         f.instr ? (f.instr.mnemonic === 'bl' ? 4 : 2) : f.data ? f.data.values.length * (f.data.halfwords ? 2 : 4) : 0;
       // Replace each `.align pow, 0` with the pad instructions its zero-fill bytes ARE — the same
-      // item the other two spellings of a pad produce. Every other item is an even byte count and
-      // `base` is even, so the fill is a whole number of halfwords; that is asserted rather than
-      // assumed, because a half-consumed fill would shift every pc-relative load after it.
+      // item the other two spellings of a pad produce. The fill is always a whole number of
+      // halfwords and cannot be otherwise: `base` is 0 or 2, every item size is even (2, 4, or a
+      // whole number of 2/4-byte values), and `pow` is at most 2 — so `-(base + at) & 3` is even.
+      // It was an assertion here; nothing could fail it, and being raised OUTSIDE the candidate
+      // try/catch below it would have bypassed the base machinery it appeared to belong to.
       const expandAligns = (base: number): Candidate => {
         const items: FlatItem[] = [];
         const offs: number[] = [];
@@ -801,11 +819,6 @@ function decode(
         flat.forEach((f, i) => {
           if (f.align) {
             const fill = -(base + at) & ((1 << f.align.pow) - 1);
-            if (fill % 2 !== 0) {
-              throw new FrontendUnsupportedError(
-                `cannot lift '${name}': '.align ${f.align.pow}, 0' pads ${fill} bytes here, which is not a whole number of Thumb instructions`,
-              );
-            }
             fills.push({ site: i, start: at, bytes: fill });
             for (let k = 0; k < fill; k += 2) {
               offs.push(at + k);
@@ -829,8 +842,15 @@ function decode(
         items.every((f, i) => !f.data || f.data.halfwords || (base + offs[i]) % 4 === 0),
       );
       if (viable.length === 0) {
+        // With an align in the slice this is reachable with ONE pool word: the align's own size
+        // moves it, and neither base lands it on a 4-byte boundary. Nothing is inconsistent with
+        // anything, so the pre-existing multi-pool message would send a reader hunting for a
+        // second pool that does not exist.
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': literal pools at inconsistent alignments — cannot determine the function's base alignment`,
+          flat.some((f) => f.align)
+            ? `cannot lift '${name}': no base alignment (0 or 2 mod 4) puts every literal pool word on a ` +
+                `4-byte boundary once alignment fill is accounted for`
+            : `cannot lift '${name}': literal pools at inconsistent alignments — cannot determine the function's base alignment`,
         );
       }
       // Two viable bases that lay the slice out identically are one candidate: the base is then
@@ -1007,11 +1027,27 @@ function decode(
         try {
           resolved.push(resolveAt(c, hasPool ? c.base : undefined));
         } catch (e) {
-          refusals.push(e as Error);
+          // ONLY a refusal is a vote against this base. Swallowing every exception would let a
+          // programming error inside resolveAt elect the other base, and the lift would then rest
+          // on a hypothesis chosen because the code threw.
+          if (!(e instanceof FrontendUnsupportedError)) {
+            throw e;
+          }
+          refusals.push(e);
         }
       }
       if (resolved.length === 0) {
-        throw refusals[0];
+        // With one candidate the message is the single hypothesis's own, byte for byte as before.
+        // With two, reporting only candidate 0's message states one hypothesis as fact — including
+        // byte offsets computed in a layout that was never established, which `onGap: 'annotate'`
+        // writes into the emitted artifact.
+        if (candidates.length === 1) {
+          throw refusals[0];
+        }
+        const why = refusals.map(
+          (e, i) => `base ${candidates[i].base}: ${e.message.replace(/^cannot lift '[^']*': /, '')}`,
+        );
+        throw new FrontendUnsupportedError(`cannot lift '${name}': neither base alignment fits — ${why.join('; ')}`);
       }
       // More than one base can survive and still decide EVERY question the same way — an align
       // whose fill is unreachable padding moves the two layouts apart without moving the answer,
@@ -1130,22 +1166,14 @@ function decode(
       }
     }
     let live = blocks.filter((b) => b.instrs.length > 0);
-    // Alignment-pad NOPs a splitter emits around returns and literal pools: `lsls r0, r0, #0`
-    // is the 0x0000 halfword, `mov r8, r8` is 0x46C0, plus a literal `nop`. A block made ONLY
-    // of these is pool/section padding when unreachable — pruned below. A REACHABLE pad block
-    // is a real (degenerate) instruction and is kept.
-    //
-    // This is the ONE place the question is decided, for all three ways a splitter spells the
-    // same two bytes: as this instruction, as `.2byte 0x0000` (decoded at parse — padHalfword),
-    // or as `.align 2, 0` (sized by the layout pass above). None of them arrives here as its own
-    // kind of thing, so none of them can be judged by a different rule.
-    const isPadInstr = (i: Instr) =>
-      i.mnemonic === 'nop' ||
-      ((i.mnemonic === 'lsl' || i.mnemonic === 'lsls') &&
-        i.ops[0] === 'r0' &&
-        i.ops[1] === 'r0' &&
-        /^#0x?0*$/.test(i.ops[2] ?? '')) ||
-      ((i.mnemonic === 'mov' || i.mnemonic === 'movs') && i.ops[0] === 'r8' && i.ops[1] === 'r8');
+    // Alignment fill a splitter emits around returns and literal pools (isPadInstr, above, is the
+    // single definition of which instructions those are). This is the ONE place padding-versus-real
+    // -instruction is decided, for all three ways the same two bytes get spelled: as the
+    // instruction itself, as `.2byte 0x0000` (decoded at parse — padHalfword), or as `.align 2, 0`
+    // (expanded into these very instructions by the layout pass above whenever anything can execute
+    // the fill; when nothing can, that pass reached the SAME verdict — padding — and dropped the
+    // item). None of them arrives here as its own kind of thing, so none can be judged by a
+    // different rule.
     const padBlocks = new Set(live.filter((b) => b.instrs.every(isPadInstr)).map((b) => b.label));
     if (fallsIntoData.size > 0 || padBlocks.size > 0) {
       // Targeted reachability: a block that falls into data is either luvdis's unreachable
