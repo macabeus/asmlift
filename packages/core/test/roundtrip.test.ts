@@ -60,7 +60,9 @@ test('double round-trip is a fixed point', () => {
 // decides an edge's copy order — and, on a cycle, which register is spilled — appeared nowhere in
 // the artifact the tower's own boundary criterion asks for. It appears now, at `stage:lift`, and it
 // deliberately does NOT come back through `parse`: a parsed fn that returned measured would
-// structure differently from every other parsed fn.
+// structure differently from every other parsed fn. The MEASUREMENT is what does not come back —
+// the TEXT still parses, because every stage dump carries the annotation now (pipeline.ts,
+// trace.ts) and a dump nobody can paste into `parse` is not the oracle this file is about.
 test('the lift dump shows the write-order record; the canonical text still does not', () => {
   const asm = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
   const fn = frontendFor(ARMV4T_AGBCC).lift('gcd', asm, ARMV4T_AGBCC, {}, undefined, undefined);
@@ -79,4 +81,34 @@ test('the lift dump shows the write-order record; the canonical text still does 
 test('an UNMEASURED fn prints identically with the annotation asked for', () => {
   const fn = parse(DIAMOND);
   expect(print(fn, { writeOrder: true })).toBe(print(fn));
+});
+
+test('an ANNOTATED dump parses back — as the same graph, still unmeasured', () => {
+  const asm = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
+  const fn = frontendFor(ARMV4T_AGBCC).lift('gcd', asm, ARMV4T_AGBCC, {}, undefined, undefined);
+  const annotated = print(fn, { writeOrder: true });
+  // Both annotations are on the same dump: the block headers carry `; writes=N` and the
+  // terminators `; order ^bbN(…)`, and either alone was enough to make `parse` fail.
+  expect(annotated).toMatch(/\):\s+; writes=/);
+  expect(annotated).toContain('; order ');
+  const back = parse(annotated);
+  expect(back.writeOrder).toBeUndefined();
+  expect(print(back)).toBe(print(fn));
+});
+
+test('a `;` inside an operand is not a comment: the strip is anchored on the two annotations', () => {
+  // `opaque` carries the instruction text asmlift could not model, and a list attr prints `[a;b]`.
+  // A general trailing-comment strip would eat both.
+  const ir = `fn semis {
+^bb0(%0: s32):
+  opaque %0 {text="swi #0; nop"}
+  switch_br %0, ^bb1(), ^bb1(), ^bb1() {cases=[1;2]}
+^bb1():
+  ret %0
+}
+`;
+  const fn = parse(ir);
+  expect(fn.blocks[0].ops[0].attrs.text).toBe('swi #0; nop');
+  expect(fn.blocks[0].ops[1].attrs.cases).toEqual([1, 2]);
+  expect(print(fn)).toBe(ir);
 });
