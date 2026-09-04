@@ -1,11 +1,17 @@
-// raise/retsink.ts — return-sinking, and the SSA debris it leaves.
+// raise/retsink.ts — return-sinking, its GATE, and the SSA debris it leaves.
 //
 // Sinking rewrites `br ^merge(v)` into `ret v` in every unconditional predecessor. A merge also
 // reached by a `cond_br` keeps that one edge — a conditional branch cannot carry a `ret` — so the
 // block survives with a single predecessor, and a block parameter with one in-edge is no longer a
-// join. The asm below is agbcc's own output for a fall-through switch: `.L3` is reached by a
-// `b .L3`, by falling out of `.L6` — which has two predecessors of its own, the shared arm the
-// sinking gate looks for — and by a `bne .L3` that cannot be rewritten.
+// join.
+//
+// THE GATE reads the shape it is for: a short-circuit chain's arms converge on a SHARED early
+// exit reached from ≥2 CONDITIONS. `CHAIN` below is that shape with a store between the two
+// conditions, so raise/shortcircuit.ts cannot fuse them and the unfused arm of the gate is the one
+// that answers. `SWITCH_ASM`/`SWITCH_RET` are the shape that is NOT it, and the reason the gate
+// counts conditions rather than predecessors: agbcc's fall-through switch gives case 1's body two
+// predecessors — the dispatch's `beq`, and case 2's body running on — which is a fall-IN, not a
+// chain. Sinking there tail-duplicated a switch's shared return into all five of its paths.
 import { expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
@@ -14,7 +20,23 @@ import { firstTrivialPhi, simplifyTrivialPhis } from '../src/ir/simplify';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
-const ASM =
+/** A two-condition chain converging on a shared `return 0` arm, with a store between the
+ *  conditions so the two are not fused into one `logic_and`. `.Lend` also keeps a `cond_br`
+ *  in-edge, which is what leaves a residual block behind when the two `br` edges are sunk. */
+const CHAIN =
+  'f:\n' +
+  '\tcmp\tr0, #0x0\n\tble\t.Lbad\t@cond_branch\n' +
+  '\tstr\tr0, [r2]\n' +
+  '\tcmp\tr1, #0x0\n\tble\t.Lbad\t@cond_branch\n' +
+  '\tmov\tr0, #0x1\n' +
+  '\tcmp\tr3, #0x5\n\tbeq\t.Lend\t@cond_branch\n' +
+  '\tmov\tr0, #0x2\n\tb\t.Lend\n' +
+  '.Lbad:\n\tmov\tr0, #0x0\n\tb\t.Lend\n' +
+  '.Lend:\n\tbx\tlr\n';
+
+/** agbcc's own output for a fall-through switch — `synthetic:sw_fallmem`'s shape. `.L3` is a
+ *  return-only merge reached by a `b .L3`, by falling out of `.L6`, and by a `bne .L3`. */
+const SWITCH_ASM =
   'f:\n' +
   '\tcmp\tr0, #0x2\n\tbeq\t.L5\t@cond_branch\n' +
   '\tcmp\tr0, #0x2\n\tbgt\t.L9\t@cond_branch\n' +
@@ -29,10 +51,10 @@ const ASM =
 const PROTO = { prototypes: { f: { returnsVoid: true } } } as const;
 
 test('return-sinking leaves no trivial phi behind', () => {
-  const fn = frontendFor(ARMV4T_AGBCC).lift('f', ASM, ARMV4T_AGBCC, PROTO.prototypes);
+  const fn = frontendFor(ARMV4T_AGBCC).lift('f', CHAIN, ARMV4T_AGBCC, {});
   applyIdiomPatterns(fn, ARMV4T_AGBCC);
-  raiseRecovered(fn, ARMV4T_AGBCC, {}, PROTO.prototypes.f);
-  // The residual `.L3` keeps its `cond_br` in-edge and nothing else, so its parameter is an alias
+  raiseRecovered(fn, ARMV4T_AGBCC, {});
+  // The residual `.Lend` keeps its `cond_br` in-edge and nothing else, so its parameter is an alias
   // of that edge's argument. Re-running the substrate cleanup must find nothing left to do.
   expect(simplifyTrivialPhis(fn)).toBe(0);
   const oneInEdge = fn.blocks.filter(
@@ -44,9 +66,9 @@ test('return-sinking leaves no trivial phi behind', () => {
   expect(oneInEdge).toEqual([]);
 });
 
-// The same dispatch, returning the accumulator instead of storing it — so the residual merge's
-// parameter is READ, and the structurer has to spell it.
-const ASM_RET =
+/** The same dispatch, returning the accumulator instead of storing it — `synthetic:sw_fall`'s own
+ *  target, where the shared `.L3` is what the source's single `return r;` compiled to. */
+const SWITCH_RET =
   'g:\n' +
   '\tmov\tr1, #0x0\n' +
   '\tcmp\tr0, #0x2\n\tbeq\t.L5\t@cond_branch\n' +
@@ -62,9 +84,43 @@ test('the stranded alias is not spelled as a copy', () => {
   // Left in place, the structurer destroys the alias into a local of its own and emits
   // `v = 0; return v;` — a variable the asm never had, on the one path that reaches the
   // residual block.
-  const out = decompile('g', ASM_RET, ARMV4T_AGBCC, {}).source;
+  const out = decompile('f', CHAIN, ARMV4T_AGBCC, {}).source;
   expect(out).toContain('return 0;');
   expect(out).not.toMatch(/v\d+ = 0;\n\s*return v\d+;/);
+});
+
+// ── the GATE: ≥2 CONDITIONS, not ≥2 predecessors ─────────────────────────────────────────────────
+
+test('a chain of two conditions converging on one early exit is still sunk', () => {
+  // The shape the gate exists for, unfused (the store between the conditions blocks
+  // raise/shortcircuit.ts), so it is the CFG arm of the gate that answers here. Without it the
+  // three arms share one merge variable and one `return v0;`, which is what regressed the rows
+  // `retsink` was written for.
+  const out = decompile('f', CHAIN, ARMV4T_AGBCC, {}).source;
+  expect(out).toContain('return 0;');
+  expect(out).toContain('return 1;');
+  expect(out).toContain('return 2;');
+  expect(out).not.toMatch(/return v\d+;/); // no merge variable
+});
+
+test('the same shape with a VOID exit keeps its one exit too', () => {
+  // `synthetic:sw_fallmem:agbcc`, which MATCHES today only because sinking duplicated its
+  // `bx lr` away and so removed the second default candidate. Keeping the merge is what the
+  // preceding commit's resolve-through pays for.
+  const out = decompile('f', SWITCH_ASM, ARMV4T_AGBCC, PROTO).source;
+  expect(out).toContain('switch (a0)');
+  expect(out.match(/return;/g)).toHaveLength(1);
+});
+
+test('a fall-through case arm is a fall-IN, not a chain, and its shared return survives', () => {
+  // `.L6` (case 1's body) has two predecessors — the dispatch's `beq .L6` and `.L5` running on —
+  // which counting PREDECESSORS reads as the shared early exit of a chain. It is not: only ONE of
+  // the two is a condition. Sinking here duplicated the switch's single `return r;` into five
+  // paths, which agbcc then constant-folds per arm, and the row could not match at any spelling.
+  const out = decompile('g', SWITCH_RET, ARMV4T_AGBCC, {}).source;
+  expect(out).toContain('switch (a0)');
+  expect(out.match(/return /g)).toHaveLength(1); // ONE return, shared by every path
+  expect(out).not.toContain('return 0;'); // …not the sunk default arm
 });
 
 // ── the postcondition, rather than the pass ──────────────────────────────────────────────────────
@@ -75,7 +131,7 @@ test('the stranded alias is not spelled as a copy', () => {
 // construction and the `addrnum` pass both mint one and clear it inside their own scope.
 
 test('`firstTrivialPhi` is the pass’s own predicate, asked without mutating', () => {
-  const fn = frontendFor(ARMV4T_AGBCC).lift('g', ASM_RET, ARMV4T_AGBCC, {});
+  const fn = frontendFor(ARMV4T_AGBCC).lift('f', CHAIN, ARMV4T_AGBCC, {});
   applyIdiomPatterns(fn, ARMV4T_AGBCC);
   raiseRecovered(fn, ARMV4T_AGBCC, {});
   expect(firstTrivialPhi(fn)).toBeNull();
@@ -88,7 +144,7 @@ test('a stranded alias put BACK is caught at the boundary, not three stages late
   // in the `afterRetsink` hook — after every pass that has a cleanup of its own has run, which is
   // where a NEW CFG-motion pass's debris would sit. Injected earlier it is simply cleaned up, which
   // is itself the point: the check fires only on debris nothing collects.
-  const fn = frontendFor(ARMV4T_AGBCC).lift('g', ASM_RET, ARMV4T_AGBCC, {});
+  const fn = frontendFor(ARMV4T_AGBCC).lift('f', CHAIN, ARMV4T_AGBCC, {});
   applyIdiomPatterns(fn, ARMV4T_AGBCC);
   const strand = () => {
     const edgesOf = (b: (typeof fn.blocks)[number]) =>

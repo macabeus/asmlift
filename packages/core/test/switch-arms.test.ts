@@ -905,8 +905,11 @@ test('a chain of falling arms is ONE switch, and the fallen-into arm is emitted 
   expect(armOrder(out)).toEqual([3, 2, 1]);
   // Each body appears exactly once — if-recovery reaches `case 1`'s body on three paths and emits
   // it three times, which is what the fall-through spelling replaces.
-  expect(count(out, '*a1 = *a1 + 3;')).toBe(1);
-  expect(count(out, 'break;')).toBe(0); // every arm falls, and the last one ends the switch
+  expect(count(out, '*a1 = v0 + 3;')).toBe(1);
+  // The last arm CLOSES: the epilogue is the switch's merge and every arm reaches it. It used to
+  // end in `return;` instead, because `raise/retsink.ts` duplicated that epilogue into each arm —
+  // which it no longer does on a fall-through switch (see retsink.test.ts).
+  expect(count(out, 'break;')).toBe(1);
 });
 
 test('the CHAIN orders the arms, not the case values, on a compiler with no layout rule', () => {
@@ -1049,7 +1052,7 @@ test('a language with no case fall-through gets the if-recovery, not a stub', ()
   expect(out).toContain('if (');
   expect(out).not.toContain('case ');
   // the body is really there — an if-recovery duplicates the fallen-into arms rather than losing them
-  expect(count(out, 'a1^ := (a1^ + 3);')).toBeGreaterThan(1);
+  expect(count(out, 'a1^ := (v0 + 3);')).toBeGreaterThan(1);
 });
 
 test('…and the SAME assembly still recovers the falling switch for C', () => {
