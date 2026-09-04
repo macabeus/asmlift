@@ -824,9 +824,12 @@ const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, numbe
  *
  *  A SUPERSET of the real sort, on purpose and in the safe direction — and the direction only
  *  holds because rank asks this of the SAME fn it then structures (a `variantGate`, evaluated on
- *  the variant's own fully-raised fn). On that fn the remaining gap is `keepSlot`/`suppressedArgs`
- *  dropping copies the edge still carries here, so it can answer true for a pair that later
- *  collapses (the tree dedup then eats it) but never false for one that does not.
+ *  the variant's own fully-raised fn). On that fn two gaps remain, both of which only ever say YES
+ *  where the sort says nothing: `keepSlot`/`suppressedArgs` drop copies the edge still carries
+ *  here, and this asks of EVERY edge where `preferDefPosCopyOrder` reorders only the acyclic ones
+ *  (`copySetIsCyclic`), which needs the built copy list this cannot see. So it can answer true for
+ *  a pair that later collapses (the tree dedup then eats it) but never false for one that does
+ *  not.
  *
  *  ASKED EARLIER THAN THAT, THE CLAIM FAILS, in both directions and measurably. The answer moves
  *  with the SYMBOL MAP (klonoa's `UpdateHUDCollectibleCount`: false under the map, true on the
@@ -3331,12 +3334,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     //     (482 → 476).
     //  2. ACYCLIC copy sets — a SECOND, separately-licensed claim: that the compiler LAID THE
     //     COPIES OUT in the order it wrote them. No instruction states it, and it is two-sided.
-    //     Restricting the record to cyclic sets was measured over the 736 synthetic rows: it takes
-    //     `armfall:agbcc` 11 → 8, `memcpy1:mwcc` 23 → 19 and `memset1:mwcc` 21 → 19 — and LOSES
-    //     `gcd:agbcc` (the cyclic row's own entry edge is acyclic) and `structarr:agbcc`, both to
-    //     nonmatch. So the acyclic half is kept, and because it is two-sided the def-position
-    //     spelling is enumerated beside it as a ranked candidate (`/copy-defpos`, rank.ts) rather
-    //     than declared right here.
+    //     Restricting the record to cyclic sets as a DEFAULT was measured over the 736 synthetic
+    //     rows: it takes `armfall:agbcc` 11 → 8, `memcpy1:mwcc` 23 → 19 and `memset1:mwcc`
+    //     21 → 19 — and LOSES `gcd:agbcc` (the cyclic row's own entry edge is acyclic) and
+    //     `structarr:agbcc`, both to nonmatch. So the acyclic half is kept as the default, and
+    //     because it is two-sided the def-position spelling is enumerated beside it as a ranked
+    //     candidate (`/copy-defpos`, rank.ts) rather than declared right here.
+    //     AND THE CANDIDATE ASKS ONLY THAT SECOND QUESTION: `preferDefPosCopyOrder` takes the
+    //     proxy on ACYCLIC sets and keeps the record on cyclic ones, so no arm of the fan spells a
+    //     cycle against the instruction that licenses it, and the pair differs exactly where the
+    //     evidence runs out. Priced over all 988 benchmark rows — 736 synthetic and 252 real
+    //     across six projects — and 0 move; the three rows the axis exists for (`armfall:agbcc`,
+    //     `memcpy1:mwcc`, `memset1:mwcc`) keep their `/copy-defpos` winners, so the edges they
+    //     needed were acyclic all along. What it buys is the third spelling, which neither arm
+    //     could reach before: the record on a cycle and the proxy on an acyclic edge of the same
+    //     function, which is what `gcd:agbcc`'s own two edges are.
     //
     // IT ALSO DECIDES WHETHER `l3/tailmerge.ts` FIRES. An arm of an `if` ends in one edge's copies,
     // and that pass peels only a common LAST statement, so an arm-varying copy ordered last hides
@@ -3366,7 +3378,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // frontend DID measure — the one place the two questions ("is there a record" and "use it")
       // come apart.
       const record =
-        predIsMeasured && !preferDefPosCopyOrder
+        predIsMeasured && (!preferDefPosCopyOrder || copySetIsCyclic(copies))
           ? (fn.writeOrder!.lastWrite.get(pred) ?? NO_WRITTEN_DESTINATIONS)
           : undefined;
       const rank =
@@ -4626,6 +4638,25 @@ function recognizeForLoops(stmts: Stmt[]): Stmt[] {
 // still-pending assignment reads; break a cycle by spilling one destination to a temp.
 // `tmp` is the per-FUNCTION temp counter (threaded from structure()) so two independent
 // parallel copies never reuse a temp name against conflicting types.
+/** Does this edge's copy set contain a CYCLE — a destination every remaining copy still reads, so
+ *  `sequentialize` has to spill one into a temp? `sequentialize`'s own emittability loop, run
+ *  without emitting, so the two can never disagree about which sets are which.
+ *
+ *  It is the LICENCE BOUNDARY at the sort site: on a cyclic set the write-order record names the
+ *  compiler's own temp and an instruction says so, and on an acyclic one the record is only an
+ *  assumption about layout order. `preferDefPosCopyOrder` asks for the proxy on the second kind
+ *  only. */
+function copySetIsCyclic(copies: { name: string; value: Expr }[]): boolean {
+  const pending = copies.map((c) => ({ name: c.name, reads: exprVars(c.value) }));
+  for (;;) {
+    const i = pending.findIndex((a) => !pending.some((b) => b !== a && b.reads.has(a.name)));
+    if (i < 0) {
+      return pending.length > 0;
+    }
+    pending.splice(i, 1);
+  }
+}
+
 function sequentialize(
   copies: { name: string; value: Expr }[],
   varType: Map<string, IrType>,

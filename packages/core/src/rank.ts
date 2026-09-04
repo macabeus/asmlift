@@ -268,6 +268,14 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // referees nothing — so the def-position spelling is enumerated beside the record's and the
   // differ picks, exactly as `/fresh-merge` above does for the merge home.
   //
+  // THE AXIS SPANS THE UNLICENSED HALF ONLY. Its ON arm keeps the record on cyclic sets, so
+  // neither arm ever spells a cycle against the instruction that names the compiler's temp, and
+  // the pair differs exactly where the evidence runs out. That scoping was measured over all 988
+  // benchmark rows and moves none of them — the three rows above keep their `/copy-defpos`
+  // winners, so what they needed was the acyclic half all along — and it makes reachable a
+  // spelling neither arm had: the record on a cycle and the proxy on an acyclic edge of the same
+  // function, which is what `synthetic:gcd:agbcc`'s own two edges are.
+  //
   // Gated on the two orders actually differing somewhere in this function, so on a row where the
   // record changes nothing the pair is one tree and the fan does not grow.
   //

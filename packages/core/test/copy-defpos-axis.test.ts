@@ -7,7 +7,9 @@
 // benchmark answers the assumption both ways inside a single compiler: `synthetic:gcd:mwcc_242_81`
 // matches with the record while `memcpy1:mwcc_242_81` and `memset1:mwcc_242_81` score worse with
 // it. So the def-position spelling is enumerated BESIDE the record's and the differ referees,
-// rather than a per-compiler boolean declaring one of them right.
+// rather than a per-compiler boolean declaring one of them right — and the sibling asks the
+// UNLICENSED question only: it keeps the record on cyclic sets, so on gcd the two arms differ on
+// the entry edge and agree on the loop's cycle.
 //
 // What this file pins: the sibling exists and is a genuinely different program where the two
 // orders differ, the gate withholds it where they do not — and the gate is a question about ONE
@@ -46,12 +48,16 @@ test('the axis offers the def-position spelling beside the record-ordered one', 
   const sibling = cands.find((c) => c.label === 'signed/copy-defpos');
   expect(base).toBeDefined();
   expect(sibling).toBeDefined();
-  // The record spills the DIVISOR's home (agbcc's own `add r4, r0, #0` — the loop's first
-  // instruction); the def-position proxy, which cannot compare an incoming param with an in-block
-  // def, spills the other member. Two correct sequentializations of one parallel copy, and only
-  // the differ can say which the compiler wrote.
-  expect(base!.source).toContain('t0 = v0;\n        v0 = v1 % v0;\n        v1 = t0;');
-  expect(sibling!.source).toContain('t0 = v1;\n        v1 = v0;\n        v0 = t0 % v0;');
+  // The LOOP is a cyclic copy set, and agbcc's own `add r4, r0, #0` — the loop's first instruction
+  // — says which member it spilled. Both arms therefore spell it the same way; the sibling is not
+  // free to contradict that instruction.
+  for (const c of [base!, sibling!]) {
+    expect(c.source).toContain('t0 = v0;\n        v0 = v1 % v0;\n        v1 = t0;');
+  }
+  // The ENTRY edge is acyclic — no instruction says whether the compiler laid those two copies out
+  // in the order it wrote them — and that is the whole of what the pair disagrees about.
+  expect(base!.source).toContain('v1 = a0;\n    v0 = a1;');
+  expect(sibling!.source).toContain('v0 = a1;\n    v1 = a0;');
 });
 
 test('…and it is a real product: every spelling gets the sibling, never just the base', () => {
