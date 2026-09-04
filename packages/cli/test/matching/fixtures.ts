@@ -627,6 +627,10 @@ export const FIXTURES: DecompFixture[] = [
       // `WriteOrder`), and a destination the pred never wrote sorts first, where the def-position
       // proxy put an outside def. No instruction licenses the count's position, and the recompile
       // is indifferent: both orders score 3 with the same breakdown (insert 1, delete 1, arg 1).
+      // The front position is NOT a sentinel's accident — it is the clause that keeps the record
+      // path agreeing with the proxy on copies neither can speak about (structure.ts `NO_RECORD`),
+      // and it was priced: pinning unrecorded copies at their param-order slot instead loses
+      // armdef, loopfall, loopset and structarr over the 736 synthetic rows.
       '    v1 = a1;\n' +
       '    v0 = a0;\n' +
       '    if (v1 > 0) {\n' +
