@@ -84,6 +84,43 @@ f:
     expect(() => d('f', asm)).toThrow(/raw halfword '0x4680'.*not a decodable branch/);
   });
 
+  test('a `.2byte` whose value only STARTS like pad is not pad — it declines loud', () => {
+    // `parseInt` stops at the first character it cannot use, so `0x0000+2` read as 0x0000 and
+    // `0x46C0+1` as 0x46C0. The assembler emits 0x0002 (`lsls r2, r0, #0`) and 0x46C1
+    // (`mov r9, r8`) — different instructions, silently substituted. Only a complete 16-bit hex
+    // literal is an encoding this pass may read.
+    const withVal = (v: string) => `	thumb_func_start pv
+pv:
+	movs r0, #0x03
+	b _e
+	.2byte ${v}
+_e:
+	bx lr
+`;
+    expect(d('pv', withVal('0x0000')).source).toBe('s32 pv(void) {\n    return 3;\n}\n');
+    for (const v of ['0x0000+2', '0x46C0+1', '0x0000 + 2', 'PAD', '18112']) {
+      expect(() => d('pv', withVal(v))).toThrow(FrontendUnsupportedError);
+      expect(() => d('pv', withVal(v))).toThrow(/not a decodable branch/);
+    }
+  });
+
+  test('the same rule guards the raw BRANCH decode — an expression is not an encoding', () => {
+    // The branch decoder read its value with the same prefix-tolerant parse, so `0xD001+2` would
+    // have been decoded as the branch 0xD001 encodes and the `+2` silently dropped.
+    const withVal = (v: string) => `	thumb_func_start bv
+bv:
+	cmp r0, #0x00
+	.2byte ${v}
+	movs r0, #0x01
+	bx lr
+_t:
+	movs r0, #0x02
+	bx lr
+`;
+    expect(d('bv', withVal('0xD001')).source).toContain('return 2;');
+    expect(() => d('bv', withVal('0xD001+2'))).toThrow(/raw halfword '0xD001\+2'.*not a decodable branch/);
+  });
+
   test('a pad halfword under a LABEL is still a sub-word data table, not code', () => {
     // `inCode` means "no label since the last instruction". A labelled `.2byte` is a data table
     // and keeps declining for the function that reads it — this pass must not swallow one.

@@ -146,6 +146,15 @@ const COND_OPCODE: Record<string, Opcode> = {
 // encodes is a decode, not a fabrication — the same move the raw-BRANCH decoder below already
 // makes for `.2byte 0xD10E`. Everything that decides what padding MEANS (isPadInstr, the
 // reachability prune) then sees one representation instead of three spellings.
+// A `.2byte`/`.hword`/`.short` operand this pass may read as an ENCODING: a complete 16-bit hex
+// literal and nothing else. `parseInt` stops at the first character it cannot use, so `0x0000+2`
+// parsed as 0x0000 and `0xD001+2` as 0xD001 — an expression, a relocation or a symbol would have
+// been rewritten into the instruction its PREFIX encodes, which is not the instruction the
+// assembler emits. Anything else returns null and falls through to the loud refusal.
+function halfwordLiteral(text: string): number | null {
+  return /^0[xX][0-9a-fA-F]{1,4}$/.test(text) ? parseInt(text, 16) : null;
+}
+
 function padHalfword(v: number): Instr | null {
   if (v === 0x0000) {
     return { mnemonic: 'lsls', ops: ['r0', 'r0', '#0x00'] };
@@ -494,7 +503,10 @@ function decode(
           // than in the raw-branch pass matters: a function whose only in-code data was pad then
           // needs no byte-accurate layout at all, exactly as it needs none under the instruction
           // spelling.
-          const pads = values.map((v) => padHalfword(parseInt(v, 16)));
+          const pads = values.map((v) => {
+            const hw = halfwordLiteral(v);
+            return hw === null ? null : padHalfword(hw);
+          });
           if (pads.every((p) => p !== null)) {
             for (const p of pads) {
               flat.push({ instr: p! });
@@ -781,8 +793,8 @@ function decode(
           }
           f.data.values.forEach((raw, k) => {
             const at = itemOff[i] + k * 2;
-            const v = parseInt(raw, 16);
-            const br = Number.isFinite(v) ? decodeHalfword(v, at) : null;
+            const v = halfwordLiteral(raw);
+            const br = v === null ? null : decodeHalfword(v, at);
             if (!br) {
               throw new FrontendUnsupportedError(
                 `cannot lift '${name}': raw halfword '${raw}' in the code stream is not a decodable branch — ` +
