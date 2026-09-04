@@ -748,6 +748,29 @@ describe('the witness is compared as data, not as prose', () => {
     expect(sayFact(b)).toContain('item 9');
   });
 
+  test('and the site reaches the refusal a reader actually sees', () => {
+    // End to end, not a unit: the raw halfword 0xE002 at offset 2 targets offset 10, which is
+    // INSIDE the alignment fill under base 0 and the `_pool` label under base 2. The message names
+    // which fill and how far in; it used to say the bare words `alignment fill`.
+    const asm = `	thumb_func_start z
+z:
+	movs r2, #0x00
+	.2byte 0xE002
+	b _e
+	movs r1, #0x01
+_dat:
+	.2byte 0x1111
+	.align 2, 0
+_pool:
+	.4byte 0x22222222
+_e:
+	movs r0, #0x01
+	bx lr
+`;
+    expect(() => d('z', asm)).toThrow(FrontendUnsupportedError);
+    expect(() => d('z', asm)).toThrow(/raw branch at item 2 → alignment fill at item 7 \(\+0 bytes\)/);
+  });
+
   test('a branch onto an item and a branch into fill are never the same fact', () => {
     expect(factKey({ kind: 'branch', at: 1, to: { item: 4 } })).not.toBe(
       factKey({ kind: 'branch', at: 1, to: { fill: 4, off: 0 } }),
