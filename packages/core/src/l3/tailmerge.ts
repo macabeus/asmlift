@@ -37,6 +37,21 @@
 //     of the arms hides the common tail, and DCE only removes it afterwards, so the shape this pass
 //     exists for is missed. The fix is a fixpoint of the pair, not one extra call — a lone second
 //     pass leaves an empty `if` behind.
+//   - THE SAME HIDING HAPPENS WITHOUT DCE, and the edge-copy sort decides when. An arm ends in the
+//     copies of one CFG edge, ordered by the predecessor's write record or by the def-position
+//     proxy (`structure.ts`); an arm-varying copy ordered LAST hides an agreeing one behind it.
+//     Measured on klonoa `CountCollectedGems` (map-less, agbcc): the record's order leaves six
+//     copies of `v22 = (s32 *)50345232;` where the proxy's order merges them into one, and with
+//     THIS PASS disabled both orders emit all six — so the duplication is this peel not firing,
+//     not something the sort creates. Reaching the hidden statement is not a matter of peeling
+//     further: it would have to move ACROSS the differing one, which needs the independence
+//     argument this pass deliberately does not have (see the soundness note above). Pinned both
+//     ways in `test/tailmerge.test.ts`.
+//     A ranked row is not stuck with either order: `/copy-defpos` (rank.ts) enumerates the
+//     def-position spelling beside the record's, so the merged form is a candidate the differ can
+//     pick on bytes — on `CountCollectedGems` its gate admits the axis on the map-ful and map-less
+//     lifts alike. What no arm of the fan spells is the third form, the hidden statement merged
+//     while KEEPING the record's order.
 //
 // SCOPE. Only `assign`/`store`/`exprstmt` merge, compared structurally through `exprEquals`.
 // Control flow (`break`/`continue`/`return`) is excluded: moving one out of an arm changes which

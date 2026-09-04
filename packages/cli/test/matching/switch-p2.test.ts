@@ -45,7 +45,7 @@ describe('P2 verifier — switch_br invariants fail loud at their source', () =>
         attrs: { cases },
       }),
     );
-    return { name: 'sw', blocks: [entry, ...bodies] };
+    return { name: 'sw', blocks: [entry, ...bodies], writeOrder: undefined };
   };
 
   test('well-formed switch_br verifies', () => {

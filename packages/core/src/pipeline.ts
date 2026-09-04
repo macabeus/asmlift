@@ -145,7 +145,9 @@ function runTower(
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
   const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
-  const raw = print(fn);
+  // Every dump carries the write-order record (ir/print.ts `PrintOptions`): it decides the
+  // edge-copy order and the raising folds mutate it, so two dumps compare whole program states.
+  const raw = print(fn, { writeOrder: true });
   // (1.5) the ARRAY SHAPES this function's own assembly evidences, for globals the project map
   // does not describe. Read HERE, off the lifted fn, because the fact it needs — whether the base
   // was materialized before the index was scaled — is destroyed by the raising tower below
@@ -158,12 +160,12 @@ function runTower(
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
   const patternHits = applyIdiomPatterns(fn, target, opts.patterns);
-  const folded = print(fn);
+  const folded = print(fn, { writeOrder: true });
 
   // (2.35–3.5) pre-recovery recognizers → type recovery → return-sinking, the ONE shared spine
   // (`raiseRecovered`) that trace.ts and the cli's rank.ts/report.ts also run.
   raiseRecovered(fn, target, {}, prototypes[name]);
-  const recovered = print(fn);
+  const recovered = print(fn, { writeOrder: true });
 
   // (4) structure: IR → neutral AST; boundary contract: no unresolved value leaked (strict), or
   // every unresolved value spelled as a loud ASMLIFT_ERROR marker (annotate).

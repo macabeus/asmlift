@@ -74,7 +74,7 @@ describe('P0-b — the structurer fails loud on an unknown (many-way) terminator
         successors: [c0, c1, c2].map((block) => ({ block, args: [] })),
       }),
     );
-    const fn: Fn = { name: 'sw', blocks: [entry, c0, c1, c2] };
+    const fn: Fn = { name: 'sw', blocks: [entry, c0, c1, c2], writeOrder: undefined };
     expect(() => structure(fn)).toThrow(StructureError);
     expect(() => structure(fn)).toThrow(/unsupported terminator 'computed_br'/);
   });

@@ -1,11 +1,15 @@
 // M0 — the load-bearing invariant: parse(print) is the identity on canonical text, so
 // the textual IR is a trustworthy test oracle. Includes a genuine two-predecessor join,
 // which proves block-argument SSA on a real merge.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
+import { frontendFor } from '../src/frontend/registry';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const STRAIGHT_LINE = `fn read_u16 {
 ^bb0(%0: u8*):
@@ -49,4 +53,61 @@ test('double round-trip is a fixed point', () => {
   const once = print(parse(DIAMOND));
   const twice = print(parse(once));
   expect(twice).toBe(once);
+});
+
+// THE WRITE-ORDER ANNOTATION is a DUMP feature, not a round-trip one (ir/print.ts `PrintOptions`).
+// The record decides an edge's copy order and, on a cycle, which register is spilled, so without it
+// two functions with identical `stage:lift` text emit different C and the dump cannot say why. It
+// deliberately does NOT come back through `parse`: a parsed fn that returned measured would
+// structure differently from every other parsed fn. The MEASUREMENT is what does not come back —
+// the TEXT still parses, because every stage dump carries the annotation (pipeline.ts, trace.ts)
+// and a dump nobody can paste into `parse` is not the oracle this file is about.
+test('the lift dump shows the write-order record; the canonical text still does not', () => {
+  const asm = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
+  const fn = frontendFor(ARMV4T_AGBCC).lift('gcd', asm, ARMV4T_AGBCC, {}, undefined, undefined);
+  const dump = print(fn, { writeOrder: true });
+  // The back edge's own numbers — the ordinals the edge-copy sort reads, in successor-arg order.
+  expect(dump).toContain('; order ^bb1(3, 4)');
+  expect(dump).toMatch(/\^bb1\(.*\):\s+; writes=5/);
+  // …and the default print is unchanged, so `parse(print(fn))` keeps its domain.
+  const plain = print(fn);
+  expect(plain).not.toContain('; order');
+  expect(plain).not.toContain('; writes=');
+  expect(print(parse(plain))).toBe(plain);
+  expect(parse(plain).writeOrder).toBeUndefined();
+});
+
+test('an UNMEASURED fn prints identically with the annotation asked for', () => {
+  const fn = parse(DIAMOND);
+  expect(print(fn, { writeOrder: true })).toBe(print(fn));
+});
+
+test('an ANNOTATED dump parses back — as the same graph, still unmeasured', () => {
+  const asm = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
+  const fn = frontendFor(ARMV4T_AGBCC).lift('gcd', asm, ARMV4T_AGBCC, {}, undefined, undefined);
+  const annotated = print(fn, { writeOrder: true });
+  // Both annotations are on the same dump — `; writes=N` on the block headers, `; order ^bbN(…)`
+  // on the terminators — and either one alone is enough to make an unguarded `parse` fail.
+  expect(annotated).toMatch(/\):\s+; writes=/);
+  expect(annotated).toContain('; order ');
+  const back = parse(annotated);
+  expect(back.writeOrder).toBeUndefined();
+  expect(print(back)).toBe(print(fn));
+});
+
+test('a `;` inside an operand is not a comment: the strip is anchored on the two annotations', () => {
+  // `opaque` carries the instruction text asmlift could not model, and a list attr prints `[a;b]`.
+  // A general trailing-comment strip would eat both.
+  const ir = `fn semis {
+^bb0(%0: s32):
+  opaque %0 {text="swi #0; nop"}
+  switch_br %0, ^bb1(), ^bb1(), ^bb1() {cases=[1;2]}
+^bb1():
+  ret %0
+}
+`;
+  const fn = parse(ir);
+  expect(fn.blocks[0].ops[0].attrs.text).toBe('swi #0; nop');
+  expect(fn.blocks[0].ops[1].attrs.cases).toEqual([1, 2]);
+  expect(print(fn)).toBe(ir);
 });

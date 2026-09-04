@@ -15,7 +15,7 @@
 // computation via read/writeVar, push its terminator op last (successors referencing
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
-import { Block, Fn, Op, Value, mkOp, mkValue } from '../ir/core';
+import { Block, Fn, Op, Value, type WriteOrder, mkOp, mkValue } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
@@ -165,7 +165,8 @@ export function makeSsaBuilder(
   const model = (): LiveInModel => (modelMemo ??= checkedLiveInModel(name, liveInOf()));
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
-  const fn: Fn = { name, blocks: irBlocks };
+  // `writeOrder` is filled in below, where the builder's counters live.
+  const fn: Fn = { name, blocks: irBlocks, writeOrder: undefined };
 
   const defs: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const sealed: boolean[] = irBlocks.map(() => false);
@@ -198,9 +199,24 @@ export function makeSsaBuilder(
   const guessedCalls: GuessedCallSite[] = [];
   let abiSeen: { argRegs: string[]; returnReg: string } = { argRegs: [], returnReg: '' };
 
+  // WRITE ORDER (ir/core.ts `WriteOrder`). Measured here for the same reason the clobber set is:
+  // every register write in every frontend already goes through `writeVar`, and a delay-slot write
+  // is decoded before its branch is emitted, so the ordinal is the machine's own program order on
+  // every ISA with no frontend code. Per block, because the consumer asks a per-EDGE question.
+  const writeCount: number[] = irBlocks.map(() => 0);
+  const lastWriteAt: Array<Map<string, number>> = irBlocks.map(() => new Map());
+  const writeOrder: WriteOrder = { lastWrite: new Map(), writes: new Map() };
+  fn.writeOrder = writeOrder;
+  const forgetOrder = (p: Value) => {
+    for (const m of writeOrder.lastWrite.values()) {
+      m.delete(p);
+    }
+  };
+
   const writeVar = (reg: string, b: number, v: Value) => {
     writtenSinceCall[b].add(reg);
     defs[b].set(reg, v);
+    lastWriteAt[b].set(reg, writeCount[b]++);
   };
   const readVar = (reg: string, b: number): Value => defs[b].get(reg) ?? readRecursive(reg, b);
 
@@ -268,12 +284,21 @@ export function makeSsaBuilder(
     }
     // sealed join: create the phi and wire every predecessor's terminator arg now.
     const phi = newPhi(reg, b);
-    addPhiOperands(reg, b);
+    addPhiOperands(reg, b, phi);
     return phi;
   };
-  const addPhiOperands = (reg: string, b: number) => {
+  // The ONE point that knows the phi, its key and each predecessor together, which is what the
+  // write-order record is keyed by. `phi` is passed rather than looked up: by the time a deferred
+  // phi is wired the block may have written its key again, so `defs[b]` no longer names it.
+  const addPhiOperands = (reg: string, b: number, phi: Value) => {
     for (const p of distinctPreds(b)) {
       appendSuccessorArg(p, b, readVar(reg, p));
+      const at = lastWriteAt[p].get(reg);
+      if (at !== undefined) {
+        const rec = writeOrder.lastWrite.get(irBlocks[p]) ?? new Map<Value, number>();
+        rec.set(phi, at);
+        writeOrder.lastWrite.set(irBlocks[p], rec);
+      }
     }
   };
   // Append `arg` to EVERY successor edge of predecessor p that targets block b.
@@ -297,8 +322,8 @@ export function makeSsaBuilder(
       return;
     }
     sealed[b] = true; // set first: addPhiOperands may recurse back here
-    for (const reg of incompletePhis[b].keys()) {
-      addPhiOperands(reg, b);
+    for (const [reg, phi] of incompletePhis[b]) {
+      addPhiOperands(reg, b, phi);
     }
     incompletePhis[b].clear();
   };
@@ -392,9 +417,11 @@ export function makeSsaBuilder(
           sites: guessedCalls,
         });
       }
+      irBlocks.forEach((blk, i) => writeOrder.writes.set(blk, writeCount[i]));
       simplifyTrivialPhis(fn, (p) => {
         phiBlock.delete(p);
         phiKey.delete(p);
+        forgetOrder(p);
       });
       // Then the phis nothing reads at all — a register two paths leave holding different junk
       // (a loop counter after its last use, a scratch the epilogue overwrites) still joins as a
@@ -404,6 +431,7 @@ export function makeSsaBuilder(
       pruneDeadParams(fn, (p) => {
         phiBlock.delete(p);
         phiKey.delete(p);
+        forgetOrder(p);
       });
       // A STACK SLOT MAY NEVER LEAVE AS AN ENTRY PARAMETER. A slot is memory the function itself
       // allocated, so its value can only come from a store the function made; arriving as a live-in

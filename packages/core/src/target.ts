@@ -126,8 +126,8 @@ export interface TargetDescription {
   compilerBehaviors: {
     // When a loop induction variable's initial value comes from an argument register, some
     // compilers keep mutating that register across the loop (coalesce → no init copy); others
-    // copy to a fresh local. IDO -O2 reuses the arg register (true); agbcc/KMC-GCC allocate
-    // fresh (false).
+    // copy to a fresh local. IDO -O2 and KMC GCC -O2 reuse the arg register (true); agbcc
+    // allocates fresh (false).
     coalesceLoopInit?: boolean;
     // Divergent-if (both arms terminate, no join): reproduce the source branch DIRECTION by
     // emitting the forward-branch-on-negated-condition (taken arm as `else`). IDO/MIPS preserves
@@ -138,11 +138,16 @@ export interface TargetDescription {
     // preserves divergent sense and inverts joined sense splits them by promoting that option to a
     // field here — never by an `arch ==` branch in the structurer.
     preserveDivergentBranchSense?: boolean;
-    // Order the parallel-copy assignments at a CFG edge by the order their values are COMPUTED
-    // in the predecessor (vs. source/param order), matching a compiler that lays defining ops
-    // (and the copies reading them) out in computation order. Uniform (true) across all current
-    // compilers. Absent ⇒ true; a compiler opts OUT.
-    orderArgCopiesByComputation?: boolean;
+    // Order the parallel-copy assignments at a CFG edge by the order the PREDECESSOR WROTE THEIR
+    // DESTINATIONS — the frontend's own measurement (ir/core.ts `WriteOrder`), falling back to a
+    // def-position proxy on a predecessor no frontend measured. Not "computation order": a
+    // destination written with a value defined elsewhere is a plain register copy, and it ranks by
+    // where that copy sits, not by where its value was computed. Uniform (true) across all current
+    // compilers; absent ⇒ true, and a compiler that opts OUT turns the sort off entirely and emits
+    // in source/param order. WHICH order a measured edge takes is not this flag's question and
+    // cannot be: the benchmark has rows on both sides inside one compiler (mwcc), so that choice is
+    // refereed per row by `/copy-defpos` (rank.ts), never declared per compiler here.
+    orderArgCopiesByWriteOrder?: boolean;
     // Regime-A switch recovery: accept an `x != K` test as a case (the EQUAL side is the case
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
     // decline path keeps recovery sound either way.
@@ -301,7 +306,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
   compilerBehaviors: {
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
-    orderArgCopiesByComputation: true,
+    orderArgCopiesByWriteOrder: true,
     nearBaseSpan: 255,
     foldsConstAddrOffset: true,
     readsStayWhereWritten: true,
@@ -328,7 +333,7 @@ export const MIPS_IDO: TargetDescription = {
   compilerBehaviors: {
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
-    orderArgCopiesByComputation: true,
+    orderArgCopiesByWriteOrder: true,
     switchAllowsNeqCase: false,
   },
 };
@@ -341,10 +346,25 @@ export const MIPS_GCC: TargetDescription = {
   compiler: 'gcc',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
-  // KMC GCC allocates a fresh local for the loop init (coalesceLoopInit false — where it differs
-  // from IDO); the structuring levers take the universal default until a KMC fixture says otherwise.
+  // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
+  // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,
+  // and the row it comes from matches only with the parameters as the loop's homes. The other
+  // structuring levers take the universal default until a KMC fixture says otherwise.
+  //
+  // THIS IS A COMPILER-WIDE GUESS STANDING IN FOR A PER-FUNCTION OBSERVATION the assembly states
+  // outright: whether the compiler kept a loop's induction variable in its argument register. What
+  // would say it is "the header param's register key IS the key the entry value already lives in" —
+  // known to the SSA builder (`frontend/ssa.ts` `phiKey`) and to this file (`argRegs`), unexposed.
+  // Exposing it would replace two booleans (here, and PPC_MWCC's "false until a CW loop fixture
+  // says otherwise") with a measurement.
+  // NOT the obvious proxy for it, which was built and measured: adopting the entry value's name
+  // when the forward predecessor did not WRITE the param's key moves 36 of the 736 synthetic rows
+  // and costs four matches net (continueloop, countpos and loopif on mwcc plus dmafill, dmaptrsrc
+  // and dmastride on agbcc lost; maxarr and preupdate_exit_call on agbcc gained) — because a pred
+  // that computes the initial value INTO the param's own register wrote the key and still
+  // coalesces.
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
-  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByComputation: true },
+  compilerBehaviors: { coalesceLoopInit: true, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
 };
 
 /** PowerPC (GameCube/Wii) + Metrowerks CodeWarrior. The real GC/Wii matching target is
@@ -361,8 +381,9 @@ export const PPC_MWCC: TargetDescription = {
   returnReg: 'r3',
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: true },
   // CodeWarrior's structuring levers are UNKNOWN until fixtures reveal them — safe universal
-  // defaults; coalesceLoopInit false until a CW loop fixture says otherwise.
-  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByComputation: true },
+  // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
+  // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
+  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
 };
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every

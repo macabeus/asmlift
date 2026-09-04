@@ -108,7 +108,7 @@ function chain(opts: {
     // a second, unrelated entry into `g` — the fold would delete a block still reachable
     blocks.splice(1, 0, blk([{ ...mkOp('br'), successors: [{ block: g, args: [] }] }]));
   }
-  return { name: 'f', blocks };
+  return { name: 'f', blocks, writeOrder: undefined };
 }
 
 /** The connective a fold produced, or null when nothing fired. */
@@ -406,7 +406,7 @@ describe('chains', () => {
         { block: g1.b, args: [] },
       ],
     });
-    const fn: Fn = { name: 'f', blocks: [h.b, g1.b, g2.b, shared, other] };
+    const fn: Fn = { name: 'f', blocks: [h.b, g1.b, g2.b, shared, other], writeOrder: undefined };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
     expect(fn.blocks).toHaveLength(3); // both condition blocks consumed
     expect(fn.blocks[0].ops.filter((o) => o.opcode === 'logic_or')).toHaveLength(2);
@@ -447,7 +447,7 @@ describe('the refusals found by the adversarial round', () => {
         { block: entry, args: [] },
       ],
     });
-    const fn: Fn = { name: 'f', blocks: [entry, body, latch, exit] };
+    const fn: Fn = { name: 'f', blocks: [entry, body, latch, exit], writeOrder: undefined };
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
     expect(fn.blocks[0]).toBe(entry);
   });
@@ -492,7 +492,7 @@ describe('the refusals found by the adversarial round', () => {
         ],
       },
     ]);
-    const fn: Fn = { name: 'f', blocks: [head, g, shared, other] };
+    const fn: Fn = { name: 'f', blocks: [head, g, shared, other], writeOrder: undefined };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
   });
 
@@ -582,7 +582,7 @@ function comparisonTree(): Fn {
       ],
     },
   ]);
-  return { name: 'f', blocks: [head, g, shared, other] };
+  return { name: 'f', blocks: [head, g, shared, other], writeOrder: undefined };
 }
 
 // The tree-ownership refusal chooses a SPELLING where every other refusal in this pass guards
@@ -675,8 +675,101 @@ describe('the VALUE form shares the entry-block refusal', () => {
     });
     entry.ops.push({ ...mkOp('br'), successors: [{ block: merge, args: [vb] }] });
     const other = blk([{ ...mkOp('br'), successors: [{ block: merge, args: [vb] }] }]);
-    const fn: Fn = { name: 'f', blocks: [entry, head, other, merge] };
+    const fn: Fn = { name: 'f', blocks: [entry, head, other, merge], writeOrder: undefined };
     expect(recognizeShortCircuit(fn)).toBe(false);
     expect(fn.blocks[0]).toBe(entry);
+  });
+});
+
+describe('the write-order record follows the fold', () => {
+  // ^g's body moves to the end of ^h, so the builder's write-order record (ir/core.ts `WriteOrder`)
+  // for ^g's edges must land under ^h AFTER ^h's own writes — the fold owes `foldWriteOrder`.
+  test("^g's record lands under ^h, offset by ^h's write count", () => {
+    const p = mkValue(T.unk(32));
+    const v = mkValue(T.unk(32));
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      sharedParams: [p],
+      sharedArgsFromH: [v],
+      sharedArgsFromG: [v],
+    });
+    const [h, g] = fn.blocks;
+    fn.writeOrder = {
+      lastWrite: new Map([
+        [h, new Map([[p, 2]])],
+        [g, new Map([[p, 0]])],
+      ]),
+      // Every block, not only the two this test reasons about: a measured fn measures all of them,
+      // which is what the closing `verify` enforces.
+      writes: new Map(fn.blocks.map((b, i) => [b, [5, 1][i] ?? 0])),
+    };
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(fn.writeOrder.lastWrite.get(h)!.get(p)).toBe(5);
+    expect(fn.writeOrder.writes.get(h)).toBe(6);
+    verify(fn);
+  });
+
+  test('an unmeasured ^h takes nothing', () => {
+    const p = mkValue(T.unk(32));
+    const v = mkValue(T.unk(32));
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      sharedParams: [p],
+      sharedArgsFromH: [v],
+      sharedArgsFromG: [v],
+    });
+    const [h, g] = fn.blocks;
+    fn.writeOrder = { lastWrite: new Map([[g, new Map([[p, 0]])]]), writes: new Map([[g, 1]]) };
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(fn.writeOrder.lastWrite.get(h)).toBeUndefined();
+    expect(fn.writeOrder.writes.has(h)).toBe(false);
+  });
+});
+
+describe('the VALUE form carries the write-order record too', () => {
+  test("the feeder's record lands under the head, offset by the head's write count", () => {
+    // `x = c ? 0 : (k != 1)` in CHAIN context (a third predecessor keeps the merge's phi alive) —
+    // the feeder's body is hoisted into the head, so its write to the phi's key now follows the
+    // head's own writes.
+    const phi = mkValue(T.unk(32));
+    const merge = blk([mkOp('ret', { operands: [phi] })], [phi]);
+    const vb = mkValue(T.unk(32));
+    const feeder = blk(cmp(vb));
+    const c = mkValue(T.unk(32));
+    const head = blk(cmp(c));
+    const zero = mkValue(T.unk(32));
+    head.ops.splice(head.ops.length - 1, 0, mkOp('const', { results: [zero], attrs: { value: 0 } }));
+    head.ops.push({
+      ...mkOp('cond_br', { operands: [c] }),
+      successors: [
+        { block: merge, args: [zero] },
+        { block: feeder, args: [] },
+      ],
+    });
+    feeder.ops.push({ ...mkOp('br'), successors: [{ block: merge, args: [vb] }] });
+    const one = mkValue(T.unk(32));
+    const other = blk([
+      mkOp('const', { results: [one], attrs: { value: 1 } }),
+      { ...mkOp('br'), successors: [{ block: merge, args: [one] }] },
+    ]);
+    const fn: Fn = { name: 'f', blocks: [head, feeder, other, merge], writeOrder: undefined };
+    fn.writeOrder = {
+      lastWrite: new Map([
+        [head, new Map([[phi, 3]])],
+        [feeder, new Map([[phi, 2]])],
+        [other, new Map([[phi, 0]])],
+      ]),
+      writes: new Map([
+        [head, 4],
+        [feeder, 3],
+        [other, 1],
+      ]),
+    };
+    expect(recognizeShortCircuit(fn)).toBe(true);
+    expect(merge.params).toEqual([phi]); // chain context: the phi survives, fed by the connective
+    expect(fn.writeOrder.lastWrite.get(head)!.get(phi)).toBe(6);
+    expect(fn.writeOrder.writes.get(head)).toBe(7);
   });
 });

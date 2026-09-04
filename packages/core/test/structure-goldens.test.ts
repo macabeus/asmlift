@@ -20,6 +20,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import type { Block, Fn, Value } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { decompile, raiseRecovered, structureChecked } from '../src/pipeline';
@@ -32,6 +33,25 @@ const emit = (ir: string): string => {
   verify(fn);
   recoverTypes(fn);
   return cBackend.emit(structure(fn));
+};
+
+/** Attach a write-order record the way a FRONTEND would, and re-verify.
+ *
+ *  Measurement is all-or-nothing per function (ir/core.ts `WriteOrder`, checked by `ir/verify.ts`),
+ *  so a record naming only the block under test is not a state any lift produces: `structure()`
+ *  accepts it and `verify()` rejects it. Every other block is therefore measured too, with no
+ *  destination of its own edge recorded — the legal way to say "this golden is about the latch
+ *  edge". It is not cosmetic: the FOR_ACC pair below emits different C for the other blocks'
+ *  records, which is why it carries an entry record of its own. */
+const measure = (fn: Fn, per: Map<Block, Map<Value, number>>, writes: Map<Block, number>): Fn => {
+  for (const b of fn.blocks) {
+    if (!writes.has(b)) {
+      writes.set(b, 0);
+    }
+  }
+  fn.writeOrder = { lastWrite: per, writes };
+  verify(fn);
+  return fn;
 };
 
 // while (i < n) i++; return i + n — the exit region COMPUTES with the loop value, so the
@@ -176,5 +196,162 @@ test('pool-global recovery + base-CSE hoist, as emitted C (full pipeline)', () =
   expect(decompile('initcfg', `initcfg:\n${BASECSE_ASM}\n`, ARMV4T_AGBCC).source).toBe(
     's32 initcfg(void) {\n    u8 * p0;\n    p0 = (u8 *)&gCfg;\n    *p0 = 1;\n    p0[1] = 2;\n' +
       '    p0[2] = 3;\n    return 3;\n}\n',
+  );
+});
+
+// The SAME swap cycle with the frontend's write-order record attached (ir/core.ts `WriteOrder`):
+// the latch wrote v1's register FIRST, then v0's, then v2's. `sequentialize` spills the first
+// pending destination, so the record decides WHICH member becomes the temp — here v1, where the
+// def-position proxy picks v0 (a param sorts before an in-block def). The unmeasured golden keeps
+// its own spelling: a parsed Fn carries no record, and that refusal is what it pins.
+test('a swap cycle with a write-order record spills the member the pred wrote first', () => {
+  const fn = parse(SWAP_CYCLE);
+  verify(fn);
+  recoverTypes(fn);
+  const [, header, latch] = fn.blocks;
+  const [v0, v1, v2] = header.params;
+  measure(
+    fn,
+    new Map([
+      [
+        latch,
+        new Map([
+          [v1, 0],
+          [v0, 1],
+          [v2, 2],
+        ]),
+      ],
+    ]),
+    new Map([[latch, 3]]),
+  );
+  expect(cBackend.emit(structure(fn))).toBe(
+    's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
+      '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
+      '        t0 = v1;\n        v1 = v0;\n        v0 = t0;\n    }\n    return v0;\n}\n',
+  );
+});
+
+// The record says NOTHING about a destination the pred never wrote, and the rule invents no
+// answer: that copy keeps the front position the def-position proxy gives an argument the pred did
+// not compute (structure.ts `NO_RECORD`). Here the latch wrote only v0's and v2's keys, so v1's
+// copy is ordered ahead of both — and being first, v1 is the member the cycle spills. (`v2 = v2 + 1`
+// still leads the body: it is the one copy outside the cycle, and `sequentialize` emits every
+// emittable copy before it breaks one.) Pinning an unrecorded copy at its param-order slot instead
+// loses armdef, loopfall, loopset and structarr over the 736 synthetic rows, all agbcc.
+test('a destination the pred never wrote keeps the front slot, and the record orders the rest', () => {
+  const fn = parse(SWAP_CYCLE);
+  verify(fn);
+  recoverTypes(fn);
+  const [, header, latch] = fn.blocks;
+  const [v0, , v2] = header.params;
+  measure(
+    fn,
+    new Map([
+      [
+        latch,
+        new Map([
+          [v2, 0],
+          [v0, 1],
+        ]),
+      ],
+    ]),
+    new Map([[latch, 2]]),
+  );
+  expect(cBackend.emit(structure(fn))).toBe(
+    's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
+      '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
+      '        t0 = v1;\n        v1 = v0;\n        v0 = t0;\n    }\n    return v0;\n}\n',
+  );
+});
+
+// A MEASURED predecessor that recorded no destination of this edge is not an unmeasured one: it
+// wrote registers, none of them a key this edge copies. Every copy is then a pass-through with no
+// evidence, they all tie, and the param-order walk that built the list decides — NOT the
+// def-position proxy, which is only reached when no frontend measured the block at all.
+// THE EDGE-COPY ORDER FEEDS `recognizeForLoops`, NOT ONLY `sequentialize`. A `for` is recovered
+// only when the induction update is the LAST statement of the body, so the same record that picks
+// a cycle's temp also decides whether a loop is spelled `for` or `while` — in both directions,
+// which is what this pair pins. (`synthetic:gcd:agbcc` is the live case, on the `while` side.)
+const FOR_ACC = `fn foracc {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1, %1, %0)
+^bb1(%2: s32, %3: s32, %4: s32):
+  %5: u32 = icmp_slt %3, %4
+  cond_br %5, ^bb2(%2, %3, %4), ^bb3(%2)
+^bb2(%6: s32, %7: s32, %8: s32):
+  %9: s32 = const {value=1}
+  %10: s32 = add %7, %9
+  %11: s32 = add %6, %8
+  br ^bb1(%11, %10, %8)
+^bb3(%12: s32):
+  ret %12
+}`;
+const forAccWith = (order: (acc: Value, ind: Value) => [Value, number][]): string => {
+  const fn = parse(FOR_ACC);
+  verify(fn);
+  recoverTypes(fn);
+  const [entry, header, latch] = fn.blocks;
+  const [acc, ind, n] = header.params;
+  // The ENTRY edge is recorded too, and held FIXED across the pair, because `for` recovery also
+  // needs the init adjacent to the loop: with the entry left to the param-order tie both goldens
+  // come out `while`, and the pair would pin one direction twice. Its record writes the induction
+  // register last, which is what puts `v1 = 0` against the loop.
+  measure(
+    fn,
+    new Map([
+      [
+        entry,
+        new Map([
+          [acc, 0],
+          [n, 1],
+          [ind, 2],
+        ]),
+      ],
+      [latch, new Map(order(acc, ind))],
+    ]),
+    new Map([
+      [entry, 3],
+      [latch, 2],
+    ]),
+  );
+  return cBackend.emit(structure(fn));
+};
+
+test('a record that leaves the induction update last recovers a `for`…', () => {
+  expect(
+    forAccWith((acc, ind) => [
+      [acc, 0],
+      [ind, 1],
+    ]),
+  ).toBe(
+    's32 foracc(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = 0;\n    v2 = a0;\n' +
+      '    for (v1 = 0; v1 < v2; v1 = v1 + 1) {\n        v0 = v0 + v2;\n    }\n    return v0;\n}\n',
+  );
+});
+
+test('…and one that moves it off the end leaves a `while`, from the same IR', () => {
+  expect(
+    forAccWith((acc, ind) => [
+      [ind, 0],
+      [acc, 1],
+    ]),
+  ).toBe(
+    's32 foracc(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = 0;\n    v2 = a0;\n' +
+      '    v1 = 0;\n    while (v1 < v2) {\n        v1 = v1 + 1;\n        v0 = v0 + v2;\n    }\n' +
+      '    return v0;\n}\n',
+  );
+});
+
+test('a measured pred that wrote none of the edge keys leaves the copies in param order', () => {
+  const fn = parse(SWAP_CYCLE);
+  verify(fn);
+  recoverTypes(fn);
+  const [, , latch] = fn.blocks;
+  measure(fn, new Map(), new Map([[latch, 4]]));
+  expect(cBackend.emit(structure(fn))).toBe(
+    's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
+      '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
+      '        t0 = v0;\n        v0 = v1;\n        v1 = t0;\n    }\n    return v0;\n}\n',
   );
 });

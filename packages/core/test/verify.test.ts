@@ -9,7 +9,7 @@ import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import { VerifyError, verify } from '../src/ir/verify';
 
-const fnOf = (blocks: Block[]): Fn => ({ name: 'bad', blocks });
+const fnOf = (blocks: Block[]): Fn => ({ name: 'bad', blocks, writeOrder: undefined });
 
 test('rejects: block without a terminator', () => {
   expect(() => verify(parse(`fn f {\n^bb0():\n  %0: s32 = const {value=1}\n}\n`))).toThrow(VerifyError);
@@ -121,4 +121,46 @@ test('verify errors carry the fn/block/op location', () => {
   expect(() => verify(parse(`fn f {\n^bb0():\n  %0: s32 = frobnicate\n  ret %0\n}\n`))).toThrow(
     /\(fn 'f', block \^bb0, op 0\)/,
   );
+});
+
+// THE WRITE-ORDER RECORD'S CROSS-PASS OBLIGATION (ir/core.ts `WriteOrder`, `foldWriteOrder`). Its
+// failure mode is silent — an unmeasured block's edge copies sort with no records, quietly
+// changing their order and, on a cycle, which register is spilled — so it is checked, not trusted.
+const MEASURED = `fn m {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%0, %1)
+^bb1(%2: s32, %3: s32):
+  ret %2
+}`;
+const measuredFn = (): Fn => {
+  const fn = parse(MEASURED);
+  const [entry, join] = fn.blocks;
+  fn.writeOrder = {
+    lastWrite: new Map([[entry, new Map([[join.params[1], 0]])]]),
+    writes: new Map([
+      [entry, 2],
+      [join, 0],
+    ]),
+  };
+  return fn;
+};
+
+test('accepts: a fully measured fn', () => {
+  expect(() => verify(measuredFn())).not.toThrow();
+});
+
+test('rejects: a measured fn with a block carrying no write-order entry (a minted or unfolded block)', () => {
+  const fn = measuredFn();
+  fn.writeOrder!.writes.delete(fn.blocks[1]);
+  expect(() => verify(fn)).toThrow(/carries no write-order entry/);
+});
+
+test("rejects: an ordinal outside its block's own write count (a fold that moved records without growing it)", () => {
+  const fn = measuredFn();
+  fn.writeOrder!.lastWrite.get(fn.blocks[0])!.set(fn.blocks[1].params[1], 7);
+  expect(() => verify(fn)).toThrow(/outside its 2 writes/);
+});
+
+test('accepts: a fn with NO record at all — parsed IR is unmeasured, not measured-as-nothing', () => {
+  expect(() => verify(parse(MEASURED))).not.toThrow();
 });

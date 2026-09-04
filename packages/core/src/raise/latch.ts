@@ -24,7 +24,7 @@
 // `if` (declining loud on the hazards). The guard therefore survives the fold either way; what the
 // gate preserves is the SHAPE — a forward trampoline is not a latch, and folding one re-casts an
 // unrelated branch as a loop guard — which is the `target-dominates` entry's own note below.
-import { Fn, dominators } from '../ir/core';
+import { Fn, dominators, foldWriteOrder } from '../ir/core';
 import { type Gate, firstRejection } from '../l3/gates';
 
 /** What the gates below judge: one candidate block and the block its `br` goes to. */
@@ -95,12 +95,19 @@ export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] 
     }
     const onward = latch.ops[0].successors[0];
     for (const b of fn.blocks) {
+      let repointed = false;
       for (const op of b.ops) {
         op.successors.forEach((s, i) => {
           if (s.block === latch) {
             op.successors[i] = { block: onward.block, args: [...onward.args] };
+            repointed = true;
           }
         });
+      }
+      // The copies the latch stood for now happen at the end of this predecessor — after its own
+      // writes, which the write-order record has to keep saying (ir/core.ts `foldWriteOrder`).
+      if (repointed) {
+        foldWriteOrder(fn.writeOrder, latch, b);
       }
     }
     fn.blocks = fn.blocks.filter((b) => b !== latch);

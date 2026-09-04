@@ -45,6 +45,7 @@ import {
   Successor,
   Value,
   defOpMap,
+  foldWriteOrder,
   forwardingTarget,
   mkOp,
   mkValue,
@@ -193,6 +194,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
           continue;
         }
         bfeed.ops.slice(0, -1).forEach(before); // hoist B's pure body (defines Vb; harmless if a dead const)
+        foldWriteOrder(fn.writeOrder, bfeed, h); // …and its writes now follow H's (ir/core.ts)
         let condSide = cond;
         if (wantNeg) {
           condSide = mkValue(T.unk(32));
@@ -506,6 +508,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
                 { block: sharedEdge.block, args: [...sharedEdge.args] },
               ],
         });
+        foldWriteOrder(fn.writeOrder, g, h); // ^g's writes now follow ^h's own (ir/core.ts)
         fn.blocks = fn.blocks.filter((x) => x !== g);
         // ^h's old shared edge is gone, so the relay it pointed at may have become unreachable —
         // and once that link goes, so may the next, all the way down the chain. `dominators`

@@ -64,7 +64,7 @@ import {
   hasLoopSharedPureValue,
   hasMergeFeedHome,
 } from './structure/analysis';
-import { hasParamRootedMerge } from './structure/structure';
+import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
 import { C_TYPEDEFS, type TargetDescription, structureOptionsFor } from './target';
 
@@ -94,7 +94,8 @@ interface StructuringAxis {
     | 'derivedHome'
     | 'mergeHome'
     | 'unsCmp'
-    | 'freshMerge';
+    | 'freshMerge'
+    | 'copyDefPos';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -253,6 +254,46 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/fresh-merge',
     options: (on) => ({ freshParamMerge: on }),
     probeGate: (probe) => hasParamRootedMerge(probe),
+    strip: true,
+  },
+  // `/copy-defpos` — the EDGE-COPY ORDER axis (structure.ts `preferDefPosCopyOrder`). The frontend
+  // measures the order each predecessor wrote its successors' keys (ir/core.ts `WriteOrder`) and
+  // the default lays the edge's copies out in it. That the compiler laid its copies out in the
+  // order it wrote them is only licensed for a CYCLIC copy set, where the spill has to be the
+  // register whose old value was displaced first; for an acyclic set it is an assumption, and the
+  // benchmark answers it BOTH WAYS INSIDE ONE COMPILER: `synthetic:gcd:mwcc_242_81` matches only
+  // with the record, while `memcpy1:mwcc_242_81` (19 → 23) and `memset1:mwcc_242_81` (19 → 21)
+  // score worse with it, as does `armfall:agbcc` (8 → 11). A per-compiler boolean cannot decide a
+  // question with rows on both sides of it inside one compiler, and a lever that emits one tree
+  // referees nothing — so the def-position spelling is enumerated beside the record's and the
+  // differ picks, exactly as `/fresh-merge` above does for the merge home.
+  //
+  // THE AXIS SPANS THE UNLICENSED HALF ONLY: its ON arm keeps the record on cyclic sets, so
+  // neither arm spells a cycle against the instruction that names the compiler's temp. Over all
+  // 988 benchmark rows that scoping moves nothing — `memcpy1`, `memset1` and `armfall` keep their
+  // `/copy-defpos` winners, so the acyclic half is what they needed — and it makes one spelling
+  // reachable that neither whole-function arm has: the record on a cycle and the proxy on an
+  // acyclic edge of the same function, which is what `synthetic:gcd:agbcc`'s two edges want.
+  //
+  // Gated on the two orders actually differing somewhere in this function, so on a row where the
+  // record changes nothing the pair is one tree and the fan does not grow. PER SYMBOL VARIANT, on
+  // that variant's own fully-raised fn, because that is `structure()`'s own input and only there
+  // is withholding provably inert: same fn, same comparators, so a false answer means the ON arm
+  // would structure the tree the OFF arm already spelled. Asked any earlier the claim does not
+  // follow, and both ways it fails are real —
+  //   - THE SYMBOL VARIANT. klonoa's `UpdateHUDCollectibleCount` answers false with the kleod map
+  //     and true on the `/raw-globals` sibling's own lift (fixture: test/corpus/agbcc-hudcount.s).
+  //   - THE STAGE. A probe stopping after `recoverTypes` is asked before `foldEmptyLatches`
+  //     (raise/latch.ts) repoints edges and rewrites the record the gate reads: klonoa's
+  //     `EntityGravityAndFloorCheck` answers false there and true after that fold.
+  // Neither costs candidates today — over 192 klonoa functions enumerated with the map the fan is
+  // 27,847 either way, 1,970 of them `/copy-defpos`. `strip` like its neighbours: a reordering
+  // cannot rescue a spelling whose OFF sibling failed the boundary contracts.
+  {
+    flag: 'copyDefPos',
+    suffix: '/copy-defpos',
+    options: (on) => ({ preferDefPosCopyOrder: on }),
+    variantGate: edgeCopyOrdersDiffer,
     strip: true,
   },
 ];
@@ -1304,6 +1345,7 @@ export function enumerateCandidates(
     mergeHome: false,
     unsCmp: false,
     freshMerge: false,
+    copyDefPos: false,
   }));
   for (const ax of STRUCTURING_AXES) {
     if (ax.probeGate === undefined || ax.probeGate(probe, probeDefs)) {
