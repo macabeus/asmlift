@@ -3327,6 +3327,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     //     spelling is enumerated beside it as a ranked candidate (`/copy-defpos`, rank.ts) rather
     //     than declared right here.
     //
+    // IT ALSO DECIDES WHETHER `l3/tailmerge.ts` FIRES. An arm of an `if` ends in one edge's copies,
+    // and that pass peels only a common LAST statement, so an arm-varying copy ordered last hides
+    // an agreeing one behind it — five duplicated copies on klonoa `CountCollectedGems`, measured,
+    // with the peel and not this sort as the cause (that file's KNOWN INTERACTIONS carries the
+    // measurement and why reaching the hidden statement needs an argument this pass lacks).
+    //
     // AND IT FEEDS `recognizeForLoops`, not only `sequentialize`: a `for` is recovered only when
     // the induction update is the body's LAST statement, so this sort also decides `for` vs
     // `while` (goldens in `structure-goldens.test.ts`). That is why `synthetic:gcd:agbcc` emits a
