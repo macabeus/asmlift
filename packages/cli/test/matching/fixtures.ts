@@ -622,8 +622,13 @@ export const FIXTURES: DecompFixture[] = [
       '    u16 * v0;\n' +
       '    s32 v1;\n' +
       '    volatile u16 sp0;\n' +
-      '    v0 = a0;\n' +
+      // `v1 = a1` (the count, which agbcc never copies — `n` stays in r1) ahead of `v0 = a0` (a real
+      // `add r2, r0, #0`): edge copies follow the predecessor's WRITE ORDER (ir/core.ts
+      // `WriteOrder`), and a destination the pred never wrote sorts first, where the def-position
+      // proxy put an outside def. No instruction licenses the count's position, and the recompile
+      // is indifferent: both orders score 3 with the same breakdown (insert 1, delete 1, arg 1).
       '    v1 = a1;\n' +
+      '    v0 = a0;\n' +
       '    if (v1 > 0) {\n' +
       '        do {\n' +
       '            sp0 = *v0;\n' +

@@ -273,9 +273,7 @@ test('the pass is WIRED: a trampoline latch structures end to end', () => {
 // sorts the latch's copy as if it were written before everything the predecessor wrote.
 const withOrder = (fn: ReturnType<typeof parse>, lastWrite: [number, number, number][], writes: [number, number][]) => {
   fn.writeOrder = {
-    lastWrite: new Map(
-      lastWrite.map(([b, i, at]) => [fn.blocks[b], new Map([[fn.blocks[1].params[i], at]])] as const),
-    ),
+    lastWrite: new Map(lastWrite.map(([b, i, at]) => [fn.blocks[b], new Map([[fn.blocks[1].params[i], at]])] as const)),
     writes: new Map(writes.map(([b, n]) => [fn.blocks[b], n] as const)),
   };
   return fn;
@@ -283,7 +281,14 @@ const withOrder = (fn: ReturnType<typeof parse>, lastWrite: [number, number, num
 
 test("a folded latch's copy is recorded AFTER the predecessor's own writes", () => {
   // the latch (^bb2) wrote the header's key once (ordinal 0); ^bb1 made three writes of its own
-  const fn = withOrder(parse(LATCH), [[2, 0, 0]], [[1, 3], [2, 1]]);
+  const fn = withOrder(
+    parse(LATCH),
+    [[2, 0, 0]],
+    [
+      [1, 3],
+      [2, 1],
+    ],
+  );
   const [, header] = fn.blocks;
   const [phi] = header.params;
   expect(foldEmptyLatches(fn)).toBe(1);
@@ -291,8 +296,15 @@ test("a folded latch's copy is recorded AFTER the predecessor's own writes", () 
   expect(fn.writeOrder!.writes.get(header)).toBe(4);
 });
 
-test('a latch that wrote nothing leaves the predecessor\'s records as they were', () => {
-  const fn = withOrder(parse(LATCH), [[1, 0, 1]], [[1, 3], [2, 0]]);
+test("a latch that wrote nothing leaves the predecessor's records as they were", () => {
+  const fn = withOrder(
+    parse(LATCH),
+    [[1, 0, 1]],
+    [
+      [1, 3],
+      [2, 0],
+    ],
+  );
   const [, header] = fn.blocks;
   const [phi] = header.params;
   expect(foldEmptyLatches(fn)).toBe(1);

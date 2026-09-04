@@ -687,7 +687,13 @@ describe('the write-order record follows the fold', () => {
   test("^g's record lands under ^h, offset by ^h's write count", () => {
     const p = mkValue(T.unk(32));
     const v = mkValue(T.unk(32));
-    const fn = chain({ gOnTaken: false, sharedOnGTaken: true, sharedParams: [p], sharedArgsFromH: [v], sharedArgsFromG: [v] });
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      sharedParams: [p],
+      sharedArgsFromH: [v],
+      sharedArgsFromG: [v],
+    });
     const [h, g] = fn.blocks;
     fn.writeOrder = {
       lastWrite: new Map([
@@ -708,7 +714,13 @@ describe('the write-order record follows the fold', () => {
   test('an unmeasured ^h takes nothing', () => {
     const p = mkValue(T.unk(32));
     const v = mkValue(T.unk(32));
-    const fn = chain({ gOnTaken: false, sharedOnGTaken: true, sharedParams: [p], sharedArgsFromH: [v], sharedArgsFromG: [v] });
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      sharedParams: [p],
+      sharedArgsFromH: [v],
+      sharedArgsFromG: [v],
+    });
     const [h, g] = fn.blocks;
     fn.writeOrder = { lastWrite: new Map([[g, new Map([[p, 0]])]]), writes: new Map([[g, 1]]) };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
