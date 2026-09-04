@@ -584,6 +584,59 @@ fb:
   });
 });
 
+describe('the alignment directives are a FAMILY, not three literal spellings', () => {
+  // Built from an assembled fixture. `arm-none-eabi-as` + objdump on
+  //
+  //   movs r1,#1 / .2byte 0xE003 / b _end / <dir> / _pool: .4byte 0xAAAAAAAA / _end: movs r0,#1 / bx lr
+  //
+  // gives `012103e0 02e00000 aaaaaaaa 01207047`: the directive emits 2 bytes at 0x6, `_pool` sits
+  // at 0x8 and `_end` at 0xc, and the raw halfword 0xE003 at 0x2 branches to 2 + 4 + 6 = 0xc —
+  // `_end`, so the function returns 1. The same three lines assemble the same way under
+  // `.balignw 4, 0x0000`, `.p2alignw 2, 0x0000` and `.ALIGN 2, 0`: gas directives are
+  // case-insensitive, and the `w`/`l` variants fill with a repeated halfword/word pattern.
+  const bw = (dir: string) => `	thumb_func_start bw
+bw:
+	movs r1, #0x01
+	.2byte 0xE003
+	b _end
+${dir}
+_pool:
+	.4byte 0xAAAAAAAA
+_end:
+	movs r0, #0x01
+	bx lr
+`;
+
+  test('a `w`/`l` pattern fill is a loud refusal, never a zero-sized skip', () => {
+    // These fell through the lowercase three-word whitelist to `continue // other directives
+    // skipped`, contributed ZERO bytes to the layout, and put `_end` at 0xa — so the raw branch
+    // resolved to the `bx lr` instead, and the function lifted as the identity with `movs r0, #1`
+    // dropped. Silently: no marker, plausible C, wrong.
+    for (const dir of ['	.balignw 4, 0x0000', '	.p2alignw 2, 0x0000', '	.balignl 4, 0']) {
+      expect(() => d('bw', bw(dir))).toThrow(FrontendUnsupportedError);
+      expect(() => d('bw', bw(dir))).toThrow(/fills with bytes this frontend does not model/);
+    }
+  });
+
+  test('a case variant reads exactly as the lowercase spelling does', () => {
+    // Not a refusal of its own: `.ALIGN 2, 0` IS `.align 2, 0`, so it must reach whatever answer
+    // that reaches — here the honest base ambiguity, because the raw branch genuinely lands two
+    // bytes apart under the two bases. What it must not do is contribute nothing and lift.
+    const lower = () => d('bw', bw('	.align 2, 0'));
+    expect(lower).toThrow(/base 0 and base 2 both decode consistently but disagree/);
+    for (const dir of ['	.ALIGN 2, 0', '	.Align 2, 0', '	.P2ALIGN 2, 0', '	.BALIGN 4, 0']) {
+      expect(() => d('bw', bw(dir))).toThrow(FrontendUnsupportedError);
+      expect(() => d('bw', bw(dir))).toThrow(/base 0 and base 2 both decode consistently but disagree/);
+    }
+  });
+
+  test('a directive whose NAME says alignment is loud even when unrecognised', () => {
+    // The next spelling nobody has thought of gets a refusal rather than zero bytes and no marker.
+    expect(() => d('bw', bw('	.someAlignThing 2'))).toThrow(FrontendUnsupportedError);
+    expect(() => d('bw', bw('	.someAlignThing 2'))).toThrow(/'\.someAlignThing' makes item sizes unknowable/);
+  });
+});
+
 describe('a label naming DATA is not a way into an alignment fill', () => {
   test('an alignment between two words of a labelled pool is data, and lifts', () => {
     // `ldr r0, _pool` NAMES `_pool`, but it is a load, not a way for control to get there: the

@@ -615,22 +615,42 @@ function decode(
       // here for the same reason the pad halfword is decoded above: a directive this pass does not
       // recognise contributes ZERO bytes to the layout while emitting real ones, which silently
       // retargets every branch and pool load after it.
-      const ad = rest.match(/^\.(align|balign|p2align)\b\s*(.*)$/);
+      //
+      // Which is why this matches the FAMILY, not three literal spellings. gas directives are
+      // case-insensitive (`.ALIGN 2, 0` assembles identically — measured), and `.balignw` /
+      // `.balignl` / `.p2alignw` / `.p2alignl` fill with a repeated halfword or word PATTERN
+      // rather than a byte. A three-word lowercase whitelist skipped all of those as "other
+      // directives", giving them ZERO bytes in the layout while gas emitted real ones: measured,
+      // `.balignw 4, 0x0000` between a raw branch and its target retargeted the branch two bytes
+      // early and lifted the wrong C. A pattern fill stays a loud refusal — the byte COUNT is
+      // computable, but the bytes are a pattern this pass does not decode into pad encodings.
+      const ad = rest.match(/^\.(align|balign|p2align)([wl]?)\b\s*(.*)$/i);
       if (ad) {
-        const am = ad[2].trim().match(/^(\d{1,3})(?:\s*,\s*([^,]*?))?\s*$/); // N [, fill]; max-skip → no match
+        const kind = ad[1].toLowerCase();
+        const patternFill = ad[2] !== ''; // the `w`/`l` variants
+        const am = ad[3].trim().match(/^(\d{1,3})(?:\s*,\s*([^,]*?))?\s*$/); // N [, fill]; max-skip → no match
         const n = am ? Number(am[1]) : NaN;
-        const pow = ad[1] === 'balign' ? Math.log2(n) : n;
+        const pow = kind === 'balign' ? Math.log2(n) : n;
         // No fill operand → the assembler's own code-section fill; `, 0` → zeros. Anything else
         // (including an empty `.align 2,`) is a fill this pass does not model.
         const fillText = am?.[2]?.trim();
         const fill = fillText === undefined ? 0x46c0 : /^0[xX]?0*$/.test(fillText) ? 0x0000 : null;
+        const what = `.${ad[1]}${ad[2]}`; // as written, so the refusal names the reader's own line
         if (!(Number.isInteger(pow) && pow <= 2)) {
-          hazards.push({ at: flat.length - 1, what: `.${ad[1]}`, code: true, why: 'size' });
-        } else if (fill === null) {
-          hazards.push({ at: flat.length - 1, what: `.${ad[1]}`, code: true, why: 'fill' });
+          hazards.push({ at: flat.length - 1, what, code: true, why: 'size' });
+        } else if (patternFill || fill === null) {
+          hazards.push({ at: flat.length - 1, what, code: true, why: 'fill' });
         } else {
           flat.push({ align: { pow, fill } });
         }
+        continue;
+      }
+      // Belt and braces for the next spelling nobody has thought of: an unrecognised directive
+      // whose NAME says alignment is loud rather than silently zero-sized. Skipping one is the
+      // failure above, and it leaves no marker behind.
+      const alignish = rest.match(/^\.([\w.$]*align[\w.$]*)\b/i);
+      if (alignish) {
+        hazards.push({ at: flat.length - 1, what: `.${alignish[1]}`, code: true, why: 'size' });
       }
       continue; // other directives skipped
     }
