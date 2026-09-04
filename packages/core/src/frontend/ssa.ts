@@ -165,7 +165,8 @@ export function makeSsaBuilder(
   const model = (): LiveInModel => (modelMemo ??= checkedLiveInModel(name, liveInOf()));
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
-  const fn: Fn = { name, blocks: irBlocks };
+  // `writeOrder` is filled in below, where the builder's counters live.
+  const fn: Fn = { name, blocks: irBlocks, writeOrder: undefined };
 
   const defs: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const sealed: boolean[] = irBlocks.map(() => false);

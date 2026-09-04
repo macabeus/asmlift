@@ -10,7 +10,7 @@
 // stays a pure generator: the score comes through the scoring seam (scoreSource), never a
 // diff of asmlift's own.
 import { cBackend } from '@asmlift/core/backend/c';
-import type { Block, Fn, Value } from '@asmlift/core/ir/core';
+import type { Block, Fn, Value, WriteOrder } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import type { FnProto } from '@asmlift/core/proto';
@@ -166,8 +166,11 @@ function tryScore(
 // Shallow structural clone so a mid-pipeline scoring probe doesn't mutate the live fn's types.
 // (The IR is plain data; values keep identity within the clone.) Typed field-by-field against
 // Fn: a field added to Fn/Block/Op is a compile error HERE, not a silently-dropped field in
-// every score probe.
-function structuredCloneFn(fn: Fn): Fn {
+// every score probe — which is why `Fn.writeOrder` is declared REQUIRED-but-possibly-undefined
+// (`ir/core.ts`) rather than optional. An optional field is not a compile error to omit, and a
+// side table the structurer reads and this clone drops makes the probe's scoreDelta a fact about
+// a program asmlift does not emit.
+export function structuredCloneFn(fn: Fn): Fn {
   const map = new Map<Value, Value>();
   const cv = (v: Value): Value => {
     if (!map.has(v)) {
@@ -194,5 +197,22 @@ function structuredCloneFn(fn: Fn): Fn {
       }
     }
   }
-  return { name: fn.name, blocks };
+  // The write-order record is keyed by OBJECTS (pred block, destination param), so carrying the
+  // reference would be inert: every key here is a fresh object and every lookup would miss,
+  // leaving each destination with no record — a different, and worse, program than the headline.
+  // Entries for blocks a pass already dropped from `fn.blocks` (foldWriteOrder leaves the source
+  // block's own entries behind) have no counterpart and are not carried; nothing reads them.
+  const wo = fn.writeOrder;
+  const writeOrder: WriteOrder | undefined = wo && {
+    lastWrite: new Map(
+      [...wo.lastWrite]
+        .filter(([b]) => bmap.has(b))
+        .map(([b, rec]) => [
+          bmap.get(b)!,
+          new Map([...rec].filter(([p]) => map.has(p)).map(([p, at]) => [map.get(p)!, at])),
+        ]),
+    ),
+    writes: new Map([...wo.writes].filter(([b]) => bmap.has(b)).map(([b, n]) => [bmap.get(b)!, n])),
+  };
+  return { name: fn.name, blocks, writeOrder };
 }

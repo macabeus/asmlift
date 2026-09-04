@@ -42,8 +42,11 @@ export interface Block {
 export interface Fn {
   name: string;
   blocks: Block[];
-  /** L1 SIDE DATA (see {@link WriteOrder}); set by the SSA builder, absent on parsed IR. */
-  writeOrder?: WriteOrder;
+  /** L1 SIDE DATA (see {@link WriteOrder}); set by the SSA builder, `undefined` on parsed IR.
+   *  REQUIRED, not optional, and the `| undefined` is the point: every place that builds an `Fn`
+   *  — the copy in `cli/src/report.ts` most of all — has to say what it does with the record, so
+   *  a side table added to `Fn` cannot be dropped by a copy that simply never mentions it. */
+  writeOrder: WriteOrder | undefined;
 }
 
 /** The order in which each block WROTE the keys its successors' block-params stand for — a

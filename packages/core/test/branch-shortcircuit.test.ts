@@ -108,7 +108,7 @@ function chain(opts: {
     // a second, unrelated entry into `g` — the fold would delete a block still reachable
     blocks.splice(1, 0, blk([{ ...mkOp('br'), successors: [{ block: g, args: [] }] }]));
   }
-  return { name: 'f', blocks };
+  return { name: 'f', blocks, writeOrder: undefined };
 }
 
 /** The connective a fold produced, or null when nothing fired. */
@@ -406,7 +406,7 @@ describe('chains', () => {
         { block: g1.b, args: [] },
       ],
     });
-    const fn: Fn = { name: 'f', blocks: [h.b, g1.b, g2.b, shared, other] };
+    const fn: Fn = { name: 'f', blocks: [h.b, g1.b, g2.b, shared, other], writeOrder: undefined };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
     expect(fn.blocks).toHaveLength(3); // both condition blocks consumed
     expect(fn.blocks[0].ops.filter((o) => o.opcode === 'logic_or')).toHaveLength(2);
@@ -447,7 +447,7 @@ describe('the refusals found by the adversarial round', () => {
         { block: entry, args: [] },
       ],
     });
-    const fn: Fn = { name: 'f', blocks: [entry, body, latch, exit] };
+    const fn: Fn = { name: 'f', blocks: [entry, body, latch, exit], writeOrder: undefined };
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
     expect(fn.blocks[0]).toBe(entry);
   });
@@ -492,7 +492,7 @@ describe('the refusals found by the adversarial round', () => {
         ],
       },
     ]);
-    const fn: Fn = { name: 'f', blocks: [head, g, shared, other] };
+    const fn: Fn = { name: 'f', blocks: [head, g, shared, other], writeOrder: undefined };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
   });
 
@@ -582,7 +582,7 @@ function comparisonTree(): Fn {
       ],
     },
   ]);
-  return { name: 'f', blocks: [head, g, shared, other] };
+  return { name: 'f', blocks: [head, g, shared, other], writeOrder: undefined };
 }
 
 // The tree-ownership refusal chooses a SPELLING where every other refusal in this pass guards
@@ -675,7 +675,7 @@ describe('the VALUE form shares the entry-block refusal', () => {
     });
     entry.ops.push({ ...mkOp('br'), successors: [{ block: merge, args: [vb] }] });
     const other = blk([{ ...mkOp('br'), successors: [{ block: merge, args: [vb] }] }]);
-    const fn: Fn = { name: 'f', blocks: [entry, head, other, merge] };
+    const fn: Fn = { name: 'f', blocks: [entry, head, other, merge], writeOrder: undefined };
     expect(recognizeShortCircuit(fn)).toBe(false);
     expect(fn.blocks[0]).toBe(entry);
   });
@@ -755,7 +755,7 @@ describe('the VALUE form carries the write-order record too', () => {
       mkOp('const', { results: [one], attrs: { value: 1 } }),
       { ...mkOp('br'), successors: [{ block: merge, args: [one] }] },
     ]);
-    const fn: Fn = { name: 'f', blocks: [head, feeder, other, merge] };
+    const fn: Fn = { name: 'f', blocks: [head, feeder, other, merge], writeOrder: undefined };
     fn.writeOrder = {
       lastWrite: new Map([
         [head, new Map([[phi, 3]])],

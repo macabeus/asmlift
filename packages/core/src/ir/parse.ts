@@ -113,7 +113,10 @@ export function parse(text: string): Fn {
     }
   }
 
-  return { name, blocks: rawBlocks.map((r) => r.block) };
+  // No write order: the text form is the value graph, and the record is a measurement of the
+  // MACHINE that only the frontend can make. A reader must treat a parsed fn's edges as
+  // unmeasured (ir/core.ts `WriteOrder`), not as written-nowhere.
+  return { name, blocks: rawBlocks.map((r) => r.block), writeOrder: undefined };
 }
 
 function parseOp(line: string, refValue: (nm: string) => Value, refBlock: (label: string) => Block): Op {
