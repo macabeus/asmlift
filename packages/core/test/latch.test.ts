@@ -265,3 +265,45 @@ test('the pass is WIRED: a trampoline latch structures end to end', () => {
   ].join('\n');
   expect(decompile('f', asm, ARMV4T_AGBCC).source).toContain('} while (v0 != 0);');
 });
+
+// ── the write-order record rides the fold ─────────────────────────────────────────────────────
+// The latch's copies became edge args, so the builder's write-order record (ir/core.ts
+// `WriteOrder`) names them under the LATCH. Once the edge is re-pointed the copies happen at the end
+// of the predecessor, after that block's own writes — and the record must say so, or the folded edge
+// sorts the latch's copy as if it were written before everything the predecessor wrote.
+const withOrder = (fn: ReturnType<typeof parse>, lastWrite: [number, number, number][], writes: [number, number][]) => {
+  fn.writeOrder = {
+    lastWrite: new Map(
+      lastWrite.map(([b, i, at]) => [fn.blocks[b], new Map([[fn.blocks[1].params[i], at]])] as const),
+    ),
+    writes: new Map(writes.map(([b, n]) => [fn.blocks[b], n] as const)),
+  };
+  return fn;
+};
+
+test("a folded latch's copy is recorded AFTER the predecessor's own writes", () => {
+  // the latch (^bb2) wrote the header's key once (ordinal 0); ^bb1 made three writes of its own
+  const fn = withOrder(parse(LATCH), [[2, 0, 0]], [[1, 3], [2, 1]]);
+  const [, header] = fn.blocks;
+  const [phi] = header.params;
+  expect(foldEmptyLatches(fn)).toBe(1);
+  expect(fn.writeOrder!.lastWrite.get(header)!.get(phi)).toBe(3);
+  expect(fn.writeOrder!.writes.get(header)).toBe(4);
+});
+
+test('a latch that wrote nothing leaves the predecessor\'s records as they were', () => {
+  const fn = withOrder(parse(LATCH), [[1, 0, 1]], [[1, 3], [2, 0]]);
+  const [, header] = fn.blocks;
+  const [phi] = header.params;
+  expect(foldEmptyLatches(fn)).toBe(1);
+  expect(fn.writeOrder!.lastWrite.get(header)!.get(phi)).toBe(1);
+  expect(fn.writeOrder!.writes.get(header)).toBe(3);
+});
+
+test('an UNMEASURED predecessor takes no record — the fold refuses to invent its write count', () => {
+  const fn = withOrder(parse(LATCH), [[2, 0, 0]], [[2, 1]]);
+  const [, header] = fn.blocks;
+  expect(foldEmptyLatches(fn)).toBe(1);
+  expect(fn.writeOrder!.lastWrite.get(header)).toBeUndefined();
+  expect(fn.writeOrder!.writes.has(header)).toBe(false);
+});

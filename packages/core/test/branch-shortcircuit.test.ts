@@ -680,3 +680,85 @@ describe('the VALUE form shares the entry-block refusal', () => {
     expect(fn.blocks[0]).toBe(entry);
   });
 });
+
+describe('the write-order record follows the fold', () => {
+  // ^g's body moves to the end of ^h, so the builder's write-order record (ir/core.ts `WriteOrder`)
+  // for ^g's edges must land under ^h AFTER ^h's own writes — the fold owes `foldWriteOrder`.
+  test("^g's record lands under ^h, offset by ^h's write count", () => {
+    const p = mkValue(T.unk(32));
+    const v = mkValue(T.unk(32));
+    const fn = chain({ gOnTaken: false, sharedOnGTaken: true, sharedParams: [p], sharedArgsFromH: [v], sharedArgsFromG: [v] });
+    const [h, g] = fn.blocks;
+    fn.writeOrder = {
+      lastWrite: new Map([
+        [h, new Map([[p, 2]])],
+        [g, new Map([[p, 0]])],
+      ]),
+      writes: new Map([
+        [h, 5],
+        [g, 1],
+      ]),
+    };
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(fn.writeOrder.lastWrite.get(h)!.get(p)).toBe(5);
+    expect(fn.writeOrder.writes.get(h)).toBe(6);
+    verify(fn);
+  });
+
+  test('an unmeasured ^h takes nothing', () => {
+    const p = mkValue(T.unk(32));
+    const v = mkValue(T.unk(32));
+    const fn = chain({ gOnTaken: false, sharedOnGTaken: true, sharedParams: [p], sharedArgsFromH: [v], sharedArgsFromG: [v] });
+    const [h, g] = fn.blocks;
+    fn.writeOrder = { lastWrite: new Map([[g, new Map([[p, 0]])]]), writes: new Map([[g, 1]]) };
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(fn.writeOrder.lastWrite.get(h)).toBeUndefined();
+    expect(fn.writeOrder.writes.has(h)).toBe(false);
+  });
+});
+
+describe('the VALUE form carries the write-order record too', () => {
+  test("the feeder's record lands under the head, offset by the head's write count", () => {
+    // `x = c ? 0 : (k != 1)` in CHAIN context (a third predecessor keeps the merge's phi alive) —
+    // the feeder's body is hoisted into the head, so its write to the phi's key now follows the
+    // head's own writes.
+    const phi = mkValue(T.unk(32));
+    const merge = blk([mkOp('ret', { operands: [phi] })], [phi]);
+    const vb = mkValue(T.unk(32));
+    const feeder = blk(cmp(vb));
+    const c = mkValue(T.unk(32));
+    const head = blk(cmp(c));
+    const zero = mkValue(T.unk(32));
+    head.ops.splice(head.ops.length - 1, 0, mkOp('const', { results: [zero], attrs: { value: 0 } }));
+    head.ops.push({
+      ...mkOp('cond_br', { operands: [c] }),
+      successors: [
+        { block: merge, args: [zero] },
+        { block: feeder, args: [] },
+      ],
+    });
+    feeder.ops.push({ ...mkOp('br'), successors: [{ block: merge, args: [vb] }] });
+    const one = mkValue(T.unk(32));
+    const other = blk([
+      mkOp('const', { results: [one], attrs: { value: 1 } }),
+      { ...mkOp('br'), successors: [{ block: merge, args: [one] }] },
+    ]);
+    const fn: Fn = { name: 'f', blocks: [head, feeder, other, merge] };
+    fn.writeOrder = {
+      lastWrite: new Map([
+        [head, new Map([[phi, 3]])],
+        [feeder, new Map([[phi, 2]])],
+        [other, new Map([[phi, 0]])],
+      ]),
+      writes: new Map([
+        [head, 4],
+        [feeder, 3],
+        [other, 1],
+      ]),
+    };
+    expect(recognizeShortCircuit(fn)).toBe(true);
+    expect(merge.params).toEqual([phi]); // chain context: the phi survives, fed by the connective
+    expect(fn.writeOrder.lastWrite.get(head)!.get(phi)).toBe(6);
+    expect(fn.writeOrder.writes.get(head)).toBe(7);
+  });
+});

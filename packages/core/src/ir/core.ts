@@ -70,6 +70,29 @@ export interface WriteOrder {
   writes: Map<Block, number>;
 }
 
+/** `from`'s writes now happen at the END of `into` — the bookkeeping a pass owes when it moves one
+ *  block's ops (or the edge copies an empty block stood for) into another. Each of `from`'s records
+ *  lands under `into` at its ordinal plus `into`'s own write count, so a key `into` wrote itself
+ *  still sorts before everything `from` wrote, and `into`'s count grows so a later fold onto it
+ *  composes the same way. Refuses when `into` was never measured: a block no builder counted has no
+ *  place to put `from`'s writes after, and reading it as "wrote nothing of its own" would be a
+ *  guess. `from`'s own entries stay; a block a pass removes from the CFG is never read again. */
+export function foldWriteOrder(order: WriteOrder | undefined, from: Block, into: Block): void {
+  const base = order?.writes.get(into);
+  if (order === undefined || base === undefined) {
+    return;
+  }
+  const moved = order.lastWrite.get(from);
+  if (moved !== undefined) {
+    const rec = order.lastWrite.get(into) ?? new Map<Value, number>();
+    for (const [param, at] of moved) {
+      rec.set(param, base + at);
+    }
+    order.lastWrite.set(into, rec);
+  }
+  order.writes.set(into, base + (order.writes.get(from) ?? 0));
+}
+
 export function mkValue(type: IrType): Value {
   return { type };
 }
