@@ -133,6 +133,25 @@ const COND_OPCODE: Record<string, Opcode> = {
 // goto / register tail call), which this frontend does not model and must LOUD-FAIL rather than
 // silently drop — mirroring the MIPS `jr` and PPC `bctr` guards. (agbcc dispatches a dense switch
 // via `mov pc, rN`.)
+// The halfword encodings that ARE alignment fill, and the instruction each one is: 0x0000 is
+// `lsls r0, r0, #0`, 0x46C0 is `mov r8, r8` (ARM7TDMI's Thumb NOP — what `nop` assembles to).
+// Returns a FRESH Instr per call: later passes rewrite operands in place.
+//
+// A splitter that writes the pad as data (`.2byte 0x0000`) and one that writes it as an
+// instruction are describing the SAME two bytes, so turning the halfword into the instruction it
+// encodes is a decode, not a fabrication — the same move the raw-BRANCH decoder below already
+// makes for `.2byte 0xD10E`. Everything that decides what padding MEANS (isPadInstr, the
+// reachability prune) then sees one representation instead of three spellings.
+function padHalfword(v: number): Instr | null {
+  if (v === 0x0000) {
+    return { mnemonic: 'lsls', ops: ['r0', 'r0', '#0x00'] };
+  }
+  if (v === 0x46c0) {
+    return { mnemonic: 'mov', ops: ['r8', 'r8'] };
+  }
+  return null;
+}
+
 type XferKind = 'return' | 'uncond' | 'cond' | 'indirect';
 function classifyXfer(ins: Instr): XferKind | null {
   const mn = ins.mnemonic;
@@ -455,15 +474,30 @@ function decode(
       }
       const hw = rest.match(/^\.(2byte|hword|short)\s+(.+)$/);
       if (hw) {
+        const values = hw[2].split(',').map((w) => w.trim());
         // In the instruction stream these are raw undecoded instructions (luvdis emits branches
         // this way) — kept as items and DECODED (or declined) below. Under a label: a sub-word
         // data table — declines below iff the selected function references it.
-        if (dataLabel !== null) {
+        if (dataLabel === null) {
+          // …EXCEPT the halfwords that ENCODE alignment fill, decoded here to the instruction they
+          // are (see padHalfword), so the pad enters the stream as an `instr` item — the same item
+          // the `lsls r0, r0, #0` spelling of the same two bytes produces, and the same 2 bytes to
+          // the layout walk. That hands padding-versus-real-instruction to the ONE place that
+          // decides it: isPadInstr plus the unreachable-block prune below. Decoding it HERE rather
+          // than in the raw-branch pass matters: a function whose only in-code data was pad then
+          // needs no byte-accurate layout at all, exactly as it needs none under the instruction
+          // spelling.
+          const pads = values.map((v) => padHalfword(parseInt(v, 16)));
+          if (pads.every((p) => p !== null)) {
+            for (const p of pads) {
+              flat.push({ instr: p! });
+            }
+            continue;
+          }
+        } else {
           subwordData.set(dataLabel, hw[1]);
         }
-        flat.push({
-          data: { halfwords: true, values: hw[2].split(',').map((w) => w.trim()), inCode: dataLabel === null },
-        });
+        flat.push({ data: { halfwords: true, values, inCode: dataLabel === null } });
         continue;
       }
       const raw = rest.match(
