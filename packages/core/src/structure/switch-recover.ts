@@ -34,6 +34,10 @@ export interface SwitchRecoverDeps {
    *  suppressed, and a MATERIALIZED def, whose `v = …` assignment renders only here while its uses
    *  read the bare name — leaving a local declared and never assigned. */
   emitsOwnStatement: (blk: Block) => boolean;
+  /** Where a value is WRITTEN: its block for a parameter, its def op's block otherwise — the half
+   *  of "where is this defined" `defs` does not answer. Taken from `structure.ts`, which builds
+   *  both halves for def-site anchoring, rather than indexing the parameters a second time. */
+  blockOf: (v: Value) => Block | undefined;
   /** THE DISPATCH HOIST. Collapsing the tree discards its edges, and an edge's only emission is
    *  its parallel copy — so the copies of every edge the tree walk collapsed are merged and
    *  re-emitted ONCE, ahead of the `switch`. `structure.ts hoistedDispatchAssigns` owns the
@@ -101,19 +105,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     switchArmsFollowLayout,
     spellSwitchFallthrough,
     emitsOwnStatement,
+    blockOf,
     hoistDispatchCopies,
     expr,
     structureRegion,
   } = deps;
-
-  /** Which block declares a given value as a PARAMETER — the half of "where is this defined"
-   *  `defs` does not answer, needed to ask whether a hoisted argument is available at the root. */
-  const paramBlock = new Map<Value, Block>();
-  for (const blk of fn.blocks) {
-    for (const p of blk.params) {
-      paramBlock.set(p, blk);
-    }
-  }
 
   // A block's index in `fn.blocks` as its position in the ASSEMBLY — the sole warrant for reading a
   // source's arm order off block indices below, and true PER FRONTEND rather than of the IR:
@@ -660,7 +656,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     } // not worth a switch (m2c: ≥2 cases)
     // The default is the single non-test leaf that is NOT a case body. 0 → no default; ≥2 distinct → decline.
     const caseBlocks = new Set(cases.values());
-    const leaves = [...defaultCands].filter((d) => !caseBlocks.has(d));
+    const leaves = new Set([...defaultCands].filter((d) => !caseBlocks.has(d)));
     // RESOLVE THROUGH a bare jump onto another candidate. `forwardingTarget` (ir/core.ts) stops at
     // a `br` that carries block ARGUMENTS — skipping it would drop the values it supplies — so a
     // leaf holding `b .Ldefault(v)` and `.Ldefault` itself arrive here as two distinct candidates
@@ -671,7 +667,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     //
     // A cycle of such jumps has no target to resolve to and declines. Leaves that pass DIFFERENT
     // values, or that have a body, are untouched by this and are still two defaults below.
-    const throughEdges: { pred: Block; succ: { block: Block; args: Value[] } }[] = [];
+    //
+    // This is `forwardingTarget`'s walk with the args-carrying step ADMITTED rather than refused,
+    // and it is a second deliberate non-caller of it (ir/core.ts names the first, latch.ts's
+    // `foldEmptyLatches`): the values that step supplies are not dropped here either, they become
+    // one more hoisted dispatch edge. Keyed by the PRED block so a leaf walked twice — L → X → D
+    // reaches X from L's walk and again from X's own turn in the loop — records its edge once.
+    const throughEdges = new Map<Block, { pred: Block; succ: { block: Block; args: Value[] } }>();
     const resolveDefault = (d: Block): Block | null => {
       const walked = new Set<Block>();
       let cur = d;
@@ -681,10 +683,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         }
         walked.add(cur);
         const t = cur.ops[0];
-        if (!isBareExit(cur) || t.opcode !== 'br' || !leaves.includes(t.successors[0].block)) {
+        if (!isBareExit(cur) || t.opcode !== 'br' || !leaves.has(t.successors[0].block)) {
           return cur;
         }
-        throughEdges.push({ pred: cur, succ: t.successors[0] });
+        throughEdges.set(cur, { pred: cur, succ: t.successors[0] });
         cur = t.successors[0].block;
       }
     };
@@ -856,12 +858,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     //
     // Either way the answer is a decline to if-recovery, which spells every copy the asm performs.
     const availableAtRoot = (v: Value): boolean => {
-      const d = defs.get(v);
-      const home = d ? opBlock.get(d) : paramBlock.get(v);
+      const home = blockOf(v);
       return home !== undefined && dom.get(b)!.has(home);
     };
     const dispatchEdges: { pred: Block; succ: { block: Block; args: Value[] } }[] = [];
-    for (const t of [...seen, ...throughEdges.map((e) => e.pred)]) {
+    for (const t of new Set([...seen, ...throughEdges.keys()])) {
       for (const e of t.ops[t.ops.length - 1].successors) {
         if (e.block.params.length === 0) {
           continue;

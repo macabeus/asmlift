@@ -2382,6 +2382,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //
   // What the list does NOT cover is whether the def site is RENDERED at all; an anchor that lands
   // in an elided block declines the whole function instead, at the postcondition after the render.
+  /** Where a value is WRITTEN: its block for a param, its def op's block otherwise. The two halves
+   *  of "where is this defined" — `defs`/`opBlock` answer for a computed value, `paramBlock` for a
+   *  merge slot — asked as one question. Used by def-site anchoring below to order a write against
+   *  an edge, and by Regime-A switch recovery (through `SwitchRecoverDeps`) to ask whether a
+   *  hoisted argument is available at the dispatch root; it is passed there rather than rebuilt,
+   *  since `paramBlock` and `opBlock` are this scope's own. */
+  const blockOf = (v: Value): Block | undefined => {
+    const d = defs.get(v);
+    return paramBlock.get(v) ?? (d === undefined ? undefined : opBlock.get(d));
+  };
   type AnchoredWrite = { name: string; arg: Value };
   const anchoredAt = new Map<Op, AnchoredWrite[]>();
   const suppressedArgs = new Map<object, Set<number>>();
@@ -2405,11 +2415,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // conservative "a write in `a` may execute between one in `b` and `b`'s terminator": same
     // block counts (op order refined by the caller where it matters), else CFG reachability
     const mayFollow = (a: Block, b: Block): boolean => a === b || reachFrom(a).has(b);
-    /** Where a value is WRITTEN: its block for a param, its def op's block otherwise. */
-    const blockOf = (v: Value): Block | undefined => {
-      const d = defs.get(v);
-      return paramBlock.get(v) ?? (d === undefined ? undefined : opBlock.get(d));
-    };
     // A loop entered from ONE preheader — what makes "every write to the name outside the anchored
     // one is a back-edge copy" statable: the premise is over ONE entry edge. CONSERVATIVE: two
     // entry consts anchored at their own def sites would still order correctly, and this refuses
@@ -3396,15 +3401,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     );
   /** THE DISPATCH HOIST (Regime-A switch recovery). Recovering a comparison tree COLLAPSES its
    *  test blocks, and an edge's only emission is its parallel copy — so every copy the dispatch's
-   *  edges carried would be discarded with the tree. This re-emits them ONCE, above the `switch`,
-   *  which is where the target's own layout puts them (agbcc opens `sw_fall` with `mov r1, #0`,
-   *  IDO's third instruction is `move v1,zero`) and the only position that survives a fall-through
-   *  chain: per-arm copies RE-RUN on the fall path and overwrite what the falling arm computed,
-   *  the hazard Regime B states at its own `switch_br` refusal.
+   *  edges carried would be discarded with the tree. This re-emits them above the `switch`, ONCE
+   *  PER NAME the dispatch binds — which is not once per machine write: `sw_fall`'s three arms
+   *  each take the accumulator under a name of their own, so this tree emits `v0 = 0; v1 = 0;
+   *  v2 = 0;` where agbcc has a single `mov r1, #0`, and the one-local spelling that byte-matches
+   *  comes from the `/merge-home` ranked axis, not from here. What the position is for is the
+   *  fall-through chain: per-arm copies RE-RUN on the fall path and overwrite what the falling arm
+   *  computed, the hazard Regime B states at its own `switch_br` refusal.
    *
    *  Null (⇒ the caller declines to if-recovery, which spells every copy the asm performs) on the
    *  two things one hoisted statement cannot say. Both are stated over NAMES, because the name is
-   *  what the statement writes:
+   *  what the statement writes. NEITHER HAS EVER FIRED ON A REAL INPUT — over 739 synthetic and
+   *  252 real functions the hoist is offered 8 param-carrying dispatch edges, emits on ONE
+   *  function (`sw_fall`, 3 names from 4 edges) and refuses only at the caller's own
+   *  `availableAtRoot`; both refusals below are pinned by hand-written `.s` in
+   *  `test/switch-arms.test.ts` and by nothing else. Read them as invariants, not as evidence:
    *
    *    - DISAGREEING EDGES. Two edges binding one name to different values: which one runs depends
    *      on which test fell through, and a single statement above the tree cannot depend on that.
@@ -3412,8 +3423,34 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *    - A CLOBBERED LIVE NAME. The hoisted write runs on EVERY path through the dispatch,
    *      including into arms whose own edge did not carry it. If any value under that name is
    *      live where the switch begins, or into one of its arms, the hoist would overwrite a value
-   *      those readers still want. (An arm's own parameters are not at risk: `liveIn` kills them
-   *      at their block, and binding them is what the hoist is for.)
+   *      those readers still want. WHAT THE SCAN REACHES is values read at or after the listed
+   *      blocks' entries — and by construction NOT the parameters of those blocks themselves
+   *      (`analysis.ts` kills a block's params at its own entry), nor a value defined in the root
+   *      whose only use is a dispatch edge arg, nor a binding elided upstream (identity copy,
+   *      `undefCarriesNothing`, a suppressed anchored slot) since those contribute no name to
+   *      compare. Binding an arm's parameters is what the hoist is FOR, so their invisibility is
+   *      wanted; the other three are gaps nobody has turned into a wrong answer.
+   *
+   *  THE SIBLING MECHANISM STATES MORE, and the two clauses it has that this does not are both
+   *  measured rather than overlooked. `anchorConstCopies` (above) also relocates an edge copy to
+   *  one earlier position, and refuses (a) any in-loop shape and (b) a merge variable that names
+   *  any OTHER SSA value:
+   *
+   *    - THE LOOP CLAUSE DOES NOT TRANSFER. Anchoring moves a write to the const's DEF site, which
+   *      may sit outside the loop the edge is in — block dominance is not per-iteration precedence
+   *      (the /preinit sticky-arm class, PR #13). The hoist moves a write from a dispatch's edges
+   *      to the head of that same dispatch: same loop, same iteration, every time. A
+   *      param-carrying dispatch inside a `do`-`while` is pinned in `switch-arms.test.ts`.
+   *    - THE NAME-COUNT CLAUSE CANNOT BE ADOPTED: this mechanism's whole subject is a name that
+   *      several SSA values carry — one per arm that takes the accumulator. Measured by running it
+   *      as a refusal: it declines the empty-arm fall-through switch of `retsink.test.ts` outright
+   *      (its `v0` is carried by 2 values), for no row's benefit.
+   *
+   *  ORDER ACROSS EDGES IS UNLICENSED. Within one edge, `edgeCopyRecords` sorts by the pred's
+   *  measured `WriteOrder`; the union below keeps the first record per name in TREE-WALK order,
+   *  which no compiler measured — there is no per-pred record spanning writes that different preds
+   *  performed. It is deterministic, and `switch-arms.test.ts` pins the three-name order `sw_fall`
+   *  emits so that a change to the walk fails loudly rather than silently re-spelling a match.
    *
    *  What it does NOT re-check is that evaluating an arg AT THE ROOT rather than on its edge is
    *  value-preserving. That rests on the collapsed blocks being pure (switch-recover.ts's PRE4)
@@ -3423,6 +3460,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     edges: readonly { pred: Block; succ: { block: Block; args: Value[] } }[],
     liveAt: readonly Block[],
   ): Stmt[] | null => {
+    // `edgeCopyRecords` is not a pure query: an `undef` arg whose copy it drops is APPENDED to
+    // `droppedUndefCopies`, which a loud postcondition below reads. This caller is SPECULATIVE —
+    // it asks every dispatch edge and may still decline — so the records are rolled back on the
+    // refusal paths, leaving the audit trail describing the program that was actually emitted (the
+    // caller then declines to if-recovery, which re-walks the same edges through `argAssignsFor`
+    // and records them there). Note also that `undefCarriesNothing`'s verdict is made PER PRED,
+    // against what that predecessor wrote, while the hoist emits at the ROOT — one more reason the
+    // record belongs to the edge walk that survives, not to this one. The rollback covers the
+    // refusals THIS function owns; a hoist that succeeds and is then declined further down (an arm
+    // refusal in switch-recover.ts) still leaves its records, as it leaves any swap-cycle temp name
+    // `sequentialize` minted — unwinding the caller's later refusals is not this function's to do.
+    const auditMark = droppedUndefCopies.length;
+    const rollBack = (): null => {
+      droppedUndefCopies.length = auditMark;
+      return null;
+    };
     const merged = new Map<string, { name: string; value: Expr; arg: Value; param: Value }>();
     for (const { pred, succ } of edges) {
       for (const c of edgeCopyRecords(pred, succ)) {
@@ -3430,7 +3483,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         if (prev === undefined) {
           merged.set(c.name, c);
         } else if (prev.arg !== c.arg) {
-          return null; // disagreeing edges
+          return rollBack(); // disagreeing edges
         }
       }
     }
@@ -3442,7 +3495,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       for (const v of liveIn.get(blk) ?? []) {
         const nm = varName.get(v);
         if (nm !== undefined && merged.has(nm) && !bound.has(v)) {
-          return null; // a clobbered live name
+          return rollBack(); // a clobbered live name
         }
       }
     }
@@ -3639,6 +3692,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchArmsFollowLayout,
     spellSwitchFallthrough,
     emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
+    blockOf,
     hoistDispatchCopies: (edges, liveAt) => hoistedDispatchAssigns(edges, liveAt),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),

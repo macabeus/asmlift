@@ -205,8 +205,11 @@ export function isBodyless(blk: Block): boolean {
  *  An edge carrying block ARGUMENTS is not transparent — skipping it would drop the value it
  *  supplies — so the walk stops there. Read-only: nothing about the graph changes.
  *
- *  raise/latch.ts's `foldEmptyLatches` tests a similar shape and is deliberately NOT a caller: it
- *  REWRITES the edge and carries the forwarder's args onto it, which is the case this refuses. */
+ *  Two sites test a similar shape and are deliberately NOT callers, both for the same reason —
+ *  they KEEP the args this refuses to walk past: raise/latch.ts's `foldEmptyLatches` rewrites the
+ *  edge and carries the forwarder's args onto it; structure/switch-recover.ts's `resolveDefault`
+ *  walks onto a default candidate through a `b .Ldefault(v)` and turns that step into one more
+ *  dispatch edge, whose copies the hoist re-emits above the `switch`. */
 export function forwardingTarget(b: Block): Block {
   const seen = new Set<Block>();
   let cur = b;

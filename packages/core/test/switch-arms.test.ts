@@ -276,6 +276,50 @@ test('a hoisted write that would CLOBBER a name still live in an arm declines', 
   expect(out).not.toMatch(/a1 = 0;\s*\n\s*switch/);
 });
 
+/** `synthetic:sw_fall`'s own agbcc dispatch: a three-deep fall-through chain whose accumulator
+ *  crosses every arm, so the hoist merges copies from FOUR different edges under three names. */
+const sw_fall =
+  'g:\n' +
+  '\tmov\tr1, #0x0\n' +
+  '\tcmp\tr0, #0x2\n\tbeq\t.L5\t@cond_branch\n' +
+  '\tcmp\tr0, #0x2\n\tbgt\t.L9\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.L6\t@cond_branch\n' +
+  '\tb\t.L3\n' +
+  '.L9:\n\tcmp\tr0, #0x3\n\tbne\t.L3\t@cond_branch\n\tmov\tr1, #0x1\n' +
+  '.L5:\n\tadd\tr1, r1, #0x1\n' +
+  '.L6:\n\tadd\tr1, r1, #0x1\n' +
+  '.L3:\n\tadd\tr0, r1, #0x0\n\tbx\tlr\n';
+
+test('copies merged from SEVERAL edges are emitted in one fixed order', () => {
+  // ORDER ACROSS EDGES IS UNLICENSED — no compiler measured a write order spanning writes that
+  // different predecessors performed, so the union keeps tree-walk order. This pins the order the
+  // walk produces on the round's own row, where three names arrive from four edges: a change to
+  // the walk that re-spells it must fail here rather than move a match silently.
+  const out = decompile('g', sw_fall, ARMV4T_AGBCC, {}).source;
+  expect(out).toMatch(/v0 = 0;\s*\n\s*v1 = 0;\s*\n\s*v2 = 0;\s*\n\s*switch \(a0\)/);
+});
+
+test('a param-carrying dispatch INSIDE a loop hoists to the head of the switch, not out of it', () => {
+  // `anchorConstCopies` declines every in-loop shape, because it moves a write to the const's DEF
+  // site, which may sit outside the loop. This mechanism moves a write from a dispatch's edges to
+  // the head of that same dispatch — inside the same loop body, on the same iteration — so the
+  // clause does not transfer, and the absence of a loop test is a claim rather than an oversight.
+  // The accumulator is loop-carried (`case 1:` reads the PREVIOUS iteration's value), which is
+  // what a write hoisted one level too far would destroy.
+  const out = of(
+    'f:\n\tmov\tr5, #0x0\n\tmov\tr2, #0x0\n\tmov\tr4, #0x0\n' +
+      '.Lloop:\n\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '\tmov\tr2, r5\n\tcmp\tr0, #0x2\n\tbne\t.Lnext\t@cond_branch\n' +
+      '\tadd\tr2, r2, #0x2\n\tb\t.Lnext\n' +
+      '.Lc1:\n\tadd\tr2, r2, #0x1\n' +
+      '.Lnext:\n\tadd\tr4, r4, #0x1\n\tcmp\tr4, #0x5\n\tblt\t.Lloop\t@cond_branch\n' +
+      '\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).toContain('do {');
+  expect(out).toMatch(/do \{\s*\n\s*v2 = 0;\s*\n\s*switch \(a0\)/); // inside the loop, above the switch
+  expect(out).toContain('v2 = v0 + 1;'); // the loop-carried value still reaches `case 1:`
+});
+
 test('two case values sharing ONE body have the same layout index, and stay in value order', () => {
   // Two case values branching to the same label share a layout index, so layout cannot order those
   // two — the one thing the ordering rule cannot read off the assembly. Ascending value is the
@@ -1119,6 +1163,7 @@ test('every withholding on the `default:` position, one call each', () => {
     switchArmsFollowLayout: true,
     spellSwitchFallthrough: true,
     emitsOwnStatement: () => false,
+    blockOf: () => undefined,
     hoistDispatchCopies: () => [],
     expr: () => ZERO,
     structureRegion: () => [],
