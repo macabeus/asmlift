@@ -282,6 +282,67 @@ _e:
     expect(() => d('nz', asm)).toThrow(/'\.align' makes item sizes unknowable/);
   });
 
+  test('`.balign` and `.p2align` are the same directive and are sized the same way', () => {
+    // `.p2align N` is `.align N` spelled explicitly; `.balign N` says the same thing in BYTES.
+    // GNU as emits identical fill for all three, so a frontend that recognises only one of them
+    // attributes ZERO bytes to the others and silently shifts everything after them.
+    const across = (pad: string) => `	thumb_func_start pc
+pc:
+	ldr r0, [pc, #0x008]
+	b _end
+${pad}
+	.4byte 0x11111111
+	.4byte 0x22222222
+_end:
+	bx lr
+`;
+    const asInstr = d('pc', across('	lsls r0, r0, #0x00')).source;
+    expect(asInstr).toBe('s32 pc(void) {\n    return 572662306;\n}\n');
+    expect(d('pc', across('	.balign 4, 0')).source).toBe(asInstr);
+    expect(d('pc', across('	.p2align 2, 0')).source).toBe(asInstr);
+  });
+
+  test('a raw branch across a `.balign` / `.p2align` no longer retargets silently', () => {
+    // The fill sits between the branch and its target, so dropping it moves the target by two
+    // bytes: `arm-none-eabi-as` + objdump put 0xD004 on `movs r0, #0x0A` (the function returns 10
+    // when a0 == 0), while attributing zero bytes to the directive lands it on the other arm.
+    // All three spellings of the alignment now reach the SAME answer — here, a loud refusal,
+    // because the two candidate base alignments genuinely disagree about this branch.
+    const withDir = (dir: string) => `	thumb_func_start k
+k:
+	cmp r0, #0x00
+	.2byte 0xD004
+	movs r0, #0x01
+	movs r1, #0x02
+	b _e
+${dir}
+	movs r0, #0x09
+	movs r0, #0x0A
+_e:
+	bx lr
+`;
+    expect(d('k', withDir('	lsls r0, r0, #0x00')).source).toContain('return 10;');
+    for (const dir of ['	.align 2, 0', '	.balign 4, 0', '	.p2align 2, 0']) {
+      expect(() => d('k', withDir(dir))).toThrow(FrontendUnsupportedError);
+      expect(() => d('k', withDir(dir))).toThrow(/base alignment/);
+    }
+  });
+
+  test('an unsizable `.balign` / `.p2align` is a hazard, exactly like `.align`', () => {
+    const withDir = (dir: string) => `	thumb_func_start nf
+nf:
+	ldr r0, [pc, #0x000]
+	b _e
+${dir}
+	.4byte 0x030052A4
+_e:
+	bx lr
+`;
+    for (const dir of ['	.balign 4', '	.p2align 2', '	.balign 8, 0', '	.p2align 3, 0', '	.balign 3, 0', '	.balign 4, 0, 2']) {
+      expect(() => d('nf', withDir(dir))).toThrow(/makes item sizes unknowable/);
+    }
+  });
+
   test('inconsistent literal pools keep their own refusal', () => {
     const asm = `	thumb_func_start ic
 ic:

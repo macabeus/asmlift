@@ -533,23 +533,32 @@ function decode(
         hazards.push({ at: flat.length - 1, what: `.${raw[1]}` }); // byte size unknown / non-word
         continue;
       }
-      if (/^\.align\b/.test(rest)) {
-        // `.align N, 0` emits (-address) mod 2^N ZERO bytes — the pad, spelled as the directive
-        // that produces it. Kept as an item so the layout walk can size it (below); its byte count
-        // is not knowable here, which is why it was a hazard before. Every OTHER form stays a
-        // hazard: without an explicit 0 fill the bytes are not necessarily zero (GNU as pads
-        // `.text` with nop patterns), and a third operand is a max-skip that suppresses the
-        // padding entirely past a threshold this frontend does not model.
-        //
-        // N > 2 stays a hazard too, and this bound is load-bearing rather than cautious: the
-        // layout pass recovers the function's base address only MOD 4 (from 4-aligned pool words),
-        // so it can size a fill to a 4-byte boundary and no further. Sizing `.align 3, 0` would
-        // mean picking one of four base residues the input says nothing about.
-        const am = rest.match(/^\.align\s+(\d{1,2})\s*,\s*0\s*$/);
-        if (am && Number(am[1]) <= 2) {
-          flat.push({ align: { pow: Number(am[1]) } });
+      // `.align N, 0` emits (-address) mod 2^N ZERO bytes — the pad, spelled as the directive
+      // that produces it. Kept as an item so the layout walk can size it (below); its byte count
+      // is not knowable here, which is why it was a hazard before. Every OTHER form stays a
+      // hazard: without an explicit 0 fill the bytes are not necessarily zero (GNU as pads
+      // `.text` with nop patterns), and a third operand is a max-skip that suppresses the
+      // padding entirely past a threshold this frontend does not model.
+      //
+      // `.p2align` is `.align` with the power-of-two reading made explicit and `.balign` is the
+      // same directive counting BYTES; GNU as emits identical fill for all three. They are read
+      // here for the same reason the pad halfword is decoded above: a directive this pass does not
+      // recognise contributes ZERO bytes to the layout while emitting real ones, which silently
+      // retargets every branch and pool load after it.
+      //
+      // N > 2 stays a hazard, and this bound is load-bearing rather than cautious: the layout pass
+      // recovers the function's base address only MOD 4 (from 4-aligned pool words), so it can
+      // size a fill to a 4-byte boundary and no further. Sizing `.align 3, 0` would mean picking
+      // one of four base residues the input says nothing about.
+      const ad = rest.match(/^\.(align|balign|p2align)\b\s*(.*)$/);
+      if (ad) {
+        const am = ad[2].trim().match(/^(\d{1,3})\s*,\s*0$/);
+        const n = am ? Number(am[1]) : NaN;
+        const pow = ad[1] === 'balign' ? Math.log2(n) : n;
+        if (Number.isInteger(pow) && pow <= 2) {
+          flat.push({ align: { pow } });
         } else {
-          hazards.push({ at: flat.length - 1, what: '.align' });
+          hazards.push({ at: flat.length - 1, what: `.${ad[1]}` });
         }
       }
       continue; // other directives skipped
