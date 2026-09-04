@@ -527,11 +527,13 @@ function decode(
   const funcLabels: string[] = []; // labels marked as function starts (.thumb_func / pret macros)
   const armLabels = new Set<string>(); // function starts declared ARM-mode (arm_func_start)
   const subwordData = new Map<string, string>(); // label → sub-word data directive under it
-  // Directives whose byte size we cannot know, recorded by allFlat POSITION so the layout check
+  // Directives this pass cannot read completely, recorded by allFlat POSITION so the layout check
   // is scoped to the SELECTED function's slice — a `.align` between two functions must not
-  // poison a sibling that needs byte-accurate layout.
+  // poison a sibling that needs byte-accurate layout. That scoping is what the `>= sliceStart`
+  // bound on the code-hazard scan below enforces; reaching one item lower admitted exactly the
+  // sibling this sentence forbids.
   //
-  // `code` separates the two reasons an unknown size matters. An alignment directive emits its
+  // `code` separates the two reasons an unreadable directive matters. An alignment directive emits its
   // fill INTO THE INSTRUCTION STREAM, so when anything can execute those bytes the function
   // cannot be lifted at all, whatever else the slice needs. A labelled data table's bytes are
   // data: they can only shift the offsets of what follows, which matters only when something in
