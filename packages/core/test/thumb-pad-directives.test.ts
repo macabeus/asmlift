@@ -738,6 +738,28 @@ describe('the pad encodings are one table', () => {
     }
   });
 
+  test('a REACHABLE pad reads the same under every spelling of its encoding', () => {
+    // The table walk above cannot see this: `isPadInstr` only governs the prune of UNREACHABLE
+    // all-pad blocks, so a spelling judged by a different rule diverges exactly where the
+    // predicate is never consulted. `mov r8, r8` is objdump's own alternate mnemonic for 0x46C0,
+    // and it was modelled as a live read of a callee-saved register — three spellings of two
+    // bytes, two different signatures. Equality across the whole set is the assertion that
+    // catches it; normalisation happens at parse, beside the halfword decode.
+    const reachable = (pad: string) => `	thumb_func_start np
+np:
+	movs r0, #0x05
+${pad}
+	bx lr
+`;
+    const asNop = d('np', reachable('	nop')).source;
+    expect(asNop).toBe('s32 np(void) {\n    return 5;\n}\n');
+    for (const pad of ['	.2byte 0x46C0', '	mov r8, r8', '	movs r8, r8']) {
+      expect(d('np', reachable(pad)).source).toBe(asNop);
+    }
+    // The 0x0000 encoding is a DIFFERENT instruction and must not be folded in with them.
+    expect(d('np', reachable('	lsls r0, r0, #0x00')).source).not.toBe(asNop);
+  });
+
   test('and the predicate does not accept just anything', () => {
     expect(isPadInstr({ mnemonic: 'mov', ops: ['r0', 'r1'] })).toBe(false);
     expect(isPadInstr({ mnemonic: 'lsls', ops: ['r0', 'r0', '#0x01'] })).toBe(false);

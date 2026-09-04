@@ -151,15 +151,15 @@ export const PAD_ENCODINGS: { hw: number; mnemonic: string; ops: string[] }[] = 
 
 /** Is this instruction alignment fill, however a splitter spelled it? A block made ONLY of these
  *  is pool/section padding when unreachable — pruned in `decode`. A REACHABLE pad block is a real
- *  (degenerate) instruction and is kept. `nop` and `mov r8, r8` are both ways of writing 0x46C0;
- *  `lsl`/`lsls r0, r0, #0` is how 0x0000 is written. */
+ *  (degenerate) instruction and is kept. `lsl`/`lsls r0, r0, #0` is how 0x0000 is written; 0x46C0
+ *  is `nop`, and the `mov r8, r8` spelling of it is normalised to `nop` at parse — so there is no
+ *  r8 clause here, and this predicate judges exactly the shapes PAD_ENCODINGS can produce. */
 export const isPadInstr = (i: Instr) =>
   i.mnemonic === 'nop' ||
   ((i.mnemonic === 'lsl' || i.mnemonic === 'lsls') &&
     i.ops[0] === 'r0' &&
     i.ops[1] === 'r0' &&
-    /^#0x?0*$/.test(i.ops[2] ?? '')) ||
-  ((i.mnemonic === 'mov' || i.mnemonic === 'movs') && i.ops[0] === 'r8' && i.ops[1] === 'r8');
+    /^#0x?0*$/.test(i.ops[2] ?? ''));
 
 // A `.2byte`/`.hword`/`.short` operand this pass may read as an ENCODING: a complete 16-bit hex
 // literal and nothing else. `parseInt` stops at the first character it cannot use, so `0x0000+2`
@@ -670,10 +670,22 @@ function decode(
     }
     dataLabel = null; // a real instruction ends a data run
     const canon = canonicalMnemonic(m[1]);
+    const ops = m[2] ? splitOperands(m[2]) : [];
+    // `mov r8, r8` is the OTHER way to write 0x46C0 — objdump prints those two bytes as
+    // `nop @ (mov r8, r8)`, and a splitter emits either. It is normalised here, at the same seam
+    // the `.2byte 0x46C0` decode uses (padHalfword), because further down it would be modelled as
+    // a live read of a callee-saved register and mint a parameter the object does not have: the
+    // three spellings of one encoding gave two different signatures. `isPadInstr` only governs the
+    // prune of UNREACHABLE all-pad blocks, so it could not see the divergence — a REACHABLE
+    // `mov r8, r8` is kept, and was kept as a register read.
+    if ((canon === 'mov' || canon === 'movs') && ops.length === 2 && ops[0] === 'r8' && ops[1] === 'r8') {
+      flat.push({ instr: { ...padHalfword(0x46c0)!, asWritten: m[1] } });
+      continue;
+    }
     flat.push({
       instr: {
         mnemonic: canon,
-        ops: m[2] ? splitOperands(m[2]) : [],
+        ops,
         ...(canon === m[1] ? {} : { asWritten: m[1] }),
       },
     });
@@ -1240,11 +1252,18 @@ function decode(
     // Alignment fill a splitter emits around returns and literal pools (isPadInstr, above, is the
     // single definition of which instructions those are). This is the ONE place padding-versus-real
     // -instruction is decided, for all three ways the same two bytes get spelled: as the
-    // instruction itself, as `.2byte 0x0000` (decoded at parse — padHalfword), or as `.align 2, 0`
-    // (expanded into these very instructions by the layout pass above whenever anything can execute
-    // the fill; when nothing can, that pass reached the SAME verdict — padding — and dropped the
+    // instruction itself (including the `mov r8, r8` spelling of the nop, normalised at parse), as
+    // `.2byte 0x0000` (decoded at parse — padHalfword), or as an alignment directive (expanded
+    // into these very instructions by the layout pass above whenever anything can execute the
+    // fill; when nothing can, that pass reached the SAME verdict — padding — and dropped the
     // item). None of them arrives here as its own kind of thing, so none can be judged by a
     // different rule.
+    //
+    // That claim is about the PRUNE, and the prune only ever sees UNREACHABLE all-pad blocks: a
+    // reachable pad is kept and modelled as the instruction it is. So a spelling that reaches this
+    // point unnormalised is not caught here — `mov r8, r8` was kept as a live read of a
+    // callee-saved register and minted a parameter, invisible to this predicate. Normalisation
+    // belongs at parse, and that is where it now is.
     const padBlocks = new Set(live.filter((b) => b.instrs.every(isPadInstr)).map((b) => b.label));
     if (fallsIntoData.size > 0 || padBlocks.size > 0) {
       // Targeted reachability: a block that falls into data is either luvdis's unreachable
