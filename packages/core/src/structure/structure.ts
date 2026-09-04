@@ -3346,9 +3346,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // `loopfall:agbcc`, `loopset:agbcc` (all three MATCH before this round) and `structarr:agbcc`,
     // and buys back only `armfall` 11 → 7 and `ucmp:kmc` 15 → 14.
     if (orderArgCopiesByWriteOrder) {
-      // UNMEASURED (undefined) is not "wrote nothing": parsed IR and a block a pass minted have no
-      // record at all, and their edges keep the def-position proxy. A MEASURED pred that recorded
-      // no destination of this edge is a different thing, and gets an empty record.
+      // UNMEASURED (undefined) is not "wrote nothing": a parsed or hand-built fn carries no record
+      // at all, and its edges keep the def-position proxy. A MEASURED pred that recorded no
+      // destination of this edge is a different thing, and gets an empty record. The two cannot
+      // meet inside one fn — measurement is all-or-nothing per function and `ir/verify.ts` enforces
+      // it (ir/core.ts `WriteOrder`) — so this asks per block only to spell the unmeasured fn.
       const predIsMeasured = fn.writeOrder?.writes.has(pred) ?? false;
       // `preferDefPosCopyOrder` is the `/copy-defpos` candidate asking for the proxy on an edge the
       // frontend DID measure — the one place the two questions ("is there a record" and "use it")

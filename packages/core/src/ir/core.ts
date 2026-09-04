@@ -66,8 +66,15 @@ export interface Fn {
  *
  *  Keyed by OBJECTS (the predecessor block, the destination param), never by arg position, so the
  *  param splices in `ir/simplify.ts` cannot leave it stale. A pass that moves one block's ops into
- *  another owes `foldWriteOrder`; a block no builder measured has no entry in `writes` and a reader
- *  must treat its edges as unmeasured rather than as written-nowhere.
+ *  another owes `foldWriteOrder`.
+ *
+ *  MEASUREMENT IS PER FUNCTION, NOT PER BLOCK. The SSA builder measures every block it builds, so
+ *  `writes` is either EMPTY (parsed or hand-built IR — nobody measured this function) or TOTAL, and
+ *  `ir/verify.ts` rejects the mixed state rather than leaving it to a reader to interpret. A reader
+ *  still asks per BLOCK (`structure.ts` `predIsMeasured`) because that is how a wholly unmeasured fn
+ *  takes the def-position proxy without a second query — but a missing entry means "no frontend
+ *  measured this function", never "this block wrote nothing". THAT is an entry whose `lastWrite`
+ *  map holds no destination of the edge, which is a different case with its own golden.
  *
  *  HALF OF THAT OBLIGATION IS CHECKED, not merely stated: `ir/verify.ts` runs after every mutating
  *  pass and rejects a MEASURED fn holding a block with no entry — a block a pass minted or dropped

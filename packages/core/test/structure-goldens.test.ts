@@ -20,7 +20,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
-import type { Value } from '../src/ir/core';
+import type { Block, Fn, Value } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { decompile, raiseRecovered, structureChecked } from '../src/pipeline';
@@ -33,6 +33,26 @@ const emit = (ir: string): string => {
   verify(fn);
   recoverTypes(fn);
   return cBackend.emit(structure(fn));
+};
+
+/** Attach a write-order record the way a FRONTEND would, and re-verify.
+ *
+ *  Measurement is all-or-nothing per function (ir/core.ts `WriteOrder`, checked by `ir/verify.ts`),
+ *  so a record naming only the block under test is not a state any lift produces — and `structure()`
+ *  accepts it while `verify()` rejects it, which is how these goldens once pinned behaviour off an
+ *  illegal fn. Every other block is therefore measured too, with no destination of its own edge
+ *  recorded: the legal way to say "this golden is about the latch edge". The two SWAP_CYCLE goldens
+ *  emit the same C either way; the FOR_ACC pair does NOT, and that is a fact worth having — see the
+ *  entry record it now carries. */
+const measure = (fn: Fn, per: Map<Block, Map<Value, number>>, writes: Map<Block, number>): Fn => {
+  for (const b of fn.blocks) {
+    if (!writes.has(b)) {
+      writes.set(b, 0);
+    }
+  }
+  fn.writeOrder = { lastWrite: per, writes };
+  verify(fn);
+  return fn;
 };
 
 // while (i < n) i++; return i + n — the exit region COMPUTES with the loop value, so the
@@ -191,8 +211,9 @@ test('a swap cycle with a write-order record spills the member the pred wrote fi
   recoverTypes(fn);
   const [, header, latch] = fn.blocks;
   const [v0, v1, v2] = header.params;
-  fn.writeOrder = {
-    lastWrite: new Map([
+  measure(
+    fn,
+    new Map([
       [
         latch,
         new Map([
@@ -202,8 +223,8 @@ test('a swap cycle with a write-order record spills the member the pred wrote fi
         ]),
       ],
     ]),
-    writes: new Map([[latch, 3]]),
-  };
+    new Map([[latch, 3]]),
+  );
   expect(cBackend.emit(structure(fn))).toBe(
     's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
       '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
@@ -226,8 +247,9 @@ test('a destination the pred never wrote keeps the front slot, and the record or
   recoverTypes(fn);
   const [, header, latch] = fn.blocks;
   const [v0, , v2] = header.params;
-  fn.writeOrder = {
-    lastWrite: new Map([
+  measure(
+    fn,
+    new Map([
       [
         latch,
         new Map([
@@ -236,8 +258,8 @@ test('a destination the pred never wrote keeps the front slot, and the record or
         ]),
       ],
     ]),
-    writes: new Map([[latch, 2]]),
-  };
+    new Map([[latch, 2]]),
+  );
   expect(cBackend.emit(structure(fn))).toBe(
     's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
       '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
@@ -273,9 +295,30 @@ const forAccWith = (order: (acc: Value, ind: Value) => [Value, number][]): strin
   const fn = parse(FOR_ACC);
   verify(fn);
   recoverTypes(fn);
-  const [, header, latch] = fn.blocks;
-  const [acc, ind] = header.params;
-  fn.writeOrder = { lastWrite: new Map([[latch, new Map(order(acc, ind))]]), writes: new Map([[latch, 2]]) };
+  const [entry, header, latch] = fn.blocks;
+  const [acc, ind, n] = header.params;
+  // The ENTRY edge is recorded too, and held FIXED across the pair, because `for` recovery also
+  // needs the init adjacent to the loop: with the entry left to the param-order tie both goldens
+  // come out `while`, and the pair would pin one direction twice. The entry record says agbcc set
+  // the induction register last, which is what puts `v1 = 0` against the loop.
+  measure(
+    fn,
+    new Map([
+      [
+        entry,
+        new Map([
+          [acc, 0],
+          [n, 1],
+          [ind, 2],
+        ]),
+      ],
+      [latch, new Map(order(acc, ind))],
+    ]),
+    new Map([
+      [entry, 3],
+      [latch, 2],
+    ]),
+  );
   return cBackend.emit(structure(fn));
 };
 
@@ -286,7 +329,7 @@ test('a record that leaves the induction update last recovers a `for`…', () =>
       [ind, 1],
     ]),
   ).toBe(
-    's32 foracc(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v2 = a0;\n    v0 = 0;\n' +
+    's32 foracc(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = 0;\n    v2 = a0;\n' +
       '    for (v1 = 0; v1 < v2; v1 = v1 + 1) {\n        v0 = v0 + v2;\n    }\n    return v0;\n}\n',
   );
 });
@@ -298,7 +341,7 @@ test('…and one that moves it off the end leaves a `while`, from the same IR', 
       [acc, 1],
     ]),
   ).toBe(
-    's32 foracc(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v2 = a0;\n    v0 = 0;\n' +
+    's32 foracc(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = 0;\n    v2 = a0;\n' +
       '    v1 = 0;\n    while (v1 < v2) {\n        v1 = v1 + 1;\n        v0 = v0 + v2;\n    }\n' +
       '    return v0;\n}\n',
   );
@@ -309,7 +352,7 @@ test('a measured pred that wrote none of the edge keys leaves the copies in para
   verify(fn);
   recoverTypes(fn);
   const [, , latch] = fn.blocks;
-  fn.writeOrder = { lastWrite: new Map(), writes: new Map([[latch, 4]]) };
+  measure(fn, new Map(), new Map([[latch, 4]]));
   expect(cBackend.emit(structure(fn))).toBe(
     's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
       '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
