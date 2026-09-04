@@ -542,6 +542,50 @@ fb:
   });
 });
 
+describe('a label naming DATA is not a way into an alignment fill', () => {
+  test('an alignment between two words of a labelled pool is data, and lifts', () => {
+    // `ldr r0, _pool` NAMES `_pool`, but it is a load, not a way for control to get there: the
+    // label heads data, so nothing can execute the fill behind it. Reading every named label as a
+    // branch target made an unsizable alignment inside a literal pool decline the function with a
+    // message that said its bytes were in the code stream. They are in the data stream, and the
+    // only thing they can do is shift the offsets of what follows.
+    const q = (dir: string) => `	thumb_func_start q
+q:
+	ldr r0, _pool
+	ldr r1, _pool2
+	adds r0, r0, r1
+	bx lr
+_pool:
+	.4byte 0x11111111
+${dir}
+_pool2:
+	.4byte 0x22222222
+`;
+    const plain = d('q', q('')).source;
+    expect(plain).toBe('s32 q(void) {\n    return 858993459;\n}\n');
+    for (const dir of ['	.align 3, 0', '	.align 2', '	.align 2, 0', '	.align 2, 0, 4']) {
+      expect(d('q', q(dir)).source).toBe(plain);
+    }
+  });
+
+  test('a CODE label named by a branch still re-opens the fill behind it', () => {
+    // The mirror, and the reason this is a data-label clause rather than a narrowing of `named`:
+    // `_l` heads instructions, `b _l` puts control on it, and the fill it precedes is executed.
+    const asm = `	thumb_func_start m
+m:
+	b _l
+	movs r0, #0x09
+	bx lr
+_l:
+	.align 2, 0, 4
+	movs r0, #0x01
+	bx lr
+`;
+    expect(() => d('m', asm)).toThrow(FrontendUnsupportedError);
+    expect(() => d('m', asm)).toThrow(/emits fill into the code stream/);
+  });
+});
+
 describe('an unsizable alignment is scoped to the function whose bytes it emits', () => {
   // The hazard is recorded by allFlat POSITION so that a directive between two functions cannot
   // poison a sibling — a property the parser comment states and nothing pinned, because every

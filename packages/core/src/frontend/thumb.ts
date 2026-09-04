@@ -733,7 +733,13 @@ function decode(
     // writes a dead `.L10:` in front of every literal-pool alignment and never branches there, so
     // reading every label as a way in sends every agbcc function through the base solver for a
     // fill no instruction can execute (measured: 75 of 253 benchmark reference functions lost).
-    const named = new Set<string>(); // labels an operand or a data word names — the branch targets
+    //
+    // `named` is every operand token, which OVERSHOOTS: `ldr r0, _pool` names `_pool` without
+    // control ever going there. The bound that matters is the one the block builder already draws
+    // — a label heading DATA is not a code entry, so naming it is a load, not a way in. Without
+    // that clause an align between two words of a labelled literal pool read as executable fill
+    // and declined the function, over bytes in the data stream that nothing can execute.
+    const named = new Set<string>(); // labels an operand or a data word names
     const labelShape = /^([A-Za-z_.$][\w.$]*)/;
     for (const f of flat) {
       for (const tok of [...(f.instr?.ops ?? []), ...(f.data?.values ?? [])]) {
@@ -743,14 +749,15 @@ function decode(
         }
       }
     }
+    const headsData = (l: string) => dataWords.has(l) || subwordData.has(l);
     const fillIsReachable = (upto: number) => {
       for (let j = upto - 1; j >= 0; j--) {
         const g = flat[j];
         if (g.label !== undefined) {
-          if (named.has(g.label)) {
+          if (named.has(g.label) && !headsData(g.label)) {
             return true;
           }
-          continue; // a label nothing names cannot bring control here
+          continue; // a label nothing names — or one naming data — cannot bring control here
         }
         if (g.instr) {
           const k = classifyXfer(g.instr);
