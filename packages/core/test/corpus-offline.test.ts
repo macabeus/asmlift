@@ -174,9 +174,9 @@ const CASES: OfflineCase[] = [
   // dividend on all four. The frontend's write-order record (ir/core.ts `WriteOrder`) is what the
   // structurer reads to get this right, and on agbcc it also orders the ENTRY copies (`add r2, r0`
   // before `add r0, r1` ⇒ `v1 = a0; v0 = a1;`). All four are benchmark rows: synthetic:gcd:agbcc,
-  // synthetic:gcd:gcc2.7.2kmc, synthetic:gcd:ido7.1 and synthetic:gcd:mwcc_242_81 — the first,
-  // third and fourth score MATCH with exactly this text; kmc's residual is the loop-init home
-  // (`coalesceLoopInit`), not the latch.
+  // synthetic:gcd:gcc2.7.2kmc, synthetic:gcd:ido7.1 and synthetic:gcd:mwcc_242_81 — every one
+  // scores MATCH with exactly this text (kmc's needs its loop homed on the parameters as well:
+  // `coalesceLoopInit`, a per-compiler default).
   {
     file: 'agbcc-gcd.s',
     sym: 'gcd',
@@ -191,11 +191,10 @@ const CASES: OfflineCase[] = [
     file: 'gcc-gcd.asm',
     sym: 'gcd',
     target: MIPS_GCC,
-    note: 'gcd — latch cycle spills the divisor; the delay-slot `move a0,v0` is the LAST write',
+    note: 'gcd — latch cycle spills the divisor; the delay-slot `move a0,v0` is the LAST write; loop homed on the parameters (coalesceLoopInit)',
     expect:
-      's32 gcd(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 t0;\n    if (a1 != 0) {\n' +
-      '        v0 = a1;\n        v1 = a0;\n        do {\n            t0 = v0;\n            v0 = v1 % v0;\n' +
-      '            v1 = t0;\n        } while (v0 != 0);\n        a0 = v1;\n    }\n    return a0;\n}\n',
+      's32 gcd(s32 a0, s32 a1) {\n    s32 t0;\n    if (a1 != 0) {\n        do {\n            t0 = a1;\n' +
+      '            a1 = a0 % a1;\n            a0 = t0;\n        } while (a1 != 0);\n    }\n    return a0;\n}\n',
   },
   {
     file: 'ido-gcd.asm',

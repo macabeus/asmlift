@@ -152,8 +152,8 @@ describe("STRUCT-HARDEN: structureOptionsFor projects a target's compilerBehavio
     // true keeps the induction var in a0. The two branch/arg levers are, by contrast, uniform-true
     // today.
     expect(MIPS_IDO.compilerBehaviors.coalesceLoopInit).toBe(true);
+    expect(MIPS_GCC.compilerBehaviors.coalesceLoopInit).toBe(true); // corpus-offline: gcc-gcd.asm
     expect(ARMV4T_AGBCC.compilerBehaviors.coalesceLoopInit).toBe(false);
-    expect(MIPS_GCC.compilerBehaviors.coalesceLoopInit).toBe(false);
     // …and the two branch/arg levers are genuinely uniform across every real compiler (the honest
     // scaffolding claim — no target sets either false today):
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {

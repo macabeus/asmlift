@@ -126,8 +126,8 @@ export interface TargetDescription {
   compilerBehaviors: {
     // When a loop induction variable's initial value comes from an argument register, some
     // compilers keep mutating that register across the loop (coalesce → no init copy); others
-    // copy to a fresh local. IDO -O2 reuses the arg register (true); agbcc/KMC-GCC allocate
-    // fresh (false).
+    // copy to a fresh local. IDO -O2 and KMC GCC -O2 reuse the arg register (true); agbcc
+    // allocates fresh (false).
     coalesceLoopInit?: boolean;
     // Divergent-if (both arms terminate, no join): reproduce the source branch DIRECTION by
     // emitting the forward-branch-on-negated-condition (taken arm as `else`). IDO/MIPS preserves
@@ -341,10 +341,12 @@ export const MIPS_GCC: TargetDescription = {
   compiler: 'gcc',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
-  // KMC GCC allocates a fresh local for the loop init (coalesceLoopInit false — where it differs
-  // from IDO); the structuring levers take the universal default until a KMC fixture says otherwise.
+  // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
+  // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,
+  // and the row it comes from matches only with the parameters as the loop's homes. The other
+  // structuring levers take the universal default until a KMC fixture says otherwise.
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
-  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByComputation: true },
+  compilerBehaviors: { coalesceLoopInit: true, preserveDivergentBranchSense: true, orderArgCopiesByComputation: true },
 };
 
 /** PowerPC (GameCube/Wii) + Metrowerks CodeWarrior. The real GC/Wii matching target is
