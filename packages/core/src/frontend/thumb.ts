@@ -413,6 +413,9 @@ interface FlatItem {
   instr?: Instr;
   /** a data directive's payload, kept in-stream so byte layout is computable */
   data?: { halfwords: boolean; values: string[]; inCode: boolean };
+  /** a `.align pow, 0` whose zero-fill byte count depends on the function's base alignment —
+   *  resolved into pad instructions by the layout pass, which is the first place that knows it */
+  align?: { pow: number };
 }
 
 function decode(
@@ -515,7 +518,23 @@ function decode(
         continue;
       }
       if (/^\.align\b/.test(rest)) {
-        hazards.push({ at: flat.length - 1, what: '.align' });
+        // `.align N, 0` emits (-address) mod 2^N ZERO bytes — the pad, spelled as the directive
+        // that produces it. Kept as an item so the layout walk can size it (below); its byte count
+        // is not knowable here, which is why it was a hazard before. Every OTHER form stays a
+        // hazard: without an explicit 0 fill the bytes are not necessarily zero (GNU as pads
+        // `.text` with nop patterns), and a third operand is a max-skip that suppresses the
+        // padding entirely past a threshold this frontend does not model.
+        //
+        // N > 2 stays a hazard too, and this bound is load-bearing rather than cautious: the
+        // layout pass recovers the function's base address only MOD 4 (from 4-aligned pool words),
+        // so it can size a fill to a 4-byte boundary and no further. Sizing `.align 3, 0` would
+        // mean picking one of four base residues the input says nothing about.
+        const am = rest.match(/^\.align\s+(\d{1,2})\s*,\s*0\s*$/);
+        if (am && Number(am[1]) <= 2) {
+          flat.push({ align: { pow: Number(am[1]) } });
+        } else {
+          hazards.push({ at: flat.length - 1, what: '.align' });
+        }
       }
       continue; // other directives skipped
     }
@@ -642,152 +661,232 @@ function decode(
           `cannot lift '${name}': raw-encoded input needs byte-accurate layout, but '${sliceHazard.what}' makes item sizes unknowable`,
         );
       }
-      // Byte offset of every item (Thumb-1: 2 bytes per instruction, `bl` is the 4-byte pair).
-      const itemOff: number[] = [];
-      const labelOff = new Map<string, number>();
-      const codeStart = new Set<number>(); // offsets that begin an instruction or carry a label
-      let off = 0;
-      flat.forEach((f, i) => {
-        itemOff[i] = off;
-        if (f.label && !labelOff.has(f.label)) {
-          labelOff.set(f.label, off);
-          codeStart.add(off);
-        }
-        if (f.instr) {
-          codeStart.add(off);
-          off += f.instr.mnemonic === 'bl' ? 4 : 2;
-        }
-        if (f.data) {
-          off += f.data.values.length * (f.data.halfwords ? 2 : 4);
-        }
-      });
-      const labelAt = new Map<number, string>();
-      for (const [lab, lo] of labelOff) {
-        if (!labelAt.has(lo)) {
-          labelAt.set(lo, lab);
-        }
-      }
-      // Thumb-1 branch encodings this frontend models (cond codes 4–7 = mi/pl/vs/vc have no
-      // lifted comparison semantics here; 14 is undefined, 15 is swi — all decline).
-      const COND_MN = ['beq', 'bne', 'bcs', 'bcc', '', '', '', '', 'bhi', 'bls', 'bge', 'blt', 'bgt', 'ble'];
-      const decodeHalfword = (v: number, at: number): { mnemonic: string; target: number } | null => {
-        if (v >= 0xd000 && v <= 0xddff) {
-          const mn = COND_MN[(v >> 8) & 0xf];
-          if (!mn) {
-            return null;
+      // ── the function's base alignment is SOLVED, not derived ─────────────────────────────────
+      // `.align N, 0` emits (-(base + off)) mod 2^N bytes, where `base` is the function's own
+      // address mod 4 — and `base` was until now recovered only AFTER this walk, from literal-pool
+      // positions that the align itself moves. That cycle is why `.align` had to be a hazard.
+      //
+      // Break it by treating `base` as the unknown it is. A Thumb function starts on a 2-byte
+      // boundary, so `base` is 0 or 2; lay the slice out BOTH ways and let the structural
+      // invariants this frontend already enforces on a single layout eliminate the wrong one — a
+      // pool word off a 4-byte boundary, a raw branch landing between instructions, a pc-relative
+      // load landing outside every pool. With nothing to size, the two layouts are identical and
+      // the first invariant alone picks the same base the old derivation did.
+      //
+      // What the input genuinely fails to determine STILL declines: if both bases survive every
+      // invariant and disagree, there is no honest answer to give.
+      const itemSize = (f: FlatItem) =>
+        f.instr ? (f.instr.mnemonic === 'bl' ? 4 : 2) : f.data ? f.data.values.length * (f.data.halfwords ? 2 : 4) : 0;
+      // Replace each `.align pow, 0` with the pad instructions its zero-fill bytes ARE — the same
+      // item the other two spellings of a pad produce. Every other item is an even byte count and
+      // `base` is even, so the fill is a whole number of halfwords; that is asserted rather than
+      // assumed, because a half-consumed fill would shift every pc-relative load after it.
+      const expandAligns = (base: number): { items: FlatItem[]; offs: number[] } => {
+        const items: FlatItem[] = [];
+        const offs: number[] = [];
+        let at = 0;
+        for (const f of flat) {
+          if (f.align) {
+            const fill = -(base + at) & ((1 << f.align.pow) - 1);
+            if (fill % 2 !== 0) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': '.align ${f.align.pow}, 0' pads ${fill} bytes here, which is not a whole number of Thumb instructions`,
+              );
+            }
+            for (let k = 0; k < fill; k += 2) {
+              offs.push(at + k);
+              items.push({ instr: padHalfword(0)! });
+            }
+            at += fill;
+            continue;
           }
-          const d = (v & 0xff) - (v & 0x80 ? 0x100 : 0);
-          return { mnemonic: mn, target: at + 4 + d * 2 };
+          offs.push(at);
+          items.push({ ...f }); // cloned: pass 2 replaces `instr` on the chosen candidate's items
+          at += itemSize(f);
         }
-        if (v >= 0xe000 && v <= 0xe7ff) {
-          const d = (v & 0x7ff) - (v & 0x400 ? 0x800 : 0);
-          return { mnemonic: 'b', target: at + 4 + d * 2 };
-        }
-        return null;
+        return { items, offs };
       };
-      // Pass 1: decode every in-code halfword; collect synthesized labels for branch targets.
-      const synthLabels = new Map<number, string>(); // target offset → label to ensure there
-      const decoded = new Map<number, Instr>(); // flat index → replacement branch instr
-      flat.forEach((f, i) => {
-        if (!f.data?.inCode) {
-          return;
-        }
-        if (!f.data.halfwords) {
-          return; // unlabelled word pool — layout bytes only (reached via [pc, #off] below)
-        }
-        f.data.values.forEach((raw, k) => {
-          const at = itemOff[i] + k * 2;
-          const v = parseInt(raw, 16);
-          const br = Number.isFinite(v) ? decodeHalfword(v, at) : null;
-          if (!br) {
-            throw new FrontendUnsupportedError(
-              `cannot lift '${name}': raw halfword '${raw}' in the code stream is not a decodable branch — ` +
-                `skipping it would silently delete its effect`,
-            );
-          }
-          if (!codeStart.has(br.target)) {
-            throw new FrontendUnsupportedError(
-              `cannot lift '${name}': raw branch '${raw}' targets byte offset 0x${br.target.toString(16)}, which is not an instruction boundary`,
-            );
-          }
-          if (f.data!.values.length > 1) {
-            throw new FrontendUnsupportedError(
-              `cannot lift '${name}': multi-value raw halfword directive mixing branches is not supported`,
-            );
-          }
-          const lab = labelAt.get(br.target) ?? synthLabels.get(br.target) ?? `.Lraw_${br.target.toString(16)}`;
-          synthLabels.set(br.target, lab);
-          decoded.set(i, { mnemonic: br.mnemonic, ops: [lab] });
-        });
-      });
-      // Pass 2: pc-relative literal loads → rewrite to a synthesized pool label so the existing
-      // resolvePoolConst/resolvePoolSymbol machinery applies. `(pc & ~3) + off` depends on the
-      // function's absolute alignment (mod 4) — derived STRUCTURALLY: pool words are 4-aligned in
-      // the ROM, so the file-relative offset of any `.4byte` word fixes the base parity (the
-      // luvdis `@ address` comments are not trusted).
-      let basePar: number | undefined;
-      flat.forEach((g, j) => {
-        if (g.data && !g.data.halfwords) {
-          const p = (4 - (itemOff[j] % 4)) % 4;
-          if (basePar === undefined) {
-            basePar = p;
-          } else if (basePar !== p) {
-            throw new FrontendUnsupportedError(
-              `cannot lift '${name}': literal pools at inconsistent alignments — cannot determine the function's base alignment`,
-            );
-          }
-        }
-      });
-      flat.forEach((f, i) => {
-        if (!isPcRelLdr(f.instr)) {
-          return;
-        }
-        if (basePar === undefined) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': pc-relative literal load with no literal pool in the function to resolve into`,
-          );
-        }
-        const imm = parseInt(
-          f.instr!.ops[1].match(/#(0x[0-9a-fA-F]+|\d+)/)![1],
-          f.instr!.ops[1].includes('0x') ? 16 : 10,
+      // The one invariant that costs nothing to check: every literal-pool word is 4-aligned in the
+      // ROM. This IS the old `basePar` derivation, read as a filter instead of an assignment.
+      const laid = [0, 2].map((base) => ({ base, ...expandAligns(base) }));
+      const viable = laid.filter(({ base, items, offs }) =>
+        items.every((f, i) => !f.data || f.data.halfwords || (base + offs[i]) % 4 === 0),
+      );
+      if (viable.length === 0) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': literal pools at inconsistent alignments — cannot determine the function's base alignment`,
         );
-        const wordOff = ((basePar + itemOff[i] + 4) & ~3) - basePar + imm;
-        // locate the word: a 4-byte data item covering [wordOff, wordOff+4)
-        let value: string | undefined;
-        flat.forEach((g, j) => {
-          if (!g.data || g.data.halfwords) {
+      }
+      // Two viable bases that lay the slice out identically are one candidate: the base is then
+      // unobservable except through a pc-relative load, which declines for want of a pool below.
+      const candidates = viable.filter((c, i) => viable.findIndex((o) => o.offs.join() === c.offs.join()) === i);
+
+      // Everything from here down is the resolution of ONE candidate layout: byte offsets, raw
+      // branch decode, pc-relative pool loads. It reads `items`/`itemOff` and returns the rewritten
+      // stream; it must not touch anything shared, or a rejected candidate would leave its marks.
+      const resolveAt = (
+        items: FlatItem[],
+        itemOff: number[],
+        basePar: number | undefined,
+      ): { items: FlatItem[]; pools: Map<string, string[]> } => {
+        const pools = new Map<string, string[]>();
+        const labelOff = new Map<string, number>();
+        const codeStart = new Set<number>(); // offsets that begin an instruction or carry a label
+        items.forEach((f, i) => {
+          if (f.label && !labelOff.has(f.label)) {
+            labelOff.set(f.label, itemOff[i]);
+            codeStart.add(itemOff[i]);
+          }
+          if (f.instr) {
+            codeStart.add(itemOff[i]);
+          }
+        });
+        const labelAt = new Map<number, string>();
+        for (const [lab, lo] of labelOff) {
+          if (!labelAt.has(lo)) {
+            labelAt.set(lo, lab);
+          }
+        }
+        // Thumb-1 branch encodings this frontend models (cond codes 4–7 = mi/pl/vs/vc have no
+        // lifted comparison semantics here; 14 is undefined, 15 is swi — all decline).
+        const COND_MN = ['beq', 'bne', 'bcs', 'bcc', '', '', '', '', 'bhi', 'bls', 'bge', 'blt', 'bgt', 'ble'];
+        const decodeHalfword = (v: number, at: number): { mnemonic: string; target: number } | null => {
+          if (v >= 0xd000 && v <= 0xddff) {
+            const mn = COND_MN[(v >> 8) & 0xf];
+            if (!mn) {
+              return null;
+            }
+            const d = (v & 0xff) - (v & 0x80 ? 0x100 : 0);
+            return { mnemonic: mn, target: at + 4 + d * 2 };
+          }
+          if (v >= 0xe000 && v <= 0xe7ff) {
+            const d = (v & 0x7ff) - (v & 0x400 ? 0x800 : 0);
+            return { mnemonic: 'b', target: at + 4 + d * 2 };
+          }
+          return null;
+        };
+        // Pass 1: decode every in-code halfword; collect synthesized labels for branch targets.
+        const synthLabels = new Map<number, string>(); // target offset → label to ensure there
+        const decoded = new Map<number, Instr>(); // item index → replacement branch instr
+        items.forEach((f, i) => {
+          if (!f.data?.inCode) {
             return;
           }
-          const rel = wordOff - itemOff[j];
-          if (rel >= 0 && rel < g.data.values.length * 4 && rel % 4 === 0) {
-            value = g.data.values[rel / 4];
+          if (!f.data.halfwords) {
+            return; // unlabelled word pool — layout bytes only (reached via [pc, #off] below)
+          }
+          f.data.values.forEach((raw, k) => {
+            const at = itemOff[i] + k * 2;
+            const v = parseInt(raw, 16);
+            const br = Number.isFinite(v) ? decodeHalfword(v, at) : null;
+            if (!br) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': raw halfword '${raw}' in the code stream is not a decodable branch — ` +
+                  `skipping it would silently delete its effect`,
+              );
+            }
+            if (!codeStart.has(br.target)) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': raw branch '${raw}' targets byte offset 0x${br.target.toString(16)}, which is not an instruction boundary`,
+              );
+            }
+            if (f.data!.values.length > 1) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': multi-value raw halfword directive mixing branches is not supported`,
+              );
+            }
+            const lab = labelAt.get(br.target) ?? synthLabels.get(br.target) ?? `.Lraw_${br.target.toString(16)}`;
+            synthLabels.set(br.target, lab);
+            decoded.set(i, { mnemonic: br.mnemonic, ops: [lab] });
+          });
+        });
+        // Pass 2: pc-relative literal loads → rewrite to a synthesized pool label so the existing
+        // resolvePoolConst/resolvePoolSymbol machinery applies. `(pc & ~3) + off` depends on the
+        // function's absolute alignment (mod 4) — `basePar`, the candidate base this layout was
+        // built at, which survived the pool-alignment filter above (the luvdis `@ address`
+        // comments are not trusted). It is `undefined` when the slice holds no pool word at all.
+        items.forEach((f, i) => {
+          if (!isPcRelLdr(f.instr)) {
+            return;
+          }
+          if (basePar === undefined) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': pc-relative literal load with no literal pool in the function to resolve into`,
+            );
+          }
+          const imm = parseInt(
+            f.instr!.ops[1].match(/#(0x[0-9a-fA-F]+|\d+)/)![1],
+            f.instr!.ops[1].includes('0x') ? 16 : 10,
+          );
+          const wordOff = ((basePar + itemOff[i] + 4) & ~3) - basePar + imm;
+          // locate the word: a 4-byte data item covering [wordOff, wordOff+4)
+          let value: string | undefined;
+          items.forEach((g, j) => {
+            if (!g.data || g.data.halfwords) {
+              return;
+            }
+            const rel = wordOff - itemOff[j];
+            if (rel >= 0 && rel < g.data.values.length * 4 && rel % 4 === 0) {
+              value = g.data.values[rel / 4];
+            }
+          });
+          if (value === undefined) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': pc-relative load at offset 0x${itemOff[i].toString(16)} resolves to byte offset ` +
+                `0x${wordOff.toString(16)}, which is not a word in a literal pool`,
+            );
+          }
+          const poolLab = `.Lpcpool_${wordOff.toString(16)}`;
+          pools.set(poolLab, [value]);
+          f.instr = { mnemonic: 'ldr', ops: [f.instr!.ops[0], poolLab] };
+        });
+        // Pass 3: rebuild the stream — insert synthesized target labels, replace decoded halfwords.
+        const next: FlatItem[] = [];
+        items.forEach((f, i) => {
+          const lab = synthLabels.get(itemOff[i]);
+          if (lab && f.label !== lab && !labelAt.has(itemOff[i])) {
+            next.push({ label: lab });
+          }
+          const br = decoded.get(i);
+          if (br) {
+            next.push({ instr: br });
+          } else {
+            next.push(f);
           }
         });
-        if (value === undefined) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': pc-relative load at offset 0x${itemOff[i].toString(16)} resolves to byte offset ` +
-              `0x${wordOff.toString(16)}, which is not a word in a literal pool`,
-          );
+        return { items: next, pools };
+      };
+
+      const resolved: { items: FlatItem[]; pools: Map<string, string[]> }[] = [];
+      const refusals: Error[] = [];
+      for (const c of candidates) {
+        // A slice with no pool word leaves the base unobservable, exactly as before: `basePar`
+        // stays undefined and a pc-relative load declines for want of a pool to resolve into.
+        const hasPool = c.items.some((f) => f.data && !f.data.halfwords);
+        try {
+          resolved.push(resolveAt(c.items, c.offs, hasPool ? c.base : undefined));
+        } catch (e) {
+          refusals.push(e as Error);
         }
-        const poolLab = `.Lpcpool_${wordOff.toString(16)}`;
-        dataWords.set(poolLab, [value]);
-        f.instr = { mnemonic: 'ldr', ops: [f.instr!.ops[0], poolLab] };
-      });
-      // Pass 3: rebuild flat — insert synthesized target labels, replace decoded halfwords.
-      const next: FlatItem[] = [];
-      flat.forEach((f, i) => {
-        const lab = synthLabels.get(itemOff[i]);
-        if (lab && f.label !== lab && !labelAt.has(itemOff[i])) {
-          next.push({ label: lab });
-        }
-        const br = decoded.get(i);
-        if (br) {
-          next.push({ instr: br });
-        } else {
-          next.push(f);
-        }
-      });
-      flat = next;
+      }
+      if (resolved.length === 0) {
+        throw refusals[0];
+      }
+      if (resolved.length > 1) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '.align' padding depends on the function's base alignment, which this input ` +
+            `does not determine — both 0 and 2 mod 4 decode consistently, and they disagree`,
+        );
+      }
+      for (const [lab, words] of resolved[0].pools) {
+        dataWords.set(lab, words);
+      }
+      flat = resolved[0].items;
+    } else {
+      // Nothing in this slice needs byte-accurate layout, so nothing needs the align's size, and
+      // the block builder below has no use for an item that carries no instruction. Dropping it
+      // is what happened to every `.align` before this pass existed.
+      flat = flat.filter((f) => !f.align);
     }
 
     const blocks: AsmBlock[] = [];
@@ -884,6 +983,11 @@ function decode(
     // is the 0x0000 halfword, `mov r8, r8` is 0x46C0, plus a literal `nop`. A block made ONLY
     // of these is pool/section padding when unreachable — pruned below. A REACHABLE pad block
     // is a real (degenerate) instruction and is kept.
+    //
+    // This is the ONE place the question is decided, for all three ways a splitter spells the
+    // same two bytes: as this instruction, as `.2byte 0x0000` (decoded at parse — padHalfword),
+    // or as `.align 2, 0` (sized by the layout pass above). None of them arrives here as its own
+    // kind of thing, so none of them can be judged by a different rule.
     const isPadInstr = (i: Instr) =>
       i.mnemonic === 'nop' ||
       ((i.mnemonic === 'lsl' || i.mnemonic === 'lsls') &&

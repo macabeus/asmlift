@@ -104,3 +104,158 @@ _end:
     expect(d('pc', across('	.2byte 0x0000')).source).toBe(asInstr);
   });
 });
+
+describe('pad spelling (c): `.align 2, 0` in the code stream', () => {
+  // `.align N, fill` emits (-(absolute address)) mod 2^N bytes, so sizing it needs the function's
+  // address mod 4 — which the frontend recovers only AFTER the layout walk, from literal-pool
+  // positions the align itself may move. It is solved instead: a Thumb function starts on a
+  // 2-byte boundary, so its base is 0 or 2 mod 4; both are tried and the structural invariants
+  // the frontend already enforces (pool words are 4-aligned, raw branches land on instruction
+  // boundaries, pc-relative loads land on a pool word) eliminate the wrong one.
+
+  test('a sized `.align 2, 0` lifts and agrees with the instruction spelling', () => {
+    // Only base=2 survives: at base=0 the align emits nothing and the load falls off the pool.
+    const across = (pad: string) => `	thumb_func_start pc
+pc:
+	ldr r0, [pc, #0x008]
+	b _end
+${pad}
+	.4byte 0x11111111
+	.4byte 0x22222222
+_end:
+	bx lr
+`;
+    const asInstr = d('pc', across('	lsls r0, r0, #0x00')).source;
+    expect(asInstr).toBe('s32 pc(void) {\n    return 572662306;\n}\n');
+    expect(d('pc', across('	.align 2, 0')).source).toBe(asInstr);
+  });
+
+  test('an `.align 2, 0` that emits ZERO bytes is not a refusal', () => {
+    const asm = `	thumb_func_start z
+z:
+	ldr r0, [pc, #0x000]
+	bx lr
+	.align 2, 0
+	.4byte 0x030052A4
+`;
+    expect(d('z', asm).source).toBe('s32 z(void) {\n    return 50352804;\n}\n');
+  });
+
+  test('a pool word BEFORE the align pins the base on its own', () => {
+    const asm = `	thumb_func_start q
+q:
+	ldr r0, [pc, #0x004]
+	b _e
+	.4byte 0x11111111
+	.align 2, 0
+	.4byte 0x22222222
+_e:
+	bx lr
+`;
+    expect(d('q', asm).source).toBe('s32 q(void) {\n    return 572662306;\n}\n');
+  });
+
+  test('an align whose size the input does not determine STILL declines loud', () => {
+    // Both base parities are self-consistent here AND both resolve the load — to DIFFERENT pool
+    // words (0x22222222 at base 0, 0x33333333 at base 2). Guessing either would be the silent
+    // wrong answer this frontend exists to refuse.
+    const asm = `	thumb_func_start am
+am:
+	movs r1, #0x00
+	ldr r0, [pc, #0x008]
+	b _e
+	.align 2, 0
+	.4byte 0x11111111
+	.4byte 0x22222222
+	.4byte 0x33333333
+_e:
+	bx lr
+`;
+    expect(() => d('am', asm)).toThrow(FrontendUnsupportedError);
+    expect(() => d('am', asm)).toThrow(/'\.align' padding depends on the function's base alignment/);
+  });
+
+  test('`.align 2` with no fill operand STILL declines loud (unknown fill bytes)', () => {
+    const asm = `	thumb_func_start nf
+nf:
+	ldr r0, [pc, #0x000]
+	b _e
+	.align 2
+	.4byte 0x030052A4
+_e:
+	bx lr
+`;
+    expect(() => d('nf', asm)).toThrow(/'\.align' makes item sizes unknowable/);
+  });
+
+  test('`.align 3, 0` STILL declines loud — the base is only knowable mod 4', () => {
+    // An 8-byte alignment needs the function's address mod 8; the pool words that pin the base
+    // pin it mod 4 only, so there is no fill count to compute and no honest guess to make.
+    const asm = `	thumb_func_start a3
+a3:
+	ldr r0, [pc, #0x004]
+	b _e
+	.align 3, 0
+	.4byte 0x11111111
+_e:
+	bx lr
+`;
+    expect(() => d('a3', asm)).toThrow(/'\.align' makes item sizes unknowable/);
+  });
+
+  test('a max-skip `.align 2, 0, 4` STILL declines loud (a form that may emit nothing)', () => {
+    const asm = `	thumb_func_start ms
+ms:
+	ldr r0, [pc, #0x000]
+	b _e
+	.align 2, 0, 4
+	.4byte 0x030052A4
+_e:
+	bx lr
+`;
+    expect(() => d('ms', asm)).toThrow(/'\.align' makes item sizes unknowable/);
+  });
+
+  test('a nonzero fill STILL declines loud — those bytes are not pad', () => {
+    const asm = `	thumb_func_start nz
+nz:
+	ldr r0, [pc, #0x008]
+	b _e
+	.align 2, 0xFF
+	.4byte 0x11111111
+	.4byte 0x22222222
+_e:
+	bx lr
+`;
+    expect(() => d('nz', asm)).toThrow(/'\.align' makes item sizes unknowable/);
+  });
+
+  test('inconsistent literal pools keep their own refusal', () => {
+    const asm = `	thumb_func_start ic
+ic:
+	ldr r0, [pc, #0x000]
+	b _e
+	.4byte 0x11111111
+	adds r1, #0x01
+	.4byte 0x22222222
+_e:
+	bx lr
+`;
+    expect(() => d('ic', asm)).toThrow(/literal pools at inconsistent alignments/);
+  });
+
+  test('a function that needs no byte-accurate layout is untouched by any of this', () => {
+    // The common shape: labelled pool, no pc-relative load, no raw halfword. The align never
+    // needed sizing here and still does not.
+    const asm = `	thumb_func_start nl
+nl:
+	ldr r0, _p
+	b _e
+	.align 2, 0
+_p: .4byte 0x030052A4
+_e:
+	bx lr
+`;
+    expect(d('nl', asm).source).toBe('s32 nl(void) {\n    return 50352804;\n}\n');
+  });
+});
