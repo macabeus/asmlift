@@ -67,7 +67,13 @@ export interface Fn {
  *  Keyed by OBJECTS (the predecessor block, the destination param), never by arg position, so the
  *  param splices in `ir/simplify.ts` cannot leave it stale. A pass that moves one block's ops into
  *  another owes `foldWriteOrder`; a block no builder measured has no entry in `writes` and a reader
- *  must treat its edges as unmeasured rather than as written-nowhere. */
+ *  must treat its edges as unmeasured rather than as written-nowhere.
+ *
+ *  HALF OF THAT OBLIGATION IS CHECKED, not merely stated: `ir/verify.ts` runs after every mutating
+ *  pass and rejects a MEASURED fn holding a block with no entry — a block a pass minted or dropped
+ *  the entry of — and an ordinal outside its own block's write count. What no snapshot of the IR
+ *  can show is ops MOVED between two measured blocks with the fold forgotten; that half is a review
+ *  obligation until the record hangs on `Successor` itself. */
 export interface WriteOrder {
   /** pred → (param of a successor → ordinal, among the pred's writes, of its LAST write to the key
    *  that param stands for). No entry ⇒ the pred did not write the key; the arg passes through. */

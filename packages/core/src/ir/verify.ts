@@ -3,6 +3,8 @@
 //   1. every block ends in exactly one terminator (and it is the last op)
 //   2. operands well-formed: opcode registered, correct arity/attrs
 //   3. SSA: each value defined once; every use is defined; def dominates use
+//   4. side data: a fn that carries a write-order record carries one for EVERY block, with every
+//      ordinal inside that block's own write count (ir/core.ts `WriteOrder`)
 import { Block, Fn, Value, dominators } from './core';
 import { opSig } from './opcodes';
 
@@ -158,6 +160,44 @@ export function verify(fn: Fn): void {
         () => at(b, idx),
       ),
     );
+  }
+
+  checkWriteOrder(fn);
+}
+
+/** THE WRITE-ORDER RECORD'S CROSS-PASS OBLIGATION, checked rather than trusted (ir/core.ts
+ *  `WriteOrder`, `foldWriteOrder`), because the consequence of missing it is silent: the edge
+ *  copies of an unmeasured block sort with no records at all, which quietly changes the order the
+ *  structurer emits them in and, on a cycle, which register it spills. No decline, no marker.
+ *
+ *  WHAT IT CATCHES: a pass that MINTS a block into a measured fn, or drops a block's entry, leaving
+ *  a hole indistinguishable from a fn that was never measured at all. Also an ordinal outside its
+ *  block's own write count, which is a `foldWriteOrder` that moved records without growing the
+ *  count. WHAT IT CANNOT: a pass that moves ops from one MEASURED block into another and forgets
+ *  the fold — both blocks still have entries, and no snapshot of the IR shows the ops moved. That
+ *  half stays a review obligation until the record hangs on `Successor` itself.
+ *
+ *  A fn is "measured" iff it has any entry at all; a fn with none is parsed IR or hand-built, and
+ *  its edges take the def-position proxy by design. */
+function checkWriteOrder(fn: Fn): void {
+  const order = fn.writeOrder;
+  if (order === undefined || order.writes.size === 0) {
+    return;
+  }
+  for (const b of fn.blocks) {
+    const writes = order.writes.get(b);
+    if (writes === undefined) {
+      throw new VerifyError(
+        `fn '${fn.name}': block ^bb${fn.blocks.indexOf(b)} carries no write-order entry, but the fn is measured`,
+      );
+    }
+    for (const at of order.lastWrite.get(b)?.values() ?? []) {
+      if (at < 0 || at >= writes) {
+        throw new VerifyError(
+          `fn '${fn.name}': write-order ordinal ${at} on block ^bb${fn.blocks.indexOf(b)} is outside its ${writes} writes`,
+        );
+      }
+    }
   }
 }
 

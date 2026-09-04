@@ -700,10 +700,9 @@ describe('the write-order record follows the fold', () => {
         [h, new Map([[p, 2]])],
         [g, new Map([[p, 0]])],
       ]),
-      writes: new Map([
-        [h, 5],
-        [g, 1],
-      ]),
+      // Every block, not only the two this test reasons about: a measured fn measures all of them,
+      // and `verify` below enforces exactly that.
+      writes: new Map(fn.blocks.map((b, i) => [b, [5, 1][i] ?? 0])),
     };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
     expect(fn.writeOrder.lastWrite.get(h)!.get(p)).toBe(5);
