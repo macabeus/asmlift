@@ -807,6 +807,16 @@ interface WhileLoopInfo {
 // (structure/analysis.ts) already proves before it lets one inline at all.
 const REPEATED_EFFECT = new Set(['call', 'opaque']);
 
+/** No evidence about where this copy goes — NOT "written before everything". A destination the
+ *  predecessor never wrote is an argument passing through, and the def-position proxy has always
+ *  emitted those first; the write-order rule keeps them there rather than answering a question the
+ *  assembly did not put to it (the measurement is at the sort site). */
+const NO_RECORD = -1;
+/** A MEASURED predecessor that recorded no destination of this edge — it wrote registers, none of
+ *  them a key this edge copies. Distinct from an UNMEASURED pred, which has no record at all and
+ *  falls back to the def-position proxy. */
+const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, number>();
+
 // A bottom-tested `do { body } while(cond)`. The header is the body entry (entered before any
 // test); the LATCH holds the loop condition and the single exit. Body = header..latch structured, then
 // the latch's own ops + the loop-update; the latch test is the do-while condition. The condition is
@@ -902,7 +912,8 @@ export function reHomesParamMerge(
 //   returnsVoid                    — from the function's own prototype (suppress phantom r0 return);
 //   coalesceLoopInit               — keep the induction var in its arg register;
 //   preserveDivergentBranchSense   — reproduce source branch direction on divergent ifs;
-//   orderArgCopiesByComputation    — order edge copies by computation order in the predecessor.
+//   orderArgCopiesByWriteOrder     — order edge copies by the order the pred WROTE their
+//                                    destinations (preferDefPosCopyOrder takes the proxy instead).
 // The last three are `compilerBehaviors` (target.ts) — this pass stays target-AGNOSTIC: it reads
 // booleans, never a compiler name.
 export interface StructureOptions {
@@ -934,7 +945,7 @@ export interface StructureOptions {
   // (`synthetic:fib`, `for(i=0;i<n;i++)`, emits `if (0 >= a0) … else do{…}while`), so there no
   // spelling is the faithful one and only the differ can choose.
   negateJoinedBranchSense?: boolean;
-  orderArgCopiesByComputation?: boolean;
+  orderArgCopiesByWriteOrder?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
@@ -1213,7 +1224,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     coalesceLoopInit = false,
     preserveDivergentBranchSense = true,
     negateJoinedBranchSense = preserveDivergentBranchSense,
-    orderArgCopiesByComputation = true,
+    orderArgCopiesByWriteOrder = true,
     switchAllowsNeqCase = true,
     switchAllowsBoundCase = false,
     switchArmsFollowLayout = false,
@@ -3236,35 +3247,61 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
       copies.push({ name, value: intoDeclaredTemp(name, argExpr(arg)), arg, param: p });
     });
-    // Emit in the order the pred WROTE the destinations — a compiler that lays the copies out in
-    // that order matches with no spurious arg-swap. This is a per-compiler behavior
-    // (orderArgCopiesByComputation), not a universal: a compiler that emits copies in source/param
-    // order sets it false. Dependency ordering (sequentialize) still has the final say regardless —
-    // and it is why the order matters beyond cosmetics: in a CYCLIC copy `sequentialize` spills the
-    // FIRST pending destination, and the register the compiler overwrote first is exactly the one
-    // whose old value it had to save (the others still read it), so the machine's write order makes
-    // that spill the compiler's own temp.
+    // Emit in the order the pred WROTE the destinations (ir/core.ts `WriteOrder` — the frontend's
+    // measurement; the value graph cannot show it, because a copy is the same SSA value under a new
+    // key). This is a per-compiler behavior (orderArgCopiesByWriteOrder), not a universal: a
+    // compiler that emits copies in source/param order sets it false and no sort runs at all.
     //
-    // The write order is the frontend's measurement (ir/core.ts `WriteOrder`): the value graph
-    // cannot show it, because a copy is the same SSA value under a new key. A pred no builder
-    // measured — parsed IR, a block a pass minted — keeps the def-position proxy, which puts an
-    // in-block def after every incoming param and so, on a cycle between a param and a def, always
-    // spills the param's destination; that is a guess the record replaces, not a rule it refines.
-    if (orderArgCopiesByComputation) {
-      const written = fn.writeOrder?.writes.has(pred) ? fn.writeOrder.lastWrite.get(pred) : undefined;
-      if (fn.writeOrder?.writes.has(pred)) {
-        // a destination the pred never wrote takes -1: the arg passes through, and it sorts first
-        // exactly where the proxy below put an outside def
-        const at = (p: Value) => written?.get(p) ?? -1;
-        copies.sort((a, b) => at(a.param) - at(b.param));
-      } else {
-        // opIndex is only valid for a def IN this block; a def elsewhere keeps indexOf's -1 (sorts first).
-        const pos = (v: Value) => {
-          const d = defs.get(v);
-          return d && opBlock.get(d) === pred ? opIndex.get(d)! : -1;
-        };
-        copies.sort((a, b) => pos(a.arg) - pos(b.arg));
-      }
+    // THE RULE IS TWO CLAIMS, and only the first is licensed by an instruction:
+    //
+    //  1. CYCLIC copy sets. `sequentialize` spills the FIRST pending destination, and the record
+    //     names the destination whose FINAL value the compiler established earliest — which is the
+    //     one whose old value had to be saved elsewhere, because every later reader of that old
+    //     value reads it after the register stopped holding it. That is the compiler's own temp,
+    //     and it is what `synthetic:gcd` turns on.
+    //     READ THE QUANTITY AS THE LAST WRITE, not the first overwrite: `ir/core.ts` records each
+    //     key's LAST write, and the two differ often — over 1,295 functions lifted from klonoa
+    //     (agbcc/Thumb), marioparty3 (MIPS_GCC) and af (MIPS_IDO), 1,867 of 5,283 edge-destination
+    //     records come from a pred that wrote that key more than once, in 312 of the 464 functions
+    //     that record anything. Both alternatives were priced over the 736 synthetic rows and both
+    //     cost matches and gain none: recording the FIRST write instead loses `bgsplit`,
+    //     `bgswitch`, `bgswsplit` and `hipress` (all agbcc); REFUSING the record for a key written
+    //     more than once loses those three plus `dmascope2`, `hipress` and `swmulti`.
+    //  2. ACYCLIC copy sets — a SECOND, separately-licensed claim: that the compiler LAID THE
+    //     COPIES OUT in the order it wrote them. No instruction states it, and it is two-sided.
+    //     Restricting the record to cyclic sets was measured over the 736 synthetic rows: it takes
+    //     `armfall:agbcc` 11 → 8, `memcpy1:mwcc` 23 → 19 and `memset1:mwcc` 21 → 19 — and LOSES
+    //     `gcd:agbcc` (the cyclic row's own entry edge is acyclic) and `structarr:agbcc`, both to
+    //     nonmatch. So the acyclic half is kept, and because it is two-sided the def-position
+    //     spelling is enumerated beside it as a ranked candidate (`/copy-defpos`, rank.ts) rather
+    //     than declared right here.
+    //
+    // AND IT FEEDS `recognizeForLoops`, not only `sequentialize`: a `for` is recovered only when
+    // the induction update is the body's LAST statement, so this sort also decides `for` vs
+    // `while` (goldens in `structure-goldens.test.ts`). That is why `synthetic:gcd:agbcc` emits a
+    // `while` — agbcc wrote the dividend's register last, so the modulo update is not last.
+    //
+    // A destination with NO RECORD keeps `NO_RECORD`, sorting first, which is exactly where the
+    // proxy below has always put an argument the pred did not compute — the record path AGREES
+    // with the def-position path on those copies instead of replacing them. Measured, same 736
+    // rows: pinning unwritten destinations at their param-order slot instead loses `armdef:agbcc`,
+    // `loopfall:agbcc`, `loopset:agbcc` (all three MATCH before this round) and `structarr:agbcc`,
+    // and buys back only `armfall` 11 → 7 and `ucmp:kmc` 15 → 14.
+    if (orderArgCopiesByWriteOrder) {
+      // UNMEASURED (undefined) is not "wrote nothing": parsed IR and a block a pass minted have no
+      // record at all, and their edges keep the def-position proxy. A MEASURED pred that recorded
+      // no destination of this edge is a different thing, and gets an empty record.
+      const predIsMeasured = fn.writeOrder?.writes.has(pred) ?? false;
+      const record = predIsMeasured ? (fn.writeOrder!.lastWrite.get(pred) ?? NO_WRITTEN_DESTINATIONS) : undefined;
+      const rank =
+        record !== undefined
+          ? (c: (typeof copies)[number]) => record.get(c.param) ?? NO_RECORD
+          : // opIndex is only valid for a def IN this block; a def elsewhere gets NO_RECORD too.
+            (c: (typeof copies)[number]) => {
+              const d = defs.get(c.arg);
+              return d && opBlock.get(d) === pred ? opIndex.get(d)! : NO_RECORD;
+            };
+      copies.sort((a, b) => rank(a) - rank(b));
     }
     return sequentialize(
       copies.map(({ name, value }) => ({ name, value })),

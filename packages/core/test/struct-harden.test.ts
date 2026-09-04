@@ -118,18 +118,21 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     );
   });
 
-  test('orderArgCopiesByComputation flips the order of independent edge assignments', () => {
-    // true (the default): the copy whose value is computed FIRST in the predecessor is emitted
-    // first — here v1 (= a1 + a0, the first add) precedes v0 (= a0 + a1, the second add).
-    expect(emit(ARGORD, { orderArgCopiesByComputation: true })).toContain('v1 = a1 + a0;\n    v0 = a0 + a1;');
+  test('orderArgCopiesByWriteOrder flips the order of independent edge assignments', () => {
+    // ARGORD is PARSED IR, so its predecessor is UNMEASURED and the sort takes the def-position
+    // proxy: the copy whose value is defined FIRST in the predecessor is emitted first — here v1
+    // (= a1 + a0, the first add) precedes v0 (= a0 + a1, the second add). What the frontend's
+    // write-order record does on a MEASURED pred is pinned in structure-goldens.test.ts; this test
+    // owns the flag, which turns the whole sort on and off.
+    expect(emit(ARGORD, { orderArgCopiesByWriteOrder: true })).toContain('v1 = a1 + a0;\n    v0 = a0 + a1;');
     // false: emit in source/param order — v0 (param 0) before v1 (param 1).
-    expect(emit(ARGORD, { orderArgCopiesByComputation: false })).toContain('v0 = a0 + a1;\n    v1 = a1 + a0;');
+    expect(emit(ARGORD, { orderArgCopiesByWriteOrder: false })).toContain('v0 = a0 + a1;\n    v1 = a1 + a0;');
   });
 
   test('absent levers default to true', () => {
     // A caller passing no lever must get exactly the lever-true behavior.
     expect(emit(DIVERGE, {})).toBe(emit(DIVERGE, { preserveDivergentBranchSense: true }));
-    expect(emit(ARGORD, {})).toBe(emit(ARGORD, { orderArgCopiesByComputation: true }));
+    expect(emit(ARGORD, {})).toBe(emit(ARGORD, { orderArgCopiesByWriteOrder: true }));
   });
 });
 
@@ -141,7 +144,7 @@ describe("STRUCT-HARDEN: structureOptionsFor projects a target's compilerBehavio
       // The projection carries each behavior verbatim — this is the ONE seam target→structurer.
       expect(opts.coalesceLoopInit).toBe(t.compilerBehaviors.coalesceLoopInit);
       expect(opts.preserveDivergentBranchSense).toBe(t.compilerBehaviors.preserveDivergentBranchSense);
-      expect(opts.orderArgCopiesByComputation).toBe(t.compilerBehaviors.orderArgCopiesByComputation);
+      expect(opts.orderArgCopiesByWriteOrder).toBe(t.compilerBehaviors.orderArgCopiesByWriteOrder);
     }
   });
 
@@ -155,10 +158,13 @@ describe("STRUCT-HARDEN: structureOptionsFor projects a target's compilerBehavio
     expect(MIPS_GCC.compilerBehaviors.coalesceLoopInit).toBe(true); // corpus-offline: gcc-gcd.asm
     expect(ARMV4T_AGBCC.compilerBehaviors.coalesceLoopInit).toBe(false);
     // …and the two branch/arg levers are genuinely uniform across every real compiler (the honest
-    // scaffolding claim — no target sets either false today):
+    // scaffolding claim — no target sets either false today). For the copy order that is not the
+    // whole story and must not be read as one: WHICH order a measured edge takes is two-sided
+    // inside a single compiler (mwcc rows on both sides), so it is refereed per row by rank.ts's
+    // `/copy-defpos` candidate — this flag only says whether the sort runs at all:
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
       expect(t.compilerBehaviors.preserveDivergentBranchSense).toBe(true);
-      expect(t.compilerBehaviors.orderArgCopiesByComputation).toBe(true);
+      expect(t.compilerBehaviors.orderArgCopiesByWriteOrder).toBe(true);
     }
   });
 });

@@ -138,11 +138,17 @@ export interface TargetDescription {
     // preserves divergent sense and inverts joined sense splits them by promoting that option to a
     // field here — never by an `arch ==` branch in the structurer.
     preserveDivergentBranchSense?: boolean;
-    // Order the parallel-copy assignments at a CFG edge by the order their values are COMPUTED
-    // in the predecessor (vs. source/param order), matching a compiler that lays defining ops
-    // (and the copies reading them) out in computation order. Uniform (true) across all current
-    // compilers. Absent ⇒ true; a compiler opts OUT.
-    orderArgCopiesByComputation?: boolean;
+    // Order the parallel-copy assignments at a CFG edge by the order the PREDECESSOR WROTE THEIR
+    // DESTINATIONS — the frontend's own measurement (ir/core.ts `WriteOrder`), falling back to a
+    // def-position proxy on a predecessor no frontend measured. Not "computation order": a
+    // destination the pred wrote with a value defined somewhere else is a plain register copy, and
+    // it ranks by where that copy sits, not by where its value was computed.
+    // Uniform (true) across all current compilers. Absent ⇒ true; a compiler opts OUT, which turns
+    // the sort OFF entirely and emits in source/param order.
+    // Which of the two ORDERS a measured edge takes is not this flag's question and cannot be: the
+    // benchmark has rows on both sides inside one compiler (mwcc), so the choice is refereed per
+    // row by the `/copy-defpos` candidate in rank.ts, never declared per compiler here.
+    orderArgCopiesByWriteOrder?: boolean;
     // Regime-A switch recovery: accept an `x != K` test as a case (the EQUAL side is the case
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
     // decline path keeps recovery sound either way.
@@ -301,7 +307,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
   compilerBehaviors: {
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
-    orderArgCopiesByComputation: true,
+    orderArgCopiesByWriteOrder: true,
     nearBaseSpan: 255,
     foldsConstAddrOffset: true,
     readsStayWhereWritten: true,
@@ -328,7 +334,7 @@ export const MIPS_IDO: TargetDescription = {
   compilerBehaviors: {
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
-    orderArgCopiesByComputation: true,
+    orderArgCopiesByWriteOrder: true,
     switchAllowsNeqCase: false,
   },
 };
@@ -346,7 +352,7 @@ export const MIPS_GCC: TargetDescription = {
   // and the row it comes from matches only with the parameters as the loop's homes. The other
   // structuring levers take the universal default until a KMC fixture says otherwise.
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
-  compilerBehaviors: { coalesceLoopInit: true, preserveDivergentBranchSense: true, orderArgCopiesByComputation: true },
+  compilerBehaviors: { coalesceLoopInit: true, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
 };
 
 /** PowerPC (GameCube/Wii) + Metrowerks CodeWarrior. The real GC/Wii matching target is
@@ -364,7 +370,7 @@ export const PPC_MWCC: TargetDescription = {
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: true },
   // CodeWarrior's structuring levers are UNKNOWN until fixtures reveal them — safe universal
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise.
-  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByComputation: true },
+  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
 };
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every

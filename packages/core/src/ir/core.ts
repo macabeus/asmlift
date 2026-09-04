@@ -54,12 +54,15 @@ export interface Fn {
  *  keeps no trace of it: a register copy is the same SSA value under a new key, and once a key's
  *  value is a successor's edge argument the write that put it there has no op of its own.
  *
- *  The structurer needs it to spell a parallel copy in the compiler's own order. The compiler wrote
- *  the header's registers in SOME order, and in a cyclic copy the register it overwrote FIRST is
- *  the one whose old value it had to save beforehand — the temp. Sorting an edge's copies by this
- *  record puts that copy first, so the sequentializer's first-copy spill reproduces the compiler's
- *  temp instead of guessing from def positions (where an in-block def and an incoming param have no
- *  common scale, and the param always sorts first).
+ *  The structurer needs it to spell a parallel copy in the compiler's own order. The compiler
+ *  established the block's final register values in SOME order, and in a cyclic copy the register
+ *  that reached its final value FIRST is the one whose old value had to be saved elsewhere — the
+ *  temp — because the copies that still read that old value run after it. Sorting an edge's copies
+ *  by this record puts that copy first, so the sequentializer's first-copy spill reproduces the
+ *  compiler's temp instead of guessing from def positions (where an in-block def and an incoming
+ *  param have no common scale, and the param always sorts first). LAST write, not first: a
+ *  predecessor commonly writes one key several times (1,867 of 5,283 records over three checkouts),
+ *  and the value the edge carries is the one the last write left.
  *
  *  Keyed by OBJECTS (the predecessor block, the destination param), never by arg position, so the
  *  param splices in `ir/simplify.ts` cannot leave it stale. A pass that moves one block's ops into

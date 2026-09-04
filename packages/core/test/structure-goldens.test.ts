@@ -20,6 +20,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import type { Value } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { decompile, raiseRecovered, structureChecked } from '../src/pipeline';
@@ -207,5 +208,111 @@ test('a swap cycle with a write-order record spills the member the pred wrote fi
     's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
       '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
       '        t0 = v1;\n        v1 = v0;\n        v0 = t0;\n    }\n    return v0;\n}\n',
+  );
+});
+
+// The record says NOTHING about a destination the pred never wrote, and the rule does not invent
+// an answer: that copy keeps the front position the def-position proxy has always given an
+// argument the pred did not compute (structure.ts `NO_RECORD`). Here the latch wrote only v0's and
+// v2's keys, so v1's copy is ordered ahead of both — and being first, v1 is the member the cycle
+// spills, where the record-ordered sibling above spills v1's neighbour. (`v2 = v2 + 1` still leads
+// the body: it is the one copy outside the cycle, and `sequentialize` emits every emittable copy
+// before it breaks one.) Pinning an unrecorded copy at its param-order slot instead was measured
+// over the 736 synthetic rows and loses four matches — armdef, loopfall, loopset, structarr, all
+// agbcc, the first three of them matches before this round.
+test('a destination the pred never wrote keeps the front slot, and the record orders the rest', () => {
+  const fn = parse(SWAP_CYCLE);
+  verify(fn);
+  recoverTypes(fn);
+  const [, header, latch] = fn.blocks;
+  const [v0, , v2] = header.params;
+  fn.writeOrder = {
+    lastWrite: new Map([
+      [
+        latch,
+        new Map([
+          [v2, 0],
+          [v0, 1],
+        ]),
+      ],
+    ]),
+    writes: new Map([[latch, 2]]),
+  };
+  expect(cBackend.emit(structure(fn))).toBe(
+    's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
+      '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
+      '        t0 = v1;\n        v1 = v0;\n        v0 = t0;\n    }\n    return v0;\n}\n',
+  );
+});
+
+// A MEASURED predecessor that recorded no destination of this edge is not an unmeasured one: it
+// wrote registers, none of them a key this edge copies. Every copy is then a pass-through with no
+// evidence, they all tie, and the param-order walk that built the list decides — NOT the
+// def-position proxy, which is only reached when no frontend measured the block at all.
+// THE EDGE-COPY ORDER FEEDS `recognizeForLoops`, NOT ONLY `sequentialize`. A `for` is recovered
+// only when the induction update is the LAST statement of the body, so the same record that picks
+// a cycle's temp also decides whether a loop is spelled `for` or `while` — and it decides it in
+// both directions, which is what this pair pins. (It is why `synthetic:gcd:agbcc` is a `while`:
+// agbcc wrote its dividend register last, so the modulo update is not the body's final statement.)
+const FOR_ACC = `fn foracc {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1, %1, %0)
+^bb1(%2: s32, %3: s32, %4: s32):
+  %5: u32 = icmp_slt %3, %4
+  cond_br %5, ^bb2(%2, %3, %4), ^bb3(%2)
+^bb2(%6: s32, %7: s32, %8: s32):
+  %9: s32 = const {value=1}
+  %10: s32 = add %7, %9
+  %11: s32 = add %6, %8
+  br ^bb1(%11, %10, %8)
+^bb3(%12: s32):
+  ret %12
+}`;
+const forAccWith = (order: (acc: Value, ind: Value) => [Value, number][]): string => {
+  const fn = parse(FOR_ACC);
+  verify(fn);
+  recoverTypes(fn);
+  const [, header, latch] = fn.blocks;
+  const [acc, ind] = header.params;
+  fn.writeOrder = { lastWrite: new Map([[latch, new Map(order(acc, ind))]]), writes: new Map([[latch, 2]]) };
+  return cBackend.emit(structure(fn));
+};
+
+test('a record that leaves the induction update last recovers a `for`…', () => {
+  expect(
+    forAccWith((acc, ind) => [
+      [acc, 0],
+      [ind, 1],
+    ]),
+  ).toBe(
+    's32 foracc(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v2 = a0;\n    v0 = 0;\n' +
+      '    for (v1 = 0; v1 < v2; v1 = v1 + 1) {\n        v0 = v0 + v2;\n    }\n    return v0;\n}\n',
+  );
+});
+
+test('…and one that moves it off the end leaves a `while`, from the same IR', () => {
+  expect(
+    forAccWith((acc, ind) => [
+      [ind, 0],
+      [acc, 1],
+    ]),
+  ).toBe(
+    's32 foracc(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v2 = a0;\n    v0 = 0;\n' +
+      '    v1 = 0;\n    while (v1 < v2) {\n        v1 = v1 + 1;\n        v0 = v0 + v2;\n    }\n' +
+      '    return v0;\n}\n',
+  );
+});
+
+test('a measured pred that wrote none of the edge keys leaves the copies in param order', () => {
+  const fn = parse(SWAP_CYCLE);
+  verify(fn);
+  recoverTypes(fn);
+  const [, , latch] = fn.blocks;
+  fn.writeOrder = { lastWrite: new Map(), writes: new Map([[latch, 4]]) };
+  expect(cBackend.emit(structure(fn))).toBe(
+    's32 swapcycle(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n' +
+      '    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    while (v2 < 10) {\n        v2 = v2 + 1;\n' +
+      '        t0 = v0;\n        v0 = v1;\n        v1 = t0;\n    }\n    return v0;\n}\n',
   );
 });
