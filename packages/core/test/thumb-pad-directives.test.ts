@@ -436,6 +436,63 @@ _end:
     expect(d('q', f('	.align 2, 0')).source).toBe(asInstr);
   });
 
+  test('an UNSIZABLE alignment over reachable bytes declines, whatever else the slice needs', () => {
+    // None of these four forms can be sized (no fill operand, a nonzero fill, a max-skip limit, an
+    // alignment wider than the base is known to), and all four emit bytes into the instruction
+    // stream at a point control reaches. The check used to live inside the byte-layout branch, so
+    // a function with a labelled pool and no pc-relative load skipped it entirely and lifted with
+    // the directive's bytes missing — and decoding the `.2byte 0x0000` pad at parse time took the
+    // last shape that forced that branch away with it.
+    const hz = (dir: string) => `	thumb_func_start hz
+hz:
+	ldr r0, _p
+	movs r1, #0x07
+${dir}
+	bx lr
+_p: .4byte 0x030052A4
+`;
+    expect(d('hz', hz('')).source).toBe('s32 hz(void) {\n    return 50352804;\n}\n');
+    for (const dir of ['	.align 2', '	.align 2, 0, 4', '	.align 3, 0', '	.align 2, 0xFF', '	.balign 4']) {
+      expect(() => d('hz', hz(dir))).toThrow(FrontendUnsupportedError);
+      expect(() => d('hz', hz(dir))).toThrow(/makes item sizes unknowable/);
+    }
+  });
+
+  test('an unsizable alignment SEALED off by a branch is still not a refusal', () => {
+    // The mirror of the test above, and the reason the check asks about reachability rather than
+    // declining on sight: behind an unconditional `b` those bytes are pool padding no instruction
+    // executes, nothing in the slice needs their offset, and this lifted before the round.
+    const asm = `	thumb_func_start sz
+sz:
+	ldr r0, _p
+	b _e
+	.align 2
+_p: .4byte 0x030052A4
+_e:
+	bx lr
+`;
+    expect(d('sz', asm).source).toBe('s32 sz(void) {\n    return 50352804;\n}\n');
+  });
+
+  test('a labelled data table stays a LAYOUT hazard, and reads the same under every spelling', () => {
+    // `.byte` under a label is a data table: its bytes are not in the instruction stream, so its
+    // unknown size can only shift offsets — which matters only when the slice needs them. Both pad
+    // spellings must therefore reach the same answer here; the `lsls` one always lifted, and the
+    // data spelling used to decline only because it dragged the slice onto the layout path.
+    const t = (pad: string) => `	thumb_func_start h
+h:
+	movs r0, #0x07
+	b _end
+${pad}
+tbl:
+	.byte 0x01, 0x02, 0x03
+_end:
+	bx lr
+`;
+    expect(d('h', t('	lsls r0, r0, #0x00')).source).toBe('s32 h(void) {\n    return 7;\n}\n');
+    expect(d('h', t('	.2byte 0x0000')).source).toBe(d('h', t('	lsls r0, r0, #0x00')).source);
+  });
+
   test("agbcc's dead pool label does not re-open a sealed fill", () => {
     // agbcc writes `.L10:` in front of every literal-pool alignment and never branches there. A
     // label is only a way into the fill if something in the slice NAMES it — reading every label

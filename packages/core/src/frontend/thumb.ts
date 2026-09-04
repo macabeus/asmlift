@@ -469,7 +469,13 @@ function decode(
   // Directives whose byte size we cannot know, recorded by allFlat POSITION so the layout check
   // is scoped to the SELECTED function's slice — a `.align` between two functions must not
   // poison a sibling that needs byte-accurate layout.
-  const hazards: { at: number; what: string }[] = [];
+  //
+  // `code` separates the two reasons an unknown size matters. An alignment directive emits its
+  // fill INTO THE INSTRUCTION STREAM, so when anything can execute those bytes the function
+  // cannot be lifted at all, whatever else the slice needs. A labelled data table's bytes are
+  // data: they can only shift the offsets of what follows, which matters only when something in
+  // the slice actually needs byte-accurate offsets.
+  const hazards: { at: number; what: string; code: boolean }[] = [];
   let dataLabel: string | null = null;
   let pendingFn = false;
   let pendingArm = false;
@@ -552,7 +558,7 @@ function decode(
           );
         }
         subwordData.set(dataLabel, raw[1]);
-        hazards.push({ at: flat.length - 1, what: `.${raw[1]}` }); // byte size unknown / non-word
+        hazards.push({ at: flat.length - 1, what: `.${raw[1]}`, code: false }); // size unknown / non-word
         continue;
       }
       // `.align N, 0` emits (-address) mod 2^N ZERO bytes — the pad, spelled as the directive
@@ -580,7 +586,7 @@ function decode(
         if (Number.isInteger(pow) && pow <= 2) {
           flat.push({ align: { pow } });
         } else {
-          hazards.push({ at: flat.length - 1, what: `.${ad[1]}` });
+          hazards.push({ at: flat.length - 1, what: `.${ad[1]}`, code: true });
         }
       }
       continue; // other directives skipped
@@ -739,6 +745,22 @@ function decode(
       return true;
     };
     const sealedFill = flat.map((f, i) => f.align !== undefined && !fillIsReachable(i));
+    // An alignment directive this pass could NOT size (no fill operand, a nonzero fill, a max-skip
+    // limit, an alignment wider than the base is known to) records a hazard instead of an item —
+    // and its fill bytes are still in the instruction stream. If anything can execute them the
+    // function cannot be lifted, whether or not the slice needs byte offsets for another reason;
+    // reading the size question as a LAYOUT question only is what let a `.2byte 0x0000` pad, once
+    // decoded at parse time, carry a `.align 2` past this check into a silent lift. The hazard
+    // sits at the item BEFORE the directive, so the fill would occupy the next slice position.
+    const liveHazard = hazards.find(
+      (h) =>
+        h.code && h.at >= sliceStart - 1 && h.at < boundaries[boundaryIdx] && fillIsReachable(h.at - sliceStart + 1),
+    );
+    if (liveHazard) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': '${liveHazard.what}' emits fill into the code stream and makes item sizes unknowable`,
+      );
+    }
     const needsLayout = flat.some(
       (f, i) => (f.data?.inCode ?? false) || isPcRelLdr(f.instr) || (f.align !== undefined && !sealedFill[i]),
     );
