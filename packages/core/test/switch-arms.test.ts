@@ -123,6 +123,46 @@ test('a fall-out leaf with a BODY is not a bare jump, and its store is not dropp
   expect(out).toContain('*(s32 *)(160 << 19) = a1;'); // the leaf's store survives
 });
 
+// ── one default, reached through a bare jump ─────────────────────────────────────────────────────
+// `forwardingTarget` (ir/core.ts) refuses to see through a `br` that carries block ARGUMENTS,
+// because skipping it would drop the values it supplies. So a subtree that runs out of case values
+// into `b .Ldefault(v)` and the `.Ldefault` block itself arrive as TWO default candidates whenever
+// the default takes a parameter — and `sameBareExit` cannot join them, since one of the two has a
+// body. They are one default: the jumping leaf emits nothing of its own, and what its `br` hands
+// the other's parameters is what the DISPATCH hands them, so it is one more hoisted edge.
+
+/** `sw_fall`'s own dispatch with the accumulator STORED rather than returned, so no return-sink
+ *  rewrites the shape: the low subtree runs out into a bare `b .Lend` carrying the accumulator,
+ *  while the high subtree's `bne` branches to `.Lend` directly. `hi` writes the accumulator inside
+ *  the high test block, so the two paths hand `.Lend`'s parameter different values. */
+const defaultThroughJump = (hi: string) =>
+  'f:\n\tmov\tr2, #0x0\n\tmov\tr3, #0x9\n' +
+  '\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n' +
+  '\tcmp\tr0, #0x2\n\tbgt\t.Lhi\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tb\t.Lend\n' +
+  `.Lhi:\n${hi}\tcmp\tr0, #0x3\n\tbne\t.Lend\t@cond_branch\n\tmov\tr2, #0x1\n` +
+  '.Lc2:\n\tadd\tr2, r2, #0x1\n' +
+  '.Lc1:\n\tadd\tr2, r2, #0x1\n' +
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+
+test('a default reached through a bare jump that CARRIES its value is one default', () => {
+  const out = defaultThroughJump('');
+  expect(of(out)).toContain('switch (a0)');
+  expect(armOrder(of(out))).toEqual([3, 2, 1]); // the falling chain, in layout order
+  expect(of(out)).not.toContain('default:'); // one default, and it is where the switch ends
+  expect(of(out)).toMatch(/v2 = 0;\s*\n\s*switch \(a0\)/); // the jump's value, hoisted above
+});
+
+test('…and two paths into it carrying DIFFERENT values still decline', () => {
+  // The refusal that keeps the resolution honest, and it is the hoist's own: `.Lhi` writes the
+  // accumulator, so the two dispatch paths bind `.Lend`'s parameter to 9 and to 0, and no single
+  // statement above the tree says both.
+  const out = of(defaultThroughJump('\tmov\tr2, r3\n'));
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('v2 = 9;'); // 9 stays on the path that writes it
+});
+
 // ── arm ORDER ────────────────────────────────────────────────────────────────────────────────────
 // The dispatch tree above the bodies is the same whatever order the arms were written in, so the
 // only evidence of that order is where agbcc laid the bodies out — and it lays them out as it

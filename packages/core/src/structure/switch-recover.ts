@@ -660,7 +660,44 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     } // not worth a switch (m2c: ≥2 cases)
     // The default is the single non-test leaf that is NOT a case body. 0 → no default; ≥2 distinct → decline.
     const caseBlocks = new Set(cases.values());
-    const defaults = [...defaultCands].filter((d) => !caseBlocks.has(d));
+    const leaves = [...defaultCands].filter((d) => !caseBlocks.has(d));
+    // RESOLVE THROUGH a bare jump onto another candidate. `forwardingTarget` (ir/core.ts) stops at
+    // a `br` that carries block ARGUMENTS — skipping it would drop the values it supplies — so a
+    // leaf holding `b .Ldefault(v)` and `.Ldefault` itself arrive here as two distinct candidates
+    // even though one merely jumps to the other. They are not two defaults: the jumping leaf emits
+    // nothing of its own, and the values its `br` hands the other's parameters are the values the
+    // DISPATCH hands them. So it is one more dispatch edge — hoisted with the rest, where the
+    // hoist's disagreement rule decides whether the two paths can share one statement.
+    //
+    // A cycle of such jumps has no target to resolve to and declines. Leaves that pass DIFFERENT
+    // values, or that have a body, are untouched by this and are still two defaults below.
+    const throughEdges: { pred: Block; succ: { block: Block; args: Value[] } }[] = [];
+    const resolveDefault = (d: Block): Block | null => {
+      const walked = new Set<Block>();
+      let cur = d;
+      for (;;) {
+        if (walked.has(cur)) {
+          return null;
+        }
+        walked.add(cur);
+        const t = cur.ops[0];
+        if (!isBareExit(cur) || t.opcode !== 'br' || !leaves.includes(t.successors[0].block)) {
+          return cur;
+        }
+        throughEdges.push({ pred: cur, succ: t.successors[0] });
+        cur = t.successors[0].block;
+      }
+    };
+    const defaults: Block[] = [];
+    for (const d of leaves) {
+      const r = resolveDefault(d);
+      if (r === null) {
+        return null;
+      }
+      if (!defaults.includes(r)) {
+        defaults.push(r);
+      }
+    }
     // ONE default reached by SEVERAL leaves. `balance_case_nodes`/`emit_case_nodes` give each
     // subtree that runs out of case values its own jump to the default, so agbcc's four-case tree
     // reaches it through two `b .Ldefault` blocks, which comparing candidates by BLOCK would count
@@ -824,7 +861,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return home !== undefined && dom.get(b)!.has(home);
     };
     const dispatchEdges: { pred: Block; succ: { block: Block; args: Value[] } }[] = [];
-    for (const t of seen) {
+    for (const t of [...seen, ...throughEdges.map((e) => e.pred)]) {
       for (const e of t.ops[t.ops.length - 1].successors) {
         if (e.block.params.length === 0) {
           continue;
