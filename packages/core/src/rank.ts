@@ -269,15 +269,34 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // differ picks, exactly as `/fresh-merge` above does for the merge home.
   //
   // Gated on the two orders actually differing somewhere in this function, so on a row where the
-  // record changes nothing the pair is one tree and the fan does not grow. Structural — it reads
-  // the lifted graph and the record, neither of which the symbol variant changes — so no
-  // `variantGate`. `strip` like its neighbours: a reordering cannot rescue a spelling whose OFF
-  // sibling failed the boundary contracts.
+  // record changes nothing the pair is one tree and the fan does not grow.
+  //
+  // PER SYMBOL VARIANT, on that variant's own fully-raised fn — which is `structure()`'s own
+  // input, and that is what makes the gate's one-directional claim true. Withholding the arm is
+  // inert exactly when the gate is asked of the fn the sort will read: same fn, same comparators,
+  // so a false answer means the ON arm would structure the tree the OFF arm already spelled and
+  // the dedup would eat it. Asked anywhere EARLIER the claim does not follow, and both ways it can
+  // be wrong are real, measured over 1,298 functions from klonoa (agbcc, with the kleod map),
+  // marioparty3 (MIPS_GCC) and af (MIPS_IDO), against the probe position this axis shipped with:
+  //   - THE SYMBOL VARIANT. `UpdateHUDCollectibleCount` in the klonoa checkout — probe with the
+  //     map false, the
+  //     `/raw-globals` sibling's own lift true (the fixture is test/corpus/agbcc-hudcount.s).
+  //   - THE STAGE. The probe stops after `recoverTypes`, so it is asked before `foldEmptyLatches`
+  //     (raise/latch.ts) repoints edges and rewrites the very record it reads:
+  //     klonoa's `EntityGravityAndFloorCheck` answers false at the probe and true after that fold,
+  //     watched firing on the `afterLatchFold` hook.
+  // 5 arms over those 1,298 functions are offered here that the probe position withheld, and none
+  // is withheld that it offered. THE PRICE AND THE GAIN ARE BOTH ZERO TODAY: over 192 klonoa
+  // functions enumerated with the map, candidates are 27,847 either way (1,970 of them
+  // `/copy-defpos`) in 40.3s against 39.9s — every arm the move adds structures a tree its OFF
+  // sibling already spelled. What it buys is that the withholding is now provable rather than
+  // hopeful. `strip` like its neighbours: a reordering cannot rescue a spelling whose OFF sibling
+  // failed the boundary contracts.
   {
     flag: 'copyDefPos',
     suffix: '/copy-defpos',
     options: (on) => ({ preferDefPosCopyOrder: on }),
-    probeGate: (probe) => edgeCopyOrdersDiffer(probe),
+    variantGate: edgeCopyOrdersDiffer,
     strip: true,
   },
 ];

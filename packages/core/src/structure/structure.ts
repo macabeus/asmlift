@@ -822,11 +822,21 @@ const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, numbe
  *  same tree and the fan does not grow, so the gate exists to keep the pair off the rows where the
  *  question has no content at all.
  *
- *  A SUPERSET of the real sort, on purpose and in the safe direction: it runs on the LIFTED edge
- *  before `keepSlot`/`suppressedArgs` drop copies and before the tower rewrites the graph, so it
- *  can answer true for a pair that later collapses (the tree dedup then eats it) but never false
- *  for one that does not. Mirrors the two comparators at the sort site rather than re-deriving
- *  them — including the stability that decides ties. */
+ *  A SUPERSET of the real sort, on purpose and in the safe direction — and the direction only
+ *  holds because rank asks this of the SAME fn it then structures (a `variantGate`, evaluated on
+ *  the variant's own fully-raised fn). On that fn the remaining gap is `keepSlot`/`suppressedArgs`
+ *  dropping copies the edge still carries here, so it can answer true for a pair that later
+ *  collapses (the tree dedup then eats it) but never false for one that does not.
+ *
+ *  ASKED EARLIER THAN THAT, THE CLAIM FAILS, in both directions and measurably. The answer moves
+ *  with the SYMBOL MAP (klonoa's `UpdateHUDCollectibleCount`: false under the map, true on the
+ *  map-less lift of the same asm — test/corpus/agbcc-hudcount.s) and it moves with the STAGE,
+ *  because `raise/latch.ts` rewrites the record this reads: klonoa's `EntityGravityAndFloorCheck`
+ *  answers false after `recoverTypes` and true after `foldEmptyLatches`. Over 1,298 functions from
+ *  klonoa, marioparty3 and af those are the two that move.
+ *
+ *  Mirrors the two comparators at the sort site rather than re-deriving them — including the
+ *  stability that decides ties. */
 export function edgeCopyOrdersDiffer(fn: Fn): boolean {
   const order = fn.writeOrder;
   if (order === undefined) {
