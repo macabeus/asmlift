@@ -6,15 +6,14 @@
 // register whose old value was displaced first) and only ASSUMED for an acyclic one — and the
 // benchmark answers the assumption both ways inside a single compiler: `synthetic:gcd:mwcc_242_81`
 // matches with the record while `memcpy1:mwcc_242_81` and `memset1:mwcc_242_81` score worse with
-// it. So the def-position spelling is enumerated BESIDE the record's and the differ referees,
-// rather than a per-compiler boolean declaring one of them right — and the sibling asks the
-// UNLICENSED question only: it keeps the record on cyclic sets, so on gcd the two arms differ on
-// the entry edge and agree on the loop's cycle.
+// it. So the def-position spelling is enumerated BESIDE the record's and the differ referees, and
+// the sibling asks the UNLICENSED question only: it keeps the record on cyclic sets, so on gcd the
+// two arms differ on the entry edge and agree on the loop's cycle.
 //
-// What this file pins: the sibling exists and is a genuinely different program where the two
-// orders differ, the gate withholds it where they do not — and the gate is a question about ONE
-// lift, not about the function, which is why rank asks it per symbol variant on the fn it is about
-// to structure rather than once on the shared probe.
+// What this file pins: the sibling exists and is a genuinely different program where the two orders
+// differ, the gate withholds it where they do not — and the gate is a question about ONE lift, not
+// about the function, which is why rank asks it per symbol variant on the fn it is about to
+// structure.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -90,10 +89,9 @@ test('an UNMEASURED fn has no question to ask: parsed IR never admits the axis',
   expect(edgeCopyOrdersDiffer(fn)).toBe(false);
 });
 
-// WHY THE GATE IS A `variantGate` AND NOT A `probeGate`, in the two ways the probe position was
-// wrong. Neither costs a candidate today — every arm the move adds structures a tree its OFF
-// sibling already spelled, measured over 1,298 corpus functions — so these pin the FACTS, which are
-// what a reader checking the axis entry's argument needs.
+// WHY THE GATE IS A `variantGate` AND NOT A `probeGate`: the answer is a fact about one LIFT at one
+// STAGE, and both of those move under it. Neither costs a candidate today, so what these pin is the
+// facts a reader checking the axis entry's argument needs.
 
 // (1) THE SYMBOL VARIANT. One asm, two lifts: with a map naming its two pool addresses the record
 // and the proxy agree, without one they do not. rank enumerates both lifts, so a gate asked once on
@@ -132,7 +130,7 @@ const HUD_MAP: SymbolMap = new Map([
 ]);
 
 test('the same function answers the gate differently with and without a symbol map', () => {
-  // Asked where rank now asks it: on the variant's own FULLY RAISED fn, which is what structure()
+  // Asked where rank asks it: on the variant's own FULLY RAISED fn, which is what structure()
   // reads. (On the bare lift both variants answer true — the disagreement is made by the tower.)
   const raised = (symbols: SymbolMap | undefined) => {
     const fn = frontendFor(ARMV4T_AGBCC).lift('UpdateHUDCollectibleCount', HUD, ARMV4T_AGBCC, {}, undefined, symbols);
@@ -144,11 +142,11 @@ test('the same function answers the gate differently with and without a symbol m
   expect(edgeCopyOrdersDiffer(raised(undefined))).toBe(true);
 });
 
-// (2) THE STAGE. rank's probe stops after `recoverTypes`; `foldEmptyLatches` runs after that and
-// repoints a predecessor's edge onto the header, carrying the latch's args — so the edge the gate
-// judges did not exist when the probe was asked. Here `^bb2` reaches the header only through the
-// empty `^bb4`, whose own edge ties; after the fold `^bb2` carries those two copies itself, and its
-// record disagrees with its def positions.
+// (2) THE STAGE. rank's shared probe stops after `recoverTypes`; `foldEmptyLatches` runs after that
+// and repoints a predecessor's edge onto the header, carrying the latch's args — so the edge the
+// gate judges did not exist yet. Here `^bb2` reaches the header only through the empty `^bb4`,
+// whose own edge ties; after the fold `^bb2` carries those two copies itself, and its record
+// disagrees with its def positions.
 const LATCH_FOLD = `fn latchfold {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}

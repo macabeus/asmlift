@@ -56,13 +56,12 @@ test('double round-trip is a fixed point', () => {
 });
 
 // THE WRITE-ORDER ANNOTATION is a DUMP feature, not a round-trip one (ir/print.ts `PrintOptions`).
-// Two functions with identical `stage:lift` text used to emit different C, because the record that
-// decides an edge's copy order — and, on a cycle, which register is spilled — appeared nowhere in
-// the artifact the tower's own boundary criterion asks for. It appears now, at `stage:lift`, and it
+// The record decides an edge's copy order and, on a cycle, which register is spilled, so without it
+// two functions with identical `stage:lift` text emit different C and the dump cannot say why. It
 // deliberately does NOT come back through `parse`: a parsed fn that returned measured would
 // structure differently from every other parsed fn. The MEASUREMENT is what does not come back —
-// the TEXT still parses, because every stage dump carries the annotation now (pipeline.ts,
-// trace.ts) and a dump nobody can paste into `parse` is not the oracle this file is about.
+// the TEXT still parses, because every stage dump carries the annotation (pipeline.ts, trace.ts)
+// and a dump nobody can paste into `parse` is not the oracle this file is about.
 test('the lift dump shows the write-order record; the canonical text still does not', () => {
   const asm = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
   const fn = frontendFor(ARMV4T_AGBCC).lift('gcd', asm, ARMV4T_AGBCC, {}, undefined, undefined);
@@ -87,8 +86,8 @@ test('an ANNOTATED dump parses back — as the same graph, still unmeasured', ()
   const asm = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
   const fn = frontendFor(ARMV4T_AGBCC).lift('gcd', asm, ARMV4T_AGBCC, {}, undefined, undefined);
   const annotated = print(fn, { writeOrder: true });
-  // Both annotations are on the same dump: the block headers carry `; writes=N` and the
-  // terminators `; order ^bbN(…)`, and either alone was enough to make `parse` fail.
+  // Both annotations are on the same dump — `; writes=N` on the block headers, `; order ^bbN(…)`
+  // on the terminators — and either one alone is enough to make an unguarded `parse` fail.
   expect(annotated).toMatch(/\):\s+; writes=/);
   expect(annotated).toContain('; order ');
   const back = parse(annotated);

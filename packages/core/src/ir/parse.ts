@@ -5,11 +5,11 @@
 // semantics — that is the verifier's job — so malformed-but-well-formed-syntax IR can be
 // constructed and then rejected by verify().
 // The write-order annotation `print(fn, { writeOrder: true })` adds is DISCARDED, not rejected: the
-// text still parses (`stripWriteOrderAnnotation` below), and the fn comes back with
-// `writeOrder: undefined`. Both halves are deliberate. The measurement is one only a frontend can
-// make, and a parsed fn that came back measured would structure differently from every other parsed
-// fn — but every stage dump now carries the annotation (pipeline.ts, trace.ts), and a dump nobody
-// can paste back in is not the oracle the paragraph above claims it is.
+// text parses (`stripWriteOrderAnnotation`) and the fn comes back with `writeOrder: undefined`.
+// Both halves are deliberate — only a frontend can make that measurement, and a parsed fn that came
+// back measured would structure differently from every other parsed fn, while every stage dump
+// carries the annotation (pipeline.ts, trace.ts) and a dump nobody can paste back in is not an
+// oracle.
 // ROUND-TRIP DOMAIN: parse(print(fn)) holds for L1/scalar types only — `unkN`/`sN`/`uN` and
 // `*`-pointers to them. STRUCT/ARRAY/VOID types print (typeToString) but do NOT parse back; a
 // post-type-recovery dump is a one-way debugging artifact, not a test oracle.
@@ -120,8 +120,7 @@ export function parse(text: string): Fn {
   }
 
   // No write order: the text form is the value graph, and the record is a measurement of the
-  // MACHINE that only the frontend can make. A reader must treat a parsed fn's edges as
-  // unmeasured (ir/core.ts `WriteOrder`), not as written-nowhere.
+  // MACHINE. A parsed fn's edges are UNMEASURED, never written-nowhere (ir/core.ts `WriteOrder`).
   return { name, blocks: rawBlocks.map((r) => r.block), writeOrder: undefined };
 }
 
@@ -129,8 +128,7 @@ export function parse(text: string): Fn {
  *
  *  Anchored on their exact shapes rather than on "text after a `;`", because a `;` is not a comment
  *  marker in this format: a string attr prints JSON-quoted (`opaque {text="mrs r0, cpsr; …"}`) and
- *  a list attr prints `[1;2;3]`, so a general trailing-comment strip would eat an operand. These
- *  two patterns can only match what `print` wrote. */
+ *  a list attr prints `[1;2;3]`, so a general trailing-comment strip would eat an operand. */
 function stripWriteOrderAnnotation(line: string): string {
   return line.replace(/^(\^\w+\(.*\):)\s+;\s+writes=\d+$/, '$1').replace(/\s+;\s+order(?:\s+\^\w+\([^()]*\))+$/, '');
 }

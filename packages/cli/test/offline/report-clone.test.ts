@@ -2,9 +2,8 @@
 //
 // `decompileWithReport` scores a pattern's delta by cloning the fn as it stands, raising and
 // structuring the clone, and scoring that. The clone is therefore not a convenience: it is the
-// program the reported `scoreDelta` is about. Anything on `Fn` the structurer reads and the clone
-// drops makes the probe measure a program asmlift does not emit — the same defect the file's
-// symbol-map comments call out, one field over.
+// program the reported `scoreDelta` is about, so anything on `Fn` the structurer reads and the
+// clone drops makes the probe measure a program asmlift does not emit.
 //
 // `Fn.writeOrder` (the frontend's per-edge write-order measurement) is exactly such a field: with
 // it the agbcc gcd lift spells its latch copies in the compiler's order, without it the

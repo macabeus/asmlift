@@ -701,7 +701,7 @@ describe('the write-order record follows the fold', () => {
         [g, new Map([[p, 0]])],
       ]),
       // Every block, not only the two this test reasons about: a measured fn measures all of them,
-      // and `verify` below enforces exactly that.
+      // which is what the closing `verify` enforces.
       writes: new Map(fn.blocks.map((b, i) => [b, [5, 1][i] ?? 0])),
     };
     expect(recognizeBranchShortCircuit(fn)).toBe(true);

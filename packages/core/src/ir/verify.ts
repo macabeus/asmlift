@@ -166,19 +166,19 @@ export function verify(fn: Fn): void {
 }
 
 /** THE WRITE-ORDER RECORD'S CROSS-PASS OBLIGATION, checked rather than trusted (ir/core.ts
- *  `WriteOrder`, `foldWriteOrder`), because the consequence of missing it is silent: the edge
- *  copies of an unmeasured block sort with no records at all, which quietly changes the order the
- *  structurer emits them in and, on a cycle, which register it spills. No decline, no marker.
+ *  `WriteOrder`, `foldWriteOrder`), because the consequence of missing it is silent: an unmeasured
+ *  block's edge copies sort with no records at all, changing the order the structurer emits them in
+ *  and, on a cycle, which register it spills. No decline, no marker.
  *
  *  WHAT IT CATCHES: a pass that MINTS a block into a measured fn, or drops a block's entry, leaving
- *  a hole indistinguishable from a fn that was never measured at all. Also an ordinal outside its
- *  block's own write count, which is a `foldWriteOrder` that moved records without growing the
- *  count. WHAT IT CANNOT: a pass that moves ops from one MEASURED block into another and forgets
- *  the fold — both blocks still have entries, and no snapshot of the IR shows the ops moved. That
- *  half stays a review obligation until the record hangs on `Successor` itself.
+ *  a hole indistinguishable from a fn nobody measured. Also an ordinal outside its block's own
+ *  write count — a `foldWriteOrder` that moved records without growing the count. WHAT IT CANNOT:
+ *  ops moved from one MEASURED block into another with the fold forgotten, since both blocks still
+ *  have entries and no snapshot of the IR shows the move. That half stays a review obligation until
+ *  the record hangs on `Successor` itself.
  *
- *  A fn is "measured" iff it has any entry at all; a fn with none is parsed IR or hand-built, and
- *  its edges take the def-position proxy by design. */
+ *  A fn is "measured" iff it has any entry at all; one with none is parsed or hand-built IR, whose
+ *  edges take the def-position proxy by design. */
 function checkWriteOrder(fn: Fn): void {
   const order = fn.writeOrder;
   if (order === undefined || order.writes.size === 0) {

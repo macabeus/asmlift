@@ -10,9 +10,9 @@ import { typeToString } from './types';
 /** WRITE-ORDER ANNOTATION (`ir/core.ts` WriteOrder) — OFF by default and deliberately not part of
  *  the round-trip artifact. The record is a measurement `parse` cannot reconstruct, and a parsed fn
  *  that came back MEASURED would structure differently from every other parsed fn, so the text form
- *  never carries it back in. It is printed for the per-stage DUMPS, where its absence was the gap:
- *  two functions with identical `stage:lift` output emit different C, and attributing that took a
- *  temporary printf where a dump diff should have shown it. */
+ *  never carries it back in. It is printed for the per-stage DUMPS, which are otherwise unable to
+ *  explain themselves: two functions with identical `stage:lift` output emit different C when their
+ *  records differ. */
 export interface PrintOptions {
   writeOrder?: boolean;
 }
@@ -41,7 +41,7 @@ export function print(fn: Fn, opts: PrintOptions = {}): string {
   }
   const ref = (v: Value) => name.get(v) ?? '%<undef>';
 
-  // Present only when asked for AND measured — an unmeasured fn prints exactly as before, which is
+  // Present only when asked for AND measured, so an unmeasured fn prints identically either way —
   // the distinction a reader of the dump most needs to see.
   const order = opts.writeOrder ? fn.writeOrder : undefined;
   const lines: string[] = [`fn ${fn.name} {`];
@@ -66,9 +66,9 @@ export function print(fn: Fn, opts: PrintOptions = {}): string {
         s += ' ' + args.join(', ');
       }
       s += fmtAttrs(op.attrs);
-      // Per SUCCESSOR, the ordinal of this block's last write to each destination param's key —
-      // the exact numbers `structure.ts`'s edge-copy sort reads, in successor-arg order, with `-`
-      // for a destination this block never wrote.
+      // Per SUCCESSOR, in successor-arg order: the ordinal of this block's last write to each
+      // destination param's key — what `structure.ts`'s edge-copy sort reads — and `-` for a
+      // destination this block never wrote.
       if (order?.writes.has(b) && op.successors.length) {
         const rec = order.lastWrite.get(b);
         s +=

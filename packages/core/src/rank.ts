@@ -268,38 +268,27 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // referees nothing — so the def-position spelling is enumerated beside the record's and the
   // differ picks, exactly as `/fresh-merge` above does for the merge home.
   //
-  // THE AXIS SPANS THE UNLICENSED HALF ONLY. Its ON arm keeps the record on cyclic sets, so
-  // neither arm ever spells a cycle against the instruction that names the compiler's temp, and
-  // the pair differs exactly where the evidence runs out. That scoping was measured over all 988
-  // benchmark rows and moves none of them — the three rows above keep their `/copy-defpos`
-  // winners, so what they needed was the acyclic half all along — and it makes reachable a
-  // spelling neither arm had: the record on a cycle and the proxy on an acyclic edge of the same
-  // function, which is what `synthetic:gcd:agbcc`'s own two edges are.
+  // THE AXIS SPANS THE UNLICENSED HALF ONLY: its ON arm keeps the record on cyclic sets, so
+  // neither arm spells a cycle against the instruction that names the compiler's temp. Over all
+  // 988 benchmark rows that scoping moves nothing — `memcpy1`, `memset1` and `armfall` keep their
+  // `/copy-defpos` winners, so the acyclic half is what they needed — and it makes one spelling
+  // reachable that neither whole-function arm has: the record on a cycle and the proxy on an
+  // acyclic edge of the same function, which is what `synthetic:gcd:agbcc`'s two edges want.
   //
   // Gated on the two orders actually differing somewhere in this function, so on a row where the
-  // record changes nothing the pair is one tree and the fan does not grow.
-  //
-  // PER SYMBOL VARIANT, on that variant's own fully-raised fn — which is `structure()`'s own
-  // input, and that is what makes the gate's one-directional claim true. Withholding the arm is
-  // inert exactly when the gate is asked of the fn the sort will read: same fn, same comparators,
-  // so a false answer means the ON arm would structure the tree the OFF arm already spelled and
-  // the dedup would eat it. Asked anywhere EARLIER the claim does not follow, and both ways it can
-  // be wrong are real, measured over 1,298 functions from klonoa (agbcc, with the kleod map),
-  // marioparty3 (MIPS_GCC) and af (MIPS_IDO), against the probe position this axis shipped with:
-  //   - THE SYMBOL VARIANT. `UpdateHUDCollectibleCount` in the klonoa checkout — probe with the
-  //     map false, the
-  //     `/raw-globals` sibling's own lift true (the fixture is test/corpus/agbcc-hudcount.s).
-  //   - THE STAGE. The probe stops after `recoverTypes`, so it is asked before `foldEmptyLatches`
-  //     (raise/latch.ts) repoints edges and rewrites the very record it reads:
-  //     klonoa's `EntityGravityAndFloorCheck` answers false at the probe and true after that fold,
-  //     watched firing on the `afterLatchFold` hook.
-  // 5 arms over those 1,298 functions are offered here that the probe position withheld, and none
-  // is withheld that it offered. THE PRICE AND THE GAIN ARE BOTH ZERO TODAY: over 192 klonoa
-  // functions enumerated with the map, candidates are 27,847 either way (1,970 of them
-  // `/copy-defpos`) in 40.3s against 39.9s — every arm the move adds structures a tree its OFF
-  // sibling already spelled. What it buys is that the withholding is now provable rather than
-  // hopeful. `strip` like its neighbours: a reordering cannot rescue a spelling whose OFF sibling
-  // failed the boundary contracts.
+  // record changes nothing the pair is one tree and the fan does not grow. PER SYMBOL VARIANT, on
+  // that variant's own fully-raised fn, because that is `structure()`'s own input and only there
+  // is withholding provably inert: same fn, same comparators, so a false answer means the ON arm
+  // would structure the tree the OFF arm already spelled. Asked any earlier the claim does not
+  // follow, and both ways it fails are real —
+  //   - THE SYMBOL VARIANT. klonoa's `UpdateHUDCollectibleCount` answers false with the kleod map
+  //     and true on the `/raw-globals` sibling's own lift (fixture: test/corpus/agbcc-hudcount.s).
+  //   - THE STAGE. A probe stopping after `recoverTypes` is asked before `foldEmptyLatches`
+  //     (raise/latch.ts) repoints edges and rewrites the record the gate reads: klonoa's
+  //     `EntityGravityAndFloorCheck` answers false there and true after that fold.
+  // Neither costs candidates today — over 192 klonoa functions enumerated with the map the fan is
+  // 27,847 either way, 1,970 of them `/copy-defpos`. `strip` like its neighbours: a reordering
+  // cannot rescue a spelling whose OFF sibling failed the boundary contracts.
   {
     flag: 'copyDefPos',
     suffix: '/copy-defpos',

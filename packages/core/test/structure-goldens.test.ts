@@ -38,12 +38,11 @@ const emit = (ir: string): string => {
 /** Attach a write-order record the way a FRONTEND would, and re-verify.
  *
  *  Measurement is all-or-nothing per function (ir/core.ts `WriteOrder`, checked by `ir/verify.ts`),
- *  so a record naming only the block under test is not a state any lift produces — and `structure()`
- *  accepts it while `verify()` rejects it, which is how these goldens once pinned behaviour off an
- *  illegal fn. Every other block is therefore measured too, with no destination of its own edge
- *  recorded: the legal way to say "this golden is about the latch edge". The two SWAP_CYCLE goldens
- *  emit the same C either way; the FOR_ACC pair does NOT, and that is a fact worth having — see the
- *  entry record it now carries. */
+ *  so a record naming only the block under test is not a state any lift produces: `structure()`
+ *  accepts it and `verify()` rejects it. Every other block is therefore measured too, with no
+ *  destination of its own edge recorded — the legal way to say "this golden is about the latch
+ *  edge". It is not cosmetic: the FOR_ACC pair below emits different C for the other blocks'
+ *  records, which is why it carries an entry record of its own. */
 const measure = (fn: Fn, per: Map<Block, Map<Value, number>>, writes: Map<Block, number>): Fn => {
   for (const b of fn.blocks) {
     if (!writes.has(b)) {
@@ -203,8 +202,8 @@ test('pool-global recovery + base-CSE hoist, as emitted C (full pipeline)', () =
 // The SAME swap cycle with the frontend's write-order record attached (ir/core.ts `WriteOrder`):
 // the latch wrote v1's register FIRST, then v0's, then v2's. `sequentialize` spills the first
 // pending destination, so the record decides WHICH member becomes the temp — here v1, where the
-// def-position proxy above (a param sorts before an in-block def) always picks v0. The parsed
-// golden above stays as it is: a parsed Fn carries no record, and that refusal is what it pins.
+// def-position proxy picks v0 (a param sorts before an in-block def). The unmeasured golden keeps
+// its own spelling: a parsed Fn carries no record, and that refusal is what it pins.
 test('a swap cycle with a write-order record spills the member the pred wrote first', () => {
   const fn = parse(SWAP_CYCLE);
   verify(fn);
@@ -232,15 +231,13 @@ test('a swap cycle with a write-order record spills the member the pred wrote fi
   );
 });
 
-// The record says NOTHING about a destination the pred never wrote, and the rule does not invent
-// an answer: that copy keeps the front position the def-position proxy has always given an
-// argument the pred did not compute (structure.ts `NO_RECORD`). Here the latch wrote only v0's and
-// v2's keys, so v1's copy is ordered ahead of both — and being first, v1 is the member the cycle
-// spills, where the record-ordered sibling above spills v1's neighbour. (`v2 = v2 + 1` still leads
-// the body: it is the one copy outside the cycle, and `sequentialize` emits every emittable copy
-// before it breaks one.) Pinning an unrecorded copy at its param-order slot instead was measured
-// over the 736 synthetic rows and loses four matches — armdef, loopfall, loopset, structarr, all
-// agbcc, the first three of them matches before this round.
+// The record says NOTHING about a destination the pred never wrote, and the rule invents no
+// answer: that copy keeps the front position the def-position proxy gives an argument the pred did
+// not compute (structure.ts `NO_RECORD`). Here the latch wrote only v0's and v2's keys, so v1's
+// copy is ordered ahead of both — and being first, v1 is the member the cycle spills. (`v2 = v2 + 1`
+// still leads the body: it is the one copy outside the cycle, and `sequentialize` emits every
+// emittable copy before it breaks one.) Pinning an unrecorded copy at its param-order slot instead
+// loses armdef, loopfall, loopset and structarr over the 736 synthetic rows, all agbcc.
 test('a destination the pred never wrote keeps the front slot, and the record orders the rest', () => {
   const fn = parse(SWAP_CYCLE);
   verify(fn);
@@ -273,9 +270,8 @@ test('a destination the pred never wrote keeps the front slot, and the record or
 // def-position proxy, which is only reached when no frontend measured the block at all.
 // THE EDGE-COPY ORDER FEEDS `recognizeForLoops`, NOT ONLY `sequentialize`. A `for` is recovered
 // only when the induction update is the LAST statement of the body, so the same record that picks
-// a cycle's temp also decides whether a loop is spelled `for` or `while` — and it decides it in
-// both directions, which is what this pair pins. (It is why `synthetic:gcd:agbcc` is a `while`:
-// agbcc wrote its dividend register last, so the modulo update is not the body's final statement.)
+// a cycle's temp also decides whether a loop is spelled `for` or `while` — in both directions,
+// which is what this pair pins. (`synthetic:gcd:agbcc` is the live case, on the `while` side.)
 const FOR_ACC = `fn foracc {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}
@@ -299,8 +295,8 @@ const forAccWith = (order: (acc: Value, ind: Value) => [Value, number][]): strin
   const [acc, ind, n] = header.params;
   // The ENTRY edge is recorded too, and held FIXED across the pair, because `for` recovery also
   // needs the init adjacent to the loop: with the entry left to the param-order tie both goldens
-  // come out `while`, and the pair would pin one direction twice. The entry record says agbcc set
-  // the induction register last, which is what puts `v1 = 0` against the loop.
+  // come out `while`, and the pair would pin one direction twice. Its record writes the induction
+  // register last, which is what puts `v1 = 0` against the loop.
   measure(
     fn,
     new Map([

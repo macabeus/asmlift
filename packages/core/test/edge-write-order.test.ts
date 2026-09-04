@@ -114,10 +114,9 @@ test('a phi the builder retires as trivial leaves no record behind', () => {
 
 // ── through the real frontend ─────────────────────────────────────────────────────────────────
 // agbcc's gcd (`while (b) { t = b; b = a % b; a = t; }`, benchmark row synthetic:gcd:agbcc — the
-// same asm). The entry writes `add r2, r0` THEN `add r0, r1`; the latch writes r0 (the `bl __modsi3`
-// result) THEN
-// `add r2, r4`. Both are copies the value graph erases (a copy is the same SSA value), so the
-// record is the only place the order survives.
+// same asm). The entry writes `add r2, r0` THEN `add r0, r1`; the latch writes r0 (the
+// `bl __modsi3` result) THEN `add r2, r4`. Both are copies the value graph erases (a copy is the
+// same SSA value), so the record is the only place the order survives.
 const GCD_S = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-gcd.s'), 'utf8');
 
 test('Thumb: the entry and the latch write the gcd header registers in opposite orders', () => {

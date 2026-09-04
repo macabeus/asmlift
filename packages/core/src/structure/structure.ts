@@ -808,9 +808,8 @@ interface WhileLoopInfo {
 const REPEATED_EFFECT = new Set(['call', 'opaque']);
 
 /** No evidence about where this copy goes — NOT "written before everything". A destination the
- *  predecessor never wrote is an argument passing through, and the def-position proxy has always
- *  emitted those first; the write-order rule keeps them there rather than answering a question the
- *  assembly did not put to it (the measurement is at the sort site). */
+ *  predecessor never wrote is an argument passing through, and both orders put those first, so the
+ *  record answers no question the assembly put to it. Priced where the sort runs. */
 const NO_RECORD = -1;
 /** A MEASURED predecessor that recorded no destination of this edge — it wrote registers, none of
  *  them a key this edge copies. Distinct from an UNMEASURED pred, which has no record at all and
@@ -819,27 +818,24 @@ const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, numbe
 
 /** Does the write-order record order some edge's copies differently from the def-position proxy?
  *  rank.ts's enumeration gate for `/copy-defpos`: where the two orders agree, the sibling is the
- *  same tree and the fan does not grow, so the gate exists to keep the pair off the rows where the
- *  question has no content at all.
+ *  same tree and the fan does not grow.
  *
  *  A SUPERSET of the real sort, on purpose and in the safe direction — and the direction only
  *  holds because rank asks this of the SAME fn it then structures (a `variantGate`, evaluated on
- *  the variant's own fully-raised fn). On that fn two gaps remain, both of which only ever say YES
- *  where the sort says nothing: `keepSlot`/`suppressedArgs` drop copies the edge still carries
- *  here, and this asks of EVERY edge where `preferDefPosCopyOrder` reorders only the acyclic ones
- *  (`copySetIsCyclic`), which needs the built copy list this cannot see. So it can answer true for
- *  a pair that later collapses (the tree dedup then eats it) but never false for one that does
- *  not.
+ *  the variant's own fully-raised fn). Two gaps remain, both of which only say YES where the sort
+ *  says nothing: `keepSlot`/`suppressedArgs` drop copies this still counts, and this asks of every
+ *  edge where `preferDefPosCopyOrder` reorders only the acyclic ones (`copySetIsCyclic` needs the
+ *  built copy list, which is not available here). So it can answer true for a pair that later
+ *  collapses — the tree dedup then eats it — but never false for one that does not.
  *
- *  ASKED EARLIER THAN THAT, THE CLAIM FAILS, in both directions and measurably. The answer moves
- *  with the SYMBOL MAP (klonoa's `UpdateHUDCollectibleCount`: false under the map, true on the
- *  map-less lift of the same asm — test/corpus/agbcc-hudcount.s) and it moves with the STAGE,
- *  because `raise/latch.ts` rewrites the record this reads: klonoa's `EntityGravityAndFloorCheck`
- *  answers false after `recoverTypes` and true after `foldEmptyLatches`. Over 1,298 functions from
- *  klonoa, marioparty3 and af those are the two that move.
+ *  ASKED ANY EARLIER THE CLAIM FAILS, in both directions. The answer moves with the SYMBOL MAP
+ *  (klonoa's `UpdateHUDCollectibleCount` answers false under the map and true without it, off one
+ *  asm — test/corpus/agbcc-hudcount.s) and with the STAGE, because `raise/latch.ts` rewrites the
+ *  record this reads (klonoa's `EntityGravityAndFloorCheck`: false after `recoverTypes`, true
+ *  after `foldEmptyLatches`).
  *
- *  Mirrors the two comparators at the sort site rather than re-deriving them — including the
- *  stability that decides ties. */
+ *  Mirrors the sort's two comparators rather than re-deriving them — including the stability that
+ *  decides ties. */
 export function edgeCopyOrdersDiffer(fn: Fn): boolean {
   const order = fn.writeOrder;
   if (order === undefined) {
@@ -971,7 +967,7 @@ export function reHomesParamMerge(
 //   coalesceLoopInit               — keep the induction var in its arg register;
 //   preserveDivergentBranchSense   — reproduce source branch direction on divergent ifs;
 //   orderArgCopiesByWriteOrder     — order edge copies by the order the pred WROTE their
-//                                    destinations (preferDefPosCopyOrder takes the proxy instead).
+//                                    destinations.
 // The last three are `compilerBehaviors` (target.ts) — this pass stays target-AGNOSTIC: it reads
 // booleans, never a compiler name.
 export interface StructureOptions {
@@ -1004,10 +1000,12 @@ export interface StructureOptions {
   // spelling is the faithful one and only the differ can choose.
   negateJoinedBranchSense?: boolean;
   orderArgCopiesByWriteOrder?: boolean;
-  /** Order a measured edge's copies by the DEF-POSITION PROXY anyway — the `/copy-defpos` ranked
-   *  sibling of the write-order spelling (rank.ts). Not a target field and deliberately not one:
-   *  which of the two orders a compiler laid out is two-sided inside one compiler, so the differ
-   *  referees it per row. Inert on an unmeasured pred, where the proxy is already what runs. */
+  /** Order a measured edge's ACYCLIC copy set by the def-position proxy instead — the
+   *  `/copy-defpos` ranked sibling of the write-order spelling (rank.ts). A CYCLIC set keeps the
+   *  record either way: there an instruction names the compiler's temp, and no arm of the fan may
+   *  contradict it (`copySetIsCyclic`). Not a target field and deliberately not one: which order a
+   *  compiler laid out is two-sided inside one compiler, so the differ referees it per row. Inert
+   *  on an unmeasured pred, where the proxy is already what runs. */
   preferDefPosCopyOrder?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
@@ -3319,64 +3317,50 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // THE RULE IS TWO CLAIMS, and only the first is licensed by an instruction:
     //
     //  1. CYCLIC copy sets. `sequentialize` spills the FIRST pending destination, and the record
-    //     names the destination whose FINAL value the compiler established earliest — which is the
-    //     one whose old value had to be saved elsewhere, because every later reader of that old
-    //     value reads it after the register stopped holding it. That is the compiler's own temp,
-    //     and it is what `synthetic:gcd` turns on.
-    //     READ THE QUANTITY AS THE LAST WRITE, not the first overwrite: `ir/core.ts` records each
-    //     key's LAST write, and the two differ often — over 1,295 functions lifted from klonoa
-    //     (agbcc/Thumb), marioparty3 (MIPS_GCC) and af (MIPS_IDO), 1,867 of 5,283 edge-destination
-    //     records come from a pred that wrote that key more than once, in 312 of the 464 functions
-    //     that record anything. Both alternatives were priced over the 736 synthetic rows and both
-    //     cost matches and gain none: recording the FIRST write instead loses `bgsplit`,
+    //     names the destination whose FINAL value the compiler established earliest — the one whose
+    //     old value had to be saved elsewhere, since every later reader of that old value reads it
+    //     after the register stopped holding it. That is the compiler's own temp.
+    //     READ THE QUANTITY AS THE LAST WRITE, not the first overwrite: a pred commonly writes a
+    //     key several times (1,867 of 5,283 edge-destination records over klonoa, marioparty3 and
+    //     af, in 312 of the 464 functions that record anything). Both alternatives cost matches
+    //     over the 736 synthetic rows and gain none: recording the FIRST write loses `bgsplit`,
     //     `bgswitch`, `bgswsplit` and `hipress` (all agbcc, 482 → 478); REFUSING the record for a
-    //     key written more than once loses those four and `dmascope2` and `swmulti` too
-    //     (482 → 476).
+    //     key written more than once loses those four plus `dmascope2` and `swmulti` (482 → 476).
     //  2. ACYCLIC copy sets — a SECOND, separately-licensed claim: that the compiler LAID THE
-    //     COPIES OUT in the order it wrote them. No instruction states it, and it is two-sided.
-    //     Restricting the record to cyclic sets as a DEFAULT was measured over the 736 synthetic
-    //     rows: it takes `armfall:agbcc` 11 → 8, `memcpy1:mwcc` 23 → 19 and `memset1:mwcc`
-    //     21 → 19 — and LOSES `gcd:agbcc` (the cyclic row's own entry edge is acyclic) and
-    //     `structarr:agbcc`, both to nonmatch. So the acyclic half is kept as the default, and
-    //     because it is two-sided the def-position spelling is enumerated beside it as a ranked
-    //     candidate (`/copy-defpos`, rank.ts) rather than declared right here.
-    //     AND THE CANDIDATE ASKS ONLY THAT SECOND QUESTION: `preferDefPosCopyOrder` takes the
-    //     proxy on ACYCLIC sets and keeps the record on cyclic ones, so no arm of the fan spells a
-    //     cycle against the instruction that licenses it, and the pair differs exactly where the
-    //     evidence runs out. Priced over all 988 benchmark rows — 736 synthetic and 252 real
-    //     across six projects — and 0 move; the three rows the axis exists for (`armfall:agbcc`,
-    //     `memcpy1:mwcc`, `memset1:mwcc`) keep their `/copy-defpos` winners, so the edges they
-    //     needed were acyclic all along. What it buys is the third spelling, which neither arm
-    //     could reach before: the record on a cycle and the proxy on an acyclic edge of the same
-    //     function, which is what `gcd:agbcc`'s own two edges are.
+    //     COPIES OUT in the order it wrote them. No instruction states it, and it is two-sided, so
+    //     the def-position spelling is enumerated beside the record's as a ranked candidate
+    //     (`/copy-defpos`, rank.ts) instead of being declared here. Restricting the record to
+    //     cyclic sets as the DEFAULT was measured over the 736 synthetic rows: it takes
+    //     `armfall:agbcc` 11 → 8, `memcpy1:mwcc` 23 → 19 and `memset1:mwcc` 21 → 19 — and LOSES
+    //     `gcd:agbcc` (the cyclic row's own entry edge is acyclic) and `structarr:agbcc` to
+    //     nonmatch. The CANDIDATE spans that second claim only (`preferDefPosCopyOrder`: the proxy
+    //     on acyclic sets, the record on cyclic ones), so no arm of the fan spells a cycle against
+    //     the instruction that licenses it, and the pair differs exactly where the evidence runs
+    //     out — which is what lets one function take the record on its back edge and the proxy on
+    //     its entry edge, as `gcd:agbcc` does.
     //
-    // IT ALSO DECIDES WHETHER `l3/tailmerge.ts` FIRES. An arm of an `if` ends in one edge's copies,
-    // and that pass peels only a common LAST statement, so an arm-varying copy ordered last hides
-    // an agreeing one behind it — five duplicated copies on klonoa `CountCollectedGems`, measured,
-    // with the peel and not this sort as the cause (that file's KNOWN INTERACTIONS carries the
-    // measurement and why reaching the hidden statement needs an argument this pass lacks).
+    // IT REACHES FURTHER THAN `sequentialize`, because it decides which copy is an arm's LAST
+    // statement: `l3/tailmerge.ts` peels only a common last statement, so an arm-varying copy
+    // ordered last hides an agreeing one behind it (measured there, on klonoa
+    // `CountCollectedGems`); and `recognizeForLoops` recovers a `for` only when the induction
+    // update is last, so this sort also decides `for` vs `while` (goldens in
+    // `structure-goldens.test.ts`). That is why `synthetic:gcd:agbcc` is a `while` — agbcc wrote
+    // the dividend's register last, so the modulo update is not last.
     //
-    // AND IT FEEDS `recognizeForLoops`, not only `sequentialize`: a `for` is recovered only when
-    // the induction update is the body's LAST statement, so this sort also decides `for` vs
-    // `while` (goldens in `structure-goldens.test.ts`). That is why `synthetic:gcd:agbcc` emits a
-    // `while` — agbcc wrote the dividend's register last, so the modulo update is not last.
-    //
-    // A destination with NO RECORD keeps `NO_RECORD`, sorting first, which is exactly where the
-    // proxy below has always put an argument the pred did not compute — the record path AGREES
-    // with the def-position path on those copies instead of replacing them. Measured, same 736
-    // rows: pinning unwritten destinations at their param-order slot instead loses `armdef:agbcc`,
-    // `loopfall:agbcc`, `loopset:agbcc` (all three MATCH before this round) and `structarr:agbcc`,
-    // and buys back only `armfall` 11 → 7 and `ucmp:kmc` 15 → 14.
+    // A destination with NO RECORD keeps `NO_RECORD`, sorting first, which is where the proxy also
+    // puts an argument the pred did not compute: on those copies the two orders AGREE rather than
+    // one replacing the other. Pinning unwritten destinations at their param-order slot instead
+    // loses `armdef:agbcc`, `loopfall:agbcc`, `loopset:agbcc` and `structarr:agbcc` over the same
+    // 736 rows, and buys back only `armfall` 11 → 7 and `ucmp:kmc` 15 → 14.
     if (orderArgCopiesByWriteOrder) {
       // UNMEASURED (undefined) is not "wrote nothing": a parsed or hand-built fn carries no record
-      // at all, and its edges keep the def-position proxy. A MEASURED pred that recorded no
-      // destination of this edge is a different thing, and gets an empty record. The two cannot
-      // meet inside one fn — measurement is all-or-nothing per function and `ir/verify.ts` enforces
-      // it (ir/core.ts `WriteOrder`) — so this asks per block only to spell the unmeasured fn.
+      // at all and its edges keep the def-position proxy, while a MEASURED pred that recorded no
+      // destination of this edge gets an empty record. The two cannot meet inside one fn —
+      // measurement is all-or-nothing per function and `ir/verify.ts` enforces it — so this asks
+      // per block only to spell the wholly unmeasured fn.
       const predIsMeasured = fn.writeOrder?.writes.has(pred) ?? false;
-      // `preferDefPosCopyOrder` is the `/copy-defpos` candidate asking for the proxy on an edge the
-      // frontend DID measure — the one place the two questions ("is there a record" and "use it")
-      // come apart.
+      // The `/copy-defpos` candidate asking for the proxy on an edge the frontend DID measure —
+      // the one place the two questions ("is there a record" and "use it") come apart.
       const record =
         predIsMeasured && (!preferDefPosCopyOrder || copySetIsCyclic(copies))
           ? (fn.writeOrder!.lastWrite.get(pred) ?? NO_WRITTEN_DESTINATIONS)
@@ -4638,14 +4622,15 @@ function recognizeForLoops(stmts: Stmt[]): Stmt[] {
 // still-pending assignment reads; break a cycle by spilling one destination to a temp.
 // `tmp` is the per-FUNCTION temp counter (threaded from structure()) so two independent
 // parallel copies never reuse a temp name against conflicting types.
-/** Does this edge's copy set contain a CYCLE — a destination every remaining copy still reads, so
- *  `sequentialize` has to spill one into a temp? `sequentialize`'s own emittability loop, run
- *  without emitting, so the two can never disagree about which sets are which.
+/** Does this edge's copy set contain a CYCLE — no copy emittable without overwriting a destination
+ *  another still reads, so `sequentialize` has to spill one into a temp? `sequentialize`'s own
+ *  emittability loop, run without emitting, so the two can never disagree about which sets are
+ *  which.
  *
- *  It is the LICENCE BOUNDARY at the sort site: on a cyclic set the write-order record names the
- *  compiler's own temp and an instruction says so, and on an acyclic one the record is only an
- *  assumption about layout order. `preferDefPosCopyOrder` asks for the proxy on the second kind
- *  only. */
+ *  It is the LICENCE BOUNDARY the edge-copy sort draws: on a cyclic set an instruction names the
+ *  compiler's temp and the write-order record reproduces it, while on an acyclic one the record is
+ *  only an assumption about layout order. `preferDefPosCopyOrder` asks for the proxy on the second
+ *  kind only. */
 function copySetIsCyclic(copies: { name: string; value: Expr }[]): boolean {
   const pending = copies.map((c) => ({ name: c.name, reads: exprVars(c.value) }));
   for (;;) {

@@ -141,13 +141,12 @@ export interface TargetDescription {
     // Order the parallel-copy assignments at a CFG edge by the order the PREDECESSOR WROTE THEIR
     // DESTINATIONS — the frontend's own measurement (ir/core.ts `WriteOrder`), falling back to a
     // def-position proxy on a predecessor no frontend measured. Not "computation order": a
-    // destination the pred wrote with a value defined somewhere else is a plain register copy, and
-    // it ranks by where that copy sits, not by where its value was computed.
-    // Uniform (true) across all current compilers. Absent ⇒ true; a compiler opts OUT, which turns
-    // the sort OFF entirely and emits in source/param order.
-    // Which of the two ORDERS a measured edge takes is not this flag's question and cannot be: the
-    // benchmark has rows on both sides inside one compiler (mwcc), so the choice is refereed per
-    // row by the `/copy-defpos` candidate in rank.ts, never declared per compiler here.
+    // destination written with a value defined elsewhere is a plain register copy, and it ranks by
+    // where that copy sits, not by where its value was computed. Uniform (true) across all current
+    // compilers; absent ⇒ true, and a compiler that opts OUT turns the sort off entirely and emits
+    // in source/param order. WHICH order a measured edge takes is not this flag's question and
+    // cannot be: the benchmark has rows on both sides inside one compiler (mwcc), so that choice is
+    // refereed per row by `/copy-defpos` (rank.ts), never declared per compiler here.
     orderArgCopiesByWriteOrder?: boolean;
     // Regime-A switch recovery: accept an `x != K` test as a case (the EQUAL side is the case
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
@@ -352,20 +351,18 @@ export const MIPS_GCC: TargetDescription = {
   // and the row it comes from matches only with the parameters as the loop's homes. The other
   // structuring levers take the universal default until a KMC fixture says otherwise.
   //
-  // THIS IS A COMPILER-WIDE GUESS STANDING IN FOR A PER-FUNCTION OBSERVATION, and it is the one
-  // place in this file where that is true of something the assembly states outright: whether the
-  // compiler kept a loop's induction variable in its argument register is visible in every
-  // function, one function at a time. The observation is "the header param's register key IS the
-  // key the entry value already lives in" — known to the SSA builder (`frontend/ssa.ts` `phiKey`)
-  // and to this file (`argRegs`), and unexposed for the same reason the write order was unexposed
-  // until this round. Exposing it would replace two booleans (here and PPC_MWCC's "false until a
-  // CW loop fixture says otherwise") with a measurement.
-  // NOT the nearby proxy, which was built and measured: adopting the entry value's name exactly
-  // when the forward predecessor did not WRITE the param's key — a question the write-order record
-  // already answers — moves 36 of the 736 synthetic rows and costs four matches net (continueloop,
-  // countpos and loopif on mwcc plus dmafill, dmaptrsrc and dmastride on agbcc lost; maxarr and
-  // preupdate_exit_call on agbcc gained). The proxy is not the observation: a pred that computes
-  // the initial value INTO the param's own register wrote the key and still coalesces.
+  // THIS IS A COMPILER-WIDE GUESS STANDING IN FOR A PER-FUNCTION OBSERVATION the assembly states
+  // outright: whether the compiler kept a loop's induction variable in its argument register. What
+  // would say it is "the header param's register key IS the key the entry value already lives in" —
+  // known to the SSA builder (`frontend/ssa.ts` `phiKey`) and to this file (`argRegs`), unexposed.
+  // Exposing it would replace two booleans (here, and PPC_MWCC's "false until a CW loop fixture
+  // says otherwise") with a measurement.
+  // NOT the obvious proxy for it, which was built and measured: adopting the entry value's name
+  // when the forward predecessor did not WRITE the param's key moves 36 of the 736 synthetic rows
+  // and costs four matches net (continueloop, countpos and loopif on mwcc plus dmafill, dmaptrsrc
+  // and dmastride on agbcc lost; maxarr and preupdate_exit_call on agbcc gained) — because a pred
+  // that computes the initial value INTO the param's own register wrote the key and still
+  // coalesces.
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   compilerBehaviors: { coalesceLoopInit: true, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
 };

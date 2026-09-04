@@ -167,9 +167,9 @@ function tryScore(
 // (The IR is plain data; values keep identity within the clone.) Typed field-by-field against
 // Fn: a field added to Fn/Block/Op is a compile error HERE, not a silently-dropped field in
 // every score probe — which is why `Fn.writeOrder` is declared REQUIRED-but-possibly-undefined
-// (`ir/core.ts`) rather than optional. An optional field is not a compile error to omit, and a
-// side table the structurer reads and this clone drops makes the probe's scoreDelta a fact about
-// a program asmlift does not emit.
+// (`ir/core.ts`) rather than optional: omitting an optional field is no compile error, and a side
+// table the structurer reads and this clone drops makes the probe's scoreDelta a fact about a
+// program asmlift does not emit.
 export function structuredCloneFn(fn: Fn): Fn {
   const map = new Map<Value, Value>();
   const cv = (v: Value): Value => {
@@ -197,11 +197,10 @@ export function structuredCloneFn(fn: Fn): Fn {
       }
     }
   }
-  // The write-order record is keyed by OBJECTS (pred block, destination param), so carrying the
-  // reference would be inert: every key here is a fresh object and every lookup would miss,
-  // leaving each destination with no record — a different, and worse, program than the headline.
-  // Entries for blocks a pass already dropped from `fn.blocks` (foldWriteOrder leaves the source
-  // block's own entries behind) have no counterpart and are not carried; nothing reads them.
+  // Re-keyed, not shared: the record is keyed by OBJECTS (pred block, destination param), so
+  // carrying the reference would leave every lookup missing the clone's fresh objects and every
+  // destination with no record. Entries for blocks a pass already dropped from `fn.blocks`
+  // (`foldWriteOrder` leaves the source block's behind) have no counterpart and nothing reads them.
   const wo = fn.writeOrder;
   const writeOrder: WriteOrder | undefined = wo && {
     lastWrite: new Map(

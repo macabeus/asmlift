@@ -59,28 +59,22 @@ export interface Fn {
  *  that reached its final value FIRST is the one whose old value had to be saved elsewhere — the
  *  temp — because the copies that still read that old value run after it. Sorting an edge's copies
  *  by this record puts that copy first, so the sequentializer's first-copy spill reproduces the
- *  compiler's temp instead of guessing from def positions (where an in-block def and an incoming
- *  param have no common scale, and the param always sorts first). LAST write, not first: a
- *  predecessor commonly writes one key several times (1,867 of 5,283 records over three checkouts),
- *  and the value the edge carries is the one the last write left.
+ *  compiler's temp instead of guessing from def positions, where an in-block def and an incoming
+ *  param have no common scale. LAST write, not first: a predecessor commonly writes one key several
+ *  times (1,867 of 5,283 records over three checkouts), and the edge carries what the last left.
  *
  *  Keyed by OBJECTS (the predecessor block, the destination param), never by arg position, so the
  *  param splices in `ir/simplify.ts` cannot leave it stale. A pass that moves one block's ops into
  *  another owes `foldWriteOrder`.
  *
  *  MEASUREMENT IS PER FUNCTION, NOT PER BLOCK. The SSA builder measures every block it builds, so
- *  `writes` is either EMPTY (parsed or hand-built IR — nobody measured this function) or TOTAL, and
- *  `ir/verify.ts` rejects the mixed state rather than leaving it to a reader to interpret. A reader
- *  still asks per BLOCK (`structure.ts` `predIsMeasured`) because that is how a wholly unmeasured fn
- *  takes the def-position proxy without a second query — but a missing entry means "no frontend
- *  measured this function", never "this block wrote nothing". THAT is an entry whose `lastWrite`
- *  map holds no destination of the edge, which is a different case with its own golden.
- *
- *  HALF OF THAT OBLIGATION IS CHECKED, not merely stated: `ir/verify.ts` runs after every mutating
- *  pass and rejects a MEASURED fn holding a block with no entry — a block a pass minted or dropped
- *  the entry of — and an ordinal outside its own block's write count. What no snapshot of the IR
- *  can show is ops MOVED between two measured blocks with the fold forgotten; that half is a review
- *  obligation until the record hangs on `Successor` itself. */
+ *  `writes` covers every block or the record is absent/empty (parsed or hand-built IR — nobody
+ *  measured this function); `ir/verify.ts` rejects the mixed state, and says there what that check
+ *  does and does not reach. A reader still asks per BLOCK (`structure.ts` `predIsMeasured`), which
+ *  is how a wholly unmeasured fn takes the def-position proxy without a second query — but a
+ *  missing entry means "no frontend measured this function", never "this block wrote nothing". The
+ *  latter is an entry whose `lastWrite` holds no destination of the edge, its own case with its own
+ *  golden. */
 export interface WriteOrder {
   /** pred → (param of a successor → ordinal, among the pred's writes, of its LAST write to the key
    *  that param stands for). No entry ⇒ the pred did not write the key; the arg passes through. */
@@ -92,10 +86,10 @@ export interface WriteOrder {
 /** `from`'s writes now happen at the END of `into` — the bookkeeping a pass owes when it moves one
  *  block's ops (or the edge copies an empty block stood for) into another. Each of `from`'s records
  *  lands under `into` at its ordinal plus `into`'s own write count, so a key `into` wrote itself
- *  still sorts before everything `from` wrote, and `into`'s count grows so a later fold onto it
- *  composes the same way. Refuses when `into` was never measured: a block no builder counted has no
- *  place to put `from`'s writes after, and reading it as "wrote nothing of its own" would be a
- *  guess. `from`'s own entries stay; a block a pass removes from the CFG is never read again. */
+ *  still sorts first and a later fold onto `into` composes the same way. REFUSES when `into` was
+ *  never measured: a block no builder counted has no place to put `from`'s writes after, and
+ *  reading it as "wrote nothing of its own" would be a guess. `from`'s own entries stay; a block a
+ *  pass removes from the CFG is never read again. */
 export function foldWriteOrder(order: WriteOrder | undefined, from: Block, into: Block): void {
   const base = order?.writes.get(into);
   if (order === undefined || base === undefined) {

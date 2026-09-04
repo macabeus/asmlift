@@ -146,8 +146,7 @@ function runTower(
   const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
   // Every dump carries the write-order record (ir/print.ts `PrintOptions`): it decides the
-  // edge-copy order, the raising folds mutate it, and a reader comparing two dumps must be
-  // comparing the whole program state.
+  // edge-copy order and the raising folds mutate it, so two dumps compare whole program states.
   const raw = print(fn, { writeOrder: true });
   // (1.5) the ARRAY SHAPES this function's own assembly evidences, for globals the project map
   // does not describe. Read HERE, off the lifted fn, because the fact it needs — whether the base

@@ -54,10 +54,10 @@ describe('what merges', () => {
   // for a differing DEAD statement, with a second cause: `structure.ts`'s edge-copy sort decides
   // which of an arm's trailing copies comes last, so the write-order record and the def-position
   // proxy can put the agreeing one on either side of the differing one. Measured on klonoa
-  // `CountCollectedGems` (map-less, agbcc): the record's order leaves five copies of
-  // `v22 = (s32 *)50345232;` inside the arms where the proxy's order merges them into one — and
-  // with THIS PASS disabled both orders emit all six, which is what says the duplication is this
-  // peel not firing, and not something the sort creates.
+  // `CountCollectedGems` (map-less, agbcc): the record's order emits six copies of
+  // `v22 = (s32 *)50345232;` where the proxy's order merges them into one — and with THIS PASS
+  // disabled both orders emit all six, which is what says the duplication is this peel not firing
+  // and not something the sort creates.
   test('…and an AGREEING statement behind a differing one is not reached', () => {
     const out = mergeCommonTails(fn([iff([asg('a', 1), asg('b', 2)], [asg('a', 1), asg('b', 9)])]));
     expect(kinds(out.body)).toEqual(['if']);

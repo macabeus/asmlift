@@ -170,13 +170,12 @@ const CASES: OfflineCase[] = [
   // `while (b) { t = b; b = a % b; a = t; }` — a cyclic copy at the latch, which `sequentialize`
   // breaks by spilling the first pending destination. Every one of these compilers overwrote the
   // DIVISOR's register first (`bl __modsi3`→r0, `mfhi a1`, `subf r4`) and copied its old value to a
-  // scratch beforehand, so the temp must be `t0 = <divisor>`; the def-position proxy spilled the
-  // dividend on all four. The frontend's write-order record (ir/core.ts `WriteOrder`) is what the
-  // structurer reads to get this right, and on agbcc it also orders the ENTRY copies (`add r2, r0`
-  // before `add r0, r1` ⇒ `v1 = a0; v0 = a1;`). All four are benchmark rows: synthetic:gcd:agbcc,
-  // synthetic:gcd:gcc2.7.2kmc, synthetic:gcd:ido7.1 and synthetic:gcd:mwcc_242_81 — every one
-  // scores MATCH with exactly this text (kmc's needs its loop homed on the parameters as well:
-  // `coalesceLoopInit`, a per-compiler default).
+  // scratch beforehand, so the temp must be `t0 = <divisor>` — where the def-position proxy spills
+  // the dividend on all four. The frontend's write-order record (ir/core.ts `WriteOrder`) is what
+  // the structurer reads to get this right, and on agbcc it also orders the ENTRY copies
+  // (`add r2, r0` before `add r0, r1` ⇒ `v1 = a0; v0 = a1;`). All four are benchmark rows —
+  // synthetic:gcd on agbcc, gcc2.7.2kmc, ido7.1 and mwcc_242_81 — and each scores MATCH with
+  // exactly this text (kmc's also needs its loop homed on the parameters: `coalesceLoopInit`).
   {
     file: 'agbcc-gcd.s',
     sym: 'gcd',
