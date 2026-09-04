@@ -173,6 +173,49 @@ attribution line for every decline naming its first blocker. Constraints learned
   a future `/match-function` should build first. Push the branch and open the PR.
 - Then `scripts/pr-wait.sh <pr>` — it polls the PR's real state under a deadline and exits with the ANSWER (0 merged · 1 a check failed · 2 still pending, nothing decided · 3 green and ready to merge). Never ask a human whether CI is green or whether the PR merged; that question was asked six times in one session and the script answers all six.
 
+## Cost discipline — measured, and a rule rather than a preference
+
+Read off this project's own logs, not estimated:
+
+| command | cost |
+| --- | --- |
+| `pnpm bench run` (all tiers) | **~1800 s** — synthetic 182 s + real 1618 s |
+| `pnpm bench run --tier synthetic` | **~182 s** |
+| `pnpm bench run --tier <t> --only <sym>` | 5–15 s |
+| a ranked run at LoadBGTilemapData scale | 1500–8000 s |
+| `npx vitest run` (root config) | ~120 s |
+
+**A full `pnpm bench run` runs EXACTLY TWICE in a round: once at the zero-flip gate, and once at
+ship after the final rebase.** Everything else uses the scoped forms — the synthetic tier for a
+broad sanity check, `--only` for the rows a change can reach. This is not a style note. One round
+ran it **eleven times**, four of them inside a single remediation agent, and spent about four and a
+half hours on nine runs that the scoped forms answer in three minutes. The real tier is ~90% of the
+cost and is dominated by asmlift's own enumeration, which is the thing under test and therefore
+uncacheable — so the saving comes from not repeating it, never from making it faster.
+
+If you believe a third full run is genuinely needed, run it and **say in your report why** — a
+stated reason is fine, a silent extra half hour is not.
+
+### Start the long command, then keep working
+
+A full bench and a ranked run are pure waiting. Launch one in the BACKGROUND at the start of a
+phase whose other work does not depend on its answer, and read the log at the end:
+
+```sh
+( pnpm bench run > /tmp/<round>-bench.log 2>&1; echo "EXIT=$?" >> /tmp/<round>-bench.log ) &
+… meanwhile: read the diff, grep the corpus, run the unit tests, draft the report …
+until grep -q 'EXIT=' /tmp/<round>-bench.log; do sleep 30; done
+```
+
+**Wait on a log marker, never on `pgrep -f "<pattern>"`** when the pattern also matches your own
+waiting shell — five waiter shells once deadlocked on each other for eight hours doing exactly
+that, long after the jobs they watched had finished.
+
+**Two full benches must never overlap on this machine.** It has 10 cores, the run fans 8 shards,
+and a ranked run takes `--jobs 6`; a bench measured **2704 s against a neighbour versus 1800 s
+solo**. Worse than slow: a shard killed by a neighbour writes a partial tier with **no error line**,
+and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line.
+
 ---
 
 ## Hard rules
