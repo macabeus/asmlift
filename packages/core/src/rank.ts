@@ -64,7 +64,7 @@ import {
   hasLoopSharedPureValue,
   hasMergeFeedHome,
 } from './structure/analysis';
-import { hasParamRootedMerge } from './structure/structure';
+import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
 import { C_TYPEDEFS, type TargetDescription, structureOptionsFor } from './target';
 
@@ -94,7 +94,8 @@ interface StructuringAxis {
     | 'derivedHome'
     | 'mergeHome'
     | 'unsCmp'
-    | 'freshMerge';
+    | 'freshMerge'
+    | 'copyDefPos';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -253,6 +254,30 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/fresh-merge',
     options: (on) => ({ freshParamMerge: on }),
     probeGate: (probe) => hasParamRootedMerge(probe),
+    strip: true,
+  },
+  // `/copy-defpos` — the EDGE-COPY ORDER axis (structure.ts `preferDefPosCopyOrder`). The frontend
+  // measures the order each predecessor wrote its successors' keys (ir/core.ts `WriteOrder`) and
+  // the default lays the edge's copies out in it. That the compiler laid its copies out in the
+  // order it wrote them is only licensed for a CYCLIC copy set, where the spill has to be the
+  // register whose old value was displaced first; for an acyclic set it is an assumption, and the
+  // benchmark answers it BOTH WAYS INSIDE ONE COMPILER: `synthetic:gcd:mwcc_242_81` matches only
+  // with the record, while `memcpy1:mwcc_242_81` (19 → 23) and `memset1:mwcc_242_81` (19 → 21)
+  // score worse with it, as does `armfall:agbcc` (8 → 11). A per-compiler boolean cannot decide a
+  // question with rows on both sides of it inside one compiler, and a lever that emits one tree
+  // referees nothing — so the def-position spelling is enumerated beside the record's and the
+  // differ picks, exactly as `/fresh-merge` above does for the merge home.
+  //
+  // Gated on the two orders actually differing somewhere in this function, so on a row where the
+  // record changes nothing the pair is one tree and the fan does not grow. Structural — it reads
+  // the lifted graph and the record, neither of which the symbol variant changes — so no
+  // `variantGate`. `strip` like its neighbours: a reordering cannot rescue a spelling whose OFF
+  // sibling failed the boundary contracts.
+  {
+    flag: 'copyDefPos',
+    suffix: '/copy-defpos',
+    options: (on) => ({ preferDefPosCopyOrder: on }),
+    probeGate: (probe) => edgeCopyOrdersDiffer(probe),
     strip: true,
   },
 ];
@@ -1304,6 +1329,7 @@ export function enumerateCandidates(
     mergeHome: false,
     unsCmp: false,
     freshMerge: false,
+    copyDefPos: false,
   }));
   for (const ax of STRUCTURING_AXES) {
     if (ax.probeGate === undefined || ax.probeGate(probe, probeDefs)) {

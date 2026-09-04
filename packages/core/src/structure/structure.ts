@@ -817,6 +817,51 @@ const NO_RECORD = -1;
  *  falls back to the def-position proxy. */
 const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, number>();
 
+/** Does the write-order record order some edge's copies differently from the def-position proxy?
+ *  rank.ts's enumeration gate for `/copy-defpos`: where the two orders agree, the sibling is the
+ *  same tree and the fan does not grow, so the gate exists to keep the pair off the rows where the
+ *  question has no content at all.
+ *
+ *  A SUPERSET of the real sort, on purpose and in the safe direction: it runs on the LIFTED edge
+ *  before `keepSlot`/`suppressedArgs` drop copies and before the tower rewrites the graph, so it
+ *  can answer true for a pair that later collapses (the tree dedup then eats it) but never false
+ *  for one that does not. Mirrors the two comparators at the sort site rather than re-deriving
+ *  them — including the stability that decides ties. */
+export function edgeCopyOrdersDiffer(fn: Fn): boolean {
+  const order = fn.writeOrder;
+  if (order === undefined) {
+    return false;
+  }
+  const defs = defOpMap(fn);
+  for (const pred of fn.blocks) {
+    if (!order.writes.has(pred)) {
+      continue;
+    }
+    const rec = order.lastWrite.get(pred) ?? NO_WRITTEN_DESTINATIONS;
+    const opAt = new Map(pred.ops.map((o, i) => [o, i] as const));
+    for (const op of pred.ops) {
+      for (const succ of op.successors) {
+        if (succ.args.length < 2) {
+          continue;
+        }
+        const slots = succ.args.map((_, i) => i);
+        const proxyPos = (i: number) => {
+          const d = defs.get(succ.args[i]);
+          return d !== undefined && opAt.has(d) ? opAt.get(d)! : NO_RECORD;
+        };
+        const byRecord = [...slots].sort(
+          (a, b) => (rec.get(succ.block.params[a]) ?? NO_RECORD) - (rec.get(succ.block.params[b]) ?? NO_RECORD),
+        );
+        const byProxy = [...slots].sort((a, b) => proxyPos(a) - proxyPos(b));
+        if (byRecord.some((v, i) => v !== byProxy[i])) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 // A bottom-tested `do { body } while(cond)`. The header is the body entry (entered before any
 // test); the LATCH holds the loop condition and the single exit. Body = header..latch structured, then
 // the latch's own ops + the loop-update; the latch test is the do-while condition. The condition is
@@ -946,6 +991,11 @@ export interface StructureOptions {
   // spelling is the faithful one and only the differ can choose.
   negateJoinedBranchSense?: boolean;
   orderArgCopiesByWriteOrder?: boolean;
+  /** Order a measured edge's copies by the DEF-POSITION PROXY anyway — the `/copy-defpos` ranked
+   *  sibling of the write-order spelling (rank.ts). Not a target field and deliberately not one:
+   *  which of the two orders a compiler laid out is two-sided inside one compiler, so the differ
+   *  referees it per row. Inert on an unmeasured pred, where the proxy is already what runs. */
+  preferDefPosCopyOrder?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
@@ -1225,6 +1275,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     preserveDivergentBranchSense = true,
     negateJoinedBranchSense = preserveDivergentBranchSense,
     orderArgCopiesByWriteOrder = true,
+    preferDefPosCopyOrder = false,
     switchAllowsNeqCase = true,
     switchAllowsBoundCase = false,
     switchArmsFollowLayout = false,
@@ -3291,7 +3342,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // UNMEASURED (undefined) is not "wrote nothing": parsed IR and a block a pass minted have no
       // record at all, and their edges keep the def-position proxy. A MEASURED pred that recorded
       // no destination of this edge is a different thing, and gets an empty record.
-      const predIsMeasured = fn.writeOrder?.writes.has(pred) ?? false;
+      const predIsMeasured = !preferDefPosCopyOrder && (fn.writeOrder?.writes.has(pred) ?? false);
       const record = predIsMeasured ? (fn.writeOrder!.lastWrite.get(pred) ?? NO_WRITTEN_DESTINATIONS) : undefined;
       const rank =
         record !== undefined
