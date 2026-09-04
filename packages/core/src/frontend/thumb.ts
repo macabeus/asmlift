@@ -144,7 +144,7 @@ const COND_OPCODE: Record<string, Opcode> = {
 // as instruction shapes. A third encoding added to one and forgotten in the other would produce a
 // pad nothing ever prunes, silently and with no test failing — so a test walks this table through
 // that predicate.
-export const PAD_ENCODINGS: { hw: number; mnemonic: string; ops: string[] }[] = [
+const PAD_ENCODINGS: { hw: number; mnemonic: string; ops: string[] }[] = [
   { hw: 0x0000, mnemonic: 'lsls', ops: ['r0', 'r0', '#0x00'] },
   { hw: 0x46c0, mnemonic: 'nop', ops: [] },
 ];
@@ -154,7 +154,7 @@ export const PAD_ENCODINGS: { hw: number; mnemonic: string; ops: string[] }[] = 
  *  (degenerate) instruction and is kept. `lsl`/`lsls r0, r0, #0` is how 0x0000 is written; 0x46C0
  *  is `nop`, and the `mov r8, r8` spelling of it is normalised to `nop` at parse — so there is no
  *  r8 clause here, and this predicate judges exactly the shapes PAD_ENCODINGS can produce. */
-export const isPadInstr = (i: Instr) =>
+const isPadInstr = (i: Instr) =>
   i.mnemonic === 'nop' ||
   ((i.mnemonic === 'lsl' || i.mnemonic === 'lsls') &&
     i.ops[0] === 'r0' &&
@@ -182,6 +182,19 @@ function padHalfword(v: number): Instr | null {
 }
 
 type XferKind = 'return' | 'uncond' | 'cond' | 'indirect';
+
+/** Does straight-line control continue past this instruction into the bytes that follow it? The
+ *  ONE definition, used by the pre-layout fill scan and by the block-level fall-into-data scan —
+ *  they ask the same question of different representations and used to spell the answer twice.
+ *  Only an open instruction or a conditional branch continues. A `return`, an `uncond` branch and
+ *  an `indirect` (computed/loaded PC write) all seal what follows: for `indirect` that is a
+ *  DELIBERATE conservatism, not an oversight — this frontend does not model where a computed jump
+ *  goes, so it cannot claim the next bytes are entered, and it declines on such a transfer
+ *  elsewhere rather than guessing here. */
+const controlContinuesPast = (ins: Instr) => {
+  const k = classifyXfer(ins);
+  return k === null || k === 'cond';
+};
 function classifyXfer(ins: Instr): XferKind | null {
   const mn = ins.mnemonic;
   if (mn === 'b') {
@@ -461,15 +474,45 @@ interface Candidate {
   fills: { site: number; start: number; bytes: number }[];
 }
 
+/** One fact a candidate layout decided, as DATA rather than as a sentence. Two candidates are
+ *  compared by these, so the comparison cannot depend on how a message happens to be worded — and
+ *  a fact that must distinguish two layouts cannot lose the thing that distinguishes them. The
+ *  branch target is an ITEM identity, never a byte offset: one layout's offsets mean nothing in
+ *  the other. A target inside alignment fill carries WHICH fill and how far in, because two
+ *  layouts that send the same branch into different fill sites disagree. */
+type LayoutFact =
+  | { kind: 'branch'; at: number; to: { item: number } | { fill: number; off: number } | { off: number } }
+  | { kind: 'load'; at: number; value: string }
+  | { kind: 'fill'; site: number; bytes: number };
+
 /** A candidate that survived resolution: the rewritten stream, the literal pools it discovered,
- *  and the WITNESS — every fact this layout decided, phrased so two candidates can be COMPARED
- *  rather than merely counted. */
+ *  and the WITNESS — every fact this layout decided, so two candidates can be COMPARED rather
+ *  than merely counted. */
 interface Resolved {
   base: number;
   items: FlatItem[];
   pools: Map<string, string[]>;
-  witness: string[];
+  witness: LayoutFact[];
 }
+
+/** The canonical serialisation a witness is compared BY, and the prose it is reported AS. Keeping
+ *  them apart is the point: rewording `sayFact` changes a message, never a decision. */
+const factKey = (f: LayoutFact) => JSON.stringify(f);
+const sayFact = (f: LayoutFact): string => {
+  if (f.kind === 'load') {
+    return `pc-relative load at item ${f.at} → ${f.value}`;
+  }
+  if (f.kind === 'fill') {
+    return `alignment fill at item ${f.site} is ${f.bytes} bytes`;
+  }
+  const to =
+    'item' in f.to
+      ? `item ${f.to.item}`
+      : 'fill' in f.to
+        ? `alignment fill at item ${f.to.fill} (+${f.to.off} bytes)`
+        : `byte offset 0x${f.to.off.toString(16)}, which is no item`;
+  return `raw branch at item ${f.at} → ${to}`;
+};
 
 function decode(
   name: string,
@@ -809,6 +852,15 @@ function decode(
       }
     }
     const headsData = (l: string) => dataWords.has(l) || subwordData.has(l);
+    // A LINEAR, PRE-LAYOUT APPROXIMATION of the CFG walk forty lines below — not a second opinion
+    // about it. Ordering forces the approximation: the real walk needs blocks, blocks need the
+    // item stream, and the item stream needs the fill sizes this predicate is being asked about.
+    // So it answers "can control reach these bytes" by scanning backwards over `flat` instead of
+    // forwards over the CFG, which makes it CONSERVATIVE in one direction on purpose: it looks at
+    // the nearest preceding instruction and does not ask whether THAT instruction is itself
+    // reachable, so a pad in front of an unsizable `.align` reads as "control continues". Loud
+    // where the walk would be quiet, never the reverse. `controlContinuesPast` is shared with the
+    // block-level scan so the two cannot drift on what a transfer kind means.
     const fillIsReachable = (upto: number) => {
       for (let j = upto - 1; j >= 0; j--) {
         const g = flat[j];
@@ -819,8 +871,7 @@ function decode(
           continue; // a label nothing names — or one naming data — cannot bring control here
         }
         if (g.instr) {
-          const k = classifyXfer(g.instr);
-          return k === null || k === 'cond';
+          return controlContinuesPast(g.instr);
         }
         // data: not executed — keep looking for the instruction whose flow reaches this point
       }
@@ -956,7 +1007,7 @@ function decode(
         basePar: number | undefined,
       ): Resolved => {
         const pools = new Map<string, string[]>();
-        const observed: string[] = [];
+        const observed: LayoutFact[] = [];
         const fillEntered = new Set<number>(); // fill sites a raw branch lands inside
         const labelOff = new Map<string, number>();
         const codeStart = new Set<number>(); // offsets that begin an instruction or carry a label
@@ -1031,11 +1082,21 @@ function decode(
               fillEntered.add(inFill.site);
             }
             // The branch is witnessed by WHICH item it lands on, not by the byte offset: the
-            // offsets of one layout mean nothing in the other.
+            // offsets of one layout mean nothing in the other. A target inside fill names the fill
+            // SITE and the distance into it — rendering it as the bare words `alignment fill` made
+            // two layouts that send the same branch into DIFFERENT fill sites compare equal, which
+            // is precisely the disagreement this witness exists to establish.
             const ti = items.findIndex((_g, j) => itemOff[j] === br.target);
-            observed.push(
-              `raw branch at item ${from[i]} → ${ti < 0 ? '?' : from[ti] < 0 ? 'alignment fill' : `item ${from[ti]}`}`,
-            );
+            observed.push({
+              kind: 'branch',
+              at: from[i],
+              to:
+                ti >= 0 && from[ti] >= 0
+                  ? { item: from[ti] }
+                  : inFill
+                    ? { fill: inFill.site, off: br.target - inFill.start }
+                    : { off: br.target },
+            });
           });
         });
         // Pass 2: pc-relative literal loads → rewrite to a synthesized pool label so the existing
@@ -1077,7 +1138,7 @@ function decode(
           const poolLab = `.Lpcpool_${wordOff.toString(16)}`;
           pools.set(poolLab, [value]);
           f.instr = { mnemonic: 'ldr', ops: [f.instr!.ops[0], poolLab] };
-          observed.push(`pc-relative load at item ${from[i]} → ${value}`);
+          observed.push({ kind: 'load', at: from[i], value });
         });
         // Pass 3: rebuild the stream — insert synthesized target labels, replace decoded halfwords.
         const next: FlatItem[] = [];
@@ -1095,10 +1156,10 @@ function decode(
         });
         for (const fl of fills) {
           if (fl.bytes > 0 && (!sealedFill[fl.site] || fillEntered.has(fl.site))) {
-            observed.push(`alignment fill at item ${fl.site} is ${fl.bytes} bytes`);
+            observed.push({ kind: 'fill', site: fl.site, bytes: fl.bytes });
           }
         }
-        return { base, items: next, pools, witness: observed.sort() };
+        return { base, items: next, pools, witness: observed.sort((a, b) => (factKey(a) < factKey(b) ? -1 : 1)) };
       };
 
       const resolved: Resolved[] = [];
@@ -1136,10 +1197,14 @@ function decode(
       // whose fill is unreachable padding moves the two layouts apart without moving the answer,
       // which is the ordinary shape, not a corner. Only a difference in what the layouts decided
       // is a refusal, and the message quotes the difference it found.
-      const other = resolved.find((r) => r.witness.join('\n') !== resolved[0].witness.join('\n'));
+      const seal = (r: Resolved) => r.witness.map(factKey).join('\n');
+      const other = resolved.find((r) => seal(r) !== seal(resolved[0]));
       if (other) {
-        const only = (a: Resolved, b: Resolved) => a.witness.filter((w) => !b.witness.includes(w));
-        const say = (w: string[]) => (w.length > 0 ? w.join('; ') : 'nothing');
+        const only = (a: Resolved, b: Resolved) => {
+          const bk = new Set(b.witness.map(factKey));
+          return a.witness.filter((w) => !bk.has(factKey(w)));
+        };
+        const say = (w: LayoutFact[]) => (w.length > 0 ? w.map(sayFact).join('; ') : 'nothing');
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': alignment padding depends on the function's base alignment, which this ` +
             `input does not determine — base ${resolved[0].base} and base ${other.base} both decode ` +
@@ -1184,11 +1249,8 @@ function decode(
             prev = blocks[j];
           }
         }
-        if (prev) {
-          const k = classifyXfer(prev.instrs[prev.instrs.length - 1]);
-          if (k === null || k === 'cond') {
-            fallsIntoData.add(prev.label);
-          }
+        if (prev && controlContinuesPast(prev.instrs[prev.instrs.length - 1])) {
+          fallsIntoData.add(prev.label);
         }
         cur = null;
         continue;
@@ -1284,7 +1346,7 @@ function decode(
         if (kind === 'cond' || kind === 'uncond') {
           targets.push(last.ops[0]);
         }
-        if (kind === null || kind === 'cond') {
+        if (last && controlContinuesPast(last)) {
           const fall = live[i + 1]?.label;
           if (fall !== undefined && !fallsIntoData.has(b.label)) {
             targets.push(fall);
@@ -1301,7 +1363,7 @@ function decode(
       for (const b of live) {
         if (fallsIntoData.has(b.label) && reach.has(idx.get(b.label)!)) {
           const last = b.instrs[b.instrs.length - 1];
-          if (!last || classifyXfer(last) === null || classifyXfer(last) === 'cond') {
+          if (!last || controlContinuesPast(last)) {
             throw new FrontendUnsupportedError(
               `cannot lift '${name}': reachable code in block '${b.label}' falls through into data bytes`,
             );
@@ -4119,3 +4181,10 @@ export function lift(
 
 /** The ARMv4T / Thumb (agbcc) frontend, registered for the `armv4t` target. */
 export const thumbFrontend: Frontend = { id: 'thumb', inputFormat: 'gnu-as', lift };
+
+/** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports
+ *  every source path under `./*`, so a plain `export` here would put the pad table, the pad
+ *  predicate and the witness serialisation into the package's public API — three things no
+ *  consumer should be able to depend on, exported only so a cross-check test could reach them.
+ *  The name says what it is; nothing in `src` reads it. */
+export const __testing = { PAD_ENCODINGS, isPadInstr, factKey, sayFact };

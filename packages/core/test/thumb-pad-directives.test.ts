@@ -15,9 +15,11 @@
 import { describe, expect, test } from 'vitest';
 
 import { FrontendUnsupportedError } from '../src/frontend/errors';
-import { PAD_ENCODINGS, isPadInstr } from '../src/frontend/thumb';
+import { __testing } from '../src/frontend/thumb';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
+
+const { PAD_ENCODINGS, isPadInstr, factKey, sayFact } = __testing;
 
 const d = (name: string, asm: string) => decompile(name, asm, ARMV4T_AGBCC);
 
@@ -724,6 +726,32 @@ ${dir}
       expect(() => d('Bar', inside(dir))).toThrow(FrontendUnsupportedError);
       expect(() => d('Bar', inside(dir))).toThrow(/emits fill into the code stream/);
     }
+  });
+});
+
+describe('the witness is compared as data, not as prose', () => {
+  test('two branches into DIFFERENT fill sites are different facts', () => {
+    // The witness exists so that "the two bases disagree" is established rather than asserted. It
+    // used to be compared by string equality of English, and a branch landing inside padding
+    // rendered as the bare words `alignment fill` with no site — so two layouts that sent the
+    // same branch into different fills produced byte-identical witnesses and were declared to
+    // agree, one level down from the failure the witness was introduced to fix.
+    const a = { kind: 'branch', at: 3, to: { fill: 5, off: 0 } } as const;
+    const b = { kind: 'branch', at: 3, to: { fill: 9, off: 0 } } as const;
+    const c = { kind: 'branch', at: 3, to: { fill: 5, off: 2 } } as const;
+    expect(factKey(a)).not.toBe(factKey(b));
+    expect(factKey(a)).not.toBe(factKey(c));
+    expect(factKey(a)).toBe(factKey({ kind: 'branch', at: 3, to: { fill: 5, off: 0 } }));
+    // …and the site survives into the prose, which is now rendered FROM the fact rather than
+    // being the fact. Rewording this string changes a message; it can no longer change a decision.
+    expect(sayFact(a)).toContain('item 5');
+    expect(sayFact(b)).toContain('item 9');
+  });
+
+  test('a branch onto an item and a branch into fill are never the same fact', () => {
+    expect(factKey({ kind: 'branch', at: 1, to: { item: 4 } })).not.toBe(
+      factKey({ kind: 'branch', at: 1, to: { fill: 4, off: 0 } }),
+    );
   });
 });
 
