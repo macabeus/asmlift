@@ -766,11 +766,18 @@ function decode(
     // and its fill bytes are still in the instruction stream. If anything can execute them the
     // function cannot be lifted, whether or not the slice needs byte offsets for another reason;
     // reading the size question as a LAYOUT question only is what let a `.2byte 0x0000` pad, once
-    // decoded at parse time, carry a `.align 2` past this check into a silent lift. The hazard
-    // sits at the item BEFORE the directive, so the fill would occupy the next slice position.
+    // decoded at parse time, carry a `.align 2` past this check into a silent lift.
+    //
+    // The hazard is recorded at the item BEFORE the directive (`flat.length - 1` at push time), so
+    // its fill occupies slice position `at - sliceStart + 1`. The lower bound is `sliceStart`, not
+    // `sliceStart - 1`: `allFlat[sliceStart]` is the function's OWN label, so an align inside the
+    // slice always records `at >= sliceStart` — and `at === sliceStart - 1` can only mean the
+    // directive sits between the previous function's last item and this function's entry label,
+    // i.e. its fill is emitted at addresses BELOW this function and belongs to the sibling.
+    // Admitting it declined every function that merely FOLLOWED an unsizable alignment, which is
+    // the poisoning the allFlat-position bookkeeping exists to prevent (see `hazards` above).
     const liveHazard = hazards.find(
-      (h) =>
-        h.code && h.at >= sliceStart - 1 && h.at < boundaries[boundaryIdx] && fillIsReachable(h.at - sliceStart + 1),
+      (h) => h.code && h.at >= sliceStart && h.at < boundaries[boundaryIdx] && fillIsReachable(h.at - sliceStart + 1),
     );
     if (liveHazard) {
       throw new FrontendUnsupportedError(

@@ -542,6 +542,52 @@ fb:
   });
 });
 
+describe('an unsizable alignment is scoped to the function whose bytes it emits', () => {
+  // The hazard is recorded by allFlat POSITION so that a directive between two functions cannot
+  // poison a sibling — a property the parser comment states and nothing pinned, because every
+  // other fixture in this file holds exactly one function.
+  const two = (dir: string) => `	thumb_func_start Foo
+Foo:
+	movs r0, #0x01
+	bx lr
+${dir}
+	thumb_func_start Bar
+Bar:
+	movs r0, #0x02
+	bx lr
+`;
+
+  test('a directive in the PREVIOUS function tail leaves the next function alone', () => {
+    // Its fill is emitted at addresses below `Bar`'s entry label, so no instruction of `Bar` can
+    // execute it and none of `Bar`'s offsets move. The hazard sits at the item BEFORE the
+    // directive, which for this shape is `Foo`'s last item — one slot below `Bar`'s slice.
+    for (const dir of ['	.align 2', '	.align 4, 0', '	.balign 8', '	.align 2, 0, 4', '	.align 2, 0xFF']) {
+      expect(d('Bar', two(dir)).source).toBe('s32 Bar(void) {\n    return 2;\n}\n');
+      // …and `Foo` itself still lifts: the fill is sealed off by its `bx lr`.
+      expect(d('Foo', two(dir)).source).toBe('s32 Foo(void) {\n    return 1;\n}\n');
+    }
+  });
+
+  test('the same directive INSIDE the function still declines', () => {
+    // The mirror: move the identical text one line down, past `Bar`'s entry label, and its fill is
+    // in `Bar`'s own instruction stream at a point control reaches.
+    const inside = (dir: string) => `	thumb_func_start Foo
+Foo:
+	movs r0, #0x01
+	bx lr
+	thumb_func_start Bar
+Bar:
+	movs r0, #0x02
+${dir}
+	bx lr
+`;
+    for (const dir of ['	.align 2, 0, 4', '	.align 2, 0xFF']) {
+      expect(() => d('Bar', inside(dir))).toThrow(FrontendUnsupportedError);
+      expect(() => d('Bar', inside(dir))).toThrow(/emits fill into the code stream/);
+    }
+  });
+});
+
 describe('the pad encodings are one table', () => {
   test('every instruction padHalfword can emit is one isPadInstr recognises', () => {
     // The knowledge "which bytes are alignment fill" is spelled twice — as encodings in
