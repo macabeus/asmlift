@@ -39,7 +39,22 @@ _end:
   });
 
   test('`.2byte 0x46C0` (the canonical Thumb nop) reads the same way', () => {
-    expect(d('p', withPad('	.2byte 0x46C0')).source).toBe(d('p', withPad('	mov r8, r8')).source);
+    expect(d('p', withPad('	.2byte 0x46C0')).source).toBe(d('p', withPad('	nop')).source);
+  });
+
+  test('a REACHABLE `.2byte 0x46C0` is a NOP, never a live read of r8', () => {
+    // 0x46C0 is what `nop` assembles to on ARM7TDMI, and objdump disassembles it as
+    // `nop @ (mov r8, r8)`. The `mov r8, r8` spelling of it is modelled as a READ of a
+    // callee-saved register, which invents a parameter — so decoding the halfword that way gives
+    // the same two bytes a signature the object does not have. Decode it as the nop it is.
+    const reachable = (pad: string) => `	thumb_func_start np
+np:
+	movs r0, #0x05
+${pad}
+	bx lr
+`;
+    expect(d('np', reachable('	.2byte 0x46C0')).source).toBe(d('np', reachable('	nop')).source);
+    expect(d('np', reachable('	.2byte 0x46C0')).source).toBe('s32 np(void) {\n    return 5;\n}\n');
   });
 
   test('a REACHABLE pad halfword is KEPT as its degenerate instruction, never dropped', () => {

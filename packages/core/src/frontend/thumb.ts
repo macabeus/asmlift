@@ -134,7 +134,11 @@ const COND_OPCODE: Record<string, Opcode> = {
 // silently drop — mirroring the MIPS `jr` and PPC `bctr` guards. (agbcc dispatches a dense switch
 // via `mov pc, rN`.)
 // The halfword encodings that ARE alignment fill, and the instruction each one is: 0x0000 is
-// `lsls r0, r0, #0`, 0x46C0 is `mov r8, r8` (ARM7TDMI's Thumb NOP — what `nop` assembles to).
+// `lsls r0, r0, #0`, and 0x46C0 is the ARM7TDMI Thumb NOP — what `nop` assembles to, and what
+// objdump prints as `nop @ (mov r8, r8)`. It is decoded as `nop`, NOT as `mov r8, r8`: the two
+// spell the same encoding, but `mov r8, r8` is modelled downstream as a READ of a callee-saved
+// register, which invents a parameter — the same two bytes would then get a signature the object
+// does not have. Both readings are pad to isPadInstr; only one of them is inert.
 // Returns a FRESH Instr per call: later passes rewrite operands in place.
 //
 // A splitter that writes the pad as data (`.2byte 0x0000`) and one that writes it as an
@@ -147,7 +151,7 @@ function padHalfword(v: number): Instr | null {
     return { mnemonic: 'lsls', ops: ['r0', 'r0', '#0x00'] };
   }
   if (v === 0x46c0) {
-    return { mnemonic: 'mov', ops: ['r8', 'r8'] };
+    return { mnemonic: 'nop', ops: [] };
   }
   return null;
 }
