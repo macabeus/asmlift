@@ -9,9 +9,9 @@
 // exit reached from ≥2 CONDITIONS. `CHAIN` below is that shape with a store between the two
 // conditions, so raise/shortcircuit.ts cannot fuse them and the unfused arm of the gate is the one
 // that answers. `SWITCH_ASM`/`SWITCH_RET` are the shape that is NOT it, and the reason the gate
-// counts conditions rather than predecessors: agbcc's fall-through switch gives case 1's body two
+// counts ARRIVALS rather than predecessors: agbcc's fall-through switch gives case 1's body two
 // predecessors — the dispatch's `beq`, and case 2's body running on — which is a fall-IN, not a
-// chain. Sinking there tail-duplicated a switch's shared return into all five of its paths.
+// chain. Sinking there tail-duplicates a switch's shared return into all five of its paths.
 import { expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
@@ -95,9 +95,9 @@ test('the stranded alias is not spelled as a copy', () => {
 
 test('a chain of two conditions converging on one early exit is still sunk', () => {
   // The shape the gate exists for, unfused (the store between the conditions blocks
-  // raise/shortcircuit.ts), so it is the CFG arm of the gate that answers here. Without it the
-  // three arms share one merge variable and one `return v0;`, which is what regressed the rows
-  // `retsink` was written for.
+  // raise/shortcircuit.ts), so it is the CFG arm of the gate that answers here. Refuse it and the
+  // three arms share one merge variable and one `return v0;` — the spelling the compiler does not
+  // re-emit, and the reason this pass exists.
   const out = decompile('f', CHAIN, ARMV4T_AGBCC, {}).source;
   expect(out).toContain('return 0;');
   expect(out).toContain('return 1;');
@@ -106,9 +106,9 @@ test('a chain of two conditions converging on one early exit is still sunk', () 
 });
 
 test('the same shape with a VOID exit keeps its one exit too', () => {
-  // `synthetic:sw_fallmem:agbcc`, which MATCHES today only because sinking duplicated its
-  // `bx lr` away and so removed the second default candidate. Keeping the merge is what the
-  // preceding commit's resolve-through pays for.
+  // `synthetic:sw_fallmem:agbcc`. Keeping this merge leaves the switch two default candidates —
+  // the bare `b .L3` leaf and `.L3` itself — which is what `resolveDefault` (switch-recover.ts)
+  // joins back into one.
   const out = decompile('f', SWITCH_ASM, ARMV4T_AGBCC, PROTO).source;
   expect(out).toContain('switch (a0)');
   expect(out.match(/return;/g)).toHaveLength(1);
@@ -117,8 +117,8 @@ test('the same shape with a VOID exit keeps its one exit too', () => {
 test('a fall-through case arm is a fall-IN, not a chain, and its shared return survives', () => {
   // `.L6` (case 1's body) has two predecessors — the dispatch's `beq .L6` and `.L5` running on —
   // which counting PREDECESSORS reads as the shared early exit of a chain. It is not: only ONE of
-  // the two is a condition. Sinking here duplicated the switch's single `return r;` into five
-  // paths, which agbcc then constant-folds per arm, and the row could not match at any spelling.
+  // the two is a condition. Sinking here duplicates the switch's single `return r;` into five
+  // paths, which agbcc then constant-folds per arm, and no spelling of the row can match.
   const out = decompile('g', SWITCH_RET, ARMV4T_AGBCC, {}).source;
   expect(out).toContain('switch (a0)');
   expect(out.match(/return /g)).toHaveLength(1); // ONE return, shared by every path
@@ -130,7 +130,7 @@ test('a fall-through case arm is a fall-IN, not a chain, and its shared return s
  *  predecessors of `.L6` have a body, and one of them (`.L4`) even falls straight through into it,
  *  so a gate that subtracts "a predecessor that computed something and ran on" sees no chain here
  *  at all. It is the chain: the two arms are the two conditions' early exits, and `.L6` is the
- *  shared one. Five real-tier sites have this shape. */
+ *  shared one. Five real-tier sites have this shape, `kleod:EntityItemDrop:agbcc` among them. */
 const TWO_ARMS =
   'm1:\n' +
   '\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n' +
@@ -142,9 +142,8 @@ const TWO_ARMS =
 
 test('two arms that each COMPUTE and converge on a shared exit are still a chain', () => {
   // The discriminator is what a predecessor IS, not what it computed. Reading "computed something
-  // and ran on" as the fall-in signal refuses this — and it is the pass's own reason to exist, so
-  // that reading halved its reach (measured: 14 firings → 8 over the real corpus, taking
-  // `kleod:EntityItemDrop:agbcc`'s recovered `switch` with it).
+  // and ran on" as the fall-in signal refuses this — the pass's own reason to exist — and halves
+  // its reach over the real corpus.
   const out = decompile('m1', TWO_ARMS, ARMV4T_AGBCC, {}).source;
   expect(out.match(/return 0;/g)).toHaveLength(2); // sunk into BOTH arms
   expect(out).toContain('return 5;');
@@ -218,8 +217,9 @@ test('a stranded alias put BACK is caught at the boundary, not three stages late
  *  `else`, and not a switch in sight. `.L4` is the inner join: it and the `add r2, r2, #2` block
  *  above it are THE TWO SUCCESSORS OF ONE `cond_br`, and the block above falls into it. Reading
  *  "both are the target of SOME conditional branch" as the fall-in signal subtracts that arrival,
- *  drops `.L4` to one, and refuses to sink — where sinking is what byte-matches. Measured on 79
- *  generated switch-free shapes: that reading changed 35 of them and lost 18 matches. */
+ *  drops `.L4` to one, and refuses to sink — where sinking is what byte-matches. That reading
+ *  loses matches across generated switch-free shapes, on a predicate firing where no dispatch
+ *  exists at all. */
 const IF_NO_ELSE =
   'g0:\n' +
   '\tcmp\tr0, #0\n\tbeq\t.L3\t@cond_branch\n' +
@@ -259,18 +259,17 @@ const GUARDED_SWITCH =
 
 test('a merge the dispatch SHARES with an outside guard is sunk, not kept', () => {
   // `ownedBy`: the guard's `bgt` is a predecessor of the merge that belongs to no test on the
-  // scrutinee, so this dispatch does not own its return and nothing is subtracted. 19 of 140
-  // generated shapes of this family byte-match with this clause and none without it.
+  // scrutinee, so this dispatch does not own its return and nothing is subtracted.
+  // `synthetic:sw_fallguard` is the corpus row — MATCH, and diff:6 with the clause dropped.
   const out = decompile('w9', GUARDED_SWITCH, ARMV4T_AGBCC, { prototypes: { w9: { params: 3 } } }).source;
   expect(out).toContain('switch (a0)');
   expect(out.match(/return /g)!.length).toBeGreaterThan(1); // the tails ARE sunk
 });
 
 test('ablating the dispatch gate reads an `if` join, and a guarded switch, as fall-ins', () => {
-  // The ablation this round had to run as three patched source trees, as a test. Dropping
-  // `one-dispatch-owning-the-merge` leaves "both are the target of SOME conditional branch",
-  // which is the reading that lost 18 byte-matches over 79 generated switch-free shapes: both
-  // fixtures stop sinking, which is the wrong answer for both.
+  // Dropping `one-dispatch-owning-the-merge` leaves "both are the target of SOME conditional
+  // branch" — the reading that fires where no dispatch exists. Both fixtures stop sinking, which
+  // is the wrong answer for both.
   const sinks = (sym: string, asm: string, gates?: readonly Gate<FallInCandidate>[]) => {
     const fn = frontendFor(ARMV4T_AGBCC).lift(sym, asm, ARMV4T_AGBCC, {});
     applyIdiomPatterns(fn, ARMV4T_AGBCC);

@@ -38,14 +38,12 @@ export interface SwitchRecoverDeps {
    *  of "where is this defined" `defs` does not answer. Taken from `structure.ts`, which builds
    *  both halves for def-site anchoring, rather than indexing the parameters a second time. */
   blockOf: (v: Value) => Block | undefined;
-  /** THE DISPATCH HOIST. Collapsing the tree discards its edges, and an edge's only emission is
-   *  its parallel copy — so the copies of every edge the tree walk collapsed are merged and
-   *  re-emitted ONCE, ahead of the `switch`. `structure.ts hoistedDispatchAssigns` owns the
-   *  emission (suppression, identity elision, `undef`, the write-order sort, `sequentialize`), so
-   *  this regime takes it as a dependency rather than implementing it a second time, exactly as
-   *  Regime B takes `argAssignsFor`. Null ⇒ no single hoisted statement spells them; the caller
-   *  declines to if-recovery. `liveAt` are the blocks whose live-in names the hoisted writes must
-   *  not clobber. */
+  /** THE DISPATCH HOIST: the copies of every edge the tree walk collapsed, merged and re-emitted
+   *  ONCE ahead of the `switch`. `structure.ts hoistedDispatchAssigns` owns the emission
+   *  (suppression, identity elision, `undef`, the write-order sort, `sequentialize`), so this
+   *  regime takes it as a dependency rather than implementing it a second time, exactly as Regime
+   *  B takes `argAssignsFor`. Null ⇒ no single hoisted statement spells them; the caller declines
+   *  to if-recovery. `liveAt` are the blocks whose live-in names the writes must not clobber. */
   hoistDispatchCopies: (
     edges: readonly { pred: Block; succ: { block: Block; args: Value[] } }[],
     liveAt: readonly Block[],
@@ -598,8 +596,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
           } // a case target that's a test → decline
           // A case entry with a PHI is admitted: the dispatch edge binds those parameters, and
           // `hoistDispatchCopies` re-emits that binding once above the `switch` (or declines the
-          // whole recovery). Refusing it here cost `sw_fall` its `switch` outright — a
-          // fall-through chain's accumulator crosses every arm as exactly such a parameter.
+          // whole recovery). A fall-through chain's accumulator crosses every arm as exactly such
+          // a parameter, so refusing it here refuses the whole family.
           if (cases.has(k!)) {
             return false;
           } // duplicate case value → decline
@@ -662,17 +660,15 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // leaf holding `b .Ldefault(v)` and `.Ldefault` itself arrive here as two distinct candidates
     // even though one merely jumps to the other. They are not two defaults: the jumping leaf emits
     // nothing of its own, and the values its `br` hands the other's parameters are the values the
-    // DISPATCH hands them. So it is one more dispatch edge — hoisted with the rest, where the
-    // hoist's disagreement rule decides whether the two paths can share one statement.
+    // DISPATCH hands them. So this is `forwardingTarget`'s walk with the args-carrying step
+    // ADMITTED rather than refused, and it does not drop those values either — the step becomes one
+    // more dispatch edge, hoisted with the rest, where the hoist's disagreement rule decides
+    // whether the two paths can share one statement. (ir/core.ts lists the non-callers and why.)
     //
     // A cycle of such jumps has no target to resolve to and declines. Leaves that pass DIFFERENT
-    // values, or that have a body, are untouched by this and are still two defaults below.
-    //
-    // This is `forwardingTarget`'s walk with the args-carrying step ADMITTED rather than refused,
-    // and it is a second deliberate non-caller of it (ir/core.ts names the first, latch.ts's
-    // `foldEmptyLatches`): the values that step supplies are not dropped here either, they become
-    // one more hoisted dispatch edge. Keyed by the PRED block so a leaf walked twice — L → X → D
-    // reaches X from L's walk and again from X's own turn in the loop — records its edge once.
+    // values, or that have a body, are untouched and are still two defaults below. Keyed by the
+    // PRED block so a leaf walked twice — L → X → D reaches X from L's walk and again from X's own
+    // turn in the loop — records its edge once.
     const throughEdges = new Map<Block, { pred: Block; succ: { block: Block; args: Value[] } }>();
     const resolveDefault = (d: Block): Block | null => {
       const walked = new Set<Block>();
@@ -713,9 +709,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     const defaultBlk = defaults[0] ?? null;
     // A default entry that takes BLOCK PARAMETERS is admitted on the same terms a case entry is:
     // the dispatch edge binds them and `hoistDispatchCopies` re-emits that binding above the
-    // `switch`. It was refused while nothing re-emitted it — `switch (x) { case 1: … case 2: … }`
-    // whose fall-out edge also carried `w = 0` would have dropped that write silently — and the
-    // hoist is exactly what makes the fall-out arm spell the value the dispatch handed it.
+    // `switch`. The hazard it stands over is silent — without that re-emission,
+    // `switch (x) { case 1: … case 2: … }` whose fall-out edge also carried `w = 0` drops the write
+    // and looks entirely ordinary doing it — so the admission is only as good as the hoist.
     // A default candidate that is ALSO a case body means a relational edge hit a case leaf → ambiguous.
     if ([...defaultCands].some((d) => caseBlocks.has(d))) {
       return null;
@@ -896,14 +892,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       // in two different places: entering by its own case value takes the hoisted copy above the
       // `switch` (`hoistDispatchCopies`), while FALLING in takes the copies the falling arm's own
       // `br` emits as its last statements (`structureRegion(blk, to)` walks that terminator, so
-      // they are already there). This is the seam where breaking the rule would be SILENT, which
-      // is why it was the conservative refusal until the hoist existed to pay for it.
+      // they are already there). Getting this wrong is SILENT, which is why it rests on the hoist
+      // rather than on a local reading of the arm.
       //
-      // Regime B still refuses the same hazard LOUD at its own `switch_br` path, on the weaker
-      // predicate that fits it (the copies `argAssignsFor` actually produced): its arms take their
-      // edge copies PER ARM, so a fall-through path would re-run them over what the falling arm
-      // computed. Hoisting is what removes that hazard, and Regime B does not hoist — booked there,
-      // not built, and no row asks for it (`sw_jtfall`/`sw_jtfalldesc` match today).
+      // Regime B refuses the same hazard LOUD at its own `switch_br` path, on the weaker predicate
+      // that fits it (the copies `argAssignsFor` actually produced): its arms take their edge
+      // copies PER ARM, so a fall-through path would re-run them over what the falling arm
+      // computed. Hoisting is what removes that hazard, and Regime B does not hoist — booked, not
+      // built, and no row asks for it (`sw_jtfall`/`sw_jtfalldesc` match today).
       outCases.push({
         values: armsByBlock.get(blk)!,
         body: structureRegion(blk, to ?? merge),

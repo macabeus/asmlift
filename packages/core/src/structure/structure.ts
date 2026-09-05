@@ -2382,12 +2382,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //
   // What the list does NOT cover is whether the def site is RENDERED at all; an anchor that lands
   // in an elided block declines the whole function instead, at the postcondition after the render.
-  /** Where a value is WRITTEN: its block for a param, its def op's block otherwise. The two halves
-   *  of "where is this defined" — `defs`/`opBlock` answer for a computed value, `paramBlock` for a
-   *  merge slot — asked as one question. Used by def-site anchoring below to order a write against
-   *  an edge, and by Regime-A switch recovery (through `SwitchRecoverDeps`) to ask whether a
-   *  hoisted argument is available at the dispatch root; it is passed there rather than rebuilt,
-   *  since `paramBlock` and `opBlock` are this scope's own. */
+  /** Where a value is WRITTEN: its block for a param, its def op's block otherwise — the two
+   *  halves of "where is this defined" asked as one question. Used by def-site anchoring below to
+   *  order a write against an edge, and by Regime-A switch recovery (through `SwitchRecoverDeps`)
+   *  to ask whether a hoisted argument is available at the dispatch root; passed there rather than
+   *  rebuilt, since `paramBlock` and `opBlock` are this scope's own. */
   const blockOf = (v: Value): Block | undefined => {
     const d = defs.get(v);
     return paramBlock.get(v) ?? (d === undefined ? undefined : opBlock.get(d));
@@ -3411,11 +3410,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *
    *  Null (⇒ the caller declines to if-recovery, which spells every copy the asm performs) on the
    *  two things one hoisted statement cannot say. Both are stated over NAMES, because the name is
-   *  what the statement writes. NEITHER HAS EVER FIRED ON A REAL INPUT — over 739 synthetic and
-   *  252 real functions the hoist is offered 8 param-carrying dispatch edges, emits on ONE
-   *  function (`sw_fall`, 3 names from 4 edges) and refuses only at the caller's own
-   *  `availableAtRoot`; both refusals below are pinned by hand-written `.s` in
-   *  `test/switch-arms.test.ts` and by nothing else. Read them as invariants, not as evidence:
+   *  what the statement writes. NEITHER FIRES ON A CORPUS ROW: over the synthetic tier the only
+   *  functions offering the hoist a param-carrying dispatch edge are the `sw_fall*` family (four
+   *  of them, 13 edges under 10 names), it emits on all four, and what refuses is the caller's own
+   *  `availableAtRoot`. Both refusals below are pinned by hand-written `.s` in
+   *  `test/switch-arms.test.ts` and by nothing else — read them as invariants, not as evidence:
    *
    *    - DISAGREEING EDGES. Two edges binding one name to different values: which one runs depends
    *      on which test fell through, and a single statement above the tree cannot depend on that.
@@ -3423,28 +3422,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *    - A CLOBBERED LIVE NAME. The hoisted write runs on EVERY path through the dispatch,
    *      including into arms whose own edge did not carry it. If any value under that name is
    *      live where the switch begins, or into one of its arms, the hoist would overwrite a value
-   *      those readers still want. WHAT THE SCAN REACHES is values read at or after the listed
-   *      blocks' entries — and by construction NOT the parameters of those blocks themselves
-   *      (`analysis.ts` kills a block's params at its own entry), nor a value defined in the root
-   *      whose only use is a dispatch edge arg, nor a binding elided upstream (identity copy,
-   *      `undefCarriesNothing`, a suppressed anchored slot) since those contribute no name to
-   *      compare. Binding an arm's parameters is what the hoist is FOR, so their invisibility is
-   *      wanted; the other three are gaps nobody has turned into a wrong answer.
+   *      those readers still want. THE SCAN REACHES values read at or after the listed blocks'
+   *      entries, and by construction NOT: the parameters of those blocks (`analysis.ts` kills a
+   *      block's params at its own entry), a value defined in the root whose only use is a
+   *      dispatch edge arg, or a binding elided upstream (identity copy, `undefCarriesNothing`, a
+   *      suppressed anchored slot), which contribute no name to compare. Binding an arm's
+   *      parameters is what the hoist is FOR, so that blindness is wanted; the other three are
+   *      gaps nobody has turned into a wrong answer.
    *
-   *  THE SIBLING MECHANISM STATES MORE, and the two clauses it has that this does not are both
-   *  measured rather than overlooked. `anchorConstCopies` (above) also relocates an edge copy to
-   *  one earlier position, and refuses (a) any in-loop shape and (b) a merge variable that names
-   *  any OTHER SSA value:
-   *
-   *    - THE LOOP CLAUSE DOES NOT TRANSFER. Anchoring moves a write to the const's DEF site, which
-   *      may sit outside the loop the edge is in — block dominance is not per-iteration precedence
-   *      (the /preinit sticky-arm class, PR #13). The hoist moves a write from a dispatch's edges
-   *      to the head of that same dispatch: same loop, same iteration, every time. A
-   *      param-carrying dispatch inside a `do`-`while` is pinned in `switch-arms.test.ts`.
-   *    - THE NAME-COUNT CLAUSE CANNOT BE ADOPTED: this mechanism's whole subject is a name that
-   *      several SSA values carry — one per arm that takes the accumulator. Measured by running it
-   *      as a refusal: it declines the empty-arm fall-through switch of `retsink.test.ts` outright
-   *      (its `v0` is carried by 2 values), for no row's benefit.
+   *  `anchorConstCopies` (above) relocates an edge copy too, and states two clauses this does not;
+   *  neither absence is an oversight. Its LOOP clause does not transfer: anchoring moves a write to
+   *  the const's DEF site, which may sit outside the loop the edge is in (block dominance is not
+   *  per-iteration precedence — the /preinit sticky-arm class, PR #13), while the hoist moves a
+   *  write from a dispatch's edges to the head of that same dispatch, same iteration every time
+   *  (`switch-arms.test.ts` pins a param-carrying dispatch inside a `do`-`while`). Its NAME-COUNT
+   *  clause — refuse a name several SSA values carry — cannot be adopted, because that is this
+   *  mechanism's whole subject: one name per arm taking the accumulator. As a refusal it declines
+   *  the empty-arm fall-through switch of `retsink.test.ts` outright, for no row's benefit.
    *
    *  ORDER ACROSS EDGES IS UNLICENSED. Within one edge, `edgeCopyRecords` sorts by the pred's
    *  measured `WriteOrder`; the union below keeps the first record per name in TREE-WALK order,
@@ -3461,16 +3455,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     liveAt: readonly Block[],
   ): Stmt[] | null => {
     // `edgeCopyRecords` is not a pure query: an `undef` arg whose copy it drops is APPENDED to
-    // `droppedUndefCopies`, which a loud postcondition below reads. This caller is SPECULATIVE —
-    // it asks every dispatch edge and may still decline — so the records are rolled back on the
-    // refusal paths, leaving the audit trail describing the program that was actually emitted (the
-    // caller then declines to if-recovery, which re-walks the same edges through `argAssignsFor`
-    // and records them there). Note also that `undefCarriesNothing`'s verdict is made PER PRED,
-    // against what that predecessor wrote, while the hoist emits at the ROOT — one more reason the
-    // record belongs to the edge walk that survives, not to this one. The rollback covers the
-    // refusals THIS function owns; a hoist that succeeds and is then declined further down (an arm
-    // refusal in switch-recover.ts) still leaves its records, as it leaves any swap-cycle temp name
-    // `sequentialize` minted — unwinding the caller's later refusals is not this function's to do.
+    // `droppedUndefCopies`, which a loud postcondition below reads. This caller is SPECULATIVE — it
+    // asks every dispatch edge and may still decline — so the records are rolled back on the
+    // refusal paths, leaving the audit trail describing the program actually emitted (the caller
+    // then declines to if-recovery, which re-walks the same edges through `argAssignsFor` and
+    // records them there). `undefCarriesNothing` judges PER PRED, against what that predecessor
+    // wrote, while the hoist emits at the ROOT — so the record belongs to the edge walk that
+    // survives, not to this one. The rollback covers the refusals THIS function owns: a hoist that
+    // succeeds and is declined further down (an arm refusal in switch-recover.ts) still leaves its
+    // records, as it leaves any swap-cycle temp name `sequentialize` minted.
     const auditMark = droppedUndefCopies.length;
     const rollBack = (): null => {
       droppedUndefCopies.length = auditMark;

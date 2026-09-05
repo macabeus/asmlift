@@ -180,17 +180,16 @@ export function dominators(fn: Fn): Map<Block, Set<Block>> {
 }
 
 /** A block with NO BODY OF ITS OWN: it declares no parameters and holds a single op, which is
- *  therefore its terminator. Whatever it does is transfer control — it computes nothing and it
- *  binds nothing. Three sites ask this same question and each adds its own clause to it
- *  (`forwardingTarget` below wants a `br` carrying no args; switch-recover.ts's `isBareExit`
- *  admits a `ret` as well; raise/retsink.ts asks it of a predecessor, to tell a decision that RAN
- *  OUT from an arm that ran ON), so the shared half is stated once, here.
+ *  therefore its terminator. It computes nothing and it binds nothing. Three sites ask this and
+ *  each adds its own clause (`forwardingTarget` below wants a `br` carrying no args;
+ *  switch-recover.ts's `isBareExit` admits a `ret` as well; raise/retsink.ts asks it of a
+ *  predecessor, to tell a decision that RAN OUT from an arm that ran ON), so the shared half is
+ *  stated once, here.
  *
  *  THE PARAMETER CLAUSE IS THE LOAD-BEARING HALF, and the reason this is not spelled
  *  `ops.length === 1`: a case ENTRY whose arm is EMPTY is also one op — the jump onwards — but it
  *  takes the accumulator as a block parameter, so it is a real arm of a dispatch and not a
- *  forwarder. Reading it as bodyless is what let a fall-through switch with an empty arm have its
- *  shared return duplicated anyway. */
+ *  forwarder. */
 export function isBodyless(blk: Block): boolean {
   return blk.params.length === 0 && blk.ops.length === 1;
 }
@@ -205,11 +204,11 @@ export function isBodyless(blk: Block): boolean {
  *  An edge carrying block ARGUMENTS is not transparent — skipping it would drop the value it
  *  supplies — so the walk stops there. Read-only: nothing about the graph changes.
  *
- *  Two sites test a similar shape and are deliberately NOT callers, both for the same reason —
- *  they KEEP the args this refuses to walk past: raise/latch.ts's `foldEmptyLatches` rewrites the
- *  edge and carries the forwarder's args onto it; structure/switch-recover.ts's `resolveDefault`
- *  walks onto a default candidate through a `b .Ldefault(v)` and turns that step into one more
- *  dispatch edge, whose copies the hoist re-emits above the `switch`. */
+ *  Two sites test a similar shape and are deliberately NOT callers, both because they KEEP the
+ *  args this refuses to walk past: raise/latch.ts's `foldEmptyLatches` rewrites the edge and
+ *  carries the forwarder's args onto it; structure/switch-recover.ts's `resolveDefault` walks onto
+ *  a default candidate through a `b .Ldefault(v)` and turns that step into one more dispatch edge,
+ *  whose copies the hoist re-emits above the `switch`. */
 export function forwardingTarget(b: Block): Block {
   const seen = new Set<Block>();
   let cur = b;

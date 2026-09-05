@@ -192,14 +192,14 @@ test('a compiler that has not declared layout-order arms keeps the ascending spe
 
 // ── THE DISPATCH HOIST ───────────────────────────────────────────────────────────────────────────
 // Collapsing a comparison tree discards its edges, and an edge's only emission is its parallel
-// copy — so an entry the DISPATCH hands values to used to decline the whole recovery, at three
-// separate sites (a case entry with a phi, a default entry with parameters, an arm fallen into
-// with parameters). All three now read one rule: merge those copies and emit them ONCE above the
+// copy — so an entry the DISPATCH hands values to has to be paid for somewhere. Three sites face
+// it (a case entry with a phi, a default entry with parameters, an arm fallen into with
+// parameters) and all three read one rule: merge those copies and emit them ONCE above the
 // `switch`, which is where the target's own layout puts them. The pair below is the shape and its
 // refusal; `hoistedDispatchAssigns` (structure.ts) states what the refusal is.
 
 /** `bne` branches straight to the merge, so the default entry is a block with a PARAMETER and the
- *  edge into it carries `w = 0` — the exact shape the three refusals shared. */
+ *  edge into it carries `w = 0` — the shape all three sites share. */
 const hoistedDefault =
   'f:\n\tmov\tr2, #0x0\n' +
   '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -950,9 +950,9 @@ test('a chain of falling arms is ONE switch, and the fallen-into arm is emitted 
   // Each body appears exactly once — if-recovery reaches `case 1`'s body on three paths and emits
   // it three times, which is what the fall-through spelling replaces.
   expect(count(out, '*a1 = v0 + 3;')).toBe(1);
-  // The last arm CLOSES: the epilogue is the switch's merge and every arm reaches it. It used to
-  // end in `return;` instead, because `raise/retsink.ts` duplicated that epilogue into each arm —
-  // which it no longer does on a fall-through switch (see retsink.test.ts).
+  // The last arm CLOSES on the switch's merge, which every arm reaches — one shared epilogue, not
+  // one `return;` per arm, because `raise/retsink.ts` does not sink a fall-through switch's tails
+  // (retsink.test.ts).
   expect(count(out, 'break;')).toBe(1);
 });
 
