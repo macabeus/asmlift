@@ -1031,9 +1031,16 @@ export interface StructureOptions {
   // Which way this compiler hands out frame slots against DECLARATION RANK: `ascending` = the
   // earlier-declared spilled local takes the LOWER `[sp,#k]`. A per-compiler DATA lever declared
   // in TargetDescription.compilerBehaviors, carried to the backend on `SFn.slotOrder` and applied
-  // by `l3/slotorder.ts` at emit time. `'unknown'` and absent both mean the ordering refuses —
-  // there is no default direction, because a wrong one reorders declarations for no reason.
-  spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
+  // by `l3/slotorder.ts` at emit time. ABSENT means the ordering refuses — there is no default
+  // direction, because a wrong one reorders declarations for no reason.
+  //
+  // TWO STATES, NOT THREE. `TargetDescription` spells a third, `'unknown'`, and it earns its place
+  // there: it separates a direction that was measured and deliberately not shipped from one nobody
+  // ever asked about, which is a fact about the target worth writing down. Nobody reads a STRUCTURER option to learn what was
+  // measured, so carrying it here would be a second way to spell "no" on a public option type. The
+  // translation happens once, in `structureOptionsFor` (target.ts), which is where the
+  // target-to-structurer mapping lives.
+  spillSlotOrder?: 'ascending' | 'descending';
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -1297,7 +1304,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchAllowsBoundCase = false,
     switchArmsFollowLayout = false,
     spellSwitchFallthrough = true,
-    spillSlotOrder = 'unknown',
+    spillSlotOrder,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -4733,9 +4740,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     retType: returnsVoid ? T.void() : returnType(fn),
     body,
     ...(structs.length ? { structs } : {}),
-    // `'unknown'` is dropped rather than carried: the backend asks "is a direction known?", and a
-    // third state at that boundary would be a second way to spell "no".
-    ...(spillSlotOrder === 'ascending' || spillSlotOrder === 'descending' ? { slotOrder: spillSlotOrder } : {}),
+    // absent stays absent: the backend asks "is a direction known?", and there is no third state
+    // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
+    ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
   };
 }
 

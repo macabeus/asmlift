@@ -468,7 +468,20 @@ export const PPC_MWCC: TargetDescription = {
 export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean): StructureOptions {
   // `littleEndian` is the one HARDWARE capability the structurer consumes (bitfield extract
   // recognition is LSB-first); everything else is a compiler behavior.
-  return { returnsVoid, littleEndian: t.capabilities.endianness === 'little', ...t.compilerBehaviors };
+  //
+  // ONE FIELD IS NOT A STRAIGHT SPREAD, and this is where the difference belongs. A frame
+  // direction has THREE states here — `ascending`, `descending`, and `'unknown'` meaning measured
+  // and deliberately not shipped (see `spillSlotOrder` above) — and only TWO downstream: the
+  // structurer either has a direction or refuses. `'unknown'` is a fact about what this repo
+  // measured, not an instruction to a pass, so it is dropped at the translation rather than
+  // carried onto a public option type that would then need a third case nobody branches on.
+  const { spillSlotOrder, ...behaviors } = t.compilerBehaviors;
+  return {
+    returnsVoid,
+    littleEndian: t.capabilities.endianness === 'little',
+    ...behaviors,
+    ...(spillSlotOrder === 'ascending' || spillSlotOrder === 'descending' ? { spillSlotOrder } : {}),
+  };
 }
 
 export const C_TYPEDEFS =

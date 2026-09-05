@@ -304,13 +304,26 @@ test('a local the asm never spilled carries no slots — absent, not an empty li
   expect(sfn.locals.some((l) => l.slots === undefined)).toBe(true);
 });
 
-test('the direction rides StructureOptions onto the SFn, and `unknown` reaches it as absent', () => {
+test('the direction rides StructureOptions onto the SFn, and absent stays absent', () => {
   const at = (spillSlotOrder: StructureOptions['spillSlotOrder']) =>
     structured('agbcc-spillorder.s', 'spillorder', { spillSlotOrder }).slotOrder;
   expect(at('ascending')).toBe('ascending');
   expect(at('descending')).toBe('descending');
-  expect(at('unknown')).toBeUndefined();
   expect(at(undefined)).toBeUndefined();
+});
+
+// `'unknown'` IS A TARGET STATE, NOT A STRUCTURER ONE, and the boundary between them is
+// `structureOptionsFor`. On a `TargetDescription` it says "measured and deliberately not shipped",
+// which is worth writing down; on a structurer option it would be a second spelling of "no" that
+// no pass branches on, so the option type does not admit it — a `@ts-expect-error` is the pin,
+// because a type that stops rejecting it is exactly the regression.
+test('`unknown` never reaches the structurer: the option type refuses it, the translation drops it', () => {
+  // @ts-expect-error — StructureOptions has two states; `'unknown'` is a TargetDescription state
+  const rejected: StructureOptions['spillSlotOrder'] = 'unknown';
+  expect(rejected).toBe('unknown'); // the value exists; the TYPE is what refuses it
+  expect(MIPS_IDO.compilerBehaviors.spillSlotOrder).toBe('unknown');
+  expect(structureOptionsFor(MIPS_IDO, false).spillSlotOrder).toBeUndefined();
+  expect('spillSlotOrder' in structureOptionsFor(MIPS_IDO, false)).toBe(false);
 });
 
 // THE `uninit` REFUSAL, pinned on BOTH trees, because the two disagree and only one of them is
@@ -391,7 +404,8 @@ test('the frame-slot direction is a per-compiler datum: agbcc ascending, everyth
 
 test('the datum reaches the structurer through the compilerBehaviors spread, with no plumbing', () => {
   expect(structureOptionsFor(ARMV4T_AGBCC, false).spillSlotOrder).toBe('ascending');
-  expect(structureOptionsFor(MIPS_IDO, false).spillSlotOrder).toBe('unknown');
+  // and `'unknown'` does NOT — it is dropped at this translation, not carried and re-tested
+  expect(structureOptionsFor(MIPS_IDO, false).spillSlotOrder).toBeUndefined();
 });
 
 // THE THREE `'unknown'`s, BACKED BY A COMMITTED PROBE RATHER THAN A NUMBER IN A COMMENT. Each
@@ -425,10 +439,22 @@ const declRank = (file: string, reversed: boolean): [number, number][] => {
 };
 const directionOf = (file: string, reversed: boolean): { n: number; dir: string } => {
   const rows = declRank(file, reversed);
+  // BELOW TWO ROWS THERE IS NO DIRECTION TO SEE, and both predicates below are vacuously true on
+  // one row or none — the helper would report `ascending` off a probe that spilled nothing, which
+  // is exactly the shape mwcc produces. A direction it did not observe must not be spellable.
+  if (rows.length < 2) {
+    return { n: rows.length, dir: 'unmeasured' };
+  }
   const asc = rows.every((r, i) => i === 0 || rows[i - 1][1] < r[1]);
   const desc = rows.every((r, i) => i === 0 || rows[i - 1][1] > r[1]);
   return { n: rows.length, dir: asc ? 'ascending' : desc ? 'descending' : 'mixed' };
 };
+
+test('a probe that spilled nothing reports no direction, not `ascending` by vacuity', () => {
+  // the fixture with every `sw …(sp)` line removed: the pairing finds no row, and the two
+  // monotonicity predicates would both hold over an empty list
+  expect(directionOf('probe-declrank.c', false)).toEqual({ n: 0, dir: 'unmeasured' });
+});
 
 test('ido7.1 hands frame slots out DESCENDING against declaration rank — measured, not shipped', () => {
   expect(directionOf('ido71-declrank.txt', false)).toEqual({ n: 16, dir: 'descending' });

@@ -1,3 +1,21 @@
+/* Declaration-rank probe for `TargetDescription.compilerBehaviors.spillSlotOrder`.
+ *
+ * Sixteen `int` locals, each assigned `n + 17*(rank+1)` so its immediate NAMES it in the object,
+ * all live across a call so the allocator must home the losers in the frame. Reading
+ * `<imm> -> [sp,#off]` gives the compiler's direction: does the earlier-DECLARED local take the
+ * lower slot or the higher one?
+ *
+ * THIS IS THE REVERSED HALF: the identical body with the DECLARATION LIST reversed. Both files
+ * assign in the same textual order, so anything that follows USE order is unchanged between the
+ * two and only a fact about declaration rank moves.
+ *
+ * Compiled by `scripts/regen-declrank-probes.ts` for ido7.1, gcc2.7.2kmc and gcc2.7.2 — flags and
+ * objdump command are in each generated `*-declrank-rev.txt` header, taken from
+ * `@asmlift/toolchains` rather than retyped. Read by
+ * `packages/core/test/spill-slot-order.test.ts`. Regenerate with:
+ *
+ *   npx tsx scripts/regen-declrank-probes.ts
+ */
 int sink(int);
 int probe(int n)
 {
