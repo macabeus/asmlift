@@ -36,8 +36,10 @@
 // folds bottom-up: the innermost diamond becomes a bare condition, which the next diamond consumes as its
 // Vb, and so on. SCOPE: the shared-arm must be reachable as a single-predecessor `br` feeder; the `||`
 // form where the const-1 "true" block has TWO predecessors (`return a || b`) is not folded.
-// Guards stay conservative: the CONST is exactly 0/1, Vb is a bool op or 0/1 const, the head condition is a
-// negatable icmp, and any deviation falls through untouched (a miss, never a miscompile).
+// Guards stay conservative: the CONST is exactly 0/1, Vb is a bool op or 0/1 const, and the head condition
+// is NEGATABLE whenever the orientation inverts it — an icmp by opcode swap or a `logic_and`/`logic_or` by
+// De Morgan, both via `negateCondOps`, which the control-flow form below shares. Any deviation falls
+// through untouched (a miss, never a miscompile).
 import {
   Block,
   Fn,
@@ -175,10 +177,9 @@ export function recognizeShortCircuit(fn: Fn): boolean {
           continue;
         }
         const cond = ht.operands[0];
-        const condDef = defs.get(cond);
-        if (!condDef || !NEGATED_ICMP[condDef.opcode]) {
+        if (!defs.get(cond)) {
           continue;
-        } // head condition must be a negatable icmp
+        } // the head condition must be computed here — a block param or a call result has no cone
 
         // The `cond`-side operand is negated iff `cond` guards the short-circuit (taken+0 / fall+1).
         const wantNeg = (c === 0 && mIsTaken) || (c === 1 && mIsFall);
@@ -193,12 +194,28 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         if (bfeed.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;
         }
+        // The head condition has to be NEGATABLE only when the orientation actually inverts it, and
+        // asking it the other way round is what kept this pass narrower than its sibling: it used to
+        // demand a negatable icmp before `wantNeg` was even computed, so a head whose condition is a
+        // fused `logic_and`/`logic_or` — precisely what the branch form below leaves behind, and what
+        // an earlier round of THIS pass leaves behind in a chain — was refused even when nothing
+        // needed inverting. `negateCondOps` is the same helper the branch form uses, so both siblings
+        // now negate a connective by De Morgan and refuse the same three shapes. Its precondition
+        // holds here for a different reason than there: `cond` is ^h's OWN terminator operand, so its
+        // whole cone dominates the point `before` splices into.
+        //
+        // Minted here, below every other refusal and above the first mutation: a site refused for
+        // any other reason pays nothing, and a refusal below the hoist would leave ^h half-rewritten.
+        const negation = wantNeg ? negateCondOps(defs, cond, NEGATE_BUDGET) : null;
+        if (wantNeg && !negation) {
+          continue;
+        }
         bfeed.ops.slice(0, -1).forEach(before); // hoist B's pure body (defines Vb; harmless if a dead const)
         foldWriteOrder(fn.writeOrder, bfeed, h); // …and its writes now follow H's (ir/core.ts)
         let condSide = cond;
-        if (wantNeg) {
-          condSide = mkValue(T.unk(32));
-          before(mkOp(NEGATED_ICMP[condDef.opcode], { operands: [...condDef.operands], results: [condSide] }));
+        if (negation) {
+          negation.ops.forEach((op) => before(op));
+          condSide = negation.result;
         }
         // Vb const → the phi reduces to the (possibly negated) condition; Vb bool → a && / || connective.
         let res = condSide;
@@ -632,7 +649,8 @@ const NEGATE_BUDGET = 8;
  *  at `verify`, but this helper does not look.
  *
  *  It stays in this file rather than joining `NEGATED_ICMP` in ir/opcodes.ts: that table is a fact
- *  about opcodes, this MINTS ops, and the abstraction follows the second consumer. There is one. */
+ *  about opcodes, this MINTS ops, and both consumers are the two folds above — the value form and
+ *  the branch form, which is the whole reason it is a helper and not inline. */
 function negateCondOps(defs: Map<Value, Op>, v: Value, budget: number): { ops: Op[]; result: Value } | null {
   const ops: Op[] = [];
   const go = (x: Value): Value | null => {

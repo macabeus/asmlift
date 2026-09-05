@@ -116,14 +116,22 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   { id: 'member-arrays', run: (fn) => recognizeMemberArrays(fn), dce: true },
   { id: 'structs', run: recognizeStructs, dce: false },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
-  // The control-flow sibling, and this order IS load-bearing — value form FIRST.
+  // The control-flow sibling, value form FIRST.
   //
   // Their input SHAPES are disjoint (the value form's second block ends in `br` carrying a phi
-  // argument, this one's ends in `cond_br`), so neither can eat the other's literal pattern. But
-  // this pass REWRITES its head's condition into a `logic_or`/`logic_and`, and the value form
-  // refuses any head whose condition is not a negatable icmp — so running this one first can
-  // permanently disqualify a value fold that was available. The reverse cannot happen: the value
-  // form replaces its head's `cond_br` with a `br`, which this pass never matches.
+  // argument, this one's ends in `cond_br`), so neither can eat the other's literal pattern.
+  //
+  // The order used to be load-bearing for a SECOND reason, and no longer is: this pass REWRITES its
+  // head's condition into a `logic_or`/`logic_and`, and the value form refused any head whose
+  // condition was not a negatable icmp — so running this one first could permanently disqualify a
+  // value fold that was available. Both folds now negate a connective by De Morgan
+  // (`negateCondOps`, raise/shortcircuit.ts), so a fused head disqualifies nothing by itself; what
+  // is left is that helper's own refusals — a cone holding a non-negatable leaf, or one over its
+  // budget. Measured rather than assumed, by instrumenting the value form's head gate and sweeping
+  // the benchmark corpus: it refuses 0 times over the 782 rows that lift map-lessly, so the hazard
+  // has no producer there at all. The order stays because nothing argues for changing it. The
+  // reverse direction never could: the value form replaces its head's `cond_br` with a `br`, which
+  // this pass never matches.
   {
     id: 'branch-shortcircuit',
     run: (fn, _self, opts) => recognizeBranchShortCircuit(fn, opts.shortCircuit),

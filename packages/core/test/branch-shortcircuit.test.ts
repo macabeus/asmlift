@@ -922,3 +922,81 @@ describe('negating a fused connective (De Morgan)', () => {
     expect(folds(balanced(3))).toBe(false); // 15 nodes
   });
 });
+
+// The VALUE form's head gate, which used to be the narrower of the two siblings: it demanded a
+// negatable icmp BEFORE computing whether the orientation negates anything at all, so a head whose
+// condition is a fused connective — what the branch form leaves behind, and what an earlier round of
+// this same pass leaves behind in a chain — was refused even when nothing needed inverting. That
+// narrowness is what raise/pre-recovery.ts calls its pass order load-bearing for.
+describe('the VALUE form takes a fused connective head, and negates one by De Morgan', () => {
+  /** `H: cond_br(cond) -> [M(k) taken, B fall];  B: vb = icmp; br M(vb);  M(p): ret p`.
+   *  `k = 1` ⇒ the head condition is NOT negated; `k = 0` ⇒ it is. */
+  const valueDiamond = (opts: { k: 0 | 1; head: 'icmp' | 'connective'; leafNegatable?: boolean }): Fn => {
+    const p = mkValue(T.unk(32));
+    const m = blk([mkOp('ret', { operands: [p] })], [p]);
+    const vb = mkValue(T.unk(32));
+    const b = blk([...cmp(vb, 'icmp_ne'), { ...mkOp('br'), successors: [{ block: m, args: [vb] }] }]);
+    const k = mkValue(T.unk(32));
+    const cond = mkValue(T.unk(32));
+    const ops: Op[] = [mkOp('const', { results: [k], attrs: { value: opts.k } })];
+    if (opts.head === 'connective') {
+      const x = mkValue(T.unk(32));
+      const y = mkValue(T.unk(32));
+      ops.push(
+        ...cmp(x, 'icmp_eq'),
+        ...(opts.leafNegatable === false
+          ? [mkOp('and', { operands: [mkValue(T.unk(32)), mkValue(T.unk(32))], results: [y] })]
+          : cmp(y, 'icmp_ne')),
+        mkOp('logic_or', { operands: [x, y], results: [cond] }),
+      );
+    } else {
+      ops.push(...cmp(cond, 'icmp_eq'));
+    }
+    ops.push({
+      ...mkOp('cond_br', { operands: [cond] }),
+      successors: [
+        { block: m, args: [k] },
+        { block: b, args: [] },
+      ],
+    });
+    return { name: 'f', blocks: [blk(ops), b, m], writeOrder: undefined, slotHomes: undefined };
+  };
+  const defIn = (fn: Fn, v: Value): Op => fn.blocks[0].ops.find((o) => o.results.includes(v))!;
+  /** The recovered connective: M's phi is retired at 2 predecessors, so the value reaches M's `ret`. */
+  const headCond = (fn: Fn): Op => defIn(fn, fn.blocks.at(-1)!.ops.at(-1)!.operands[0]);
+
+  test('a connective head with NOTHING to negate folds — the refusal was gratuitous', () => {
+    const fn = valueDiamond({ k: 1, head: 'connective' });
+    expect(recognizeShortCircuit(fn)).toBe(true);
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_or'); // `cond || vb`
+    expect(defIn(fn, outer.operands[0]).opcode).toBe('logic_or'); // the ORIGINAL fused head, reused
+    verify(fn);
+  });
+
+  test('a connective head that DOES need negating is distributed, not refused', () => {
+    const fn = valueDiamond({ k: 0, head: 'connective' });
+    expect(recognizeShortCircuit(fn)).toBe(true);
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_and'); // `!cond && vb`
+    const inner = defIn(fn, outer.operands[0]);
+    expect(inner.opcode).toBe('logic_and'); // !(x || y) ⇒ !x && !y
+    expect(defIn(fn, inner.operands[0]).opcode).toBe('icmp_ne');
+    expect(defIn(fn, inner.operands[1]).opcode).toBe('icmp_eq');
+    verify(fn);
+  });
+
+  test('REFUSED: a connective head with a non-negatable leaf, when the negation is needed', () => {
+    expect(recognizeShortCircuit(valueDiamond({ k: 0, head: 'connective', leafNegatable: false }))).toBe(false);
+    // …and the same head folds when nothing has to be inverted.
+    expect(recognizeShortCircuit(valueDiamond({ k: 1, head: 'connective', leafNegatable: false }))).toBe(true);
+  });
+
+  test('the plain icmp head still folds both ways, negated and not', () => {
+    for (const k of [0, 1] as const) {
+      const fn = valueDiamond({ k, head: 'icmp' });
+      expect(recognizeShortCircuit(fn)).toBe(true);
+      verify(fn);
+    }
+  });
+});
