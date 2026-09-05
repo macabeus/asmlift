@@ -334,6 +334,14 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     Its own refusals — no def, a non-negatable leaf ANYWHERE in the cone (no partial De Morgan),
 //     a cone over the node budget — are on the helper.
 //
+//     What the widening does NOT do, measured over those 11 rather than argued: it materializes no
+//     new local. De Morgan duplicates leaf comparisons, and a duplicated leaf could in principle
+//     gain a second consumer that analysis.ts renders as a statement BEFORE the `if` — the same
+//     hazard the single-icmp negation always had. It does not happen at any of the 11: the local
+//     count is identical at every site and the emitted line count only falls. Two of them
+//     (`sub_80930B8`, `sub_80932E0`) go from DECLINED to a full decompilation, because folding a
+//     loop-exit connective removes the back-edge loop recovery was refusing.
+//
 // Every refusal falls through untouched, leaving the tail-duplicated spelling — a miss, never a
 // miscompile. Applied ITERATIVELY, so `a || b || c` folds left-to-right, each round consuming one
 // more condition block.
@@ -547,10 +555,10 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
 
 /** How many ops `negateCondOps` may MINT for one negation. A cone is a DAG and De Morgan rebuilds it
  *  per path, so a shared sub-condition could in principle blow up; this is the cheap loud stop.
- *  Chosen from a measurement, not a guess: the deepest cone the fold actually meets across the
- *  benchmark and the klonoa+sa3 corpora mints THREE ops (`!(x || y)` — two leaves and the dual),
- *  so 8 leaves the observed shapes untouched and still refuses anything an order of magnitude
- *  larger. Raise it only with a corpus site that needs it. */
+ *  Chosen from a measurement, not a guess: swept over the 2,047 lifted klonoa+sa3 functions the
+ *  fold negates a connective 17 times and the DEEPEST cone mints 5 ops, so 8 leaves every observed
+ *  shape untouched with room to spare and still refuses anything much larger. Raise it only with a
+ *  corpus site that needs it. */
 const NEGATE_BUDGET = 8;
 
 /** The ops computing `!v`, or `null` when `v` cannot be negated.
