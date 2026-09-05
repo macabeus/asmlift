@@ -1,0 +1,254 @@
+{
+  "symbol": "erbctl",
+  "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+  "score": 12,
+  "diff_kinds": {
+    "arg-mismatch": 7,
+    "insert": 3,
+    "delete": 1,
+    "op-mismatch": 1
+  },
+  "row_categories": {
+    "immediate+operand-structure+register": 1,
+    "insertion/deletion": 3,
+    "register-only": 6,
+    "pool/data": 1,
+    "pool/data+insertion/deletion": 1
+  },
+  "instruction_shape_alignment": {
+    "equal_shape_pairs": 19,
+    "identical_pairs": 8,
+    "structural_regions": 3,
+    "structural_target_instructions": 1,
+    "structural_candidate_instructions": 2,
+    "register_only_pairs": 8,
+    "normalized_branch_or_pool_pairs": 3
+  },
+  "pool_data_values": {
+    "target": {
+      "[[\"opcode\",\".word\"],[\"symbol\",\"gReadBgs\"]]": 1
+    },
+    "candidate": {
+      "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"symbol\",\"gReadBgs\"]]": 1
+    }
+  },
+  "pool_data_totals": {
+    "target": {
+      "rows": 1,
+      "distinct_values": 1
+    },
+    "candidate": {
+      "rows": 2,
+      "distinct_values": 2
+    }
+  },
+  "rows": [
+    {
+      "row": 1,
+      "kind": "arg-mismatch",
+      "category": "immediate+operand-structure+register",
+      "target": [
+        ["opcode", "mov"],
+        ["register", "r3"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "0"]
+      ],
+      "candidate": [
+        ["opcode", "mov"],
+        ["register", "r3"],
+        ["basic", ","],
+        ["register", "r1"]
+      ]
+    },
+    {
+      "row": 3,
+      "kind": "insert",
+      "category": "insertion/deletion",
+      "target": [],
+      "candidate": [
+        ["opcode", "mov"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "0"]
+      ]
+    },
+    {
+      "row": 4,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "cmp"],
+        ["register", "r3"],
+        ["basic", ","],
+        ["register", "r1"]
+      ],
+      "candidate": [
+        ["opcode", "cmp"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "r3"]
+      ]
+    },
+    {
+      "row": 6,
+      "kind": "delete",
+      "category": "insertion/deletion",
+      "target": [
+        ["opcode", "ldr"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "pc"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "28"],
+        ["basic", "]"],
+        ["basic", "(->"],
+        ["branch-dest", "40"],
+        ["basic", ")"]
+      ],
+      "candidate": []
+    },
+    {
+      "row": 8,
+      "kind": "insert",
+      "category": "insertion/deletion",
+      "target": [],
+      "candidate": [
+        ["opcode", "ldr"],
+        ["register", "r1"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "pc"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "28"],
+        ["basic", "]"],
+        ["basic", "(->"],
+        ["branch-dest", "44"],
+        ["basic", ")"]
+      ]
+    },
+    {
+      "row": 9,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "add"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r4"]
+      ],
+      "candidate": [
+        ["opcode", "add"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r1"]
+      ]
+    },
+    {
+      "row": 13,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "ldrh"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "r4"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "22"],
+        ["basic", "]"]
+      ],
+      "candidate": [
+        ["opcode", "ldrh"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "r1"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "22"],
+        ["basic", "]"]
+      ]
+    },
+    {
+      "row": 14,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "add"],
+        ["register", "r3"],
+        ["basic", ","],
+        ["register", "r0"]
+      ],
+      "candidate": [
+        ["opcode", "add"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "r0"]
+      ]
+    },
+    {
+      "row": 16,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "cmp"],
+        ["register", "r2"],
+        ["basic", ","],
+        ["register", "r1"]
+      ],
+      "candidate": [
+        ["opcode", "cmp"],
+        ["register", "r2"],
+        ["basic", ","],
+        ["register", "r3"]
+      ]
+    },
+    {
+      "row": 18,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "mov"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r3"]
+      ],
+      "candidate": [
+        ["opcode", "mov"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r4"]
+      ]
+    },
+    {
+      "row": 22,
+      "kind": "op-mismatch",
+      "category": "pool/data",
+      "target": [
+        ["opcode", ".word"],
+        ["symbol", "gReadBgs"]
+      ],
+      "candidate": [
+        ["opcode", ".hword"],
+        ["unsigned", "0"]
+      ]
+    },
+    {
+      "row": 23,
+      "kind": "insert",
+      "category": "pool/data+insertion/deletion",
+      "target": [],
+      "candidate": [
+        ["opcode", ".word"],
+        ["symbol", "gReadBgs"]
+      ]
+    }
+  ]
+}

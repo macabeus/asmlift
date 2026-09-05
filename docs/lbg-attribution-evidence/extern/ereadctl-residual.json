@@ -1,0 +1,65 @@
+{
+  "symbol": "ereadctl",
+  "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+  "score": 2,
+  "diff_kinds": {
+    "insert": 1,
+    "delete": 1
+  },
+  "row_categories": {
+    "insertion/deletion": 2
+  },
+  "instruction_shape_alignment": {
+    "equal_shape_pairs": 13,
+    "identical_pairs": 13,
+    "structural_regions": 2,
+    "structural_target_instructions": 1,
+    "structural_candidate_instructions": 1
+  },
+  "pool_data_values": {
+    "target": {
+      "[[\"opcode\",\".word\"],[\"symbol\",\"gReadBgs\"]]": 1
+    },
+    "candidate": {
+      "[[\"opcode\",\".word\"],[\"symbol\",\"gReadBgs\"]]": 1
+    }
+  },
+  "pool_data_totals": {
+    "target": {
+      "rows": 1,
+      "distinct_values": 1
+    },
+    "candidate": {
+      "rows": 1,
+      "distinct_values": 1
+    }
+  },
+  "rows": [
+    {
+      "row": 4,
+      "kind": "insert",
+      "category": "insertion/deletion",
+      "target": [],
+      "candidate": [
+        ["opcode", "lsl"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "3"]
+      ]
+    },
+    {
+      "row": 6,
+      "kind": "delete",
+      "category": "insertion/deletion",
+      "target": [
+        ["opcode", "lsl"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "3"]
+      ],
+      "candidate": []
+    }
+  ]
+}

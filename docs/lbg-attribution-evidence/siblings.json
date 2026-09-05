@@ -1,0 +1,551 @@
+{
+  "m4aMPlayPanpotControl": {
+    "symbol": "m4aMPlayPanpotControl",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 29,
+    "diff_kinds": {
+      "replace": 1,
+      "insert": 8,
+      "arg-mismatch": 14,
+      "delete": 4,
+      "op-mismatch": 2
+    },
+    "row_categories": {
+      "operand-structure+register": 1,
+      "insertion/deletion": 11,
+      "branch-target+pool-offset": 2,
+      "register-only": 11,
+      "structure/opcode": 1,
+      "branch-target": 1,
+      "pool/data": 1,
+      "pool/data+insertion/deletion": 1
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 44,
+      "identical_pairs": 28,
+      "structural_regions": 7,
+      "structural_target_instructions": 6,
+      "structural_candidate_instructions": 9,
+      "normalized_branch_or_pool_pairs": 6,
+      "register_only_pairs": 10
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1752395091\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1752395091\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 1,
+        "distinct_values": 1
+      },
+      "candidate": {
+        "rows": 2,
+        "distinct_values": 2
+      }
+    }
+  },
+  "m4aMPlayPitchControl": {
+    "symbol": "m4aMPlayPitchControl",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 31,
+    "diff_kinds": {
+      "arg-mismatch": 17,
+      "delete": 4,
+      "insert": 8,
+      "op-mismatch": 1,
+      "replace": 1
+    },
+    "row_categories": {
+      "register-only": 11,
+      "branch-target+pool-offset": 1,
+      "insertion/deletion": 12,
+      "structure/opcode": 1,
+      "operand-structure+register": 1,
+      "immediate+operand-structure+register": 2,
+      "branch-target": 3
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 50,
+      "identical_pairs": 30,
+      "register_only_pairs": 14,
+      "normalized_branch_or_pool_pairs": 6,
+      "structural_regions": 8,
+      "structural_target_instructions": 6,
+      "structural_candidate_instructions": 10
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1752395091\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1752395091\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 1,
+        "distinct_values": 1
+      },
+      "candidate": {
+        "rows": 1,
+        "distinct_values": 1
+      }
+    }
+  },
+  "m4aMPlayVolumeControl": {
+    "symbol": "m4aMPlayVolumeControl",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 27,
+    "diff_kinds": {
+      "insert": 8,
+      "replace": 3,
+      "arg-mismatch": 12,
+      "delete": 4
+    },
+    "row_categories": {
+      "insertion/deletion": 12,
+      "operand-structure+register": 2,
+      "structure/opcode": 1,
+      "branch-target+pool-offset": 1,
+      "register-only": 9,
+      "immediate+operand-structure+register": 1,
+      "branch-target": 1
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 42,
+      "identical_pairs": 27,
+      "structural_regions": 9,
+      "structural_target_instructions": 8,
+      "structural_candidate_instructions": 12,
+      "normalized_branch_or_pool_pairs": 6,
+      "register_only_pairs": 9
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1752395091\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1752395091\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 1,
+        "distinct_values": 1
+      },
+      "candidate": {
+        "rows": 1,
+        "distinct_values": 1
+      }
+    }
+  },
+  "sub_0804B2A0": {
+    "symbol": "sub_0804B2A0",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 46,
+    "diff_kinds": {
+      "insert": 15,
+      "replace": 5,
+      "arg-mismatch": 16,
+      "delete": 6,
+      "op-mismatch": 4
+    },
+    "row_categories": {
+      "insertion/deletion": 21,
+      "operand-structure+register": 3,
+      "register-only": 11,
+      "immediate": 1,
+      "structure/opcode": 6,
+      "immediate+register": 2,
+      "branch-target": 2
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 26,
+      "identical_pairs": 5,
+      "structural_regions": 10,
+      "structural_target_instructions": 12,
+      "structural_candidate_instructions": 21,
+      "normalized_branch_or_pool_pairs": 8,
+      "register_only_pairs": 13
+    },
+    "pool_data_values": {
+      "target": {},
+      "candidate": {}
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 0,
+        "distinct_values": 0
+      },
+      "candidate": {
+        "rows": 0,
+        "distinct_values": 0
+      }
+    }
+  },
+  "sub_0804B2EC": {
+    "symbol": "sub_0804B2EC",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 5,
+    "diff_kinds": {
+      "arg-mismatch": 3,
+      "replace": 2
+    },
+    "row_categories": {
+      "register-only": 1,
+      "branch-target+operand-structure+pool-offset+register": 2,
+      "pool/data": 2
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 48,
+      "identical_pairs": 46,
+      "register_only_pairs": 2,
+      "structural_regions": 2,
+      "structural_target_instructions": 1,
+      "structural_candidate_instructions": 1
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67108928\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_030034A0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4294967040\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_030034A0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67108928\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4294967040\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 4,
+        "distinct_values": 4
+      },
+      "candidate": {
+        "rows": 4,
+        "distinct_values": 4
+      }
+    }
+  },
+  "sub_0804B464": {
+    "symbol": "sub_0804B464",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 15,
+    "diff_kinds": {
+      "delete": 3,
+      "replace": 2,
+      "insert": 3,
+      "arg-mismatch": 7
+    },
+    "row_categories": {
+      "insertion/deletion": 6,
+      "immediate+operand-structure+register": 1,
+      "register-only": 6,
+      "branch-target+operand-structure+pool-offset+register": 1,
+      "pool/data": 1
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 27,
+      "identical_pairs": 20,
+      "structural_regions": 5,
+      "structural_target_instructions": 3,
+      "structural_candidate_instructions": 3,
+      "normalized_branch_or_pool_pairs": 1,
+      "register_only_pairs": 6
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_08189BCC\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_08057ACC\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gBgInfo\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_08189BCC\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_08057ACC\"],[\"addend\",\"1\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gBgInfo\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 4,
+        "distinct_values": 4
+      },
+      "candidate": {
+        "rows": 4,
+        "distinct_values": 4
+      }
+    }
+  },
+  "sub_0804BBD4": {
+    "symbol": "sub_0804BBD4",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 100,
+    "diff_kinds": {
+      "arg-mismatch": 73,
+      "insert": 12,
+      "replace": 4,
+      "delete": 11
+    },
+    "row_categories": {
+      "register-only": 37,
+      "insertion/deletion": 22,
+      "operand-structure+register": 2,
+      "pool-offset+register": 3,
+      "immediate+operand-structure+register": 2,
+      "pool-offset": 1,
+      "branch-target+operand-structure+pool-offset+register": 2,
+      "branch-target+register": 1,
+      "immediate": 3,
+      "branch-target+pool-offset": 9,
+      "branch-target+pool-offset+register": 4,
+      "render-equal/metadata": 1,
+      "pool/data": 12,
+      "pool/data+insertion/deletion": 1
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 100,
+      "identical_pairs": 38,
+      "register_only_pairs": 42,
+      "structural_regions": 18,
+      "structural_target_instructions": 17,
+      "structural_candidate_instructions": 17,
+      "normalized_branch_or_pool_pairs": 20
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gBgInfo\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"100675584\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67109076\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"2164261376\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_082EA584\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_082EA730\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"2147483647\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gBgDataPtrs\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1023\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4095\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gBgTilemapBufs\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4294959104\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"2147484672\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67108872\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1537\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67108880\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_082EA7F0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"83886528\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gBgInfo\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"100675584\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67109076\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"2164261376\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_082EA584\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"100664320\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_082EA730\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"2147483647\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gBgDataPtrs\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gBgTilemapBufs\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4095\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4294959104\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1023\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"2147484672\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67108872\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"1537\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67108880\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_082EA7F0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"83886528\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 18,
+        "distinct_values": 18
+      },
+      "candidate": {
+        "rows": 19,
+        "distinct_values": 19
+      }
+    }
+  },
+  "sub_0804C0EC": {
+    "symbol": "sub_0804C0EC",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 39,
+    "diff_kinds": {
+      "arg-mismatch": 14,
+      "insert": 19,
+      "delete": 3,
+      "replace": 3
+    },
+    "row_categories": {
+      "register-only": 6,
+      "insertion/deletion": 18,
+      "branch-target+pool-offset": 6,
+      "pool/data+insertion/deletion": 4,
+      "structure/opcode": 2,
+      "operand-structure+register": 1,
+      "pool/data": 2
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 65,
+      "identical_pairs": 48,
+      "register_only_pairs": 6,
+      "structural_regions": 8,
+      "structural_target_instructions": 7,
+      "structural_candidate_instructions": 19,
+      "normalized_branch_or_pool_pairs": 11
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_030052AC\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4194238464\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_030007C8\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_08057954\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67109076\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_08189DCC\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gObjPalRamPtr\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"2147483664\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_030007C8\"]]": 2,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_030052AC\"]]": 2,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4194238464\"]]": 2,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_08057954\"]]": 2,
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"67109076\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_08189DCC\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gObjPalRamPtr\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"2147483664\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 9,
+        "distinct_values": 9
+      },
+      "candidate": {
+        "rows": 13,
+        "distinct_values": 9
+      }
+    }
+  },
+  "sub_0804C484": {
+    "symbol": "sub_0804C484",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 106,
+    "diff_kinds": {
+      "arg-mismatch": 66,
+      "insert": 12,
+      "replace": 7,
+      "delete": 20,
+      "op-mismatch": 1
+    },
+    "row_categories": {
+      "register-only": 54,
+      "insertion/deletion": 31,
+      "operand-structure+register": 2,
+      "branch-target+pool-offset": 2,
+      "branch-target+operand-structure+pool-offset+register": 2,
+      "immediate+register": 6,
+      "structure/opcode": 3,
+      "immediate+operand-structure+register": 3,
+      "pool/data": 2,
+      "pool/data+insertion/deletion": 1
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 82,
+      "identical_pairs": 27,
+      "register_only_pairs": 53,
+      "structural_regions": 19,
+      "structural_target_instructions": 44,
+      "structural_candidate_instructions": 37,
+      "normalized_branch_or_pool_pairs": 2
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gEntityInfo\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_03004D84\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gOamAffineBuffer\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gEntityInfo\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gOamAffineBuffer\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_03004D84\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 4,
+        "distinct_values": 4
+      },
+      "candidate": {
+        "rows": 3,
+        "distinct_values": 3
+      }
+    }
+  },
+  "sub_0804DA60": {
+    "symbol": "sub_0804DA60",
+    "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+    "score": 26,
+    "diff_kinds": {
+      "arg-mismatch": 13,
+      "delete": 7,
+      "insert": 5,
+      "op-mismatch": 1
+    },
+    "row_categories": {
+      "branch-target+pool-offset": 4,
+      "insertion/deletion": 11,
+      "register-only": 4,
+      "immediate": 1,
+      "pool/data": 5,
+      "pool/data+insertion/deletion": 1
+    },
+    "instruction_shape_alignment": {
+      "equal_shape_pairs": 89,
+      "identical_pairs": 81,
+      "normalized_branch_or_pool_pairs": 4,
+      "structural_regions": 7,
+      "structural_target_instructions": 7,
+      "structural_candidate_instructions": 6,
+      "register_only_pairs": 4
+    },
+    "pool_data_values": {
+      "target": {
+        "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_03004D84\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_030052A4\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4290805759\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4294965255\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"sub_0804CAC8\"]]": 1
+      },
+      "candidate": {
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_03004D84\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"gUnk_030052A4\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"4290805759\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"unsigned\",\"63495\"]]": 1,
+        "[[\"opcode\",\".word\"],[\"symbol\",\"sub_0804CAC8\"]]": 1
+      }
+    },
+    "pool_data_totals": {
+      "target": {
+        "rows": 6,
+        "distinct_values": 6
+      },
+      "candidate": {
+        "rows": 5,
+        "distinct_values": 5
+      }
+    }
+  }
+}

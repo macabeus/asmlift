@@ -1,0 +1,75 @@
+--- a/gcc/stmt.c
++++ b/gcc/stmt.c
+@@ -3287,6 +3287,23 @@
+ /* Generate RTL for the automatic variable declaration DECL.
+    (Other kinds of declarations are simply ignored if seen here.)  */
+ 
++static tree lbg_saved_decls[4096];
++static int lbg_saved_decl_count;
++void
++lbg_dump_named_homes ()
++{
++  int n;
++  if (!getenv ("LBG_ALLOC_TRACE")) return;
++  for (n = 0; n < lbg_saved_decl_count; n++)
++    {
++      tree d = lbg_saved_decls[n];
++      fprintf (stderr, "LBG_NAMED_HOME %s rtl=",
++               DECL_NAME (d) ? IDENTIFIER_POINTER (DECL_NAME (d)) : "<anon>");
++      print_rtl_single (stderr, DECL_RTL (d));
++    }
++  lbg_saved_decl_count = 0;
++}
++
+ void
+ expand_decl (decl)
+      register tree decl;
+@@ -3294,6 +3311,12 @@
+   struct nesting *thisblock = block_stack;
+   tree type;
+ 
++  if (getenv ("LBG_ALLOC_TRACE") && TREE_CODE (decl) == VAR_DECL
++      && !TREE_STATIC (decl) && !DECL_EXTERNAL (decl))
++    {
++      if (lbg_saved_decl_count >= 4096) abort ();
++      lbg_saved_decls[lbg_saved_decl_count++] = decl;
++    }
+   type = TREE_TYPE (decl);
+ 
+   /* Only automatic variables need any expansion done.
+@@ -3341,6 +3364,10 @@
+ 
+       DECL_RTL (decl) = gen_reg_rtx (reg_mode);
+       mark_user_reg (DECL_RTL (decl));
++      if (getenv ("LBG_ALLOC_TRACE"))
++        fprintf (stderr, "LBG_DECL %s pseudo=%d\n",
++                 DECL_NAME (decl) ? IDENTIFIER_POINTER (DECL_NAME (decl)) : "<anon>",
++                 REGNO (DECL_RTL (decl)));
+ 
+       if (POINTER_TYPE_P (type))
+ 	mark_reg_pointer (DECL_RTL (decl),
+--- a/gcc/global.c
++++ b/gcc/global.c
+@@ -592,8 +592,21 @@
+        for the sake of debugging information.  */
+ 
+     build_insn_chain (get_insns ());
++    if (getenv ("LBG_ALLOC_TRACE"))
++      for (i = FIRST_PSEUDO_REGISTER; i < max_regno; i++)
++        fprintf (stderr, "LBG_ALLOC pseudo=%d hard=%d refs=%d live=%d\n",
++                 i, reg_renumber[i], REG_N_REFS (i), REG_LIVE_LENGTH (i));
+     retval = reload (get_insns (), 1, file);
+-
++    if (getenv ("LBG_ALLOC_TRACE"))
++      for (i = FIRST_PSEUDO_REGISTER; i < max_regno; i++)
++        {
++          fprintf (stderr, "LBG_HOME pseudo=%d hard=%d rtl=", i, reg_renumber[i]);
++          print_rtl_single (stderr, regno_reg_rtx[i]);
++        }
++
++
++    if (getenv ("LBG_ALLOC_TRACE"))
++      { extern void lbg_dump_named_homes (); lbg_dump_named_homes (); }
+     obstack_free (&global_obstack, NULL);
+     free (conflicts);
+ 

@@ -1,0 +1,274 @@
+{
+  "symbol": "erback",
+  "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+  "score": 12,
+  "diff_kinds": {
+    "arg-mismatch": 10,
+    "insert": 1,
+    "delete": 1
+  },
+  "row_categories": {
+    "register-only": 10,
+    "insertion/deletion": 2
+  },
+  "instruction_shape_alignment": {
+    "equal_shape_pairs": 22,
+    "identical_pairs": 12,
+    "register_only_pairs": 10,
+    "structural_regions": 2,
+    "structural_target_instructions": 1,
+    "structural_candidate_instructions": 1
+  },
+  "pool_data_values": {
+    "target": {
+      "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"symbol\",\"gReadBgs\"]]": 1
+    },
+    "candidate": {
+      "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"symbol\",\"gReadBgs\"]]": 1
+    }
+  },
+  "pool_data_totals": {
+    "target": {
+      "rows": 2,
+      "distinct_values": 2
+    },
+    "candidate": {
+      "rows": 2,
+      "distinct_values": 2
+    }
+  },
+  "rows": [
+    {
+      "row": 1,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "mov"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "r1"]
+      ],
+      "candidate": [
+        ["opcode", "mov"],
+        ["register", "r3"],
+        ["basic", ","],
+        ["register", "r1"]
+      ]
+    },
+    {
+      "row": 2,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "mov"],
+        ["register", "r5"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "0"]
+      ],
+      "candidate": [
+        ["opcode", "mov"],
+        ["register", "r2"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "0"]
+      ]
+    },
+    {
+      "row": 3,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "mov"],
+        ["register", "r2"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "0"]
+      ],
+      "candidate": [
+        ["opcode", "mov"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "0"]
+      ]
+    },
+    {
+      "row": 4,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "cmp"],
+        ["register", "r5"],
+        ["basic", ","],
+        ["register", "r4"]
+      ],
+      "candidate": [
+        ["opcode", "cmp"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "r3"]
+      ]
+    },
+    {
+      "row": 6,
+      "kind": "insert",
+      "category": "insertion/deletion",
+      "target": [],
+      "candidate": [
+        ["opcode", "lsl"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "3"]
+      ]
+    },
+    {
+      "row": 7,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "ldr"],
+        ["register", "r3"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "pc"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "32"],
+        ["basic", "]"],
+        ["basic", "(->"],
+        ["branch-dest", "48"],
+        ["basic", ")"]
+      ],
+      "candidate": [
+        ["opcode", "ldr"],
+        ["register", "r5"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "pc"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "32"],
+        ["basic", "]"],
+        ["basic", "(->"],
+        ["branch-dest", "48"],
+        ["basic", ")"]
+      ]
+    },
+    {
+      "row": 8,
+      "kind": "delete",
+      "category": "insertion/deletion",
+      "target": [
+        ["opcode", "lsl"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "3"]
+      ],
+      "candidate": []
+    },
+    {
+      "row": 9,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "add"],
+        ["register", "r6"],
+        ["basic", ","],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r3"]
+      ],
+      "candidate": [
+        ["opcode", "add"],
+        ["register", "r6"],
+        ["basic", ","],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r5"]
+      ]
+    },
+    {
+      "row": 15,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "ldrh"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "r3"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "22"],
+        ["basic", "]"]
+      ],
+      "candidate": [
+        ["opcode", "ldrh"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "r5"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "22"],
+        ["basic", "]"]
+      ]
+    },
+    {
+      "row": 16,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "add"],
+        ["register", "r5"],
+        ["basic", ","],
+        ["register", "r0"]
+      ],
+      "candidate": [
+        ["opcode", "add"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "r0"]
+      ]
+    },
+    {
+      "row": 18,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "cmp"],
+        ["register", "r2"],
+        ["basic", ","],
+        ["register", "r4"]
+      ],
+      "candidate": [
+        ["opcode", "cmp"],
+        ["register", "r2"],
+        ["basic", ","],
+        ["register", "r3"]
+      ]
+    },
+    {
+      "row": 20,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "mov"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r5"]
+      ],
+      "candidate": [
+        ["opcode", "mov"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r4"]
+      ]
+    }
+  ]
+}
