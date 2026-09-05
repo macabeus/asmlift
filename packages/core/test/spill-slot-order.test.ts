@@ -15,12 +15,17 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
+import { cppBackend } from '../src/backend/cpp';
+import { pascalBackend } from '../src/backend/pascal';
 import { frontendFor } from '../src/frontend/registry';
 import { makeSsaBuilder, stackSlotKey } from '../src/frontend/ssa';
 import { type Block, type Fn, type Value, mkOp, mkValue, replaceAllUsesWith } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { T } from '../src/ir/types';
+import type { SFn } from '../src/l3/ast';
+import { orderSlotLocals } from '../src/l3/slotorder';
 import { raiseRecovered } from '../src/pipeline';
 import { type StructureOptions, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
@@ -223,4 +228,91 @@ test('the frame-slot direction is a per-compiler datum: agbcc ascending, everyth
 test('the datum reaches the structurer through the compilerBehaviors spread, with no plumbing', () => {
   expect(structureOptionsFor(ARMV4T_AGBCC, false).spillSlotOrder).toBe('ascending');
   expect(structureOptionsFor(MIPS_IDO, false).spillSlotOrder).toBe('unknown');
+});
+
+// ── A5: one pure ordering, owned by `emit` ────────────────────────────────────────────────────
+
+/** Two slot-carrying locals declared AGAINST an ascending frame, an unslotted one between them. */
+const twoSlots = (over: Partial<SFn> = {}): SFn => ({
+  name: 'f',
+  params: [],
+  locals: [
+    { name: 'hi', type: T.int(32, true), slot: 4 },
+    { name: 'mid', type: T.int(32, true) },
+    { name: 'lo', type: T.int(32, true), slot: 0 },
+  ],
+  retType: T.void(),
+  body: [],
+  slotOrder: 'ascending',
+  ...over,
+});
+
+const declOrder = (src: string): string[] => [...src.matchAll(/\b(hi|mid|lo|only)\b/g)].map((m) => m[1]);
+
+test('C: the declaration list is refilled in the target frame order, in place', () => {
+  expect(declOrder(cBackend.emit(orderSlotLocals(twoSlots())))).toEqual(['lo', 'mid', 'hi']);
+});
+
+test('C++: the same, through the other C-family backend', () => {
+  const backend = cppBackend({ method: 'f', retType: { base: 'void', ptr: 0 }, params: [] });
+  expect(declOrder(backend.emit(orderSlotLocals(twoSlots())))).toEqual(['lo', 'mid', 'hi']);
+});
+
+test('Pascal: the same, through a backend with its own spelling', () => {
+  expect(declOrder(pascalBackend.emit(orderSlotLocals(twoSlots())))).toEqual(['lo', 'mid', 'hi']);
+});
+
+test('descending reverses it, and an unknown direction is the identity', () => {
+  expect(orderSlotLocals(twoSlots({ slotOrder: 'descending' })).locals.map((l) => l.name)).toEqual(['hi', 'mid', 'lo']);
+  expect(orderSlotLocals(twoSlots({ slotOrder: undefined })).locals.map((l) => l.name)).toEqual(['hi', 'mid', 'lo']);
+});
+
+test('fewer than two sortable locals is the identity', () => {
+  const one = twoSlots({
+    locals: [
+      { name: 'mid', type: T.int(32, true) },
+      { name: 'only', type: T.int(32, true), slot: 8 },
+    ],
+  });
+  expect(orderSlotLocals(one).locals.map((l) => l.name)).toEqual(['mid', 'only']);
+});
+
+test('an unslotted local NEVER moves — only the sortable positions are refilled', () => {
+  const sfn = orderSlotLocals(twoSlots());
+  expect(sfn.locals[1].name).toBe('mid');
+});
+
+test("the ordering is pure: the structurer's own list is left alone", () => {
+  const sfn = twoSlots();
+  const before = sfn.locals.map((l) => l.name);
+  orderSlotLocals(sfn);
+  expect(sfn.locals.map((l) => l.name)).toEqual(before);
+});
+
+test('two locals sharing one slot keep their relative order', () => {
+  const sfn = twoSlots({
+    locals: [
+      { name: 'hi', type: T.int(32, true), slot: 4 },
+      { name: 'mid', type: T.int(32, true), slot: 4 },
+      { name: 'lo', type: T.int(32, true), slot: 0 },
+    ],
+  });
+  expect(orderSlotLocals(sfn).locals.map((l) => l.name)).toEqual(['lo', 'hi', 'mid']);
+});
+
+test('every backend orders: no `emit` may print an unordered declaration list', () => {
+  // Owned by `emit` rather than by a call site because there are SEVEN `.emit(` call sites, and
+  // the web Playground reaches two of them for one function (the headline source and the Pipeline
+  // tab) while the score probe reaches a third. A call-site ordering would print an ordered
+  // headline beside an unordered pipeline dump, and measure a scoreDelta on a source the ranked
+  // path never compiles.
+  const sfn = twoSlots();
+  const backends = [
+    cBackend,
+    pascalBackend,
+    cppBackend({ method: 'f', retType: { base: 'void', ptr: 0 }, params: [] }),
+  ];
+  for (const b of backends) {
+    expect(declOrder(b.emit(sfn))).toEqual(['lo', 'mid', 'hi']);
+  }
 });
