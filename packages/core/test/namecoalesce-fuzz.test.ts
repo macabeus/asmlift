@@ -107,7 +107,7 @@ export function generate(seed: number, withLoop: boolean): Fn {
       }),
     );
   }
-  return { name: `fz${seed}`, blocks, writeOrder: undefined };
+  return { name: `fz${seed}`, blocks, writeOrder: undefined, slotHomes: undefined };
 }
 
 /** A local that no path assigned. It POISONS: an expression over one is as indeterminate as it is,

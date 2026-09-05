@@ -574,13 +574,29 @@ export function unreduceAccumulators(
         // Every flag `SFn.locals` can carry, because each is a fact about the ASM that only the
         // declaration states: two qualifiers (deleting a `volatile u16 *` local re-spells `*p = 0`
         // as a raw cast with no qualifier on it — l3/inlinebase.ts carries it onto the minted cast
-        // instead, and this lever has no local left to carry anything), a frame home, and an
-        // `undef` whose whole content is the assignment that is MISSING.
+        // instead, and this lever has no local left to carry anything), a frame home, an `undef`
+        // whose whole content is the assignment that is MISSING, and the SPILL HOMES.
+        //
+        // WHY `slots` PINS, which is not the obvious reading. Deleting a slot-carrying local does
+        // not mis-order the survivors: they stay a subset of one total order and rank correctly
+        // among themselves. What it can do is flip a REFUSAL into an ordering. `l3/slotorder.ts`
+        // refuses the whole function when two declared locals share one offset, because reload
+        // hands each spilled pseudo a fresh slot and a duplicate proves the offsets did not come
+        // from reload. Delete one sharer and the survivors are injective — so the ordering fires
+        // on a frame whose evidence was already known not to be declaration ranks, and it fires
+        // silently. Refusing to delete keeps the duplicate, and keeps the refusal.
+        //
+        // MEASURED, so this is a stated zero and not an assumption: instrumented at the deletion
+        // below, it fires on none of the three agbcc rows that spill AND lift — `spillorder`,
+        // `dma_fill_uninit`, `uninit_spill` — so the clause costs no candidate today. (`spill10`
+        // spills too but declines in the Thumb frontend, so it never reaches this pass and its
+        // zero says nothing.) It is here for the day one does.
         pinned:
           cand.volatile !== undefined ||
           cand.pointeeVolatile !== undefined ||
           cand.frame !== undefined ||
-          cand.uninit !== undefined,
+          cand.uninit !== undefined ||
+          cand.slots !== undefined,
         liveOutside: mentions(
           outside.filter((s) => s !== initStmt),
           cand.name,

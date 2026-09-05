@@ -47,7 +47,61 @@ export interface Fn {
    *  — the copy in `cli/src/report.ts` most of all — has to say what it does with the record, so
    *  a side table added to `Fn` cannot be dropped by a copy that simply never mentions it. */
   writeOrder: WriteOrder | undefined;
+  /** L1 SIDE DATA (see {@link SlotHomes}); set by the SSA builder, `undefined` on parsed IR.
+   *  REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` is: an optional field is
+   *  silently dropped by a copy that never mentions it (`cli/src/report.ts` structuredCloneFn says
+   *  so at its own definition), and a fact the structurer reads but the score probe's clone drops
+   *  makes that probe's delta a fact about a program asmlift does not emit. */
+  slotHomes: SlotHomes | undefined;
 }
+
+/** Which `[sp,#k]` the machine homed a value at — the frame coordinate, carried L1 → L3.
+ *
+ *  The coordinate exists only in the frontends: they record a word sp-relative slot's value in SSA
+ *  under the key `sp@k` (`frontend/ssa.ts` stackSlotKey) instead of emitting a store through `sp`,
+ *  so by L2 the value is an ordinary SSA value and `k` is gone. This map is where `k` survives.
+ *
+ *  A KEY IS NOT A FRAME COORDINATE, and the frontends differ on exactly that. `sp@40` is a local
+ *  on one ABI and the caller's fifth argument on another, so the shared stamp asks the frontend's
+ *  own `LiveInModel.declaredLocals` and refuses an offset outside it — Thumb declares a range,
+ *  MIPS and PPC declare no partition and so stamp nothing. An entry here therefore means "storage
+ *  this function DECLARES, homed at k", not "some sp-relative key".
+ *
+ *  DECLARES, NOT OWNS, AND THE DIFFERENCE IS AN AGBCC FACT WITH A LIVE DEPENDENCY: `ownedLocals`,
+ *  the partition a def-less READ asks, admits agbcc's outgoing stack-argument area, and an offset
+ *  there is an ABI position rather than an `expand_decl` rank. Under Thumb the two ranges are
+ *  written equal, and a decline rather than a proof is what makes that safe — see `declaredLocals`
+ *  (frontend/ssa.ts) for the dependency and what lifting it obliges.
+ *
+ *  ONE consumer reads it for its content — the structurer, which turns it into
+ *  `SFn.locals[i].slots`; everything else only carries it (`replaceAllUsesWith`, the report's
+ *  clone). It exists because a compiler that hands out frame slots by declaration rank makes the
+ *  source's DECLARATION ORDER observable in the object. Absent entries are the norm: most values
+ *  are never spilled, and a value with no entry simply has no frame coordinate to order by.
+ *
+ *  A SET, AND NOTHING MERGES IT. Every place two homes meet — this map's own writes, a value that
+ *  inherits another's uses in `replaceAllUsesWith`, several values under one name in the
+ *  structurer's naming walk, two named locals absorbed into one by `l3/coalesce.ts` — takes the
+ *  UNION. None of those four sites picks an offset, because picking one is a question about the
+ *  TARGET and not one of them holds a target: the SSA builder takes `(name, blockCount, preds,
+ *  liveInOf)`, `replaceAllUsesWith` takes an `Fn`, and `localsAfterMerge` takes a locals list.
+ *
+ *  The reduction happens ONCE, in `l3/slotorder.ts`, which is the one place that holds
+ *  `SFn.slotOrder`. Earliest declaration rank is the LOWEST offset under an ascending frame and
+ *  the HIGHEST under a descending one, so a merge site that took an END of the set would be
+ *  spelling one direction's answer under a neutral name: right for agbcc, inverted for a target
+ *  whose measured direction is `descending` (ido7.1). Reducing where the direction is in hand
+ *  makes it one comparator rather than four copies of a sentence.
+ *
+ *  It is still a POLICY and not a proof: the machine homed one value at two offsets and the source
+ *  declared one local, so no reading of the asm recovers which rank the source had. What the union
+ *  buys is that the choice is made where it can be made correctly.
+ *
+ *  NO `ir/verify.ts` RULE, unlike `writeOrder`: that record is a per-FUNCTION measurement with a
+ *  mixed state to reject (some blocks measured, others not). A slot home is per VALUE and
+ *  legitimately absent on almost every value, so there is no mixed state for a verifier to catch
+ *  and a rule would never fire. */
+export type SlotHomes = Map<Value, Set<number>>;
 
 /** The order in which each block WROTE the keys its successors' block-params stand for — a
  *  measurement the SSA builder makes and nothing downstream can recover, because the value graph
@@ -308,6 +362,29 @@ export function defOpMap(fn: Fn): Map<Value, Op> {
 
 /** Replace every use of `oldV` with `newV` (operands + successor args). No in-place op mutation. */
 export function replaceAllUsesWith(fn: Fn, oldV: Value, newV: Value): void {
+  // The frame coordinate follows the value that inherits the uses. Without this the home stays on
+  // a value nothing reads any more while the local the structurer names — `newV` — carries none,
+  // and the declaration list loses its order for that local. UNION, never a choice: this helper is
+  // handed an `Fn` and an `Fn` carries no target, so it cannot know whether the earlier rank is the
+  // lower or the higher offset (`SlotHomes`). `l3/slotorder.ts` decides that, once.
+  //
+  // A GUARD, MEASURED: instrumented over every agbcc case of both benchmark tiers, this fires 14
+  // times on 252 lifted synthetic functions and 112 times on 116 lifted real ones — and in every
+  // single firing the inheriting value already carried the same offset. So it has never yet SAVED
+  // a home, and the union has never yet held two. It ships because the alternative is a home
+  // stranded on a retired value, which is silent.
+  const homes = fn.slotHomes;
+  if (homes !== undefined) {
+    const from = homes.get(oldV);
+    if (from !== undefined) {
+      const to = homes.get(newV);
+      if (to === undefined) {
+        homes.set(newV, new Set(from));
+      } else {
+        from.forEach((off) => to.add(off));
+      }
+    }
+  }
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       op.operands = op.operands.map((v) => (v === oldV ? newV : v));

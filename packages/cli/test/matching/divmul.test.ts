@@ -189,6 +189,7 @@ describe('sdiv variadic invariant (verifier)', () => {
       name: 'f',
       blocks: [{ params: [x], ops: [mkOp('sdiv', { operands, results: [r], attrs }), mkOp('ret', { operands: [r] })] }],
       writeOrder: undefined,
+      slotHomes: undefined,
     };
   };
   test('1 operand WITH imm is valid', () => {

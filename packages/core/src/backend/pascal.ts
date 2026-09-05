@@ -10,6 +10,7 @@
 // Turbo/Delphi/FreePascal.
 import { IrType, typeToString } from '../ir/types';
 import { BinOp, Expr, LanguageBackend, SFn, Stmt } from '../l3/ast';
+import { orderSlotLocals } from '../l3/slotorder';
 import { type VarTypes, declaredTypes, derefStrideOk, exprCType } from '../l3/typing';
 
 // Infix operators IDO Pascal spells directly.
@@ -275,7 +276,10 @@ export const pascalBackend: LanguageBackend = {
   // spells as plain if-nesting, which Pascal prints, so the choice is between a decompiled
   // function and a stub.
   spellsSwitchFallthrough: false,
-  emit(fn: SFn): string {
+  emit(fn0: SFn): string {
+    // The declaration list is put into the target's own frame order HERE, as the C family does it
+    // in its shared assembler — owned by `emit`, never by a `.emit(` call site (l3/slotorder.ts).
+    const fn = orderSlotLocals(fn0);
     // Same env discipline as the C family (cfamily.ts cFamilyBody): the printer judges derefs
     // against the exact declarations it emits.
     const ps = makePrinter(declaredTypes(fn));

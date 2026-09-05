@@ -269,7 +269,21 @@ export interface SFn {
    *  may drop a store or render one machine load as two reads, and `volatile` over an access
    *  set asmlift did not preserve is a source that contradicts itself. ABSENT where the counts
    *  would be a floor rather than the set: an address reaching anything but a direct load/store
-   *  leaves accesses the count cannot see. */
+   *  leaves accesses the count cannot see.
+   *
+   *  ORDER MATTERS, and it means two different things at two different times. As the structurer
+   *  builds it and as every L3 pass sees it, this is the RECOVERED DECLARATION ORDER — the naming
+   *  walk's order — and passes reason about it as such: `l3/coalesce.ts` picks the arm-disjoint
+   *  survivor by position in THIS list, so the earlier declaration wins the way a shared source
+   *  local reads. The EMITTED order is this list re-sorted by `l3/slotorder.ts` inside `emit`,
+   *  which happens after every pass and returns a copy. A pass that sorted the list any earlier
+   *  would silently change which local survives every arm-disjoint merge.
+   *
+   *  ONE COMMENT, DELIBERATELY. Five sites tell a reader to consult "the SFn.locals doc"
+   *  (structure/structure.ts, l3/inlinebase.ts, l3/volatileval.ts, l3/reindex.ts, l3/unreduce.ts),
+   *  and TypeScript attaches only the LAST doc block before a declaration — so a second block
+   *  added in front of this one would silently orphan everything above and those five references
+   *  would point at half a paragraph. Append here; do not add a neighbour. */
   locals: {
     name: string;
     type: IrType;
@@ -280,6 +294,16 @@ export interface SFn {
      *  MISSING assignment is the recovery. Marked because a local read and never assigned is
      *  otherwise a dropped statement (contracts.ts assertLocalsWritten). */
     uninit?: true;
+    /** every `[sp,#k]` the machine homed this local at, when the asm spilled it — ascending, and
+     *  usually one. Several when the naming walk put several spilled values under this one name,
+     *  or a coalesce absorbed a second homed local into it; the list is the UNION and picks
+     *  nothing, because which offset is the earlier DECLARATION RANK depends on the frame's
+     *  direction and only `l3/slotorder.ts` holds it (ir/core.ts `SlotHomes`).
+     *
+     *  Present ONLY on a local recovered from word-spill VALUES. A `frame` local and a `uninit`
+     *  one are deliberately left unstamped even where the offset is in hand — see the refusal at
+     *  the structurer's build site for the measurement that decided it. */
+    slots?: number[];
   }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
@@ -290,6 +314,18 @@ export interface SFn {
   /** Struct types this function's fields reference, declared above it by the backend. Empty
    *  unless raise/structs.ts recovered a struct. Sorted by name for deterministic output. */
   structs?: StructType[];
+  /** Which way this compiler hands out frame slots against DECLARATION RANK, when it is known:
+   *
+   *  THE ONE COMPILER DATUM ON THE NEUTRAL TREE, and it is here rather than in a backend on
+   *  purpose: `LanguageBackend.emit(fn: SFn): string` is the only seam a backend has, and widening
+   *  it to `emit(fn, opts)` would hand the datum back to the seven `.emit(` CALL SITES this design
+   *  exists to keep it out of. So the tree is neutral in its NODES — every node still spells the
+   *  same thing in C, C++ and Pascal — and not in its emission policy, which this field is.
+   *  `ascending` = the earlier-declared spilled local takes the LOWER `[sp,#k]`. Set by the
+   *  structurer from `StructureOptions.spillSlotOrder`, itself a per-compiler default declared in
+   *  `TargetDescription.compilerBehaviors`. ABSENT means the direction is unknown for this target
+   *  and `l3/slotorder.ts` is the identity — never "ascending by default". */
+  slotOrder?: 'ascending' | 'descending';
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct

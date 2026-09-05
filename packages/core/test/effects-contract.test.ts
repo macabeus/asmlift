@@ -23,7 +23,12 @@ const irWith = (calls: string[], unreachable: string[] = []): Fn => {
     params: [],
     ops: [...unreachable.map((t) => mkOp('call', { results: [mkValue(T.s(32))], attrs: { target: t } })), mkOp('ret')],
   };
-  return { name: 'F', blocks: unreachable.length ? [entry, dead] : [entry], writeOrder: undefined };
+  return {
+    name: 'F',
+    blocks: unreachable.length ? [entry, dead] : [entry],
+    writeOrder: undefined,
+    slotHomes: undefined,
+  };
 };
 
 const sfnWith = (body: Stmt[]): SFn => ({ name: 'F', params: [], locals: [], retType: T.void(), body });

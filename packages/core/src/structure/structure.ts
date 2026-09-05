@@ -1028,6 +1028,19 @@ export interface StructureOptions {
   // that a fall-through switch has a SECOND, behaviourally identical recovery. Regime A declines
   // to if-recovery when it is false; Regime B, having no fallback, fails loud. Default true.
   spellSwitchFallthrough?: boolean;
+  // Which way this compiler hands out frame slots against DECLARATION RANK: `ascending` = the
+  // earlier-declared spilled local takes the LOWER `[sp,#k]`. A per-compiler DATA lever declared
+  // in TargetDescription.compilerBehaviors, carried to the backend on `SFn.slotOrder` and applied
+  // by `l3/slotorder.ts` at emit time. ABSENT means the ordering refuses — there is no default
+  // direction, because a wrong one reorders declarations for no reason.
+  //
+  // TWO STATES, NOT THREE. `TargetDescription` spells a third, `'unknown'`, and it earns its place
+  // there: it separates a direction that was measured and deliberately not shipped from one nobody
+  // ever asked about, which is a fact about the target worth writing down. Nobody reads a
+  // STRUCTURER option to learn what was measured, so carrying it here would be a second way to
+  // spell "no" on a public option type. The translation happens once, in `structureOptionsFor`
+  // (target.ts), which is where the target-to-structurer mapping lives.
+  spillSlotOrder?: 'ascending' | 'descending';
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -1291,6 +1304,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchAllowsBoundCase = false,
     switchArmsFollowLayout = false,
     spellSwitchFallthrough = true,
+    spillSlotOrder,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -4561,6 +4575,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const localNames = [...new Set([...varName.values(), ...[...varType.keys()].filter((n) => /^t\d+$/.test(n))])].filter(
     (n) => /^[vt]\d+$/.test(n) && !globalNames.has(n),
   );
+  // THE FRAME COORDINATES OF EACH DECLARED LOCAL (ir/core.ts `SlotHomes`, stamped by the SSA
+  // builder). The naming walk is what makes it a per-DECLARATION fact: several spilled values can
+  // land under one name, and the local the source declared is the name, not the value. Where a
+  // name covers several homes it takes the UNION and picks NOTHING — which offset is the earlier
+  // declaration rank depends on the frame's direction, and `l3/slotorder.ts` is the one place that
+  // holds it. Sorted, so the list is deterministic rather than insertion-ordered.
+  //
+  // A NAME COVERING NO HOMED VALUE GETS NO ENTRY, so `slots` is absent rather than `[]` on the
+  // locals the asm kept in registers. Values named `a<n>` (parameters) never reach here:
+  // `localNames` is the `v*`/`t*` set, and a parameter's storage is the caller's question.
+  const slotsOfName = new Map<string, Set<number>>();
+  const isLocalName = new Set(localNames);
+  for (const [v, offs] of fn.slotHomes ?? []) {
+    const n = varName.get(v);
+    if (n === undefined || !isLocalName.has(n)) {
+      continue;
+    }
+    const prev = slotsOfName.get(n);
+    if (prev === undefined) {
+      slotsOfName.set(n, new Set(offs));
+    } else {
+      offs.forEach((off) => prev.add(off));
+    }
+  }
   // The machine's static access counts for one frame object: every `load`/`store` rooted on an
   // `laddr` at the same offset. Counted over the L2 blocks, so it is the access set the asm had,
   // before any L3 readability pass could drop or duplicate one. Summed across the offset's
@@ -4609,9 +4647,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     name: fn.name,
     params: entry.params.map((p, i) => ({ name: `a${i}`, type: p.type })),
     locals: [
-      ...localNames.map((n) => ({ name: n, type: varType.get(n)! })),
+      ...localNames.map((n) => ({
+        name: n,
+        type: varType.get(n)!,
+        ...(slotsOfName.has(n) ? { slots: [...slotsOfName.get(n)!].sort((x, y) => x - y) } : {}),
+      })),
       // frame-local objects (laddr): declared with EXACTLY the access type the machine used —
       // the frontend's frame-object audit proved all accesses agree, so this is a fact, not a guess
+      //
+      // NO `slots` IS STAMPED HERE, and the offset is in hand (`op.attrs.off`), so this is a
+      // refusal and not an oversight. An RTL-time frame object is allocated at its declaration
+      // and sits BELOW every spill slot, so its offset is not evidence of its rank among the
+      // spilled locals — and the one row in the corpus that carries such an object next to real
+      // spills (`synthetic:dma_fill_uninit`, a `volatile` scratch at offset 0) compiles to the
+      // same object whether that local is sorted with the spills or left where the naming walk
+      // put it, measured both ways. So no row can refute an ordering over these, and an ordering
+      // no row can refute does not earn its place. THE FLIP CONDITION: the first row whose object
+      // is decided by the declaration order of two `laddr` locals, or of an `laddr` against a
+      // spill, is the referee — stamp them then, and `l3/slotorder.ts` needs no change to use it.
       ...[
         ...new Map(
           fn.blocks
@@ -4636,7 +4689,33 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ).values(),
       ],
       // uninitialised locals (undef): declared, never assigned, typed by whatever recovery settled
-      // on for the value.
+      // on for the value. NO `slots` either, on the same footing as the frame objects above.
+      //
+      // THE REASON IS UNDECIDABILITY, not absence. One frame slot then yields TWO declarations:
+      // the `undef` read of the storage and the value stored into it. They are one object in the
+      // source, and the asm does not say which of the two took the rank — so ranking one of the
+      // pair while leaving the other pinned would invent an answer. Refusing the undef half keeps
+      // the stored half's rank, which is the one the spill evidence is about.
+      //
+      // AND IT IS PRECAUTIONARY: NO ROW REACHES IT. The co-existence is real in the tree this
+      // function returns — `uninit_spill` declares `uninit_sp0/sp4/sp8` beside the slotted `v4@0
+      // v5@4 v6@8`, `dma_fill_uninit` declares `uninit_sp4/sp8/sp12` beside `v4@4 v6@8 v8@12` —
+      // but that tree is never emitted: `structure()` has exactly one caller, `structureChecked`
+      // (pipeline.ts), and `l3/slotorder.ts` runs inside `emit`, downstream of it on every emit
+      // path. On the tree `structureChecked` returns neither row has an `uninit` local left —
+      // `eliminateDeadStores` (l3/dce.ts, whose last line keeps only locals the body still
+      // references) removes all eight on `uninit_spill` and all seven on `dma_fill_uninit`,
+      // leaving the slot-carrying locals untouched. Instrumented one spine stage at a time, not
+      // inferred: raw 8 → mergeCommonTails 8 → eliminateDeadStores 0.
+      //
+      // The refusal stays HERE rather than at the ordering because this is where the stamp is
+      // decided, and an `undef` local that survived DCE — address-taken, `volatile`, or genuinely
+      // read — would otherwise carry it into `emit`. FLIP CONDITION, and it is not "the first
+      // uninit local", since four rows already have them in `structure()`'s tree and none in
+      // `structureChecked`'s: it is the first row where a slot-keyed `undef` local SURVIVES
+      // dead-store elimination beside a slotted local at the same offset, and compile shows the
+      // two to be two source declarations rather than one. `spill-slot-order.test.ts` pins both
+      // halves, so a change to either fails there.
       ...fn.blocks
         .flatMap((b) => b.ops)
         .filter((op) => op.opcode === 'undef')
@@ -4656,6 +4735,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     retType: returnsVoid ? T.void() : returnType(fn),
     body,
     ...(structs.length ? { structs } : {}),
+    // absent stays absent: the backend asks "is a direction known?", and there is no third state
+    // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
+    ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
   };
 }
 

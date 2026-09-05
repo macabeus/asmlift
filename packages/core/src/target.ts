@@ -189,6 +189,25 @@ export interface TargetDescription {
     // unmeasured per-compiler default is to claim nothing. Read off the target by a raising pass
     // (`inferGlobalArrays`), not by the structurer.
     arrayShapeFromStride?: boolean;
+    // Which way this compiler hands out FRAME SLOTS against a spilled local's DECLARATION RANK:
+    // `ascending` = the earlier-declared spilled local takes the LOWER `[sp,#k]`. Consumed by the
+    // structurer (StructureOptions.spillSlotOrder) and applied at emit time by l3/slotorder.ts.
+    //
+    // `'unknown'` and absent both REFUSE the ordering — there is deliberately no default
+    // direction, because the wrong one reorders every declaration list on that target for no
+    // reason. That is why three of the four descriptions below ship `'unknown'`: no MIPS or PPC
+    // benchmark row lifts with two or more spilled user locals, so no row on those tiers can
+    // referee a value, and a value no row can falsify does not earn the level. Two of the three
+    // have a direction MEASURED against a committed probe and withheld for that reason; the third
+    // (mwcc) has no direction at all, because the probe does not spill there. Each says which it
+    // is, and its flip condition, at its own site.
+    //
+    // KEYED BY DESCRIPTION, WHILE THE FACT IS PER TOOLCHAIN — the first field in this bag with a
+    // stated instance of that gap. `MIPS_GCC` serves BOTH `gcc2.7.2kmc` (Snowboard Kids 2's Kyoto
+    // build at -O2) and `gcc2.7.2` (Mario Party 3's at -O1); they agree here, and a committed probe
+    // says so, but nothing in this bag could express it if they did not. Any behavior that can
+    // differ between two toolchains sharing one description is mis-keyed by construction.
+    spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation.
@@ -314,6 +333,14 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchArmsFollowLayout: true,
     hoistsSingleSetArm: true,
     arrayShapeFromStride: true,
+    // agbcc: reload walks pseudos ascending handing each global-alloc loser a fresh slot, a user
+    // local's pseudo number is its `expand_decl` position, and the Thumb frame grows UPWARD
+    // (FRAME_GROWS_DOWNWARD is commented out in thumb.h). So the earlier-declared spilled local
+    // takes the lower offset. The rows that referee it are `synthetic:spillorder` (six `[sp,#k]`
+    // operand rows and nothing else, from two locals declared the other way round) and its
+    // control `synthetic:spillorder_rev` (the same body in the order asmlift already emits, which
+    // must stay a MATCH), plus `synthetic:dma_fill_uninit`, a row this did not author.
+    spillSlotOrder: 'ascending',
   },
 };
 
@@ -335,6 +362,22 @@ export const MIPS_IDO: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
     switchAllowsNeqCase: false,
+    // MEASURED `descending` (the earlier-declared spilled local takes the HIGHER offset) and NOT
+    // SHIPPED. The probe is COMMITTED — `packages/core/test/corpus/probe-declrank.c` and its
+    // reversed-declaration twin, with this compiler's objects beside them — and a test reads the
+    // correspondence off it: 16 of 16 spills, and rank → offset unchanged when the declaration
+    // list is reversed, which is what separates declaration rank from the order of the
+    // assignments. No ido7.1 benchmark row lifts with two or more spilled user locals — the only
+    // spilling shape in the corpus carries a call, and this frontend declines a call — so no row
+    // can tell a wrong value from a right one here.
+    //
+    // FLIP CONDITION, and it has TWO parts because the second is easy to miss. (1) The first
+    // ido7.1 row that lifts with two spilled locals. (2) `frontend/mips.ts` must first claim a
+    // frame partition (`LiveInModel.declaredLocals`); until it does, the shared stamp refuses every
+    // MIPS slot, so this value would order nothing — and if the partition were claimed WRONGLY,
+    // O32's caller-owned home area `[0,16)` would be read as this function's first four
+    // declaration ranks. Shipping a direction before the partition orders by argument index.
+    spillSlotOrder: 'unknown',
   },
 };
 
@@ -364,7 +407,21 @@ export const MIPS_GCC: TargetDescription = {
   // that computes the initial value INTO the param's own register wrote the key and still
   // coalesces.
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
-  compilerBehaviors: { coalesceLoopInit: true, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
+  compilerBehaviors: {
+    coalesceLoopInit: true,
+    preserveDivergentBranchSense: true,
+    orderArgCopiesByWriteOrder: true,
+    // MEASURED `ascending` on both toolchains this description serves — 7 of 7 spills each, and
+    // rank → offset unchanged under a reversed declaration list — and NOT SHIPPED, for the same
+    // reason as ido7.1: no row on either tier lifts with two or more spilled user locals. Both
+    // probes are COMMITTED beside ido7.1's (`corpus/gcc272kmc-declrank*.txt`,
+    // `corpus/gcc272-declrank*.txt`) and a test reads the direction off them.
+    //
+    // The two agreeing is not a formality. The value is per DESCRIPTION and TWO toolchains map
+    // here, so a toolchain whose direction differed from its description's would need a
+    // per-toolchain override this bag cannot express — see the note at `compilerBehaviors`.
+    spillSlotOrder: 'unknown',
+  },
 };
 
 /** PowerPC (GameCube/Wii) + Metrowerks CodeWarrior. The real GC/Wii matching target is
@@ -383,7 +440,19 @@ export const PPC_MWCC: TargetDescription = {
   // CodeWarrior's structuring levers are UNKNOWN until fixtures reveal them — safe universal
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
-  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
+  compilerBehaviors: {
+    coalesceLoopInit: false,
+    preserveDivergentBranchSense: true,
+    orderArgCopiesByWriteOrder: true,
+    // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
+    // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
+    // locals, and the compiler does not spill the committed declaration-rank probe either: at
+    // sixteen locals it homes every one in a register, and at forty it sinks the whole computation
+    // past the call so nothing is live across it. And, as at MIPS_IDO, the frame partition comes
+    // first: `frontend/ppc.ts` claims no `LiveInModel.declaredLocals`, so the shared stamp records
+    // no slot home on this target at all and a direction here would order nothing until it does.
+    spillSlotOrder: 'unknown',
+  },
 };
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every
@@ -399,7 +468,20 @@ export const PPC_MWCC: TargetDescription = {
 export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean): StructureOptions {
   // `littleEndian` is the one HARDWARE capability the structurer consumes (bitfield extract
   // recognition is LSB-first); everything else is a compiler behavior.
-  return { returnsVoid, littleEndian: t.capabilities.endianness === 'little', ...t.compilerBehaviors };
+  //
+  // ONE FIELD IS NOT A STRAIGHT SPREAD, and this is where the difference belongs. A frame
+  // direction has THREE states here — `ascending`, `descending`, and `'unknown'` meaning measured
+  // and deliberately not shipped (see `spillSlotOrder` above) — and only TWO downstream: the
+  // structurer either has a direction or refuses. `'unknown'` is a fact about what this repo
+  // measured, not an instruction to a pass, so it is dropped at the translation rather than
+  // carried onto a public option type that would then need a third case nobody branches on.
+  const { spillSlotOrder, ...behaviors } = t.compilerBehaviors;
+  return {
+    returnsVoid,
+    littleEndian: t.capabilities.endianness === 'little',
+    ...behaviors,
+    ...(spillSlotOrder === 'ascending' || spillSlotOrder === 'descending' ? { spillSlotOrder } : {}),
+  };
 }
 
 export const C_TYPEDEFS =
