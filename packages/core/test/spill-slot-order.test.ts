@@ -250,6 +250,19 @@ test('a slot home survives the whole raising spine, on a function with a u8 loca
   }
   const live = [...fn.slotHomes!].filter(([v]) => reached.has(v)).flatMap(([, offs]) => [...offs]);
   expect(new Set(live)).toEqual(new Set([0, 4, 8, 12]));
+
+  // AND THE PROPERTY THE CAPABILITY ACTUALLY CONSUMES, which reachability does not imply: after
+  // the naming walk, is each offset still carried by a DECLARED local? On this fixture it is not
+  // — four L1 offsets become three slot-carrying locals, because the walk INLINES the value homed
+  // at 0 into an expression instead of declaring it. That attrition is the capability's real
+  // blocker (see the REACH paragraph in l3/slotorder.ts) and is pinned as a NUMBER here, so a
+  // future pass that turns three into two fails on this line instead of passing the weaker
+  // reachability proxy above. Instrumented, not inferred: forcing `rerootNarrowReads` to return 0
+  // gives the identical L3 result, so this is naming-walk attrition and not a stranded home.
+  const sfn = structure(fn, structureOptionsFor(ARMV4T_AGBCC, false));
+  const declared = sfn.locals.filter((l) => l.slots !== undefined);
+  expect(declared.map((l) => `${l.name}@${l.slots!.join('/')}`)).toEqual(['v0@4', 'v10@8', 'v11@12']);
+  expect(new Set(declared.flatMap((l) => l.slots!))).toEqual(new Set([4, 8, 12]));
 });
 
 // ── A3: the declaration attribute, from the structurer's naming walk ──────────────────────────
@@ -336,17 +349,21 @@ const twoSlots = (over: Partial<SFn> = {}): SFn => ({
 
 const declOrder = (src: string): string[] => [...src.matchAll(/\b(hi|mid|lo|only)\b/g)].map((m) => m[1]);
 
+// EACH BACKEND'S OWN `emit` MUST DO THE ORDERING. The input here is the structurer's order —
+// `hi, mid, lo` against an ascending frame — and is handed to `emit` UNSORTED on purpose: pre-
+// sorting it with `orderSlotLocals` would make these pass whether or not `emit` called anything,
+// since every backend prints its declaration list in list order.
 test('C: the declaration list is refilled in the target frame order, in place', () => {
-  expect(declOrder(cBackend.emit(orderSlotLocals(twoSlots())))).toEqual(['lo', 'mid', 'hi']);
+  expect(declOrder(cBackend.emit(twoSlots()))).toEqual(['lo', 'mid', 'hi']);
 });
 
 test('C++: the same, through the other C-family backend', () => {
   const backend = cppBackend({ method: 'f', retType: { base: 'void', ptr: 0 }, params: [] });
-  expect(declOrder(backend.emit(orderSlotLocals(twoSlots())))).toEqual(['lo', 'mid', 'hi']);
+  expect(declOrder(backend.emit(twoSlots()))).toEqual(['lo', 'mid', 'hi']);
 });
 
 test('Pascal: the same, through a backend with its own spelling', () => {
-  expect(declOrder(pascalBackend.emit(orderSlotLocals(twoSlots())))).toEqual(['lo', 'mid', 'hi']);
+  expect(declOrder(pascalBackend.emit(twoSlots()))).toEqual(['lo', 'mid', 'hi']);
 });
 
 test('descending reverses it, and an unknown direction is the identity', () => {
