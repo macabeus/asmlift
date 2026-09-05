@@ -33,13 +33,13 @@ produce different fans from byte-identical assembly.**
 
 Measured on `LoadBGTilemapData`, one asmlift commit, one command, the same `.s` bytes:
 
-| checkout | branch | FUNC/OBJECT syms | fan |
-| --- | --- | ---: | ---: |
-| `apps/benchmark/checkouts/klonoa-empire-of-dreams` | `asmlift-benchmark` | 1,196 | **112,896** |
-| a sibling working clone of the same project | `runtime-naming-round7` | 1,161 | **135,936** |
+| checkout                                           | branch                  | FUNC/OBJECT syms |         fan |
+| -------------------------------------------------- | ----------------------- | ---------------: | ----------: |
+| `apps/benchmark/checkouts/klonoa-empire-of-dreams` | `asmlift-benchmark`     |            1,196 | **112,896** |
+| a sibling working clone of the same project        | `runtime-naming-round7` |            1,161 | **135,936** |
 
 Note the direction: **fewer symbols, larger fan.** It is the names and the recovered shapes that
-drive enumeration, not the symbol count, so "it has a symbol map" is not a configuration — *which*
+drive enumeration, not the symbol count, so "it has a symbol map" is not a configuration — _which_
 map is. A run with **no** map is a third configuration again, and a much wider one: every global
 becomes a raw address, which is the `/raw-globals` basin, and a partial run in that state was
 observed at 603,648 against 271,872 for the same tree with its map present.
