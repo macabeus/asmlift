@@ -11,7 +11,7 @@ three different commands (PR #79).
 ```sh
 cd <repo> && pnpm --filter @asmlift/cli build     # rebuild the loader; see below
 
-cd <project checkout>            # e.g. apps/benchmark/checkouts/klonoa-empire-of-dreams
+cd apps/benchmark/checkouts/<project>   # THE BENCHMARK CHECKOUT — not a sibling clone; see below
 node <repo>/packages/cli/dist/asmlift.mjs <asm/nonmatchings/…/Fn.s> \
   --config decomp.yaml \
   --score-against <build/…/tu.o> \
@@ -23,6 +23,54 @@ Run it from the project checkout and redirect stderr to a file — the `[score]`
 lines are stderr, and they are the whole record. From a git worktree, export the harness's
 toolchain overrides first (`ASMLIFT_AGBCC` and the rest): a worktree's repo root is not the
 workspace, so without them the sibling checkouts do not resolve and the run measures nothing.
+
+## The CHECKOUT is part of the number, and it is the one that bit
+
+A project can exist on this machine more than once — the benchmark's own
+`apps/benchmark/checkouts/<project>` and whatever working clone the author develops in. **Those are
+different trees with different symbol maps and different `decomp.yaml` compile templates, and they
+produce different fans from byte-identical assembly.**
+
+Measured on `LoadBGTilemapData`, one asmlift commit, one command, the same `.s` bytes:
+
+| checkout                                           | branch                  | FUNC/OBJECT syms |         fan |
+| -------------------------------------------------- | ----------------------- | ---------------: | ----------: |
+| `apps/benchmark/checkouts/klonoa-empire-of-dreams` | `asmlift-benchmark`     |            1,196 | **112,896** |
+| a sibling working clone of the same project        | `runtime-naming-round7` |            1,161 | **135,936** |
+
+Note the direction: **fewer symbols, larger fan.** It is the names and the recovered shapes that
+drive enumeration, not the symbol count, so "it has a symbol map" is not a configuration — _which_
+map is. A run with **no** map is a third configuration again, and a much wider one: every global
+becomes a raw address, which is the `/raw-globals` basin, and a partial run in that state was
+observed at 603,648 against 271,872 for the same tree with its map present.
+
+**So: run from the benchmark checkout unless you have a stated reason not to, and say which tree,
+which branch and whether a symbol map was loaded in the same breath as the number.** Two numbers
+from two trees are not a before/after pair — they are two different questions. A round once
+published a 10-point improvement measured in one tree against a baseline taken in another, and
+another round reported a fan "4.4x larger" that was simply its own tree, map-less, after an axis
+had merged.
+
+## The AXIS SET is part of the number
+
+The fan is a product over enumeration axes, so **one merged axis multiplies it**. Between
+`4fd59555` and `3ebe810d` the fan on a fixed corpus went **112,896 to 225,792 — exactly 2x** —
+because #148 shipped `/copy-defpos` (`rank.ts`), the edge-copy-order axis, as a ranked sibling.
+That was disclosed in its own PR and still invalidated every carried LBG number, because nobody
+re-stated the baseline against it.
+
+Two consequences, and they are cheap:
+
+- **A fan size that changed is a fact to explain, not noise.** Factor it: the counts above are all
+  `2^8 * 3^2 * k`, and only `k` — a per-site count — moves with the recovered structure. A clean
+  power-of-two jump is a new axis; a change in `k` is the function being recovered differently.
+- **Quote the asmlift commit with the fan.** The `[ranked]` line already carries
+  `[asmlift source <sha>]`; a number without it cannot be placed.
+
+**Getting the fan alone is cheap.** The first `[progress]` line carries the total, so a
+configuration can be identified in about two minutes without compiling anything: run the command
+with `--progress`, wait for `1/<TOTAL> candidates scored`, and kill it. Use that before committing
+hours to a full run you intend to compare against something.
 
 ## The loader is part of the number
 
