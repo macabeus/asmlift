@@ -371,13 +371,25 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     Its own refusals — no def, a non-negatable leaf ANYWHERE in the cone (no partial De Morgan),
 //     a cone over the node budget — are on the helper.
 //
-//     What the widening does NOT do, measured over those 11 rather than argued: it materializes no
-//     new local. De Morgan duplicates leaf comparisons, and a duplicated leaf could in principle
-//     gain a second consumer that analysis.ts renders as a statement BEFORE the `if` — the same
-//     hazard the single-icmp negation always had. It does not happen at any of the 11: the local
-//     count is identical at every site and the emitted line count only falls. Two of them
-//     (`sub_80930B8`, `sub_80932E0`) go from DECLINED to a full decompilation, because folding a
-//     loop-exit connective removes the back-edge loop recovery was refusing.
+//     What the widening does NOT do, measured over those 11 BRANCH-form sites rather than argued:
+//     it materializes no new local. De Morgan duplicates leaf comparisons, and a duplicated leaf
+//     could in principle gain a second consumer that analysis.ts renders as a statement BEFORE the
+//     `if` — the same hazard the single-icmp negation always had. Stated as the table actually
+//     reads: NO site gains a local (one, `sub_80B7CD0`, loses one, 8 → 7), and every site that
+//     decompiled before gets SHORTER. Two of them (`sub_80930B8`, `sub_80932E0`) go from DECLINED
+//     to a full decompilation — folding a loop-exit connective removes the back-edge loop recovery
+//     was refusing — so those two get LONGER (1 → 112 and 1 → 55 lines) and are the only sites
+//     whose local count rises at all, from 0 to 22 and 0 to 7. That is a decompilation appearing,
+//     not a leaf escaping.
+//
+//     The measurement is SCOPED to this fold on purpose, and does not carry to the value form even
+//     though both now share `negateCondOps`. Here `definedValuesStayLocal` (bottom of this file)
+//     independently forbids a ^g-defined value with a second consumer, so the result was partly
+//     structural. The value form has no use-count condition on its head cone at all — it relies on
+//     the original cone being dead after the fold, which the pass list's own `dce: true` collects —
+//     and the corpus holds no value-form connective head to measure — instrumenting the value form
+//     over the 782 benchmark rows under both lift configurations counts 6 folds per configuration,
+//     every head a single icmp — so there is nothing there yet to transfer the number to.
 //
 //     Nor does it widen the `/connective` LIFT AXIS, which is a separate question from the default
 //     lift: `onTreeOwned` below is what tells rank.ts the axis exists for a row, and this check sits
@@ -620,10 +632,16 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
  *  5 (17 connective negations, 0 refused). Clause COUNT is not the axis either: a FLAT `a || b ||
  *  c || …` chain pays nothing at all, because ^g's condition is never a connective in that shape.
  *
- *  The bound is on ops KEPT, and the frontier is a shape rather than a node count: `go` pushes a
- *  parent after its children, so a walk transiently mints up to budget + cone depth before the
- *  post-check refuses (13 at budget 8, simulated over 200k random cones), while a BALANCED cone is
- *  refused earlier — by the entry guard, at exactly `budget` kept.
+ *  The bound is on ops KEPT, and the frontier is a NODE COUNT — not a shape. Measured EXHAUSTIVELY
+ *  against this helper rather than sampled: a cone is accepted iff its node count is `<= budget`,
+ *  over all 82,500 binary cone shapes up to 23 nodes at budget 8, and over all 23,714 up to 21
+ *  nodes at every budget from 1 to 10. Shape decides only WHICH guard refuses and how many ops had
+ *  been minted when it did, and neither is visible to a caller — at budget 8, a 9-node cone is
+ *  caught by the POST-check at 9 whatever its shape, while a 15-node one is caught by the ENTRY
+ *  guard at 9 (left chain) or 8 (balanced cone) or by the post-check at 15 (right chain). Because
+ *  `go` pushes a parent only after its children, a refused walk transiently mints more than the
+ *  budget before unwinding — `2 * budget - 1` at the worst shape (15 at budget 8, that right chain),
+ *  the same maximum at every budget measured. Bounded, and nothing escapes it.
  *
  *  A refusal here is SILENT, unlike the `onTreeOwned` gate 60 lines up which exists so a sweep need
  *  not re-instrument. So raising this constant is not free advice: finding a corpus site that wants

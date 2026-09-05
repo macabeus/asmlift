@@ -872,6 +872,26 @@ describe('negating a fused connective (De Morgan)', () => {
       }
       return ops;
     };
+  /** The MIRROR of `leftChain`: `a || (b || (c || …))`, so `go` descends operands[1] instead. Same
+   *  node count, opposite lean — which is how the frontier is shown to depend on the count alone. */
+  const rightChain =
+    (n: number) =>
+    (out: Value): Op[] => {
+      const ops: Op[] = [];
+      const build = (i: number, dest: Value): void => {
+        if (i === n) {
+          ops.push(...cmp(dest, 'icmp_eq'));
+          return;
+        }
+        const leaf = mkValue(T.unk(32));
+        const rest = mkValue(T.unk(32));
+        ops.push(...cmp(leaf, 'icmp_ne'));
+        build(i + 1, rest);
+        ops.push(mkOp('logic_or', { operands: [leaf, rest], results: [dest] }));
+      };
+      build(0, out);
+      return ops;
+    };
   /** A PERFECT binary cone of depth `d`: 2^d leaves, 2^(d+1)-1 nodes, all pushed after both children. */
   const balanced =
     (d: number) =>
@@ -914,12 +934,27 @@ describe('negating a fused connective (De Morgan)', () => {
     expect(folds(leftChain(4))).toBe(false); // 5 clauses → 9 minted, one over
   });
 
-  // …and the frontier is a SHAPE, not a node count: the same 15-node cone that a chain would carry
-  // past the post-check is stopped earlier, by the entry guard, because `go` pushes a parent only
-  // after both its children.
-  test('a BALANCED cone is refused by the entry guard, at half the nodes a chain reaches', () => {
-    expect(folds(balanced(2))).toBe(true); // 7 nodes
+  // …and the frontier is the NODE COUNT and nothing else: a balanced cone flips at exactly the same
+  // count a chain does. What the shape changes is only which guard says no — this one is stopped by
+  // the ENTRY guard at 8 ops kept, where the 15-node LEFT chain above is stopped at 9 and a RIGHT
+  // chain of the same size runs to the post-check at 15 — and no caller can tell those apart.
+  // (Verified exhaustively against `negateCondOps`: accepted iff nodes <= budget, over all 82,500
+  // binary cone shapes up to 23 nodes.)
+  test('a BALANCED cone flips at the same node count a chain does, through a different guard', () => {
+    expect(folds(balanced(2))).toBe(true); // 7 nodes — and leftChain(3), also 7, also folds
     expect(folds(balanced(3))).toBe(false); // 15 nodes
+  });
+
+  // …and the same verdict for three DIFFERENT shapes at each of the two node counts either side of
+  // the cliff — the assertion form of "accepted iff nodes <= budget", which an exhaustive sweep of
+  // all 82,500 cone shapes up to 23 nodes confirms and this pins through the public fold.
+  test('the verdict depends on the node count alone: left chain, right chain and balanced agree', () => {
+    for (const at7 of [leftChain(3), rightChain(3), balanced(2)]) {
+      expect(folds(at7)).toBe(true); // 7 nodes
+    }
+    for (const at9 of [leftChain(4), rightChain(4)]) {
+      expect(folds(at9)).toBe(false); // 9 nodes
+    }
   });
 });
 
