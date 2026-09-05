@@ -45,9 +45,31 @@ import type { SFn } from './ast';
  *   4. `frame` and `uninit` locals are never sortable, because the structurer never stamps
  *      `slots` on them — the refusal, and the measurement behind it, live at that stamp site.
  *   5. Parameters are never touched: their storage is the caller's question.
- *   6. Two locals whose RANK works out the same keep their relative order (the sort is stable).
- *      One slot under two declared names is a slot the compiler REUSED, which is not evidence
- *      about either one's rank, so the ordering declines to invent one.
+ *   6. TWO DECLARED LOCALS SHARING ONE OFFSET REFUSE THE WHOLE FUNCTION. Reload hands each
+ *      spilled pseudo a FRESH slot (`reload1.c:769-770`, the premise this file's law rests on),
+ *      so a frame in which the slot -> local map is not injective is not a frame this law
+ *      describes at all: something upstream — a decomposed stack aggregate, a coalesce, a naming
+ *      walk that put two spilled values under two names at one address — produced the evidence,
+ *      and none of those is a declaration rank. It is NOT enough to leave that PAIR alone: the
+ *      shared offset is still used to rank both of them against every other sortable local, so
+ *      the whole ordering is unlicensed and the identity is the only sound answer.
+ *
+ *      MEASURED, both sides. Cost: zero on every shipped inhabitant — `spillorder` (v6@4 v12@0),
+ *      `uninit_spill` (v4@0 v5@4 v6@8), `dma_fill_uninit` (v2@16 v4@4 v6@8 v8@12) and the
+ *      `agbcc-u8spill.s` fixture (v0@4 v10@8 v11@12) are all injective, so both predicted flips
+ *      keep their ordering. Reach: over the wide agbcc corpus exactly ONE function has two
+ *      slot-carrying locals at all, and it is non-injective — `sa3 enemies/hariisen_proj.s`
+ *      `sub_80617E0` carries `v8@12 v12@8 v13@12` and, without this refusal, emitted `… v7 v12
+ *      v9 v10 v11 v8 v13 …` against the declaration order `… v7 v8 v9 v10 v11 v12 v13 …`. So 1
+ *      of 1 real functions this default actually changed was one whose evidence contradicts its
+ *      own premise; with the refusal the wild reach is zero-changed rather than one-changed-
+ *      wrongly. (Its slots are four words of one declared stack array — see the stamp site's
+ *      aggregate note — which is exactly the class that mints a duplicate.)
+ *
+ *      A consequence, so nothing downstream relies on the sort's stability: with this refusal
+ *      two sortable locals can no longer TIE. Equal ranks under `ascending` means an equal
+ *      minimum offset and under `descending` an equal maximum, and either is a shared offset,
+ *      which this refuses first.
  *
  *  AND THIS IS THE ONE PLACE A SET OF HOMES IS REDUCED TO A RANK. A local can carry several
  *  offsets — several spilled values under one name, or a coalesce that absorbed a second homed
@@ -67,8 +89,10 @@ import type { SFn } from './ast';
  *  is named: of 126 cases, four carry any L1 slot home, two carry a slot-carrying local at L3,
  *  and NONE carries two, so the ordering changes no real benchmark function's source. Over a
  *  wider corpus (2,463 real agbcc functions across 158 sa3 + klonoa listings) exactly one
- *  function permutes, and its slots are four words of a single declared stack array rather than
- *  two spilled scalars — see the stamp site's refusal list for that class. The blocker is not the
+ *  function had two slot-carrying locals at all, and its slots are four words of a single
+ *  declared stack array rather than two spilled scalars — see the stamp site's refusal list for
+ *  that class, and refusal 6 above, which now declines it, so the wild reach is ZERO functions
+ *  changed rather than one changed wrongly. The blocker is not the
  *  frame order and not the census: the structurer's naming walk INLINES spilled values instead of
  *  declaring them (`PackSaveSector` spills to 18 distinct slots, 108 stamped values, and reaches
  *  L3 with zero slot-carrying locals). Counting stores is therefore a bad proxy for reach.  */
@@ -88,6 +112,13 @@ export function orderSlotLocals(fn: SFn): SFn {
     }
   });
   if (at.length < 2) {
+    return fn;
+  }
+  // refusal 6: the slot -> local map must be INJECTIVE, or this frame is not one the law
+  // describes and no local in it can be ranked. Over every offset of every sortable local, not
+  // just their ranks: a duplicate anywhere means some slot was not a fresh reload assignment.
+  const offsets = at.flatMap((i) => fn.locals[i].slots!);
+  if (new Set(offsets).size !== offsets.length) {
     return fn;
   }
   const inFrameOrder = at

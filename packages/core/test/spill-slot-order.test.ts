@@ -479,7 +479,11 @@ test("the ordering is pure: the structurer's own list is left alone", () => {
   expect(sfn.locals.map((l) => l.name)).toEqual(before);
 });
 
-test('two locals sharing one slot keep their relative order', () => {
+// REFUSAL 6 — a non-injective slot -> local map refuses the WHOLE function, not just the pair.
+// Reload hands each spilled pseudo a fresh slot, so two declared locals at one offset means the
+// evidence did not come from reload, and the shared offset is then used to rank both sharers
+// against every OTHER sortable local too. Leaving only the pair alone would still move `lo`.
+test('two locals sharing one slot refuse the whole ordering, not just that pair', () => {
   const sfn = twoSlots({
     locals: [
       { name: 'hi', type: T.int(32, true), slots: [4] },
@@ -487,7 +491,48 @@ test('two locals sharing one slot keep their relative order', () => {
       { name: 'lo', type: T.int(32, true), slots: [0] },
     ],
   });
-  expect(orderSlotLocals(sfn).locals.map((l) => l.name)).toEqual(['lo', 'hi', 'mid']);
+  // identity — and NOT ['lo','hi','mid'], which is what ranking the two sharers against `lo`
+  // by their shared offset would give
+  expect(orderSlotLocals(sfn).locals.map((l) => l.name)).toEqual(['hi', 'mid', 'lo']);
+});
+
+// The wild shape this refusal was written for, from the only real agbcc function in a 2,463-
+// function sweep that carries two slot-carrying locals: `sa3 enemies/hariisen_proj.s`
+// `sub_80617E0` reaches L3 with `v8@12 v12@8 v13@12` — offset 12 under two names, because those
+// slots are words of one declared stack array (`Vec2_32 sp00[2]`), not two reload spills. Without
+// the refusal the whole declaration list permuted; with it the function is untouched.
+test('the measured wild non-injective frame is the identity', () => {
+  const sfn = twoSlots({
+    locals: [
+      { name: 'v8', type: T.int(32, true), slots: [12] },
+      { name: 'v9', type: T.int(32, true) },
+      { name: 'v12', type: T.int(32, true), slots: [8] },
+      { name: 'v13', type: T.int(32, true), slots: [12] },
+    ],
+  });
+  expect(orderSlotLocals(sfn).locals.map((l) => l.name)).toEqual(['v8', 'v9', 'v12', 'v13']);
+  // and the refusal is what does it: drop the duplicate and the same frame DOES order
+  const injective = twoSlots({
+    locals: [
+      { name: 'v8', type: T.int(32, true), slots: [12] },
+      { name: 'v9', type: T.int(32, true) },
+      { name: 'v12', type: T.int(32, true), slots: [8] },
+    ],
+  });
+  expect(orderSlotLocals(injective).locals.map((l) => l.name)).toEqual(['v12', 'v9', 'v8']);
+});
+
+// A duplicate anywhere in the UNION refuses too, not just among the elected ranks: under
+// ascending the ranks below are 0 and 4 and differ, but offset 4 is still homed under two names.
+test('a duplicate among a local`s non-elected homes refuses as well', () => {
+  const sfn = twoSlots({
+    locals: [
+      { name: 'hi', type: T.int(32, true), slots: [4] },
+      { name: 'mid', type: T.int(32, true) },
+      { name: 'lo', type: T.int(32, true), slots: [0, 4] },
+    ],
+  });
+  expect(orderSlotLocals(sfn).locals.map((l) => l.name)).toEqual(['hi', 'mid', 'lo']);
 });
 
 test('every backend orders: no `emit` may print an unordered declaration list', () => {
