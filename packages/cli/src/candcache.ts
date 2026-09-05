@@ -445,7 +445,100 @@ export const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 
 //     value to read without running it;
 //   • a gcc-style driver is asked where its sub-program is (`-print-prog-name=cc1`);
 //   • too deep, or too wide, is a refusal.
+//
+// AND EVERY ONE OF THOSE READINGS IS OF THE SCRIPT'S PROGRAM, NEVER ITS PROSE. `sh` drops from an
+// unquoted `#` to the end of the line, so a comment names no delegate, reads no file and computes
+// nothing; scanning it is not conservatism, it is a different question. MEASURED on the one script
+// that inhabits this refusal on this machine — a decomp wrapper whose 61 lines are half commentary
+// — TEN lines trip the detector and EIGHT of them are English sentences quoting `.set`, `.4byte`
+// and `make` in backticks. `compile-command.ts` settled this for the compile TEMPLATE already and
+// for the same reasons (a `# …docker…` comment refused a project outright, a `# remember to clean
+// build` put the project's output tree in the namespace); `stripShellComments` moved HERE so the
+// template and the scripts it names read one rule, not two that drift.
+//
+// The asymmetry is kept where the answer is genuinely ambiguous: inside a HEREDOC a leading `#` is
+// body text, not a comment, and an unquoted heredoc still substitutes — so a script containing one
+// is scanned RAW, the refusing side. An unterminated quote keeps the rest of the text for the same
+// reason. Nothing is lost by dropping a comment: the script's whole bytes are hashed as a chain
+// entry regardless, so editing a comment still re-namespaces.
 const SCRIPT_COMPUTES_ITS_DELEGATE = /\$\(|`|(^|[\s;&|])eval[\s]/;
+/** `<<` — a heredoc or a here-string. Its BODY is not shell comments, so the comment stripper
+ *  cannot be trusted over a script that has one; such a script is scanned as written. */
+const SHELL_HEREDOC = /<</;
+/** What the delegate scan reads: the script's program, with its prose dropped where that can be
+ *  decided (see above). Line NUMBERING survives — `stripShellComments` replaces a comment with the
+ *  newline that ended it — so a refusal can name the line it is about. */
+const scriptScanText = (text: string): string => (SHELL_HEREDOC.test(text) ? text : stripShellComments(text));
+
+/** A shell COMMENT is not argv. `sh` drops from an unquoted `#` that begins a word to the end of
+ *  the line, so nothing in there is read, executed or resolved — and both a decomp `compiler:`
+ *  template and a wrapper script it names are shell where a `#` line is ordinary.
+ *
+ *  MEASURED, and it is why every scan over shell text starts here. `# remember to clean build` put
+ *  the project's OWN OUTPUT TREE in the namespace, so every rebuild was a cold start — the payoff
+ *  of the whole cache, spent by a word in a comment. `# see [1] and *.o notes` promoted prose to
+ *  the glob rule. `# our CI also builds this in docker` and `# copy with scp/ssh` each REFUSED the
+ *  project's cache outright, with a message asserting the compile runs through a container that it
+ *  does not. `# … a `bl` is a relocation …` refused a project over a backtick in an English
+ *  sentence.
+ *
+ *  Dropping the text loses no measurement: the raw bytes of a template AND of every script in the
+ *  chain are hashed unconditionally, so editing a comment still moves the namespace. Quotes are
+ *  tracked because `-DTAG='#1'` is a `#` that is not a comment, and an UNTERMINATED quote keeps the
+ *  rest of the text — the over-scanning side, which costs a cold start. */
+export function stripShellComments(template: string): string {
+  let out = '';
+  let quote: string | undefined;
+  let prev = '';
+  for (let i = 0; i < template.length; i++) {
+    const c = template[i];
+    if (quote !== undefined) {
+      out += c;
+      if (c === quote) {
+        quote = undefined;
+      }
+      prev = c;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      out += c;
+      prev = c;
+      continue;
+    }
+    if (c === '#' && (prev === '' || /[\s;&|(]/.test(prev))) {
+      while (i < template.length && template[i] !== '\n') {
+        i++;
+      }
+      out += '\n';
+      prev = '\n';
+      continue;
+    }
+    out += c;
+    prev = c;
+  }
+  return out;
+}
+
+/**
+ * WHERE a script computes its delegate — for the refusal message, never for the verdict.
+ *
+ * A refusal that names only the file is a dead end: the reader is told their cache is off and left
+ * to find which of sixty lines said so, and the answer was two lines out of ten matches. The
+ * verdict stays the whole-file test (`(^|[\s;&|])eval[\s]` can straddle a line break, and a
+ * per-line answer would be a SECOND, weaker predicate deciding the same question). This walks the
+ * same text only to quote what it found.
+ */
+function computedDelegateSites(scan: string): string[] {
+  const out: string[] = [];
+  const lines = scan.split('\n');
+  for (let i = 0; i < lines.length && out.length < 4; i++) {
+    if (SCRIPT_COMPUTES_ITS_DELEGATE.test(lines[i])) {
+      out.push(`line ${i + 1}: ${lines[i].trim().slice(0, 100)}`);
+    }
+  }
+  return out;
+}
 /** `$NAME` / `${NAME}`. Positional and special parameters (`$@`, `$1`, `$?`) do not match: they
  *  carry the caller's arguments, never the program's identity. */
 const SHELL_VAR = /\$\{?([A-Za-z_]\w*)\}?/g;
@@ -532,12 +625,16 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
     return;
   }
   // A text executable is a script: what it EXECS is the compiler, and the script's own bytes are
-  // not that compiler.
+  // not that compiler. `text` is the bytes (hashed by the caller, and the shebang is read off it);
+  // `scan` is the program those bytes describe, which is what every reading below is about.
   const text = readFileSync(real, 'utf8');
-  if (SCRIPT_COMPUTES_ITS_DELEGATE.test(text)) {
+  const scan = scriptScanText(text);
+  if (SCRIPT_COMPUTES_ITS_DELEGATE.test(scan)) {
+    const where = computedDelegateSites(scan);
     throw new Error(
       `${real} computes the program it runs (a command substitution or eval), so its delegate ` +
-        `cannot be hashed — the cache refuses rather than hash a stand-in`,
+        `cannot be hashed — the cache refuses rather than hash a stand-in` +
+        (where.length === 0 ? '' : ` [${where.join(' | ')}]`),
     );
   }
   // A variable the script does not itself assign is an EXTERNAL input choosing what runs. Its
@@ -545,10 +642,10 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
   // `exec "$MYCPP" "$@"` under a byte-constant wrapper otherwise reads as one namespace for two
   // different compilers.
   const assigned = new Set<string>();
-  for (const m of text.matchAll(/^\s*(?:export\s+)?([A-Za-z_]\w*)=/gm)) {
+  for (const m of scan.matchAll(/^\s*(?:export\s+)?([A-Za-z_]\w*)=/gm)) {
     assigned.add(m[1]);
   }
-  for (const m of text.matchAll(SHELL_VAR)) {
+  for (const m of scan.matchAll(SHELL_VAR)) {
     const name = m[1];
     if (assigned.has(name)) {
       continue;
@@ -562,8 +659,10 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
       expandExecutable(val, out, depth + 1);
     }
   }
+  // The SHEBANG is read off the raw bytes on purpose: `#!/bin/sh` is the one `#` line in a script
+  // that names a program, and the stripper — correctly, for every other line — has removed it.
   const first = text.split('\n', 1)[0] ?? '';
-  const tokens = text.split(/[\s"'<>|;&()=]+/);
+  const tokens = scan.split(/[\s"'<>|;&()=]+/);
   if (first.startsWith('#!')) {
     tokens.unshift(first.slice(2).trim().split(/\s+/)[0] ?? '');
   }

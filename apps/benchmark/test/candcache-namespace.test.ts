@@ -242,3 +242,80 @@ describe('hole 5 — the compile environment is an input to every candidate comp
     expect(set).toBe(bare);
   });
 });
+
+describe("a script's PROSE is not its program", () => {
+  // The class, MEASURED on the one script that inhabits the delegate refusal on this machine
+  // (`scripts/pool_abs_syms.sh` in the author's klonoa checkout, byte-identical in five copies):
+  // TEN of its lines trip `SCRIPT_COMPUTES_ITS_DELEGATE` and EIGHT are English sentences quoting
+  // `.set`, `.4byte` and `make` in backticks. The cache refused every ranked run in that checkout,
+  // so every candidate compiled cold, twice — 17.4 s against 5.1 s warm on one 1,104-candidate fan.
+  // `compile-command.ts` had already decided this question for the compile TEMPLATE and for the
+  // same reasons; the scripts the template NAMES were still read as prose-and-program at once.
+  const wrapper = (body: string): string => {
+    const p = join(scratch(), 'wrapper');
+    writeFileSync(p, body);
+    chmodSync(p, 0o755);
+    return p;
+  };
+
+  test('a command substitution in a COMMENT is not a computed delegate', () => {
+    const p = wrapper(
+      ['#!/bin/sh', '# built by `make`, and $(dirname) is what the old spelling used', 'exec /usr/bin/true "$@"'].join(
+        '\n',
+      ) + '\n',
+    );
+    const chain = toolchainFileChain(p);
+    expect(chain, 'the real delegate is followed, not refused').toContain(realpathSync('/usr/bin/true'));
+  });
+
+  test('…and a comment naming a FILE does not put that file in the namespace', () => {
+    // The cold-start half of the same defect: a comment resolves nothing, so hashing what it
+    // mentions tracks a file no compile reads. `# run make first` tied a project's namespace to
+    // /usr/bin/make.
+    const p = wrapper('#!/bin/sh\n# remember to run make first\nexec /usr/bin/true "$@"\n');
+    expect(toolchainFileChain(p).some((e) => e.endsWith('/make'))).toBe(false);
+  });
+
+  test('editing that comment STILL re-namespaces — the text is dropped from the scan, not the hash', () => {
+    const p = wrapper('#!/bin/sh\n# one\nexec /usr/bin/true "$@"\n');
+    const before = candCacheStaticStamp(toolchainFileChain(p));
+    writeFileSync(p, '#!/bin/sh\n# two\nexec /usr/bin/true "$@"\n');
+    expect(candCacheStaticStamp(toolchainFileChain(p)), 'the script is hashed by its whole bytes').not.toBe(before);
+  });
+
+  test('the SHEBANG survives — it is the one `#` line that names a program', () => {
+    const p = wrapper('#!/bin/sh\n# a comment\nexec /usr/bin/true "$@"\n');
+    expect(toolchainFileChain(p), 'the interpreter is a delegate').toContain(realpathSync('/bin/sh'));
+  });
+
+  // ── and every true positive is KEPT ──────────────────────────────────────────────────────────
+  test('a `$(…)` in CODE still refuses, and the refusal now says WHICH LINE', () => {
+    // A refusal naming only the file is a dead end: on the script above it left the reader ten
+    // candidate lines, two of which were the answer.
+    const p = wrapper('#!/bin/sh\n# a `harmless` comment\nexec "$(command -v true)" "$@"\n');
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+    expect(() => toolchainFileChain(p)).toThrow(/line 3: exec "\$\(command -v true\)"/);
+  });
+
+  test('a BACKTICK substitution in code still refuses', () => {
+    const p = wrapper('#!/bin/sh\nCC=`command -v true`\nexec "$CC" "$@"\n');
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
+  test('an `eval` in code still refuses', () => {
+    const p = wrapper('#!/bin/sh\neval exec /usr/bin/true "$@"\n');
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
+  test('a `#` inside a quoted string is not a comment, and what follows it is still read', () => {
+    const p = wrapper('#!/bin/sh\nTAG="#1 $(command -v true)"\nexec /usr/bin/true "$@"\n');
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
+  test('a HEREDOC makes `#` ambiguous, so such a script is scanned as written — the refusing side', () => {
+    // Inside an unquoted heredoc a leading `#` is body text and `$(…)` still substitutes, so the
+    // stripper cannot be trusted there. The asymmetry is deliberate and costs a cold start.
+    const p = wrapper('#!/bin/sh\ncat <<EOF\n# $(command -v true)\nEOF\nexec /usr/bin/true "$@"\n');
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+});

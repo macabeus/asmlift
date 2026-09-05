@@ -34,6 +34,7 @@ import {
   candidateCacheRefusal,
   isChainMeasurement,
   noteKeyRefused,
+  stripShellComments,
   toolchainFileChain,
 } from './candcache';
 import { macroDefinesOf, renderDeclarations, selfDeclaredContext } from './declare';
@@ -313,55 +314,6 @@ export function containerRuntimeNamedBy(template: string, env: NodeJS.ProcessEnv
     }
   }
   return undefined;
-}
-
-/** A shell COMMENT is not argv. `sh` drops from an unquoted `#` that begins a word to the end of
- *  the line, so nothing in there is read, executed or resolved — and a decomp `compiler:` template
- *  is multi-line shell where a `#` line is ordinary.
- *
- *  MEASURED, and it is why every scan in this file starts here. `# remember to clean build` put the
- *  project's OWN OUTPUT TREE in the namespace, so every rebuild was a cold start — the payoff of
- *  this whole file, spent by a word in a comment. `# see [1] and *.o notes` promoted prose to the
- *  glob rule. `# our CI also builds this in docker` and `# copy with scp/ssh` each REFUSED the
- *  project's cache outright, with a message asserting the compile runs through a container that
- *  it does not.
- *
- *  Dropping the text loses no measurement: `stamp()` hashes the template's RAW bytes
- *  unconditionally, so editing a comment still moves the namespace. Quotes are tracked because
- *  `-DTAG='#1'` is a `#` that is not a comment, and an UNTERMINATED quote keeps the rest of the
- *  text — the over-scanning side, which costs a cold start. */
-function stripShellComments(template: string): string {
-  let out = '';
-  let quote: string | undefined;
-  let prev = '';
-  for (let i = 0; i < template.length; i++) {
-    const c = template[i];
-    if (quote !== undefined) {
-      out += c;
-      if (c === quote) {
-        quote = undefined;
-      }
-      prev = c;
-      continue;
-    }
-    if (c === '"' || c === "'") {
-      quote = c;
-      out += c;
-      prev = c;
-      continue;
-    }
-    if (c === '#' && (prev === '' || /[\s;&|(]/.test(prev))) {
-      while (i < template.length && template[i] !== '\n') {
-        i++;
-      }
-      out += '\n';
-      prev = '\n';
-      continue;
-    }
-    out += c;
-    prev = c;
-  }
-  return out;
 }
 
 /** Every token of a compile template that a path flag could be attached to, IN ARGV ORDER — the

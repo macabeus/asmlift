@@ -214,6 +214,16 @@ find nothing to disagree with and go green having audited nothing.
   (every rebuild cold) or refused the whole cache over the word `docker` in an English sentence.
   Editing the comment still moves the namespace: the template's raw bytes are hashed
   unconditionally.
+  That holds for a WRAPPER SCRIPT the template names, not only for the template itself: a comment
+  computes no delegate and opens no file, so it decides neither what the chain follows nor whether
+  the chain can be followed at all. Measured on one 61-line decomp wrapper — ten of its lines trip
+  the "computes its delegate" refusal below and EIGHT are English sentences quoting `.set`,
+  `.4byte` and `make` in backticks, which refused a whole checkout's ranked runs into compiling
+  every candidate cold, on every run. One exception, and it is the refusing side: a script
+  containing a HEREDOC (`<<`) is scanned as written, because inside one a leading `#` is body text
+  and `$(…)` still substitutes, so the comment reading is not decidable there. A refusal now QUOTES
+  the lines it is about (`… [line 35: REPO="$(cd …)"]`) — naming only the file left the reader to
+  guess which of ten matches was the answer.
   The cache still refuses, out loud, when the compile is not a pure function of its input —
   `[candcache] REFUSED label=command reason=object-is-not-a-pure-function-of-its-input` is what
   `ido7.1` gets, because it writes the absolute path of its input `.c` into the object — when a
@@ -232,7 +242,22 @@ find nothing to disagree with and go green having audited nothing.
   (`H=in; cat ${H}c/k.h`), which no token scan can resolve, and its cousin, a `cd` into a computed
   directory (`cd "$(dirname …)"` contributes no resolution base); a wrapper script that reads a
   config DIRECTORY (the chain follows what a script EXECS, not what it OPENS — though editing the
-  script itself does move the namespace); `-B /opt/tc/arm-` used as a filename PREFIX rather than a
+  script itself does move the namespace).
+  **THE FIX FOR THAT ONE IS IN YOUR TEMPLATE, and it is one token.** Pass the file your wrapper
+  reads as an ARGUMENT (`… ./scripts/wrap.sh "$OBJ" "$ASM" build/game.elf`) instead of letting the
+  script locate it for itself: every token that names an existing path is measured by content, so
+  the data input rejoins the namespace and rebuilding it correctly invalidates. Proven on the shape
+  that motivated this paragraph — a decomp wrapper that appends `.set NAME, 0xADDR` lines read out
+  of the project's linked ELF, so the candidate object is a function of that ELF's symbol table:
+  patching one symbol's `st_value` moved the object's literal pool with its SIZE UNCHANGED (680 B
+  either way, `.word 0x03005478` → `.word 0x03009999`), which is exactly the row objdiff scores.
+  With the ELF named in the template, renaming a symbol it defines recompiled all 1,104 candidates
+  of one fan (`{"miss":1104,"stored":1104}`), and putting the ELF back was the same toolchain again
+  (`{"hit":1082}`). With the identical script locating the same ELF for itself, the same rename
+  served 1,085 stale objects — and the standing 2% audit is what stood between that and a published
+  score: 9 of the 19 sampled keys disagreed and the run exited 3, with `ASMLIFT_CANDCACHE=verify`
+  putting the real damage at 439 of 1,104 keys.
+  `-B /opt/tc/arm-` used as a filename PREFIX rather than a
   directory (the operand is measured as a path, so the prefix spelling names nothing that exists
   and contributes nothing);
   a candidate's assembler `.include`/`.incbin` (the per-key refusal tests the C preprocessor's
