@@ -4682,27 +4682,38 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ).values(),
       ],
       // uninitialised locals (undef): declared, never assigned, typed by whatever recovery settled
-      // on for the value. NO `slot` either, on the same footing as the frame objects above — but
-      // for a DIFFERENT and stronger reason than "no row exercises it", which is measurably false:
-      // all four agbcc rows that spill carry `uninit` locals (`spillorder` and `spillorder_rev`
-      // three each, `dma_fill_uninit` seven, `uninit_spill` eight), and on two of them the uninit
-      // locals are keyed at the very offsets the ordering sorts by — `dma_fill_uninit` declares
-      // `uninit_sp4/sp8/sp12` beside the slotted `v4@4 v6@8 v8@12`, and `uninit_spill` declares
-      // `uninit_sp0/sp4/sp8` beside `v4@0 v5@4 v6@8`.
+      // on for the value. NO `slot` either, on the same footing as the frame objects above.
       //
       // THE REASON IS UNDECIDABILITY, not absence. One frame slot then yields TWO declarations:
       // the `undef` read of the storage and the value stored into it. They are one object in the
       // source, and the asm does not say which of the two declarations took the rank — so ranking
       // one of the pair while leaving the other pinned would invent an answer. Refusing the undef
-      // half keeps the stored half's rank, which is the one the spill evidence is about, and it
-      // is what `dma_fill_uninit` MATCHes under (measured: it flips 12 → MATCH with this refusal
-      // in place). The refusal is pinned by `spill-slot-order.test.ts` — a test that FAILS if a
-      // slot-keyed `uninit` local ever stops co-existing with a slotted local at the same offset.
+      // half keeps the stored half's rank, which is the one the spill evidence is about.
       //
-      // FLIP CONDITION, and it cannot be "the first uninit local" — two referee rows already have
-      // them. It is a row where an `undef` local and a stored value at the SAME offset are shown
-      // by compile to be two source declarations rather than one, i.e. where ranking both is
-      // sound; until then, one storage contributes one rank and the undef half is not it.
+      // AND IT IS PRECAUTIONARY: ZERO ROWS REACH IT, measured on the tree that matters. This
+      // function returns the tree `structure()` returns, and there the co-existence is real —
+      // `uninit_spill` declares `uninit_sp0/sp4/sp8` beside the slotted `v4@0 v5@4 v6@8`, and
+      // `dma_fill_uninit` declares `uninit_sp4/sp8/sp12` beside `v4@4 v6@8 v8@12`. But NOTHING
+      // EMITS THIS TREE. `l3/slotorder.ts` runs inside `emit`, strictly downstream of
+      // `structureChecked` (pipeline.ts) on all four emit paths — `decompile`, `decompileTraced`,
+      // the ranked candidates and the score probe — and `structure()` has exactly one caller,
+      // `structureChecked` itself. On the tree THAT returns, both rows carry no `uninit` local at
+      // all: `eliminateDeadStores` (l3/dce.ts, whose last line keeps only locals the body still
+      // references) removes all eight on `uninit_spill` and all seven on `dma_fill_uninit`,
+      // leaving the slot-carrying locals untouched. Instrumented one spine stage at a time, not
+      // inferred: raw 8 → mergeCommonTails 8 → eliminateDeadStores 0. So there is no shipped path
+      // on which a slot-keyed `undef` local and a slotted local at the same offset are both
+      // present when the ordering runs, and the refusal is the safe side of a question no row
+      // asks yet. It stays here rather than at the ordering because THIS is where the stamp is
+      // decided, and an `undef` local that survives DCE — address-taken, `volatile`, or genuinely
+      // read — would carry the stamp into `emit` unrefused.
+      //
+      // FLIP CONDITION, and it is not "the first uninit local" — four rows already have them in
+      // `structure()`'s tree and none in `structureChecked`'s. It is the first row where a
+      // slot-keyed `undef` local SURVIVES dead-store elimination beside a slotted local at the
+      // same offset, and compile shows the two to be two source declarations rather than one.
+      // `spill-slot-order.test.ts` pins both halves — the class in `structure()`'s tree and the
+      // zero reach in `structureChecked`'s — so a change to either fails there.
       ...fn.blocks
         .flatMap((b) => b.ops)
         .filter((op) => op.opcode === 'undef')
