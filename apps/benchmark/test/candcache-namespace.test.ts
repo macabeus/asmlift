@@ -247,11 +247,16 @@ describe('hole 5 — the compile environment is an input to every candidate comp
 describe("a script's PROSE is not its program", () => {
   // The class, MEASURED on the one script that inhabits the delegate refusal on this machine
   // (`scripts/pool_abs_syms.sh` in the author's klonoa checkout, byte-identical in five copies):
-  // TEN of its lines trip `SCRIPT_COMPUTES_ITS_DELEGATE` and EIGHT are English sentences quoting
-  // `.set`, `.4byte` and `make` in backticks. The cache refused every ranked run in that checkout,
-  // so every candidate compiled cold, twice — 17.4 s against 5.1 s warm on one 1,104-candidate fan.
+  // TEN of its lines trip `SCRIPT_COMPUTES_ITS_DELEGATE`, EIGHT are English sentences quoting
+  // `.set`, `.4byte` and `make` in backticks — and the other TWO ARE CODE, so reading prose as
+  // prose removes 8 of 10 refusal SITES and that script still refuses until the checkout that owns
+  // it is edited. What this file is entitled to claim is the reading, not that checkout's number.
   // `compile-command.ts` had already decided this question for the compile TEMPLATE and for the
   // same reasons; the scripts the template NAMES were still read as prose-and-program at once.
+  //
+  // The refusal boundary itself is pinned in `packages/cli/test/offline/candcache-refusals.test.ts`
+  // — inside `pnpm test:offline`, which this file is not. What stays here needs a real interpreter
+  // resolved off `$PATH`, or the benchmark's own stamp.
   const wrapper = (body: string): string => {
     const p = join(scratch(), 'wrapper');
     writeFileSync(p, body);

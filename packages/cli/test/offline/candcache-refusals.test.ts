@@ -631,6 +631,18 @@ describe("a wrapper script's PROSE is not its program", () => {
     expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
   });
 
+  test('`$((` is NOT excluded — it is not reliably arithmetic', () => {
+    // The one narrowing that looks free: an arithmetic expansion produces an integer and cannot
+    // name a program, so `$((` could be dropped from the pattern. It cannot. MEASURED:
+    //   bash -c 'echo $((cd /tmp) && pwd)'      -> runs the commands
+    //   /bin/sh (macOS), zsh                    -> the same
+    //   dash                                    -> Syntax error: Missing '))'
+    // So `$((` is a command substitution round a subshell in three of the four shells here, and
+    // this pin is the regression guard on that decline.
+    const p = wrapper(`#!/bin/sh\nD=$((cd /tmp) && pwd)\nexec "$D/node" "$@"\n`);
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
   test('a HEREDOC makes `#` ambiguous, so such a script is read as written — the refusing side', () => {
     const p = wrapper(`#!/bin/sh\ncat <<EOF\n# $(command -v node)\nEOF\nexec ${NODE} "$@"\n`);
     expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);

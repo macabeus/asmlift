@@ -450,19 +450,45 @@ export const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 
 //
 // AND EVERY ONE OF THOSE READINGS IS OF THE SCRIPT'S PROGRAM, NEVER ITS PROSE. `sh` drops from an
 // unquoted `#` to the end of the line, so a comment names no delegate, reads no file and computes
-// nothing; scanning it is not conservatism, it is a different question. MEASURED on the one script
-// that inhabits this refusal on this machine — a decomp wrapper whose 61 lines are half commentary
-// — TEN lines trip the detector and EIGHT of them are English sentences quoting `.set`, `.4byte`
-// and `make` in backticks. `compile-command.ts` settled this for the compile TEMPLATE already and
-// for the same reasons (a `# …docker…` comment refused a project outright, a `# remember to clean
-// build` put the project's output tree in the namespace); the reading itself lives in
-// `shell-text.ts`, so the template and the scripts it names read one rule, not two that drift.
+// nothing; scanning it is not conservatism, it is a different question. `compile-command.ts`
+// settled this for the compile TEMPLATE already and for the same reasons (a `# …docker…` comment
+// refused a project outright, a `# remember to clean build` put the project's output tree in the
+// namespace); the reading itself lives in `shell-text.ts`, so the template and the scripts it
+// names read one rule, not two that drift.
+//
+// SAY WHAT THIS MOVED, PLAINLY: whole SCRIPTS cross from the refusing side to the serving side.
+// Every CONSTRUCT that refused still refuses — but a script whose only matches were in English is
+// now read, followed and cached, and the file such a script OPENS is not in its chain (the chain
+// follows what a script EXECS). The refusal was never the guard for that: measured, a wrapper
+// reading `ELF="${3:-game.elf}"` with no `$(` anywhere in it was served on both sides of this
+// change, with `game.elf` in neither chain. Keeping the old reading would have closed that hole
+// only for wrappers whose PROSE happened to trip a regex. The remedy is one token in the compile
+// template — pass the file as an argument and `templatePathOperands` measures it by content — and
+// `docs/ranked-repro.md` carries the recipe, the asymmetry that makes it non-obvious, and the cold
+// start it costs. `packages/cli/test/offline/candcache-refusals.test.ts` pins both halves.
+//
+// MEASURED on the one script that inhabits this refusal on this machine — a decomp wrapper whose
+// 61 lines are half commentary — TEN lines trip the detector, EIGHT are English sentences quoting
+// `.set`, `.4byte` and `make` in backticks, and the other TWO ARE CODE. So this change alone does
+// not clear that script: it still refuses, on `REPO="$(cd "$(dirname "$0")/.." && pwd)"` and on a
+// backtick inside a diagnostic string, until the checkout that owns it is edited. Nothing here is
+// entitled to that checkout's warm-cache number.
+//
+// The VERDICT is a SYNTAX test over the program text, and it over-refuses on purpose. A `$(…)`
+// computing a PATH refuses; so does one computing an INTEGER; so does an escaped backtick inside
+// an English diagnostic that happens to sit in code. None of those can name a program, and
+// narrowing the test to values that reach an EXEC POSITION is static analysis of shell, declined.
+// The one exclusion that looks free is not: `$((` is NOT reliably arithmetic — measured, `bash`,
+// macOS `/bin/sh` and `zsh` all run `echo $((cd /tmp) && pwd)` as a command substitution round a
+// subshell (only `dash` rejects it), so dropping `$((` from the pattern would be a hole.
 //
 // The asymmetry is kept where the answer is genuinely ambiguous: inside a HEREDOC a leading `#` is
 // body text, not a comment, and an unquoted heredoc still substitutes — so a script containing one
-// is scanned RAW, the refusing side. An unterminated quote keeps the rest of the text for the same
-// reason. Nothing is lost by dropping a comment: the script's whole bytes are hashed as a chain
-// entry regardless, so editing a comment still re-namespaces.
+// is scanned RAW, the refusing side. That marker is tested on the STRIPPED text and on a heredoc's
+// actual shape, because a `<<` in a COMMENT is not a heredoc and reading it as one let prose decide
+// the reading after all. An unterminated quote keeps the rest of the text for the same reason.
+// Nothing is lost by dropping a comment: the script's whole bytes are hashed as a chain entry
+// regardless, so editing a comment still re-namespaces.
 const SCRIPT_COMPUTES_ITS_DELEGATE = /\$\(|`|(^|[\s;&|])eval[\s]/;
 /**
  * WHERE a script computes its delegate — for the refusal message, never for the verdict.
