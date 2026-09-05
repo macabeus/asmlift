@@ -855,27 +855,70 @@ describe('negating a fused connective (De Morgan)', () => {
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
   });
 
-  test('REFUSED: a cone deeper than the node budget', () => {
-    // A left chain of `n` connectives over `n+1` icmp leaves mints `2n+1` ops when negated.
-    const leftChain =
-      (n: number) =>
-      (out: Value): Op[] => {
-        const ops: Op[] = [];
-        let acc = mkValue(T.unk(32));
-        ops.push(...cmp(acc, 'icmp_eq'));
-        for (let i = 0; i < n; i++) {
-          const leaf = mkValue(T.unk(32));
-          ops.push(...cmp(leaf, 'icmp_ne'));
-          const next = i === n - 1 ? out : mkValue(T.unk(32));
-          ops.push(mkOp('logic_or', { operands: [acc, leaf], results: [next] }));
-          acc = next;
+  // A left chain of `n` connectives over `n+1` icmp leaves — an `n+1`-clause inner conjunct, which
+  // mints `2n+1` ops when negated.
+  const leftChain =
+    (n: number) =>
+    (out: Value): Op[] => {
+      const ops: Op[] = [];
+      let acc = mkValue(T.unk(32));
+      ops.push(...cmp(acc, 'icmp_eq'));
+      for (let i = 0; i < n; i++) {
+        const leaf = mkValue(T.unk(32));
+        ops.push(...cmp(leaf, 'icmp_ne'));
+        const next = i === n - 1 ? out : mkValue(T.unk(32));
+        ops.push(mkOp('logic_or', { operands: [acc, leaf], results: [next] }));
+        acc = next;
+      }
+      return ops;
+    };
+  /** A PERFECT binary cone of depth `d`: 2^d leaves, 2^(d+1)-1 nodes, all pushed after both children. */
+  const balanced =
+    (d: number) =>
+    (out: Value): Op[] => {
+      const ops: Op[] = [];
+      const build = (depth: number, dest: Value): void => {
+        if (depth === 0) {
+          ops.push(...cmp(dest, 'icmp_ne'));
+          return;
         }
-        return ops;
+        const a = mkValue(T.unk(32));
+        const b = mkValue(T.unk(32));
+        build(depth - 1, a);
+        build(depth - 1, b);
+        ops.push(mkOp('logic_or', { operands: [a, b], results: [dest] }));
       };
-    const under = chain({ gOnTaken: false, sharedOnGTaken: false, gBody: leftChain(3) }); // 7 ops
-    expect(recognizeBranchShortCircuit(under)).toBe(true);
-    verify(under);
-    const over = chain({ gOnTaken: false, sharedOnGTaken: false, gBody: leftChain(8) }); // 17 ops
-    expect(recognizeBranchShortCircuit(over)).toBe(false);
+      build(d, out);
+      return ops;
+    };
+  const folds = (gBody: (out: Value) => Op[]): boolean => {
+    const fn = chain({ gOnTaken: false, sharedOnGTaken: false, gBody }); // sharedOnGTaken false ⇒ negation
+    const changed = recognizeBranchShortCircuit(fn);
+    if (changed) {
+      verify(fn);
+    }
+    return changed;
+  };
+
+  test('REFUSED: a cone deeper than the node budget', () => {
+    expect(folds(leftChain(3))).toBe(true); // 7 ops
+    expect(folds(leftChain(8))).toBe(false); // 17 ops
+  });
+
+  // THE CLIFF `NEGATE_BUDGET` decides, pinned so that changing the constant fails a test instead of
+  // moving silently. One op per cone node and leaves = internal + 1, so a minted count is always
+  // ODD — 1, 3, 5, 7, 9 — which makes 7 and 8 the same gate and puts the only decision one clause
+  // above the deepest cone the corpus holds (5 ops, measured over the lifted klonoa+sa3 functions).
+  test('the budget cliff: a 4-clause inner conjunct folds (7 ops), a 5-clause one does not (9)', () => {
+    expect(folds(leftChain(3))).toBe(true); // 4 clauses → 7 minted
+    expect(folds(leftChain(4))).toBe(false); // 5 clauses → 9 minted, one over
+  });
+
+  // …and the frontier is a SHAPE, not a node count: the same 15-node cone that a chain would carry
+  // past the post-check is stopped earlier, by the entry guard, because `go` pushes a parent only
+  // after both its children.
+  test('a BALANCED cone is refused by the entry guard, at half the nodes a chain reaches', () => {
+    expect(folds(balanced(2))).toBe(true); // 7 nodes
+    expect(folds(balanced(3))).toBe(false); // 15 nodes
   });
 });
