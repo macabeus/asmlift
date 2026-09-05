@@ -47,7 +47,39 @@ export interface Fn {
    *  — the copy in `cli/src/report.ts` most of all — has to say what it does with the record, so
    *  a side table added to `Fn` cannot be dropped by a copy that simply never mentions it. */
   writeOrder: WriteOrder | undefined;
+  /** L1 SIDE DATA (see {@link SlotHomes}); set by the SSA builder, `undefined` on parsed IR.
+   *  REQUIRED-but-possibly-undefined for exactly the reason `writeOrder` is: an optional field is
+   *  silently dropped by a copy that never mentions it (`cli/src/report.ts` structuredCloneFn says
+   *  so at its own definition), and a fact the structurer reads but the score probe's clone drops
+   *  makes that probe's delta a fact about a program asmlift does not emit. */
+  slotHomes: SlotHomes | undefined;
 }
+
+/** Which `[sp,#k]` the machine homed a value at — the frame coordinate, carried L1 → L3.
+ *
+ *  The coordinate exists only in the frontends: both of them recognise a word spill into the
+ *  function's own frame and record the slot's value in SSA under the key `sp@k`
+ *  (`frontend/ssa.ts` stackSlotKey) instead of emitting a store through `sp`, so by L2 the value
+ *  is an ordinary SSA value and `k` is gone. This map is where `k` survives.
+ *
+ *  It is read by ONE consumer — the structurer, which turns it into `SFn.locals[i].slot` — and
+ *  exists because a compiler that hands out frame slots by declaration rank makes the source's
+ *  DECLARATION ORDER observable in the object. Absent entries are the norm: most values are never
+ *  spilled, and a value with no entry simply has no frame coordinate to order by.
+ *
+ *  MERGE POLICY, stated once and shared by every place that merges two homes (this map's own
+ *  writes, `replaceAllUsesWith`, and `l3/coalesce.ts`'s survivor): a value that reaches two slots
+ *  takes the LOWER offset, i.e. the earlier declaration rank. That is a POLICY and not a proof —
+ *  the machine homed one value at two offsets and the source declared one local, so no reading of
+ *  the asm recovers which rank the source had; the lower is chosen because a merged pair can
+ *  reproduce at most one slot and the earlier rank is the one whose declaration the other spill
+ *  would have followed.
+ *
+ *  NO `ir/verify.ts` RULE, unlike `writeOrder`: that record is a per-FUNCTION measurement with a
+ *  mixed state to reject (some blocks measured, others not). A slot home is per VALUE and
+ *  legitimately absent on almost every value, so there is no mixed state for a verifier to catch
+ *  and a rule would never fire. */
+export type SlotHomes = Map<Value, number>;
 
 /** The order in which each block WROTE the keys its successors' block-params stand for — a
  *  measurement the SSA builder makes and nothing downstream can recover, because the value graph

@@ -152,7 +152,7 @@ function generate(seed: number, withLoop: boolean): Fn {
       }),
     );
   }
-  return { name: `nl${seed}`, blocks, writeOrder: undefined };
+  return { name: `nl${seed}`, blocks, writeOrder: undefined, slotHomes: undefined };
 }
 
 const UNDEF = null;

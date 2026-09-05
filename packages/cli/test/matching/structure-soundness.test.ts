@@ -216,7 +216,7 @@ describe('C7 — switch_br edges carry their phi copies', () => {
         }),
       ],
     };
-    return { name: 'c7', blocks: [entry, b1, b2, b3], writeOrder: undefined };
+    return { name: 'c7', blocks: [entry, b1, b2, b3], writeOrder: undefined, slotHomes: undefined };
   };
 
   test("a case edge's phi arg is assigned at the top of the case body", () => {

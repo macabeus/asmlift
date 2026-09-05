@@ -15,7 +15,7 @@
 // computation via read/writeVar, push its terminator op last (successors referencing
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
-import { Block, Fn, Op, Value, type WriteOrder, mkOp, mkValue } from '../ir/core';
+import { Block, Fn, Op, type SlotHomes, Value, type WriteOrder, mkOp, mkValue } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
@@ -165,8 +165,8 @@ export function makeSsaBuilder(
   const model = (): LiveInModel => (modelMemo ??= checkedLiveInModel(name, liveInOf()));
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
-  // `writeOrder` is filled in below, where the builder's counters live.
-  const fn: Fn = { name, blocks: irBlocks, writeOrder: undefined };
+  // `writeOrder` and `slotHomes` are filled in below, where the builder's counters live.
+  const fn: Fn = { name, blocks: irBlocks, writeOrder: undefined, slotHomes: undefined };
 
   const defs: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const sealed: boolean[] = irBlocks.map(() => false);
@@ -207,6 +207,24 @@ export function makeSsaBuilder(
   const lastWriteAt: Array<Map<string, number>> = irBlocks.map(() => new Map());
   const writeOrder: WriteOrder = { lastWrite: new Map(), writes: new Map() };
   fn.writeOrder = writeOrder;
+
+  // SLOT HOMES (ir/core.ts `SlotHomes`). Measured HERE, in the shared builder, for the same
+  // reason the clobber set and the write order are: BOTH frontends already spell a word spill as
+  // a write to the key `sp@k` (`stackSlotKey`, below), so the frontend supplies the coordinate
+  // and one rule applies it — a per-frontend stamp would be right only while each remembered to
+  // route every slot write past a wrapper, and a missed write is a local with no frame order.
+  // Empty rather than absent on a function that spills nothing: this builder measured it.
+  const slotHomes: SlotHomes = new Map();
+  fn.slotHomes = slotHomes;
+  const noteSlotHome = (key: string, v: Value) => {
+    const off = slotKeyOffset(key);
+    if (off === null) {
+      return; // an ordinary register: no frame coordinate exists
+    }
+    const prev = slotHomes.get(v);
+    // the one merge policy (ir/core.ts `SlotHomes`): two slots for one value ⇒ the LOWER
+    slotHomes.set(v, prev === undefined || off < prev ? off : prev);
+  };
   const forgetOrder = (p: Value) => {
     for (const m of writeOrder.lastWrite.values()) {
       m.delete(p);
@@ -214,6 +232,7 @@ export function makeSsaBuilder(
   };
 
   const writeVar = (reg: string, b: number, v: Value) => {
+    noteSlotHome(reg, v);
     writtenSinceCall[b].add(reg);
     defs[b].set(reg, v);
     lastWriteAt[b].set(reg, writeCount[b]++);
@@ -225,6 +244,10 @@ export function makeSsaBuilder(
     irBlocks[b].params.push(phi);
     phiBlock.set(phi, b);
     phiKey.set(phi, reg);
+    // A slot that arrives as a PHI — a loop header reading back what an earlier iteration spilled
+    // — is the same frame coordinate under a block param, and the structurer names it like any
+    // other value, so it carries the home too.
+    noteSlotHome(reg, phi);
     defs[b].set(reg, phi); // set before wiring operands to break cycles
     return phi;
   };

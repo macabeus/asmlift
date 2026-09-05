@@ -10,7 +10,7 @@
 // stays a pure generator: the score comes through the scoring seam (scoreSource), never a
 // diff of asmlift's own.
 import { cBackend } from '@asmlift/core/backend/c';
-import type { Block, Fn, Value, WriteOrder } from '@asmlift/core/ir/core';
+import type { Block, Fn, SlotHomes, Value, WriteOrder } from '@asmlift/core/ir/core';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import type { FnProto } from '@asmlift/core/proto';
@@ -213,5 +213,12 @@ export function structuredCloneFn(fn: Fn): Fn {
     ),
     writes: new Map([...wo.writes].filter(([b]) => bmap.has(b)).map(([b, n]) => [bmap.get(b)!, n])),
   };
-  return { name: fn.name, blocks, writeOrder };
+  // Re-keyed through `cv` for the same reason the write order is: the record is keyed by the
+  // VALUES this clone just replaced, so carrying the reference would leave every lookup missing
+  // and every local unslotted — the probe would then measure a scoreDelta on a source whose
+  // declaration order is not the one the ranked path emits.
+  const sh = fn.slotHomes;
+  const slotHomes: SlotHomes | undefined =
+    sh && new Map([...sh].filter(([v]) => map.has(v)).map(([v, off]) => [map.get(v)!, off]));
+  return { name: fn.name, blocks, writeOrder, slotHomes };
 }

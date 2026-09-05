@@ -1151,7 +1151,7 @@ test('every withholding on the `default:` position, one call each', () => {
   const [a0, a1, dflt, a2] = [body(), body(), body(), body()];
   // Layout: a0, a1, default, a2 — so a default read off the layout sits after TWO arms.
   const deps = {
-    fn: { name: 'f', blocks: [a0, a1, dflt, a2], writeOrder: undefined },
+    fn: { name: 'f', blocks: [a0, a1, dflt, a2], writeOrder: undefined, slotHomes: undefined },
     defs: new Map(),
     dom: new Map(),
     ipdom: new Map(),
