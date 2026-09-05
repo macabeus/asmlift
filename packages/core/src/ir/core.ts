@@ -57,10 +57,17 @@ export interface Fn {
 
 /** Which `[sp,#k]` the machine homed a value at — the frame coordinate, carried L1 → L3.
  *
- *  The coordinate exists only in the frontends: both of them recognise a word spill into the
- *  function's own frame and record the slot's value in SSA under the key `sp@k`
- *  (`frontend/ssa.ts` stackSlotKey) instead of emitting a store through `sp`, so by L2 the value
- *  is an ordinary SSA value and `k` is gone. This map is where `k` survives.
+ *  The coordinate exists only in the frontends: they record a word sp-relative slot's value in SSA
+ *  under the key `sp@k` (`frontend/ssa.ts` stackSlotKey) instead of emitting a store through `sp`,
+ *  so by L2 the value is an ordinary SSA value and `k` is gone. This map is where `k` survives.
+ *
+ *  A KEY IS NOT A FRAME COORDINATE, and the frontends differ on exactly that. `sp@40` is a local
+ *  on one ABI and the caller's fifth argument on another, so the shared stamp asks the frontend's
+ *  own `LiveInModel.ownedLocals` and refuses an offset outside it. Thumb declares `[0, localArea)`
+ *  and already bounds its minting to that range, so every Thumb spill is stamped; MIPS and PPC
+ *  declare NO partition, so nothing is stamped there — a MIPS `sw a0,0(sp)` is O32's caller-owned
+ *  register-parameter home area, not this function's first declared local. An entry in this map
+ *  therefore means "storage this function owns, homed at k", not "some sp-relative key".
  *
  *  It is read by ONE consumer — the structurer, which turns it into `SFn.locals[i].slot` — and
  *  exists because a compiler that hands out frame slots by declaration rank makes the source's

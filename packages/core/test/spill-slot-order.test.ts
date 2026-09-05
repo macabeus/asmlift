@@ -36,8 +36,13 @@ const read = (p: string) => readFileSync(join(import.meta.dirname, 'corpus', p),
 
 // ── A1: the stamp, in the SHARED builder ──────────────────────────────────────────────────────
 
+// A frame partition is what makes a slot key MEAN "storage this function owns", so every builder
+// test that expects a stamp declares one. Thumb supplies `[0, localArea)`; a builder handed no
+// model claims nothing and stamps nothing (the test below).
+const owns = (to: number) => () => ({ ownedLocals: { from: 0, to } });
+
 test('the SSA builder stamps a slot home on a slot write and on nothing else', () => {
-  const ssa = makeSsaBuilder('s', 1, [[]]);
+  const ssa = makeSsaBuilder('s', 1, [[]], owns(16));
   const [b0] = ssa.irBlocks;
   const spilled = val();
   const plain = val();
@@ -51,7 +56,7 @@ test('the SSA builder stamps a slot home on a slot write and on nothing else', (
 });
 
 test('a value written to two slots takes the LOWER — the one merge policy, stated once', () => {
-  const ssa = makeSsaBuilder('s', 1, [[]]);
+  const ssa = makeSsaBuilder('s', 1, [[]], owns(16));
   const [b0] = ssa.irBlocks;
   const v = val();
   ssa.writeVar(stackSlotKey(12), 0, v);
@@ -65,7 +70,7 @@ test('a value written to two slots takes the LOWER — the one merge policy, sta
 test('a phi standing for a slot key carries that slot home', () => {
   // ^0 writes sp@4 and branches to ^1, which is its own successor: the header reads sp@4 through
   // a phi, and Braun's construction gives that phi the slot key as its `phiKey`.
-  const ssa = makeSsaBuilder('p', 2, [[], [0, 1]]);
+  const ssa = makeSsaBuilder('p', 2, [[], [0, 1]], owns(16));
   const [b0, b1] = ssa.irBlocks;
   ssa.writeVar(stackSlotKey(4), 0, val());
   b0.ops.push(mkOp('br', { successors: [{ block: b1, args: [] }] }));
@@ -101,9 +106,33 @@ test('Thumb: every value the asm spilled to [sp,#k] carries that k', () => {
   expect(new Set(fn.slotHomes!.values())).toEqual(new Set([0, 4]));
 });
 
-test('MIPS: the same shared rule, from the other frontend', () => {
+// THE STAMP ASKS THE FRAME PARTITION, NOT THE KEY SPELLING. `sp@k` is a local on one ABI and the
+// caller's storage on another, so a key alone is not evidence of a declaration rank — which is the
+// same thing `readRecursive` refuses to guess about a def-less read.
+test('a slot outside the declared local area is NOT stamped', () => {
+  const ssa = makeSsaBuilder('s', 1, [[]], owns(8));
+  const [b0] = ssa.irBlocks;
+  const inside = val();
+  const outside = val();
+  ssa.writeVar(stackSlotKey(4), 0, inside);
+  ssa.writeVar(stackSlotKey(8), 0, outside);
+  b0.ops.push(mkOp('ret', { operands: [inside, outside] }));
+  ssa.markFilled(0);
+  ssa.finish();
+  expect(ssa.fn.slotHomes!.get(inside)).toBe(4);
+  expect(ssa.fn.slotHomes!.has(outside)).toBe(false);
+});
+
+// MIPS reaches the SAME shared stamp — and gets nothing, which is the correct answer and not a
+// gap in the plumbing. frontend/mips.ts claims no frame partition at all (`addiu sp,sp,±N` is
+// transparent there), so its `sp@k` keys span O32's CALLER-owned register-parameter home area
+// `[0,16)` and the incoming stack arguments above it. This fixture's `sw a0,0(sp) / sw a1,4(sp)`
+// is squarely inside that home area: those offsets are the caller's, not this function's
+// declaration ranks. Stamping them would have made a per-compiler ordering read the wrong storage
+// the moment `MIPS_IDO.compilerBehaviors.spillSlotOrder` stopped being `'unknown'`.
+test('MIPS reaches the same shared stamp and is refused: it claims no frame partition', () => {
   const fn = frontendFor(MIPS_IDO).lift('spillslot', read('mips-spillslot.asm'), MIPS_IDO, {}, undefined, undefined);
-  expect(new Set(fn.slotHomes!.values())).toEqual(new Set([0, 4]));
+  expect(fn.slotHomes!.size).toBe(0);
 });
 
 test('a function that spilled nothing carries an EMPTY record; parsed IR carries none at all', () => {

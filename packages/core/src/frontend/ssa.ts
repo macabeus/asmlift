@@ -221,6 +221,19 @@ export function makeSsaBuilder(
     if (off === null) {
       return; // an ordinary register: no frame coordinate exists
     }
+    // THE KEY SPELLING CANNOT DECIDE THIS, exactly as `readRecursive` says forty lines below:
+    // `sp@40` is a local on one ABI and the caller's fifth argument on another. A declaration rank
+    // is a fact about storage THIS function owns, so the stamp asks the same partition the def-less
+    // read asks, and refuses where no answer exists. The two frontends differ here and the refusal
+    // is what makes that safe: Thumb declares `ownedLocals: [0, localArea)` and already bounds its
+    // minting to it, so this is a second, independent check that changes nothing; MIPS declares NO
+    // partition (frontend/mips.ts: `addiu sp,sp,±N` is transparent, so its slot keys span O32's
+    // caller-owned register-parameter home area `[0,16)` and the incoming stack arguments above it),
+    // and PPC declares none either — so both stamp nothing rather than reporting the caller's frame
+    // as this function's declaration ranks.
+    if (!inRange(off, model().ownedLocals)) {
+      return;
+    }
     const prev = slotHomes.get(v);
     // the one merge policy (ir/core.ts `SlotHomes`): two slots for one value ⇒ the LOWER
     slotHomes.set(v, prev === undefined || off < prev ? off : prev);

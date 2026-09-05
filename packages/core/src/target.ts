@@ -359,7 +359,13 @@ export const MIPS_IDO: TargetDescription = {
     // spills on a reversed-declaration probe) and NOT SHIPPED. No ido7.1 benchmark row lifts with
     // two or more spilled user locals — the only spilling shape in the corpus carries a call, and
     // this frontend declines a call — so no row can tell a wrong value from a right one here.
-    // Flip condition: the first ido7.1 row that lifts with two spilled locals.
+    //
+    // FLIP CONDITION, and it has TWO parts because the second is easy to miss. (1) The first
+    // ido7.1 row that lifts with two spilled locals. (2) `frontend/mips.ts` must first claim a
+    // frame partition (`LiveInModel.ownedLocals`); until it does, the shared stamp refuses every
+    // MIPS slot, so this value would order nothing — and if the partition were claimed WRONGLY,
+    // O32's caller-owned home area `[0,16)` would be read as this function's first four
+    // declaration ranks. Shipping a direction before the partition orders by argument index.
     spillSlotOrder: 'unknown',
   },
 };
@@ -424,7 +430,10 @@ export const PPC_MWCC: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
     // MEASURED `descending` (9 of 9) and NOT SHIPPED: no mwcc row lifts with two or more spilled
-    // user locals either — mwcc did not spill the ten-local probe at all.
+    // user locals either — mwcc did not spill the ten-local probe at all. And, as at MIPS_IDO, the
+    // frame partition comes first: `frontend/ppc.ts` claims no `LiveInModel.ownedLocals`, so the
+    // shared stamp records no slot home on this target at all and a direction here would order
+    // nothing until it does.
     spillSlotOrder: 'unknown',
   },
 };
