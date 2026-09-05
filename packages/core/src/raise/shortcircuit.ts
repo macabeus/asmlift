@@ -342,6 +342,13 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     (`sub_80930B8`, `sub_80932E0`) go from DECLINED to a full decompilation, because folding a
 //     loop-exit connective removes the back-edge loop recovery was refusing.
 //
+//     Nor does it widen the `/connective` LIFT AXIS, which is a separate question from the default
+//     lift: `onTreeOwned` below is what tells rank.ts the axis exists for a row, and this check sits
+//     ABOVE it. Measured over all 999 benchmark rows under BOTH configurations rank.ts lifts with
+//     (`foldTreeOwned` false and true), against the same rows with this widening ablated: the
+//     recovered IR moves on the same 2 rows under each, `onTreeOwned` fires on the same rows either
+//     way, and nothing new throws.
+//
 // Every refusal falls through untouched, leaving the tail-duplicated spelling — a miss, never a
 // miscompile. Applied ITERATIVELY, so `a || b || c` folds left-to-right, each round consuming one
 // more condition block.
@@ -360,6 +367,13 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // so the axis negates every joined `if` at once — and of the 28 real rows carrying the
 // `short-circuit` tag, 22 hold two or more. A per-SITE negation is the open lever; a gate on
 // whether to ENUMERATE the axis does not reach it, and removes a spelling the differ would referee.
+//
+// The De Morgan negation below forecloses a third spelling, and it is priced rather than assumed:
+// it DISTRIBUTES, so the leaves come out negated (`a || (!b && !c)`) and `a || !(b || c)` has no
+// candidate — the IR has no `logic_not` to build one from (ir/opcodes.ts). Compiled both ways on
+// the `a || (b && c)` guard shape at agbcc's default flags, the two source spellings assemble to
+// the same bytes (12/12 rows, score 0), so the foreclosure costs nothing here. A shape that ever
+// separated them would be a new axis, not a bug in this fold.
 //
 // WHICH slot ^g lands in is decided by the asm's branch POLARITY, and on Thumb the branch RANGE
 // decides the polarity — so the same source `&&` reaches this pass two different ways:
@@ -495,8 +509,12 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           continue;
         }
         // LAST refusal, so `onTreeOwned` reports a site where tree ownership is the ONE thing in
-        // the way — nothing above allocates, so continuing here costs exactly what continuing at
-        // the top did. See the option's doc for why the position is the gate's meaning.
+        // the way — which is why the negatability check above stays above it, even though it now
+        // MINTS the negated cone (up to NEGATE_BUDGET ops) and discards it whenever this gate
+        // refuses. That discard is free rather than merely cheap: `mkValue` is `{ type }` with no
+        // identity counter (ir/core.ts) and nothing is spliced until below, so a site refused here
+        // leaves the CFG byte-identical. See the option's doc for why the position is the gate's
+        // meaning.
         if (treeOwned) {
           opts.onTreeOwned?.();
           if (!opts.foldTreeOwned) {
@@ -553,12 +571,27 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
   return changed;
 }
 
-/** How many ops `negateCondOps` may MINT for one negation. A cone is a DAG and De Morgan rebuilds it
- *  per path, so a shared sub-condition could in principle blow up; this is the cheap loud stop.
- *  Chosen from a measurement, not a guess: swept over the 2,047 lifted klonoa+sa3 functions the
- *  fold negates a connective 17 times and the DEEPEST cone mints 5 ops, so 8 leaves every observed
- *  shape untouched with room to spare and still refuses anything much larger. Raise it only with a
- *  corpus site that needs it. */
+/** How many ops `negateCondOps` may KEEP for one negation. De Morgan rebuilds the cone PER PATH and
+ *  shares nothing — deliberately, see the helper's note — so a fold's cost is linear in the cone's
+ *  nodes and this is the cheap stop on it.
+ *
+ *  What it decides, said as the shape rather than as headroom, because "8" reads like more room
+ *  than it is. A negation mints one op per cone node and a binary expansion has leaves = internal
+ *  + 1, so a minted count is always ODD: 1, 3, 5, 7, 9. At 8 a FOUR-clause inner conjunct (7 ops)
+ *  folds and a FIVE-clause one (9 ops) does not; 7 and 8 are therefore one gate, and so is 9 over
+ *  everything measured here, since the deepest cone in the 2,047 lifted klonoa+sa3 functions mints
+ *  5 (17 connective negations, 0 refused). Clause COUNT is not the axis either: a FLAT `a || b ||
+ *  c || …` chain pays nothing at all, because ^g's condition is never a connective in that shape.
+ *
+ *  The bound is on ops KEPT, and the frontier is a shape rather than a node count: `go` pushes a
+ *  parent after its children, so a walk transiently mints up to budget + cone depth before the
+ *  post-check refuses (13 at budget 8, simulated over 200k random cones), while a BALANCED cone is
+ *  refused earlier — by the entry guard, at exactly `budget` kept.
+ *
+ *  A refusal here is SILENT, unlike the `onTreeOwned` gate 60 lines up which exists so a sweep need
+ *  not re-instrument. So raising this constant is not free advice: finding a corpus site that wants
+ *  it means patching a hook back into this file, as the round that set it did. No callback is added
+ *  because no consumer has asked for one; the tests below pin both sides of the frontier instead. */
 const NEGATE_BUDGET = 8;
 
 /** The ops computing `!v`, or `null` when `v` cannot be negated.
@@ -583,6 +616,20 @@ const NEGATE_BUDGET = 8;
  *  Ops are MINTED, never mutated: the originals stay where the caller hoisted them and die to the
  *  pass list's own `dce: true` (raise/pre-recovery.ts). Only `icmp_*`/`logic_and`/`logic_or` are
  *  ever rebuilt, all of them pure, so no effect can be duplicated or reordered by construction.
+ *
+ *  Nothing is SHARED between paths, and that is the point rather than a limitation. Memoizing `go`
+ *  in a `Map<Value, Value>` is three lines and would make the budget unnecessary — and it would
+ *  create exactly the hazard this fold exists to remove: a shared negated sub-condition has two
+ *  consumers, and analysis.ts renders a value with two consumers as a statement BEFORE the `if`.
+ *  Nothing collapses the duplicates later either — `numberPureValues` runs as `addrnum`, far ahead
+ *  of both folds. So the per-path rebuild is the mechanism and NEGATE_BUDGET is its price.
+ *
+ *  PRECONDITION, earned by the caller and not checked here: every value in the cone must dominate
+ *  the point the caller splices `ops` into — the minted comparisons reuse the ORIGINAL leaf
+ *  operands. The branch fold gets it free from ^g's single-predecessor gate: with ^h ^g's only
+ *  predecessor, every def in the cone either sits in ^g's body (spliced in ahead of these ops) or
+ *  dominates ^h. A caller without that invariant emits a def that does not dominate its use — loud
+ *  at `verify`, but this helper does not look.
  *
  *  It stays in this file rather than joining `NEGATED_ICMP` in ir/opcodes.ts: that table is a fact
  *  about opcodes, this MINTS ops, and the abstraction follows the second consumer. There is one. */
