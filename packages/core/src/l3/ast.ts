@@ -280,6 +280,14 @@ export interface SFn {
      *  MISSING assignment is the recovery. Marked because a local read and never assigned is
      *  otherwise a dropped statement (contracts.ts assertLocalsWritten). */
     uninit?: true;
+    /** the `[sp,#k]` the machine homed this local at, when the asm spilled it — the lowest one,
+     *  if the naming walk put several spilled values under this one name (ir/core.ts `SlotHomes`
+     *  states that merge policy once).
+     *
+     *  Present ONLY on a local recovered from word-spill VALUES. A `frame` local and a `uninit`
+     *  one are deliberately left unstamped even where the offset is in hand — see the refusal at
+     *  the structurer's build site for the measurement that decided it. */
+    slot?: number;
   }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
@@ -290,6 +298,12 @@ export interface SFn {
   /** Struct types this function's fields reference, declared above it by the backend. Empty
    *  unless raise/structs.ts recovered a struct. Sorted by name for deterministic output. */
   structs?: StructType[];
+  /** Which way this compiler hands out frame slots against DECLARATION RANK, when it is known:
+   *  `ascending` = the earlier-declared spilled local takes the LOWER `[sp,#k]`. Set by the
+   *  structurer from `StructureOptions.spillSlotOrder`, itself a per-compiler default declared in
+   *  `TargetDescription.compilerBehaviors`. ABSENT means the direction is unknown for this target
+   *  and `l3/slotorder.ts` is the identity — never "ascending by default". */
+  slotOrder?: 'ascending' | 'descending';
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct

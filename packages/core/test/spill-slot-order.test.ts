@@ -22,7 +22,8 @@ import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { T } from '../src/ir/types';
 import { raiseRecovered } from '../src/pipeline';
-import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
+import { type StructureOptions, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC, MIPS_IDO, structureOptionsFor } from '../src/target';
 
 const val = () => mkValue(T.unk(32));
 const read = (p: string) => readFileSync(join(import.meta.dirname, 'corpus', p), 'utf8');
@@ -178,4 +179,34 @@ test('a slot home survives the whole raising spine, on a function with a u8 loca
   }
   const live = [...fn.slotHomes!].filter(([v]) => reached.has(v)).map(([, off]) => off);
   expect(new Set(live)).toEqual(new Set([0, 4, 8, 12]));
+});
+
+// ── A3: the declaration attribute, from the structurer's naming walk ──────────────────────────
+
+const structured = (file: string, sym: string, opts: StructureOptions = {}) => {
+  const fn = frontendFor(ARMV4T_AGBCC).lift(sym, read(file), ARMV4T_AGBCC, {}, undefined, undefined);
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, undefined);
+  return structure(fn, { ...structureOptionsFor(ARMV4T_AGBCC, false), ...opts });
+};
+
+test('structure() stamps each local with the slot the naming walk found under it', () => {
+  const sfn = structured('agbcc-spillorder.s', 'spillorder');
+  const slotted = sfn.locals.filter((l) => l.slot !== undefined).map((l) => [l.name, l.slot]);
+  // exactly the two spills the asm made, one local each
+  expect(slotted.length).toBe(2);
+  expect(new Set(slotted.map(([, off]) => off))).toEqual(new Set([0, 4]));
+});
+
+test('a local the asm never spilled carries no slot — absent, not zero', () => {
+  const sfn = structured('agbcc-spillorder.s', 'spillorder');
+  expect(sfn.locals.some((l) => l.slot === undefined)).toBe(true);
+});
+
+test('the direction rides StructureOptions onto the SFn, and `unknown` reaches it as absent', () => {
+  const at = (spillSlotOrder: StructureOptions['spillSlotOrder']) =>
+    structured('agbcc-spillorder.s', 'spillorder', { spillSlotOrder }).slotOrder;
+  expect(at('ascending')).toBe('ascending');
+  expect(at('descending')).toBe('descending');
+  expect(at('unknown')).toBeUndefined();
+  expect(at(undefined)).toBeUndefined();
 });
