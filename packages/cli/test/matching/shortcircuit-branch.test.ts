@@ -76,3 +76,54 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(rc.candidates.some((c) => c.label.includes('flip-join'))).toBe(true);
   });
 });
+
+// A three-clause chain needs the SECOND fold, and the second fold needs De Morgan: the pass is
+// iterative, so ^g's condition is by then the connective the first fold built, and negating one is
+// a distribution, not an opcode swap (raise/shortcircuit.ts `negateCondOps`). Without it the chain
+// folds one level, the shared arm is tail-duplicated, and the row misses.
+//
+// This lives in the MATCHING suite deliberately: it is in no CI gate and in no `bench` command, so
+// a regression here would otherwise ride main for weeks. Each score below was measured at
+// `a56952ad`, the commit before the fold learned De Morgan.
+describe('a three-clause short-circuit chain folds flat', () => {
+  const best = (c: string) => {
+    const asm = compileTargetAsm(c);
+    return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).best;
+  };
+
+  test('`a || (b && c)` guarding two arms — was 5, and the shared arm was duplicated', () => {
+    const b = best(
+      'int f(int a,int b,int c,int *p){ if (a > 0 || (b > 0 && c > 0)) { p[0]=1; } else { p[0]=2; } return p[1]; }',
+    );
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('||');
+    expect(b.source).toContain('&&');
+    // ONE else arm: the tail duplication the second fold exists to remove
+    expect(b.source.split('= 2').length - 1).toBe(1);
+  });
+
+  test('`a || (b && c)` over an accumulator — was 7', () => {
+    const b = best('int f(int a,int b,int c){ int r = 0; if (a > 0 || (b > 0 && c > 0)) r = 1; return r; }');
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('a0 > 0 || a1 > 0 && a2 > 0');
+  });
+
+  test('the `llcmp` shape — a 64-bit `<`, mixed compare signedness, was 11', () => {
+    // synthetic:llcmp:agbcc's own body. The unsigned half is spelled as a per-SITE cast by the
+    // existing `/uns-cmp` axis, NOT as a parameter type — the fan reaches the bytes without any
+    // per-parameter signedness candidate.
+    const b = best(
+      'int f(unsigned a,int b,unsigned c,int d){ int r=0; if (d > b || (d == b && c > a)) r=1; return r; }',
+    );
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('(u32)');
+  });
+
+  test('the CONTROL: `a && (b || c)` matched before this fold learned De Morgan and still does', () => {
+    // Its orientation never asks for the negation, so it pins that the widening took nothing away.
+    const b = best(
+      'int f(int a,int b,int c,int *p){ if (a > 0 && (b > 0 || c > 0)) { p[0]=1; } else { p[0]=2; } return p[1]; }',
+    );
+    expect(b.score.match).toBe(true);
+  });
+});
