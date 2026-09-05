@@ -1000,3 +1000,86 @@ describe('the VALUE form takes a fused connective head, and negates one by De Mo
     }
   });
 });
+
+// The head gate's SECOND obligation, the one that has nothing to do with negation: in CHAIN context
+// a const/const diamond reduces to the head condition ITSELF (`res = condSide`, replacing a phi that
+// was `cond ? 1 : 0`), so the head has to produce 0/1. It is the only place in this file where a
+// relaxed gate is a silent WRONG VALUE rather than a missed fold — widening the gate to mere
+// def-existence once made `and(6, 3)` the returned value where the program yields 1 — so it gets a
+// refusal test of its own, with the icmp control beside it.
+describe('the VALUE form refuses a NON-BOOLEAN head, because the chain reduction hands it on as a value', () => {
+  /** `E: cond_br -> [H, P]` (so M gets a THIRD predecessor and the chain gate opens);
+   *  `H: k = 1; cond = <head>; cond_br(cond) -> [M(k) taken, B fall]`; `B: vb = 0; br M(vb)`;
+   *  `M(p): ret p`. `k = 1` on the taken edge with `vb = 0` ⇒ `wantNeg` is FALSE, so `negateCondOps`
+   *  never runs and nothing else in the pass looks at the head's opcode. */
+  const constConstChain = (head: 'icmp' | 'and' | 'call' | 'const'): { fn: Fn; cond: Value } => {
+    const p = mkValue(T.unk(32));
+    const m = blk([mkOp('ret', { operands: [p] })], [p]);
+
+    const vb = mkValue(T.unk(32));
+    const b = blk([
+      mkOp('const', { results: [vb], attrs: { value: 0 } }),
+      { ...mkOp('br'), successors: [{ block: m, args: [vb] }] },
+    ]);
+
+    const k = mkValue(T.unk(32));
+    const cond = mkValue(T.unk(32));
+    const x = mkValue(T.unk(32));
+    const y = mkValue(T.unk(32));
+    const hops: Op[] = [
+      mkOp('const', { results: [k], attrs: { value: 1 } }),
+      mkOp('const', { results: [x], attrs: { value: 6 } }),
+      mkOp('const', { results: [y], attrs: { value: 3 } }),
+    ];
+    hops.push(
+      head === 'and'
+        ? mkOp('and', { operands: [x, y], results: [cond] }) // 6 & 3 == 2 — truthy, but not 1
+        : head === 'call'
+          ? mkOp('call', { operands: [], results: [cond], attrs: { target: 'g' } }) // HAS a def
+          : head === 'const'
+            ? mkOp('const', { results: [cond], attrs: { value: 5 } })
+            : mkOp('icmp_ne', { operands: [x, y], results: [cond] }),
+    );
+    hops.push({
+      ...mkOp('cond_br', { operands: [cond] }),
+      successors: [
+        { block: m, args: [k] },
+        { block: b, args: [] },
+      ],
+    });
+
+    const z = mkValue(T.unk(32));
+    const third = blk([
+      mkOp('const', { results: [z], attrs: { value: 0 } }),
+      { ...mkOp('br'), successors: [{ block: m, args: [z] }] },
+    ]);
+    const e = mkValue(T.unk(32));
+    const entry = blk([
+      ...cmp(e),
+      {
+        ...mkOp('cond_br', { operands: [e] }),
+        successors: [
+          { block: blk([]), args: [] },
+          { block: third, args: [] },
+        ],
+      },
+    ]);
+    // …the entry's first successor is H, patched in now that H exists.
+    const h = blk(hops);
+    entry.ops.at(-1)!.successors[0] = { block: h, args: [] };
+    return { fn: { name: 'f', blocks: [entry, h, b, third, m], writeOrder: undefined, slotHomes: undefined }, cond };
+  };
+
+  test('an icmp head reduces (the control), and the merge value is the comparison', () => {
+    const { fn, cond } = constConstChain('icmp');
+    expect(recognizeShortCircuit(fn)).toBe(true);
+    const carried = fn.blocks.find((x) => x.ops.at(-1)!.opcode === 'br' && x.ops.some((o) => o.opcode === 'icmp_ne'));
+    expect(carried!.ops.at(-1)!.successors[0].args[0]).toBe(cond); // `cond` ITSELF becomes the value
+    verify(fn);
+  });
+
+  test.each(['and', 'call', 'const'] as const)('REFUSED: a %s head is not a 0/1 value', (head) => {
+    const { fn } = constConstChain(head);
+    expect(recognizeShortCircuit(fn)).toBe(false);
+  });
+});

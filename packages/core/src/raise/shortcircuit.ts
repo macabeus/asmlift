@@ -177,9 +177,29 @@ export function recognizeShortCircuit(fn: Fn): boolean {
           continue;
         }
         const cond = ht.operands[0];
-        if (!defs.get(cond)) {
+        // The head condition must be a C BOOLEAN computed here — a negatable comparison or a
+        // `logic_and`/`logic_or`, which is exactly `BOOL_OPS` and exactly the set `negateCondOps`
+        // accepts at top level, so a fused connective head still folds. Two obligations, and only
+        // the first is about having a cone to negate:
+        //   - it must have a DEF in this function (a block param has none, so there is nothing to
+        //     invert). A call RESULT does have one — `call` declares `results: 1` and `defOpMap`
+        //     maps it — so def-existence alone does NOT exclude it;
+        //   - it must produce 0/1, because the const/const reduction ~40 lines below hands `cond`
+        //     ITSELF on as the merge value (`res = condSide`), replacing a phi that was
+        //     `cond ? 1 : 0`. With a non-boolean head that is a silent WRONG VALUE, not a missed
+        //     fold: `and(6, 3)` would be emitted where the program yields 1. The branch form has no
+        //     such obligation — its result only ever feeds a `cond_br`, which reads truthiness —
+        //     which is why this gate lives here and not in the shared helper.
+        // When `wantNeg` is true `negateCondOps` re-derives the same set and its RESULT is boolean
+        // by construction; this check is what covers the un-negated case, where it never runs.
+        // Measured by instrumenting this gate over the 782 benchmark rows under BOTH lift
+        // configurations (hook reverted): it refuses NOTHING — every head reaching it is a negatable
+        // icmp — and the pass folds 6 value-form diamonds per configuration, 3 of them through the
+        // const/const reduction, all with icmp heads. So this is the invariant's guard, not a filter
+        // any row depends on.
+        if (!isBool(defs, cond)) {
           continue;
-        } // the head condition must be computed here — a block param or a call result has no cone
+        }
 
         // The `cond`-side operand is negated iff `cond` guards the short-circuit (taken+0 / fall+1).
         const wantNeg = (c === 0 && mIsTaken) || (c === 1 && mIsFall);
@@ -640,6 +660,12 @@ const NEGATE_BUDGET = 8;
  *  consumers, and analysis.ts renders a value with two consumers as a statement BEFORE the `if`.
  *  Nothing collapses the duplicates later either — `numberPureValues` runs as `addrnum`, far ahead
  *  of both folds. So the per-path rebuild is the mechanism and NEGATE_BUDGET is its price.
+ *
+ *  What it GUARANTEES about its result, which one caller leans on: every op it mints is an `icmp_*`
+ *  or a `logic_and`/`logic_or`, so the returned value is always a C boolean. The value form hands an
+ *  un-negated head straight on as the merge VALUE, which is why that caller checks booleanness for
+ *  itself before deciding whether to call here at all (see its head gate); the branch form needs no
+ *  such check, because its result only ever feeds a `cond_br`.
  *
  *  PRECONDITION, earned by the caller and not checked here: every value in the cone must dominate
  *  the point the caller splices `ops` into — the minted comparisons reuse the ORIGINAL leaf
