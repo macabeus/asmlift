@@ -217,6 +217,27 @@ test('the direction rides StructureOptions onto the SFn, and `unknown` reaches i
   expect(at(undefined)).toBeUndefined();
 });
 
+// THE `uninit` REFUSAL, pinned against the measurement that justifies it. The structurer stamps no
+// `slot` on an `undef` local, and the reason is NOT that no row has one — every agbcc row that
+// spills has several. It is that one frame slot then yields TWO declarations, the `undef` read of
+// the storage and the value stored into it, and the asm does not say which took the declaration
+// rank. This fixture (`synthetic:uninit_spill`'s own object) is the shape: three slots whose stores
+// sit on two arms of a dispatch that a third path skips entirely, so each of [sp,#0], [sp,#4] and
+// [sp,#8] is BOTH stored and read def-lessly. If a future change makes the two stop co-existing —
+// or stamps the undef half — this fails instead of the refusal quietly losing its subject.
+test('a slot-keyed uninit local co-exists with a slotted local at the SAME offset, and takes no slot', () => {
+  const sfn = structured('agbcc-uninit-spill.s', 'uninit_spill');
+  const slotted = sfn.locals.filter((l) => l.slot !== undefined);
+  expect(slotted.map((l) => `${l.name}@${l.slot}`)).toEqual(['v4@0', 'v5@4', 'v6@8']);
+  const uninit = sfn.locals.filter((l) => l.uninit);
+  // the refusal itself: no `undef` local is ever sortable
+  expect(uninit.every((l) => l.slot === undefined)).toBe(true);
+  // and it has a subject — the offsets the ordering sorts by are exactly the offsets an `undef`
+  // local is keyed at on this row, so the two readings of one storage really do collide
+  const uninitOffsets = uninit.map((l) => /^uninit_sp(\d+)$/.exec(l.name)).filter((m) => m !== null);
+  expect(new Set(uninitOffsets.map((m) => Number(m![1])))).toEqual(new Set(slotted.map((l) => l.slot!)));
+});
+
 // ── A4: the gate as data, and shipped only where a row can referee it ─────────────────────────
 
 test('the frame-slot direction is a per-compiler datum: agbcc ascending, everything else unknown', () => {

@@ -4677,10 +4677,27 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ).values(),
       ],
       // uninitialised locals (undef): declared, never assigned, typed by whatever recovery settled
-      // on for the value. NO `slot` either, on the same footing as the frame objects above and
-      // for a measured reason: no local of any of the four agbcc rows that spill (`spillorder`,
-      // `spillorder_rev`, `dma_fill_uninit`, `uninit_spill`) is `uninit`, so there is no row to
-      // referee an ordering that includes them. The first one is the flip condition.
+      // on for the value. NO `slot` either, on the same footing as the frame objects above — but
+      // for a DIFFERENT and stronger reason than "no row exercises it", which is measurably false:
+      // all four agbcc rows that spill carry `uninit` locals (`spillorder` and `spillorder_rev`
+      // three each, `dma_fill_uninit` seven, `uninit_spill` eight), and on two of them the uninit
+      // locals are keyed at the very offsets the ordering sorts by — `dma_fill_uninit` declares
+      // `uninit_sp4/sp8/sp12` beside the slotted `v4@4 v6@8 v8@12`, and `uninit_spill` declares
+      // `uninit_sp0/sp4/sp8` beside `v4@0 v5@4 v6@8`.
+      //
+      // THE REASON IS UNDECIDABILITY, not absence. One frame slot then yields TWO declarations:
+      // the `undef` read of the storage and the value stored into it. They are one object in the
+      // source, and the asm does not say which of the two declarations took the rank — so ranking
+      // one of the pair while leaving the other pinned would invent an answer. Refusing the undef
+      // half keeps the stored half's rank, which is the one the spill evidence is about, and it
+      // is what `dma_fill_uninit` MATCHes under (measured: it flips 12 → MATCH with this refusal
+      // in place). The refusal is pinned by `spill-slot-order.test.ts` — a test that FAILS if a
+      // slot-keyed `uninit` local ever stops co-existing with a slotted local at the same offset.
+      //
+      // FLIP CONDITION, and it cannot be "the first uninit local" — two referee rows already have
+      // them. It is a row where an `undef` local and a stored value at the SAME offset are shown
+      // by compile to be two source declarations rather than one, i.e. where ranking both is
+      // sound; until then, one storage contributes one rank and the undef half is not it.
       ...fn.blocks
         .flatMap((b) => b.ops)
         .filter((op) => op.opcode === 'undef')
