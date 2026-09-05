@@ -15,30 +15,187 @@
 // (`c ? x : y`, and the branchless-compare idioms `clamp0`/`le0`/…) also converges two arms on a return
 // merge, but there the compiler emits the MERGE-VARIABLE form, which is what byte-matches — sinking it
 // would REGRESS those. The distinguishing signal is structural: a short-circuit chain converges on a
-// SHARED arm (the common early-exit reached from ≥2 conditions, so it has ≥2 predecessors), whereas a
-// simple diamond's arms each have exactly one predecessor. So sink only when some branch-predecessor of
-// the merge is itself shared (≥2 preds); every simple select stays a merge var.
+// SHARED arm — the common early-exit reached from ≥2 CONDITIONS — whereas a simple diamond's arms are
+// each reached from one. So sink only when some branch-predecessor of the merge is ARRIVED at from
+// two places; every simple select stays a merge var.
+//
+// THE QUANTITY IS ARRIVALS, NOT PREDECESSORS. A FALL-THROUGH switch arm is the difference:
+// `case 2: r++; case 1: r++;` gives case 1's body two predecessors — the dispatch's `beq`, and
+// case 2's body running on — for a reason that has nothing to do with a chain of conditions.
+// Sinking there tail-duplicates the switch's SHARED RETURN into all five of its paths, which agbcc
+// then constant-folds per arm (`synthetic:sw_fall:agbcc`, 5 of its 11 objdiff points).
+//
+// So one arrival is SUBTRACTED, and only one kind: the previous arm of the same dispatch RUNNING
+// ON into this one (`fellInto`). It is subtracted for what it IS, not for what it computed —
+// "this pred computed something and ran on" is a proxy for the same intuition, and it refuses the
+// shape this pass exists for, where the two arms of `if (a) { … return 0; } if (b) { … return 0; }`
+// both compute and both jump to the shared exit (`retsink.test.ts`'s `TWO_ARMS`; five real-tier
+// sites have it, `kleod:EntityItemDrop:agbcc` among them).
+//
+// "THE PREVIOUS ARM OF THE SAME DISPATCH" IS A CLAIM ABOUT A DISPATCH, so this file models one
+// (`scrutOf`/`armsOf` below): two arms of two DIFFERENT tests on the SAME scrutinee. A proxy that
+// does not name a dispatch is wrong in both directions, and both readings are pinned as fixtures —
+// "each is the target of SOME conditional branch" reads the join of an `if` with no `else` as a
+// fall-in (`IF_NO_ELSE`), and adding "…and not siblings of the same `cond_br`" still says nothing
+// about WHICH dispatch, so `if (a) … if (b) …` on two different values loses its sinking. A
+// function with no comparison-tree dispatch has no fall-in to subtract, which is the truth about it.
+//
+// The two other clauses (`FALL_IN_GATES`): `q` must arrive by an UNCONDITIONAL branch, and it must
+// have a BODY. `isBodyless` (ir/core.ts) is the shared spelling of the second — a bodyless arm is
+// the record gcc leaves of a decision that RAN OUT (`emit_case_nodes` mints a `b .Ldefault` per
+// exhausted subtree), and it arrives rather than falls in; dropping it costs
+// `synthetic:llshr:gcc2.7.2kmc` its sinking. Its parameter half is what keeps an EMPTY case arm
+// (one op, but it binds the accumulator) on the fall-in side.
+//
+// AND THE MERGE MUST BELONG TO THAT DISPATCH (`ownedBy`). A fall-through switch can SHARE its
+// return with control flow outside itself — a guard's `goto` onto the same `return` — and there
+// refusing to sink is exactly wrong: the merge is left standing, Regime-A switch recovery declines
+// on it, and if-recovery duplicates the tails anyway. The pred shape alone cannot tell the two
+// apart (both present one fell-into arm with two preds); the SCRUTINEE can, because the guard tests
+// a different value. `synthetic:sw_fallguard` is the row: MATCH, and diff:6 with the clause dropped.
+//
+// REGIME SCOPE — the model is `cond_br`-seeded, so it is INERT ON A JUMP TABLE. A `switch_br`
+// dispatch's arms are invisible to `armsOf` and `fellInto` never fires there, so on
+// `synthetic:sw_jtfall`/`sw_jtfalldesc` the pass behaves as it does where there is no dispatch at
+// all. Deliberate: seeding `switch_br` too would move matching rows with no row asking for it. It
+// is the second definition of "this arm falls into that one" in the tree — `switch-recover.ts`'s
+// `analyzeArmExit` covers both regimes and is not reachable from `raise/` — so whoever builds the
+// Regime-B hoist should route both through one recognizer rather than widen the seed here.
 //
 // This does NOT recover the boolean-VALUE form `return a && b` — that is shortcircuit.ts's job
 // (the `logic_and`/`logic_or` connective plus agbcc's `(-b|b)>>31` = `b!=0` normalisation).
-import { Block, Fn, defOpMap, mkOp, predecessors } from '../ir/core';
+import { Block, Fn, Value, defOpMap, isBodyless, mkOp, predecessors } from '../ir/core';
+import { NEGATED_ICMP } from '../ir/opcodes';
 import { simplifyTrivialPhis } from '../ir/simplify';
+import { type Gate, firstRejection } from '../l3/gates';
 
 /** The fused short-circuit connectives (raise/shortcircuit.ts). A `cond_br` on one of these is the
  *  post-fusion record of the ≥2 conditions that used to reach a shared arm. */
 const CONNECTIVES = new Set(['logic_and', 'logic_or']);
 
+/** "`q` is the previous arm of the same dispatch, RUNNING ON into `target`" — the one arrival
+ *  `arrivals` subtracts. `dispatches` is already the answer to the hard half (`siblingArms` and
+ *  `ownedBy` in `sinkReturns`); the table is a value so each clause can be dropped and the pass
+ *  re-run on real input. Every clause is `sound: false` — they trade BYTES, never correctness:
+ *  admitting one wrongly spells a correct function the compiler does not re-emit, and refusing one
+ *  wrongly does the same in the other direction. */
+export interface FallInCandidate {
+  /** the predecessor under test */
+  readonly q: Block;
+  /** the block it would have fallen into */
+  readonly target: Block;
+  /** the scrutinees whose dispatch has `q` and `target` as arms of two DIFFERENT tests AND owns
+   *  the return merge — empty when there is no such dispatch */
+  readonly dispatches: readonly Value[];
+}
+
+export const FALL_IN_GATES: readonly Gate<FallInCandidate>[] = [
+  {
+    // A DEFINITION rather than a tuning knob, and the one entry here nothing has been shown to
+    // move: a `cond_br` pred did not run on into this block, it chose it, so calling that a
+    // fall-in would be wrong about the CFG whatever it did to the bytes.
+    id: 'arrives-by-decision',
+    why: 'a `cond_br` pred CHOSE this block; that is a decision arriving, never a fall-in',
+    sound: false,
+    rejects: (c) => {
+      const t = c.q.ops[c.q.ops.length - 1];
+      return t?.opcode !== 'br' || t.successors.length !== 1 || t.successors[0].block !== c.target;
+    },
+  },
+  {
+    // Paid for by a CORPUS row, not by a unit test: dropping it costs `synthetic:llshr:gcc2.7.2kmc`
+    // its sinking, and moves none of this file's fixtures.
+    id: 'bodyless-arm',
+    why: "gcc's `b .Ldefault` for an exhausted subtree is a decision that RAN OUT, not an arm",
+    sound: false,
+    rejects: (c) => isBodyless(c.q),
+  },
+  {
+    id: 'one-dispatch-owning-the-merge',
+    why: 'both arms of ONE dispatch on one scrutinee, and that dispatch owns the return merge',
+    sound: false,
+    guardedBy: 'ablating the dispatch gate reads an `if` join, and a guarded switch, as fall-ins',
+    rejects: (c) => c.dispatches.length === 0,
+  },
+];
+
 /** Tail-duplicate a return-only merge block into its unconditional-branch predecessors, but ONLY in the
  *  short-circuit shape (some branch-pred is shared, or the arms are selected by a fused connective).
  *  Returns whether anything changed. A "return-only" block is exactly one `ret` whose operands are all
  *  its own block-params, so each predecessor already carries the returned value as a successor arg. */
-export function sinkReturns(fn: Fn): boolean {
+export function sinkReturns(fn: Fn, gates: readonly Gate<FallInCandidate>[] = FALL_IN_GATES): boolean {
   let changed = false;
   const preds = predecessors(fn);
   const defs = defOpMap(fn);
+  // THE DISPATCH MODEL. A TEST BLOCK ends in a `cond_br` on an integer comparison of exactly one
+  // non-constant value against constants — `scrutOf` records that value, the SCRUTINEE. Two test
+  // blocks belong to the same dispatch when they test the same scrutinee: `recognizeSwitch`'s own
+  // PRE1 ("every test is on the SAME Value") read at the raise level, without its dominance, purity
+  // or interval preconditions — those decide whether a `switch` can be SPELLED, and this pass only
+  // needs to know a decision tree is there. `NEGATED_ICMP` (ir/opcodes.ts) is the shared spelling
+  // of the icmp family, so an eleventh comparison joins this model for free.
+  //
+  // Constant folding is deliberately NOT reproduced (`switch-recover.ts evalConst` folds agbcc's
+  // synthesized immediates): a test whose constant side this cannot see contributes two
+  // non-constant operands and is skipped, which loses a subtraction rather than inventing one.
+  const scrutOf = new Map<Block, Value>();
+  /** Arms, indexed by the block reached and the scrutinee whose test sent it there — the test
+   *  blocks are the value, because a fall-in requires the two arms to come from DIFFERENT tests. */
+  const armsOf = new Map<Block, Map<Value, Set<Block>>>();
+  for (const b of fn.blocks) {
+    const t = b.ops[b.ops.length - 1];
+    if (t?.opcode !== 'cond_br') {
+      continue;
+    }
+    const cmp = defs.get(t.operands[0]);
+    if (!cmp || !(cmp.opcode in NEGATED_ICMP)) {
+      continue;
+    }
+    const vars = cmp.operands.filter((o) => defs.get(o)?.opcode !== 'const');
+    if (vars.length !== 1) {
+      continue;
+    }
+    const scrut = vars[0];
+    scrutOf.set(b, scrut);
+    for (const e of t.successors) {
+      let byScrut = armsOf.get(e.block);
+      if (!byScrut) {
+        byScrut = new Map();
+        armsOf.set(e.block, byScrut);
+      }
+      const tests = byScrut.get(scrut) ?? new Set<Block>();
+      tests.add(b);
+      byScrut.set(scrut, tests);
+    }
+  }
+  /** Is this block part of the dispatch on `s` — either one of its tests, or an arm of one? */
+  const inDispatch = (b: Block, s: Value) => scrutOf.get(b) === s || !!armsOf.get(b)?.has(s);
+  /** The scrutinees for which `q` and `target` are arms of two DIFFERENT tests: the dispatches in
+   *  which one could be the previous arm of the other. Two successors of ONE `cond_br` — the body
+   *  and the join of an `if` with no `else` — share no such scrutinee, which is the whole point. */
+  const siblingArms = (q: Block, target: Block): Value[] => {
+    const aq = armsOf.get(q);
+    const at = armsOf.get(target);
+    if (!aq || !at) {
+      return [];
+    }
+    const out: Value[] = [];
+    for (const [s, testsQ] of aq) {
+      const testsT = at.get(s);
+      if (testsT && [...testsQ].some((c) => [...testsT].some((d) => c !== d))) {
+        out.push(s);
+      }
+    }
+    return out;
+  };
+  // `?.` on the terminator: `ir/verify.ts` rejects an empty block and `pipeline.ts` verifies
+  // before calling this, but `sinkReturns` is exported and its tests build blocks by hand, where a
+  // refusal is a better answer than a TypeError. Only the reads that DECIDE something are guarded
+  // that way — once a block is known to end in a `br`, the rewrite below indexes its terminator
+  // directly.
   const isBrTo = (p: Block, m: Block) => {
     const t = p.ops[p.ops.length - 1];
-    return t.opcode === 'br' && t.successors.length === 1 && t.successors[0].block === m;
+    return t?.opcode === 'br' && t.successors.length === 1 && t.successors[0].block === m;
   };
   for (const m of [...fn.blocks]) {
     if (m.ops.length !== 1) {
@@ -60,8 +217,9 @@ export function sinkReturns(fn: Fn): boolean {
     }
     // SHORT-CIRCUIT GATE, in two shapes — the chain must be visible in the CFG or in the value domain.
     //
-    //   (a) UNFUSED: at least one branch-pred is a shared block (≥2 preds of its own) — the common
-    //       early-exit reached from every condition of the chain.
+    //   (a) UNFUSED: at least one branch-pred is ARRIVED AT from ≥2 places — the common early-exit
+    //       reached from every condition of the chain. Everything that reaches it counts EXCEPT the
+    //       previous arm running on (`fellInto` below).
     //   (b) FUSED: `branch-shortcircuit` (raise/shortcircuit.ts) rewrites the head's condition into a
     //       `logic_and`/`logic_or` and collapses the second condition block into it. That leaves both
     //       arms single-pred, so (a) cannot see the chain any more — but the CONNECTIVE is now the
@@ -85,7 +243,21 @@ export function sinkReturns(fn: Fn): boolean {
         return t.opcode === 'cond_br' && CONNECTIVES.has(defs.get(t.operands[0])?.opcode ?? '');
       });
     const fusedDiamond = brPreds.length >= 2 && brPreds.some(selectedByConnective);
-    if (!brPreds.some((p) => (preds.get(p)?.length ?? 0) >= 2) && !fusedDiamond) {
+    // Does the dispatch on `s` OWN this merge? Every predecessor of `m` must be part of it — one of
+    // its tests, or an arm of one. A `goto` from outside the switch onto the same `return` fails
+    // this on the scrutinee it tests, so nothing is subtracted and the merge is sunk. `ps`, not
+    // `brPreds`: that outside arrival is a `cond_br` (the guard's `bgt`), which never appears in
+    // `brPreds`.
+    const ownedBy = (s: Value) => ps.every((p) => inDispatch(p, s));
+    // `q` FELL INTO `p`: it is the previous arm of the same dispatch, running on. The clauses are
+    // `FALL_IN_GATES` above, argued in this file's header; `arrivals` counts every OTHER
+    // predecessor. Layout adjacency — `q` sitting immediately above `p`, which is what "fell
+    // through" means in the assembly — is NOT a clause: it moves no corpus row, and it would be an
+    // unpaid premise about `fn.blocks` still being address order.
+    const fellInto = (q: Block, target: Block) =>
+      firstRejection(gates, { q, target, dispatches: siblingArms(q, target).filter(ownedBy) }) === null;
+    const arrivals = (p: Block) => (preds.get(p) ?? []).filter((q) => !fellInto(q, p)).length;
+    if (!brPreds.some((p) => arrivals(p) >= 2) && !fusedDiamond) {
       continue;
     }
     for (const p of brPreds) {

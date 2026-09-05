@@ -538,6 +538,30 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sw_fallmem(int,int*);',
     proto: { sw_fallmem: { returnsVoid: true } },
   },
+  // The dispatch does NOT own its return: a guard jumps onto the same `return r;` from outside the
+  // switch. Locally that merge is indistinguishable from `sw_fall`'s — one arm falls into the next
+  // and the fallen-into arm has two predecessors — and the right answer is the opposite one. Here
+  // the tails must be SUNK: kept, the merge stands, comparison-tree recovery declines on it, and
+  // if-recovery duplicates the tails anyway. The row pins `retsink`'s `ownedBy` clause: agbcc
+  // MATCHes, and scores 6 with the clause dropped.
+  {
+    sym: 'sw_fallguard',
+    src: 'int sw_fallguard(int x,int y){ int r=y; if(y>0) goto done; switch(x){case 3:r=1;case 2:r++;case 1:r++;} done: return r; }',
+    features: ['fallthrough'],
+    toolchains: ALL,
+  },
+  // `sw_fall` with ONE MORE CASE, and the same bare `return r;` tail. Three cases is where
+  // refusing to sink is right (that is `sw_fall`); at four, sinking is the better spelling and no
+  // local predicate knows it. Both spellings recover the `switch`, so the DIFFER referees — and it
+  // does: the row MATCHes, but only on the `/merge-home` axis, never on the default spelling. That
+  // dependence is the fragility the fall-in subtraction carries, and why this row is in the
+  // corpus.
+  {
+    sym: 'sw_fall4',
+    src: 'int sw_fall4(int x){ int r=0; switch(x){case 4:r++;case 3:r++;case 2:r++;case 1:r++;} return r; }',
+    features: ['fallthrough'],
+    toolchains: ALL,
+  },
   // Two chains: `case 0` runs on into `case 1`, which closes, and `case 2` runs on into `default:`.
   // So where the default's label goes is decided by the fall-through rather than by where its body
   // is laid out, and one of the two `break`s a four-arm switch could carry is genuinely absent.

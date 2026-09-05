@@ -4,7 +4,7 @@
 // factory takes its dependencies EXPLICITLY (`SwitchRecoverDeps`); `expr`/`structureRegion` are
 // late-bound callbacks into the emission phase, so case bodies reuse the ordinary structuring
 // machinery (loops/ifs inside cases, the onStack guard).
-import { Block, Fn, Op, Value, forwardingTarget, successorsOf } from '../ir/core';
+import { Block, Fn, Op, Value, forwardingTarget, isBodyless, successorsOf } from '../ir/core';
 import { ORDER_SENSITIVE_OPS } from '../ir/opcodes';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
 
@@ -34,6 +34,20 @@ export interface SwitchRecoverDeps {
    *  suppressed, and a MATERIALIZED def, whose `v = …` assignment renders only here while its uses
    *  read the bare name — leaving a local declared and never assigned. */
   emitsOwnStatement: (blk: Block) => boolean;
+  /** Where a value is WRITTEN: its block for a parameter, its def op's block otherwise — the half
+   *  of "where is this defined" `defs` does not answer. Taken from `structure.ts`, which builds
+   *  both halves for def-site anchoring, rather than indexing the parameters a second time. */
+  blockOf: (v: Value) => Block | undefined;
+  /** THE DISPATCH HOIST: the copies of every edge the tree walk collapsed, merged and re-emitted
+   *  ONCE ahead of the `switch`. `structure.ts hoistedDispatchAssigns` owns the emission
+   *  (suppression, identity elision, `undef`, the write-order sort, `sequentialize`), so this
+   *  regime takes it as a dependency rather than implementing it a second time, exactly as Regime
+   *  B takes `argAssignsFor`. Null ⇒ no single hoisted statement spells them; the caller declines
+   *  to if-recovery. `liveAt` are the blocks whose live-in names the writes must not clobber. */
+  hoistDispatchCopies: (
+    edges: readonly { pred: Block; succ: { block: Block; args: Value[] } }[],
+    liveAt: readonly Block[],
+  ) => Stmt[] | null;
   expr: (v: Value) => Expr;
   structureRegion: (b: Block, stop: Block | null) => Stmt[];
 }
@@ -89,6 +103,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     switchArmsFollowLayout,
     spellSwitchFallthrough,
     emitsOwnStatement,
+    blockOf,
+    hoistDispatchCopies,
     expr,
     structureRegion,
   } = deps;
@@ -112,7 +128,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
    *  body has two dispatch preds, which is exactly the shape that makes retsink sink the merge's
    *  return into every leaf, the fall-out jumps included. */
   const isBareExit = (blk: Block): boolean =>
-    blk.params.length === 0 && blk.ops.length === 1 && (blk.ops[0].opcode === 'br' || blk.ops[0].opcode === 'ret');
+    isBodyless(blk) && (blk.ops[0].opcode === 'br' || blk.ops[0].opcode === 'ret');
 
   /** Are these two blocks the SAME bare exit — the same jump with the same args, or the same return
    *  of the same values? Neither has a body, so two of them are indistinguishable at emission. */
@@ -578,9 +594,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
           if (isTest) {
             return false;
           } // a case target that's a test → decline
-          if (child.params.length) {
-            return false;
-          } // case entry with a phi → decline
+          // A case entry with a PHI is admitted: the dispatch edge binds those parameters, and
+          // `hoistDispatchCopies` re-emits that binding once above the `switch` (or declines the
+          // whole recovery). A fall-through chain's accumulator crosses every arm as exactly such
+          // a parameter, so refusing it here refuses the whole family.
           if (cases.has(k!)) {
             return false;
           } // duplicate case value → decline
@@ -637,7 +654,48 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     } // not worth a switch (m2c: ≥2 cases)
     // The default is the single non-test leaf that is NOT a case body. 0 → no default; ≥2 distinct → decline.
     const caseBlocks = new Set(cases.values());
-    const defaults = [...defaultCands].filter((d) => !caseBlocks.has(d));
+    const leaves = new Set([...defaultCands].filter((d) => !caseBlocks.has(d)));
+    // RESOLVE THROUGH a bare jump onto another candidate. `forwardingTarget` (ir/core.ts) stops at
+    // a `br` that carries block ARGUMENTS — skipping it would drop the values it supplies — so a
+    // leaf holding `b .Ldefault(v)` and `.Ldefault` itself arrive here as two distinct candidates
+    // even though one merely jumps to the other. They are not two defaults: the jumping leaf emits
+    // nothing of its own, and the values its `br` hands the other's parameters are the values the
+    // DISPATCH hands them. So this is `forwardingTarget`'s walk with the args-carrying step
+    // ADMITTED rather than refused, and it does not drop those values either — the step becomes one
+    // more dispatch edge, hoisted with the rest, where the hoist's disagreement rule decides
+    // whether the two paths can share one statement. (ir/core.ts lists the non-callers and why.)
+    //
+    // A cycle of such jumps has no target to resolve to and declines. Leaves that pass DIFFERENT
+    // values, or that have a body, are untouched and are still two defaults below. Keyed by the
+    // PRED block so a leaf walked twice — L → X → D reaches X from L's walk and again from X's own
+    // turn in the loop — records its edge once.
+    const throughEdges = new Map<Block, { pred: Block; succ: { block: Block; args: Value[] } }>();
+    const resolveDefault = (d: Block): Block | null => {
+      const walked = new Set<Block>();
+      let cur = d;
+      for (;;) {
+        if (walked.has(cur)) {
+          return null;
+        }
+        walked.add(cur);
+        const t = cur.ops[0];
+        if (!isBareExit(cur) || t.opcode !== 'br' || !leaves.has(t.successors[0].block)) {
+          return cur;
+        }
+        throughEdges.set(cur, { pred: cur, succ: t.successors[0] });
+        cur = t.successors[0].block;
+      }
+    };
+    const defaults: Block[] = [];
+    for (const d of leaves) {
+      const r = resolveDefault(d);
+      if (r === null) {
+        return null;
+      }
+      if (!defaults.includes(r)) {
+        defaults.push(r);
+      }
+    }
     // ONE default reached by SEVERAL leaves. `balance_case_nodes`/`emit_case_nodes` give each
     // subtree that runs out of case values its own jump to the default, so agbcc's four-case tree
     // reaches it through two `b .Ldefault` blocks, which comparing candidates by BLOCK would count
@@ -649,18 +707,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return null;
     }
     const defaultBlk = defaults[0] ?? null;
-    // A default entry that takes BLOCK PARAMETERS. Collapsing the tree DISCARDS its edges, and an
-    // edge's only emission is its parallel copy (structure.ts argAssignsFor) — so an entry the
-    // dispatch hands values to would lose them: `switch (x) { case 1: … case 2: … }` where the
-    // fall-out edge also carried `w = 0` would drop that write silently. Case entries are held to
-    // the same rule where the walk records them (`asLeafOrTest`), by the same argument. Structural
-    // rather than "would these copies elide anyway", and strict at no cost: agbcc reaches its
-    // default through a jump of its OWN, which carries the copies into the default ARM, so a
-    // dispatch branch handing that entry its values is not a shape it emits. One that does declines
-    // LOUD to if-recovery, which spells every copy the asm performs.
-    if (defaultBlk && defaultBlk.params.length) {
-      return null;
-    }
+    // A default entry that takes BLOCK PARAMETERS is admitted on the same terms a case entry is:
+    // the dispatch edge binds them and `hoistDispatchCopies` re-emits that binding above the
+    // `switch`. The hazard it stands over is silent — without that re-emission,
+    // `switch (x) { case 1: … case 2: … }` whose fall-out edge also carried `w = 0` drops the write
+    // and looks entirely ordinary doing it — so the admission is only as good as the hoist.
     // A default candidate that is ALSO a case body means a relational edge hit a case leaf → ambiguous.
     if ([...defaultCands].some((d) => caseBlocks.has(d))) {
       return null;
@@ -783,6 +834,50 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       const x = exitOf.get(blk);
       return x?.kind === 'fallthrough' ? x.to : null;
     };
+    // THE DISPATCH HOIST. Every edge the tree walk is about to COLLAPSE — from any test block, to
+    // a case entry, a default candidate, the merge, or another test block — carries the parallel
+    // copy that binds its target's parameters, and collapsing the tree is what would discard it.
+    // Merge those copies and emit them ONCE, above the `switch`. Placed FIRST because it is
+    // emitted first and `argAssignsFor` mints swap-cycle temp names as it goes.
+    //
+    // TWO CONDITIONS ARE THIS REGIME'S OWN, and both must hold before the emission is asked for:
+    //
+    //  - AVAILABILITY AT THE ROOT. A hoisted copy is evaluated at `b`, not on its edge, so every
+    //    argument it reads must be defined at a block that DOMINATES `b`. An argument computed
+    //    inside a collapsed test block is not: the tree reaches that block only on some paths,
+    //    while the hoist runs on all of them, and re-rendering it above the dispatch would
+    //    SPECULATE it. (That is the one invariant PRE4's "a use is dominated by its def, so a
+    //    collapsed op runs on a subset of the paths it already ran on" does not give the hoist,
+    //    which is why the hoist asks for it here rather than inheriting it.)
+    //  - The emission's own two refusals, stated at `hoistedDispatchAssigns`: edges disagreeing
+    //    about one name, and a hoisted name whose value is still live at the switch or into an arm.
+    //
+    // Either way the answer is a decline to if-recovery, which spells every copy the asm performs.
+    const availableAtRoot = (v: Value): boolean => {
+      const home = blockOf(v);
+      return home !== undefined && dom.get(b)!.has(home);
+    };
+    const dispatchEdges: { pred: Block; succ: { block: Block; args: Value[] } }[] = [];
+    for (const t of new Set([...seen, ...throughEdges.keys()])) {
+      for (const e of t.ops[t.ops.length - 1].successors) {
+        if (e.block.params.length === 0) {
+          continue;
+        }
+        if (!e.args.every(availableAtRoot)) {
+          return null;
+        }
+        dispatchEdges.push({ pred: t, succ: e });
+      }
+    }
+    const hoisted = hoistDispatchCopies(dispatchEdges, [
+      b,
+      ...caseBlocks,
+      ...(defaultBlk ? [defaultBlk] : []),
+      ...(merge ? [merge] : []),
+    ]);
+    if (hoisted === null) {
+      return null;
+    }
     // Bodies are structured in EMISSION order — `argAssignsFor` mints swap-cycle temp names as it
     // goes, so building them out of order changes the output — and each falling arm's target is
     // re-read off that order rather than trusted from the ordering above: this is the seam where a
@@ -793,21 +888,18 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       if (to !== null && to !== (entries[i + 1] ?? dfltArm)) {
         return null;
       }
-      // The arm fallen INTO must take NO block parameters. Its only source of them would be the
-      // dispatch's own edge copies, which collapsing the tree discards — so on the fall-through
-      // path they would be lost and on its own case value they would be missing.
+      // The arm fallen INTO may take block parameters, and the TWO paths that reach it are spelled
+      // in two different places: entering by its own case value takes the hoisted copy above the
+      // `switch` (`hoistDispatchCopies`), while FALLING in takes the copies the falling arm's own
+      // `br` emits as its last statements (`structureRegion(blk, to)` walks that terminator, so
+      // they are already there). Getting this wrong is SILENT, which is why it rests on the hoist
+      // rather than on a local reading of the arm.
       //
-      // Regime B refuses the same HAZARD one step later and LOUD, on a WEAKER predicate: the copies
-      // `argAssignsFor` actually produced for that edge, which are none on three documented paths
-      // (a const anchored at its def site, an identity copy, an `undef` that carries nothing) —
-      // each meaning the edge has nothing to re-run. That is the test which fits the hazard; this
-      // one is the conservative over-approximation, and it costs nothing while `asLeafOrTest`
-      // refuses a param-carrying case entry outright. It is that refusal restated AT THE SEAM where
-      // breaking it would be silent, so admitting such an entry (the booked hoist) cannot quietly
-      // land one inside a chain — the hoist inherits both rules, not one.
-      if (to !== null && to.params.length) {
-        return null;
-      }
+      // Regime B refuses the same hazard LOUD at its own `switch_br` path, on the weaker predicate
+      // that fits it (the copies `argAssignsFor` actually produced): its arms take their edge
+      // copies PER ARM, so a fall-through path would re-run them over what the falling arm
+      // computed. Hoisting is what removes that hazard, and Regime B does not hoist — booked, not
+      // built, and no row asks for it (`sw_jtfall`/`sw_jtfalldesc` match today).
       outCases.push({
         values: armsByBlock.get(blk)!,
         body: structureRegion(blk, to ?? merge),
@@ -845,7 +937,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       cases: outCases,
       ...(defBody.length ? { default: defBody, ...(defaultAt !== undefined ? { defaultAt } : {}) } : {}),
     };
-    const out: Stmt[] = [sw];
+    const out: Stmt[] = [...hoisted, sw];
     if (merge && merge !== stop) {
       out.push(...structureRegion(merge, stop));
     }
