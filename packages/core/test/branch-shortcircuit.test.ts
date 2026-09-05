@@ -774,7 +774,6 @@ describe('the VALUE form carries the write-order record too', () => {
   });
 });
 
-// ---------------------------------------------------------------------------------------------
 // De Morgan: negating a FUSED connective.
 //
 // The fold is iterative, so by the time it reaches an OUTER diamond the inner one has already been
@@ -926,9 +925,8 @@ describe('negating a fused connective (De Morgan)', () => {
   });
 
   // THE CLIFF `NEGATE_BUDGET` decides, pinned so that changing the constant fails a test instead of
-  // moving silently. One op per cone node and leaves = internal + 1, so a minted count is always
-  // ODD — 1, 3, 5, 7, 9 — which makes 7 and 8 the same gate and puts the only decision one clause
-  // above the deepest cone the corpus holds (5 ops, measured over the lifted klonoa+sa3 functions).
+  // moving silently. A minted count is always ODD (see the constant's note), so 7 and 8 are one gate
+  // and the only decision sits one clause above the deepest cone the corpus holds.
   test('the budget cliff: a 4-clause inner conjunct folds (7 ops), a 5-clause one does not (9)', () => {
     expect(folds(leftChain(3))).toBe(true); // 4 clauses → 7 minted
     expect(folds(leftChain(4))).toBe(false); // 5 clauses → 9 minted, one over
@@ -938,16 +936,14 @@ describe('negating a fused connective (De Morgan)', () => {
   // count a chain does. What the shape changes is only which guard says no — this one is stopped by
   // the ENTRY guard at 8 ops kept, where the 15-node LEFT chain above is stopped at 9 and a RIGHT
   // chain of the same size runs to the post-check at 15 — and no caller can tell those apart.
-  // (Verified exhaustively against `negateCondOps`: accepted iff nodes <= budget, over all 82,500
-  // binary cone shapes up to 23 nodes.)
   test('a BALANCED cone flips at the same node count a chain does, through a different guard', () => {
     expect(folds(balanced(2))).toBe(true); // 7 nodes — and leftChain(3), also 7, also folds
     expect(folds(balanced(3))).toBe(false); // 15 nodes
   });
 
   // …and the same verdict for three DIFFERENT shapes at each of the two node counts either side of
-  // the cliff — the assertion form of "accepted iff nodes <= budget", which an exhaustive sweep of
-  // all 82,500 cone shapes up to 23 nodes confirms and this pins through the public fold.
+  // the cliff — the assertion form, through the public fold, of the constant's "accepted iff
+  // nodes <= budget".
   test('the verdict depends on the node count alone: left chain, right chain and balanced agree', () => {
     for (const at7 of [leftChain(3), rightChain(3), balanced(2)]) {
       expect(folds(at7)).toBe(true); // 7 nodes
@@ -958,11 +954,10 @@ describe('negating a fused connective (De Morgan)', () => {
   });
 });
 
-// The VALUE form's head gate, which used to be the narrower of the two siblings: it demanded a
-// negatable icmp BEFORE computing whether the orientation negates anything at all, so a head whose
-// condition is a fused connective — what the branch form leaves behind, and what an earlier round of
-// this same pass leaves behind in a chain — was refused even when nothing needed inverting. That
-// narrowness is what raise/pre-recovery.ts calls its pass order load-bearing for.
+// The VALUE form's head gate. A head whose condition is a fused connective — what the branch form
+// leaves behind, and what an earlier round of this same pass leaves behind in a chain — folds
+// whether or not the orientation inverts it, and that width is what raise/pre-recovery.ts's
+// pass-order note leans on when it says running the branch form first costs no value fold.
 describe('the VALUE form takes a fused connective head, and negates one by De Morgan', () => {
   /** `H: cond_br(cond) -> [M(k) taken, B fall];  B: vb = icmp; br M(vb);  M(p): ret p`.
    *  `k = 1` ⇒ the head condition is NOT negated; `k = 0` ⇒ it is. */
@@ -1000,7 +995,7 @@ describe('the VALUE form takes a fused connective head, and negates one by De Mo
   /** The recovered connective: M's phi is retired at 2 predecessors, so the value reaches M's `ret`. */
   const headCond = (fn: Fn): Op => defIn(fn, fn.blocks.at(-1)!.ops.at(-1)!.operands[0]);
 
-  test('a connective head with NOTHING to negate folds — the refusal was gratuitous', () => {
+  test('a connective head with NOTHING to negate folds, its fused value reused as-is', () => {
     const fn = valueDiamond({ k: 1, head: 'connective' });
     expect(recognizeShortCircuit(fn)).toBe(true);
     const outer = headCond(fn);
@@ -1039,9 +1034,9 @@ describe('the VALUE form takes a fused connective head, and negates one by De Mo
 // The head gate's SECOND obligation, the one that has nothing to do with negation: in CHAIN context
 // a const/const diamond reduces to the head condition ITSELF (`res = condSide`, replacing a phi that
 // was `cond ? 1 : 0`), so the head has to produce 0/1. It is the only place in this file where a
-// relaxed gate is a silent WRONG VALUE rather than a missed fold — widening the gate to mere
-// def-existence once made `and(6, 3)` the returned value where the program yields 1 — so it gets a
-// refusal test of its own, with the icmp control beside it.
+// relaxed gate is a silent WRONG VALUE rather than a missed fold — a gate at mere def-existence
+// returns `and(6, 3)` where the program yields 1 — so it gets a refusal test of its own, with the
+// icmp control beside it.
 describe('the VALUE form refuses a NON-BOOLEAN head, because the chain reduction hands it on as a value', () => {
   /** `E: cond_br -> [H, P]` (so M gets a THIRD predecessor and the chain gate opens);
    *  `H: k = 1; cond = <head>; cond_br(cond) -> [M(k) taken, B fall]`; `B: vb = 0; br M(vb)`;

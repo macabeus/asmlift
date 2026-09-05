@@ -83,35 +83,37 @@ describe('the emitted orientation decides the match, and only one orientation is
 // folds one level, the shared arm is tail-duplicated, and the row misses.
 //
 // This lives in the MATCHING suite deliberately: it is in no CI gate and in no `bench` command, so
-// a regression here would otherwise ride main for weeks. Each score below was measured at
-// `a56952ad`, the commit before the fold learned De Morgan.
+// a regression here would otherwise ride main for weeks. Each score in a test name below is what the
+// shape scores with `negateCondOps`' connective case ablated.
 describe('a three-clause short-circuit chain folds flat', () => {
   const best = (c: string) => {
     const asm = compileTargetAsm(c);
     return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).best;
   };
 
-  test('`a || (b && c)` guarding two arms — was 5, and the shared arm was duplicated', () => {
+  test('`a || (b && c)` guarding two arms — 5 without the second fold, THEN arm duplicated', () => {
     const b = best(
       'int f(int a,int b,int c,int *p){ if (a > 0 || (b > 0 && c > 0)) { p[0]=1; } else { p[0]=2; } return p[1]; }',
     );
     expect(b.score.match).toBe(true);
     expect(b.source).toContain('||');
     expect(b.source).toContain('&&');
-    // ONE else arm: the tail duplication the second fold exists to remove
-    expect(b.source.split('= 2').length - 1).toBe(1);
+    // ONE then-arm: the tail duplication the second fold removes. It is `*a3 = 1` that gets
+    // duplicated, not the else arm — ablated, the winner nests `if (a0 > 0) v0 = 1; else { … v0 = 2;
+    // … v0 = 1; }`, so `= 2` reads 1 either way and would gate nothing.
+    expect(b.source.split('= 1').length - 1).toBe(1);
   });
 
-  test('`a || (b && c)` over an accumulator — was 7', () => {
+  test('`a || (b && c)` over an accumulator — 7 without the second fold', () => {
     const b = best('int f(int a,int b,int c){ int r = 0; if (a > 0 || (b > 0 && c > 0)) r = 1; return r; }');
     expect(b.score.match).toBe(true);
     expect(b.source).toContain('a0 > 0 || a1 > 0 && a2 > 0');
   });
 
-  test('the `llcmp` shape — a 64-bit `<`, mixed compare signedness, was 11', () => {
+  test('the `llcmp` shape — a 64-bit `<`, mixed compare signedness, 11 without the second fold', () => {
     // synthetic:llcmp:agbcc's own body. The unsigned half is spelled as a per-SITE cast by the
-    // existing `/uns-cmp` axis, NOT as a parameter type — the fan reaches the bytes without any
-    // per-parameter signedness candidate.
+    // existing `/uns-cmp` axis, NOT as a parameter type: the winner is `signed/defsite/uns-cmp` with
+    // four `s32` params, so the fan reaches the bytes with no per-parameter signedness candidate.
     const b = best(
       'int f(unsigned a,int b,unsigned c,int d){ int r=0; if (d > b || (d == b && c > a)) r=1; return r; }',
     );
@@ -119,8 +121,8 @@ describe('a three-clause short-circuit chain folds flat', () => {
     expect(b.source).toContain('(u32)');
   });
 
-  test('the CONTROL: `a && (b || c)` matched before this fold learned De Morgan and still does', () => {
-    // Its orientation never asks for the negation, so it pins that the widening took nothing away.
+  test('the CONTROL: `a && (b || c)`, whose orientation never asks for the negation, still matches', () => {
+    // Ablated it matches too, so it pins that the connective case takes nothing away.
     const b = best(
       'int f(int a,int b,int c,int *p){ if (a > 0 && (b > 0 || c > 0)) { p[0]=1; } else { p[0]=2; } return p[1]; }',
     );
@@ -129,14 +131,14 @@ describe('a three-clause short-circuit chain folds flat', () => {
 });
 
 // The one LOUD→SILENT conversion this fold makes, pinned. Folding a loop-EXIT connective removes
-// the back-edge loop recovery was refusing, so a function that DECLINED now decompiles — the single
-// effect of the De Morgan widening with no differ to referee it, since the two real functions it
+// the back-edge loop recovery was refusing, so a function that DECLINED now decompiles — the one
+// effect of the connective negation with no differ to referee it, since the two real functions it
 // flips (`sub_80930B8`, `sub_80932E0`) are not benchmark rows.
 //
-// At `a56952ad` this very shape throws `StructureError: cannot structure 'f': unrecovered back-edge
-// into block #2`, so the test below cannot even reach an assertion there. It is not a match (best
-// 24 at the time of writing) and deliberately asserts no score: what it gates is that the fold
-// still SURVIVES into the loop condition rather than the bytes it scores.
+// Ablated, this very shape throws `StructureError: cannot structure 'f': unrecovered back-edge into
+// block #2`, so the test below cannot even reach an assertion there. It is not a match (best 24) and
+// deliberately asserts no score: what it gates is that the fold SURVIVES into the loop condition,
+// not the bytes it scores.
 //
 // Equivalence is executed, not argued: the decompilation and the original C, both built with the
 // host `cc` and run over a 512-point grid of `p`/`q` contents and `n` (including `n < 0` and

@@ -119,19 +119,15 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // The control-flow sibling, value form FIRST.
   //
   // Their input SHAPES are disjoint (the value form's second block ends in `br` carrying a phi
-  // argument, this one's ends in `cond_br`), so neither can eat the other's literal pattern.
-  //
-  // The order used to be load-bearing for a SECOND reason, and no longer is: this pass REWRITES its
-  // head's condition into a `logic_or`/`logic_and`, and the value form refused any head whose
-  // condition was not a negatable icmp — so running this one first could permanently disqualify a
-  // value fold that was available. Both folds now negate a connective by De Morgan
-  // (`negateCondOps`, raise/shortcircuit.ts), so a fused head disqualifies nothing by itself; what
-  // is left is that helper's own refusals — a cone holding a non-negatable leaf, or one over its
-  // budget. Measured rather than assumed, by instrumenting the value form's head gate and sweeping
-  // the benchmark corpus: it refuses 0 times over the 782 rows that lift map-lessly, so the hazard
-  // has no producer there at all. The order stays because nothing argues for changing it. The
-  // reverse direction never could: the value form replaces its head's `cond_br` with a `br`, which
-  // this pass never matches.
+  // argument, this one's ends in `cond_br`), so neither can eat the other's literal pattern. The
+  // order is not otherwise load-bearing: this pass REWRITES its head's condition into a
+  // `logic_or`/`logic_and`, and the value form takes a fused head — both siblings negate a
+  // connective by De Morgan (`negateCondOps`, raise/shortcircuit.ts). Running this one first can
+  // still cost a value fold wherever that helper refuses the fused cone (a non-negatable leaf, or a
+  // cone over its budget), but instrumenting the value form's head gate over the benchmark corpus
+  // counts 0 fused heads across the 782 rows that lift map-lessly, so the hazard has no producer
+  // there. The reverse direction never could: the value form replaces its head's `cond_br` with a
+  // `br`, which this pass never matches.
   {
     id: 'branch-shortcircuit',
     run: (fn, _self, opts) => recognizeBranchShortCircuit(fn, opts.shortCircuit),
