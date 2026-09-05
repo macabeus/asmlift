@@ -36,13 +36,16 @@ const read = (p: string) => readFileSync(join(import.meta.dirname, 'corpus', p),
 
 // ── A1: the stamp, in the SHARED builder ──────────────────────────────────────────────────────
 
-// A frame partition is what makes a slot key MEAN "storage this function owns", so every builder
-// test that expects a stamp declares one. Thumb supplies `[0, localArea)`; a builder handed no
-// model claims nothing and stamps nothing (the test below).
-const owns = (to: number) => () => ({ ownedLocals: { from: 0, to } });
+// A frame partition is what makes a slot key MEAN "storage this function DECLARES", so every
+// builder test that expects a stamp declares one. The stamp asks `declaredLocals`, which is a
+// different claim from `ownedLocals` — the second admits agbcc's outgoing stack-argument area and
+// the first must not (see `LiveInModel`) — so `declares` supplies only the one the stamp reads,
+// and the test below pins that `ownedLocals` alone buys no stamp. A builder handed no model claims
+// nothing and stamps nothing.
+const declares = (to: number) => () => ({ declaredLocals: { from: 0, to } });
 
 test('the SSA builder stamps a slot home on a slot write and on nothing else', () => {
-  const ssa = makeSsaBuilder('s', 1, [[]], owns(16));
+  const ssa = makeSsaBuilder('s', 1, [[]], declares(16));
   const [b0] = ssa.irBlocks;
   const spilled = val();
   const plain = val();
@@ -56,7 +59,7 @@ test('the SSA builder stamps a slot home on a slot write and on nothing else', (
 });
 
 test('a value written to two slots carries BOTH: the builder holds no target and chooses nothing', () => {
-  const ssa = makeSsaBuilder('s', 1, [[]], owns(16));
+  const ssa = makeSsaBuilder('s', 1, [[]], declares(16));
   const [b0] = ssa.irBlocks;
   const v = val();
   ssa.writeVar(stackSlotKey(12), 0, v);
@@ -70,7 +73,7 @@ test('a value written to two slots carries BOTH: the builder holds no target and
 test('a phi standing for a slot key carries that slot home', () => {
   // ^0 writes sp@4 and branches to ^1, which is its own successor: the header reads sp@4 through
   // a phi, and Braun's construction gives that phi the slot key as its `phiKey`.
-  const ssa = makeSsaBuilder('p', 2, [[], [0, 1]], owns(16));
+  const ssa = makeSsaBuilder('p', 2, [[], [0, 1]], declares(16));
   const [b0, b1] = ssa.irBlocks;
   ssa.writeVar(stackSlotKey(4), 0, val());
   b0.ops.push(mkOp('br', { successors: [{ block: b1, args: [] }] }));
@@ -109,8 +112,23 @@ test('Thumb: every value the asm spilled to [sp,#k] carries that k', () => {
 // THE STAMP ASKS THE FRAME PARTITION, NOT THE KEY SPELLING. `sp@k` is a local on one ABI and the
 // caller's storage on another, so a key alone is not evidence of a declaration rank — which is the
 // same thing `readRecursive` refuses to guess about a def-less read.
+test('`ownedLocals` alone buys no stamp: the two partitions are different claims', () => {
+  // `ownedLocals` says a def-less read here is an uninitialised local; `declaredLocals` says a
+  // spill here is a declaration rank. Under agbcc the first admits the outgoing stack-argument
+  // area and the second must not, so the stamp reads only the second and a model carrying the
+  // first alone stamps nothing.
+  const ssa = makeSsaBuilder('s', 1, [[]], () => ({ ownedLocals: { from: 0, to: 16 } }));
+  const [b0] = ssa.irBlocks;
+  const v = val();
+  ssa.writeVar(stackSlotKey(4), 0, v);
+  b0.ops.push(mkOp('ret', { operands: [v] }));
+  ssa.markFilled(0);
+  ssa.finish();
+  expect(ssa.fn.slotHomes!.has(v)).toBe(false);
+});
+
 test('a slot outside the declared local area is NOT stamped', () => {
-  const ssa = makeSsaBuilder('s', 1, [[]], owns(8));
+  const ssa = makeSsaBuilder('s', 1, [[]], declares(8));
   const [b0] = ssa.irBlocks;
   const inside = val();
   const outside = val();
@@ -323,7 +341,14 @@ test('a slot-keyed uninit local co-exists with a slotted local at the SAME offse
 });
 
 test('and no `undef` local reaches the ordering: the emitted tree carries none, slots intact', () => {
-  const fn = frontendFor(ARMV4T_AGBCC).lift('uninit_spill', read('agbcc-uninit-spill.s'), ARMV4T_AGBCC, {}, undefined, undefined);
+  const fn = frontendFor(ARMV4T_AGBCC).lift(
+    'uninit_spill',
+    read('agbcc-uninit-spill.s'),
+    ARMV4T_AGBCC,
+    {},
+    undefined,
+    undefined,
+  );
   raiseRecovered(fn, ARMV4T_AGBCC, {}, undefined);
   const sfn = structureChecked(fn, structureOptionsFor(ARMV4T_AGBCC, false));
   // structure() had eight; the spine's dead-store elimination leaves none, so the co-existence the

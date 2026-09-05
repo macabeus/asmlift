@@ -371,7 +371,7 @@ export const MIPS_IDO: TargetDescription = {
     //
     // FLIP CONDITION, and it has TWO parts because the second is easy to miss. (1) The first
     // ido7.1 row that lifts with two spilled locals. (2) `frontend/mips.ts` must first claim a
-    // frame partition (`LiveInModel.ownedLocals`); until it does, the shared stamp refuses every
+    // frame partition (`LiveInModel.declaredLocals`); until it does, the shared stamp refuses every
     // MIPS slot, so this value would order nothing — and if the partition were claimed WRONGLY,
     // O32's caller-owned home area `[0,16)` would be read as this function's first four
     // declaration ranks. Shipping a direction before the partition orders by argument index.
@@ -448,7 +448,7 @@ export const PPC_MWCC: TargetDescription = {
     // and at forty it sinks the whole computation past the call so nothing is live across it. An
     // earlier note here claimed `descending` "9 of 9"; that measurement is not reproducible from
     // this repo and its own next clause said the probe did not spill, so it is withdrawn. And, as at MIPS_IDO, the
-    // frame partition comes first: `frontend/ppc.ts` claims no `LiveInModel.ownedLocals`, so the
+    // frame partition comes first: `frontend/ppc.ts` claims no `LiveInModel.declaredLocals`, so the
     // shared stamp records no slot home on this target at all and a direction here would order
     // nothing until it does.
     spillSlotOrder: 'unknown',

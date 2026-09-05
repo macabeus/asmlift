@@ -63,13 +63,21 @@ export interface Fn {
  *
  *  A KEY IS NOT A FRAME COORDINATE, and the frontends differ on exactly that. `sp@40` is a local
  *  on one ABI and the caller's fifth argument on another, so the shared stamp asks the frontend's
- *  own `LiveInModel.ownedLocals` and refuses an offset outside it. Thumb declares `[0, localArea)`
- *  and already bounds its minting to that range, so every Thumb spill is stamped; MIPS and PPC
- *  declare NO partition, so nothing is stamped there — a MIPS `sw a0,0(sp)` is O32's caller-owned
- *  register-parameter home area, not this function's first declared local. An entry in this map
- *  therefore means "storage this function owns, homed at k", not "some sp-relative key".
+ *  own `LiveInModel.declaredLocals` and refuses an offset outside it. Thumb declares
+ *  `[0, localArea)`; MIPS and PPC declare NO partition, so nothing is stamped there — a MIPS
+ *  `sw a0,0(sp)` is O32's caller-owned register-parameter home area, not this function's first
+ *  declared local. An entry in this map therefore means "storage this function DECLARES, homed at
+ *  k", not "some sp-relative key".
  *
- *  It is read by ONE consumer — the structurer, which turns it into `SFn.locals[i].slot` — and
+ *  DECLARES, NOT OWNS, AND THE DIFFERENCE IS AN AGBCC FACT WITH A LIVE DEPENDENCY. `ownedLocals`
+ *  — the partition a def-less READ asks — admits agbcc's outgoing stack-argument area, which sits
+ *  at the bottom of `localArea`; an offset there is an ABI position, not an `expand_decl` rank.
+ *  Under Thumb the two ranges are written equal today, and what makes that safe is not a proof
+ *  but a decline: `prefixStored` (frontend/thumb.ts) removes every function with an outgoing area
+ *  from the population. Lifting that decline obliges narrowing `declaredLocals`; both sites say
+ *  so, and this map is the reason.
+ *
+ *  It is read by ONE consumer — the structurer, which turns it into `SFn.locals[i].slots` — and
  *  exists because a compiler that hands out frame slots by declaration rank makes the source's
  *  DECLARATION ORDER observable in the object. Absent entries are the norm: most values are never
  *  spilled, and a value with no entry simply has no frame coordinate to order by.

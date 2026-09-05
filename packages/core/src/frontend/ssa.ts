@@ -81,6 +81,37 @@ export interface LiveInModel {
    *  into the frame that escapes to anything which could write it stops that holding, and the
    *  retraction is the frontend's obligation (frontend/thumb.ts, after the frame-object audit). */
   ownedLocals?: { from: number; to: number };
+  /** Storage this function DECLARES as locals ⇒ a `[sp,#k]` spill here is a DECLARATION RANK
+   *  (`ir/core.ts` `SlotHomes`, ordered by `l3/slotorder.ts`). `[from, to)`.
+   *
+   *  WHY THIS IS NOT `ownedLocals`, and the distinction is the whole point of the field. Owning
+   *  storage and declaring it are different claims, and agbcc's frame contains storage it owns
+   *  and does not declare: `ACCUMULATE_OUTGOING_ARGS` puts the OUTGOING STACK-ARGUMENT area at
+   *  the BOTTOM of `localArea` (frontend/thumb.ts says so at its own decline), so `[0, localArea)`
+   *  admits argument slots. A def-less read of one is still an uninitialised local — `ownedLocals`
+   *  is right for that question — but its offset is an ABI position, not an `expand_decl` rank,
+   *  and ranking a declaration list by it would be wrong with no diagnostic.
+   *
+   *  TODAY THE TWO RANGES COINCIDE UNDER THUMB, AND THAT IS DELEGATED, NOT PROVED. What keeps
+   *  argument slots out of `SlotHomes` is `prefixStored` (frontend/thumb.ts): a function whose
+   *  frame has an outgoing area DECLINES before it reaches here, so every function that does
+   *  reach here has none. That guard's own comment says "Neither is sound alone and the pair is
+   *  not either", and lifting it is a named next step — so this field exists to make the
+   *  dependency TYPED and LOCAL rather than implicit and cross-module. Whoever lifts that decline
+   *  must narrow this range above the argument block; leaving it equal to `ownedLocals` would
+   *  start minting declaration ranks out of argument slots silently.
+   *
+   *  The class is populated, not hypothetical: over 2,001 lifted real agbcc functions (158 sa3 +
+   *  klonoa listings), 27 carry any L1 slot home, 12 of those also CALL, and 11 of those carry a
+   *  home at offset 0 — the exact offset `prefixStored` encodes as where an argument block starts
+   *  (`PackSaveSector` homes [0,4,…,72], `modf` [0,4,…,36], `RenderDialogSprites` [0,4,…,36], and
+   *  eight more). None reaches the ordering today, and the reason is an unrelated limitation
+   *  rather than a refusal — the structurer's naming walk INLINES spilled values instead of
+   *  declaring them (`l3/slotorder.ts`'s REACH note).
+   *
+   *  ABSENT ⇒ NO STAMP. MIPS and PPC declare no frame partition at all, so they stamp nothing,
+   *  which is the refusing direction. */
+  declaredLocals?: { from: number; to: number };
   /** Storage the CALLER wrote — incoming stack arguments ⇒ a def-less read is a parameter.
    *  `[from, to)`. O32's register-parameter home area belongs to NEITHER range: caller-owned, but
    *  not an argument. */
@@ -222,16 +253,20 @@ export function makeSsaBuilder(
       return; // an ordinary register: no frame coordinate exists
     }
     // THE KEY SPELLING CANNOT DECIDE THIS, exactly as `readRecursive` says forty lines below:
-    // `sp@40` is a local on one ABI and the caller's fifth argument on another. A declaration rank
-    // is a fact about storage THIS function owns, so the stamp asks the same partition the def-less
-    // read asks, and refuses where no answer exists. The two frontends differ here and the refusal
-    // is what makes that safe: Thumb declares `ownedLocals: [0, localArea)` and already bounds its
-    // minting to it, so this is a second, independent check that changes nothing; MIPS declares NO
+    // `sp@40` is a local on one ABI and the caller's fifth argument on another. So the stamp asks
+    // the frontend for a partition and refuses where no answer exists. The two frontends differ
+    // here and the refusal is what makes that safe: Thumb declares a range; MIPS declares NO
     // partition (frontend/mips.ts: `addiu sp,sp,±N` is transparent, so its slot keys span O32's
     // caller-owned register-parameter home area `[0,16)` and the incoming stack arguments above it),
     // and PPC declares none either — so both stamp nothing rather than reporting the caller's frame
     // as this function's declaration ranks.
-    if (!inRange(off, model().ownedLocals)) {
+    //
+    // AND IT ASKS `declaredLocals`, NOT `ownedLocals`, which is a different question with a
+    // different answer under agbcc — the outgoing stack-argument area is storage the function owns
+    // and does not declare. The two ranges are equal under Thumb today only because `prefixStored`
+    // declines every function with an outgoing area; see `declaredLocals`' own doc for the
+    // measurement and for what lifting that decline obliges.
+    if (!inRange(off, model().declaredLocals)) {
       return;
     }
     // ONE CLASS INSIDE THE PARTITION IS STILL NOT A DECLARATION RANK, and it is UNREFUSED — stated

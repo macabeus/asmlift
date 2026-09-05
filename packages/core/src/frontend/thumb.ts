@@ -1906,6 +1906,16 @@ export function lift(
   // local the compiler was entitled to put in place with no prologue at all.
   const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
     ownedLocals: { from: 0, to: localArea },
+    // THE SAME RANGE, AND NOT THE SAME CLAIM. `ownedLocals` answers "is a def-less read here an
+    // uninitialised local?"; `declaredLocals` answers "is a spill here a DECLARATION RANK?", which
+    // `ir/core.ts` `SlotHomes` and `l3/slotorder.ts` consume. Under agbcc's
+    // ACCUMULATE_OUTGOING_ARGS the outgoing stack-argument area sits at the BOTTOM of `localArea`
+    // (see the decline below), so this range would be WRONG for the second question on any
+    // function that has one — and it is written as the same range only because `prefixStored`
+    // declines every such function before it gets here. Lifting that decline obliges narrowing
+    // THIS range above the argument block; the two fields exist apart so that obligation is
+    // visible where it is created rather than inferred from a guard in another module.
+    declaredLocals: { from: 0, to: localArea },
     ...(target.nonArgRegs
       ? {
           uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
@@ -2377,6 +2387,16 @@ export function lift(
     // locals, so no local load can land on an argument offset. That disjointness is what a
     // tail-merged call site breaks, and agbcc DOES tail-merge: `Task_BonusFlower_Spawn` (sa3
     // bonus_game_enemies) stores argument 5 in both predecessors with the `bl` in the join.
+    //
+    // A SECOND THING NOW DEPENDS ON THIS DECLINE, and it is not in this file. `SlotHomes`
+    // (ir/core.ts) reads a `[sp,#k]` spill as a DECLARATION RANK and `l3/slotorder.ts` orders the
+    // declaration list by it. The partition that admits an offset is `LiveInModel.declaredLocals`,
+    // which this frontend sets to `[0, localArea)` — a range that CONTAINS the outgoing area. The
+    // only thing keeping an argument slot from becoming a declaration rank is that this decline
+    // removes such functions from the population first. So lifting or narrowing this guard is not
+    // a local change: it must come with a narrowed `declaredLocals`, or the ordering starts
+    // ranking argument positions with no diagnostic. The class is populated — of 2,001 lifted real
+    // agbcc functions, 12 carry an L1 slot home AND call, and 11 of those home offset 0.
     //
     // (b) is a forward may-analysis over the CFG, and it has been wrong twice in the other
     // direction. Scanning per block let a LABEL decide accept versus refuse; scanning the flat
