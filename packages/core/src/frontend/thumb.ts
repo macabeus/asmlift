@@ -3692,6 +3692,9 @@ export function lift(
             const object = mkOp('laddr', { results: [res], attrs: { off: u.op.attrs.off as number } });
             u.blk.ops.splice(u.blk.ops.indexOf(u.op), 0, object);
             minted.push(object);
+            // The ADDRESS operand only — the stored value (operand 1) is passed through
+            // untouched, so no slot home moves (ir/core.ts `SlotHomes`). This also runs inside
+            // `lift`, before any home outside this frame-object audit exists.
             u.op.operands = [res, ...u.op.operands.slice(1)];
             u.op.attrs = { ...u.op.attrs, off: 0 };
           }

@@ -340,6 +340,19 @@ export function defOpMap(fn: Fn): Map<Value, Op> {
 
 /** Replace every use of `oldV` with `newV` (operands + successor args). No in-place op mutation. */
 export function replaceAllUsesWith(fn: Fn, oldV: Value, newV: Value): void {
+  // The frame coordinate follows the value that inherits the uses. Without this the home stays on
+  // a value nothing reads any more while the local the structurer names — `newV` — carries none,
+  // and the declaration list loses its order for that local. The ONE merge policy lives here
+  // because this helper is the one every pass is bound to and it already receives the `fn`
+  // (`SlotHomes`: two slots for one value ⇒ the LOWER offset, the earlier declaration rank).
+  const homes = fn.slotHomes;
+  if (homes !== undefined) {
+    const from = homes.get(oldV);
+    if (from !== undefined) {
+      const to = homes.get(newV);
+      homes.set(newV, to === undefined || from < to ? from : to);
+    }
+  }
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       op.operands = op.operands.map((v) => (v === oldV ? newV : v));

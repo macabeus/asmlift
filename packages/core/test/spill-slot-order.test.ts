@@ -17,10 +17,11 @@ import { expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
 import { makeSsaBuilder, stackSlotKey } from '../src/frontend/ssa';
-import { mkOp, mkValue } from '../src/ir/core';
+import { type Block, type Fn, type Value, mkOp, mkValue, replaceAllUsesWith } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { T } from '../src/ir/types';
+import { raiseRecovered } from '../src/pipeline';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
 
 const val = () => mkValue(T.unk(32));
@@ -108,4 +109,73 @@ test('a function that spilled nothing carries an EMPTY record; parsed IR carries
   expect(ssa.fn.slotHomes).toBeDefined();
   expect(ssa.fn.slotHomes!.size).toBe(0);
   expect(parse(print(ssa.fn)).slotHomes).toBeUndefined();
+});
+
+// ── A2: propagation, with ONE merge policy ────────────────────────────────────────────────────
+
+/** A one-block fn holding two values, `a` used by the `ret`. */
+const twoValueFn = (): { fn: Fn; a: Value; b: Value } => {
+  const a = val();
+  const b = val();
+  const entry: Block = { params: [], ops: [mkOp('ret', { operands: [a] })] };
+  return { fn: { name: 'r', blocks: [entry], writeOrder: undefined, slotHomes: new Map() }, a, b };
+};
+
+test('replaceAllUsesWith carries the home onto the value that inherits the uses', () => {
+  const { fn, a, b } = twoValueFn();
+  fn.slotHomes!.set(a, 8);
+  replaceAllUsesWith(fn, a, b);
+  expect(fn.slotHomes!.get(b)).toBe(8);
+});
+
+test('…and when both carry one, the merge takes the LOWER — the same policy as the builder', () => {
+  const { fn, a, b } = twoValueFn();
+  fn.slotHomes!.set(a, 12);
+  fn.slotHomes!.set(b, 4);
+  replaceAllUsesWith(fn, a, b);
+  expect(fn.slotHomes!.get(b)).toBe(4);
+  const other = twoValueFn();
+  other.fn.slotHomes!.set(other.a, 4);
+  other.fn.slotHomes!.set(other.b, 12);
+  replaceAllUsesWith(other.fn, other.a, other.b);
+  expect(other.fn.slotHomes!.get(other.b)).toBe(4);
+});
+
+test('a replacement of an unhomed value invents no home', () => {
+  const { fn, a, b } = twoValueFn();
+  replaceAllUsesWith(fn, a, b);
+  expect(fn.slotHomes!.has(b)).toBe(false);
+});
+
+test('hand-built IR with no record survives replaceAllUsesWith untouched', () => {
+  const { fn, a, b } = twoValueFn();
+  fn.slotHomes = undefined;
+  expect(() => replaceAllUsesWith(fn, a, b)).not.toThrow();
+  expect(fn.slotHomes).toBeUndefined();
+});
+
+// THE SPINE. Every `[sp,#k]` the asm wrote must still be carried by a value the graph reaches
+// after the whole pre-recovery + type-recovery + return-sinking spine has run — `ir/simplify.ts`
+// trivial-phi removal (which a slot's loop-header param goes through), the idiom folder, `gvn`,
+// and `narrow`, the last pre-recovery pass and the one that rewrites an operand in place rather
+// than through `replaceAllUsesWith`.
+//
+// The fixture is agbcc -O2 on a function with a `u8` loop-carried local and four spilled `int`
+// locals: the `lsl/lsr` + `asr` triple in its loop is exactly `narrow`'s sext-over-zext domain, so
+// the pass fires here rather than being asserted about in the abstract.
+test('a slot home survives the whole raising spine, on a function with a u8 local', () => {
+  const fn = frontendFor(ARMV4T_AGBCC).lift('u8spill', read('agbcc-u8spill.s'), ARMV4T_AGBCC, {}, undefined, undefined);
+  expect(new Set(fn.slotHomes!.values())).toEqual(new Set([0, 4, 8, 12]));
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, undefined);
+  const reached = new Set<Value>();
+  for (const b of fn.blocks) {
+    b.params.forEach((p) => reached.add(p));
+    for (const op of b.ops) {
+      op.operands.forEach((v) => reached.add(v));
+      op.results.forEach((v) => reached.add(v));
+      op.successors.forEach((sc) => sc.args.forEach((v) => reached.add(v)));
+    }
+  }
+  const live = [...fn.slotHomes!].filter(([v]) => reached.has(v)).map(([, off]) => off);
+  expect(new Set(live)).toEqual(new Set([0, 4, 8, 12]));
 });

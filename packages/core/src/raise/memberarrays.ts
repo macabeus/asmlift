@@ -573,6 +573,9 @@ export function recognizeMemberArrays(
     }
     g.base.type = T.ptr(type);
     for (const a of g.accesses) {
+      // An ADDRESS operand, so no slot home can move with it (ir/core.ts `SlotHomes`): a home is
+      // stamped on the value a `str [sp,#k]` STORED, and the value being swapped in here is the
+      // access's base pointer, which the frame-slot model never routes through a slot key.
       a.op.operands[0] = g.base;
       a.op.attrs.memberOff = a.off;
       if (!a.isLoad) {
