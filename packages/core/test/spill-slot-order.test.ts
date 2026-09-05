@@ -24,9 +24,10 @@ import { type Block, type Fn, type Value, mkOp, mkValue, replaceAllUsesWith } fr
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { T } from '../src/ir/types';
-import type { SFn } from '../src/l3/ast';
+import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { ARM_DISJOINT_GATES, COALESCE_GATES, armDisjointUnder, coalesceUnder } from '../src/l3/coalesce';
 import { orderSlotLocals } from '../src/l3/slotorder';
-import { raiseRecovered } from '../src/pipeline';
+import { raiseRecovered, structureChecked } from '../src/pipeline';
 import { type StructureOptions, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
@@ -315,4 +316,99 @@ test('every backend orders: no `emit` may print an unordered declaration list', 
   for (const b of backends) {
     expect(declOrder(b.emit(sfn))).toEqual(['lo', 'mid', 'hi']);
   }
+});
+
+// ── A6: the guard — what depends on the order this does NOT change ────────────────────────────
+
+const asg = (n: string, v: number): Stmt => ({ k: 'assign', name: n, value: { k: 'const', value: v } });
+const use = (n: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'f', args: [{ k: 'var', name: n }] } });
+const armIf = (cond: Expr, thenS: Stmt[], elseS: Stmt[]): Stmt => ({ k: 'if', cond, then: thenS, else: elseS });
+const cnd: Expr = { k: 'bin', op: '!=', l: { k: 'var', name: 'a' }, r: { k: 'const', value: 0 } };
+const arm = (n: string): Stmt[] => [
+  asg(n, 0),
+  { k: 'dowhile', cond: { k: 'bin', op: '<', l: { k: 'var', name: n }, r: { k: 'const', value: 9 } }, body: [use(n)] },
+];
+/** `x` declared first but homed HIGH, `y` declared second and homed LOW: the two orders disagree. */
+const disagreeing = (): SFn => ({
+  name: 'f',
+  params: [],
+  locals: [
+    { name: 'x', type: T.int(32, true), slot: 8 },
+    { name: 'y', type: T.int(32, true), slot: 0 },
+  ],
+  retType: T.void(),
+  body: [armIf(cnd, arm('x'), arm('y'))],
+  slotOrder: 'ascending',
+});
+
+test('coalesce picks its survivor from the STRUCTURER order, not the emitted one', () => {
+  // `l3/coalesce.ts` chooses the arm-disjoint survivor by declIdx — the earlier declaration,
+  // matching how a shared source local reads. It runs BEFORE emit, so it reads the unsorted list
+  // and picks `x`. Sorting any earlier would silently make `y` the survivor of every such merge.
+  const out = armDisjointUnder(ARM_DISJOINT_GATES, disagreeing()).candidates;
+  expect(out.map((c) => c.merged)).toContain('y-x');
+  expect(orderSlotLocals(disagreeing()).locals.map((l) => l.name)).toEqual(['y', 'x']);
+});
+
+test('a merge carries the LOWER of the two slots onto the survivor', () => {
+  // A merged pair can reproduce at most one slot, and the lower is the earlier rank — the same
+  // policy the map and `replaceAllUsesWith` state.
+  const merged = armDisjointUnder(ARM_DISJOINT_GATES, disagreeing()).candidates.find((c) => c.merged === 'y-x')!.sfn;
+  expect(merged.locals.map((l) => [l.name, l.slot])).toEqual([['x', 0]]);
+});
+
+test('…on the span path too, where the survivor is the second name', () => {
+  const sfn: SFn = {
+    name: 'f',
+    params: [],
+    locals: [
+      { name: 'p', type: T.int(32, true), slot: 4 },
+      { name: 'q', type: T.int(32, true), slot: 12 },
+    ],
+    retType: T.void(),
+    body: [asg('p', 1), use('p'), asg('q', 2), use('q')],
+  };
+  const out = coalesceUnder(COALESCE_GATES, sfn).candidates;
+  const pq = out.find((c) => c.merged === 'p-q')!.sfn;
+  expect(pq.locals.map((l) => [l.name, l.slot])).toEqual([['q', 4]]);
+});
+
+test("a survivor with no slot of its own inherits the absorbed local's", () => {
+  const sfn: SFn = {
+    name: 'f',
+    params: [],
+    locals: [
+      { name: 'p', type: T.int(32, true), slot: 4 },
+      { name: 'q', type: T.int(32, true) },
+    ],
+    retType: T.void(),
+    body: [asg('p', 1), use('p'), asg('q', 2), use('q')],
+  };
+  const cands = coalesceUnder(COALESCE_GATES, sfn).candidates;
+  expect(cands.find((c) => c.merged === 'p-q')!.sfn.locals.map((l) => [l.name, l.slot])).toEqual([['q', 4]]);
+  // …and a merge of two unslotted locals invents nothing
+  const bare: SFn = { ...sfn, locals: sfn.locals.map((l) => ({ name: l.name, type: l.type })) };
+  expect(
+    coalesceUnder(COALESCE_GATES, bare).candidates.find((c) => c.merged === 'p-q')!.sfn.locals[0].slot,
+  ).toBeUndefined();
+});
+
+test('the relative order of slot-carrying locals survives the whole L3 spine', () => {
+  // `structureChecked` runs tail-merge -> DSE -> base-CSE over the structurer's tree before any
+  // backend sees it. The ordering is applied at emit, AFTER all of that, so what this pins is the
+  // other direction: nothing in the spine reorders the declaration list under it.
+  const fn = frontendFor(ARMV4T_AGBCC).lift(
+    'spillorder',
+    read('agbcc-spillorder.s'),
+    ARMV4T_AGBCC,
+    {},
+    undefined,
+    undefined,
+  );
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, undefined);
+  const opts = structureOptionsFor(ARMV4T_AGBCC, false);
+  const raw = structure(fn, opts).locals.map((l) => l.name);
+  const spined = structureChecked(fn, opts).locals.map((l) => l.name);
+  // the spine may DROP a local (dce) but never permutes what it keeps
+  expect(spined).toEqual(raw.filter((n) => spined.includes(n)));
 });

@@ -271,6 +271,27 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
  *  ill-defined rather than one being wrong — but this is a real difference and the differ, not any
  *  gate, is what keeps it from faking a match. The fuzz asserts it stays reachable, so the carve-out
  *  that excuses it cannot quietly become dead. */
+/** The survivor's declaration list after `gone` is absorbed into `kept`.
+ *
+ *  The merged local's declaration is dropped, so any attribute on it would be lost — and one of
+ *  them is load-bearing: `slot`, the `[sp,#k]` the machine homed it at (ir/core.ts `SlotHomes`).
+ *  A merged pair can reproduce at most ONE slot and the LOWER is the earlier declaration rank, so
+ *  the survivor takes the minimum of the two. That is the one merge policy, shared verbatim with
+ *  the SSA builder's stamp and with `replaceAllUsesWith`; it is a policy and not a proof, because
+ *  the machine homed two values and the source declared one local. Neither homed ⇒ no slot: the
+ *  merge invents nothing. */
+function localsAfterMerge(locals: SFn['locals'], gone: string, kept: string): SFn['locals'] {
+  const goneSlot = locals.find((l) => l.name === gone)?.slot;
+  return locals
+    .filter((l) => l.name !== gone)
+    .map((l) => {
+      if (l.name !== kept || goneSlot === undefined) {
+        return l;
+      }
+      return { ...l, slot: l.slot === undefined || goneSlot < l.slot ? goneSlot : l.slot };
+    });
+}
+
 export function coalesceCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
   const { candidates } = coalesceUnder(COALESCE_GATES, sfn);
   const seen = new Set(candidates.map((c) => c.merged));
@@ -454,7 +475,16 @@ export function armDisjointUnder(
           [...m.entries()].filter(([n, k]) => locals.has(n) && !params.has(n) && total.get(n) === k).map(([n]) => n);
         for (const a of confined(thenM)) {
           for (const b of confined(elseM)) {
-            // the survivor is the earlier declaration, matching how a shared source local reads
+            // the survivor is the earlier declaration, matching how a shared source local reads.
+            //
+            // THIS READS THE STRUCTURER'S ORDER, AND MUST. The declaration list is put into the
+            // target's frame order at EMIT time (l3/slotorder.ts), after this pass, so `declIdx`
+            // here is the naming walk's order and not the emitted one. That is what makes the
+            // choice mean "the earlier declaration in the source asmlift recovered". A tempting
+            // refactor that ordered the list any earlier would silently change which local
+            // survives every arm-disjoint merge, on every function with two slot-homed locals
+            // whose frame order disagrees with their declaration order — which is exactly the
+            // population the ordering exists for.
             const [gone, kept] = (declIdx.get(a) ?? 0) <= (declIdx.get(b) ?? 0) ? [b, a] : [a, b];
             const refused = firstRejection(gates, {
               a: gone,
@@ -471,7 +501,7 @@ export function armDisjointUnder(
             }
             out.push({
               merged: `${gone}-${kept}`,
-              sfn: { ...sfn, body: rename(sfn.body, gone, kept), locals: sfn.locals.filter((l) => l.name !== gone) },
+              sfn: { ...sfn, body: rename(sfn.body, gone, kept), locals: localsAfterMerge(sfn.locals, gone, kept) },
             });
           }
         }
@@ -532,7 +562,7 @@ export function coalesceUnder(
       // that is wrong but plausible.
       candidates.push({
         merged: `${a}-${b}`,
-        sfn: { ...sfn, body: rename(sfn.body, a, b), locals: sfn.locals.filter((l) => l.name !== a) },
+        sfn: { ...sfn, body: rename(sfn.body, a, b), locals: localsAfterMerge(sfn.locals, a, b) },
       });
     }
   }
