@@ -234,9 +234,15 @@ export function makeSsaBuilder(
     if (!inRange(off, model().ownedLocals)) {
       return;
     }
+    // UNION, not a choice (ir/core.ts `SlotHomes`): whether the earlier declaration rank is the
+    // lower or the higher offset is a per-COMPILER fact, and this builder is handed a name, a
+    // block count, a predecessor list and a live-in model — no target. `l3/slotorder.ts` reduces.
     const prev = slotHomes.get(v);
-    // the one merge policy (ir/core.ts `SlotHomes`): two slots for one value ⇒ the LOWER
-    slotHomes.set(v, prev === undefined || off < prev ? off : prev);
+    if (prev === undefined) {
+      slotHomes.set(v, new Set([off]));
+    } else {
+      prev.add(off);
+    }
   };
   const forgetOrder = (p: Value) => {
     for (const m of writeOrder.lastWrite.values()) {

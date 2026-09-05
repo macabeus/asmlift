@@ -219,6 +219,6 @@ export function structuredCloneFn(fn: Fn): Fn {
   // declaration order is not the one the ranked path emits.
   const sh = fn.slotHomes;
   const slotHomes: SlotHomes | undefined =
-    sh && new Map([...sh].filter(([v]) => map.has(v)).map(([v, off]) => [map.get(v)!, off]));
+    sh && new Map([...sh].filter(([v]) => map.has(v)).map(([v, offs]) => [map.get(v)!, new Set(offs)]));
   return { name: fn.name, blocks, writeOrder, slotHomes };
 }

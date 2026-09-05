@@ -4568,24 +4568,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const localNames = [...new Set([...varName.values(), ...[...varType.keys()].filter((n) => /^t\d+$/.test(n))])].filter(
     (n) => /^[vt]\d+$/.test(n) && !globalNames.has(n),
   );
-  // THE FRAME COORDINATE OF EACH DECLARED LOCAL (ir/core.ts `SlotHomes`, stamped by the SSA
+  // THE FRAME COORDINATES OF EACH DECLARED LOCAL (ir/core.ts `SlotHomes`, stamped by the SSA
   // builder). The naming walk is what makes it a per-DECLARATION fact: several spilled values can
   // land under one name, and the local the source declared is the name, not the value. Where a
-  // name covers several homes it takes the LOWEST — the ONE merge policy, stated at `SlotHomes`
-  // and shared with `replaceAllUsesWith` and `l3/coalesce.ts`.
+  // name covers several homes it takes the UNION and picks NOTHING — which offset is the earlier
+  // declaration rank depends on the frame's direction, and `l3/slotorder.ts` is the one place that
+  // holds it. Sorted, so the list is deterministic rather than insertion-ordered.
   //
-  // A NAME COVERING NO HOMED VALUE GETS NO ENTRY, so `slot` is absent rather than 0 on the locals
-  // the asm kept in registers. Values named `a<n>` (parameters) never reach here: `localNames` is
-  // the `v*`/`t*` set, and a parameter's storage is the caller's question.
-  const slotOfName = new Map<string, number>();
+  // A NAME COVERING NO HOMED VALUE GETS NO ENTRY, so `slots` is absent rather than `[]` on the
+  // locals the asm kept in registers. Values named `a<n>` (parameters) never reach here:
+  // `localNames` is the `v*`/`t*` set, and a parameter's storage is the caller's question.
+  const slotsOfName = new Map<string, Set<number>>();
   const isLocalName = new Set(localNames);
-  for (const [v, off] of fn.slotHomes ?? []) {
+  for (const [v, offs] of fn.slotHomes ?? []) {
     const n = varName.get(v);
     if (n === undefined || !isLocalName.has(n)) {
       continue;
     }
-    const prev = slotOfName.get(n);
-    slotOfName.set(n, prev === undefined || off < prev ? off : prev);
+    const prev = slotsOfName.get(n);
+    if (prev === undefined) {
+      slotsOfName.set(n, new Set(offs));
+    } else {
+      offs.forEach((off) => prev.add(off));
+    }
   }
   // The machine's static access counts for one frame object: every `load`/`store` rooted on an
   // `laddr` at the same offset. Counted over the L2 blocks, so it is the access set the asm had,
@@ -4638,7 +4643,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       ...localNames.map((n) => ({
         name: n,
         type: varType.get(n)!,
-        ...(slotOfName.has(n) ? { slot: slotOfName.get(n)! } : {}),
+        ...(slotsOfName.has(n) ? { slots: [...slotsOfName.get(n)!].sort((x, y) => x - y) } : {}),
       })),
       // frame-local objects (laddr): declared with EXACTLY the access type the machine used —
       // the frontend's frame-object audit proved all accesses agree, so this is a fact, not a guess

@@ -274,21 +274,20 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
 /** The survivor's declaration list after `gone` is absorbed into `kept`.
  *
  *  The merged local's declaration is dropped, so any attribute on it would be lost — and one of
- *  them is load-bearing: `slot`, the `[sp,#k]` the machine homed it at (ir/core.ts `SlotHomes`).
- *  A merged pair can reproduce at most ONE slot and the LOWER is the earlier declaration rank, so
- *  the survivor takes the minimum of the two. That is the one merge policy, shared verbatim with
- *  the SSA builder's stamp and with `replaceAllUsesWith`; it is a policy and not a proof, because
- *  the machine homed two values and the source declared one local. Neither homed ⇒ no slot: the
- *  merge invents nothing. */
+ *  them is load-bearing: `slots`, the `[sp,#k]`s the machine homed it at (ir/core.ts `SlotHomes`).
+ *  The survivor takes the UNION and chooses nothing: a merged pair can reproduce at most one slot,
+ *  but WHICH of the two is the earlier declaration rank depends on the frame's direction, and this
+ *  function is handed a locals list with no target in it. `l3/slotorder.ts` reduces, once, where
+ *  the direction is in hand. Neither homed ⇒ no slots: the merge invents nothing. */
 function localsAfterMerge(locals: SFn['locals'], gone: string, kept: string): SFn['locals'] {
-  const goneSlot = locals.find((l) => l.name === gone)?.slot;
+  const goneSlots = locals.find((l) => l.name === gone)?.slots;
   return locals
     .filter((l) => l.name !== gone)
     .map((l) => {
-      if (l.name !== kept || goneSlot === undefined) {
+      if (l.name !== kept || goneSlots === undefined) {
         return l;
       }
-      return { ...l, slot: l.slot === undefined || goneSlot < l.slot ? goneSlot : l.slot };
+      return { ...l, slots: [...new Set([...(l.slots ?? []), ...goneSlots])].sort((x, y) => x - y) };
     });
 }
 

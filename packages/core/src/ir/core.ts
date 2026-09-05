@@ -74,19 +74,29 @@ export interface Fn {
  *  DECLARATION ORDER observable in the object. Absent entries are the norm: most values are never
  *  spilled, and a value with no entry simply has no frame coordinate to order by.
  *
- *  MERGE POLICY, stated once and shared by every place that merges two homes (this map's own
- *  writes, `replaceAllUsesWith`, and `l3/coalesce.ts`'s survivor): a value that reaches two slots
- *  takes the LOWER offset, i.e. the earlier declaration rank. That is a POLICY and not a proof —
- *  the machine homed one value at two offsets and the source declared one local, so no reading of
- *  the asm recovers which rank the source had; the lower is chosen because a merged pair can
- *  reproduce at most one slot and the earlier rank is the one whose declaration the other spill
- *  would have followed.
+ *  A SET, AND NOTHING MERGES IT. Every place two homes meet — this map's own writes, a value that
+ *  inherits another's uses in `replaceAllUsesWith`, several values under one name in the
+ *  structurer's naming walk, two named locals absorbed into one by `l3/coalesce.ts` — takes the
+ *  UNION. None of those four sites picks an offset, because picking one is a question about the
+ *  TARGET and not one of them holds a target: the SSA builder takes `(name, blockCount, preds,
+ *  liveInOf)`, `replaceAllUsesWith` takes an `Fn`, and `localsAfterMerge` takes a locals list.
+ *
+ *  The reduction happens ONCE, in `l3/slotorder.ts`, which is the one place that holds
+ *  `SFn.slotOrder`. Earliest declaration rank is the LOWEST offset under an ascending frame and
+ *  the HIGHEST under a descending one, so the earlier "take the lower offset" policy was
+ *  ascending's answer written four times under a neutral name — right for agbcc, inverted for the
+ *  two descriptions whose measured direction is `descending`. Reducing where the direction is in
+ *  hand makes it one comparator instead of four copies of a sentence.
+ *
+ *  It is still a POLICY and not a proof: the machine homed one value at two offsets and the source
+ *  declared one local, so no reading of the asm recovers which rank the source had. What the union
+ *  buys is that the choice is made where it can be made correctly.
  *
  *  NO `ir/verify.ts` RULE, unlike `writeOrder`: that record is a per-FUNCTION measurement with a
  *  mixed state to reject (some blocks measured, others not). A slot home is per VALUE and
  *  legitimately absent on almost every value, so there is no mixed state for a verifier to catch
  *  and a rule would never fire. */
-export type SlotHomes = Map<Value, number>;
+export type SlotHomes = Map<Value, Set<number>>;
 
 /** The order in which each block WROTE the keys its successors' block-params stand for — a
  *  measurement the SSA builder makes and nothing downstream can recover, because the value graph
@@ -349,15 +359,19 @@ export function defOpMap(fn: Fn): Map<Value, Op> {
 export function replaceAllUsesWith(fn: Fn, oldV: Value, newV: Value): void {
   // The frame coordinate follows the value that inherits the uses. Without this the home stays on
   // a value nothing reads any more while the local the structurer names — `newV` — carries none,
-  // and the declaration list loses its order for that local. The ONE merge policy lives here
-  // because this helper is the one every pass is bound to and it already receives the `fn`
-  // (`SlotHomes`: two slots for one value ⇒ the LOWER offset, the earlier declaration rank).
+  // and the declaration list loses its order for that local. UNION, never a choice: this helper is
+  // handed an `Fn` and an `Fn` carries no target, so it cannot know whether the earlier rank is the
+  // lower or the higher offset (`SlotHomes`). `l3/slotorder.ts` decides that, once.
   const homes = fn.slotHomes;
   if (homes !== undefined) {
     const from = homes.get(oldV);
     if (from !== undefined) {
       const to = homes.get(newV);
-      homes.set(newV, to === undefined || from < to ? from : to);
+      if (to === undefined) {
+        homes.set(newV, new Set(from));
+      } else {
+        from.forEach((off) => to.add(off));
+      }
     }
   }
   for (const b of fn.blocks) {

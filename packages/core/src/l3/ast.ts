@@ -270,6 +270,13 @@ export interface SFn {
    *  set asmlift did not preserve is a source that contradicts itself. ABSENT where the counts
    *  would be a floor rather than the set: an address reaching anything but a direct load/store
    *  leaves accesses the count cannot see. */
+  /** ORDER MATTERS, and it means two different things at two different times. As the structurer
+   *  builds it and as every L3 pass sees it, this is the RECOVERED DECLARATION ORDER — the naming
+   *  walk's order — and passes reason about it as such: `l3/coalesce.ts` picks the arm-disjoint
+   *  survivor by position in THIS list, so the earlier declaration wins the way a shared source
+   *  local reads. The EMITTED order is this list re-sorted by `l3/slotorder.ts` inside `emit`,
+   *  which happens after every pass and returns a copy. A pass that sorted the list any earlier
+   *  would silently change which local survives every arm-disjoint merge. */
   locals: {
     name: string;
     type: IrType;
@@ -280,14 +287,16 @@ export interface SFn {
      *  MISSING assignment is the recovery. Marked because a local read and never assigned is
      *  otherwise a dropped statement (contracts.ts assertLocalsWritten). */
     uninit?: true;
-    /** the `[sp,#k]` the machine homed this local at, when the asm spilled it — the lowest one,
-     *  if the naming walk put several spilled values under this one name (ir/core.ts `SlotHomes`
-     *  states that merge policy once).
+    /** every `[sp,#k]` the machine homed this local at, when the asm spilled it — ascending, and
+     *  usually one. Several when the naming walk put several spilled values under this one name,
+     *  or a coalesce absorbed a second homed local into it; the list is the UNION and picks
+     *  nothing, because which offset is the earlier DECLARATION RANK depends on the frame's
+     *  direction and only `l3/slotorder.ts` holds it (ir/core.ts `SlotHomes`).
      *
      *  Present ONLY on a local recovered from word-spill VALUES. A `frame` local and a `uninit`
      *  one are deliberately left unstamped even where the offset is in hand — see the refusal at
      *  the structurer's build site for the measurement that decided it. */
-    slot?: number;
+    slots?: number[];
   }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
@@ -299,6 +308,12 @@ export interface SFn {
    *  unless raise/structs.ts recovered a struct. Sorted by name for deterministic output. */
   structs?: StructType[];
   /** Which way this compiler hands out frame slots against DECLARATION RANK, when it is known:
+   *
+   *  THE ONE COMPILER DATUM ON THE NEUTRAL TREE, and it is here rather than in a backend on
+   *  purpose: `LanguageBackend.emit(fn: SFn): string` is the only seam a backend has, and widening
+   *  it to `emit(fn, opts)` would hand the datum back to the seven `.emit(` CALL SITES this design
+   *  exists to keep it out of. So the tree is neutral in its NODES — every node still spells the
+   *  same thing in C, C++ and Pascal — and not in its emission policy, which this field is.
    *  `ascending` = the earlier-declared spilled local takes the LOWER `[sp,#k]`. Set by the
    *  structurer from `StructureOptions.spillSlotOrder`, itself a per-compiler default declared in
    *  `TargetDescription.compilerBehaviors`. ABSENT means the direction is unknown for this target

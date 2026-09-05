@@ -51,11 +51,11 @@ test('the SSA builder stamps a slot home on a slot write and on nothing else', (
   b0.ops.push(mkOp('ret', { operands: [ssa.readVar(stackSlotKey(8), 0)] }));
   ssa.markFilled(0);
   ssa.finish();
-  expect(ssa.fn.slotHomes!.get(spilled)).toBe(8);
+  expect([...ssa.fn.slotHomes!.get(spilled)!]).toEqual([8]);
   expect(ssa.fn.slotHomes!.has(plain)).toBe(false);
 });
 
-test('a value written to two slots takes the LOWER — the one merge policy, stated once', () => {
+test('a value written to two slots carries BOTH: the builder holds no target and chooses nothing', () => {
   const ssa = makeSsaBuilder('s', 1, [[]], owns(16));
   const [b0] = ssa.irBlocks;
   const v = val();
@@ -64,7 +64,7 @@ test('a value written to two slots takes the LOWER — the one merge policy, sta
   b0.ops.push(mkOp('ret', { operands: [v] }));
   ssa.markFilled(0);
   ssa.finish();
-  expect(ssa.fn.slotHomes!.get(v)).toBe(4);
+  expect([...ssa.fn.slotHomes!.get(v)!].sort((x, y) => x - y)).toEqual([4, 12]);
 });
 
 test('a phi standing for a slot key carries that slot home', () => {
@@ -91,7 +91,7 @@ test('a phi standing for a slot key carries that slot home', () => {
   ssa.markFilled(1);
   ssa.finish();
   expect(b1.params.length).toBe(1);
-  expect(ssa.fn.slotHomes!.get(b1.params[0])).toBe(4);
+  expect([...ssa.fn.slotHomes!.get(b1.params[0])!]).toEqual([4]);
 });
 
 test('Thumb: every value the asm spilled to [sp,#k] carries that k', () => {
@@ -103,7 +103,7 @@ test('Thumb: every value the asm spilled to [sp,#k] carries that k', () => {
     undefined,
     undefined,
   );
-  expect(new Set(fn.slotHomes!.values())).toEqual(new Set([0, 4]));
+  expect(new Set([...fn.slotHomes!.values()].flatMap((o) => [...o]))).toEqual(new Set([0, 4]));
 });
 
 // THE STAMP ASKS THE FRAME PARTITION, NOT THE KEY SPELLING. `sp@k` is a local on one ABI and the
@@ -119,7 +119,7 @@ test('a slot outside the declared local area is NOT stamped', () => {
   b0.ops.push(mkOp('ret', { operands: [inside, outside] }));
   ssa.markFilled(0);
   ssa.finish();
-  expect(ssa.fn.slotHomes!.get(inside)).toBe(4);
+  expect([...ssa.fn.slotHomes!.get(inside)!]).toEqual([4]);
   expect(ssa.fn.slotHomes!.has(outside)).toBe(false);
 });
 
@@ -147,7 +147,7 @@ test('a function that spilled nothing carries an EMPTY record; parsed IR carries
   expect(parse(print(ssa.fn)).slotHomes).toBeUndefined();
 });
 
-// ── A2: propagation, with ONE merge policy ────────────────────────────────────────────────────
+// ── A2: propagation, which UNIONS and never chooses ───────────────────────────────────────────
 
 /** A one-block fn holding two values, `a` used by the `ret`. */
 const twoValueFn = (): { fn: Fn; a: Value; b: Value } => {
@@ -159,22 +159,58 @@ const twoValueFn = (): { fn: Fn; a: Value; b: Value } => {
 
 test('replaceAllUsesWith carries the home onto the value that inherits the uses', () => {
   const { fn, a, b } = twoValueFn();
-  fn.slotHomes!.set(a, 8);
+  fn.slotHomes!.set(a, new Set([8]));
   replaceAllUsesWith(fn, a, b);
-  expect(fn.slotHomes!.get(b)).toBe(8);
+  expect([...fn.slotHomes!.get(b)!]).toEqual([8]);
 });
 
-test('…and when both carry one, the merge takes the LOWER — the same policy as the builder', () => {
+test('…and when both carry one, the merge UNIONS: this helper holds no target, so it chooses nothing', () => {
   const { fn, a, b } = twoValueFn();
-  fn.slotHomes!.set(a, 12);
-  fn.slotHomes!.set(b, 4);
+  fn.slotHomes!.set(a, new Set([12]));
+  fn.slotHomes!.set(b, new Set([4]));
   replaceAllUsesWith(fn, a, b);
-  expect(fn.slotHomes!.get(b)).toBe(4);
+  expect([...fn.slotHomes!.get(b)!].sort((x, y) => x - y)).toEqual([4, 12]);
+  // and the same either way round — a union has no order to get wrong
   const other = twoValueFn();
-  other.fn.slotHomes!.set(other.a, 4);
-  other.fn.slotHomes!.set(other.b, 12);
+  other.fn.slotHomes!.set(other.a, new Set([4]));
+  other.fn.slotHomes!.set(other.b, new Set([12]));
   replaceAllUsesWith(other.fn, other.a, other.b);
-  expect(other.fn.slotHomes!.get(other.b)).toBe(4);
+  expect([...other.fn.slotHomes!.get(other.b)!].sort((x, y) => x - y)).toEqual([4, 12]);
+});
+
+// THE REDUCTION IS DIRECTION-DEPENDENT, AND THAT IS WHY NO MERGE SITE MAKES IT. `min` is
+// ascending's answer, not a neutral one: under a descending frame the EARLIER declaration rank is
+// the HIGHER offset. A merge that had picked an end would have stamped the later rank on every
+// target whose measured direction is `descending` (ido7.1 and mwcc, per target.ts) and inverted
+// the emitted order for exactly the locals it touched.
+test('a merged local carries both homes, and each direction elects the earlier rank from them', () => {
+  const merged = (dir: 'ascending' | 'descending'): string[] =>
+    orderSlotLocals(
+      twoSlots({
+        locals: [
+          { name: 'hi', type: T.int(32, true), slots: [0, 8] },
+          { name: 'lo', type: T.int(32, true), slots: [4] },
+        ],
+        slotOrder: dir,
+      }),
+    ).locals.map((l) => l.name);
+  // ascending: the merged local's earliest rank is the LOWEST of its homes, 0, so it leads
+  expect(merged('ascending')).toEqual(['hi', 'lo']);
+  // descending: its earliest rank is the HIGHEST, 8, so it leads there too
+  expect(merged('descending')).toEqual(['hi', 'lo']);
+  // …and this is the counterfactual that makes the union load-bearing. A merge that had taken the
+  // `min` would have handed the survivor `[0]` and thrown the 8 away; under descending that ranks
+  // it BELOW the local at 4 and inverts the emitted order.
+  const minMerged = orderSlotLocals(
+    twoSlots({
+      locals: [
+        { name: 'hi', type: T.int(32, true), slots: [0] },
+        { name: 'lo', type: T.int(32, true), slots: [4] },
+      ],
+      slotOrder: 'descending',
+    }),
+  ).locals.map((l) => l.name);
+  expect(minMerged).toEqual(['lo', 'hi']);
 });
 
 test('a replacement of an unhomed value invents no home', () => {
@@ -201,7 +237,7 @@ test('hand-built IR with no record survives replaceAllUsesWith untouched', () =>
 // the pass fires here rather than being asserted about in the abstract.
 test('a slot home survives the whole raising spine, on a function with a u8 local', () => {
   const fn = frontendFor(ARMV4T_AGBCC).lift('u8spill', read('agbcc-u8spill.s'), ARMV4T_AGBCC, {}, undefined, undefined);
-  expect(new Set(fn.slotHomes!.values())).toEqual(new Set([0, 4, 8, 12]));
+  expect(new Set([...fn.slotHomes!.values()].flatMap((o) => [...o]))).toEqual(new Set([0, 4, 8, 12]));
   raiseRecovered(fn, ARMV4T_AGBCC, {}, undefined);
   const reached = new Set<Value>();
   for (const b of fn.blocks) {
@@ -212,7 +248,7 @@ test('a slot home survives the whole raising spine, on a function with a u8 loca
       op.successors.forEach((sc) => sc.args.forEach((v) => reached.add(v)));
     }
   }
-  const live = [...fn.slotHomes!].filter(([v]) => reached.has(v)).map(([, off]) => off);
+  const live = [...fn.slotHomes!].filter(([v]) => reached.has(v)).flatMap(([, offs]) => [...offs]);
   expect(new Set(live)).toEqual(new Set([0, 4, 8, 12]));
 });
 
@@ -224,17 +260,17 @@ const structured = (file: string, sym: string, opts: StructureOptions = {}) => {
   return structure(fn, { ...structureOptionsFor(ARMV4T_AGBCC, false), ...opts });
 };
 
-test('structure() stamps each local with the slot the naming walk found under it', () => {
+test('structure() stamps each local with the slots the naming walk found under it', () => {
   const sfn = structured('agbcc-spillorder.s', 'spillorder');
-  const slotted = sfn.locals.filter((l) => l.slot !== undefined).map((l) => [l.name, l.slot]);
-  // exactly the two spills the asm made, one local each
+  const slotted = sfn.locals.filter((l) => l.slots !== undefined);
+  // exactly the two spills the asm made, one local each and one offset each
   expect(slotted.length).toBe(2);
-  expect(new Set(slotted.map(([, off]) => off))).toEqual(new Set([0, 4]));
+  expect(new Set(slotted.flatMap((l) => l.slots!))).toEqual(new Set([0, 4]));
 });
 
-test('a local the asm never spilled carries no slot — absent, not zero', () => {
+test('a local the asm never spilled carries no slots — absent, not an empty list', () => {
   const sfn = structured('agbcc-spillorder.s', 'spillorder');
-  expect(sfn.locals.some((l) => l.slot === undefined)).toBe(true);
+  expect(sfn.locals.some((l) => l.slots === undefined)).toBe(true);
 });
 
 test('the direction rides StructureOptions onto the SFn, and `unknown` reaches it as absent', () => {
@@ -256,15 +292,15 @@ test('the direction rides StructureOptions onto the SFn, and `unknown` reaches i
 // or stamps the undef half — this fails instead of the refusal quietly losing its subject.
 test('a slot-keyed uninit local co-exists with a slotted local at the SAME offset, and takes no slot', () => {
   const sfn = structured('agbcc-uninit-spill.s', 'uninit_spill');
-  const slotted = sfn.locals.filter((l) => l.slot !== undefined);
-  expect(slotted.map((l) => `${l.name}@${l.slot}`)).toEqual(['v4@0', 'v5@4', 'v6@8']);
+  const slotted = sfn.locals.filter((l) => l.slots !== undefined);
+  expect(slotted.map((l) => `${l.name}@${l.slots!.join('/')}`)).toEqual(['v4@0', 'v5@4', 'v6@8']);
   const uninit = sfn.locals.filter((l) => l.uninit);
   // the refusal itself: no `undef` local is ever sortable
-  expect(uninit.every((l) => l.slot === undefined)).toBe(true);
+  expect(uninit.every((l) => l.slots === undefined)).toBe(true);
   // and it has a subject — the offsets the ordering sorts by are exactly the offsets an `undef`
   // local is keyed at on this row, so the two readings of one storage really do collide
   const uninitOffsets = uninit.map((l) => /^uninit_sp(\d+)$/.exec(l.name)).filter((m) => m !== null);
-  expect(new Set(uninitOffsets.map((m) => Number(m![1])))).toEqual(new Set(slotted.map((l) => l.slot!)));
+  expect(new Set(uninitOffsets.map((m) => Number(m![1])))).toEqual(new Set(slotted.flatMap((l) => l.slots!)));
 });
 
 // ── A4: the gate as data, and shipped only where a row can referee it ─────────────────────────
@@ -288,9 +324,9 @@ const twoSlots = (over: Partial<SFn> = {}): SFn => ({
   name: 'f',
   params: [],
   locals: [
-    { name: 'hi', type: T.int(32, true), slot: 4 },
+    { name: 'hi', type: T.int(32, true), slots: [4] },
     { name: 'mid', type: T.int(32, true) },
-    { name: 'lo', type: T.int(32, true), slot: 0 },
+    { name: 'lo', type: T.int(32, true), slots: [0] },
   ],
   retType: T.void(),
   body: [],
@@ -322,7 +358,7 @@ test('fewer than two sortable locals is the identity', () => {
   const one = twoSlots({
     locals: [
       { name: 'mid', type: T.int(32, true) },
-      { name: 'only', type: T.int(32, true), slot: 8 },
+      { name: 'only', type: T.int(32, true), slots: [8] },
     ],
   });
   expect(orderSlotLocals(one).locals.map((l) => l.name)).toEqual(['mid', 'only']);
@@ -343,9 +379,9 @@ test("the ordering is pure: the structurer's own list is left alone", () => {
 test('two locals sharing one slot keep their relative order', () => {
   const sfn = twoSlots({
     locals: [
-      { name: 'hi', type: T.int(32, true), slot: 4 },
-      { name: 'mid', type: T.int(32, true), slot: 4 },
-      { name: 'lo', type: T.int(32, true), slot: 0 },
+      { name: 'hi', type: T.int(32, true), slots: [4] },
+      { name: 'mid', type: T.int(32, true), slots: [4] },
+      { name: 'lo', type: T.int(32, true), slots: [0] },
     ],
   });
   expect(orderSlotLocals(sfn).locals.map((l) => l.name)).toEqual(['lo', 'hi', 'mid']);
@@ -383,8 +419,8 @@ const disagreeing = (): SFn => ({
   name: 'f',
   params: [],
   locals: [
-    { name: 'x', type: T.int(32, true), slot: 8 },
-    { name: 'y', type: T.int(32, true), slot: 0 },
+    { name: 'x', type: T.int(32, true), slots: [8] },
+    { name: 'y', type: T.int(32, true), slots: [0] },
   ],
   retType: T.void(),
   body: [armIf(cnd, arm('x'), arm('y'))],
@@ -400,11 +436,12 @@ test('coalesce picks its survivor from the STRUCTURER order, not the emitted one
   expect(orderSlotLocals(disagreeing()).locals.map((l) => l.name)).toEqual(['y', 'x']);
 });
 
-test('a merge carries the LOWER of the two slots onto the survivor', () => {
-  // A merged pair can reproduce at most one slot, and the lower is the earlier rank — the same
-  // policy the map and `replaceAllUsesWith` state.
+test('a merge carries BOTH slots onto the survivor — the union, not an end of it', () => {
+  // A merged pair can reproduce at most one slot, but WHICH one is the earlier rank depends on
+  // the frame's direction, and `localsAfterMerge` is handed a locals list with no target in it.
+  // So it unions, and `l3/slotorder.ts` elects.
   const merged = armDisjointUnder(ARM_DISJOINT_GATES, disagreeing()).candidates.find((c) => c.merged === 'y-x')!.sfn;
-  expect(merged.locals.map((l) => [l.name, l.slot])).toEqual([['x', 0]]);
+  expect(merged.locals.map((l) => [l.name, l.slots])).toEqual([['x', [0, 8]]]);
 });
 
 test('…on the span path too, where the survivor is the second name', () => {
@@ -412,15 +449,15 @@ test('…on the span path too, where the survivor is the second name', () => {
     name: 'f',
     params: [],
     locals: [
-      { name: 'p', type: T.int(32, true), slot: 4 },
-      { name: 'q', type: T.int(32, true), slot: 12 },
+      { name: 'p', type: T.int(32, true), slots: [4] },
+      { name: 'q', type: T.int(32, true), slots: [12] },
     ],
     retType: T.void(),
     body: [asg('p', 1), use('p'), asg('q', 2), use('q')],
   };
   const out = coalesceUnder(COALESCE_GATES, sfn).candidates;
   const pq = out.find((c) => c.merged === 'p-q')!.sfn;
-  expect(pq.locals.map((l) => [l.name, l.slot])).toEqual([['q', 4]]);
+  expect(pq.locals.map((l) => [l.name, l.slots])).toEqual([['q', [4, 12]]]);
 });
 
 test("a survivor with no slot of its own inherits the absorbed local's", () => {
@@ -428,18 +465,18 @@ test("a survivor with no slot of its own inherits the absorbed local's", () => {
     name: 'f',
     params: [],
     locals: [
-      { name: 'p', type: T.int(32, true), slot: 4 },
+      { name: 'p', type: T.int(32, true), slots: [4] },
       { name: 'q', type: T.int(32, true) },
     ],
     retType: T.void(),
     body: [asg('p', 1), use('p'), asg('q', 2), use('q')],
   };
   const cands = coalesceUnder(COALESCE_GATES, sfn).candidates;
-  expect(cands.find((c) => c.merged === 'p-q')!.sfn.locals.map((l) => [l.name, l.slot])).toEqual([['q', 4]]);
+  expect(cands.find((c) => c.merged === 'p-q')!.sfn.locals.map((l) => [l.name, l.slots])).toEqual([['q', [4]]]);
   // …and a merge of two unslotted locals invents nothing
   const bare: SFn = { ...sfn, locals: sfn.locals.map((l) => ({ name: l.name, type: l.type })) };
   expect(
-    coalesceUnder(COALESCE_GATES, bare).candidates.find((c) => c.merged === 'p-q')!.sfn.locals[0].slot,
+    coalesceUnder(COALESCE_GATES, bare).candidates.find((c) => c.merged === 'p-q')!.sfn.locals[0].slots,
   ).toBeUndefined();
 });
 

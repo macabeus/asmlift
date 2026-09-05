@@ -42,20 +42,43 @@ import type { SFn } from './ast';
  *   3. A local with NO `slot` keeps its position exactly. Only the positions the sortable locals
  *      already occupy are refilled, so an unslotted local never moves and no local is ever
  *      inserted or removed.
- *   4. `frame` and `uninit` locals are never sortable, because the structurer never stamps a
- *      `slot` on them — the refusal, and the measurement behind it, live at that stamp site.
+ *   4. `frame` and `uninit` locals are never sortable, because the structurer never stamps
+ *      `slots` on them — the refusal, and the measurement behind it, live at that stamp site.
  *   5. Parameters are never touched: their storage is the caller's question.
- *   6. Two locals homed at the SAME slot keep their relative order (the sort is stable). One slot
- *      under two declared names is a slot the compiler REUSED, which is not evidence about either
- *      one's rank, so the ordering declines to invent one.  */
+ *   6. Two locals whose RANK works out the same keep their relative order (the sort is stable).
+ *      One slot under two declared names is a slot the compiler REUSED, which is not evidence
+ *      about either one's rank, so the ordering declines to invent one.
+ *
+ *  AND THIS IS THE ONE PLACE A SET OF HOMES IS REDUCED TO A RANK. A local can carry several
+ *  offsets — several spilled values under one name, or a coalesce that absorbed a second homed
+ *  local — and every site that merged them took the union and chose nothing, because the choice
+ *  is direction-dependent and none of them holds a target (ir/core.ts `SlotHomes`). The earliest
+ *  declaration rank is the LOWEST offset under an ascending frame and the HIGHEST under a
+ *  descending one: one comparator, applied where `slotOrder` is in hand.
+ *
+ *  REACH, measured on this branch, so the next round starts at the blocker and not at the census.
+ *  The two synthetic inhabitants are `spillorder` (6 → MATCH) and `dma_fill_uninit` (12 → MATCH,
+ *  a row this capability did not author). On the REAL agbcc tier the reach is ZERO and the cause
+ *  is named: of 126 cases, four carry any L1 slot home, two carry a slot-carrying local at L3,
+ *  and NONE carries two, so the ordering changes no real benchmark function's source. Over a
+ *  wider corpus (2,463 real agbcc functions across 158 sa3 + klonoa listings) exactly one
+ *  function permutes, and its slots are four words of a single declared stack array rather than
+ *  two spilled scalars — see the stamp site's refusal list for that class. The blocker is not the
+ *  frame order and not the census: the structurer's naming walk INLINES spilled values instead of
+ *  declaring them (`PackSaveSector` spills to 18 distinct slots, 108 stamped values, and reaches
+ *  L3 with zero slot-carrying locals). Counting stores is therefore a bad proxy for reach.  */
 export function orderSlotLocals(fn: SFn): SFn {
   const dir = fn.slotOrder;
   if (dir === undefined) {
     return fn;
   }
+  // the earliest declaration rank among a local's homes: the lowest offset if the frame hands
+  // slots out ascending against rank, the highest if descending.
+  const rank = (l: SFn['locals'][number]): number =>
+    dir === 'ascending' ? Math.min(...l.slots!) : Math.max(...l.slots!);
   const at: number[] = [];
   fn.locals.forEach((l, i) => {
-    if (l.slot !== undefined) {
+    if (l.slots !== undefined && l.slots.length > 0) {
       at.push(i);
     }
   });
@@ -64,7 +87,7 @@ export function orderSlotLocals(fn: SFn): SFn {
   }
   const inFrameOrder = at
     .map((i) => fn.locals[i])
-    .sort((a, b) => (dir === 'ascending' ? a.slot! - b.slot! : b.slot! - a.slot!));
+    .sort((a, b) => (dir === 'ascending' ? rank(a) - rank(b) : rank(b) - rank(a)));
   const locals = [...fn.locals];
   at.forEach((i, k) => {
     locals[i] = inFrameOrder[k];
