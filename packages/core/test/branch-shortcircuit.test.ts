@@ -773,3 +773,109 @@ describe('the VALUE form carries the write-order record too', () => {
     expect(fn.writeOrder.writes.get(head)).toBe(7);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// De Morgan: negating a FUSED connective.
+//
+// The fold is iterative, so by the time it reaches an OUTER diamond the inner one has already been
+// collapsed and ^g's condition is a `logic_and`/`logic_or` rather than an icmp. When the
+// orientation needs that condition negated, an opcode swap is not the inverse — De Morgan is.
+// These pin both directions of the distribution and the refusals that keep it from becoming a
+// partial (and therefore wrong) negation.
+describe('negating a fused connective (De Morgan)', () => {
+  /** `out = <lhs> <op> <rhs>` — the shape an INNER fold leaves in ^g: a connective, not an icmp. */
+  const fused = (op: 'logic_and' | 'logic_or', out: Value, rhsNegatable = true): Op[] => {
+    const a = mkValue(T.unk(32));
+    const b = mkValue(T.unk(32));
+    return [
+      ...cmp(a, 'icmp_eq'),
+      ...(rhsNegatable
+        ? cmp(b, 'icmp_ne')
+        : [mkOp('and', { operands: [mkValue(T.unk(32)), mkValue(T.unk(32))], results: [b] })]),
+      mkOp(op, { operands: [a, b], results: [out] }),
+    ];
+  };
+  /** The op defining the surviving head terminator's condition. */
+  const headCond = (fn: Fn): Op => {
+    const c = fn.blocks[0].ops.at(-1)!.operands[0];
+    return fn.blocks[0].ops.find((o) => o.results.includes(c))!;
+  };
+  const defIn = (fn: Fn, v: Value): Op => fn.blocks[0].ops.find((o) => o.results.includes(v))!;
+
+  test('`c1 || !(x || y)` folds to `c1 || (!x && !y)`', () => {
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: false, // needs the negation
+      gBody: (out) => fused('logic_or', out),
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(fn.blocks).toHaveLength(3); // ^g is gone
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_or');
+    const inner = defIn(fn, outer.operands[1]);
+    expect(inner.opcode).toBe('logic_and'); // the DUAL connective
+    // …over the negated leaves: `icmp_eq` → `icmp_ne` and `icmp_ne` → `icmp_eq`.
+    expect(defIn(fn, inner.operands[0]).opcode).toBe('icmp_ne');
+    expect(defIn(fn, inner.operands[1]).opcode).toBe('icmp_eq');
+    verify(fn);
+  });
+
+  test('`c1 && !(x && y)` folds to `c1 && (!x || !y)`', () => {
+    const fn = chain({
+      gOnTaken: true,
+      sharedOnGTaken: true, // needs the negation
+      gBody: (out) => fused('logic_and', out),
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_and');
+    expect(defIn(fn, outer.operands[1]).opcode).toBe('logic_or');
+    verify(fn);
+  });
+
+  test('a connective needing NO negation still folds unchanged, operand reused not rebuilt', () => {
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true, // no negation needed
+      gBody: (out) => fused('logic_or', out),
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_or');
+    expect(defIn(fn, outer.operands[1]).opcode).toBe('logic_or'); // the ORIGINAL fused value
+    verify(fn);
+  });
+
+  test('REFUSED: one non-negatable leaf refuses the WHOLE negation — no partial De Morgan', () => {
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: false, // needs the negation
+      gBody: (out) => fused('logic_or', out, /* rhsNegatable */ false),
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('REFUSED: a cone deeper than the node budget', () => {
+    // A left chain of `n` connectives over `n+1` icmp leaves mints `2n+1` ops when negated.
+    const leftChain =
+      (n: number) =>
+      (out: Value): Op[] => {
+        const ops: Op[] = [];
+        let acc = mkValue(T.unk(32));
+        ops.push(...cmp(acc, 'icmp_eq'));
+        for (let i = 0; i < n; i++) {
+          const leaf = mkValue(T.unk(32));
+          ops.push(...cmp(leaf, 'icmp_ne'));
+          const next = i === n - 1 ? out : mkValue(T.unk(32));
+          ops.push(mkOp('logic_or', { operands: [acc, leaf], results: [next] }));
+          acc = next;
+        }
+        return ops;
+      };
+    const under = chain({ gOnTaken: false, sharedOnGTaken: false, gBody: leftChain(3) }); // 7 ops
+    expect(recognizeBranchShortCircuit(under)).toBe(true);
+    verify(under);
+    const over = chain({ gOnTaken: false, sharedOnGTaken: false, gBody: leftChain(8) }); // 17 ops
+    expect(recognizeBranchShortCircuit(over)).toBe(false);
+  });
+});
