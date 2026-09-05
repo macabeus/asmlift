@@ -9,7 +9,7 @@
 //
 // The fact travels L1 → L3 on containers that already exist: `Fn.slotHomes` (stamped by the
 // SHARED SSA builder, so both frontends supply the coordinate and one rule applies it),
-// `SFn.locals[i].slot` (the structurer's naming walk), and one pure ordering owned by
+// `SFn.locals[i].slots` (the structurer's naming walk), and one pure ordering owned by
 // `LanguageBackend.emit`. Each stage is pinned here.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -314,7 +314,7 @@ test('the direction rides StructureOptions onto the SFn, and `unknown` reaches i
 });
 
 // THE `uninit` REFUSAL, pinned on BOTH trees, because the two disagree and only one of them is
-// emitted. The structurer stamps no `slot` on an `undef` local, and the reason is undecidability:
+// emitted. The structurer stamps no `slots` on an `undef` local, and the reason is undecidability:
 // one frame slot then yields TWO declarations, the `undef` read of the storage and the value
 // stored into it, and the asm does not say which took the declaration rank.
 //
@@ -361,6 +361,23 @@ test('and no `undef` local reaches the ordering: the emitted tree carries none, 
     'v5@4',
     'v6@8',
   ]);
+});
+
+// THE `SFn.locals` DOC IS ONE BLOCK, and this is the guard that keeps it one. TypeScript attaches
+// only the LAST doc comment before a declaration, so inserting a second block in front of an
+// existing one silently orphans everything above it — which is how this branch briefly dropped the
+// `volatile`/`pointeeVolatile`/`frame`/`loads`/`stores` paragraph that five sites in the tree tell
+// a reader to consult. Read the file rather than the type: the defect is invisible to `tsc` and to
+// every behavioural test.
+test('`SFn.locals` carries ONE doc block, so nothing above it is orphaned', () => {
+  const src = readFileSync(join(import.meta.dirname, '..', 'src', 'l3', 'ast.ts'), 'utf8');
+  const field = src.indexOf('\n  locals: {');
+  expect(field).toBeGreaterThan(0);
+  // the block TypeScript would attach: the last `/**` before the declaration
+  const attached = src.slice(src.lastIndexOf('/**', field), field);
+  // both paragraphs must be inside it — the volatility/frame one and the ordering one
+  expect(attached).toContain('Recovered locals, declared at function top');
+  expect(attached).toContain('ORDER MATTERS');
 });
 
 // ── A4: the gate as data, and shipped only where a row can referee it ─────────────────────────

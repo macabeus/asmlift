@@ -269,14 +269,21 @@ export interface SFn {
    *  may drop a store or render one machine load as two reads, and `volatile` over an access
    *  set asmlift did not preserve is a source that contradicts itself. ABSENT where the counts
    *  would be a floor rather than the set: an address reaching anything but a direct load/store
-   *  leaves accesses the count cannot see. */
-  /** ORDER MATTERS, and it means two different things at two different times. As the structurer
+   *  leaves accesses the count cannot see.
+   *
+   *  ORDER MATTERS, and it means two different things at two different times. As the structurer
    *  builds it and as every L3 pass sees it, this is the RECOVERED DECLARATION ORDER — the naming
    *  walk's order — and passes reason about it as such: `l3/coalesce.ts` picks the arm-disjoint
    *  survivor by position in THIS list, so the earlier declaration wins the way a shared source
    *  local reads. The EMITTED order is this list re-sorted by `l3/slotorder.ts` inside `emit`,
    *  which happens after every pass and returns a copy. A pass that sorted the list any earlier
-   *  would silently change which local survives every arm-disjoint merge. */
+   *  would silently change which local survives every arm-disjoint merge.
+   *
+   *  ONE COMMENT, DELIBERATELY. Five sites tell a reader to consult "the SFn.locals doc"
+   *  (structure/structure.ts, l3/inlinebase.ts, l3/volatileval.ts, l3/reindex.ts, l3/unreduce.ts),
+   *  and TypeScript attaches only the LAST doc block before a declaration — so a second block
+   *  added in front of this one would silently orphan everything above and those five references
+   *  would point at half a paragraph. Append here; do not add a neighbour. */
   locals: {
     name: string;
     type: IrType;

@@ -4648,7 +4648,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // frame-local objects (laddr): declared with EXACTLY the access type the machine used —
       // the frontend's frame-object audit proved all accesses agree, so this is a fact, not a guess
       //
-      // NO `slot` IS STAMPED HERE, and the offset is in hand (`op.attrs.off`), so this is a
+      // NO `slots` IS STAMPED HERE, and the offset is in hand (`op.attrs.off`), so this is a
       // refusal and not an oversight. An RTL-time frame object is allocated at its declaration
       // and sits BELOW every spill slot, so its offset is not evidence of its rank among the
       // spilled locals — and the one row in the corpus that carries such an object next to real
@@ -4682,7 +4682,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ).values(),
       ],
       // uninitialised locals (undef): declared, never assigned, typed by whatever recovery settled
-      // on for the value. NO `slot` either, on the same footing as the frame objects above.
+      // on for the value. NO `slots` either, on the same footing as the frame objects above.
       //
       // THE REASON IS UNDECIDABILITY, not absence. One frame slot then yields TWO declarations:
       // the `undef` read of the storage and the value stored into it. They are one object in the

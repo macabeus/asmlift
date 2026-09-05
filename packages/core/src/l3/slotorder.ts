@@ -39,7 +39,7 @@ import type { SFn } from './ast';
  *   1. `fn.slotOrder` absent — the direction is unknown for this target (or the target ships
  *      `'unknown'`) — the ordering is the IDENTITY. There is no default direction.
  *   2. Fewer than two sortable locals: nothing to order.
- *   3. A local with NO `slot` keeps its position exactly. Only the positions the sortable locals
+ *   3. A local with NO `slots` keeps its position exactly. Only the positions the sortable locals
  *      already occupy are refilled, so an unslotted local never moves and no local is ever
  *      inserted or removed.
  *   4. `frame` and `uninit` locals are never sortable, because the structurer never stamps
