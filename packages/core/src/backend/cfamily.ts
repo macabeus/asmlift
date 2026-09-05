@@ -546,9 +546,9 @@ function structDecls(fn: SFn): string[] {
 
 /** Assemble a full C-family function from a caller-supplied signature line and the shared body. */
 export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook): string {
-  // The declaration list is put into the target's own frame order HERE — inside the shared
-  // C-family body, reached only from `cBackend.emit` and `cppBackend(...).emit`, so both C-family
-  // backends order and neither call site does. See l3/slotorder.ts for why `emit` owns it.
+  // The declaration list is put into the target's own frame order HERE — in the shared C-family
+  // assembler, reached only from `cBackend.emit` and `cppBackend(...).emit`, so both C-family
+  // backends order and no `.emit(` call site does (l3/slotorder.ts says why `emit` owns it).
   const fn = orderSlotLocals(fn0);
   const decls = structDecls(fn);
   const preamble = decls.length ? decls.join('\n') + '\n' : '';

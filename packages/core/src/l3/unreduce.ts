@@ -587,9 +587,10 @@ export function unreduceAccumulators(
         // silently. Refusing to delete keeps the duplicate, and keeps the refusal.
         //
         // MEASURED, so this is a stated zero and not an assumption: instrumented at the deletion
-        // below, no slot-carrying local is deleted on any of the four agbcc rows that spill
-        // (`spillorder`, `dma_fill_uninit`, `uninit_spill`, `spill10` — 0 firings each), so this
-        // clause costs no candidate today. It is here for the day it does.
+        // below, it fires on none of the three agbcc rows that spill AND lift — `spillorder`,
+        // `dma_fill_uninit`, `uninit_spill` — so the clause costs no candidate today. (`spill10`
+        // spills too but declines in the Thumb frontend, so it never reaches this pass and its
+        // zero says nothing.) It is here for the day one does.
         pinned:
           cand.volatile !== undefined ||
           cand.pointeeVolatile !== undefined ||

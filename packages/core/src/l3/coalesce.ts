@@ -478,12 +478,10 @@ export function armDisjointUnder(
             //
             // THIS READS THE STRUCTURER'S ORDER, AND MUST. The declaration list is put into the
             // target's frame order at EMIT time (l3/slotorder.ts), after this pass, so `declIdx`
-            // here is the naming walk's order and not the emitted one. That is what makes the
-            // choice mean "the earlier declaration in the source asmlift recovered". A tempting
-            // refactor that ordered the list any earlier would silently change which local
-            // survives every arm-disjoint merge, on every function with two slot-homed locals
-            // whose frame order disagrees with their declaration order — which is exactly the
-            // population the ordering exists for.
+            // is the naming walk's order and the choice means "the earlier declaration in the
+            // source asmlift recovered". Ordering the list any earlier would silently change which
+            // local survives every arm-disjoint merge on a function whose frame order disagrees
+            // with its declaration order — exactly the population the ordering exists for.
             const [gone, kept] = (declIdx.get(a) ?? 0) <= (declIdx.get(b) ?? 0) ? [b, a] : [a, b];
             const refused = firstRejection(gates, {
               a: gone,

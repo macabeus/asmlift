@@ -195,11 +195,12 @@ export interface TargetDescription {
     //
     // `'unknown'` and absent both REFUSE the ordering — there is deliberately no default
     // direction, because the wrong one reorders every declaration list on that target for no
-    // reason. That is why three of the four descriptions below ship `'unknown'` even though the
-    // direction has been measured for each of their compilers: no MIPS or PPC benchmark row lifts
-    // with two or more spilled user locals, so no row on those tiers can referee a value, and a
-    // value no row can falsify does not earn the level. Each carries its measurement and its flip
-    // condition at its own site.
+    // reason. That is why three of the four descriptions below ship `'unknown'`: no MIPS or PPC
+    // benchmark row lifts with two or more spilled user locals, so no row on those tiers can
+    // referee a value, and a value no row can falsify does not earn the level. Two of the three
+    // have a direction MEASURED against a committed probe and withheld for that reason; the third
+    // (mwcc) has no direction at all, because the probe does not spill there. Each says which it
+    // is, and its flip condition, at its own site.
     //
     // KEYED BY DESCRIPTION, WHILE THE FACT IS PER TOOLCHAIN — the first field in this bag with a
     // stated instance of that gap. `MIPS_GCC` serves BOTH `gcc2.7.2kmc` (Snowboard Kids 2's Kyoto
@@ -365,9 +366,10 @@ export const MIPS_IDO: TargetDescription = {
     // SHIPPED. The probe is COMMITTED — `packages/core/test/corpus/probe-declrank.c` and its
     // reversed-declaration twin, with this compiler's objects beside them — and a test reads the
     // correspondence off it: 16 of 16 spills, and rank → offset unchanged when the declaration
-    // list is reversed, which is what separates declaration rank from the order of the assignments. No ido7.1 benchmark row lifts with
-    // two or more spilled user locals — the only spilling shape in the corpus carries a call, and
-    // this frontend declines a call — so no row can tell a wrong value from a right one here.
+    // list is reversed, which is what separates declaration rank from the order of the
+    // assignments. No ido7.1 benchmark row lifts with two or more spilled user locals — the only
+    // spilling shape in the corpus carries a call, and this frontend declines a call — so no row
+    // can tell a wrong value from a right one here.
     //
     // FLIP CONDITION, and it has TWO parts because the second is easy to miss. (1) The first
     // ido7.1 row that lifts with two spilled locals. (2) `frontend/mips.ts` must first claim a
@@ -442,15 +444,13 @@ export const PPC_MWCC: TargetDescription = {
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
-    // NOT MEASURED, and `'unknown'` is therefore the only honest value rather than a withheld one.
-    // No mwcc row lifts with two or more spilled user locals, and the compiler does not spill the
-    // committed declaration-rank probe either: at sixteen locals it homes every one in a register,
-    // and at forty it sinks the whole computation past the call so nothing is live across it. An
-    // earlier note here claimed `descending` "9 of 9"; that measurement is not reproducible from
-    // this repo and its own next clause said the probe did not spill, so it is withdrawn. And, as at MIPS_IDO, the
-    // frame partition comes first: `frontend/ppc.ts` claims no `LiveInModel.declaredLocals`, so the
-    // shared stamp records no slot home on this target at all and a direction here would order
-    // nothing until it does.
+    // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
+    // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
+    // locals, and the compiler does not spill the committed declaration-rank probe either: at
+    // sixteen locals it homes every one in a register, and at forty it sinks the whole computation
+    // past the call so nothing is live across it. And, as at MIPS_IDO, the frame partition comes
+    // first: `frontend/ppc.ts` claims no `LiveInModel.declaredLocals`, so the shared stamp records
+    // no slot home on this target at all and a direction here would order nothing until it does.
     spillSlotOrder: 'unknown',
   },
 };

@@ -101,13 +101,12 @@ export interface LiveInModel {
    *  must narrow this range above the argument block; leaving it equal to `ownedLocals` would
    *  start minting declaration ranks out of argument slots silently.
    *
-   *  The class is populated, not hypothetical: over 2,001 lifted real agbcc functions (158 sa3 +
-   *  klonoa listings), 27 carry any L1 slot home, 12 of those also CALL, and 11 of those carry a
-   *  home at offset 0 — the exact offset `prefixStored` encodes as where an argument block starts
-   *  (`PackSaveSector` homes [0,4,…,72], `modf` [0,4,…,36], `RenderDialogSprites` [0,4,…,36], and
-   *  eight more). None reaches the ordering today, and the reason is an unrelated limitation
-   *  rather than a refusal — the structurer's naming walk INLINES spilled values instead of
-   *  declaring them (`l3/slotorder.ts`'s REACH note).
+   *  The class is populated, not hypothetical. Over a sweep of every sa3 and klonoa listing, of
+   *  2,001 lifted real agbcc functions 27 carry any L1 slot home, 12 of those also CALL, and 11 of
+   *  those carry a home at offset 0 — the exact offset `prefixStored` encodes as where an argument
+   *  block starts (`PackSaveSector` homes [0,4,…,72], `modf` [0,4,…,36], `RenderDialogSprites`
+   *  [0,4,…,36], and eight more). None reaches the ordering today, for an unrelated reason
+   *  (`l3/slotorder.ts`'s REACH note), so nothing downstream is guarding this.
    *
    *  ABSENT ⇒ NO STAMP. MIPS and PPC declare no frame partition at all, so they stamp nothing,
    *  which is the refusing direction. */
@@ -252,14 +251,14 @@ export function makeSsaBuilder(
     if (off === null) {
       return; // an ordinary register: no frame coordinate exists
     }
-    // THE KEY SPELLING CANNOT DECIDE THIS, exactly as `readRecursive` says forty lines below:
-    // `sp@40` is a local on one ABI and the caller's fifth argument on another. So the stamp asks
-    // the frontend for a partition and refuses where no answer exists. The two frontends differ
-    // here and the refusal is what makes that safe: Thumb declares a range; MIPS declares NO
+    // THE KEY SPELLING CANNOT DECIDE THIS, exactly as `readRecursive` says below of a def-less
+    // read: `sp@40` is a local on one ABI and the caller's fifth argument on another. So the stamp
+    // asks the frontend for a partition and refuses where no answer exists. The two frontends
+    // differ here and the refusal is what makes that safe: Thumb declares a range; MIPS declares NO
     // partition (frontend/mips.ts: `addiu sp,sp,±N` is transparent, so its slot keys span O32's
-    // caller-owned register-parameter home area `[0,16)` and the incoming stack arguments above it),
-    // and PPC declares none either — so both stamp nothing rather than reporting the caller's frame
-    // as this function's declaration ranks.
+    // caller-owned register-parameter home area `[0,16)` and the incoming stack arguments above
+    // it), and PPC declares none either — so both stamp nothing rather than reporting the caller's
+    // frame as this function's declaration ranks.
     //
     // AND IT ASKS `declaredLocals`, NOT `ownedLocals`, which is a different question with a
     // different answer under agbcc — the outgoing stack-argument area is storage the function owns
@@ -269,30 +268,32 @@ export function makeSsaBuilder(
     if (!inRange(off, model().declaredLocals)) {
       return;
     }
-    // ONE CLASS INSIDE THE PARTITION IS STILL NOT A DECLARATION RANK, and it is UNREFUSED — stated
-    // here because it is the only class the ordering reaches in the wild. A stack AGGREGATE the
-    // frontend decomposed into per-word keys yields several `sp@k`s that are fields of ONE declared
-    // object, not several declared scalars. Measured over 2,463 real agbcc functions (158 sa3 +
-    // klonoa listings): exactly one carries two slot-carrying locals and permutes under the
-    // ordering — sa3 `sub_80617E0`, whose [sp,#0]..[sp,#0xc] are the four words of `Vec2_32
-    // sp00[2]` (its own preprocessed source declares it), with the only genuine reload spill at
-    // [sp,#0x10]. So the wild reach of this ordering is one function, and that function is the
-    // wrong class — the honest generality sentence is "1 of 2,463 real agbcc functions changes,
-    // and it is an aggregate", not "no real agbcc function changes", which is true only of the
-    // 126 benchmark rows.
+    // ONE CLASS INSIDE THE PARTITION IS STILL NOT A DECLARATION RANK, and NOTHING HERE REFUSES IT.
+    // A stack AGGREGATE the frontend decomposed into per-word keys yields several `sp@k`s that are
+    // fields of ONE declared object, not several declared scalars — and it reaches the stamp
+    // because a non-address-taken array never mints an `laddr`, which is the only aggregate the
+    // structurer's `frame` refusal catches. It is the only class the ordering meets in the wild:
+    // over 2,463 real agbcc functions (158 sa3 + klonoa listings) exactly one carries two
+    // slot-carrying locals, sa3 `sub_80617E0`, whose [sp,#0]..[sp,#0xc] are the four words of
+    // `Vec2_32 sp00[2]` (its own preprocessed source declares it), with the only genuine reload
+    // spill at [sp,#0x10].
     //
-    // It is unrefused because a non-address-taken array never mints an `laddr`, and `laddr` is the
-    // only aggregate the structurer's `frame` refusal catches. FLIP CONDITION: once stack-array
-    // recovery declares `sp00[2]`, ordering an aggregate against a reload spill by the minimum of
-    // its element offsets is WRONG — `assign_stack_local` runs before reload and puts every array
-    // below every spill slot regardless of declaration rank. The licence this capability rests on
-    // (reload hands a spilled pseudo its slot by `expand_decl` rank) is about separately declared
-    // SCALARS; intra-aggregate offsets are fixed by the aggregate's layout at expand time.
+    // That one is declined downstream — its words land under two names at offset 12, and
+    // `l3/slotorder.ts`'s injectivity refusal reads a duplicate as evidence reload did not produce
+    // — but the class is NOT covered by that refusal: an aggregate whose words reach L3 under
+    // distinct names at distinct offsets is injective and would be ordered. FLIP CONDITION: once
+    // stack-array recovery declares `sp00[2]`, ordering an aggregate against a reload spill by the
+    // minimum of its element offsets is WRONG — `assign_stack_local` runs before reload and puts
+    // every array below every spill slot regardless of declaration rank. The licence this
+    // capability rests on (reload hands a spilled pseudo its slot by `expand_decl` rank) is about
+    // separately declared SCALARS; intra-aggregate offsets are fixed by the aggregate's layout at
+    // expand time.
+    //
     // UNION, not a choice (ir/core.ts `SlotHomes`): whether the earlier declaration rank is the
     // lower or the higher offset is a per-COMPILER fact, and this builder is handed a name, a
     // block count, a predecessor list and a live-in model — no target. `l3/slotorder.ts` reduces.
     // A GUARD WITH NO CORPUS INHABITANT: over both benchmark tiers no value is ever written to two
-    // DIFFERENT slots, so this branch has never produced a set of size two on a real input.
+    // DIFFERENT slots, so the `else` below has never produced a set of size two on a real input.
     const prev = slotHomes.get(v);
     if (prev === undefined) {
       slotHomes.set(v, new Set([off]));

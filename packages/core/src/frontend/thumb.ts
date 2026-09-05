@@ -3713,8 +3713,9 @@ export function lift(
             u.blk.ops.splice(u.blk.ops.indexOf(u.op), 0, object);
             minted.push(object);
             // The ADDRESS operand only — the stored value (operand 1) is passed through
-            // untouched, so no slot home moves (ir/core.ts `SlotHomes`). This also runs inside
-            // `lift`, before any home outside this frame-object audit exists.
+            // untouched, so no slot home moves (ir/core.ts `SlotHomes`). These accesses go through
+            // a COPY of `sp` rather than the `[sp,#k]` keys the stamp reads, so none of them
+            // carried one to begin with.
             u.op.operands = [res, ...u.op.operands.slice(1)];
             u.op.attrs = { ...u.op.attrs, off: 0 };
           }

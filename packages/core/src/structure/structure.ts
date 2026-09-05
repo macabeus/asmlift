@@ -1036,10 +1036,10 @@ export interface StructureOptions {
   //
   // TWO STATES, NOT THREE. `TargetDescription` spells a third, `'unknown'`, and it earns its place
   // there: it separates a direction that was measured and deliberately not shipped from one nobody
-  // ever asked about, which is a fact about the target worth writing down. Nobody reads a STRUCTURER option to learn what was
-  // measured, so carrying it here would be a second way to spell "no" on a public option type. The
-  // translation happens once, in `structureOptionsFor` (target.ts), which is where the
-  // target-to-structurer mapping lives.
+  // ever asked about, which is a fact about the target worth writing down. Nobody reads a
+  // STRUCTURER option to learn what was measured, so carrying it here would be a second way to
+  // spell "no" on a public option type. The translation happens once, in `structureOptionsFor`
+  // (target.ts), which is where the target-to-structurer mapping lives.
   spillSlotOrder?: 'ascending' | 'descending';
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
@@ -4693,34 +4693,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       //
       // THE REASON IS UNDECIDABILITY, not absence. One frame slot then yields TWO declarations:
       // the `undef` read of the storage and the value stored into it. They are one object in the
-      // source, and the asm does not say which of the two declarations took the rank — so ranking
-      // one of the pair while leaving the other pinned would invent an answer. Refusing the undef
-      // half keeps the stored half's rank, which is the one the spill evidence is about.
+      // source, and the asm does not say which of the two took the rank — so ranking one of the
+      // pair while leaving the other pinned would invent an answer. Refusing the undef half keeps
+      // the stored half's rank, which is the one the spill evidence is about.
       //
-      // AND IT IS PRECAUTIONARY: ZERO ROWS REACH IT, measured on the tree that matters. This
-      // function returns the tree `structure()` returns, and there the co-existence is real —
-      // `uninit_spill` declares `uninit_sp0/sp4/sp8` beside the slotted `v4@0 v5@4 v6@8`, and
-      // `dma_fill_uninit` declares `uninit_sp4/sp8/sp12` beside `v4@4 v6@8 v8@12`. But NOTHING
-      // EMITS THIS TREE. `l3/slotorder.ts` runs inside `emit`, strictly downstream of
-      // `structureChecked` (pipeline.ts) on all four emit paths — `decompile`, `decompileTraced`,
-      // the ranked candidates and the score probe — and `structure()` has exactly one caller,
-      // `structureChecked` itself. On the tree THAT returns, both rows carry no `uninit` local at
-      // all: `eliminateDeadStores` (l3/dce.ts, whose last line keeps only locals the body still
+      // AND IT IS PRECAUTIONARY: NO ROW REACHES IT. The co-existence is real in the tree this
+      // function returns — `uninit_spill` declares `uninit_sp0/sp4/sp8` beside the slotted `v4@0
+      // v5@4 v6@8`, `dma_fill_uninit` declares `uninit_sp4/sp8/sp12` beside `v4@4 v6@8 v8@12` —
+      // but that tree is never emitted: `structure()` has exactly one caller, `structureChecked`
+      // (pipeline.ts), and `l3/slotorder.ts` runs inside `emit`, downstream of it on every emit
+      // path. On the tree `structureChecked` returns neither row has an `uninit` local left —
+      // `eliminateDeadStores` (l3/dce.ts, whose last line keeps only locals the body still
       // references) removes all eight on `uninit_spill` and all seven on `dma_fill_uninit`,
       // leaving the slot-carrying locals untouched. Instrumented one spine stage at a time, not
-      // inferred: raw 8 → mergeCommonTails 8 → eliminateDeadStores 0. So there is no shipped path
-      // on which a slot-keyed `undef` local and a slotted local at the same offset are both
-      // present when the ordering runs, and the refusal is the safe side of a question no row
-      // asks yet. It stays here rather than at the ordering because THIS is where the stamp is
-      // decided, and an `undef` local that survives DCE — address-taken, `volatile`, or genuinely
-      // read — would carry the stamp into `emit` unrefused.
+      // inferred: raw 8 → mergeCommonTails 8 → eliminateDeadStores 0.
       //
-      // FLIP CONDITION, and it is not "the first uninit local" — four rows already have them in
-      // `structure()`'s tree and none in `structureChecked`'s. It is the first row where a
-      // slot-keyed `undef` local SURVIVES dead-store elimination beside a slotted local at the
-      // same offset, and compile shows the two to be two source declarations rather than one.
-      // `spill-slot-order.test.ts` pins both halves — the class in `structure()`'s tree and the
-      // zero reach in `structureChecked`'s — so a change to either fails there.
+      // The refusal stays HERE rather than at the ordering because this is where the stamp is
+      // decided, and an `undef` local that survived DCE — address-taken, `volatile`, or genuinely
+      // read — would otherwise carry it into `emit`. FLIP CONDITION, and it is not "the first
+      // uninit local", since four rows already have them in `structure()`'s tree and none in
+      // `structureChecked`'s: it is the first row where a slot-keyed `undef` local SURVIVES
+      // dead-store elimination beside a slotted local at the same offset, and compile shows the
+      // two to be two source declarations rather than one. `spill-slot-order.test.ts` pins both
+      // halves, so a change to either fails there.
       ...fn.blocks
         .flatMap((b) => b.ops)
         .filter((op) => op.opcode === 'undef')

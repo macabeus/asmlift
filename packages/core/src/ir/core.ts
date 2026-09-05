@@ -63,24 +63,21 @@ export interface Fn {
  *
  *  A KEY IS NOT A FRAME COORDINATE, and the frontends differ on exactly that. `sp@40` is a local
  *  on one ABI and the caller's fifth argument on another, so the shared stamp asks the frontend's
- *  own `LiveInModel.declaredLocals` and refuses an offset outside it. Thumb declares
- *  `[0, localArea)`; MIPS and PPC declare NO partition, so nothing is stamped there — a MIPS
- *  `sw a0,0(sp)` is O32's caller-owned register-parameter home area, not this function's first
- *  declared local. An entry in this map therefore means "storage this function DECLARES, homed at
- *  k", not "some sp-relative key".
+ *  own `LiveInModel.declaredLocals` and refuses an offset outside it — Thumb declares a range,
+ *  MIPS and PPC declare no partition and so stamp nothing. An entry here therefore means "storage
+ *  this function DECLARES, homed at k", not "some sp-relative key".
  *
- *  DECLARES, NOT OWNS, AND THE DIFFERENCE IS AN AGBCC FACT WITH A LIVE DEPENDENCY. `ownedLocals`
- *  — the partition a def-less READ asks — admits agbcc's outgoing stack-argument area, which sits
- *  at the bottom of `localArea`; an offset there is an ABI position, not an `expand_decl` rank.
- *  Under Thumb the two ranges are written equal today, and what makes that safe is not a proof
- *  but a decline: `prefixStored` (frontend/thumb.ts) removes every function with an outgoing area
- *  from the population. Lifting that decline obliges narrowing `declaredLocals`; both sites say
- *  so, and this map is the reason.
+ *  DECLARES, NOT OWNS, AND THE DIFFERENCE IS AN AGBCC FACT WITH A LIVE DEPENDENCY: `ownedLocals`,
+ *  the partition a def-less READ asks, admits agbcc's outgoing stack-argument area, and an offset
+ *  there is an ABI position rather than an `expand_decl` rank. Under Thumb the two ranges are
+ *  written equal, and a decline rather than a proof is what makes that safe — see `declaredLocals`
+ *  (frontend/ssa.ts) for the dependency and what lifting it obliges.
  *
- *  It is read by ONE consumer — the structurer, which turns it into `SFn.locals[i].slots` — and
- *  exists because a compiler that hands out frame slots by declaration rank makes the source's
- *  DECLARATION ORDER observable in the object. Absent entries are the norm: most values are never
- *  spilled, and a value with no entry simply has no frame coordinate to order by.
+ *  ONE consumer reads it for its content — the structurer, which turns it into
+ *  `SFn.locals[i].slots`; everything else only carries it (`replaceAllUsesWith`, the report's
+ *  clone). It exists because a compiler that hands out frame slots by declaration rank makes the
+ *  source's DECLARATION ORDER observable in the object. Absent entries are the norm: most values
+ *  are never spilled, and a value with no entry simply has no frame coordinate to order by.
  *
  *  A SET, AND NOTHING MERGES IT. Every place two homes meet — this map's own writes, a value that
  *  inherits another's uses in `replaceAllUsesWith`, several values under one name in the
@@ -91,10 +88,10 @@ export interface Fn {
  *
  *  The reduction happens ONCE, in `l3/slotorder.ts`, which is the one place that holds
  *  `SFn.slotOrder`. Earliest declaration rank is the LOWEST offset under an ascending frame and
- *  the HIGHEST under a descending one, so the earlier "take the lower offset" policy was
- *  ascending's answer written four times under a neutral name — right for agbcc, inverted for the
- *  two descriptions whose measured direction is `descending`. Reducing where the direction is in
- *  hand makes it one comparator instead of four copies of a sentence.
+ *  the HIGHEST under a descending one, so a merge site that took an END of the set would be
+ *  spelling one direction's answer under a neutral name: right for agbcc, inverted for a target
+ *  whose measured direction is `descending` (ido7.1). Reducing where the direction is in hand
+ *  makes it one comparator rather than four copies of a sentence.
  *
  *  It is still a POLICY and not a proof: the machine homed one value at two offsets and the source
  *  declared one local, so no reading of the asm recovers which rank the source had. What the union

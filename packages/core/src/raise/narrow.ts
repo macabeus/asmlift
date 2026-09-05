@@ -115,12 +115,12 @@ export function rerootNarrowReads(fn: Fn): number {
       // discipline (pattern/engine.ts), because the result `Value` identity has to survive: every
       // existing use of the sign extension must keep reading it.
       //
-      // SLOT HOMES (ir/core.ts `SlotHomes`) do not move here, and this is the one of the three
-      // direct operand writers where that had to be checked rather than assumed. This substitutes
-      // a new READ operand, it does not retire a value: the extension's source keeps its use in
-      // the `zext` that `zx` is the result of, so a home stamped on it is still carried by a value
-      // the graph reaches. Nothing is replaced function-wide, so `replaceAllUsesWith`'s
-      // propagation is not owed one here.
+      // SLOT HOMES (ir/core.ts `SlotHomes`) do not move here, and unlike the other two passes that
+      // write an operand directly this one had to be checked rather than read off the site. It
+      // substitutes a new READ operand, it does not retire a value: the extension's source keeps
+      // its use in the `zext` that `zx` is the result of, so a home stamped on it is still carried
+      // by a value the graph reaches, and no function-wide replacement is owed the propagation
+      // `replaceAllUsesWith` does.
       op.opcode = 'sext';
       op.operands = [zx];
       op.attrs = { width: sgn.width };

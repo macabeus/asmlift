@@ -1,12 +1,14 @@
 // Regenerate the committed declaration-rank probe objects read by
 // `packages/core/test/spill-slot-order.test.ts`.
 //
-// WHY A SCRIPT AND NOT A NOTE. The three `'unknown'` frame directions in `target.ts` each record a
-// measurement that was deliberately NOT shipped, and a measurement nobody can re-run is a claim.
-// Committing the objdump text made it re-readable; this makes it re-MEASURABLE. The flags are
-// load-bearing and differ between the two toolchains that share `MIPS_GCC` (Snowboard Kids 2's
-// Kyoto build at -O2 and Mario Party 3's at -O1), so they are taken from `@asmlift/toolchains`
-// rather than retyped — a flag change shows up here as a diff in the regenerated fixtures.
+// WHY A SCRIPT AND NOT A NOTE. Two of the `'unknown'` frame directions in `target.ts` — MIPS_IDO's
+// and MIPS_GCC's — record a measurement deliberately NOT shipped, and a measurement nobody can
+// re-run is a claim. (PPC_MWCC's `'unknown'` has none behind it and gets no probe here: mwcc does
+// not spill this source at all.) Committing the objdump text made the two re-readable; this makes
+// them re-MEASURABLE. The flags are load-bearing and differ between the two toolchains that share
+// `MIPS_GCC` (Snowboard Kids 2's Kyoto build at -O2 and Mario Party 3's at -O1), so they are taken
+// from `@asmlift/toolchains` rather than retyped — a flag change shows up here as a diff in the
+// regenerated fixtures.
 //
 //   ASMLIFT_IDO_CC=… ASMLIFT_KMC_DIR=… ASMLIFT_GCC272_DIR=… npx tsx scripts/regen-declrank-probes.ts
 //

@@ -113,10 +113,6 @@ test('Thumb: every value the asm spilled to [sp,#k] carries that k', () => {
 // caller's storage on another, so a key alone is not evidence of a declaration rank — which is the
 // same thing `readRecursive` refuses to guess about a def-less read.
 test('`ownedLocals` alone buys no stamp: the two partitions are different claims', () => {
-  // `ownedLocals` says a def-less read here is an uninitialised local; `declaredLocals` says a
-  // spill here is a declaration rank. Under agbcc the first admits the outgoing stack-argument
-  // area and the second must not, so the stamp reads only the second and a model carrying the
-  // first alone stamps nothing.
   const ssa = makeSsaBuilder('s', 1, [[]], () => ({ ownedLocals: { from: 0, to: 16 } }));
   const [b0] = ssa.irBlocks;
   const v = val();
@@ -198,9 +194,9 @@ test('…and when both carry one, the merge UNIONS: this helper holds no target,
 
 // THE REDUCTION IS DIRECTION-DEPENDENT, AND THAT IS WHY NO MERGE SITE MAKES IT. `min` is
 // ascending's answer, not a neutral one: under a descending frame the EARLIER declaration rank is
-// the HIGHER offset. A merge that had picked an end would have stamped the later rank on every
-// target whose measured direction is `descending` (ido7.1 and mwcc, per target.ts) and inverted
-// the emitted order for exactly the locals it touched.
+// the HIGHER offset. A merge that had picked an end would have stamped the later rank on a target
+// whose measured direction is `descending` — ido7.1, per target.ts — and inverted the emitted
+// order for exactly the locals it touched.
 test('a merged local carries both homes, and each direction elects the earlier rank from them', () => {
   const merged = (dir: 'ascending' | 'descending'): string[] =>
     orderSlotLocals(
@@ -313,10 +309,10 @@ test('the direction rides StructureOptions onto the SFn, and absent stays absent
 });
 
 // `'unknown'` IS A TARGET STATE, NOT A STRUCTURER ONE, and the boundary between them is
-// `structureOptionsFor`. On a `TargetDescription` it says "measured and deliberately not shipped",
-// which is worth writing down; on a structurer option it would be a second spelling of "no" that
-// no pass branches on, so the option type does not admit it — a `@ts-expect-error` is the pin,
-// because a type that stops rejecting it is exactly the regression.
+// `structureOptionsFor`. On a `TargetDescription` it separates a direction measured and withheld
+// from one nobody measured, which is worth writing down; on a structurer option it would be a
+// second spelling of "no" that no pass branches on, so the option type does not admit it — a
+// `@ts-expect-error` is the pin, because a type that stops rejecting it is exactly the regression.
 test('`unknown` never reaches the structurer: the option type refuses it, the translation drops it', () => {
   // @ts-expect-error — StructureOptions has two states; `'unknown'` is a TargetDescription state
   const rejected: StructureOptions['spillSlotOrder'] = 'unknown';
@@ -377,8 +373,8 @@ test('and no `undef` local reaches the ordering: the emitted tree carries none, 
 });
 
 // THE `SFn.locals` DOC IS ONE BLOCK, and this is the guard that keeps it one. TypeScript attaches
-// only the LAST doc comment before a declaration, so inserting a second block in front of an
-// existing one silently orphans everything above it — which is how this branch briefly dropped the
+// only the LAST doc comment before a declaration, so a second block inserted in front of an
+// existing one silently orphans everything above it — including the
 // `volatile`/`pointeeVolatile`/`frame`/`loads`/`stores` paragraph that five sites in the tree tell
 // a reader to consult. Read the file rather than the type: the defect is invisible to `tsc` and to
 // every behavioural test.
@@ -451,8 +447,9 @@ const directionOf = (file: string, reversed: boolean): { n: number; dir: string 
 };
 
 test('a probe that spilled nothing reports no direction, not `ascending` by vacuity', () => {
-  // the fixture with every `sw …(sp)` line removed: the pairing finds no row, and the two
-  // monotonicity predicates would both hold over an empty list
+  // the probe's own C source stands in for such an object: it holds no `sw …(sp)` line at all, so
+  // the pairing finds no row and the two monotonicity predicates would both hold over an empty
+  // list
   expect(directionOf('probe-declrank.c', false)).toEqual({ n: 0, dir: 'unmeasured' });
 });
 
@@ -478,8 +475,8 @@ test('both toolchains behind MIPS_GCC hand them out ASCENDING — and the field 
 
 // mwcc has NO probe here, and that is the finding rather than an omission: it spilled nothing on
 // this probe at sixteen locals and nothing at forty either (it sinks the whole computation past
-// the call, so no local is live across it). Its comment in target.ts is corrected to say the
-// direction is UNMEASURED rather than "9 of 9".
+// the call, so no local is live across it). So its `'unknown'` is the absence of a measurement,
+// where ido7.1's and MIPS_GCC's are measurements withheld — target.ts says which at each site.
 test('mwcc ships unknown with no measured direction behind it', () => {
   expect(PPC_MWCC.compilerBehaviors.spillSlotOrder).toBe('unknown');
 });
@@ -628,15 +625,14 @@ test('every backend orders: no `emit` may print an unordered declaration list', 
   }
 });
 
-// AND THE LIST ABOVE IS DERIVED, not remembered. Paragraph (e) of this capability's design says
-// `emit` owns the ordering, but nothing CONSTRUCTS that: `orderSlotLocals` is called from two
-// hand-written sites (`backend/cfamily.ts` for the C family, `backend/pascal.ts` for its own body
-// printer), so a fourth backend with its own printer would silently emit an unordered list and the
-// test above would still pass. One thing narrows it — `cFamilyBody` is module-private, so any new
-// C-family backend must route through `emitCFamily` and gets the ordering for free; only a
-// Pascal-shaped backend can miss it.
+// AND THE LIST ABOVE IS DERIVED, not remembered. `emit` owning the ordering is a convention, not a
+// construction: `orderSlotLocals` is called from two hand-written sites (`backend/cfamily.ts` for
+// the C family, `backend/pascal.ts` for its own body printer), so a fourth backend with its own
+// printer would silently emit an unordered list and the test above would still pass. One thing
+// narrows it — `cFamilyBody` is module-private, so any new C-family backend must route through
+// `emitCFamily` and gets the ordering for free; only a Pascal-shaped backend can miss it.
 //
-// This asserts the coverage rather than assuming it: the set of modules declaring a
+// So the coverage is asserted rather than assumed: the set of modules declaring a
 // `LanguageBackend` is read off the filesystem and compared with the set the test exercises, so
 // adding one fails HERE on the day it is written rather than at a byte diff later.
 //
@@ -645,8 +641,8 @@ test('every backend orders: no `emit` may print an unordered declaration list', 
 // returned backend wraps the language backend in a decorator that applies the frame order. The
 // repo already has the precedent — `cppBackend(spec)` is a backend FACTORY — and it would give one
 // ordering site instead of two and remove `SFn.slotOrder` from the neutral tree, restoring the
-// invariant `l3/ast.ts` currently concedes. It is out of scope for a remediation because it moves
-// the `emit` seam every call site holds.
+// invariant `l3/ast.ts` currently concedes. Not done here: it moves the `emit` seam every call
+// site holds.
 test('the guard covers every backend module, not the three someone remembered', () => {
   expect(backendModules().sort()).toEqual(['c.ts', 'cpp.ts', 'pascal.ts']);
 });
