@@ -11,7 +11,7 @@
 // SHARED SSA builder, so both frontends supply the coordinate and one rule applies it),
 // `SFn.locals[i].slots` (the structurer's naming walk), and one pure ordering owned by
 // `LanguageBackend.emit`. Each stage is pinned here.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
@@ -603,6 +603,14 @@ test('a duplicate among a local`s non-elected homes refuses as well', () => {
   expect(orderSlotLocals(sfn).locals.map((l) => l.name)).toEqual(['hi', 'mid', 'lo']);
 });
 
+/** Every module under `src/backend` that DECLARES a `LanguageBackend`, read off the filesystem. */
+const backendModules = (): string[] =>
+  readdirSync(join(import.meta.dirname, '..', 'src', 'backend'))
+    .filter((f) => f.endsWith('.ts'))
+    .filter((f) =>
+      /:\s*LanguageBackend\b/.test(readFileSync(join(import.meta.dirname, '..', 'src', 'backend', f), 'utf8')),
+    );
+
 test('every backend orders: no `emit` may print an unordered declaration list', () => {
   // Owned by `emit` rather than by a call site because there are SEVEN `.emit(` call sites, and
   // the web Playground reaches two of them for one function (the headline source and the Pipeline
@@ -618,6 +626,29 @@ test('every backend orders: no `emit` may print an unordered declaration list', 
   for (const b of backends) {
     expect(declOrder(b.emit(sfn))).toEqual(['lo', 'mid', 'hi']);
   }
+});
+
+// AND THE LIST ABOVE IS DERIVED, not remembered. Paragraph (e) of this capability's design says
+// `emit` owns the ordering, but nothing CONSTRUCTS that: `orderSlotLocals` is called from two
+// hand-written sites (`backend/cfamily.ts` for the C family, `backend/pascal.ts` for its own body
+// printer), so a fourth backend with its own printer would silently emit an unordered list and the
+// test above would still pass. One thing narrows it — `cFamilyBody` is module-private, so any new
+// C-family backend must route through `emitCFamily` and gets the ordering for free; only a
+// Pascal-shaped backend can miss it.
+//
+// This asserts the coverage rather than assuming it: the set of modules declaring a
+// `LanguageBackend` is read off the filesystem and compared with the set the test exercises, so
+// adding one fails HERE on the day it is written rather than at a byte diff later.
+//
+// THE REDESIGN THIS STANDS IN FOR, named so it is a choice and not an oversight: a
+// `backendFor(target, lang): LanguageBackend` mirroring the existing `frontendFor(target)`, whose
+// returned backend wraps the language backend in a decorator that applies the frame order. The
+// repo already has the precedent — `cppBackend(spec)` is a backend FACTORY — and it would give one
+// ordering site instead of two and remove `SFn.slotOrder` from the neutral tree, restoring the
+// invariant `l3/ast.ts` currently concedes. It is out of scope for a remediation because it moves
+// the `emit` seam every call site holds.
+test('the guard covers every backend module, not the three someone remembered', () => {
+  expect(backendModules().sort()).toEqual(['c.ts', 'cpp.ts', 'pascal.ts']);
 });
 
 // ── A6: the guard — what depends on the order this does NOT change ────────────────────────────
