@@ -74,9 +74,16 @@ export function stripShellComments(template: string): string {
   return out;
 }
 
-/** `<<` — a heredoc or a here-string. Its BODY is not shell comments, so the comment stripper
- *  cannot be trusted over a script that has one; such a script is scanned as written. */
-const SHELL_HEREDOC = /<</;
+/** A HEREDOC's opening: `<<`, an optional `-`, then the delimiter word (which may be quoted or
+ *  backslash-escaped). Its BODY is not shell comments, so the stripper cannot be trusted over a
+ *  text that has one.
+ *
+ *  The shape matters, twice over. A bare `/<</` also matched `$((1 << 2))` — an arithmetic
+ *  expansion, where `<<` is a shift — and `cat <<<"x"`, a here-STRING whose body is an ordinary
+ *  word with ordinary `#` rules; both switched the whole text back to being read as prose. It is
+ *  still deliberately loose in the over-refusing direction: `echo "a << b"` inside a quoted string
+ *  reads as a heredoc here and costs a cold start, which is the safe side of this predicate. */
+const SHELL_HEREDOC = /(?<!<)<<(?!<)-?\s*(['"\\]?[A-Za-z_])/;
 
 /** The PROGRAM a shell text describes: its prose dropped, where that can be decided.
  *
@@ -87,5 +94,10 @@ const SHELL_HEREDOC = /<</;
  *  text rather than a comment, and an unquoted heredoc still substitutes, so the comment reading
  *  is not decidable there and such a text is handed back as written. */
 export function shellProgramText(text: string): string {
-  return SHELL_HEREDOC.test(text) ? text : stripShellComments(text);
+  // The heredoc test is on the STRIPPED text, not the raw text: a `<<` inside an English comment
+  // is not a heredoc, and testing the raw bytes let prose decide the reading after all — the very
+  // defect this function exists to remove, one level up. Stripping only ever deletes COMMENT
+  // text, so a real `<<EOF` in code always survives into the answer this tests.
+  const stripped = stripShellComments(text);
+  return SHELL_HEREDOC.test(stripped) ? text : stripped;
 }

@@ -19,7 +19,7 @@ describe('a comment is dropped, and only a comment', () => {
     expect(stripShellComments('exec cc "$@" # run the compiler\n')).toBe('exec cc "$@" \n');
   });
 
-  test('a `#` inside a quoted string is not a comment — `-DTAG=\'#1\'`', () => {
+  test("a `#` inside a quoted string is not a comment — `-DTAG='#1'`", () => {
     const t = "cc -DTAG='#1 $(uname)' x.c\n";
     expect(stripShellComments(t)).toBe(t);
   });
@@ -60,5 +60,37 @@ describe('a BACKSLASH escape does not close a quote — the under-scanning side'
 
   test('a backslash-newline continuation keeps the newline, so line numbers do not shift', () => {
     expect(stripShellComments('a \\\nb\n# c\nd\n').split('\n')).toHaveLength(5);
+  });
+});
+
+describe('a HEREDOC is decided on the PROGRAM, not on the prose', () => {
+  // `<<` used to be tested on the RAW text, so prose decided the program after all: a `<<` inside
+  // an English comment — or an arithmetic left-shift — turned comment stripping off for the whole
+  // script, and the refusal that followed quoted the comment as its reason. That is this round's
+  // own defect class, one level up from the detector it was fixing.
+  const PROSE = '#!/bin/sh\n# see the <<NOTE>> above; built by `make`\nexec /bin/echo "$@"\n';
+
+  test('a `<<` inside a COMMENT does not switch the reading back to raw', () => {
+    expect(shellProgramText(PROSE)).not.toContain('make');
+  });
+
+  test('an arithmetic left-shift is not a heredoc', () => {
+    const t = '#!/bin/sh\n# built by `make`\nMASK=$((1 << 2))\nexec /bin/echo "$@"\n';
+    const scan = shellProgramText(t);
+    expect(scan, 'the comment is still dropped').not.toContain('make');
+    expect(scan, 'and the real `$( ` in code is still there to refuse on').toContain('$((1 << 2))');
+  });
+
+  test('a here-STRING is not a heredoc — its body is an ordinary word', () => {
+    expect(shellProgramText('#!/bin/sh\n# built by `make`\ncat <<<"x"\n')).not.toContain('make');
+  });
+
+  test('a real heredoc IS one, and the text comes back as written — the refusing side', () => {
+    // Inside an unquoted heredoc a leading `#` is body text and `$(…)` still substitutes, so the
+    // comment reading is not decidable there.
+    for (const marker of ['<<EOF', '<< EOF', '<<-EOF', "<<'EOF'", '<<"EOF"', '<<\\EOF']) {
+      const t = `#!/bin/sh\n# built by \`make\`\ncat ${marker}\n# $(command -v true)\nEOF\n`;
+      expect(shellProgramText(t), marker).toBe(t);
+    }
   });
 });
