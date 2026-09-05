@@ -2982,6 +2982,48 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { rereadctl: { returnsVoid: true } },
   },
 
+  // EXTERN-SYMBOL READ-BACK PAIRS. These preserve a named data relocation, unlike the
+  // raw-address reread/rereadctl pair above. ereread/ereadctl differ only by a same-value
+  // fixed-index field write; erback/erbctl add a read-back after the indexed destination
+  // store. The src strings are verbatim compiled probes. All four are agbcc-specific.
+  // ereadctl and erbctl are intervention controls, not MATCH controls. Individual agbcc
+  // smoke scores: ereread 11, ereadctl 2, erback 12, erbctl 12. The existing raw rereadctl
+  // MATCHes. These scores include the whole residual, not just register differences.
+  // All four m2c declines first emit `extern ? gReadBgs;` (? placeholder): unknown extern
+  // type recovery owns that blocker, not this allocator/aliasing experiment. Both tools
+  // receive only named function parameters; neither receives a global layout in context.
+  // No row is a proposed allocator fix; measured attribution is in docs/lbg-attribution.md.
+  {
+    sym: 'ereread',
+    src: 'struct Bg { u32 *dst; u16 h; u16 v; };\nextern struct Bg gReadBgs[];\nvoid ereread(u32 k, u32 n) { u32 i; for (i=0; i<n; i=i+1) { gReadBgs[2].v = gReadBgs[2].v + 0; gReadBgs[k].dst[i] = i << 6; } }\n',
+    features: ['value-home', 'global', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'void ereread(u32 k, u32 n);',
+    proto: { ereread: { returnsVoid: true } },
+  },
+  {
+    sym: 'ereadctl',
+    src: 'struct Bg { u32 *dst; u16 h; u16 v; };\nextern struct Bg gReadBgs[];\nvoid ereadctl(u32 k, u32 n) { u32 i; for (i=0; i<n; i=i+1) { gReadBgs[k].dst[i] = i << 6; } }\n',
+    features: ['value-home', 'global', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'void ereadctl(u32 k, u32 n);',
+    proto: { ereadctl: { returnsVoid: true } },
+  },
+  {
+    sym: 'erback',
+    src: 'struct Bg { u32 *dst; u16 h; u16 v; };\nextern struct Bg gReadBgs[];\nu32 erback(u32 k, u32 n) { u32 i, sum=0; for (i=0; i<n; i=i+1) { gReadBgs[2].v = gReadBgs[2].v + 0; gReadBgs[k].dst[i] = i << 6; sum += gReadBgs[2].v; } return sum; }\n',
+    features: ['value-home', 'global', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 erback(u32 k, u32 n);',
+  },
+  {
+    sym: 'erbctl',
+    src: 'struct Bg { u32 *dst; u16 h; u16 v; };\nextern struct Bg gReadBgs[];\nu32 erbctl(u32 k, u32 n) { u32 i, sum=0; for (i=0; i<n; i=i+1) { gReadBgs[k].dst[i] = i << 6; sum += gReadBgs[2].v; } return sum; }\n',
+    features: ['value-home', 'global', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 erbctl(u32 k, u32 n);',
+  },
+
   // A BASE THE ARMS SHARE, AND A CONSTANT INDEX THAT NEEDS NONE: one fold, two surfaces, and
   // asmlift loses a different thing to each. The struct and the base are LoadBGTilemapData's —
   // a 28-byte `gBgInfo` element at 0x03003430.
