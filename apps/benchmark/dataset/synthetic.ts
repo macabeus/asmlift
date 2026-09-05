@@ -3004,7 +3004,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'ereadctl',
     src: 'struct Bg { u32 *dst; u16 h; u16 v; };\nextern struct Bg gReadBgs[];\nvoid ereadctl(u32 k, u32 n) { u32 i; for (i=0; i<n; i=i+1) { gReadBgs[k].dst[i] = i << 6; } }\n',
-    features: ['value-home', 'global', 'array'],
+    features: ['global', 'array'],
     toolchains: ['agbcc'],
     ctx: 'void ereadctl(u32 k, u32 n);',
     proto: { ereadctl: { returnsVoid: true } },
