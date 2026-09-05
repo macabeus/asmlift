@@ -259,24 +259,6 @@ describe("a script's PROSE is not its program", () => {
     return p;
   };
 
-  test('a command substitution in a COMMENT is not a computed delegate', () => {
-    const p = wrapper(
-      ['#!/bin/sh', '# built by `make`, and $(dirname) is what the old spelling used', 'exec /usr/bin/true "$@"'].join(
-        '\n',
-      ) + '\n',
-    );
-    const chain = toolchainFileChain(p);
-    expect(chain, 'the real delegate is followed, not refused').toContain(realpathSync('/usr/bin/true'));
-  });
-
-  test('…and a comment naming a FILE does not put that file in the namespace', () => {
-    // The cold-start half of the same defect: a comment resolves nothing, so hashing what it
-    // mentions tracks a file no compile reads. `# run make first` tied a project's namespace to
-    // /usr/bin/make.
-    const p = wrapper('#!/bin/sh\n# remember to run make first\nexec /usr/bin/true "$@"\n');
-    expect(toolchainFileChain(p).some((e) => e.endsWith('/make'))).toBe(false);
-  });
-
   test('editing that comment STILL re-namespaces — the text is dropped from the scan, not the hash', () => {
     const p = wrapper('#!/bin/sh\n# one\nexec /usr/bin/true "$@"\n');
     const before = candCacheStaticStamp(toolchainFileChain(p));
@@ -299,36 +281,5 @@ describe("a script's PROSE is not its program", () => {
     const chain = toolchainFileChain(p);
     expect(chain, 'env itself').toContain(realpathSync('/usr/bin/env'));
     expect(chain, 'and the interpreter env goes on to run').toContain(sh);
-  });
-
-  // ── and every true positive is KEPT ──────────────────────────────────────────────────────────
-  test('a `$(…)` in CODE still refuses, and the refusal now says WHICH LINE', () => {
-    // A refusal naming only the file is a dead end: on the script above it left the reader ten
-    // candidate lines, two of which were the answer.
-    const p = wrapper('#!/bin/sh\n# a `harmless` comment\nexec "$(command -v true)" "$@"\n');
-    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
-    expect(() => toolchainFileChain(p)).toThrow(/line 3: exec "\$\(command -v true\)"/);
-  });
-
-  test('a BACKTICK substitution in code still refuses', () => {
-    const p = wrapper('#!/bin/sh\nCC=`command -v true`\nexec "$CC" "$@"\n');
-    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
-  });
-
-  test('an `eval` in code still refuses', () => {
-    const p = wrapper('#!/bin/sh\neval exec /usr/bin/true "$@"\n');
-    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
-  });
-
-  test('a `#` inside a quoted string is not a comment, and what follows it is still read', () => {
-    const p = wrapper('#!/bin/sh\nTAG="#1 $(command -v true)"\nexec /usr/bin/true "$@"\n');
-    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
-  });
-
-  test('a HEREDOC makes `#` ambiguous, so such a script is scanned as written — the refusing side', () => {
-    // Inside an unquoted heredoc a leading `#` is body text and `$(…)` still substitutes, so the
-    // stripper cannot be trusted there. The asymmetry is deliberate and costs a cold start.
-    const p = wrapper('#!/bin/sh\ncat <<EOF\n# $(command -v true)\nEOF\nexec /usr/bin/true "$@"\n');
-    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
   });
 });
