@@ -603,12 +603,18 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
       expandExecutable(val, out, depth + 1);
     }
   }
-  // The SHEBANG is read off the raw bytes on purpose: `#!/bin/sh` is the one `#` line in a script
-  // that names a program, and the stripper — correctly, for every other line — has removed it.
+  // The SHEBANG is read off the raw bytes on purpose: `#!` is the one `#` line in a script that
+  // names a program, and the stripper — correctly, for every other line — has removed it.
+  //
+  // EVERY token of it goes back, not just the first: `#!/usr/bin/env python3` names TWO programs
+  // and both of them run, so keeping only `/usr/bin/env` drops the real interpreter out of the
+  // namespace and swapping what is behind `env` would serve objects built by a different program.
+  // The rest of the line is argv (`#!/bin/sh -e`), which the token loop already ignores because it
+  // resolves to nothing.
   const first = text.split('\n', 1)[0] ?? '';
   const tokens = scan.split(/[\s"'<>|;&()=]+/);
   if (first.startsWith('#!')) {
-    tokens.unshift(first.slice(2).trim().split(/\s+/)[0] ?? '');
+    tokens.unshift(...first.slice(2).trim().split(/\s+/));
   }
   for (const tok of tokens) {
     if (!tok || tok.length > 300) {

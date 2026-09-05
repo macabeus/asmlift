@@ -30,6 +30,7 @@
 // so `SHAPING_SOURCES` is asserted directly: that half is a constant and needs no toolchain.
 import { toolchainFileChain } from '@asmlift/cli/candcache';
 import { TOOLCHAIN } from '@asmlift/toolchains';
+import { execSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -286,6 +287,18 @@ describe("a script's PROSE is not its program", () => {
   test('the SHEBANG survives — it is the one `#` line that names a program', () => {
     const p = wrapper('#!/bin/sh\n# a comment\nexec /usr/bin/true "$@"\n');
     expect(toolchainFileChain(p), 'the interpreter is a delegate').toContain(realpathSync('/bin/sh'));
+  });
+
+  test('…and `#!/usr/bin/env sh` names TWO programs, both of which run', () => {
+    // The stripper removes the shebang like any other `#` line, so it is re-added from the raw
+    // bytes — and re-adding only the FIRST token drops the real interpreter out of the namespace
+    // for every `env` shebang. Swap the interpreter behind `env` and the cache would serve objects
+    // built by a different program.
+    const sh = realpathSync(execSync('command -v sh', { shell: '/bin/sh' }).toString().trim());
+    const p = wrapper('#!/usr/bin/env sh\n# a comment\nexec /usr/bin/true "$@"\n');
+    const chain = toolchainFileChain(p);
+    expect(chain, 'env itself').toContain(realpathSync('/usr/bin/env'));
+    expect(chain, 'and the interpreter env goes on to run').toContain(sh);
   });
 
   // ── and every true positive is KEPT ──────────────────────────────────────────────────────────
