@@ -189,6 +189,18 @@ export interface TargetDescription {
     // unmeasured per-compiler default is to claim nothing. Read off the target by a raising pass
     // (`inferGlobalArrays`), not by the structurer.
     arrayShapeFromStride?: boolean;
+    // Which way this compiler hands out FRAME SLOTS against a spilled local's DECLARATION RANK:
+    // `ascending` = the earlier-declared spilled local takes the LOWER `[sp,#k]`. Consumed by the
+    // structurer (StructureOptions.spillSlotOrder) and applied at emit time by l3/slotorder.ts.
+    //
+    // `'unknown'` and absent both REFUSE the ordering — there is deliberately no default
+    // direction, because the wrong one reorders every declaration list on that target for no
+    // reason. That is why three of the four descriptions below ship `'unknown'` even though the
+    // direction has been measured for each of their compilers: no MIPS or PPC benchmark row lifts
+    // with two or more spilled user locals, so no row on those tiers can referee a value, and a
+    // value no row can falsify does not earn the level. Each carries its measurement and its flip
+    // condition at its own site.
+    spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation.
@@ -314,6 +326,14 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchArmsFollowLayout: true,
     hoistsSingleSetArm: true,
     arrayShapeFromStride: true,
+    // agbcc: reload walks pseudos ascending handing each global-alloc loser a fresh slot, a user
+    // local's pseudo number is its `expand_decl` position, and the Thumb frame grows UPWARD
+    // (FRAME_GROWS_DOWNWARD is commented out in thumb.h). So the earlier-declared spilled local
+    // takes the lower offset. The rows that referee it are `synthetic:spillorder` (six `[sp,#k]`
+    // operand rows and nothing else, from two locals declared the other way round) and its
+    // control `synthetic:spillorder_rev` (the same body in the order asmlift already emits, which
+    // must stay a MATCH), plus `synthetic:dma_fill_uninit`, a row this did not author.
+    spillSlotOrder: 'ascending',
   },
 };
 
@@ -335,6 +355,12 @@ export const MIPS_IDO: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
     switchAllowsNeqCase: false,
+    // MEASURED `descending` (the earlier-declared spilled local takes the HIGHER offset, 7 of 7
+    // spills on a reversed-declaration probe) and NOT SHIPPED. No ido7.1 benchmark row lifts with
+    // two or more spilled user locals — the only spilling shape in the corpus carries a call, and
+    // this frontend declines a call — so no row can tell a wrong value from a right one here.
+    // Flip condition: the first ido7.1 row that lifts with two spilled locals.
+    spillSlotOrder: 'unknown',
   },
 };
 
@@ -364,7 +390,17 @@ export const MIPS_GCC: TargetDescription = {
   // that computes the initial value INTO the param's own register wrote the key and still
   // coalesces.
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
-  compilerBehaviors: { coalesceLoopInit: true, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
+  compilerBehaviors: {
+    coalesceLoopInit: true,
+    preserveDivergentBranchSense: true,
+    orderArgCopiesByWriteOrder: true,
+    // MEASURED `ascending` on both toolchains this description serves (gcc2.7.2kmc 8 of 8,
+    // gcc2.7.2 8 of 8) and NOT SHIPPED, for the same reason as ido7.1: no row on either tier
+    // lifts with two or more spilled user locals. Note the shape of the risk if it ever ships —
+    // the value is per DESCRIPTION and TWO toolchains map here, so a toolchain whose direction
+    // differed from its description's would need a per-toolchain override this bag cannot express.
+    spillSlotOrder: 'unknown',
+  },
 };
 
 /** PowerPC (GameCube/Wii) + Metrowerks CodeWarrior. The real GC/Wii matching target is
@@ -383,7 +419,14 @@ export const PPC_MWCC: TargetDescription = {
   // CodeWarrior's structuring levers are UNKNOWN until fixtures reveal them — safe universal
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
-  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByWriteOrder: true },
+  compilerBehaviors: {
+    coalesceLoopInit: false,
+    preserveDivergentBranchSense: true,
+    orderArgCopiesByWriteOrder: true,
+    // MEASURED `descending` (9 of 9) and NOT SHIPPED: no mwcc row lifts with two or more spilled
+    // user locals either — mwcc did not spill the ten-local probe at all.
+    spillSlotOrder: 'unknown',
+  },
 };
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every

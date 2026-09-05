@@ -23,7 +23,7 @@ import { print } from '../src/ir/print';
 import { T } from '../src/ir/types';
 import { raiseRecovered } from '../src/pipeline';
 import { type StructureOptions, structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC, MIPS_IDO, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
 const val = () => mkValue(T.unk(32));
 const read = (p: string) => readFileSync(join(import.meta.dirname, 'corpus', p), 'utf8');
@@ -209,4 +209,18 @@ test('the direction rides StructureOptions onto the SFn, and `unknown` reaches i
   expect(at('descending')).toBe('descending');
   expect(at('unknown')).toBeUndefined();
   expect(at(undefined)).toBeUndefined();
+});
+
+// ── A4: the gate as data, and shipped only where a row can referee it ─────────────────────────
+
+test('the frame-slot direction is a per-compiler datum: agbcc ascending, everything else unknown', () => {
+  expect(ARMV4T_AGBCC.compilerBehaviors.spillSlotOrder).toBe('ascending');
+  expect(MIPS_IDO.compilerBehaviors.spillSlotOrder).toBe('unknown');
+  expect(MIPS_GCC.compilerBehaviors.spillSlotOrder).toBe('unknown');
+  expect(PPC_MWCC.compilerBehaviors.spillSlotOrder).toBe('unknown');
+});
+
+test('the datum reaches the structurer through the compilerBehaviors spread, with no plumbing', () => {
+  expect(structureOptionsFor(ARMV4T_AGBCC, false).spillSlotOrder).toBe('ascending');
+  expect(structureOptionsFor(MIPS_IDO, false).spillSlotOrder).toBe('unknown');
 });
