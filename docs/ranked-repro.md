@@ -303,27 +303,31 @@ find nothing to disagree with and go green having audited nothing.
      is the near-universal wrapper idiom and it alone refuses the whole project, because the
      detector is a syntax test over a script and does not ask whether the computed value reaches an
      exec position. Take the directory from the caller, or accept the path as an argument;
-  3. de-backtick any diagnostic STRING (`echo "… (run \`make\` first)"`is code, correctly, so the
-backtick in it counts).
-Step 2 is the asymmetry the residual list names: the identical`$( )`costs a TEMPLATE a
-resolution base and REFUSES a SCRIPT outright. Steps 1 and 3 alone leave a script refusing.
-Proven on the shape that motivated this bullet — a decomp wrapper that appends`.set NAME, 0xADDR`lines read out of the project's linked ELF, so the candidate object is a
-function of that ELF's symbol table: patching one symbol's`st_value`moved the object's literal
-pool with its SIZE UNCHANGED (680 B either way,`.word 0x03005478`→`.word 0x03009999`), which
-is exactly the row objdiff scores. With the ELF named in the template, renaming a symbol it
-defines recompiled all 1,104 candidates of one fan (`{"miss":1104,"stored":1104}`), and putting
-the ELF back was the same toolchain again (`{"hit":1082}`). With the identical script locating
-the same ELF for itself, the same rename served 1,085 stale objects — and the standing 2% audit
-is what stood between that and a published score: 9 of the 19 sampled keys disagreed and the run
-exited 3, with `ASMLIFT_CANDCACHE=verify` putting the real damage at 439 of 1,104 keys.
-**AND THE COST, because it is not free.** A named file is a namespace input, so every rebuild of
-it is a full cold fan — the same rule that keeps the PROJECT ROOT on the residual list above
-(`build/`and`.git/`in the namespace means the cache never warms). The`{"miss":1104}`line
-two paragraphs up is that cost as well as the soundness proof: it is what a`make` of the named
-     file buys you, every time. So name the SMALLEST file your wrapper actually reads, not the tree it
-     sits in, and expect a cold start after each build of it. On a workflow that rebuilds that file
-     constantly — a symbol-renaming round, say — that is the honest expected value, and it is what
-     decides whether the warm-cache ratio is real for you.
+  3. de-backtick any diagnostic STRING (`echo "… (run \`make\` first)"` is code, correctly, so the
+     backtick in it counts).
+
+  Step 2 is the asymmetry the residual list names: the identical `$( )` costs a TEMPLATE a
+  resolution base and REFUSES a SCRIPT outright. Steps 1 and 3 alone leave a script refusing.
+  Proven on the shape that motivated this bullet — a decomp wrapper that appends
+  `.set NAME, 0xADDR` lines read out of the project's linked ELF, so the candidate object is a
+  function of that ELF's symbol table: patching one symbol's `st_value` moved the object's literal
+  pool with its SIZE UNCHANGED (680 B either way, `.word 0x03005478` → `.word 0x03009999`), which
+  is exactly the row objdiff scores. With the ELF named in the template, renaming a symbol it
+  defines recompiled all 1,104 candidates of one fan (`{"miss":1104,"stored":1104}`), and putting
+  the ELF back was the same toolchain again (`{"hit":1082}`). With the identical script locating
+  the same ELF for itself, the same rename served 1,085 stale objects — and the standing 2% audit
+  is what stood between that and a published score: 9 of the 19 sampled keys disagreed and the run
+  exited 3, with `ASMLIFT_CANDCACHE=verify` putting the real damage at 439 of 1,104 keys.
+
+  **AND THE COST, because it is not free.** A named file is a namespace input, so every rebuild of
+  it is a full cold fan — the same rule that keeps the PROJECT ROOT on the residual list above
+  (`build/` and `.git/` in the namespace means the cache never warms). The `{"miss":1104}` line
+  two paragraphs up is that cost as well as the soundness proof: it is what a `make` of the named
+  file buys you, every time. So name the SMALLEST file your wrapper actually reads, not the tree it
+  sits in, and expect a cold start after each build of it. On a workflow that rebuilds that file
+  constantly — a symbol-renaming round, say — that is the honest expected value, and it is what
+  decides whether the warm-cache ratio is real for you.
+
 - **A `put` does not trust the store either, and that hole had NO audit over it at all.** The
   store is content-addressed: `objects/<sha>` is deduped and hardlinked per key. Treating the
   EXISTENCE of that file as proof of its CONTENT meant a corrupted entry — a disk error, an
