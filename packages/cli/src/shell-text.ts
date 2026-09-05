@@ -32,6 +32,20 @@ export function stripShellComments(template: string): string {
   let prev = '';
   for (let i = 0; i < template.length; i++) {
     const c = template[i];
+    // A BACKSLASH takes the next character verbatim — unquoted and inside a DOUBLE quote, but not
+    // inside a single quote, where `sh` gives it no meaning at all. Skipping this let `\"` close
+    // the tracker's quote EARLY, which is the under-scanning direction: a later `#` on that line
+    // then read as a comment and deleted a `$( )` that `sh` really does substitute, out from under
+    // a SAFETY detector. `sh -c 'CC="a \" # $(command -v true) "; echo "[$CC]"'` prints `[a " # true ]`.
+    // The escaped character is emitted (line numbers never shift) but does not become `prev`
+    // unless it is a newline: `a\ #b` is one word with a literal `#` in it, while a line
+    // continuation really does put the next line's `#` at the start of a word.
+    if (c === '\\' && quote !== "'" && i + 1 < template.length) {
+      out += c + template[i + 1];
+      prev = template[i + 1] === '\n' ? '\n' : 'x';
+      i++;
+      continue;
+    }
     if (quote !== undefined) {
       out += c;
       if (c === quote) {
