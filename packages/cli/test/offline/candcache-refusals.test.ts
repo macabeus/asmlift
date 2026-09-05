@@ -4,10 +4,22 @@
 // Every case below is a shape an audit reproduced on the shipped code, each of which served a
 // stale or wrong answer with no perturbation of anything the design considered an input.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+
+import { toolchainFileChain } from '../../src/candcache';
 
 // A BLOCKING-spawnSync suite in a pool whose config says there are none: every case here drives
 // several `spawnSync` compiles, and the file's neighbours in `test:offline` run in parallel worker
@@ -581,4 +593,106 @@ describe('the matching gate upgrades to verify off ONE list of off-words, never 
       expect(await modeAfterSetup(raw)).toBe('verify');
     },
   );
+});
+
+// ── the DELEGATE-REFUSAL boundary: what a wrapper script in the chain is read as ───────────────
+//
+// These drive `toolchainFileChain` directly and resolve nothing but `/bin/sh` and this process's
+// own node binary, so they run wherever `test:offline` does. The cases that need a real toolchain
+// stay in `apps/benchmark/test/candcache-namespace.test.ts`; this is the half that guards the
+// refusal, and it belongs next to the rest of what this cache refuses.
+describe("a wrapper script's PROSE is not its program", () => {
+  const wrapper = (body: string): string => {
+    const p = join(scratch(), 'wrapper');
+    writeFileSync(p, body);
+    chmodSync(p, 0o755);
+    return p;
+  };
+  const NODE = realpathSync(process.execPath);
+
+  test('a `$(…)` in CODE refuses, and the refusal says WHICH LINE', () => {
+    const p = wrapper(`#!/bin/sh\n# a \`harmless\` comment\nexec "$(command -v node)" "$@"\n`);
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+    expect(() => toolchainFileChain(p)).toThrow(/line 3: exec "\$\(command -v node\)"/);
+  });
+
+  test('a BACKTICK substitution in code refuses', () => {
+    const p = wrapper('#!/bin/sh\nCC=`command -v node`\nexec "$CC" "$@"\n');
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
+  test('an `eval` in code refuses', () => {
+    const p = wrapper(`#!/bin/sh\neval exec ${NODE} "$@"\n`);
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
+  test('a `#` inside a quoted string is not a comment, and what follows it is still read', () => {
+    const p = wrapper(`#!/bin/sh\nTAG="#1 $(command -v node)"\nexec ${NODE} "$@"\n`);
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
+  test('`$((` is NOT excluded — it is not reliably arithmetic', () => {
+    // The one narrowing that looks free: an arithmetic expansion produces an integer and cannot
+    // name a program, so `$((` could be dropped from the pattern. It cannot. MEASURED:
+    //   bash -c 'echo $((cd /tmp) && pwd)'      -> runs the commands
+    //   /bin/sh (macOS), zsh                    -> the same
+    //   dash                                    -> Syntax error: Missing '))'
+    // So `$((` is a command substitution round a subshell in three of the four shells here, and
+    // this pin is the regression guard on that decline.
+    const p = wrapper(`#!/bin/sh\nD=$((cd /tmp) && pwd)\nexec "$D/node" "$@"\n`);
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
+  test('a HEREDOC makes `#` ambiguous, so such a script is read as written — the refusing side', () => {
+    const p = wrapper(`#!/bin/sh\ncat <<EOF\n# $(command -v node)\nEOF\nexec ${NODE} "$@"\n`);
+    expect(() => toolchainFileChain(p)).toThrow(/computes the program it runs/);
+  });
+
+  test('a command substitution in a COMMENT is not a computed delegate', () => {
+    const p = wrapper(`#!/bin/sh\n# built by \`make\`, and $(dirname) is the old spelling\nexec ${NODE} "$@"\n`);
+    expect(toolchainFileChain(p), 'the real delegate is followed, not refused').toContain(NODE);
+  });
+
+  test('…and a comment naming a FILE does not put that file in the namespace', () => {
+    const p = wrapper(`#!/bin/sh\n# remember to run make first\nexec ${NODE} "$@"\n`);
+    expect(toolchainFileChain(p).some((e) => e.endsWith('/make'))).toBe(false);
+  });
+});
+
+describe('THE RESIDUAL: a wrapper that OPENS a file it locates for itself', () => {
+  // Said out loud because 48ecc3fb moved whole SCRIPTS across this line, not only constructs. The
+  // chain follows what a script EXECS, never what it OPENS, so a wrapper that reads a project data
+  // file — a linked ELF whose symbol table its output depends on — is SERVED with that file
+  // outside the namespace, and rebuilding the file does not invalidate.
+  //
+  // What the pin is here to keep honest: the delegate refusal was never the guard for this. A
+  // wrapper whose ENGLISH happens to contain a backtick refused; the identical wrapper whose
+  // English does not was served on origin/main too, and both are served now. The remedy is one
+  // token in the compile TEMPLATE — pass the file as an argument, and `templatePathOperands`
+  // measures it by content. `docs/ranked-repro.md` carries the recipe and its cost.
+  const wrapper = (body: string): string => {
+    const dir = scratch();
+    writeFileSync(join(dir, 'game.elf'), 'symbols v1');
+    const p = join(dir, 'wrapper');
+    writeFileSync(p, body);
+    chmodSync(p, 0o755);
+    return p;
+  };
+  const NODE = realpathSync(process.execPath);
+  const READS_A_FILE = `ELF="\${3:-game.elf}"\n/bin/cat "$ELF" >/dev/null\nexec ${NODE} "$@"\n`;
+
+  test('the file it reads is NOT in the chain, with prose and without — the prose was never the guard', () => {
+    const withProse = toolchainFileChain(wrapper(`#!/bin/sh\n# run \`make\` first\n${READS_A_FILE}`));
+    const without = toolchainFileChain(wrapper(`#!/bin/sh\n${READS_A_FILE}`));
+    for (const [label, chain] of [
+      ['with prose', withProse],
+      ['without prose', without],
+    ] as const) {
+      expect(chain, `${label}: served, not refused`).toContain(NODE);
+      expect(
+        chain.some((e) => e.endsWith('game.elf')),
+        `${label}: the data input is the documented residual`,
+      ).toBe(false);
+    }
+  });
 });

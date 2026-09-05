@@ -30,6 +30,7 @@
 // so `SHAPING_SOURCES` is asserted directly: that half is a constant and needs no toolchain.
 import { toolchainFileChain } from '@asmlift/cli/candcache';
 import { TOOLCHAIN } from '@asmlift/toolchains';
+import { execSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -240,5 +241,50 @@ describe('hole 5 — the compile environment is an input to every candidate comp
     const bare = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', undefined, () => candCacheStaticStamp([]));
     const set = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', 'x', () => candCacheStaticStamp([]));
     expect(set).toBe(bare);
+  });
+});
+
+describe("a script's PROSE is not its program", () => {
+  // The class, MEASURED on the one script that inhabits the delegate refusal on this machine
+  // (`scripts/pool_abs_syms.sh` in the author's klonoa checkout, byte-identical in five copies):
+  // TEN of its lines trip `SCRIPT_COMPUTES_ITS_DELEGATE`, EIGHT are English sentences quoting
+  // `.set`, `.4byte` and `make` in backticks — and the other TWO ARE CODE, so reading prose as
+  // prose removes 8 of 10 refusal SITES and that script still refuses until the checkout that owns
+  // it is edited. What this file is entitled to claim is the reading, not that checkout's number.
+  // `compile-command.ts` had already decided this question for the compile TEMPLATE and for the
+  // same reasons; the scripts the template NAMES were still read as prose-and-program at once.
+  //
+  // The refusal boundary itself is pinned in `packages/cli/test/offline/candcache-refusals.test.ts`
+  // — inside `pnpm test:offline`, which this file is not. What stays here needs a real interpreter
+  // resolved off `$PATH`, or the benchmark's own stamp.
+  const wrapper = (body: string): string => {
+    const p = join(scratch(), 'wrapper');
+    writeFileSync(p, body);
+    chmodSync(p, 0o755);
+    return p;
+  };
+
+  test('editing that comment STILL re-namespaces — the text is dropped from the scan, not the hash', () => {
+    const p = wrapper('#!/bin/sh\n# one\nexec /usr/bin/true "$@"\n');
+    const before = candCacheStaticStamp(toolchainFileChain(p));
+    writeFileSync(p, '#!/bin/sh\n# two\nexec /usr/bin/true "$@"\n');
+    expect(candCacheStaticStamp(toolchainFileChain(p)), 'the script is hashed by its whole bytes').not.toBe(before);
+  });
+
+  test('the SHEBANG survives — it is the one `#` line that names a program', () => {
+    const p = wrapper('#!/bin/sh\n# a comment\nexec /usr/bin/true "$@"\n');
+    expect(toolchainFileChain(p), 'the interpreter is a delegate').toContain(realpathSync('/bin/sh'));
+  });
+
+  test('…and `#!/usr/bin/env sh` names TWO programs, both of which run', () => {
+    // The stripper removes the shebang like any other `#` line, so it is re-added from the raw
+    // bytes — and re-adding only the FIRST token drops the real interpreter out of the namespace
+    // for every `env` shebang. Swap the interpreter behind `env` and the cache would serve objects
+    // built by a different program.
+    const sh = realpathSync(execSync('command -v sh', { shell: '/bin/sh' }).toString().trim());
+    const p = wrapper('#!/usr/bin/env sh\n# a comment\nexec /usr/bin/true "$@"\n');
+    const chain = toolchainFileChain(p);
+    expect(chain, 'env itself').toContain(realpathSync('/usr/bin/env'));
+    expect(chain, 'and the interpreter env goes on to run').toContain(sh);
   });
 });
