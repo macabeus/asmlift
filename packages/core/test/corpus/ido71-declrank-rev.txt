@@ -1,0 +1,89 @@
+
+probe.o:     file format elf32-tradbigmips
+
+
+Disassembly of section .text:
+
+00000000 <probe>:
+   0:	addiu	sp,sp,-88
+   4:	addiu	t6,a0,17
+   8:	addiu	t7,a0,34
+   c:	addiu	t8,a0,51
+  10:	addiu	t9,a0,68
+  14:	addiu	t0,a0,85
+  18:	addiu	t1,a0,102
+  1c:	sw	t6,24(sp)
+  20:	sw	t7,28(sp)
+  24:	sw	t8,32(sp)
+  28:	sw	t9,36(sp)
+  2c:	sw	t0,40(sp)
+  30:	sw	t1,44(sp)
+  34:	sw	ra,20(sp)
+  38:	addiu	t2,a0,119
+  3c:	addiu	t3,a0,136
+  40:	addiu	t4,a0,153
+  44:	addiu	t5,a0,170
+  48:	addiu	t6,a0,187
+  4c:	addiu	t7,a0,204
+  50:	addiu	t8,a0,221
+  54:	addiu	t9,a0,238
+  58:	addiu	t0,a0,255
+  5c:	addiu	t1,a0,272
+  60:	sw	t2,48(sp)
+  64:	sw	t3,52(sp)
+  68:	sw	t4,56(sp)
+  6c:	sw	t5,60(sp)
+  70:	sw	t6,64(sp)
+  74:	sw	t7,68(sp)
+  78:	sw	t8,72(sp)
+  7c:	sw	t9,76(sp)
+  80:	sw	t0,80(sp)
+  84:	jal	0 <probe>
+  88:	sw	t1,84(sp)
+  8c:	lw	t2,24(sp)
+  90:	lw	t3,28(sp)
+  94:	lw	t5,32(sp)
+  98:	lw	t6,36(sp)
+  9c:	multu	t2,t3
+  a0:	lw	t9,40(sp)
+  a4:	lw	t0,44(sp)
+  a8:	lw	t3,48(sp)
+  ac:	lw	ra,20(sp)
+  b0:	mflo	t4
+	...
+  bc:	multu	t5,t6
+  c0:	lw	t5,52(sp)
+  c4:	mflo	t7
+  c8:	addu	t8,t4,t7
+  cc:	lw	t7,56(sp)
+  d0:	multu	t9,t0
+  d4:	lw	t9,60(sp)
+  d8:	mflo	t1
+  dc:	addu	t2,t8,t1
+  e0:	lw	t1,64(sp)
+  e4:	multu	t3,t5
+  e8:	lw	t3,68(sp)
+  ec:	mflo	t6
+  f0:	addu	t4,t2,t6
+  f4:	lw	t6,72(sp)
+  f8:	multu	t7,t9
+  fc:	lw	t7,76(sp)
+ 100:	mflo	t0
+ 104:	addu	t8,t4,t0
+ 108:	lw	t0,80(sp)
+ 10c:	multu	t1,t3
+ 110:	lw	t1,84(sp)
+ 114:	addiu	sp,sp,88
+ 118:	mflo	t5
+ 11c:	addu	t2,t8,t5
+ 120:	nop
+ 124:	multu	t6,t7
+ 128:	mflo	t9
+ 12c:	addu	t4,t2,t9
+ 130:	nop
+ 134:	multu	t0,t1
+ 138:	mflo	t3
+ 13c:	addu	v0,t4,t3
+ 140:	jr	ra
+ 144:	nop
+	...

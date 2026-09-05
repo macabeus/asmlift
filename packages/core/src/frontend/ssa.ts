@@ -234,9 +234,30 @@ export function makeSsaBuilder(
     if (!inRange(off, model().ownedLocals)) {
       return;
     }
+    // ONE CLASS INSIDE THE PARTITION IS STILL NOT A DECLARATION RANK, and it is UNREFUSED — stated
+    // here because it is the only class the ordering reaches in the wild. A stack AGGREGATE the
+    // frontend decomposed into per-word keys yields several `sp@k`s that are fields of ONE declared
+    // object, not several declared scalars. Measured over 2,463 real agbcc functions (158 sa3 +
+    // klonoa listings): exactly one carries two slot-carrying locals and permutes under the
+    // ordering — sa3 `sub_80617E0`, whose [sp,#0]..[sp,#0xc] are the four words of `Vec2_32
+    // sp00[2]` (its own preprocessed source declares it), with the only genuine reload spill at
+    // [sp,#0x10]. So the wild reach of this ordering is one function, and that function is the
+    // wrong class — the honest generality sentence is "1 of 2,463 real agbcc functions changes,
+    // and it is an aggregate", not "no real agbcc function changes", which is true only of the
+    // 126 benchmark rows.
+    //
+    // It is unrefused because a non-address-taken array never mints an `laddr`, and `laddr` is the
+    // only aggregate the structurer's `frame` refusal catches. FLIP CONDITION: once stack-array
+    // recovery declares `sp00[2]`, ordering an aggregate against a reload spill by the minimum of
+    // its element offsets is WRONG — `assign_stack_local` runs before reload and puts every array
+    // below every spill slot regardless of declaration rank. The licence this capability rests on
+    // (reload hands a spilled pseudo its slot by `expand_decl` rank) is about separately declared
+    // SCALARS; intra-aggregate offsets are fixed by the aggregate's layout at expand time.
     // UNION, not a choice (ir/core.ts `SlotHomes`): whether the earlier declaration rank is the
     // lower or the higher offset is a per-COMPILER fact, and this builder is handed a name, a
     // block count, a predecessor list and a live-in model — no target. `l3/slotorder.ts` reduces.
+    // A GUARD WITH NO CORPUS INHABITANT: over both benchmark tiers no value is ever written to two
+    // DIFFERENT slots, so this branch has never produced a set of size two on a real input.
     const prev = slotHomes.get(v);
     if (prev === undefined) {
       slotHomes.set(v, new Set([off]));

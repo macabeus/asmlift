@@ -200,6 +200,12 @@ export interface TargetDescription {
     // with two or more spilled user locals, so no row on those tiers can referee a value, and a
     // value no row can falsify does not earn the level. Each carries its measurement and its flip
     // condition at its own site.
+    //
+    // KEYED BY DESCRIPTION, WHILE THE FACT IS PER TOOLCHAIN — the first field in this bag with a
+    // stated instance of that gap. `MIPS_GCC` serves BOTH `gcc2.7.2kmc` (Snowboard Kids 2's Kyoto
+    // build at -O2) and `gcc2.7.2` (Mario Party 3's at -O1); they agree here, and a committed probe
+    // says so, but nothing in this bag could express it if they did not. Any behavior that can
+    // differ between two toolchains sharing one description is mis-keyed by construction.
     spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
     // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
@@ -355,8 +361,11 @@ export const MIPS_IDO: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
     switchAllowsNeqCase: false,
-    // MEASURED `descending` (the earlier-declared spilled local takes the HIGHER offset, 7 of 7
-    // spills on a reversed-declaration probe) and NOT SHIPPED. No ido7.1 benchmark row lifts with
+    // MEASURED `descending` (the earlier-declared spilled local takes the HIGHER offset) and NOT
+    // SHIPPED. The probe is COMMITTED — `packages/core/test/corpus/probe-declrank.c` and its
+    // reversed-declaration twin, with this compiler's objects beside them — and a test reads the
+    // correspondence off it: 16 of 16 spills, and rank → offset unchanged when the declaration
+    // list is reversed, which is what separates declaration rank from the order of the assignments. No ido7.1 benchmark row lifts with
     // two or more spilled user locals — the only spilling shape in the corpus carries a call, and
     // this frontend declines a call — so no row can tell a wrong value from a right one here.
     //
@@ -400,11 +409,15 @@ export const MIPS_GCC: TargetDescription = {
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
-    // MEASURED `ascending` on both toolchains this description serves (gcc2.7.2kmc 8 of 8,
-    // gcc2.7.2 8 of 8) and NOT SHIPPED, for the same reason as ido7.1: no row on either tier
-    // lifts with two or more spilled user locals. Note the shape of the risk if it ever ships —
-    // the value is per DESCRIPTION and TWO toolchains map here, so a toolchain whose direction
-    // differed from its description's would need a per-toolchain override this bag cannot express.
+    // MEASURED `ascending` on both toolchains this description serves — 7 of 7 spills each, and
+    // rank → offset unchanged under a reversed declaration list — and NOT SHIPPED, for the same
+    // reason as ido7.1: no row on either tier lifts with two or more spilled user locals. Both
+    // probes are COMMITTED beside ido7.1's (`corpus/gcc272kmc-declrank*.txt`,
+    // `corpus/gcc272-declrank*.txt`) and a test reads the direction off them.
+    //
+    // The two agreeing is not a formality. The value is per DESCRIPTION and TWO toolchains map
+    // here, so a toolchain whose direction differed from its description's would need a
+    // per-toolchain override this bag cannot express — see the note at `compilerBehaviors`.
     spillSlotOrder: 'unknown',
   },
 };
@@ -429,8 +442,12 @@ export const PPC_MWCC: TargetDescription = {
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
-    // MEASURED `descending` (9 of 9) and NOT SHIPPED: no mwcc row lifts with two or more spilled
-    // user locals either — mwcc did not spill the ten-local probe at all. And, as at MIPS_IDO, the
+    // NOT MEASURED, and `'unknown'` is therefore the only honest value rather than a withheld one.
+    // No mwcc row lifts with two or more spilled user locals, and the compiler does not spill the
+    // committed declaration-rank probe either: at sixteen locals it homes every one in a register,
+    // and at forty it sinks the whole computation past the call so nothing is live across it. An
+    // earlier note here claimed `descending` "9 of 9"; that measurement is not reproducible from
+    // this repo and its own next clause said the probe did not spill, so it is withdrawn. And, as at MIPS_IDO, the
     // frame partition comes first: `frontend/ppc.ts` claims no `LiveInModel.ownedLocals`, so the
     // shared stamp records no slot home on this target at all and a direction here would order
     // nothing until it does.

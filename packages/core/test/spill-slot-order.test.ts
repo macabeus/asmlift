@@ -330,6 +330,70 @@ test('the datum reaches the structurer through the compilerBehaviors spread, wit
   expect(structureOptionsFor(MIPS_IDO, false).spillSlotOrder).toBe('unknown');
 });
 
+// THE THREE `'unknown'`s, BACKED BY A COMMITTED PROBE RATHER THAN A NUMBER IN A COMMENT. Each
+// target's comment records a direction that was measured and deliberately not shipped, and a
+// direction nobody can re-run is a claim, not a measurement. The probe is `corpus/probe-declrank.c`
+// — sixteen `int` locals, each assigned `n + 17*(rank+1)` so its immediate NAMES it in the object,
+// all live across a call so the allocator must home the losers in the frame — plus
+// `probe-declrank-rev.c`, the identical body with the DECLARATION LIST reversed. The reversal is
+// what separates declaration rank from use order: the two files assign in the same textual order,
+// so anything that follows use order is unchanged between them.
+//
+// Read `<imm> → [sp,#off]` by pairing each `addiu rX,a0,<imm>` with the next `sw rX,off(sp)` (the
+// old allocators reuse a temp, so pairing is by nearest following store, not by register).
+const declRank = (file: string, reversed: boolean): [number, number][] => {
+  const pending = new Map<string, number>();
+  const out: [number, number][] = [];
+  for (const line of read(file).split('\n')) {
+    const def = /addiu\s+(\S+),a0,(-?\d+)/.exec(line);
+    if (def !== null) {
+      pending.set(def[1], Number(def[2]));
+      continue;
+    }
+    const st = /\bsw\s+(\S+),(\d+)\(sp\)/.exec(line);
+    if (st !== null && pending.has(st[1])) {
+      const k = pending.get(st[1])! / 17; // the k-th assignment, 1-based
+      pending.delete(st[1]);
+      out.push([reversed ? 16 - k : k - 1, Number(st[2])]);
+    }
+  }
+  return out.sort((a, b) => a[0] - b[0]);
+};
+const directionOf = (file: string, reversed: boolean): { n: number; dir: string } => {
+  const rows = declRank(file, reversed);
+  const asc = rows.every((r, i) => i === 0 || rows[i - 1][1] < r[1]);
+  const desc = rows.every((r, i) => i === 0 || rows[i - 1][1] > r[1]);
+  return { n: rows.length, dir: asc ? 'ascending' : desc ? 'descending' : 'mixed' };
+};
+
+test('ido7.1 hands frame slots out DESCENDING against declaration rank — measured, not shipped', () => {
+  expect(directionOf('ido71-declrank.txt', false)).toEqual({ n: 16, dir: 'descending' });
+  // the reversal moves which VARIABLE sits at each offset and leaves rank → offset alone, which is
+  // what makes this a fact about declaration rank rather than about the order of the assignments
+  expect(directionOf('ido71-declrank-rev.txt', true)).toEqual({ n: 16, dir: 'descending' });
+  expect(MIPS_IDO.compilerBehaviors.spillSlotOrder).toBe('unknown');
+});
+
+test('both toolchains behind MIPS_GCC hand them out ASCENDING — and the field is per DESCRIPTION', () => {
+  // gcc2.7.2kmc (Snowboard Kids 2's Kyoto build, -O2) and gcc2.7.2 (Mario Party 3's, -O1) share
+  // ONE TargetDescription, so this pair is also the check that the two agree — a behavior that
+  // differed between two toolchains mapping to one description would be mis-keyed by construction,
+  // and `compilerBehaviors` has no way to spell the override.
+  expect(directionOf('gcc272kmc-declrank.txt', false)).toEqual({ n: 7, dir: 'ascending' });
+  expect(directionOf('gcc272kmc-declrank-rev.txt', true)).toEqual({ n: 7, dir: 'ascending' });
+  expect(directionOf('gcc272-declrank.txt', false)).toEqual({ n: 7, dir: 'ascending' });
+  expect(directionOf('gcc272-declrank-rev.txt', true)).toEqual({ n: 7, dir: 'ascending' });
+  expect(MIPS_GCC.compilerBehaviors.spillSlotOrder).toBe('unknown');
+});
+
+// mwcc has NO probe here, and that is the finding rather than an omission: it spilled nothing on
+// this probe at sixteen locals and nothing at forty either (it sinks the whole computation past
+// the call, so no local is live across it). Its comment in target.ts is corrected to say the
+// direction is UNMEASURED rather than "9 of 9".
+test('mwcc ships unknown with no measured direction behind it', () => {
+  expect(PPC_MWCC.compilerBehaviors.spillSlotOrder).toBe('unknown');
+});
+
 // ── A5: one pure ordering, owned by `emit` ────────────────────────────────────────────────────
 
 /** Two slot-carrying locals declared AGAINST an ascending frame, an unslotted one between them. */

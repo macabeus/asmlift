@@ -56,6 +56,11 @@ import type { SFn } from './ast';
  *  declaration rank is the LOWEST offset under an ascending frame and the HIGHEST under a
  *  descending one: one comparator, applied where `slotOrder` is in hand.
  *
+ *  The `descending` half of that comparator has NO SHIPPED INHABITANT: agbcc is the only target
+ *  that ships a direction and it is `ascending`. It is reached only through the public
+ *  `StructureOptions.spillSlotOrder` and by the tests, and it exists because two of the four
+ *  `TargetDescription`s carry a MEASURED `descending` with a written flip condition (target.ts).
+ *
  *  REACH, measured on this branch, so the next round starts at the blocker and not at the census.
  *  The two synthetic inhabitants are `spillorder` (6 → MATCH) and `dma_fill_uninit` (12 → MATCH,
  *  a row this capability did not author). On the REAL agbcc tier the reach is ZERO and the cause

@@ -362,6 +362,12 @@ export function replaceAllUsesWith(fn: Fn, oldV: Value, newV: Value): void {
   // and the declaration list loses its order for that local. UNION, never a choice: this helper is
   // handed an `Fn` and an `Fn` carries no target, so it cannot know whether the earlier rank is the
   // lower or the higher offset (`SlotHomes`). `l3/slotorder.ts` decides that, once.
+  //
+  // A GUARD, MEASURED: instrumented over every agbcc case of both benchmark tiers, this fires 14
+  // times on 252 lifted synthetic functions and 112 times on 116 lifted real ones — and in every
+  // single firing the inheriting value already carried the same offset. So it has never yet SAVED
+  // a home, and the union has never yet held two. It ships because the alternative is a home
+  // stranded on a retired value, which is silent.
   const homes = fn.slotHomes;
   if (homes !== undefined) {
     const from = homes.get(oldV);
