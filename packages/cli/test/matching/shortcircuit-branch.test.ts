@@ -127,3 +127,28 @@ describe('a three-clause short-circuit chain folds flat', () => {
     expect(b.score.match).toBe(true);
   });
 });
+
+// The one LOUD→SILENT conversion this fold makes, pinned. Folding a loop-EXIT connective removes
+// the back-edge loop recovery was refusing, so a function that DECLINED now decompiles — the single
+// effect of the De Morgan widening with no differ to referee it, since the two real functions it
+// flips (`sub_80930B8`, `sub_80932E0`) are not benchmark rows.
+//
+// At `a56952ad` this very shape throws `StructureError: cannot structure 'f': unrecovered back-edge
+// into block #2`, so the test below cannot even reach an assertion there. It is not a match (best
+// 24 at the time of writing) and deliberately asserts no score: what it gates is that the fold
+// still SURVIVES into the loop condition rather than the bytes it scores.
+//
+// Equivalence is executed, not argued: the decompilation and the original C, both built with the
+// host `cc` and run over a 512-point grid of `p`/`q` contents and `n` (including `n < 0` and
+// `n` past the array), print identical output.
+describe('a loop-exit connective folds, and the loop it un-declines stays recovered', () => {
+  test('`while (i < n && (p[i] || q[i]))` keeps ONE loop with the connective in its condition', () => {
+    const c =
+      'int f(int*p,int*q,int n,int*o){ int i=0; while (i<n && (p[i]!=0 || q[i]!=0)) i++; o[0]=i; o[2]=q[1]; return i; }';
+    const asm = compileTargetAsm(c);
+    const best = decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).best;
+    expect(best.source).toMatch(/while \(v0 < a2 && \(a0\[v0\] != 0 \|\| a1\[v0\] != 0\)\)/);
+    expect(best.source.split('do {').length - 1).toBe(1); // no tail-duplicated loop
+    expect(best.source).not.toContain('ASMLIFT_ERROR');
+  });
+});
