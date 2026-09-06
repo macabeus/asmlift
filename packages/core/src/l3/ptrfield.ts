@@ -62,7 +62,16 @@
 // FreeAllDecompBuffers, TransformSingleEntityToScreen and ConfigureEntityBehavior among them).
 // Declining there is right; being unable to say which of the two happened is the defect.
 import { type IrType, T } from '../ir/types';
-import { type Expr, type SFn, type Stmt, type StructType, mapExprChildren, mapStmtExprs, walkExprs } from './ast';
+import {
+  type Expr,
+  type SFn,
+  type Stmt,
+  type StructType,
+  mapExprChildren,
+  mapStmtExprs,
+  stmtChildren,
+  walkExprs,
+} from './ast';
 import { type Gate, firstRejection } from './gates';
 import { declaredTypes, exprCType } from './typing';
 
@@ -159,25 +168,9 @@ function* stores(body: readonly Stmt[]): Generator<Extract<Stmt, { k: 'store' }>
     if (s.k === 'store') {
       yield s;
     }
-    yield* stores(stmtLists(s));
+    yield* stores(stmtChildren(s));
   }
 }
-
-const stmtLists = (s: Stmt): Stmt[] => {
-  switch (s.k) {
-    case 'if':
-      return [...s.then, ...s.else];
-    case 'while':
-    case 'dowhile':
-      return s.body;
-    case 'for':
-      return [s.init, s.inc, ...s.body];
-    case 'switch':
-      return [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])];
-    default:
-      return [];
-  }
-};
 
 /** The `/ptr-field` candidate, or null when no field qualifies. Read-only: returns a fresh SFn.
  *

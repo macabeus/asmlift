@@ -89,7 +89,16 @@
 // The induction inits are read out of the statements PRECEDING the do-while in its own list
 // rather than out of a guard arm, and the counter's init is the only one the rewrite deletes.
 import { IrType, T } from '../ir/types';
-import { Expr, SFn, Stmt, mapExprChildren, mapStmtExprs, rematerializableAddress, stmtExprs } from './ast';
+import {
+  Expr,
+  SFn,
+  Stmt,
+  mapExprChildren,
+  mapStmtExprs,
+  rematerializableAddress,
+  stmtChildren,
+  stmtExprs,
+} from './ast';
 import { type Gate, firstRejection } from './gates';
 import { takenNames } from './hoist';
 import { nameStorage } from './storage';
@@ -120,17 +129,7 @@ function countMentions(stmts: Stmt[], name: string): number {
       n++;
     }
     stmtExprs(s).forEach(inExpr);
-    const kids: Stmt[] =
-      s.k === 'if'
-        ? [...s.then, ...s.else]
-        : s.k === 'while' || s.k === 'dowhile'
-          ? s.body
-          : s.k === 'for'
-            ? [s.init, s.inc, ...s.body]
-            : s.k === 'switch'
-              ? [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])]
-              : [];
-    kids.forEach(inStmt);
+    stmtChildren(s).forEach(inStmt);
   };
   stmts.forEach(inStmt);
   return n;
@@ -163,17 +162,7 @@ function derefWidths(stmts: Stmt[], p: string): number[] {
   };
   const inStmt = (s: Stmt): void => {
     stmtExprs(s).forEach(inExpr);
-    const kids: Stmt[] =
-      s.k === 'if'
-        ? [...s.then, ...s.else]
-        : s.k === 'while' || s.k === 'dowhile'
-          ? s.body
-          : s.k === 'for'
-            ? [s.init, s.inc, ...s.body]
-            : s.k === 'switch'
-              ? [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])]
-              : [];
-    kids.forEach(inStmt);
+    stmtChildren(s).forEach(inStmt);
   };
   stmts.forEach(inStmt);
   return out;
@@ -197,17 +186,7 @@ function stmtAssigns(s: Stmt, name: string): boolean {
   if (s.k === 'assign' && s.name === name) {
     return true;
   }
-  const kids: Stmt[] =
-    s.k === 'if'
-      ? [...s.then, ...s.else]
-      : s.k === 'while' || s.k === 'dowhile'
-        ? s.body
-        : s.k === 'for'
-          ? [s.init, s.inc, ...s.body]
-          : s.k === 'switch'
-            ? [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])]
-            : [];
-  return kids.some((x) => stmtAssigns(x, name));
+  return stmtChildren(s).some((x) => stmtAssigns(x, name));
 }
 
 /** One countdown loop as the shared admission rules read it: every fact collected before any rule
@@ -340,20 +319,10 @@ function stmtMentions(s: Stmt, name: string): boolean {
   if (s.k === 'assign' && s.name === name) {
     return true;
   }
-  const kids: Stmt[] =
-    s.k === 'if'
-      ? [...s.then, ...s.else]
-      : s.k === 'while' || s.k === 'dowhile'
-        ? s.body
-        : s.k === 'for'
-          ? [s.init, s.inc, ...s.body]
-          : s.k === 'switch'
-            ? [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])]
-            : [];
+  const kids = stmtChildren(s);
   return stmtExprs(s).some((e) => mentionsVar(e, name)) || kids.some((k) => stmtMentions(k, name));
 }
 
-/** `assign(p, p + 1)` on a pointer-typed `p`? */
 /** `x = x + 1` on ANY variable — the assigned name, or null. */
 function isUnitIncrement(s: Stmt): string | null {
   if (s.k !== 'assign') {
@@ -365,6 +334,7 @@ function isUnitIncrement(s: Stmt): string | null {
   return ok ? s.name : null;
 }
 
+/** `assign(p, p + 1)` on a pointer-typed `p` — the walk's step; the assigned name, or null. */
 function isUnitStep(s: Stmt, ptrVars: Map<string, IrType>): string | null {
   const n = isUnitIncrement(s);
   return n !== null && ptrVars.has(n) ? n : null;
@@ -374,8 +344,8 @@ function isUnitStep(s: Stmt, ptrVars: Map<string, IrType>): string | null {
  *  mentioned NOWHERE in the function outside its init and its loop — counted GLOBALLY, because a
  *  suffix-only scan missed reads after an ENCLOSING construct, leaving the deleted init's var
  *  read uninitialized. One spelling for every recognizer. */
-function confinedToWalk(fnBody: Stmt[], name: string, initMentions: number, loop: Stmt): boolean {
-  return countMentions(fnBody, name) === initMentions + countMentions([loop], name);
+function confinedToWalk(fnBody: Stmt[], name: string, mentionsOutsideLoop: number, loop: Stmt): boolean {
+  return countMentions(fnBody, name) === mentionsOutsideLoop + countMentions([loop], name);
 }
 
 /** Rewrite every deref of `p` into an indexed access off `base`, and every OTHER mention of `p`
@@ -396,9 +366,14 @@ function reindexExpr(e: Expr, walk: WalkLoop, iv: string): Expr | null {
       e.idx.k === 'const' && e.idx.value === 0
         ? { k: 'var', name: iv }
         : { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: e.idx };
-    // NOTE: this rebuilds the node from parts, so any field not named here is DROPPED. `lead` is
-    // declined above (the deref side); it cannot arrive on the base side either, since `walk.base`
-    // is a local pointer and structuring only ever puts `lead` on an array GLOBAL's own name.
+    // NOTE: this rebuilds the node from parts, so any field not named here is DROPPED — and the
+    // `index` node has exactly three optional ones (ast.ts): `lead`, `operandOff`, `baseOrdered`.
+    // `lead` is declined above (the deref side); it cannot arrive on the base side either, since
+    // `walk.base` is a local pointer and structuring only ever puts `lead` on an array GLOBAL's
+    // own name. Dropping the other two is right rather than merely harmless: `baseOrdered` is
+    // stamped per SYMBOL on an order-licensed GLOBAL, which a local var base never is, and
+    // `operandOff`'s readers (l3/basecse.ts, l3/offmember.ts) ask about a CONSTANT subscript,
+    // which the rewritten `i`/`i + k` index never is.
     return { k: 'index', base: { k: 'var', name: walk.base }, idx, width: e.width, signed: e.signed };
   }
   let failed = false;
@@ -716,11 +691,10 @@ export function reindexWalks(
   //     exactly that size — otherwise the walk (strides p's pointee) and the indexed form
   //     (strides base's) read different addresses;
   //   • confinedToWalk — the global mention accounting, shared with v3.
-  const soundWalk = (walk: WalkLoop, initMentions: number, loop: Stmt): boolean =>
+  const soundWalk = (walk: WalkLoop, mentionsOutsideLoop: number, loop: Stmt): boolean =>
     walk.p !== walk.base &&
-    strideAgrees(ptrVars.get(walk.p), ptrVars.get(walk.base) ?? paramType(walk.base), derefWidths([loop], walk.p)) &&
-    confinedToWalk(sfn.body, walk.p, initMentions, loop);
-  const paramType = (n: string): IrType | undefined => sfn.params.find((x) => x.name === n)?.type;
+    strideAgrees(ptrVars.get(walk.p), ptrVars.get(walk.base), derefWidths([loop], walk.p)) &&
+    confinedToWalk(sfn.body, walk.p, mentionsOutsideLoop, loop);
 
   // walk a statement LIST so the `while` shape can see its preceding init statement
   const walkList = (stmts: Stmt[]): Stmt[] => {
@@ -736,8 +710,7 @@ export function reindexWalks(
           init.k === 'assign' &&
           init.name === p &&
           init.value.k === 'var' &&
-          // init contributes 2 mentions (the write to p and the inc's read... the for init is
-          // part of the loop stmt itself, so count the whole `for` node) — see soundWalk
+          // a `for`'s init lives inside the loop node, so confinedToWalk already counts it
           soundWalk({ p, base: init.value.name }, 0, s)
         ) {
           const walk: WalkLoop = { p, base: init.value.name };

@@ -1,10 +1,10 @@
 // What one L3 tree does to each of its locals, counted once.
 //
-// Two levers ask overlapping versions of the question and would disagree if each walked the tree
+// Levers ask overlapping versions of the question and would disagree if each walked the tree
 // its own way: l3/inlinebase.ts needs the SHAPE of every use (only an `index` base is re-spellable,
 // and the single assignment must be a top-level `const` nothing mentions earlier), while
 // l3/volatileval.ts needs the COUNTS, to check the tree still performs every access the machine
-// did before it declares them all observable. One walk answers both, and it has to: on the second
+// did before it declares them all observable. One walk answers both, and it has to: on the counting
 // consumer a miscount is a wrong `volatile` claim, not a missed candidate.
 //
 // Derived from the ONE traversal vocabulary (exprChildren/stmtExprs/stmtChildren) for every node

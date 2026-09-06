@@ -138,6 +138,81 @@ export interface RegcopySpelling {
   sfn: SFn;
 }
 
+interface Diamond {
+  v: string;
+  E: Expr;
+  updArm: 'then' | 'else';
+  upd: Expr;
+  cond: Expr;
+}
+/** `if (cmp) { v = E } else { v = f(E) }` (or arms swapped), f = bin(E, const-ish). */
+function matchDiamond(s: Extract<Stmt, { k: 'if' }>): Diamond | null {
+  if (s.then.length !== 1 || s.else.length !== 1) {
+    return null;
+  }
+  const a = s.then[0];
+  const b = s.else[0];
+  if (a.k !== 'assign' || b.k !== 'assign' || a.name !== b.name) {
+    return null;
+  }
+  const isUpdOf = (upd: Expr, base: Expr): boolean =>
+    upd.k === 'bin' && isPure(upd.r) && exprEq(upd.l, base) && isConstExpr(upd.r);
+  if (isUpdOf(b.value, a.value)) {
+    return { v: a.name, E: a.value, updArm: 'else', upd: b.value, cond: s.cond };
+  }
+  if (isUpdOf(a.value, b.value)) {
+    return { v: a.name, E: b.value, updArm: 'then', upd: a.value, cond: s.cond };
+  }
+  return null;
+}
+/** Does the cond's NON-E operand mention `v`? (The E side becomes the copy; the other side
+ *  must be v-free or the hoisted assignment changes what it compares against.) */
+function condOtherMentions(cond: Expr, E: Expr, v: string): boolean {
+  if (cond.k !== 'bin') {
+    return false;
+  }
+  const other = exprEq(cond.l, E) ? cond.r : exprEq(cond.r, E) ? cond.l : null;
+  const mentions = (e: Expr): boolean => {
+    if (e.k === 'var') {
+      return e.name === v;
+    }
+    let hit = false;
+    mapExprChildren(e, (c) => {
+      hit = hit || mentions(c);
+      return c;
+    });
+    return hit;
+  };
+  return other ? mentions(other) : false;
+}
+/** cond compares E against a pure operand → same comparison reading the named var. */
+function rewriteCond(cond: Expr, E: Expr, name: string): Expr | null {
+  if (cond.k !== 'bin' || !(cond.op in FLIP)) {
+    return null;
+  }
+  if (exprEq(cond.l, E) && isPure(cond.r)) {
+    return { k: 'bin', op: cond.op, l: { k: 'var', name }, r: cond.r };
+  }
+  if (exprEq(cond.r, E) && isPure(cond.l)) {
+    return { k: 'bin', op: cond.op, l: cond.l, r: { k: 'var', name } };
+  }
+  return null;
+}
+function flipCmp(cond: Expr): Expr | null {
+  if (cond.k !== 'bin') {
+    return null;
+  }
+  const op = FLIP[cond.op];
+  return op ? { k: 'bin', op: op as Extract<Expr, { k: 'bin' }>['op'], l: cond.l, r: cond.r } : null;
+}
+/** in `upd`, the occurrence of subtree E replaced by var `name` (E was just assigned to it). */
+function renameSubexpr(e: Expr, E: Expr, name: string): Expr {
+  if (exprEq(e, E)) {
+    return { k: 'var', name };
+  }
+  return mapExprChildren(e, (c) => renameSubexpr(c, E, name));
+}
+
 /** Apply the register-copy re-spelling. Returns 0–3 variants — the base, plus the R3 tail in each
  *  spelling that exists (reuse needs R1 to have fired, fresh always does) — and an EMPTY list when
  *  nothing fired. Pure — never mutates the input. */
@@ -210,81 +285,6 @@ export function registerishSpellings(sfn: SFn): RegcopySpelling[] {
     return out;
   };
 
-  interface Diamond {
-    v: string;
-    E: Expr;
-    updArm: 'then' | 'else';
-    upd: Expr;
-    cond: Expr;
-  }
-  /** `if (cmp) { v = E } else { v = f(E) }` (or arms swapped), f = bin(E, const-ish). */
-  function matchDiamond(s: Extract<Stmt, { k: 'if' }>): Diamond | null {
-    if (s.then.length !== 1 || s.else.length !== 1) {
-      return null;
-    }
-    const a = s.then[0];
-    const b = s.else[0];
-    if (a.k !== 'assign' || b.k !== 'assign' || a.name !== b.name) {
-      return null;
-    }
-    const isUpdOf = (upd: Expr, base: Expr): boolean =>
-      upd.k === 'bin' && isPure(upd.r) && exprEq(upd.l, base) && isConstExpr(upd.r);
-    if (isUpdOf(b.value, a.value)) {
-      return { v: a.name, E: a.value, updArm: 'else', upd: b.value, cond: s.cond };
-    }
-    if (isUpdOf(a.value, b.value)) {
-      return { v: a.name, E: b.value, updArm: 'then', upd: a.value, cond: s.cond };
-    }
-    return null;
-  }
-  /** Does the cond's NON-E operand mention `v`? (The E side becomes the copy; the other side
-   *  must be v-free or the hoisted assignment changes what it compares against.) */
-  function condOtherMentions(cond: Expr, E: Expr, v: string): boolean {
-    if (cond.k !== 'bin') {
-      return false;
-    }
-    const other = exprEq(cond.l, E) ? cond.r : exprEq(cond.r, E) ? cond.l : null;
-    const mentions = (e: Expr): boolean => {
-      if (e.k === 'var') {
-        return e.name === v;
-      }
-      let hit = false;
-      mapExprChildren(e, (c) => {
-        hit = hit || mentions(c);
-        return c;
-      });
-      return hit;
-    };
-    return other ? mentions(other) : false;
-  }
-  /** cond compares E against a pure operand → same comparison reading the named var. */
-  function rewriteCond(cond: Expr, E: Expr, name: string): Expr | null {
-    if (cond.k !== 'bin' || !(cond.op in FLIP)) {
-      return null;
-    }
-    if (exprEq(cond.l, E) && isPure(cond.r)) {
-      return { k: 'bin', op: cond.op, l: { k: 'var', name }, r: cond.r };
-    }
-    if (exprEq(cond.r, E) && isPure(cond.l)) {
-      return { k: 'bin', op: cond.op, l: cond.l, r: { k: 'var', name } };
-    }
-    return null;
-  }
-  function flipCmp(cond: Expr): Expr | null {
-    if (cond.k !== 'bin') {
-      return null;
-    }
-    const op = FLIP[cond.op];
-    return op ? { k: 'bin', op: op as Extract<Expr, { k: 'bin' }>['op'], l: cond.l, r: cond.r } : null;
-  }
-  /** in `upd`, the occurrence of subtree E replaced by var `name` (E was just assigned to it). */
-  function renameSubexpr(e: Expr, E: Expr, name: string): Expr {
-    if (exprEq(e, E)) {
-      return { k: 'var', name };
-    }
-    return mapExprChildren(e, (c) => renameSubexpr(c, E, name));
-  }
-
   // R2: stage const-expressions used as bin operands into fresh locals, at statement level.
   const r2Stmt = (s: Stmt): Stmt[] => {
     const staged: Stmt[] = [];
@@ -333,14 +333,17 @@ export function registerishSpellings(sfn: SFn): RegcopySpelling[] {
   // than asserting one compiler's preference; the source dedupe collapses them when identical.
   const tails: RegcopySpelling[] = [];
   const last = base.body[base.body.length - 1];
-  if (last?.k === 'return' && last.value && last.value.k !== 'var') {
+  if (last?.k === 'return' && last.value !== undefined && last.value.k !== 'var') {
+    // bound here rather than re-read inside `mk`: a PROPERTY's narrowing does not survive into a
+    // closure, and re-asserting it is what the three casts this replaces were doing
+    const retVal: Expr = last.value;
     const mk = (name: string): SFn => ({
       ...base,
       locals: [...locals],
       body: [
         ...base.body.slice(0, -1),
-        { k: 'assign', name, value: (last as Extract<Stmt, { k: 'return' }>).value! } as Stmt,
-        { k: 'return', value: { k: 'var', name } } as Stmt,
+        { k: 'assign', name, value: retVal },
+        { k: 'return', value: { k: 'var', name } },
       ],
     });
     if (deadValueVar) {
