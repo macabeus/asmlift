@@ -805,6 +805,32 @@ function linkInto(objBytes: Buffer, dest: string): void {
 // about to use with a lease file, and a pruner treats a namespace with a live lease as untouchable.
 const LEASE = `${process.pid}-${randomBytes(4).toString('hex')}`;
 const PRUNE_GRACE_MS = 60 * 60 * 1000;
+/** WALL-CLOCK BUDGET for one prune, and the reason there is one. `pruneOnce` runs in EVERY
+ *  process that resolves a namespace — both halves of a ~1800 s `pnpm bench run` included — and
+ *  NOTHING above it on that path has a timeout. Its two eviction loops each re-walk the whole
+ *  store (`storeCost()` after every deleted namespace, and after every 512 deleted keys), so the
+ *  work is super-linear in a store that is far over cap: the failure mode is not a slow prune, it
+ *  is a run that produces no output for as long as the walk takes and cannot be told apart from a
+ *  hang. Over budget the prune stops where it is and SAYS so. That is the right trade in both
+ *  directions — an over-cap store costs disk, a stalled bench run costs the round — and it is safe
+ *  because a partial prune is just a prune: every delete it did make is complete, and the next
+ *  process runs the cap check again. `ASMLIFT_CANDCACHE_PRUNE_MS` overrides it, parsed the same
+ *  closed way as the cap — 0 means "check the cap, evict nothing", which is what pins the budget
+ *  in a test. */
+const RAW_PRUNE_MS = process.env.ASMLIFT_CANDCACHE_PRUNE_MS;
+const PRUNE_BUDGET_MS = ((): number => {
+  if (RAW_PRUNE_MS === undefined || RAW_PRUNE_MS.trim() === '') {
+    return 30 * 1000;
+  }
+  const n = Number(RAW_PRUNE_MS);
+  if (!Number.isFinite(n) || n < 0) {
+    say(
+      `ignoring ASMLIFT_CANDCACHE_PRUNE_MS=${JSON.stringify(RAW_PRUNE_MS)} — want a non-negative number of ms; using 30000`,
+    );
+    return 30 * 1000;
+  }
+  return n;
+})();
 /** How long an `objects/` entry is presumed to be mid-`put` in another process. `linkInto` writes
  *  the content-addressed file and links it a moment later, and in that window the object has
  *  `nlink === 1` and looks like garbage to a reaper in a sibling shard. Microseconds of exposure,
@@ -979,10 +1005,23 @@ function pruneOnce(keepNs: string): void {
   }
   pruned = true;
   try {
+    const startedAt = Date.now();
+    let overBudget = false;
+    const outOfBudget = (): boolean => {
+      overBudget ||= Date.now() - startedAt >= PRUNE_BUDGET_MS;
+      return overBudget;
+    };
     let cost = storeCost().bytes;
     if (cost <= CAP_BYTES) {
       return;
     }
+    // ONE line before the walk begins. A prune that says nothing is indistinguishable from a
+    // hang, which is exactly how this path was first read. It costs a run that never prunes
+    // nothing, because it is reached only once the cap has already been exceeded.
+    say(
+      `store costs ${(cost / 1048576).toFixed(0)} MB over a ${CAP_MB} MB cap — pruning ` +
+        `(${PRUNE_BUDGET_MS / 1000}s budget)`,
+    );
     const nsRoot = join(ROOT, 'ns');
     const cutoff = Date.now() - PRUNE_GRACE_MS;
     let heldBack = 0;
@@ -1005,7 +1044,7 @@ function pruneOnce(keepNs: string): void {
       })
       .sort((a, b) => a.at - b.at);
     for (const ns of namespaces) {
-      if (cost <= CAP_BYTES * 0.8) {
+      if (cost <= CAP_BYTES * 0.8 || outOfBudget()) {
         break;
       }
       // Re-asked immediately before the delete, not only in the filter above: the filter runs over
@@ -1027,7 +1066,7 @@ function pruneOnce(keepNs: string): void {
       } else {
         const keys = keysOf(keepDir);
         let i = 0;
-        while (cost > CAP_BYTES * 0.8 && i < keys.length) {
+        while (cost > CAP_BYTES * 0.8 && i < keys.length && !outOfBudget()) {
           rmSync(keys[i].path, { force: true });
           bump('prunedKeys');
           i += 1;
@@ -1042,6 +1081,7 @@ function pruneOnce(keepNs: string): void {
       // Say which reason actually applied. A message that asserts a reason it did not measure is
       // a report nobody can act on.
       const why = [
+        overBudget ? `the prune stopped at its ${PRUNE_BUDGET_MS / 1000}s budget` : '',
         keepHeld ? 'another process holds the namespace this run is using' : '',
         heldBack > 0 ? `${heldBack} other namespace(s) held by a live process` : '',
         tooYoung > 0
