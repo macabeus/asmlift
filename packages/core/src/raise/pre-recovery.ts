@@ -116,14 +116,18 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   { id: 'member-arrays', run: (fn) => recognizeMemberArrays(fn), dce: true },
   { id: 'structs', run: recognizeStructs, dce: false },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
-  // The control-flow sibling, and this order IS load-bearing — value form FIRST.
+  // The control-flow sibling, value form FIRST.
   //
   // Their input SHAPES are disjoint (the value form's second block ends in `br` carrying a phi
-  // argument, this one's ends in `cond_br`), so neither can eat the other's literal pattern. But
-  // this pass REWRITES its head's condition into a `logic_or`/`logic_and`, and the value form
-  // refuses any head whose condition is not a negatable icmp — so running this one first can
-  // permanently disqualify a value fold that was available. The reverse cannot happen: the value
-  // form replaces its head's `cond_br` with a `br`, which this pass never matches.
+  // argument, this one's ends in `cond_br`), so neither can eat the other's literal pattern. The
+  // order is not otherwise load-bearing: this pass REWRITES its head's condition into a
+  // `logic_or`/`logic_and`, and the value form takes a fused head — both siblings negate a
+  // connective by De Morgan (`negateCondOps`, raise/shortcircuit.ts). Running this one first can
+  // still cost a value fold wherever that helper refuses the fused cone (a non-negatable leaf, or a
+  // cone over its budget), but instrumenting the value form's head gate over the benchmark corpus
+  // counts 0 fused heads across the 782 rows that lift map-lessly, so the hazard has no producer
+  // there. The reverse direction never could: the value form replaces its head's `cond_br` with a
+  // `br`, which this pass never matches.
   {
     id: 'branch-shortcircuit',
     run: (fn, _self, opts) => recognizeBranchShortCircuit(fn, opts.shortCircuit),

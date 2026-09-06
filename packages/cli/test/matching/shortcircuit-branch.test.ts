@@ -76,3 +76,81 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(rc.candidates.some((c) => c.label.includes('flip-join'))).toBe(true);
   });
 });
+
+// A three-clause chain needs the SECOND fold, and the second fold needs De Morgan: the pass is
+// iterative, so ^g's condition is by then the connective the first fold built, and negating one is
+// a distribution, not an opcode swap (raise/shortcircuit.ts `negateCondOps`). Without it the chain
+// folds one level, the shared arm is tail-duplicated, and the row misses.
+//
+// This lives in the MATCHING suite deliberately: it is in no CI gate and in no `bench` command, so
+// a regression here would otherwise ride main for weeks. Each score in a test name below is what the
+// shape scores with `negateCondOps`' connective case ablated.
+describe('a three-clause short-circuit chain folds flat', () => {
+  const best = (c: string) => {
+    const asm = compileTargetAsm(c);
+    return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).best;
+  };
+
+  test('`a || (b && c)` guarding two arms — 5 without the second fold, THEN arm duplicated', () => {
+    const b = best(
+      'int f(int a,int b,int c,int *p){ if (a > 0 || (b > 0 && c > 0)) { p[0]=1; } else { p[0]=2; } return p[1]; }',
+    );
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('||');
+    expect(b.source).toContain('&&');
+    // ONE then-arm: the tail duplication the second fold removes. It is `*a3 = 1` that gets
+    // duplicated, not the else arm — ablated, the winner nests `if (a0 > 0) v0 = 1; else { … v0 = 2;
+    // … v0 = 1; }`, so `= 2` reads 1 either way and would gate nothing.
+    expect(b.source.split('= 1').length - 1).toBe(1);
+  });
+
+  test('`a || (b && c)` over an accumulator — 7 without the second fold', () => {
+    const b = best('int f(int a,int b,int c){ int r = 0; if (a > 0 || (b > 0 && c > 0)) r = 1; return r; }');
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('a0 > 0 || a1 > 0 && a2 > 0');
+  });
+
+  test('the `llcmp` shape — a 64-bit `<`, mixed compare signedness, 11 without the second fold', () => {
+    // synthetic:llcmp:agbcc's own body. The unsigned half is spelled as a per-SITE cast by the
+    // existing `/uns-cmp` axis, NOT as a parameter type: the winner is `signed/defsite/uns-cmp` with
+    // four `s32` params, so the fan reaches the bytes with no per-parameter signedness candidate.
+    const b = best(
+      'int f(unsigned a,int b,unsigned c,int d){ int r=0; if (d > b || (d == b && c > a)) r=1; return r; }',
+    );
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('(u32)');
+  });
+
+  test('the CONTROL: `a && (b || c)`, whose orientation never asks for the negation, still matches', () => {
+    // Ablated it matches too, so it pins that the connective case takes nothing away.
+    const b = best(
+      'int f(int a,int b,int c,int *p){ if (a > 0 && (b > 0 || c > 0)) { p[0]=1; } else { p[0]=2; } return p[1]; }',
+    );
+    expect(b.score.match).toBe(true);
+  });
+});
+
+// The one LOUD→SILENT conversion this fold makes, pinned. Folding a loop-EXIT connective removes
+// the back-edge loop recovery was refusing, so a function that DECLINED now decompiles — the one
+// effect of the connective negation with no differ to referee it, since the two real functions it
+// flips (`sub_80930B8`, `sub_80932E0`) are not benchmark rows.
+//
+// Ablated, this very shape throws `StructureError: cannot structure 'f': unrecovered back-edge into
+// block #2`, so the test below cannot even reach an assertion there. It is not a match (best 24) and
+// deliberately asserts no score: what it gates is that the fold SURVIVES into the loop condition,
+// not the bytes it scores.
+//
+// Equivalence is executed, not argued: the decompilation and the original C, both built with the
+// host `cc` and run over a 512-point grid of `p`/`q` contents and `n` (including `n < 0` and
+// `n` past the array), print identical output.
+describe('a loop-exit connective folds, and the loop it un-declines stays recovered', () => {
+  test('`while (i < n && (p[i] || q[i]))` keeps ONE loop with the connective in its condition', () => {
+    const c =
+      'int f(int*p,int*q,int n,int*o){ int i=0; while (i<n && (p[i]!=0 || q[i]!=0)) i++; o[0]=i; o[2]=q[1]; return i; }';
+    const asm = compileTargetAsm(c);
+    const best = decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).best;
+    expect(best.source).toMatch(/while \(v0 < a2 && \(a0\[v0\] != 0 \|\| a1\[v0\] != 0\)\)/);
+    expect(best.source.split('do {').length - 1).toBe(1); // no tail-duplicated loop
+    expect(best.source).not.toContain('ASMLIFT_ERROR');
+  });
+});

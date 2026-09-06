@@ -773,3 +773,343 @@ describe('the VALUE form carries the write-order record too', () => {
     expect(fn.writeOrder.writes.get(head)).toBe(7);
   });
 });
+
+// De Morgan: negating a FUSED connective.
+//
+// The fold is iterative, so by the time it reaches an OUTER diamond the inner one has already been
+// collapsed and ^g's condition is a `logic_and`/`logic_or` rather than an icmp. When the
+// orientation needs that condition negated, an opcode swap is not the inverse — De Morgan is.
+// These pin both directions of the distribution and the refusals that keep it from becoming a
+// partial (and therefore wrong) negation.
+describe('negating a fused connective (De Morgan)', () => {
+  /** `out = <lhs> <op> <rhs>` — the shape an INNER fold leaves in ^g: a connective, not an icmp. */
+  const fused = (op: 'logic_and' | 'logic_or', out: Value, rhsNegatable = true): Op[] => {
+    const a = mkValue(T.unk(32));
+    const b = mkValue(T.unk(32));
+    return [
+      ...cmp(a, 'icmp_eq'),
+      ...(rhsNegatable
+        ? cmp(b, 'icmp_ne')
+        : [mkOp('and', { operands: [mkValue(T.unk(32)), mkValue(T.unk(32))], results: [b] })]),
+      mkOp(op, { operands: [a, b], results: [out] }),
+    ];
+  };
+  /** The op defining the surviving head terminator's condition. */
+  const headCond = (fn: Fn): Op => {
+    const c = fn.blocks[0].ops.at(-1)!.operands[0];
+    return fn.blocks[0].ops.find((o) => o.results.includes(c))!;
+  };
+  const defIn = (fn: Fn, v: Value): Op => fn.blocks[0].ops.find((o) => o.results.includes(v))!;
+
+  test('`c1 || !(x || y)` folds to `c1 || (!x && !y)`', () => {
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: false, // needs the negation
+      gBody: (out) => fused('logic_or', out),
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(fn.blocks).toHaveLength(3); // ^g is gone
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_or');
+    const inner = defIn(fn, outer.operands[1]);
+    expect(inner.opcode).toBe('logic_and'); // the DUAL connective
+    // …over the negated leaves: `icmp_eq` → `icmp_ne` and `icmp_ne` → `icmp_eq`.
+    expect(defIn(fn, inner.operands[0]).opcode).toBe('icmp_ne');
+    expect(defIn(fn, inner.operands[1]).opcode).toBe('icmp_eq');
+    verify(fn);
+  });
+
+  test('`c1 && !(x && y)` folds to `c1 && (!x || !y)`', () => {
+    const fn = chain({
+      gOnTaken: true,
+      sharedOnGTaken: true, // needs the negation
+      gBody: (out) => fused('logic_and', out),
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_and');
+    expect(defIn(fn, outer.operands[1]).opcode).toBe('logic_or');
+    verify(fn);
+  });
+
+  test('a connective needing NO negation still folds unchanged, operand reused not rebuilt', () => {
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true, // no negation needed
+      gBody: (out) => fused('logic_or', out),
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_or');
+    expect(defIn(fn, outer.operands[1]).opcode).toBe('logic_or'); // the ORIGINAL fused value
+    verify(fn);
+  });
+
+  test('REFUSED: one non-negatable leaf refuses the WHOLE negation — no partial De Morgan', () => {
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: false, // needs the negation
+      gBody: (out) => fused('logic_or', out, /* rhsNegatable */ false),
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  // A left chain of `n` connectives over `n+1` icmp leaves — an `n+1`-clause inner conjunct, which
+  // mints `2n+1` ops when negated.
+  const leftChain =
+    (n: number) =>
+    (out: Value): Op[] => {
+      const ops: Op[] = [];
+      let acc = mkValue(T.unk(32));
+      ops.push(...cmp(acc, 'icmp_eq'));
+      for (let i = 0; i < n; i++) {
+        const leaf = mkValue(T.unk(32));
+        ops.push(...cmp(leaf, 'icmp_ne'));
+        const next = i === n - 1 ? out : mkValue(T.unk(32));
+        ops.push(mkOp('logic_or', { operands: [acc, leaf], results: [next] }));
+        acc = next;
+      }
+      return ops;
+    };
+  /** The MIRROR of `leftChain`: `a || (b || (c || …))`, so `go` descends operands[1] instead. Same
+   *  node count, opposite lean — which is how the frontier is shown to depend on the count alone. */
+  const rightChain =
+    (n: number) =>
+    (out: Value): Op[] => {
+      const ops: Op[] = [];
+      const build = (i: number, dest: Value): void => {
+        if (i === n) {
+          ops.push(...cmp(dest, 'icmp_eq'));
+          return;
+        }
+        const leaf = mkValue(T.unk(32));
+        const rest = mkValue(T.unk(32));
+        ops.push(...cmp(leaf, 'icmp_ne'));
+        build(i + 1, rest);
+        ops.push(mkOp('logic_or', { operands: [leaf, rest], results: [dest] }));
+      };
+      build(0, out);
+      return ops;
+    };
+  /** A PERFECT binary cone of depth `d`: 2^d leaves, 2^(d+1)-1 nodes, all pushed after both children. */
+  const balanced =
+    (d: number) =>
+    (out: Value): Op[] => {
+      const ops: Op[] = [];
+      const build = (depth: number, dest: Value): void => {
+        if (depth === 0) {
+          ops.push(...cmp(dest, 'icmp_ne'));
+          return;
+        }
+        const a = mkValue(T.unk(32));
+        const b = mkValue(T.unk(32));
+        build(depth - 1, a);
+        build(depth - 1, b);
+        ops.push(mkOp('logic_or', { operands: [a, b], results: [dest] }));
+      };
+      build(d, out);
+      return ops;
+    };
+  const folds = (gBody: (out: Value) => Op[]): boolean => {
+    const fn = chain({ gOnTaken: false, sharedOnGTaken: false, gBody }); // sharedOnGTaken false ⇒ negation
+    const changed = recognizeBranchShortCircuit(fn);
+    if (changed) {
+      verify(fn);
+    }
+    return changed;
+  };
+
+  test('REFUSED: a cone deeper than the node budget', () => {
+    expect(folds(leftChain(3))).toBe(true); // 7 ops
+    expect(folds(leftChain(8))).toBe(false); // 17 ops
+  });
+
+  // THE CLIFF `NEGATE_BUDGET` decides, pinned so that changing the constant fails a test instead of
+  // moving silently. A minted count is always ODD (see the constant's note), so 7 and 8 are one gate
+  // and the only decision sits one clause above the deepest cone the corpus holds.
+  test('the budget cliff: a 4-clause inner conjunct folds (7 ops), a 5-clause one does not (9)', () => {
+    expect(folds(leftChain(3))).toBe(true); // 4 clauses → 7 minted
+    expect(folds(leftChain(4))).toBe(false); // 5 clauses → 9 minted, one over
+  });
+
+  // …and the frontier is the NODE COUNT and nothing else: a balanced cone flips at exactly the same
+  // count a chain does. What the shape changes is only which guard says no — this one is stopped by
+  // the ENTRY guard at 8 ops kept, where the 15-node LEFT chain above is stopped at 9 and a RIGHT
+  // chain of the same size runs to the post-check at 15 — and no caller can tell those apart.
+  test('a BALANCED cone flips at the same node count a chain does, through a different guard', () => {
+    expect(folds(balanced(2))).toBe(true); // 7 nodes — and leftChain(3), also 7, also folds
+    expect(folds(balanced(3))).toBe(false); // 15 nodes
+  });
+
+  // …and the same verdict for three DIFFERENT shapes at each of the two node counts either side of
+  // the cliff — the assertion form, through the public fold, of the constant's "accepted iff
+  // nodes <= budget".
+  test('the verdict depends on the node count alone: left chain, right chain and balanced agree', () => {
+    for (const at7 of [leftChain(3), rightChain(3), balanced(2)]) {
+      expect(folds(at7)).toBe(true); // 7 nodes
+    }
+    for (const at9 of [leftChain(4), rightChain(4)]) {
+      expect(folds(at9)).toBe(false); // 9 nodes
+    }
+  });
+});
+
+// The VALUE form's head gate. A head whose condition is a fused connective — what the branch form
+// leaves behind, and what an earlier round of this same pass leaves behind in a chain — folds
+// whether or not the orientation inverts it, and that width is what raise/pre-recovery.ts's
+// pass-order note leans on when it says running the branch form first costs no value fold.
+describe('the VALUE form takes a fused connective head, and negates one by De Morgan', () => {
+  /** `H: cond_br(cond) -> [M(k) taken, B fall];  B: vb = icmp; br M(vb);  M(p): ret p`.
+   *  `k = 1` ⇒ the head condition is NOT negated; `k = 0` ⇒ it is. */
+  const valueDiamond = (opts: { k: 0 | 1; head: 'icmp' | 'connective'; leafNegatable?: boolean }): Fn => {
+    const p = mkValue(T.unk(32));
+    const m = blk([mkOp('ret', { operands: [p] })], [p]);
+    const vb = mkValue(T.unk(32));
+    const b = blk([...cmp(vb, 'icmp_ne'), { ...mkOp('br'), successors: [{ block: m, args: [vb] }] }]);
+    const k = mkValue(T.unk(32));
+    const cond = mkValue(T.unk(32));
+    const ops: Op[] = [mkOp('const', { results: [k], attrs: { value: opts.k } })];
+    if (opts.head === 'connective') {
+      const x = mkValue(T.unk(32));
+      const y = mkValue(T.unk(32));
+      ops.push(
+        ...cmp(x, 'icmp_eq'),
+        ...(opts.leafNegatable === false
+          ? [mkOp('and', { operands: [mkValue(T.unk(32)), mkValue(T.unk(32))], results: [y] })]
+          : cmp(y, 'icmp_ne')),
+        mkOp('logic_or', { operands: [x, y], results: [cond] }),
+      );
+    } else {
+      ops.push(...cmp(cond, 'icmp_eq'));
+    }
+    ops.push({
+      ...mkOp('cond_br', { operands: [cond] }),
+      successors: [
+        { block: m, args: [k] },
+        { block: b, args: [] },
+      ],
+    });
+    return { name: 'f', blocks: [blk(ops), b, m], writeOrder: undefined, slotHomes: undefined };
+  };
+  const defIn = (fn: Fn, v: Value): Op => fn.blocks[0].ops.find((o) => o.results.includes(v))!;
+  /** The recovered connective: M's phi is retired at 2 predecessors, so the value reaches M's `ret`. */
+  const headCond = (fn: Fn): Op => defIn(fn, fn.blocks.at(-1)!.ops.at(-1)!.operands[0]);
+
+  test('a connective head with NOTHING to negate folds, its fused value reused as-is', () => {
+    const fn = valueDiamond({ k: 1, head: 'connective' });
+    expect(recognizeShortCircuit(fn)).toBe(true);
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_or'); // `cond || vb`
+    expect(defIn(fn, outer.operands[0]).opcode).toBe('logic_or'); // the ORIGINAL fused head, reused
+    verify(fn);
+  });
+
+  test('a connective head that DOES need negating is distributed, not refused', () => {
+    const fn = valueDiamond({ k: 0, head: 'connective' });
+    expect(recognizeShortCircuit(fn)).toBe(true);
+    const outer = headCond(fn);
+    expect(outer.opcode).toBe('logic_and'); // `!cond && vb`
+    const inner = defIn(fn, outer.operands[0]);
+    expect(inner.opcode).toBe('logic_and'); // !(x || y) ⇒ !x && !y
+    expect(defIn(fn, inner.operands[0]).opcode).toBe('icmp_ne');
+    expect(defIn(fn, inner.operands[1]).opcode).toBe('icmp_eq');
+    verify(fn);
+  });
+
+  test('REFUSED: a connective head with a non-negatable leaf, when the negation is needed', () => {
+    expect(recognizeShortCircuit(valueDiamond({ k: 0, head: 'connective', leafNegatable: false }))).toBe(false);
+    // …and the same head folds when nothing has to be inverted.
+    expect(recognizeShortCircuit(valueDiamond({ k: 1, head: 'connective', leafNegatable: false }))).toBe(true);
+  });
+
+  test('the plain icmp head still folds both ways, negated and not', () => {
+    for (const k of [0, 1] as const) {
+      const fn = valueDiamond({ k, head: 'icmp' });
+      expect(recognizeShortCircuit(fn)).toBe(true);
+      verify(fn);
+    }
+  });
+});
+
+// The head gate's SECOND obligation, the one that has nothing to do with negation: in CHAIN context
+// a const/const diamond reduces to the head condition ITSELF (`res = condSide`, replacing a phi that
+// was `cond ? 1 : 0`), so the head has to produce 0/1. It is the only place in this file where a
+// relaxed gate is a silent WRONG VALUE rather than a missed fold — a gate at mere def-existence
+// returns `and(6, 3)` where the program yields 1 — so it gets a refusal test of its own, with the
+// icmp control beside it.
+describe('the VALUE form refuses a NON-BOOLEAN head, because the chain reduction hands it on as a value', () => {
+  /** `E: cond_br -> [H, P]` (so M gets a THIRD predecessor and the chain gate opens);
+   *  `H: k = 1; cond = <head>; cond_br(cond) -> [M(k) taken, B fall]`; `B: vb = 0; br M(vb)`;
+   *  `M(p): ret p`. `k = 1` on the taken edge with `vb = 0` ⇒ `wantNeg` is FALSE, so `negateCondOps`
+   *  never runs and nothing else in the pass looks at the head's opcode. */
+  const constConstChain = (head: 'icmp' | 'and' | 'call' | 'const'): { fn: Fn; cond: Value } => {
+    const p = mkValue(T.unk(32));
+    const m = blk([mkOp('ret', { operands: [p] })], [p]);
+
+    const vb = mkValue(T.unk(32));
+    const b = blk([
+      mkOp('const', { results: [vb], attrs: { value: 0 } }),
+      { ...mkOp('br'), successors: [{ block: m, args: [vb] }] },
+    ]);
+
+    const k = mkValue(T.unk(32));
+    const cond = mkValue(T.unk(32));
+    const x = mkValue(T.unk(32));
+    const y = mkValue(T.unk(32));
+    const hops: Op[] = [
+      mkOp('const', { results: [k], attrs: { value: 1 } }),
+      mkOp('const', { results: [x], attrs: { value: 6 } }),
+      mkOp('const', { results: [y], attrs: { value: 3 } }),
+    ];
+    hops.push(
+      head === 'and'
+        ? mkOp('and', { operands: [x, y], results: [cond] }) // 6 & 3 == 2 — truthy, but not 1
+        : head === 'call'
+          ? mkOp('call', { operands: [], results: [cond], attrs: { target: 'g' } }) // HAS a def
+          : head === 'const'
+            ? mkOp('const', { results: [cond], attrs: { value: 5 } })
+            : mkOp('icmp_ne', { operands: [x, y], results: [cond] }),
+    );
+    hops.push({
+      ...mkOp('cond_br', { operands: [cond] }),
+      successors: [
+        { block: m, args: [k] },
+        { block: b, args: [] },
+      ],
+    });
+
+    const z = mkValue(T.unk(32));
+    const third = blk([
+      mkOp('const', { results: [z], attrs: { value: 0 } }),
+      { ...mkOp('br'), successors: [{ block: m, args: [z] }] },
+    ]);
+    const e = mkValue(T.unk(32));
+    const entry = blk([
+      ...cmp(e),
+      {
+        ...mkOp('cond_br', { operands: [e] }),
+        successors: [
+          { block: blk([]), args: [] },
+          { block: third, args: [] },
+        ],
+      },
+    ]);
+    // …the entry's first successor is H, patched in now that H exists.
+    const h = blk(hops);
+    entry.ops.at(-1)!.successors[0] = { block: h, args: [] };
+    return { fn: { name: 'f', blocks: [entry, h, b, third, m], writeOrder: undefined, slotHomes: undefined }, cond };
+  };
+
+  test('an icmp head reduces (the control), and the merge value is the comparison', () => {
+    const { fn, cond } = constConstChain('icmp');
+    expect(recognizeShortCircuit(fn)).toBe(true);
+    const carried = fn.blocks.find((x) => x.ops.at(-1)!.opcode === 'br' && x.ops.some((o) => o.opcode === 'icmp_ne'));
+    expect(carried!.ops.at(-1)!.successors[0].args[0]).toBe(cond); // `cond` ITSELF becomes the value
+    verify(fn);
+  });
+
+  test.each(['and', 'call', 'const'] as const)('REFUSED: a %s head is not a 0/1 value', (head) => {
+    const { fn } = constConstChain(head);
+    expect(recognizeShortCircuit(fn)).toBe(false);
+  });
+});

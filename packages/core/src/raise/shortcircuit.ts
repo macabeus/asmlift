@@ -36,8 +36,10 @@
 // folds bottom-up: the innermost diamond becomes a bare condition, which the next diamond consumes as its
 // Vb, and so on. SCOPE: the shared-arm must be reachable as a single-predecessor `br` feeder; the `||`
 // form where the const-1 "true" block has TWO predecessors (`return a || b`) is not folded.
-// Guards stay conservative: the CONST is exactly 0/1, Vb is a bool op or 0/1 const, the head condition is a
-// negatable icmp, and any deviation falls through untouched (a miss, never a miscompile).
+// Guards stay conservative: the CONST is exactly 0/1, Vb is a bool op or 0/1 const, and the head condition
+// is NEGATABLE whenever the orientation inverts it — an icmp by opcode swap or a `logic_and`/`logic_or` by
+// De Morgan, both via `negateCondOps`, which the control-flow form below shares. Any deviation falls
+// through untouched (a miss, never a miscompile).
 import {
   Block,
   Fn,
@@ -175,10 +177,24 @@ export function recognizeShortCircuit(fn: Fn): boolean {
           continue;
         }
         const cond = ht.operands[0];
-        const condDef = defs.get(cond);
-        if (!condDef || !NEGATED_ICMP[condDef.opcode]) {
+        // The head condition must be a C BOOLEAN computed here — a negatable comparison or a
+        // `logic_and`/`logic_or`, which is exactly `BOOL_OPS` and exactly the set `negateCondOps`
+        // accepts at top level, so a fused connective head still folds. Mere def-existence is NOT
+        // the test — `call` declares `results: 1` (ir/opcodes.ts), so `defOpMap` maps a call result
+        // like any other — because the const/const reduction below hands `cond` ITSELF on as the
+        // merge value (`res = condSide`), replacing a phi that was `cond ? 1 : 0`. A non-boolean
+        // head there is a silent WRONG VALUE, not a missed fold: `and(6, 3)` emitted where the
+        // program yields 1. The branch form carries no such obligation — its result only ever feeds
+        // a `cond_br`, which reads truthiness — which is why this gate lives here and not in the
+        // shared helper, whose own result is boolean by construction and so covers the negated case.
+        //
+        // Instrumented over the 782 benchmark rows under BOTH lift configurations, it refuses
+        // NOTHING — every head reaching it is a negatable icmp — while the pass folds 6 value-form
+        // diamonds per configuration, 3 of them through the const/const reduction. An invariant's
+        // guard, not a filter any row depends on.
+        if (!isBool(defs, cond)) {
           continue;
-        } // head condition must be a negatable icmp
+        }
 
         // The `cond`-side operand is negated iff `cond` guards the short-circuit (taken+0 / fall+1).
         const wantNeg = (c === 0 && mIsTaken) || (c === 1 && mIsFall);
@@ -193,12 +209,26 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         if (bfeed.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;
         }
+        // NEGATABLE only when the orientation actually inverts the head — asked here rather than up
+        // with the other head checks, so a fused `logic_and`/`logic_or` head (what the branch form
+        // below leaves behind, and what an earlier round of THIS pass leaves behind in a chain) is
+        // not refused when nothing needs inverting. `negateCondOps` is the branch form's helper too,
+        // so both siblings refuse the same three shapes. Its dominance precondition holds here for a
+        // different reason than there: `cond` is ^h's OWN terminator operand, so its whole cone
+        // dominates the point `before` splices into.
+        //
+        // Minted below every other refusal and above the first mutation: a site refused for any
+        // other reason pays nothing, and a refusal below the hoist would leave ^h half-rewritten.
+        const negation = wantNeg ? negateCondOps(defs, cond, NEGATE_BUDGET) : null;
+        if (wantNeg && !negation) {
+          continue;
+        }
         bfeed.ops.slice(0, -1).forEach(before); // hoist B's pure body (defines Vb; harmless if a dead const)
         foldWriteOrder(fn.writeOrder, bfeed, h); // …and its writes now follow H's (ir/core.ts)
         let condSide = cond;
-        if (wantNeg) {
-          condSide = mkValue(T.unk(32));
-          before(mkOp(NEGATED_ICMP[condDef.opcode], { operands: [...condDef.operands], results: [condSide] }));
+        if (negation) {
+          negation.ops.forEach((op) => before(op));
+          condSide = negation.result;
         }
         // Vb const → the phi reduces to the (possibly negated) condition; Vb bool → a && / || connective.
         let res = condSide;
@@ -322,8 +352,40 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //   - the two edges into the shared block carry DIFFERENT args. Only one edge survives the fold,
 //     so it can only carry one argument list; picking either would silently drop the other path's
 //     phi input.
-//   - ^g's two successors are the same block, or ^g's condition is not a negatable icmp when the
-//     orientation needs negating.
+//   - ^g's two successors are the same block, or ^g's condition cannot be NEGATED when the
+//     orientation needs negating. `negateCondOps` decides that, over two shapes: a negatable
+//     `icmp_*` (the swapped opcode) and a `logic_and`/`logic_or` (De Morgan — the dual connective
+//     over recursively negated operands). The connective case is what lets a chain fold past its
+//     FIRST level: this pass is iterative, so by the time it tries an outer diamond the inner one is
+//     already fused and ^g's condition is a connective, which `NEGATED_ICMP` — a table over
+//     comparison opcodes — has no entry for. Refuse it and `a || !(b || c)` stops after one level at
+//     all 13 sites this fires on (`synthetic:llcmp:agbcc`, `:gcc2.7.2kmc`, and 11 real agbcc
+//     functions in klonoa+sa3); on the two benchmark rows the structurer then tail-duplicates the
+//     shared return into both arms. The helper's own refusals — no def, a non-negatable leaf
+//     ANYWHERE in the cone (no partial De Morgan), a cone over the node budget — are on the helper.
+//
+//     De Morgan DUPLICATES leaf comparisons, so a duplicated leaf could gain a second consumer that
+//     analysis.ts renders as a statement BEFORE the `if` — the hazard the single-icmp negation
+//     always carried. Measured over those 11 BRANCH-form sites: NO site gains a local (one,
+//     `sub_80B7CD0`, loses one, 8 → 7) and every site that already decompiled gets SHORTER. Two
+//     (`sub_80930B8`, `sub_80932E0`) go from DECLINED to a full decompilation — folding a loop-exit
+//     connective removes the back-edge loop recovery was refusing — so they get LONGER (1 → 112 and
+//     1 → 55 lines) and are the only sites whose local count rises at all, 0 → 22 and 0 → 7. A
+//     decompilation appearing, not a leaf escaping.
+//
+//     That number is SCOPED to this fold and does not carry to the value form, which shares the
+//     helper but no use-count condition: `definedValuesStayLocal` (bottom of this file)
+//     independently forbids a ^g-defined value with a second consumer HERE, while the value form
+//     relies on the original cone dying to the pass list's own `dce: true`. There is nothing to
+//     transfer the number to yet either — instrumenting the value form over the 782 benchmark rows
+//     under both lift configurations counts 6 folds per configuration, every head a single icmp.
+//
+//     The `/connective` LIFT AXIS is a separate question from the default lift, and is unwidened:
+//     `onTreeOwned` below is what tells rank.ts the axis exists for a row, and this check sits ABOVE
+//     it. Over all 999 benchmark rows under BOTH configurations rank.ts lifts with (`foldTreeOwned`
+//     false and true), against the same rows with the connective case ablated: the recovered IR
+//     moves on the same 2 rows under each, `onTreeOwned` fires on the same rows either way, and
+//     nothing new throws.
 //
 // Every refusal falls through untouched, leaving the tail-duplicated spelling — a miss, never a
 // miscompile. Applied ITERATIVELY, so `a || b || c` folds left-to-right, each round consuming one
@@ -343,6 +405,13 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // so the axis negates every joined `if` at once — and of the 28 real rows carrying the
 // `short-circuit` tag, 22 hold two or more. A per-SITE negation is the open lever; a gate on
 // whether to ENUMERATE the axis does not reach it, and removes a spelling the differ would referee.
+//
+// The De Morgan negation below forecloses a third spelling, at a measured price: it DISTRIBUTES, so
+// the leaves come out negated (`a || (!b && !c)`) and `a || !(b || c)` has no
+// candidate — the IR has no `logic_not` to build one from (ir/opcodes.ts). Compiled both ways on
+// the `a || (b && c)` guard shape at agbcc's default flags, the two source spellings assemble to
+// the same bytes (12/12 rows, score 0), so the foreclosure costs nothing here. A shape that ever
+// separated them would be a new axis, not a bug in this fold.
 //
 // WHICH slot ^g lands in is decided by the asm's branch POLARITY, and on Thumb the branch RANGE
 // decides the polarity — so the same source `&&` reaches this pass two different ways:
@@ -470,25 +539,27 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // reach the SHARED block", `logic_and` asks "does ^g reach the OTHER block".
         const wantEdge = gIsFall ? sharedEdge : otherEdge;
         const c2 = gt.operands[0];
-        const c2Def = defs.get(c2);
-        if (wantEdge !== gTaken && (!c2Def || !NEGATED_ICMP[c2Def.opcode])) {
+        // ^g's condition may itself be a CONNECTIVE — the fold is iterative, so an inner diamond is
+        // already fused by the time the outer one is tried, and negating one is De Morgan rather
+        // than an opcode swap. `negateCondOps` does both, and returns null on anything else.
+        const negation = wantEdge !== gTaken ? negateCondOps(defs, c2, NEGATE_BUDGET) : null;
+        if (wantEdge !== gTaken && !negation) {
           continue;
         }
-        // LAST refusal, so `onTreeOwned` reports a site where tree ownership is the ONE thing in
-        // the way — nothing above allocates, so continuing here costs exactly what continuing at
-        // the top did. See the option's doc for why the position is the gate's meaning.
+        // LAST refusal, so `onTreeOwned` reports a site where tree ownership is the ONE thing in the
+        // way — which is why the negatability check stays above it even though it MINTS the negated
+        // cone (up to NEGATE_BUDGET ops) and discards it whenever this gate refuses. That discard is
+        // free rather than merely cheap: `mkValue` is `{ type }` with no identity counter
+        // (ir/core.ts) and nothing is spliced until below, so a site refused here leaves the CFG
+        // byte-identical. See the option's doc for why the position is the gate's meaning.
         if (treeOwned) {
           opts.onTreeOwned?.();
           if (!opts.foldTreeOwned) {
             continue;
           }
         }
-        let second = c2;
-        const negated: Op[] = [];
-        if (wantEdge !== gTaken) {
-          second = mkValue(T.unk(32));
-          negated.push(mkOp(NEGATED_ICMP[c2Def!.opcode], { operands: [...c2Def!.operands], results: [second] }));
-        }
+        const second = negation ? negation.result : c2;
+        const negated: Op[] = negation ? negation.ops : [];
         const res = mkValue(T.unk(32));
         const connective = mkOp(gIsFall ? 'logic_or' : 'logic_and', {
           operands: [ht.operands[0], second],
@@ -535,6 +606,115 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
     }
   }
   return changed;
+}
+
+/** How many ops `negateCondOps` may KEEP for one negation. De Morgan rebuilds the cone PER PATH and
+ *  shares nothing — deliberately, see the helper's note — so a fold's cost is linear in the cone's
+ *  nodes and this is the cheap stop on it.
+ *
+ *  What 8 decides, said as the shape rather than as headroom, because "8" reads like more room than
+ *  it is. A negation mints one op per cone node and a binary expansion has leaves = internal + 1, so
+ *  a minted count is always ODD: 1, 3, 5, 7, 9. At 8 a FOUR-clause inner conjunct (7 ops) folds and
+ *  a FIVE-clause one (9 ops) does not; 7 and 8 are therefore one gate, and so is 9 over everything
+ *  measured here, the deepest cone in the 2,047 lifted klonoa+sa3 functions minting 5 (17
+ *  connective negations, 0 refused). Clause COUNT is not the axis either: a FLAT `a || b || c || …`
+ *  chain pays nothing at all, because ^g's condition is never a connective in that shape.
+ *
+ *  The bound is on ops KEPT, and the frontier is a NODE COUNT — not a shape. Measured EXHAUSTIVELY
+ *  against this helper rather than sampled: a cone is accepted iff its node count is `<= budget`,
+ *  over all 82,500 binary cone shapes up to 23 nodes at budget 8, and over all 23,714 up to 21 nodes
+ *  at every budget from 1 to 10. Shape decides only WHICH guard refuses and how many ops had been
+ *  minted when it did, neither of them visible to a caller — at budget 8 a 15-node cone is caught by
+ *  the ENTRY guard at 9 (left chain) or 8 (balanced cone) or by the POST-check at 15 (right chain).
+ *  Because `go` pushes a parent only after its children, a refused walk transiently mints more than
+ *  the budget before unwinding — `2 * budget - 1` at the worst shape, that right chain, at every
+ *  budget measured. Bounded, and nothing escapes it.
+ *
+ *  A refusal here is SILENT, unlike the `onTreeOwned` gate above which exists so a sweep need not
+ *  re-instrument. So raising this constant is not free advice: finding a corpus site that wants it
+ *  means patching a hook back into this file. No callback is added because no consumer has asked for
+ *  one; the tests below pin both sides of the frontier instead. */
+const NEGATE_BUDGET = 8;
+
+/** The ops computing `!v`, or `null` when `v` cannot be negated.
+ *
+ *  Two cases, and no third:
+ *    - an `icmp_*` in `NEGATED_ICMP` → the swapped-opcode comparison over the SAME operands.
+ *    - a `logic_and`/`logic_or` → the DUAL connective over its two recursively negated operands.
+ *      De Morgan: `!(a || b)` is `!a && !b`. This is the only reason the helper is recursive, and
+ *      it is what lets a chain fold past its first level (`a || !(b || c)`).
+ *
+ *  REFUSALS — each returns `null`, which the caller turns into its existing `continue`, so the CFG
+ *  is left exactly as it was and the structurer emits today's tail-duplicated spelling. A bytes
+ *  miss, never a wrong answer:
+ *    - the value has no def in this function, which means a block param — a call RESULT has one,
+ *      `call` declaring `results: 1` (ir/opcodes.ts), and is refused by the next bullet instead;
+ *    - the def is neither a negatable icmp nor a connective (a call, any arithmetic) — there is no
+ *      sound inverse to build, and `!x` as `x == 0` is a DIFFERENT spelling, not this fold's
+ *      business;
+ *    - ANY leaf anywhere in the cone is non-negatable ⇒ the WHOLE negation is refused. Half a
+ *      De Morgan is not a conservative approximation of one;
+ *    - the cone exceeds `NEGATE_BUDGET` minted ops.
+ *
+ *  Ops are MINTED, never mutated: the originals stay where the caller hoisted them and die to the
+ *  pass list's own `dce: true` (raise/pre-recovery.ts). Only `icmp_*`/`logic_and`/`logic_or` are
+ *  ever rebuilt, all of them pure, so no effect can be duplicated or reordered by construction.
+ *
+ *  Nothing is SHARED between paths, and that is the point rather than a limitation. Memoizing `go`
+ *  in a `Map<Value, Value>` is three lines and would make the budget unnecessary — and it would
+ *  create exactly the hazard this fold exists to remove: a shared negated sub-condition has two
+ *  consumers, and analysis.ts renders a value with two consumers as a statement BEFORE the `if`.
+ *  Nothing collapses the duplicates later either — `numberPureValues` runs as `addrnum`, far ahead
+ *  of both folds. So the per-path rebuild is the mechanism and NEGATE_BUDGET is its price.
+ *
+ *  What it GUARANTEES about its result, which one caller leans on: every op it mints is an `icmp_*`
+ *  or a `logic_and`/`logic_or`, so the returned value is always a C boolean. The value form hands an
+ *  un-negated head straight on as the merge VALUE, which is why that caller checks booleanness for
+ *  itself before deciding whether to call here at all (see its head gate); the branch form needs no
+ *  such check, because its result only ever feeds a `cond_br`.
+ *
+ *  PRECONDITION, earned by the caller and not checked here: every value in the cone must dominate
+ *  the point the caller splices `ops` into — the minted comparisons reuse the ORIGINAL leaf
+ *  operands. The branch fold gets it free from ^g's single-predecessor gate: with ^h ^g's only
+ *  predecessor, every def in the cone either sits in ^g's body (spliced in ahead of these ops) or
+ *  dominates ^h. A caller without that invariant emits a def that does not dominate its use — loud
+ *  at `verify`, but this helper does not look.
+ *
+ *  It stays in this file rather than joining `NEGATED_ICMP` in ir/opcodes.ts: that table is a fact
+ *  about opcodes, this MINTS ops, and both consumers are the two folds above — the value form and
+ *  the branch form, which is the whole reason it is a helper and not inline. */
+function negateCondOps(defs: Map<Value, Op>, v: Value, budget: number): { ops: Op[]; result: Value } | null {
+  const ops: Op[] = [];
+  const go = (x: Value): Value | null => {
+    if (ops.length >= budget) {
+      return null;
+    }
+    const d = defs.get(x);
+    if (!d) {
+      return null;
+    }
+    const out = mkValue(T.unk(32));
+    if (NEGATED_ICMP[d.opcode]) {
+      ops.push(mkOp(NEGATED_ICMP[d.opcode], { operands: [...d.operands], results: [out] }));
+      return out;
+    }
+    if (d.opcode === 'logic_and' || d.opcode === 'logic_or') {
+      const a = go(d.operands[0]);
+      if (a === null) {
+        return null;
+      }
+      const b = go(d.operands[1]);
+      if (b === null) {
+        return null;
+      }
+      // Operands are pushed BEFORE the connective, so the op list is already in dominating order.
+      ops.push(mkOp(d.opcode === 'logic_and' ? 'logic_or' : 'logic_and', { operands: [a, b], results: [out] }));
+      return out;
+    }
+    return null;
+  };
+  const result = go(v);
+  return result === null || ops.length > budget ? null : { ops, result };
 }
 
 /** Blocks reachable from the entry, following successor edges. */
