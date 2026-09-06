@@ -553,8 +553,9 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
  *  source `for (i = 0; …) use(base + (i << 6))` gives the compiler-created giv the init
  *  `base + (0 << 6)`, and the compiler folds that to `base` long before any of it reaches the asm:
  *  the start term is gone, the init is loop-invariant, and nothing is left to substitute. Every
- *  shipped `/unreduce` row starts its counter at a PARAMETER (`dmafill`'s `lo`), which is exactly
- *  why none of them needed this branch — a symbolic start cannot fold.
+ *  `/unreduce` row that PREDATES this branch starts its counter at a PARAMETER (`dmafill`'s `lo`),
+ *  which is exactly why none of them needed it — a symbolic start cannot fold. `offloop`,
+ *  `offgiv`, `offgiv2` and `offgiv3` are the rows that do.
  *
  *  So the closed form is ADDITIVE rather than substitutional: `INIT + (ctr << s)`, the init kept
  *  whole and the scaled counter added to it. The invariant it must preserve is the same one, and
