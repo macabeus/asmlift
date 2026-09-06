@@ -1,9 +1,16 @@
 # Extern same-value-write probes
 
-These are gap measurements, not a plan to move the score. The extern family preserves relocation
-identity and exposes a small ordering residual in its control; it does not establish a new compiler
-mechanism or price the large target by subtraction. All prices below are in this family's symbol
-basin, against each probe's own compiled object.
+These are gap measurements, not a plan to move the score. They do not establish a new compiler
+mechanism and they do not price the large target by subtraction. All prices below are in this
+family's symbol basin, against each probe's own compiled object.
+
+The family's two points are a **conjunction**, priced from both sides. `ereadctl` declares
+`extern struct Bg gReadBgs[];` and subscripts it inside a loop, and scores 2. Drop the array shape
+and keep the loop (`ername`, the same named symbol reached as `&gReadBgsObj` through a pointer
+macro): MATCH. Drop the loop and keep the array shape (`erflat`): MATCH. Spelling the bound
+`gReadBgs[4]` instead of `[]` also scores 2, so the incomplete type is not the axis. The named
+data relocation is therefore free — it is what distinguishes this family from the raw
+`reread`/`rereadctl` pair, and it is not what costs anything.
 
 The exact compiled sources are the `ereread`, `ereadctl`, `erback`, and `erbctl` entries in
 `apps/benchmark/dataset/synthetic.ts`. `ereread`/`ereadctl` differ only by
@@ -23,6 +30,9 @@ This reproduces the existing raw `reread` family's observed source/codegen contr
 retaining the extern relocation. It does not newly instrument which optimizer pass preserves
 or deletes the same-value write. The allocator/loop explanation in the existing family remains
 prior attribution, not a newly established mechanism from these four compiles.
+
+The two one-fact controls `ername` and `erflat` are harness rows, scored the same way as every
+other dataset row; they were not part of the candidate-capture study below, which predates them.
 
 ## Actual compiled candidates
 
@@ -75,12 +85,27 @@ The two-row extern control residual belongs to global-address evaluation order, 
 allocation. The established compiler fork is `gcc/c-typeck.c:1383`, with array-base expansion
 at `:1449` and pointer-base expansion at `:1469`; the prospective asmlift knowledge site is
 `packages/core/src/raise/globalshape.ts:890` (`inferGlobalArrays`), called for declaration shapes
-at `packages/core/src/rank.ts:1177`. The separate ordering licence is `globalshape.ts:924`
-(`orderLicensedGlobals`), called at `rank.ts:2309`, passed to L3 at `rank.ts:2370`, and consumed
-by the `order-licensed` gate at `packages/core/src/l3/basecse.ts:639`.
-The candidate cast spelling and the measured load/shift order identify this as the relevant
-existing machinery. No guard was instrumented here, so this is not a claim that a particular
-licensing refusal fired or that a specific edit would remove two points.
+at `packages/core/src/rank.ts:1177`.
+
+**The order licence was nominated without instrumenting anything, and the one-fact controls turn
+that nomination into a sharper question rather than settling it.** `globalshape.ts:924`
+(`orderLicensedGlobals`), reaching the `order-licensed` gate at
+`packages/core/src/l3/basecse.ts:639`, was named from the candidate cast spelling and the observed
+load/shift order alone; no guard was watched fire, so it is a hypothesis.
+
+What the controls now add is that the axis **is** admitted in this basin. `erflat` — the array shape
+without the loop — MATCHes, and its winning label is `unsigned/orderbase`. Only four winners in the
+whole published artifact carry `/orderbase` (`bgarr`, `erflat`, `CalculatePPWithBonus`,
+`GetGenderFromSpeciesAndPersonality`), and one of them is this family's own loop-free arm. The loop
+arm's winner is `unsigned/fresh-merge/initfirst` and scores 2. So the open question is not whether
+the licence can reach this shape — it does — but why the ordered base stops winning once the
+subscript is inside a loop. That is a cheap, well-posed ablation and it is this family's next
+target.
+
+None of it carries to LoadBGTilemapData as things stand: the instrumented note at
+`packages/core/src/rank.ts:1899` records that licence measured **empty on every lift variant of both
+symbol-map arms of the target**. What is measured here is a price and its two sides. The site that
+would pay it is still not identified, and this study does not claim one.
 
 The dominant register-only component of `erback` is evidence for the general allocator residual.
 Its established compiler ownership is `gcc/global.c:605`/`:926` and reload at
@@ -90,12 +115,21 @@ loop reload already exists; `packages/core/src/rank.ts:106` (`/reread-globals`) 
 missing capability here. The mixed control `erbctl` must not be represented as twelve register
 rows or as a pure allocation probe.
 
-The root's individual harness smoke reports m2c declining all four rows with the first emitted
-gap `extern ? gReadBgs`. This is an extern-type placeholder blocker, not a register-allocation
-failure. The harness recognizes this emitted incompleteness marker at
+The root's individual harness smoke reports m2c declining all four read-back rows with the first
+emitted gap `extern ? gReadBgs`. This is an extern-type placeholder blocker, not a
+register-allocation failure. The harness recognizes this emitted incompleteness marker at
 `apps/benchmark/src/eval/outcome.ts:40`; it classifies the output before compilation. That
-observable classification does not identify a private m2c optimizer refusal site. The declarations/prototype information is shared by both tools, but this blocker prevents
-a numerical cross-tool comparison for the family. No claim about m2c register recovery follows.
+observable classification does not identify a private m2c optimizer refusal site. This blocker
+prevents a numerical cross-tool comparison for the family, and no claim about m2c register
+recovery follows.
+
+That decline is a fact about the context these rows pass, not about the corpus. Rows such as
+`sbscope` and `ptrelem` hand the global's declaration to both tools through a `symbols:` entry,
+and `sbscope` — an extern array global — reaches m2c `nonmatch` rather than a decline. Compiling
+`ereadctl`'s spelling with its own declaration in `ctx` moves m2c from `declined` to `noncompile`:
+past the placeholder, still without a scored output, with asmlift unmoved at 2. Neither convention
+yields a cross-tool number here, so the family's conclusion is unchanged; the reason it declines is
+narrower than "the corpus never supplies a global".
 The existing raw `rereadctl` MATCH is a control for a different basin; it cannot replace the
 observed extern control score of two.
 

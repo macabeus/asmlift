@@ -105,6 +105,13 @@ blockers. Existing `reread`/`rereadctl` cover a register-residual pair. This cen
 justifies no additional synthetic row by itself: its finding is a mixed population, not a new
 isolated capability. The parent plan's independently compiled probes carry any new rows.
 
+Nor can sub_0804C484 become a **real** row as things stand, and the reason is neither its residual
+nor its provenance. The benchmark's pinned kleod checkout (`704fd74`) does carry it, renamed by the
+project's own symbol map to `StreamCmd_SetEntityTransform` in `src/gfx.c` — the same translation
+unit as `LoadBGTilemapData`. It is an `INCLUDE_ASM` stub, so no reference C exists for it, and all
+42 entries in `apps/benchmark/dataset/real/kleod.json` carry a `funcC`. A real row would need
+upstream to decompile it first.
+
 ## Reproduction
 
 `KLEOD` and `OTHER` below are user-provided checkout roots; `REPO` is this asmlift worktree and

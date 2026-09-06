@@ -2982,17 +2982,46 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { rereadctl: { returnsVoid: true } },
   },
 
-  // EXTERN-SYMBOL READ-BACK PAIRS. These preserve a named data relocation, unlike the
-  // raw-address reread/rereadctl pair above. ereread/ereadctl differ only by a same-value
-  // fixed-index field write; erback/erbctl add a read-back after the indexed destination
-  // store. The src strings are verbatim compiled probes. All four are agbcc-specific.
-  // ereadctl and erbctl are intervention controls, not MATCH controls. Individual agbcc
-  // smoke scores: ereread 11, ereadctl 2, erback 12, erbctl 12. The existing raw rereadctl
-  // MATCHes. These scores include the whole residual, not just register differences.
-  // All four m2c declines first emit `extern ? gReadBgs;` (? placeholder): unknown extern
-  // type recovery owns that blocker, not this allocator/aliasing experiment. Both tools
-  // receive only named function parameters; neither receives a global layout in context.
-  // No row is a proposed allocator fix; measured attribution is in docs/lbg-attribution.md.
+  // A DECLARED EXTERN ARRAY SUBSCRIPTED INSIDE A LOOP: two facts that cost nothing apart and
+  // two points together. `ereadctl` is the conjunction — `extern struct Bg gReadBgs[];` reached
+  // as `gReadBgs[k].dst[i]` under a loop — and it scores 2. `ername` keeps the loop and drops
+  // the array shape, reaching the same named symbol through `&gReadBgsObj`; `erflat` keeps the
+  // array shape and drops the loop. Both MATCH, so the pair brackets the conjunction from both
+  // sides and neither term is the price on its own. The declared bound is not the axis either:
+  // spelling it `gReadBgs[4]` instead of `[]` also scores 2. `erflat` wins on
+  // `unsigned/orderbase` and the loop arm's winner does not carry that axis at all, which is the
+  // family's open question and not a claim about where the two points are paid.
+  //
+  // The named data relocation is free. It is what makes this family look different from the
+  // raw-address reread/rereadctl pair above, and it is not what costs anything: `ername` carries
+  // the same relocation and MATCHes.
+  //
+  // WHAT THE READ-BACK PAIRS ADD, on top of that conjunction. `ereread` adds a same-value
+  // fixed-index field write to `ereadctl`; `erback`/`erbctl` make the same comparison with a
+  // read-back of that field after the indexed store. agbcc scores: ereread 11, ereadctl 2,
+  // erback 12, erbctl 12. So the same-value write is worth 9 with no read-back (11 against 2)
+  // and 0 with one (12 against 12): the read-back collapses the statement's price, and that
+  // collapse is what this family measures.
+  //
+  // `ereread`'s 11 decomposes into residual fields its neighbours each carry alone — the
+  // insert/delete pair is `ereadctl`'s whole residual, the replaces are `reread`'s. It prices
+  // the extern basin's same-value write against a control that does not MATCH, which is why the
+  // raw `reread`/`rereadctl` pair stays: that one brackets 0 against 8.
+  //
+  // `ereadctl` and `erbctl` are intervention controls, not MATCH controls, and neither is
+  // `value-home`. `ereadctl`'s residual is a moved shift; `erbctl`'s twelve are six
+  // register-only rows plus an opcode mismatch and four insertion/deletion rows, which is not a
+  // diff dominated by where a value lives.
+  //
+  // m2c declines every row here, first emitting the extern as `extern ? gReadBgs;`, so the family
+  // yields no cross-tool number: unknown extern-type recovery owns that blocker, not this
+  // allocator/aliasing experiment. That is a fact about the context THESE rows pass. Rows such as
+  // `sbscope` and `ptrelem` hand the global's declaration to both tools instead, and supplying
+  // it to `ereadctl`'s spelling moves m2c from `declined` to `noncompile` — past the
+  // placeholder, still without a score, with asmlift unmoved at 2.
+  //
+  // agbcc only, for the same reason as the raw family above, and no row here is a proposed fix;
+  // the measured attribution is in docs/lbg-attribution.md.
   {
     sym: 'ereread',
     src: 'struct Bg { u32 *dst; u16 h; u16 v; };\nextern struct Bg gReadBgs[];\nvoid ereread(u32 k, u32 n) { u32 i; for (i=0; i<n; i=i+1) { gReadBgs[2].v = gReadBgs[2].v + 0; gReadBgs[k].dst[i] = i << 6; } }\n',
@@ -3019,9 +3048,34 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'erbctl',
     src: 'struct Bg { u32 *dst; u16 h; u16 v; };\nextern struct Bg gReadBgs[];\nu32 erbctl(u32 k, u32 n) { u32 i, sum=0; for (i=0; i<n; i=i+1) { gReadBgs[k].dst[i] = i << 6; sum += gReadBgs[2].v; } return sum; }\n',
-    features: ['value-home', 'global', 'array'],
+    features: ['global', 'array'],
     toolchains: ['agbcc'],
     ctx: 'u32 erbctl(u32 k, u32 n);',
+  },
+  {
+    sym: 'ername',
+    src:
+      'struct Bg { u32 *dst; u16 h; u16 v; };\n' +
+      'extern struct Bg gReadBgsObj;\n' +
+      '#define gRB ((struct Bg *)&gReadBgsObj)\n' +
+      'void ername(u32 k, u32 n){ u32 i;' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gRB[k].dst[i] = i << 6; } }',
+    features: ['global'],
+    toolchains: ['agbcc'],
+    ctx: 'void ername(u32 k, u32 n);',
+    proto: { ername: { returnsVoid: true } },
+  },
+  {
+    sym: 'erflat',
+    src:
+      'struct Bg { u32 *dst; u16 h; u16 v; };\n' +
+      'extern struct Bg gReadBgs[];\n' +
+      'void erflat(u32 k, u32 i){ gReadBgs[k].dst[i] = i << 6; }',
+    features: ['global', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'void erflat(u32 k, u32 i);',
+    proto: { erflat: { returnsVoid: true } },
   },
 
   // A BASE THE ARMS SHARE, AND A CONSTANT INDEX THAT NEEDS NONE: one fold, two surfaces, and
@@ -5830,7 +5884,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // no appeal to them justifies anything here. COUNTED IN ROWS, which is what `bench` reports and
   // what "rows" means everywhere else in this file, and read off THE ARTIFACT THIS BRANCH
   // PUBLISHES: `uninit-local` is 16 rows (agbcc 7, ido7.1 3, gcc2.7.2kmc 3, mwcc_242_81 3) and
-  // `value-home` is 78 (agbcc 57, gcc2.7.2kmc 8, ido7.1 7, mwcc_242_81 6 — 73 synthetic plus 5
+  // `value-home` is 82 (agbcc 61, gcc2.7.2kmc 8, ido7.1 7, mwcc_242_81 6 — 77 synthetic plus 5
   // real). A cross-family census in a comment is a fact about the whole file, so it goes stale on
   // someone ELSE's merge: re-run it after every rebase, from the artifact and not from a `grep`
   // over this file, which counts prose lines. The reason these stay agbcc-only is direct: whether
