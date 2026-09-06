@@ -114,7 +114,7 @@ test('a `for` loop reads its counter out of init and inc', () => {
 });
 
 /** synthetic:offgiv's shape: the counter starts at the LITERAL 0, so the compiler folded its
- *  start out of the giv's init and left `acc = a1` — counter-free. `over` edits one fact. */
+ *  start out of the giv's init and left `acc = a1` — counter-free. `o` edits one fact. */
 const folded = (o: { start?: Expr; accStep?: Expr; ctrStep?: Expr; init?: Expr } = {}): SFn =>
   fill({}, [
     set('i', o.start ?? c(0)),
@@ -776,7 +776,7 @@ test('an accumulator whose step counts different units than its init declines', 
       unreduceAccumulators(ptrWalk(T.ptr(T.u(16)), intInit), GBA, undefined, without(UNREDUCE_GATES, 'stride-units')),
     ),
   ).toContain('+ (i << 5)');
-  // (b) THE SUBSTITUTIONAL PATH, which has the same hazard and predates the folded branch: the
+  // (b) THE SUBSTITUTIONAL PATH, which asks the same question of the same two types: the
   // init names the counter's start under the accumulator's own numeric stride, and `rec` rebuilds
   // it in the INIT's units rather than the accumulator's.
   const subst = ptrWalk(T.ptr(T.u(16)), plus(shl(v('a0'), c(5)), v('a1')), [

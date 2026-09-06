@@ -39,16 +39,16 @@
 // reaches the asm — the start term is GONE and there is nothing to substitute for. Every corpus
 // inhabitant of the substitutional spelling starts its counter at a PARAMETER (`dmafill`'s `lo`),
 // which is exactly why none of them needed the other: a symbolic start cannot fold.
-// `synthetic:offloop`, `offgiv`, `offgiv2` and `offgiv3` are the shape that does. For them the
-// closed form is ADDITIVE — `INIT + (ctr << s)`, the init kept whole — and `relateFolded` below
-// carries it, as a FALLBACK reached only where the substitutional rule already declined.
+// `synthetic:offloop`, `offgiv`, `offgiv2` and `offgiv3` are the shape that does, and for them
+// `relateFolded` carries the ADDITIVE form — `INIT + (ctr << s)`, the init kept whole — as a
+// FALLBACK reached only where the substitutional rule already declined.
 //
-// AND ITS THREE REFUSALS ARE NOT OF A KIND, which the SCOPE section below files under one heading
-// and should not. Only ONE of them has soundness content: a non-constant `start` would put a NEW
-// read of the start expression at every use, which none of the five re-evaluation gates asks
-// about. `d != 1` and a `k` that is not a power of two are SPELLING refusals of a form that is
-// already sound — the identity holds, this file just does not write `(ctr - start) * (k / d)`.
-// A round that needs `d = 2` should widen `relateFolded`, not write a third function beside it.
+// AND ITS REFUSALS ARE NOT OF A KIND. `relateFolded`'s own three are SPELLINGS of a form that is
+// already sound: the identity holds, this file just does not write `(ctr - start) * (k / d)`, so
+// a round that needs `d = 2` widens it rather than writing a third function beside it. The one
+// SOUNDNESS question is a start that is not a constant at all — it would put a NEW read of the
+// start expression at every use — and `relate` refuses that before `relateFolded` is reached,
+// because none of the five re-evaluation gates asks about it.
 //
 // THE ARITHMETIC. The rewrite rests on one invariant: at every read, `acc == g(ctr)`, where `g` is
 // the init expression with the counter's own start substituted by the counter. It holds at entry
@@ -142,17 +142,18 @@
 // both scales are KNOWN and equal; a narrow integer accumulator is the same question in the other
 // direction, since `u16 acc` wraps at 65536 where `init + (i << 6)` does not.
 //
-// THAT GATE IS THE WHOLE OF THIS LEVER'S REAL-CORPUS REACH TODAY, which is worth stating plainly.
-// Diffed function by function against the commit before it, over 2,755 lifted functions
-// (klonoa 467, sa3 2,288) in both symbol-map configurations — and the benchmark's own REAL tier,
-// where all 252 rows lift and NOT ONE fires, so no real-tier row and no zero-flip gate can see
-// this lever at all: exactly ONE function fires
-// (klonoa's `UpdateHUDTimePanel`, in BOTH configurations), and it is the mis-typed one. With a
-// symbol map its accumulator lifts `u16 *` against an integer init and the gate refuses it
-// (`LOST=1 GAINED=0 RESPELLED=0`); with raw addresses the same asm lifts all-integer and the
-// candidate is correct and survives (`50335396 + (v15 << 6)`, 64 bytes an iteration, which is the
-// ROM's own `adds r1, #0x40`). Same assembly, same loop, same stride — a raw-address sweep alone
-// is BLIND to the defect and reports the lever as correct.
+// THAT GATE HAS NO BENCHMARK REACH AT ALL, and neither tier can see it. Censused at the
+// `firstRejection` call site over both — 750 synthetic trees and all 252 real-tier rows, the real
+// tier being the SYMBOL-MAPPED configuration since every row carries its authored map —
+// `unitsDisagree` is true on NO row in either, and `/unreduce` fires on no real-tier row at all,
+// so no zero-flip gate reaches this lever. Its one known inhabitant is outside the benchmark:
+// klonoa's `UpdateHUDTimePanel`, where WITH a symbol map the accumulator lifts `u16 *` against an
+// integer init and the gate refuses it, and with RAW ADDRESSES the same asm lifts all-integer and
+// the candidate is correct and survives (`50335396 + (v15 << 6)`, 64 bytes an iteration, which is
+// the ROM's own `adds r1, #0x40`). Same assembly, same loop, same stride — a raw-address sweep is
+// BLIND to the defect and reports the lever as correct. The checkout sweep behind that datum
+// covered klonoa's 467 functions in both configurations and sa3's 2,288 in the RAW one only, so
+// sa3 map-ful — 83% of it, and the blind arm — is unmeasured.
 //
 // SCOPE, stated because a decline outside it names no gate and so looks exactly like a gate that
 // refused. This pass walks TOP-LEVEL loops only: the counter's start and the accumulator's init are
@@ -165,16 +166,14 @@
 // there names no gate, and a reader will attribute one anyway. Widening the scan is a REACH change
 // and belongs to a row that demands it (dmanest is the obvious candidate), not to a soundness pass.
 //
-// AND THE TABLE ANSWERS FOR A SMALLER POPULATION STILL. Instrumented over those same 834 trees,
-// the 16 gates are consulted 36 times and only four ever decide: `acc-live-outside` 14,
-// `acc-read-at-step` 10, `unrelated-step` 7, `acc-multi-assign` 2, admit 3. `unrelated-step` has
-// since been split into the FIVE reasons `relate` can decline for (`scale-mismatch`,
-// `unrelated-start`, `nonzero-start`, `step-ratio`, `stride-not-shift`), so its 7 counted five
-// questions as one and the split has not been re-censused; the shape of the finding (four gates
-// decide, the rest are held by their tests) is what it is good for, not the 7. The others —
+// AND THE TABLE ANSWERS FOR A SMALLER POPULATION STILL. Censused at the `firstRejection` call
+// site over the benchmark's two tiers, counting FIRST rejections rather than reach — short-circuit
+// order hides a later gate behind an earlier one. Of 750 synthetic trees, 21 (loop, accumulator)
+// pairs reach the table: 8 admit, `acc-live-outside` 7, `acc-read-at-step` 4, `unrelated-start` 2.
+// Of 252 real-tier rows, 6 reach it: `acc-live-outside` 3, and one each of `acc-multi-assign`,
+// `acc-read-at-step` and `unrelated-start`. FOUR of the twenty gates decide anything; the rest —
 // `moved-read-aliasable`, which the device-memory argument above rests on, among them — are held
-// by their unit tests and by the fuzz, and by nothing the corpus has yet shown them. Short-circuit
-// order hides a later gate behind an earlier one, so this counts FIRST rejections and not reach.
+// by their unit tests and by the fuzz, and by nothing either tier has yet shown them.
 //
 // AND ITS SIBLING. `l3/reindex.ts` un-reduces a POINTER WALK over the same argument, with the same
 // shape of gate table, and it already handles the `if (guard) do {} while` rotation this file
@@ -203,9 +202,8 @@ import {
 import { type Gate, firstRejection } from './gates';
 import { type VarTypes, declaredTypes, exprCType, ptrElemBytes } from './typing';
 
-/** Why `relate` refused — one tag per question it asks, and the five gates below test one tag
- *  each. `relate` is the only place that knows which question failed, so it says so rather than
- *  handing back a bare null the gate table has to re-derive from a proxy. */
+/** Why `relate` refused — one tag per question it asks. `relate` is the only place that knows
+ *  which question failed, so it says so; the five gates below test one tag each. */
 type RelDecline = 'scale-mismatch' | 'unrelated-start' | 'nonzero-start' | 'step-ratio' | 'stride-not-shift';
 
 /** `relate`'s answer: the closed form, or the reason there is none. */
@@ -232,9 +230,8 @@ export interface AccCtx {
   /** the accumulator's own step and its init count in DIFFERENT C units, so the closed form's
    *  `+` would scale by the wrong element size (or by none) */
   unitsDisagree: boolean;
-  /** WHY `relate` refused, or null where it produced a closed form. One tag per question asked,
-   *  so each gate below tests one reason and its `why` is true of its whole population — a gate
-   *  routed on a PROXY for a decision `relate` has already taken is a `why` that drifts. */
+  /** WHY `relate` refused, or null where it produced a closed form — one tag per question it
+   *  asks, so each of the five relation gates tests exactly one reason. */
   declined: RelDecline | null;
   /** the init reads a name something in the motion region assigns */
   initLoopVar: boolean;
@@ -271,15 +268,6 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
     rejects: (c) => c.pinned,
   },
   {
-    // The accumulator's step is read off `acc = acc + K`, so K counts in the units of the
-    // ACCUMULATOR's declared type — elements for a pointer, and a `u16 *` stepped by 32 advances
-    // 64 bytes. The closed form spells that stride onto the INIT expression, whose `+` scales by
-    // whatever the INIT's own C type says. Where the two disagree the candidate addresses the
-    // wrong byte, compiles clean, and carries no marker — structure.ts:`bytePtr` states the same
-    // rule from the other end ("a `u16 *` walked by a computed offset addresses TWICE the intended
-    // byte, and nothing downstream can see the error"). A narrow integer accumulator is the same
-    // question in the other direction: `u16 acc` WRAPS at 65536 where `init + (i << 6)` does not,
-    // so only a full-width integer counts as a unit-1 arithmetic type.
     id: 'stride-units',
     why: 'a step counted in the accumulator’s own units is not the init’s, and the closed form would scale by the wrong one',
     sound: true,
@@ -335,12 +323,9 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
   },
   // ── the five refusals `relate` can produce, one gate each ─────────────────────────────────
   //
-  // These five PARTITION the non-null `declined` tags, so together they reject exactly what a
-  // single `!related` rule rejected — and each one's `why` is true of its whole population by
-  // construction rather than by a reader's reading. That is the point: routing a gate on a tree
-  // FACT (`the start is a constant`) rather than on the decision `relate` actually took makes the
-  // `why` drift the moment a second reason shares the fact, which is how one conflated gate
-  // becomes two conflated gates.
+  // These five PARTITION the non-null `declined` tags, and each is keyed on the decision `relate`
+  // took rather than on a tree fact that stands for it (`the start is a constant`): a proxy makes
+  // the `why` drift the moment a second reason shares the fact.
   {
     id: 'scale-mismatch',
     why: 'an init whose scale does not carry the accumulator’s whole stride proves nothing',
@@ -436,13 +421,12 @@ function arithScale(t: IrType | undefined): number | null {
   return t.kind === 'int' && t.width === 32 ? 1 : null;
 }
 
-/** Constant-fold a stride the FRONTEND spelled as arithmetic. Thumb's `add rd, #imm8` cannot spell
- *  256, so agbcc emits `mov #128 / lsl #1` and the recovered step is the node `128 << 1` rather
- *  than the constant 256. Every relation check below reads the stride's VALUE, so without this a
- *  stride refuses on its SPELLING and names a gate whose `why` is about the value — measured on
- *  synthetic:offgiv3, where the start is the literal 0, the counter steps by 1 and 256 is a
- *  constant power of two, and the lever declined anyway. The refusal was pre-existing on the
- *  substitutional path too (`rec` reads `k.k === 'const'` the same way).
+/** Read a constant the FRONTEND spelled as arithmetic as its VALUE. Thumb's `add rd, #imm8`
+ *  cannot spell 256, so agbcc emits `mov #128 / lsl #1` and the recovered node is `128 << 1`.
+ *  Every question the relation asks about a constant is about its value — the accumulator's
+ *  stride, the counter's start, the counter's step, a product's invariant multiplier — so each is
+ *  folded before it is read; unfolded, the same number refuses on its spelling and names a gate
+ *  whose `why` is about the value (synthetic:offgiv3 is the row, on the stride).
  *
  *  ONLY all-constant nodes fold, which is what keeps this from being a general simplifier: nothing
  *  that mentions a name is touched, so `acc-read-at-step` — which reads the same expression for
@@ -531,14 +515,12 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
   if (substituted !== null) {
     return { ok: substituted };
   }
-  // …AND THE FOLDED FORM AS THE FALLBACK. Note that the occurrence COUNT above cannot be trusted
-  // to route this on its own: where the start is the constant 0, every unrelated literal zero in
-  // the init — an `[0]` subscript, a `+ 0` — counts as an occurrence and sends a counter-free init
-  // down the substitutional path, where it declines for the wrong reason. (`rec` never substitutes
-  // for such a literal: it verifies an all-`+` spine down to the occurrence at the accumulator's
-  // own scale, and an `index` node on that path refuses. So the misrouting costs reach, not
-  // soundness — and trying `rec` first and asking about the START's shape second fixes the reach
-  // without touching the safety argument.)
+  // …AND THE FOLDED FORM AS THE FALLBACK. The occurrence COUNT cannot route this on its own:
+  // where the start is the constant 0, every unrelated literal zero in the init — an `[0]`
+  // subscript, a `+ 0` — `exprEquals` the start and counts as one. `rec` never substitutes for
+  // such a literal (it verifies an all-`+` spine down to the occurrence at the accumulator's own
+  // scale, and an `index` node on that path refuses), so running it FIRST and asking about the
+  // start's SHAPE second misroutes nothing.
   // The start's SHAPE is what routes this, so it is read as a VALUE: `128 << 1` is the constant
   // 256, and taking it for a symbolic start would name a gate whose `why` says the start is one.
   // `rec` above keeps matching the init's subterms against the ORIGINAL spelling, which is what
@@ -553,42 +535,29 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
   return relateFolded(init, startConst.value, ctr, k, d);
 }
 
-/** THE OTHER relation, and it is the same one after CONSTANT FOLDING. `relate` above recovers the
- *  init by substituting the counter for its own start, which needs the start to still be THERE. A
- *  source `for (i = 0; …) use(base + (i << 6))` gives the compiler-created giv the init
- *  `base + (0 << 6)`, and the compiler folds that to `base` long before any of it reaches the asm:
- *  the start term is gone, the init is loop-invariant, and nothing is left to substitute. Every
- *  `/unreduce` row that PREDATES this branch starts its counter at a PARAMETER (`dmafill`'s `lo`),
- *  which is exactly why none of them needed it — a symbolic start cannot fold. `offloop`,
- *  `offgiv`, `offgiv2` and `offgiv3` are the rows that do.
+/** THE OTHER SPELLING of the identity above: ADDITIVE, `INIT + (ctr << s)`, with the init kept
+ *  whole and the scaled counter added to it. It applies where the counter's start has been folded
+ *  out of the init and there is nothing left to substitute for (see the header). `start` is the
+ *  start's VALUE — `relate` has already established that it is a constant.
  *
- *  So the closed form is ADDITIVE rather than substitutional: `INIT + (ctr << s)`, the init kept
- *  whole and the scaled counter added to it. The invariant it must preserve is the same one, and
- *  it holds for the same reason: at entry `ctr == 0`, so `INIT + (0 << s) == INIT`; per iteration
- *  `ctr` grows by 1 and the closed form by `2^s`, which is the accumulator's own stride `k`.
+ *  The invariant is the header's, and holds for the same reason: at entry `ctr == 0`, so
+ *  `INIT + (0 << s) == INIT`; per iteration `ctr` grows by 1 and the closed form by `2^s`, which
+ *  is the accumulator's own stride `k`. All five re-evaluation gates read `initStmt.value` — the
+ *  ORIGINAL init — and that is exactly what this form re-evaluates at each read, so none of them
+ *  needs a second reading here.
  *
- *  AND THE RE-EVALUATION GATES ARE UNCHANGED, which is why this branch adds no soundness question.
- *  All five of them read `initStmt.value` — the ORIGINAL init — and that expression is precisely
- *  what the additive form re-evaluates at each read. It is strictly more exact than the
- *  substitutional case, where a subterm is replaced before the form is spelled.
- *
- *  SCOPE, and its three refusals are NOT of a kind (see the header). Each returns its own tag, so
- *  each names its own gate and its own `why`:
- *    • SOUNDNESS. `start` must be the CONSTANT 0 (`nonzero-start`). A non-constant start would put
- *      a NEW read of the start expression at every use — a question none of the five
- *      re-evaluation gates asks, because in the substitutional case the start is a subterm of the
- *      init they already range over. A non-ZERO constant start is sound and merely unspelled: it
- *      wants the bias term `- start * k`, which no corpus row asks for.
- *    • SPELLING. `d` must be 1 (`step-ratio`), or the closed form carries the ratio `K / d`.
- *    • SPELLING. `k` must be a power of two AFTER `foldConsts` (`stride-not-shift`).
- *      `INIT + ctr * k` is the general spelling and compiles identically at agbcc (the shift and
- *      the product were compiled and diffed: byte-identical), so a second spelling would double
- *      the fan and buy no score. The shift is what this class's references spell. The FOLD is not
- *      optional politeness: without it a stride agbcc had to spell `mov #128 / lsl #1` — because
- *      256 does not fit Thumb's `add rd, #imm8` — refuses on its own node kind while every stated
- *      condition holds (synthetic:offgiv3, 5 without the fold and MATCH with it).
- *  The soundness refusal is pinned by a unit test and reached by no corpus row; the two spelling
- *  refusals are pinned by unit tests and by `offgiv3`'s neighbours. */
+ *  SCOPE. Three refusals, each with its own tag and so its own gate and its own `why`:
+ *    • `nonzero-start` — the start is a constant other than 0. Sound and merely unspelled: it
+ *      wants the bias term `- start * k`, which no corpus row asks for. A start that is not a
+ *      constant AT ALL never arrives here; `relate` answers that one, with `unrelated-start` or
+ *      `scale-mismatch`.
+ *    • `step-ratio` — `d` is not 1, so the closed form would carry the ratio `K / d`.
+ *    • `stride-not-shift` — `k` is not a power of two once folded. `INIT + ctr * k` is the general
+ *      spelling and compiles identically at agbcc (both were compiled and diffed: byte-identical),
+ *      so a second spelling would double the fan and buy no score; the shift is what this class's
+ *      references spell.
+ *  The first is pinned by a unit test and reached by no corpus row; the other two by unit tests
+ *  and by `offgiv3`'s neighbours. */
 function relateFolded(init: Expr, start: number, ctr: string, k: Expr, d: number): Relation {
   if (start !== 0) {
     return { declined: 'nonzero-start' };
@@ -607,8 +576,8 @@ function relateFolded(init: Expr, start: number, ctr: string, k: Expr, d: number
   // `rec`'s branch (c) already writes the bare counter for the substitutional case.
   const scaled: Expr = sh === 0 ? idx : { k: 'bin', op: '<<', l: idx, r: { k: 'const', value: sh } };
   // A ZERO init contributes nothing and `0 + (i << 3)` is a spelling no source writes, so the
-  // scaled counter stands alone — this is `rec`'s branch (c) reached the other way. (Found on
-  // synthetic:nestedloop:mwcc_242_81, whose accumulator starts at 0.)
+  // scaled counter stands alone — this is `rec`'s branch (c) reached the other way.
+  // (synthetic:nestedloop:mwcc_242_81 is such an accumulator.)
   //
   // Otherwise the INIT stays on the LEFT: it is the base the source names, and `rec` builds the
   // same shape for the same loop where the fold did not happen. Product operand order is
@@ -898,12 +867,11 @@ export function unreduceAccumulators(
       if (firstRejection(gates, ctx) !== null) {
         continue;
       }
-      // AND THE CLOSED FORM ITSELF, which the gates alone do not establish. Five of them reject a
-      // reason `relate` declined for, so the full table implies one exists — but the table is a
-      // VALUE, and `gates.ts`'s differential ablation drops an entry and re-runs this pass. With
-      // one of those five gone there is still nothing to substitute, while the init statement and
-      // the declaration would be deleted anyway: C naming a variable that is no longer there,
-      // emitted with no marker. The refusal keeps an ablation a DECLINE.
+      // AND THE CLOSED FORM ITSELF, which the gates alone do not establish: five of them reject a
+      // reason `relate` declined for, so only the FULL table implies one exists. `gates.ts`'s
+      // differential ablation drops an entry and re-runs this pass, and with one of those five
+      // gone there is nothing to substitute while the init statement and the declaration are
+      // deleted regardless — C naming a variable that is no longer there, with no marker on it.
       if (!('ok' in closed)) {
         continue;
       }

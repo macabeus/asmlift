@@ -2473,17 +2473,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // variable, and `offgiv` below is the isolate that proves it (the same 3, with no `/expr-home`
   // in the winner). Both are MATCH now.
   //
-  // AND THE GUARD-PLACEMENT ATTRIBUTION THIS COMMENT USED TO CARRY WAS WRONG, recorded because a
-  // later round will otherwise re-derive it. It read "the IV's init copy sitting above the
-  // zero-trip guard where the ROM has it below, which is the guard-placement family, not this
-  // one", and it was a reading rather than a measurement. Falsified twice over, by compiling
-  // asmlift's own emitted C with this agbcc: moving the copy below the guard by hand still scores
-  // 3, and deleting the induction variable outright is byte-exact WITH the guard and WITHOUT it,
-  // both. The guard is irrelevant in either direction. `/initfirst`, the shipped guard-placement
-  // lever, was instrumented on this row and has NO REACH — 64 calls, 64 declines, because the
-  // recovered tree has no `if` in it at all — against `armfall`, where the same probe shows it
-  // firing and LOSING (it scores 9, the winner 8). Those are two different arms of the
-  // no-reach/loses/does-not-compose distinction, and neither of them was this row's residual.
+  // AND THE ZERO-TRIP GUARD IS NOT `offloop`'S RESIDUAL, pinned here because the shape invites
+  // that reading. Measured by compiling asmlift's own emitted C with this agbcc: moving the
+  // induction variable's init copy below the guard by hand still scores 3, while deleting the
+  // variable outright is byte-exact WITH the guard and WITHOUT it, both — the guard is irrelevant
+  // in either direction. `/initfirst`, the shipped guard-placement lever, has NO REACH here (64
+  // calls, 64 declines: the recovered tree carries no `if` at all), against `armfall`, where the
+  // same probe shows it firing and LOSING at 9 to the winner's 8. Two different arms of the
+  // no-reach/loses/does-not-compose distinction, and neither is this row's residual.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; ido7.1, gcc2.7.2kmc and mwcc_242_81 were NOT measured, so those lanes are left
@@ -2590,16 +2587,11 @@ export const SYNTHETIC: SynthSpec[] = [
   },
 
   // THE COUNTER'S START, WHEN IT IS THE LITERAL 0 — `offgiv` is `offloop` with the `+ 4` bias
-  // removed, and it is the isolate that separates this family's two mechanisms. It scores the
-  // SAME 3 and its winner carries no `/expr-home` (`signed/vol-store` against `offloop`'s
-  // `signed/expr-home/vol-store`), so the residual is not the value home: it is the
-  // strength-reduced induction variable's init copy, alone.
-  //
-  // WHAT THE RESIDUAL ACTUALLY IS, because this family's prose got it wrong once. It is NOT the
-  // zero-trip guard. Moving the copy below the guard by hand, in asmlift's own emitted C, still
-  // scores 3 — while deleting the induction variable outright and re-deriving its value
-  // (`gDma[0] = (s32)(p + (i << 6));`) is byte-exact WITH the guard and WITHOUT it, both. The
-  // guard is irrelevant in either direction; the un-reduction is the whole 3.
+  // removed, and it is the isolate that separates this family's two mechanisms. It was authored at
+  // the same 3 as `offloop`, with no `/expr-home` in its winner (`signed/vol-store` against
+  // `offloop`'s `signed/expr-home/vol-store`), so the residual was not the value home: it was the
+  // strength-reduced induction variable's init copy, alone. The guard is not that residual either
+  // — see the family comment above `offhome`.
   //
   // AND IT IS THE `/unreduce` FAMILY, one class its lever could not reach. `dmafill` and friends
   // start the counter at the PARAMETER `lo`, so the compiler-created giv's init is
@@ -2648,8 +2640,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // the start is the literal 0, the counter steps by 1, the stride is a constant power of two —
   // and the lever refused anyway, on the SPELLING of the stride node rather than on its value.
   // That is a refusal of asmlift's own folding, in a lever whose entire framing is the COMPILER's
-  // folding, and it was pre-existing on the substitutional path too (`rec` reads
-  // `k.k === 'const'` the same way).
+  // folding, and it was never confined to the folded branch — the substitutional path compared an
+  // unfolded multiplier against a folded stride the same way. The relation reads every constant
+  // as its value, on both paths.
   {
     sym: 'offgiv2',
     src:
@@ -3286,12 +3279,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // exactly: 0 with one base, 11 with four, same lever, same poll, same loop.
   //
   // The loop is spelled `i = 0; do … while` rather than `for` deliberately: a `for` puts the
-  // family below's zero-trip guard into the same row, and this row is about the bases. When that
-  // was written the `for` spelling scored 15, of which 11 was these bases and 4 was that guard
-  // (verified by composing both fixes by hand: 15 → 4 → 0).
-  //
-  // THAT NUMBER IS STALE and the separation it argues for has since been closed by shipped levers.
-  // Re-measured on the same hand-compiled `for` shape, `docs/ranked-repro.md`'s command: 76
+  // family below's zero-trip guard into the same row, and this row is about the bases. That
+  // separation is closed: measured on the same hand-compiled `for` shape with
+  // `docs/ranked-repro.md`'s command, 76
   // candidate(s) scored, 0 dropped, 0 withheld, best `signed/livebase-block/volatile/initfirst`:
   // 0 (match). `/initfirst` is IN that winner, so the guard-placement lever does close a real
   // instance of the shape — which is worth knowing next to `armfall`, where the same lever is
