@@ -589,22 +589,29 @@ const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *  is a plain leaf reached twice, `/livebase` already binds exactly that set at this placement and
  *  this row declines rather than restating it under a second label.
  *
- *  ONE PLACEMENT, AND IT IS A MEASURED ZERO rather than a question the admission does not raise.
- *  `synthetic:bgarr` emits the identical source at both placements (the hoist has nothing to sit
- *  above) and that one row generalizes to nothing: over the artifact's agbcc rows `head` and
- *  `first-use` emit DIFFERENT source on 3 of the 8 rows this admission binds map-less and 4 of the
- *  10 map-ful — `kleod:SetupBG3WindowOverlay`, `kleod:UpdateCameraScroll`,
- *  `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful `kleod:StreamCmd_SetBGScroll`. Run
- *  through the harness on all four, a second entry at `placement: 'first-use'` scores nothing:
- *  146 → 146, noncompile → noncompile, MATCH → MATCH, noncompile → noncompile, against +1129
- *  candidates over those rows' 15167 (+7.4%) and `kleod:UpdateCameraScroll` 224 s → 278 s. So the
- *  second row is withheld for the reason `pairings: false` is — a measured zero on the corpus. Add
- *  it when a row scores better with it, and re-run those four when one does.
+ *  TWO PLACEMENTS, and the FLAT second one is a measured zero. `synthetic:bgarr` emits the identical
+ *  source at `head` and `first-use` (the hoist has nothing to sit above) and that one row
+ *  generalizes to nothing: over the artifact's agbcc rows the two emit DIFFERENT source on 3 of the
+ *  8 rows this admission binds map-less and 4 of the 10 map-ful — `kleod:SetupBG3WindowOverlay`,
+ *  `kleod:UpdateCameraScroll`, `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful
+ *  `kleod:StreamCmd_SetBGScroll`. Run through the harness on all four, an entry at
+ *  `placement: 'first-use'` scores nothing: 146 → 146, noncompile → noncompile, MATCH → MATCH,
+ *  noncompile → noncompile, against +1129 candidates over those rows' 15167 (+7.4%) and
+ *  `kleod:UpdateCameraScroll` 224 s → 278 s. That row stays withheld.
  *
- *  `pairings: false` for the field's own reason — a product is added for a row that demands the
- *  joint spelling, and the row that earned this entry demands none. */
+ *  `scope` is a DIFFERENT question and a row demanded it. `first-use` reaches only the top-level
+ *  statement list, so on a function whose licensed base is used solely inside a guarded loop it
+ *  spells the same bytes `head` does — the pool word above the branch — while the reference loads
+ *  it after. Compiled through the benchmark's own agbcc on `synthetic:ereadctl`'s target, with
+ *  everything else held identical: the init above the `if` differs, the same init INSIDE the arm is
+ *  instruction-identical. So the two flat placements are one answer here and this is the other, the
+ *  way `/basefold`'s pair is one eligibility rule at two positions.
+ *
+ *  `pairings: false` on both for the field's own reason — a product is added for a row that demands
+ *  the joint spelling, and neither row here demands one. */
 const ORDERBASE_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/orderbase', gates: ORDERBASE_GATES, placement: 'head', pairings: false },
+  { suffix: '/orderbase/scoped', gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
 ];
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>

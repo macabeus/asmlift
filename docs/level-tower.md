@@ -311,9 +311,17 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   All three that place into that run now share the body rebuild, and TWO of them share the policy
   as an argument: `l3/hoist.ts` owns name allocation for every pass that mints a local, and
   `placeBaseLocals(sfn, minted, placement)` owns the leading base-init run, the first-use query and
-  the rebuild. `head` and `first-use` are two positions for a run this file has already ordered —
-  that is `HoistPlacement`, the only thing `l3/basecse.ts` accepts and the only thing a roster
-  admission may state, so a row in `rank.ts` says WHERE its locals go beside WHICH bases it binds.
+  the rebuild. `head`, `first-use` and `scope` are three positions for a run this file has already
+  ordered — that is `HoistPlacement`, the only thing `l3/basecse.ts` accepts and the only thing a
+  roster admission may state, so a row in `rank.ts` says WHERE its locals go beside WHICH bases it
+  binds. `scope` is the first of the three that leaves the top-level statement list: it continues
+  the first-use query downward while exactly one statement mentions the local, that statement
+  mentions it nowhere outside the lists it opens, and exactly one of those lists holds it — and it
+  reproduces `first-use` exactly where no nested list holds every mention, which is what keeps it a
+  position rather than a policy. It is also the only one whose result is not above every use by
+  construction, so `hoistBaseLocals` runs `assertHoistsDominate` over its mints there and nowhere
+  else. The setter half of `stmtLists` (`mapStmtLists`, beside it in `l3/ast.ts`) is what lets the
+  rebuild reach a nested list without a second `Stmt`-kind switch.
   `l3/nearbase.ts`'s `prepend` is not a third position: it returns before the query and the sort,
   so it is `[...minted, ...body]` and shares the rebuild only. It is a separate type and not a
   third value of one — handing it to `hoistBaseLocals` spells a minted base's pool load above the

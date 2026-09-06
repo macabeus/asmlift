@@ -140,10 +140,11 @@ function mapTo(list: Stmt[], at: number | undefined): { list: Stmt[]; at: number
 }
 
 /** The innermost statement list holding EVERY mention of `name`, and the index in it of the first
- *  statement that mentions it. This is `firstUseIn` continued downward: it descends while exactly
- *  one statement mentions the name, that statement does not mention it outside the lists it opens
- *  (a loop condition, a `for`'s `init`/`inc` — those run at the enclosing cadence, so a list under
- *  them holds no mention the enclosing list does not), and exactly one of those lists holds it.
+ *  statement that mentions it. This is `firstUseIn` continued downward, and it descends only on
+ *  three facts: exactly one statement of this list mentions the name, that statement mentions it
+ *  nowhere OUTSIDE the lists it opens (its own condition, or a `for`'s `init`/`inc` — which are
+ *  statements no list holds), and exactly one of those lists holds it. Any of the three failing
+ *  means a nested list does not hold every mention, so this list is as deep as the init may go.
  *  Stopping at the top level reproduces `first-use` exactly, which is what lets `scope` be a
  *  placement rather than a second policy.
  *
@@ -271,6 +272,13 @@ export function placeBaseLocals(
   }
   const rebuild = (list: Stmt[]): Stmt[] => {
     const here = bySite.get(list);
+    // CONSUMED: one `Stmt[]` object sitting at two tree positions takes the init at the FIRST of
+    // them, never at both, where a second splice would write the same local twice. `scopeSite`
+    // cannot return such a list — sharing means two statements mention the local, which stops the
+    // descent at their common list — so this restates that invariant where breaking it would be
+    // silent. Nothing in the L3 contract forbids the sharing itself (l3/scopebase.ts records a
+    // producer that shares an expression node).
+    bySite.delete(list);
     let changed = here !== undefined;
     const mapped = list.map((s) => {
       let inner = false;

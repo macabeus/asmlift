@@ -397,6 +397,19 @@ describe('`scope` is the third placement: the init goes INSIDE the block holding
     expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'first-use').body);
   });
 
+  test('a list at TWO tree positions is never a scope site: both positions mention it', () => {
+    // Nothing in the L3 contract forbids the sharing, and an init spliced into a shared list would
+    // be written twice. The descent cannot reach one — two mentioning statements stop it at their
+    // common list — and this is that invariant, asserted where breaking it would be silent.
+    const shared: Stmt[] = [read('p0', 1)];
+    const sfn = fn([
+      init('p0', 0x3001100),
+      { k: 'if', cond: c(1), then: shared, else: [] },
+      { k: 'if', cond: c(2), then: shared, else: [] },
+    ]);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'head').body);
+  });
+
   test('a local the function assigns again does not sink — the move would cross that write', () => {
     const sfn = fn([
       init('p0', 0x3001100),
