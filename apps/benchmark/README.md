@@ -1,7 +1,7 @@
 # asmlift benchmark — m2c vs asmlift decompilation quality
 
 A reproducible, **extensible** benchmark comparing the decompilation quality of
-[`m2c`](https://github.com/matt-kempster/m2c) and asmlift over the four toolchains asmlift supports, scored with the same
+[`m2c`](https://github.com/matt-kempster/m2c) and asmlift over the five toolchains asmlift supports, scored with the same
 `objdiff` engine asmlift uses. Built to become a **live QA pipeline**: re-run it as asmlift evolves
 and watch match/compile/error rates move.
 
@@ -46,9 +46,9 @@ are genuine modeling gaps — carry flags, unknown instructions, and callees the
 never declares — that context cannot fix; same class as asmlift's declines (the decline-reason
 Pareto in Gap Analysis is the roadmap).
 
-## Toolchains (the four `--target` IDs)
+## Toolchains (the five `--target` IDs)
 
-All four are live via asmlift's own scoring seam (`packages/cli/src/score.ts`), reused here so the benchmark
+All five are live via asmlift's own scoring seam (`packages/cli/src/score.ts`), reused here so the benchmark
 measures the exact compilers asmlift is tested against. Candidate compilation runs THROUGH the
 same `decomp.yaml` path a real project uses (`src/decomp-config.ts`): the configs are COMMITTED
 as live documentation — `dataset/toolchains/<id>/decomp.yaml`, one per toolchain, with machine
@@ -56,7 +56,7 @@ locations as `$ASMLIFT_*` placeholders (the same names `@asmlift/toolchains` hon
 overrides). The harness materializes them into the gitignored `.cache/decomp-configs/` and loads
 them with the real loader — the native pair (agbcc, IDO) keeps its `tools.asmlift.compiler`
 command mirroring the built-in invocation (parity enforced by `test/decomp-config.test.ts`),
-while for the dockerized pair (KMC GCC, mwcc) the harness strips the compiler so the registry
+while for the dockerized three (KMC GCC, GCC 2.7.2, mwcc) the harness strips the compiler so the registry
 built-ins (with container pooling) serve it, the same either/or a user gets. The reproduction
 scripts (`bench target`) get the command intact on every toolchain:
 
@@ -65,6 +65,7 @@ scripts (`bench target`) get the command intact on every toolchain:
 | `agbcc`       | agbcc / ARM (GBA)                  | agbcc `.s` (shared by both — ARM is free)   |
 | `ido7.1`      | IDO / MIPS (N64)                   | `objdump -d` → normalized to GNU-as for m2c |
 | `gcc2.7.2kmc` | KMC GCC / MIPS (N64, Docker)       | `objdump -d` → normalized for m2c           |
+| `gcc2.7.2`    | GCC 2.7.2 / MIPS (N64, Docker)     | `objdump -d` → normalized for m2c           |
 | `mwcc_242_81` | CodeWarrior / PowerPC (GC, Docker) | `objdump -d` → normalized for m2c           |
 
 asmlift's MIPS/PPC frontends consume `objdump`; m2c wants GNU-as text, so `src/eval/m2c-normalizer.ts`
