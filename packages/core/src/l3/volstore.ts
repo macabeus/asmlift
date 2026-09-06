@@ -179,7 +179,10 @@ function qualify(lval: Expr, window: readonly [number, number] | undefined): Exp
 }
 
 /** How many stores this tree would qualify — the enumeration gate, so a function with no device
- *  store costs one walk and no candidate. */
+ *  store costs one walk and no candidate.
+ *
+ *  A COUNT, so the shared `stmtChildren` walk order (a switch's default at `defaultAt`, not last)
+ *  cannot reach the answer. */
 export function deviceStoreCount(sfn: SFn, window?: readonly [number, number]): number {
   let n = 0;
   const visit = (stmts: readonly Stmt[]): void => {

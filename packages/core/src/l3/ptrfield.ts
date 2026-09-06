@@ -163,6 +163,10 @@ function plan(sfn: SFn): Map<string, IrType> {
   return out;
 }
 
+/** Every `store` in the tree. ORDER-FREE by construction, which is what lets it use the shared
+ *  `stmtChildren` (a switch's default sits at `defaultAt`, not last): its one caller only sets
+ *  `written` on entries the preceding `walkExprs` pass already created — `note` builds an entry
+ *  from the DECLARED field type, a function of the key alone, so this loop mints no key. */
 function* stores(body: readonly Stmt[]): Generator<Extract<Stmt, { k: 'store' }>> {
   for (const s of body) {
     if (s.k === 'store') {

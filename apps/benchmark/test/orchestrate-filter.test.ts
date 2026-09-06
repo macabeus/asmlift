@@ -1,7 +1,14 @@
 import { CACHE_MISMATCH_EXIT } from '@asmlift/cli/candcache';
 import { describe, expect, it } from 'vitest';
 
-import { emptySelectionError, fanExitCode, shardQueue, tierIsFiltered } from '../src/run/orchestrate';
+import {
+  type StitchResult,
+  emptySelectionError,
+  fanExitCode,
+  shardQueue,
+  tierIsFiltered,
+  tierLine,
+} from '../src/run/orchestrate';
 
 // A filter that selects no row used to print `✓ real: 0 results` and exit 0, having replaced a
 // good 240-row `real.json` with `results: []` — the file `bench merge` reads next. The verdict is
@@ -100,5 +107,34 @@ describe('fanExitCode', () => {
 
   it('is 1 when nothing failed — the caller asks it only after a failure, and it may not invent one', () => {
     expect(fanExitCode([])).toBe(1);
+  });
+});
+
+describe('tierLine', () => {
+  const line = (stitched: StitchResult, failedShards = 0, skips = 0): string =>
+    tierLine({ tier: 'real', stitched, failedShards, secs: '12.3', skips });
+
+  it('claims the write only when the write happened', () => {
+    expect(line({ wrote: true, rows: 404 })).toBe('✓ real: 404 results in 12.3s → results/real.json');
+    // The regression this pins: a tier whose shards all died reported `✓ … → results/real.json`
+    // for a file `stitch` had deliberately left alone, because the glyph and the arrow were
+    // derived from the row count instead of from what the write path returned.
+    expect(line({ wrote: false, rows: 0, why: 'no-parts' })).toBe(
+      '– real: 0 results in 12.3s — no shard wrote a part file, results/real.json left unchanged',
+    );
+    expect(line({ wrote: false, rows: 0, why: 'no-row-selected' })).toBe(
+      '– real: 0 results in 12.3s — no row selected, results/real.json left unchanged',
+    );
+  });
+
+  it('a nonzero shard exit outranks both, and skips are appended to whichever fired', () => {
+    expect(line({ wrote: true, rows: 400 }, 2, 7)).toBe(
+      '✗ real: 400 results in 12.3s (2 shard(s) exited nonzero) → results/real.json' +
+        ' — ⚠ 7 row(s) SKIPPED, toolchain unavailable',
+    );
+    expect(line({ wrote: false, rows: 0, why: 'no-parts' }, 0, 3)).toBe(
+      '– real: 0 results in 12.3s — no shard wrote a part file, results/real.json left unchanged' +
+        ' — ⚠ 3 row(s) SKIPPED, toolchain unavailable',
+    );
   });
 });

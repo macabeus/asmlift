@@ -124,10 +124,32 @@ export function emptySelectionError(
  *  it declined to write — which of the two refusals fired. The caller renders both the tick and
  *  the ` → results/<tier>.json` claim from this, so a claim about a write cannot be re-derived
  *  into disagreeing with the write. */
-interface StitchResult {
+export interface StitchResult {
   wrote: boolean;
   rows: number;
   why?: 'no-parts' | 'no-row-selected';
+}
+
+/** One tier's summary line. Pure, and exported for the test: the glyph and the
+ *  ` → results/<tier>.json` suffix are the run's only report of whether that file was rewritten,
+ *  and a tier whose shards all died once printed `✓ … → results/<tier>.json` for a write that had
+ *  not happened. Both now read the write off the same `StitchResult` the write path returned. */
+export function tierLine(a: {
+  tier: Tier;
+  stitched: StitchResult;
+  failedShards: number;
+  secs: string;
+  skips: number;
+}): string {
+  const glyph = a.failedShards ? '✗' : a.stitched.wrote ? '✓' : '–';
+  const wrote = a.stitched.wrote
+    ? ` → results/${a.tier}.json`
+    : ` — ${a.stitched.why === 'no-row-selected' ? 'no row selected' : 'no shard wrote a part file'}, results/${a.tier}.json left unchanged`;
+  // A skip total belongs on the tier line, not only in the scrollback: an absent toolchain
+  // costs whole projects and `bench regression` reads them as MISSING.
+  const skipNote = a.skips ? ` — ⚠ ${a.skips} row(s) SKIPPED, toolchain unavailable` : '';
+  const failNote = a.failedShards ? ` (${a.failedShards} shard(s) exited nonzero)` : '';
+  return `${glyph} ${a.tier}: ${a.stitched.rows} results in ${a.secs}s${failNote}${wrote}${skipNote}`;
 }
 
 /** Stitch `${tier}.part{0..n-1}.json` back into the canonical `${tier}.json`, delete the parts.
@@ -272,25 +294,13 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
     }
     const s = span.get(tier);
     const secs = (((s?.t1 ?? 0) - (s?.t0 ?? 0)) / 1000).toFixed(1);
-    // A skip total belongs on the tier line, not only in the scrollback: an absent toolchain
-    // costs whole projects and `bench regression` reads them as MISSING.
-    const skipNote = skips ? ` — ⚠ ${skips} row(s) SKIPPED, toolchain unavailable` : '';
-    // `→ results/<tier>.json` is a claim about a WRITE, and it is now the same value the write
-    // path returned rather than a second derivation of it — the two disagreed for a tier whose
-    // shards all died, which reported the file rewritten when `stitch` had deliberately left the
-    // last good one in place.
     // Only a FILTER that selected nothing makes a tier `untouched`: a tier whose shards wrote no
     // part file was not left alone because `--only` matched nothing, and `emptySelectionError`
     // must not name it as evidence that it did.
     if (stitched.why === 'no-row-selected') {
       untouched.push(tier);
     }
-    const wrote = stitched.wrote
-      ? ` → results/${tier}.json`
-      : ` — ${stitched.why === 'no-row-selected' ? 'no row selected' : 'no shard wrote a part file'}, results/${tier}.json left unchanged`;
-    console.log(
-      `${failed ? '✗' : stitched.wrote ? '✓' : '–'} ${tier}: ${n} results in ${secs}s${failed ? ` (${failed} shard(s) exited nonzero)` : ''}${wrote}${skipNote}`,
-    );
+    console.log(tierLine({ tier, stitched, failedShards: failed, secs, skips }));
   }
   if (failedShards > 0) {
     // all tiers stitched (partial results persist for debugging), but the run itself failed

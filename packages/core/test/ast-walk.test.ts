@@ -201,3 +201,30 @@ test('the walk agrees with the recursion on 200 random bodies', () => {
   }
   expect(total).toBeGreaterThan(2000); // the corpus actually exercised something
 });
+
+// `stmtChildren` places a switch's default at `defaultAt` — PRINT order, not "cases then default".
+// Six consumers were hand-rolled walks that appended the default LAST (l3/reindex.ts ×4,
+// l3/volstore.ts, l3/ptrfield.ts) and now share this one; each is order-free (counters and
+// `.some(…)`), so the change was invisible to them. A seventh caller that collects into an array
+// would see it, which is why the placement is pinned here as the contract rather than left as an
+// implementation detail of the splice.
+test('a switch spliced its default in at defaultAt, not after the cases', () => {
+  const arm = (n: number): Stmt[] => [{ k: 'assign', name: 'a', value: c(n) }];
+  const sw = (defaultAt: number | undefined): Stmt => ({
+    k: 'switch',
+    scrutinee: v('sw'),
+    cases: [
+      { values: [1], body: arm(11), fallsThrough: false },
+      { values: [2], body: arm(22), fallsThrough: false },
+    ],
+    default: arm(33),
+    defaultAt,
+  });
+  const values = (s: Stmt): number[] =>
+    stmtChildren(s).map((x) => (x.k === 'assign' && x.value.k === 'const' ? x.value.value : -1));
+
+  expect(values(sw(0))).toEqual([33, 11, 22]); // default FIRST
+  expect(values(sw(1))).toEqual([11, 33, 22]);
+  expect(values(sw(2))).toEqual([11, 22, 33]);
+  expect(values(sw(undefined))).toEqual([11, 22, 33]); // no recorded position ⇒ last
+});

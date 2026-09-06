@@ -47,6 +47,10 @@ glabel func_80012340
     expect(calleeNames('  bcctrl 20, 0, 0\n', 'Fn')).toEqual([]);
     // and it is still not a call when a comment follows the mnemonic on the same line
     expect(calleeNames('  bctrl # call through r12\n', 'Fn')).toEqual([]);
+    // THE case that separates this rule from listing `bctrl` among the call mnemonics: a token
+    // after `bctrl` is not the callee — the branch goes to CTR whatever follows it — so a rule
+    // that matched the mnemonic and read an operand would report a phantom name here.
+    expect(calleeNames('  bctrl foo\n', 'Fn')).toEqual([]);
   });
 });
 
