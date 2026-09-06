@@ -89,6 +89,152 @@ export interface SwitchRecovery {
   chainArms: (order: Block[], dflt: Block | null, exitOf: Map<Block, ArmExit>) => Block[] | null;
 }
 
+/** A block with no body of its own: no params, and one op that only LEAVES. `ret` qualifies as
+ *  well as `br` because raise/retsink.ts rewrites the one into the other — a cross-jumped arm
+ *  body has two dispatch preds, which is exactly the shape that makes retsink sink the merge's
+ *  return into every leaf, the fall-out jumps included. */
+function isBareExit(blk: Block): boolean {
+  return isBodyless(blk) && (blk.ops[0].opcode === 'br' || blk.ops[0].opcode === 'ret');
+}
+
+/** Are these two blocks the SAME bare exit — the same jump with the same args, or the same return
+ *  of the same values? Neither has a body, so two of them are indistinguishable at emission. */
+function sameBareExit(a: Block, c: Block): boolean {
+  if (a === c) {
+    return true;
+  }
+  if (!isBareExit(a) || !isBareExit(c) || a.ops[0].opcode !== c.ops[0].opcode) {
+    return false;
+  }
+  const same = (x: readonly Value[], y: readonly Value[]) => x.length === y.length && x.every((v, i) => v === y[i]);
+  if (a.ops[0].opcode === 'ret') {
+    return same(a.ops[0].operands, c.ops[0].operands);
+  }
+  const [x, y] = [a, c].map((blk) => blk.ops[0].successors[0]);
+  return x.block === y.block && same(x.args, y.args);
+}
+
+export interface TestInfo {
+  x: Value;
+  k: number;
+  cls: 'eq' | 'ne' | 'rel';
+  opcode: string;
+  xOnLeft: boolean;
+}
+
+// Evaluate a test predicate for a CONCRETE scrutinee value — used to SIMULATE the decision tree and
+// verify recovered case values (below). Returns true iff the `taken` (successors[0]) edge is followed.
+// Signed/unsigned per the icmp opcode (PRE3, done concretely rather than via interval lattices).
+function evalCmp(opcode: string, xOnLeft: boolean, xv: number, k: number): boolean {
+  const uns = opcode.startsWith('icmp_u');
+  const [xn, kn] = uns ? [xv >>> 0, k >>> 0] : [xv | 0, k | 0];
+  const [l, r] = xOnLeft ? [xn, kn] : [kn, xn]; // put the scrutinee where it textually appears
+  switch (opcode) {
+    case 'icmp_eq':
+      return l === r;
+    case 'icmp_ne':
+      return l !== r;
+    case 'icmp_slt':
+    case 'icmp_ult':
+      return l < r;
+    case 'icmp_sle':
+    case 'icmp_ule':
+      return l <= r;
+    case 'icmp_sgt':
+    case 'icmp_ugt':
+      return l > r;
+    case 'icmp_sge':
+    case 'icmp_uge':
+      return l >= r;
+    default:
+      return false;
+  }
+}
+
+// Which single scrutinee value does this relational test's BRANCH admit, if exactly one? A
+// relational side is a HALF-LINE in the compare's own ordering, so it can hold one value only at
+// a domain endpoint — which is why testing the two endpoints and their neighbours decides it,
+// with no interval lattice. `x < 1` over an unsigned scrutinee admits `{0}` and is agbcc's
+// spelling of `case 0` in a balanced search: `emit_case_nodes` tests the subtree BOUND, not the
+// value, whenever the remaining range has collapsed to one. Read as navigation instead, that
+// arm's body becomes a second default candidate and the whole tree declines.
+//
+// THE BRANCH, never the fall-through. Every jump in `emit_case_nodes` that lands on a case body
+// is its test's BRANCH — for a single-valued node, LT to `node->left->code_label` and GT to
+// `node->right->code_label`, each guarded by `node_is_bounded` on that side — while the
+// fall-through always continues into more dispatch, so a fall-side reading has no producer in
+// this dispatch — and none turns up in 3176 generated agbcc dispatches.
+//
+// TWO PREMISES ABOUT THE DOMAIN. It is the 32-bit REGISTER's, not the scrutinee's recovered
+// type, so a narrower type has a nearer endpoint this misses — which costs a case and never
+// invents one. And it is the WHOLE of that domain, so an ancestor that already excluded the
+// value makes the reading wrong; PRE3 is what catches that, simulating the original tree for
+// every recovered case value and declining unless it lands on the recorded body, exactly as it
+// does for the `eq` cases. Null when the branch admits none, several, or the whole domain.
+function singletonTaken(ti: TestInfo): number | null {
+  const [min, max] = ti.opcode.startsWith('icmp_u') ? [0, -1] : [-0x80000000, 0x7fffffff];
+  for (const [v, next] of [
+    [min, min + 1],
+    [max, max - 1],
+  ]) {
+    if (evalCmp(ti.opcode, ti.xOnLeft, v, ti.k) && !evalCmp(ti.opcode, ti.xOnLeft, next, ti.k)) {
+      return v;
+    }
+  }
+  return null;
+}
+
+/** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
+ *  fall-through chain is emitted contiguously and takes the position of its HEAD in `order`,
+ *  which is the caller's own arm-order policy — so with no fall-through every chain is a
+ *  singleton and `order` comes back unchanged. `dflt` is the `default:` arm's block when it has
+ *  one, and it is pinned LAST because that is where C prints the label.
+ *
+ *  THREE REFUSALS (null ⇒ the caller declines), each a shape no single linear order spells:
+ *    - two arms falling into the SAME arm — C drops into an arm from above along one edge only;
+ *    - the `default:` arm falling into a case, since nothing is emitted below it;
+ *    - a fall-through CYCLE, whose members are all fallen-into and so are never a chain head. */
+export function chainArms(order: Block[], dflt: Block | null, exitOf: Map<Block, ArmExit>): Block[] | null {
+  const next = new Map<Block, Block>();
+  const fallenInto = new Set<Block>();
+  for (const e of [...order, ...(dflt ? [dflt] : [])]) {
+    const x = exitOf.get(e);
+    if (x?.kind !== 'fallthrough') {
+      continue;
+    }
+    if (e === dflt || fallenInto.has(x.to)) {
+      return null;
+    }
+    fallenInto.add(x.to);
+    next.set(e, x.to);
+  }
+  const chains: Block[][] = [];
+  const seen = new Set<Block>();
+  let intoDefault = -1;
+  for (const head of order) {
+    if (fallenInto.has(head)) {
+      continue;
+    }
+    const chain: Block[] = [];
+    for (let cur: Block | undefined = head; cur !== undefined && cur !== dflt && !seen.has(cur); cur = next.get(cur)) {
+      seen.add(cur);
+      chain.push(cur);
+    }
+    if (dflt !== null && next.get(chain[chain.length - 1]) === dflt) {
+      intoDefault = chains.length;
+    }
+    chains.push(chain);
+  }
+  // A cycle's every member is fallen-into, so none of them is a head and none is walked.
+  if (seen.size !== order.length) {
+    return null;
+  }
+  if (intoDefault >= 0) {
+    chains.push(...chains.splice(intoDefault, 1));
+  }
+  return chains.flat();
+}
+
 export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   const {
     fn,
@@ -123,63 +269,42 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));
   const layoutIndex = (blk: Block): number => blockIndex.get(blk) ?? -1;
 
-  /** A block with no body of its own: no params, and one op that only LEAVES. `ret` qualifies as
-   *  well as `br` because raise/retsink.ts rewrites the one into the other — a cross-jumped arm
-   *  body has two dispatch preds, which is exactly the shape that makes retsink sink the merge's
-   *  return into every leaf, the fall-out jumps included. */
-  const isBareExit = (blk: Block): boolean =>
-    isBodyless(blk) && (blk.ops[0].opcode === 'br' || blk.ops[0].opcode === 'ret');
-
-  /** Are these two blocks the SAME bare exit — the same jump with the same args, or the same return
-   *  of the same values? Neither has a body, so two of them are indistinguishable at emission. */
-  const sameBareExit = (a: Block, c: Block): boolean => {
-    if (a === c) {
-      return true;
-    }
-    if (!isBareExit(a) || !isBareExit(c) || a.ops[0].opcode !== c.ops[0].opcode) {
-      return false;
-    }
-    const same = (x: readonly Value[], y: readonly Value[]) => x.length === y.length && x.every((v, i) => v === y[i]);
-    if (a.ops[0].opcode === 'ret') {
-      return same(a.ops[0].operands, c.ops[0].operands);
-    }
-    const [x, y] = [a, c].map((blk) => blk.ops[0].successors[0]);
-    return x.block === y.block && same(x.args, y.args);
-  };
-
   // Where the `default:` label goes among the arms, as a COUNT of the arms laid out before it — the
   // same evidence the case bodies carry, read the same way. Compiled at every position of a 3- to
   // 8-case switch, the default's block lands where the source wrote it. `undefined` ⇒ C's
   // conventional last position, which is what every other producer of this node means.
   //
-  // THREE refusals. One is about a block the walk already read as a CASE arm — a dense table sends
-  // every unwritten value's slot to the default's block, so grouping the slots gives that block an
-  // arm of its own and its index is where THAT arm sits. The other two are about a block the
-  // DISPATCH placed rather than the arm:
-  //   - a block with no body of its own is one the dispatch minted (`b .Ldefault`), and which of
-  //     several such the collapse below keeps is a walk-order accident;
-  //   - `emit_case_nodes` ends every exhausted subtree with `emit_jump_if_reachable (default_label)`
-  //     and `expand_end_case` reorders the whole dispatch, those jumps included, ahead of the arm
-  //     bodies — so a jump survives as a plain FALL-THROUGH exactly when the default's body is the
-  //     arm the source wrote FIRST. That reading holds only while a second subtree still names the
-  //     label: a two-case chain names it once, and agbcc then lays that block right after the tests
-  //     whatever the source wrote, both spellings compiling to identical instructions.
+  // SEVEN WITHHOLDINGS, W1..W7, numbered in the order the code asks them so the prose and the code
+  // index ONE list, and stated here so both regimes state them once. W1 is the target's own opt-in;
+  // W2..W4 are about a block the DISPATCH placed rather than the arm; W5..W7 are about
+  // fall-through — W5 about the LIST the count would index, W6 and W7 about the POSITION it names.
   //
-  // THREE further withholdings, all about fall-through and all stated here so both regimes state
-  // them once. The first is about the LIST the count would index; the other two are about the
-  // POSITION it names:
-  //   - the chain RE-THREADED the arm order (`orderIntact` false), so the emitted list is no longer
-  //     the one the layout count describes and no position in it means what the count says. This
-  //     one is whole-switch because the re-threading is. A per-position reading — bracket the label
-  //     between the two arms that straddle it in LAYOUT, then map that into the emitted list — is
-  //     possible and unbuilt, and hard to need: a compiler that lays bodies out in source order
-  //     already writes a falling arm directly above its target, so the order it declares is a chain
-  //     order too;
-  //   - the LAST emitted arm falls through, which can only be into the default (the adjacency
-  //     check leaves no other target) — the label must then be last, which IS `undefined`;
-  //   - the position lands directly after a falling arm, where printing the label would divert
-  //     that arm into the default. cfamily.ts fails loud on exactly that, and this is the producer
-  //     side of the same rule.
+  //   W1 the target does not read arm order off the layout at all (`switchArmsFollowLayout`).
+  //   W2 a block with no body of its own is one the dispatch minted (`b .Ldefault`), and which of
+  //      several such the collapse below keeps is a walk-order accident.
+  //   W3 the walk already read that block as a CASE arm — a dense table sends every unwritten
+  //      value's slot to the default's block, so grouping the slots gives that block an arm of its
+  //      own and its index is where THAT arm sits.
+  //   W4 `emit_case_nodes` ends every exhausted subtree with `emit_jump_if_reachable
+  //      (default_label)` and `expand_end_case` reorders the whole dispatch, those jumps included,
+  //      ahead of the arm bodies — so a jump survives as a plain FALL-THROUGH exactly when the
+  //      default's body is the arm the source wrote FIRST. That reading holds only while a second
+  //      subtree still names the label: a two-case chain names it once, and agbcc then lays that
+  //      block right after the tests whatever the source wrote, both spellings compiling to
+  //      identical instructions.
+  //   W5 the chain RE-THREADED the arm order (`orderIntact` false), so the emitted list is no
+  //      longer the one the layout count describes and no position in it means what the count
+  //      says. This one is whole-switch because the re-threading is. A per-position reading —
+  //      bracket the label between the two arms that straddle it in LAYOUT, then map that into the
+  //      emitted list — is possible and unbuilt, and hard to need: a compiler that lays bodies out
+  //      in source order already writes a falling arm directly above its target, so the order it
+  //      declares is a chain order too.
+  //   W6 the LAST emitted arm falls through, which can only be into the default (the adjacency
+  //      check leaves no other target) — the label must then be last, which IS `undefined`.
+  //   W7 the position lands directly after a falling arm, where printing the label would divert
+  //      that arm into the default. cfamily.ts fails loud on exactly that, and this is the producer
+  //      side of the same rule.
+  //
   // A switch with a chain elsewhere keeps its evidence: the reason to withhold is the position,
   // never "some arm somewhere falls".
   const defaultLayoutPos = (
@@ -187,17 +312,26 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     arms: readonly { entry: Block; fallsThrough: boolean }[],
     opts: { placedByDispatch: boolean; orderIntact: boolean },
   ): number | undefined => {
-    if (
-      !switchArmsFollowLayout ||
-      isBareExit(defaultBlk) ||
-      arms.some((a) => a.entry === defaultBlk) ||
-      opts.placedByDispatch ||
-      !opts.orderIntact ||
-      arms[arms.length - 1]?.fallsThrough
-    ) {
-      return undefined;
+    if (!switchArmsFollowLayout) {
+      return undefined; // W1 target does not read layout
+    }
+    if (isBareExit(defaultBlk)) {
+      return undefined; // W2 dispatch-minted bodyless block
+    }
+    if (arms.some((a) => a.entry === defaultBlk)) {
+      return undefined; // W3 already an emitted arm
+    }
+    if (opts.placedByDispatch) {
+      return undefined; // W4 dispatch ran out into it
+    }
+    if (!opts.orderIntact) {
+      return undefined; // W5 chain re-threaded the arms
+    }
+    if (arms[arms.length - 1]?.fallsThrough) {
+      return undefined; // W6 last arm falls through
     }
     const at = arms.filter((a) => layoutIndex(a.entry) < layoutIndex(defaultBlk)).length;
+    // W7 the label would land directly after a falling arm
     return at > 0 && arms[at - 1].fallsThrough ? undefined : at;
   };
 
@@ -291,13 +425,6 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // A block that tests the scrutinee and is NOT collapsible is still dispatch, so the walk must
   // read it as dispatch and decline, never re-read it as a case body — that would spell an arm
   // whose guard the dispatch has already decided.
-  interface TestInfo {
-    x: Value;
-    k: number;
-    cls: 'eq' | 'ne' | 'rel';
-    opcode: string;
-    xOnLeft: boolean;
-  }
   const collapsible = (blk: Block): boolean =>
     !blk.ops.some((op) => ORDER_SENSITIVE_OPS.has(op.opcode)) && !emitsOwnStatement(blk);
   const testInfo = (blk: Block): TestInfo | null => {
@@ -329,78 +456,16 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     return { x, k, cls, opcode: cmp.opcode, xOnLeft };
   };
 
-  // Evaluate a test predicate for a CONCRETE scrutinee value — used to SIMULATE the decision tree and
-  // verify recovered case values (below). Returns true iff the `taken` (successors[0]) edge is followed.
-  // Signed/unsigned per the icmp opcode (PRE3, done concretely rather than via interval lattices).
-  const evalCmp = (opcode: string, xOnLeft: boolean, xv: number, k: number): boolean => {
-    const uns = opcode.startsWith('icmp_u');
-    const [xn, kn] = uns ? [xv >>> 0, k >>> 0] : [xv | 0, k | 0];
-    const [l, r] = xOnLeft ? [xn, kn] : [kn, xn]; // put the scrutinee where it textually appears
-    switch (opcode) {
-      case 'icmp_eq':
-        return l === r;
-      case 'icmp_ne':
-        return l !== r;
-      case 'icmp_slt':
-      case 'icmp_ult':
-        return l < r;
-      case 'icmp_sle':
-      case 'icmp_ule':
-        return l <= r;
-      case 'icmp_sgt':
-      case 'icmp_ugt':
-        return l > r;
-      case 'icmp_sge':
-      case 'icmp_uge':
-        return l >= r;
-      default:
-        return false;
-    }
-  };
-
-  // Which single scrutinee value does this relational test's BRANCH admit, if exactly one? A
-  // relational side is a HALF-LINE in the compare's own ordering, so it can hold one value only at
-  // a domain endpoint — which is why testing the two endpoints and their neighbours decides it,
-  // with no interval lattice. `x < 1` over an unsigned scrutinee admits `{0}` and is agbcc's
-  // spelling of `case 0` in a balanced search: `emit_case_nodes` tests the subtree BOUND, not the
-  // value, whenever the remaining range has collapsed to one. Read as navigation instead, that
-  // arm's body becomes a second default candidate and the whole tree declines.
-  //
-  // THE BRANCH, never the fall-through. Every jump in `emit_case_nodes` that lands on a case body
-  // is its test's BRANCH — for a single-valued node, LT to `node->left->code_label` and GT to
-  // `node->right->code_label`, each guarded by `node_is_bounded` on that side — while the
-  // fall-through always continues into more dispatch, so a fall-side reading has no producer in
-  // this dispatch — and none turns up in 3176 generated agbcc dispatches.
-  //
-  // TWO PREMISES ABOUT THE DOMAIN. It is the 32-bit REGISTER's, not the scrutinee's recovered
-  // type, so a narrower type has a nearer endpoint this misses — which costs a case and never
-  // invents one. And it is the WHOLE of that domain, so an ancestor that already excluded the
-  // value makes the reading wrong; PRE3 is what catches that, simulating the original tree for
-  // every recovered case value and declining unless it lands on the recorded body, exactly as it
-  // does for the `eq` cases. Null when the branch admits none, several, or the whole domain.
-  const singletonTaken = (ti: TestInfo): number | null => {
-    const [min, max] = ti.opcode.startsWith('icmp_u') ? [0, -1] : [-0x80000000, 0x7fffffff];
-    for (const [v, next] of [
-      [min, min + 1],
-      [max, max - 1],
-    ]) {
-      if (evalCmp(ti.opcode, ti.xOnLeft, v, ti.k) && !evalCmp(ti.opcode, ti.xOnLeft, next, ti.k)) {
-        return v;
-      }
-    }
-    return null;
-  };
-
   // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
   // sibling arm's entry, and classify what it steps INTO. `siblings` is every OTHER arm entry the
   // caller can emit a `case`/`default` label for — the merge is deliberately not among them, so a
   // switch whose default block IS the merge (agbcc's usual "the default just leaves") reads as an
   // ordinary `break`, not as falling into the default.
   //
-  // Region membership is `dom(blk) ∋ b` as before: a block NOT dominated by the switch is outside
-  // this switch's region and is not walked. It IS recorded as an escape, because an arm that can
-  // leave sideways does not fall into the next case — but only the fall-through verdict consults
-  // that, so no arm that used to be accepted as closed becomes a decline.
+  // Region membership is `dom(blk) ∋ b`: a block NOT dominated by the switch is outside this
+  // switch's region and is not walked. It IS recorded as an escape, because an arm that can leave
+  // sideways does not fall into the next case — and only the FALL-THROUGH verdict consults that
+  // record, so an arm that reaches no sibling still closes with a plain `break`.
   //
   // A CONSEQUENCE, not a hole: a sibling reachable only THROUGH such a block is never seen, so the
   // arm reads as closed and `structureRegion` walks into the sibling's blocks and emits them again
@@ -441,7 +506,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     // Name what is actually missing. These three are different facts, and only the first is a shape
     // C has no spelling for — the other two are asmlift's own limits, so say so rather than blame C.
-    const names = () => [...into].map((x) => `#${fn.blocks.indexOf(x)}`).join(', ');
+    const names = () => [...into].map((x) => `#${layoutIndex(x)}`).join(', ');
     if (into.size > 1) {
       return {
         kind: 'unstructurable',
@@ -461,61 +526,6 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       // (l3/ast.ts), never switch-scoped. That is the capability this shape is waiting on.
       why: `a case body reaches sibling case ${names()} on one path and the end of the switch on another — a switch-scoped \`break\` inside a case body is not emitted yet`,
     };
-  };
-
-  /** Re-thread `order` so every FALLING arm sits directly above the arm it falls into. Each
-   *  fall-through chain is emitted contiguously and takes the position of its HEAD in `order`,
-   *  which is the caller's own arm-order policy — so with no fall-through every chain is a
-   *  singleton and `order` comes back unchanged. `dflt` is the `default:` arm's block when it has
-   *  one, and it is pinned LAST because that is where C prints the label.
-   *
-   *  THREE REFUSALS (null ⇒ the caller declines), each a shape no single linear order spells:
-   *    - two arms falling into the SAME arm — C drops into an arm from above along one edge only;
-   *    - the `default:` arm falling into a case, since nothing is emitted below it;
-   *    - a fall-through CYCLE, whose members are all fallen-into and so are never a chain head. */
-  const chainArms = (order: Block[], dflt: Block | null, exitOf: Map<Block, ArmExit>): Block[] | null => {
-    const next = new Map<Block, Block>();
-    const fallenInto = new Set<Block>();
-    for (const e of [...order, ...(dflt ? [dflt] : [])]) {
-      const x = exitOf.get(e);
-      if (x?.kind !== 'fallthrough') {
-        continue;
-      }
-      if (e === dflt || fallenInto.has(x.to)) {
-        return null;
-      }
-      fallenInto.add(x.to);
-      next.set(e, x.to);
-    }
-    const chains: Block[][] = [];
-    const seen = new Set<Block>();
-    let intoDefault = -1;
-    for (const head of order) {
-      if (fallenInto.has(head)) {
-        continue;
-      }
-      const chain: Block[] = [];
-      for (
-        let cur: Block | undefined = head;
-        cur !== undefined && cur !== dflt && !seen.has(cur);
-        cur = next.get(cur)
-      ) {
-        seen.add(cur);
-        chain.push(cur);
-      }
-      if (dflt !== null && next.get(chain[chain.length - 1]) === dflt) {
-        intoDefault = chains.length;
-      }
-      chains.push(chain);
-    }
-    // A cycle's every member is fallen-into, so none of them is a head and none is walked.
-    if (seen.size !== order.length) {
-      return null;
-    }
-    if (intoDefault >= 0) {
-      chains.push(...chains.splice(intoDefault, 1));
-    }
-    return chains.flat();
   };
 
   const recognizeSwitch = (b: Block, stop: Block | null): Stmt[] | null => {
@@ -588,45 +598,45 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         const t = testInfo(child);
         return !!t && t.x === scrut;
       };
-      const asLeafOrTest = (child: Block, role: 'case' | 'nav', k?: number) => {
-        const isTest = isTestOn(child);
-        if (role === 'case') {
-          if (isTest) {
-            return false;
-          } // a case target that's a test → decline
-          // A case entry with a PHI is admitted: the dispatch edge binds those parameters, and
-          // `hoistDispatchCopies` re-emits that binding once above the `switch` (or declines the
-          // whole recovery). A fall-through chain's accumulator crosses every arm as exactly such
-          // a parameter, so refusing it here refuses the whole family.
-          if (cases.has(k!)) {
-            return false;
-          } // duplicate case value → decline
-          cases.set(k!, child);
-          return true;
-        }
-        // navigation edge
-        if (isTest) {
+      /** Read `child` as the BODY of case `k`. A case entry with a PHI is admitted: the dispatch
+       *  edge binds those parameters, and `hoistDispatchCopies` re-emits that binding once above
+       *  the `switch` (or declines the whole recovery). A fall-through chain's accumulator crosses
+       *  every arm as exactly such a parameter, so refusing it here refuses the whole family. */
+      const asCase = (child: Block, k: number): boolean => {
+        if (isTestOn(child)) {
+          return false;
+        } // a case target that's a test → decline
+        if (cases.has(k)) {
+          return false;
+        } // duplicate case value → decline
+        cases.set(k, child);
+        return true;
+      };
+      /** Read `child` as a NAVIGATION edge: more dispatch to walk, or a non-test leaf, which is a
+       *  default candidate. Never declines — the leaf's own reading is settled below. */
+      const asNav = (child: Block): boolean => {
+        if (isTestOn(child)) {
           work.push(child);
           return true;
         }
-        defaultCands.add(child); // a non-test leaf reached by nav = default
+        defaultCands.add(child);
         return true;
       };
       if (ti.cls === 'eq') {
-        if (!asLeafOrTest(taken, 'case', ti.k)) {
+        if (!asCase(taken, ti.k)) {
           return null;
         } // x==k → taken is case k
-        if (!asLeafOrTest(fall, 'nav')) {
+        if (!asNav(fall)) {
           return null;
         }
       } else if (ti.cls === 'ne') {
         if (!switchAllowsNeqCase) {
           return null;
         } // per-compiler gate
-        if (!asLeafOrTest(fall, 'case', ti.k)) {
+        if (!asCase(fall, ti.k)) {
           return null;
         } // x!=k → the EQUAL side (fall) is case k
-        if (!asLeafOrTest(taken, 'nav')) {
+        if (!asNav(taken)) {
           return null;
         }
       } else {
@@ -640,10 +650,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         //     descending to pin the value. It is dispatch, so the walk reads it as dispatch —
         //     recovering it, or declining at PRE4 if it is not collapsible.
         const k = switchAllowsBoundCase && blk !== b && !isTestOn(taken) ? singletonTaken(ti) : null;
-        if (!asLeafOrTest(taken, k === null ? 'nav' : 'case', k ?? undefined)) {
+        if (!(k === null ? asNav(taken) : asCase(taken, k))) {
           return null;
         }
-        if (!asLeafOrTest(fall, 'nav')) {
+        if (!asNav(fall)) {
           return null;
         }
       }
@@ -666,10 +676,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // whether the two paths can share one statement. (ir/core.ts lists the non-callers and why.)
     //
     // A cycle of such jumps has no target to resolve to and declines. Leaves that pass DIFFERENT
-    // values, or that have a body, are untouched and are still two defaults below. Keyed by the
-    // PRED block so a leaf walked twice — L → X → D reaches X from L's walk and again from X's own
-    // turn in the loop — records its edge once.
-    const throughEdges = new Map<Block, { pred: Block; succ: { block: Block; args: Value[] } }>();
+    // values, or that have a body, are untouched and are still two defaults below. A SET so a leaf
+    // walked twice — L → X → D reaches X from L's walk and again from X's own turn in the loop —
+    // is recorded once.
+    const throughEdges = new Set<Block>();
     const resolveDefault = (d: Block): Block | null => {
       const walked = new Set<Block>();
       let cur = d;
@@ -682,7 +692,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         if (!isBareExit(cur) || t.opcode !== 'br' || !leaves.has(t.successors[0].block)) {
           return cur;
         }
-        throughEdges.set(cur, { pred: cur, succ: t.successors[0] });
+        throughEdges.add(cur);
         cur = t.successors[0].block;
       }
     };
@@ -805,8 +815,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // IDO does not merge at all — 224 bytes against the grouped 144 — so on MIPS a shared block can
     // only have come from stacked labels. Two DISTINCT blocks with equal bodies therefore mean one
     // arm on neither compiler: under agbcc that ROM is unreachable, under IDO it is what two arms
-    // compile to. Sound also because a case entry with a phi already declined above
-    // (`asLeafOrTest`), so two edges onto one body bind nothing that could differ.
+    // compile to. Sound also because two dispatch edges onto ONE body cannot bind one name two
+    // ways: `hoistDispatchCopies` merges every collapsed edge's copies into a single statement
+    // above the `switch` and refuses on disagreement (structure.ts `hoistedDispatchAssigns`), so
+    // an arm reached by two case values is reached with one set of parameter values or the whole
+    // recovery declines.
     //
     // An arm takes the position of its FIRST value, which keeps the sort above. `defaultLayoutPos`
     // is handed the GROUPED entry list because what it returns is an INDEX INTO the arm array, so
@@ -858,7 +871,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return home !== undefined && dom.get(b)!.has(home);
     };
     const dispatchEdges: { pred: Block; succ: { block: Block; args: Value[] } }[] = [];
-    for (const t of new Set([...seen, ...throughEdges.keys()])) {
+    for (const t of new Set([...seen, ...throughEdges])) {
       for (const e of t.ops[t.ops.length - 1].successors) {
         if (e.block.params.length === 0) {
           continue;
@@ -915,13 +928,22 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     const dispatchTargets = [...seen].flatMap((t) =>
       t.ops[t.ops.length - 1].successors.map((e) => forwardingTarget(e.block)),
     );
-    const ranOutInto = (blk: Block) =>
+    // THE TWO CONJUNCTS READ THE EDGES DIFFERENTLY, and deliberately. The first is asked RAW, of
+    // the terminator's own second successor, because a surviving `b .Ldefault` block is a jump
+    // that did NOT collapse into a fall-through — resolving it away would count the jump as the
+    // running-out it is not (see the `expand_end_case` paragraph on `defaultLayoutPos`). The
+    // second is asked FORWARDED, over `dispatchTargets`, because there a forwarder is transparent:
+    // two edges that arrive through one are two references to the same block, which is exactly
+    // what "named more than once" has to count.
+    const fellThroughIntoIt = (blk: Block) =>
       [...seen].some((t) => {
         const succ = t.ops[t.ops.length - 1].successors;
         return succ.length > 1 && succ[1].block === blk;
-      }) && dispatchTargets.filter((e) => e === blk).length < 2;
-    // `defaultLayoutPos` owns which POSITIONS a chain makes unreadable — see its three
-    // fall-through withholdings. A chain elsewhere in the switch does not delete the evidence for
+      });
+    const namedOnlyOnce = (blk: Block) => dispatchTargets.filter((e) => e === blk).length < 2;
+    const ranOutInto = (blk: Block) => fellThroughIntoIt(blk) && namedOnlyOnce(blk);
+    // `defaultLayoutPos` owns which POSITIONS a chain makes unreadable — see its fall-through
+    // withholdings W5..W7. A chain elsewhere in the switch does not delete the evidence for
     // where the label goes, and reading it off the emitted arms is what lets a `default:` written
     // between two closed arms keep its place while a chain runs beside it.
     const defaultAt = defaultBlk

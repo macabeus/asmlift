@@ -7,15 +7,13 @@
 // — and it answers them the same way for every caller, which is the point of the split: the
 // rank-pinning fallback and the declared-subscript recovery share `bareArrayElement`, so the two
 // cannot disagree about what a bare element spelling is.
-//
-// Extracted from structure.ts under the reviewed refactor plan's rule (safety infra first, then
-// only PURE hazards): unit-testable on `Expr` literals, and one less family in a 4,700-line file.
 import type { Expr } from '../l3/ast';
 import { type SymbolInfo, arrayInnerExtents } from '../symbols';
 
 // `&gSym`, possibly wearing the value-context integer cast the additive lowering adds
-// (`(u32)&gSym` — see lowerDef's addr-intify): both spell the same link-time constant, so the
-// fold rules match through the cast and every access that CAN spell a named element still does.
+// (`(u32)&gSym` — see `intifyAddr` in structure.ts's lowerDef): both spell the same link-time
+// constant, so the fold rules match through the cast and every access that CAN spell a named
+// element still does.
 // WIDTH 32 ONLY — a NARROWING cast (`(u8)&gSym`, from a zext/sext lowering) is a different
 // VALUE (`addr & 0xFF`), and folding through it would read the named global at a wrong address
 // (the adversarial round's probe: `*(u8*)(u8)&gSym` must keep its truncation, never become

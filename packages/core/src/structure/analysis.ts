@@ -1,12 +1,16 @@
 // asmlift structurer — the ANALYSIS phase. Pure derivation over the lifted fn — nothing here
 // mutates the IR or depends on naming/emission state:
 //   • use-site registry — every use of a value, POSITIONED (op + block + index);
-//   • per-block SSA value liveness (backward dataflow) — consumed by the coalescing
-//     interference check in structure.ts;
+//   • per-block SSA value liveness (backward dataflow) — consumed by structure.ts and
+//     structure/namecoalesce.ts;
 //   • the effect-ordering model — which defs must MATERIALIZE as named temps at their own
 //     program position instead of inlining at their use (calls/loads for effect order, plus
-//     the pure defs the homing rules claim).
-import { globalCellOf, mayWriteGlobal } from '../ir/alias';
+//     the pure defs the homing rules claim);
+//   • the HOMING-AXIS ENUMERATION GATES — one export per candidate axis, each answering "does
+//     this function hold a value the axis would home at all" so rank.ts can skip an axis whose
+//     candidate would only duplicate the default. Each mirrors its axis's scope inside `analyze`
+//     and states where it DIVERGES from it, in which direction, and what that costs.
+import { disjointConstSlots, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import {
   Block,
   Fn,
@@ -213,6 +217,50 @@ export function sharedBaseClasses(fn: Fn, ignoreRet: boolean): Set<Value> {
   return out;
 }
 
+/** Is `d` a def one of the homing axes could seat in a local — a def at all, and a PURE
+ *  non-memory one that is not a `const`? The three enumeration gates below share this filter and
+ *  each then adds its own cone/address/shape refusals.
+ *
+ *  Named for what it tests rather than for the shape it excludes: a `const` IS a pure non-memory
+ *  def, and it is out because a re-derived const is re-materialization — the compiler's own
+ *  behaviour — not because it computes anything a home would preserve. */
+function isHomeableDef(d: Op | undefined): d is Op {
+  return !!d && d.opcode !== 'const' && d.opcode !== 'call' && d.opcode !== 'load' && d.opcode !== 'aload';
+}
+
+/** THE READ CONE of a pure def: the `load`/`aload` defs its operand tree stands on. The walk stops
+ *  AT a read (a read's own address computation is the read's business, not this walk's) and
+ *  REFUSES — null — as soon as the cone holds a `call`, whose re-render would re-execute it, or a
+ *  `gaddr`/`laddr`, whose standalone rendering loses the memAccess's inline byte-stride cast.
+ *
+ *  Both callers gate `load`/`aload`/`call` out of `op0` itself before asking, and neither reads the
+ *  order the reads come back in — one takes `length`/`every`, the other builds a `Set`. */
+function readCone(op0: Op, defOf: Map<Value, Op>): Op[] | null {
+  const reads: Op[] = [];
+  const seen = new Set<Value>();
+  const cone = [op0];
+  while (cone.length) {
+    const d = cone.pop()!;
+    if (d.opcode === 'load' || d.opcode === 'aload') {
+      reads.push(d);
+      continue;
+    }
+    if (d.opcode === 'call' || d.opcode === 'gaddr' || d.opcode === 'laddr') {
+      return null;
+    }
+    for (const x of d.operands) {
+      if (!seen.has(x)) {
+        seen.add(x);
+        const dd = defOf.get(x);
+        if (dd) {
+          cone.push(dd);
+        }
+      }
+    }
+  }
+  return reads;
+}
+
 /** rank.ts's enumeration gate for the `/addr-home` axis: does the function HAVE a value the axis
  *  would home — a non-const pure def whose merge class is a shared base, with no gaddr/laddr in
  *  its cone? Mirrors the axis's scope rule in `analyze` (the same `sharedBaseClasses` call), minus
@@ -227,14 +275,7 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   for (const v of sharedBaseClasses(fn, true)) {
     const d = defOf.get(v);
-    if (
-      d &&
-      d.opcode !== 'const' &&
-      d.opcode !== 'call' &&
-      d.opcode !== 'load' &&
-      d.opcode !== 'aload' &&
-      !coneHoldsAddr(d, defOf)
-    ) {
+    if (isHomeableDef(d) && !coneHoldsAddr(d, defOf)) {
       return true;
     }
   }
@@ -251,8 +292,8 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
  *  on IR whose block layout does not follow dominance, which every frontend avoids by laying blocks
  *  out in address order (a natural loop's back edge points backward), and on a value EITHER of
  *  whose two consumers is a branch arg, which the rule would home and this never enumerates. The
- *  second is unwitnessed over the 856-row bench, and costs a missing candidate, never a wrong
- *  one. */
+ *  second is unwitnessed over the 856-row bench the axis was measured on (#97), and costs a
+ *  missing candidate, never a wrong one. */
 export function hasLoopSharedPureValue(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const pos = new Map<Block, number>(fn.blocks.map((b, i) => [b, i]));
@@ -279,7 +320,7 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
   }
   for (const [v, cs] of consumers) {
     const d = defOf.get(v);
-    if (!d || d.opcode === 'const' || d.opcode === 'call' || d.opcode === 'load' || d.opcode === 'aload') {
+    if (!isHomeableDef(d)) {
       continue;
     }
     const dp = opPos.get(d)!;
@@ -340,27 +381,9 @@ export function hasDerivedReadHome(fn: Fn): boolean {
   const writeBetween = (b: Block, lo: number, hi: number): boolean =>
     b.ops.slice(lo + 1, hi).some((x) => EFFECTFUL_OPS.has(x.opcode));
   const standsOnRead = (op0: Op): boolean => {
-    const reads: Op[] = [];
-    const seen = new Set<Value>();
-    const cone = [op0];
-    while (cone.length) {
-      const d = cone.pop()!;
-      if (d.opcode === 'load' || d.opcode === 'aload') {
-        reads.push(d);
-        continue;
-      }
-      if (d.opcode === 'call' || d.opcode === 'gaddr' || d.opcode === 'laddr') {
-        return false;
-      }
-      for (const x of d.operands) {
-        if (!seen.has(x)) {
-          seen.add(x);
-          const dd = defOf.get(x);
-          if (dd) {
-            cone.push(dd);
-          }
-        }
-      }
+    const reads = readCone(op0, defOf);
+    if (reads === null) {
+      return false;
     }
     const b = blockOf.get(op0)!;
     return (
@@ -375,16 +398,7 @@ export function hasDerivedReadHome(fn: Fn): boolean {
   };
   for (const [v, cs] of consumers) {
     const d = defOf.get(v);
-    if (
-      cs.size >= 2 &&
-      d &&
-      d.opcode !== 'const' &&
-      d.opcode !== 'call' &&
-      d.opcode !== 'load' &&
-      d.opcode !== 'aload' &&
-      !rendersAsAddress(d) &&
-      standsOnRead(d)
-    ) {
+    if (cs.size >= 2 && isHomeableDef(d) && !rendersAsAddress(d) && standsOnRead(d)) {
       return true;
     }
   }
@@ -662,7 +676,7 @@ export interface StructureAnalysis {
    *  transitively; null = several places / unresolvable (callers treat conservatively) */
   emitPos: (op: Op) => { blk: Block; idx: number } | null;
   /** may an op `isWrite` accepts execute between `def` and a statement at `render`, on any
-   *  def-avoiding path — the fold-ordering gate (see the closure's comment) */
+   *  def-avoiding path — the fold-ordering gate (see `makeMemWriteBetween`) */
   memWriteBetween: (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean;
 }
 
@@ -812,6 +826,264 @@ export interface AnalyzeOptions {
   readsStayWhereWritten?: boolean;
 }
 
+/** THE def-block placement rule's loop refusal: is `b` a PREHEADER of some loop whose body holds
+ *  one of the render blocks — outside the body, and a predecessor of the header?
+ *
+ *  Loop invariant motion (loop.c, which agbcc does compile and run at -O2) is the pass whose
+ *  landing spot the source could not have spelled: it parks the read BELOW the loop guard, where
+ *  a read the source wrote above the loop sits above it. Compiled,
+ *  `for (i=0;i<n;i++) t += gK*i;` emits `mov r2,#0 / cmp r2,r3 / bge .L4 / ldr r0,.L8 /
+ *  ldr r4,[r0]` — guard first, read after — while hoisting `gK` into a local above the loop by
+ *  hand puts both `ldr`s ahead of the guard. So a read in the preheader is evidence of a read in
+ *  the BODY, and inferring def-block placement there spells the one source the asm rules out.
+ *  (With an aliasing store in the loop agbcc hoists only the address constant and leaves the
+ *  `ldr` in the body — same conclusion, weaker premise.)
+ *
+ *  Narrow on purpose: a loop merely lying between def and render is not this shape. */
+function preheaderOfRenderLoop(
+  loopBodies: readonly { header: Block; body: Set<Block> }[],
+  b: Block,
+  renders: readonly Block[],
+): boolean {
+  return loopBodies.some(
+    (L) => !L.body.has(b) && successorsOf(b).includes(L.header) && renders.some((x) => L.body.has(x)),
+  );
+}
+
+/** THE def-block placement rule's seam refusal: does a FALL-THROUGH alone put a render below
+ *  `b` — a chain of unconditional `br` edges, each into a block whose only predecessor is the
+ *  one before it?
+ *
+ *  The frontends start a block at every LABEL, so a label nothing branches to cuts one straight
+ *  line of asm in two and the upper half dominates the lower with no control flow between. The
+ *  rule's premise is that the compiler will not move a read ACROSS a branch, which says nothing
+ *  there — while WITHIN a straight line agbcc picks the order itself. Compiled, klonoa's
+ *  StreamCmd_SetMusicParams (a stray `sub_0804E9AC:` between its last `ldrh r2,[r4]` and the
+ *  `bl` consuming it) assembles byte-identical to its object from the inlined read and four
+ *  bytes off from the named one, which swaps that `ldrh` with the `ldr r0,pool` beside it. Of
+ *  the rule's 20 firings over the 464 klonoa agbcc functions, 13 were across such a seam. */
+function fallThroughSeam(predsOf: Map<Block, Block[]>, b: Block, renders: readonly Block[]): boolean {
+  const seen = new Set<Block>([b]);
+  for (let cur = b; ;) {
+    const t = cur.ops[cur.ops.length - 1];
+    if (t?.opcode !== 'br') {
+      return false;
+    }
+    const next = t.successors[0].block;
+    if (predsOf.get(next)!.length !== 1 || seen.has(next)) {
+      return false;
+    }
+    if (renders.includes(next)) {
+      return true;
+    }
+    seen.add(next);
+    cur = next;
+  }
+}
+
+/** THE def→render path discipline. May an op `isWrite` accepts execute between `def` and a
+ *  statement at `render`, on any def-avoiding path? The def block's tail, the render block's head,
+ *  and every between-block on a path; a path re-crossing the def is the NEXT dynamic instance and
+ *  does not count. Path-based on purpose: `fn.blocks` is ADDRESS order, so a linear-position scan
+ *  misses a block laid out after the render that executes between def and render on the taken path
+ *  (an audit round broke exactly that way). */
+function makeMemWriteBetween(deps: {
+  opBlock: Map<Op, Block>;
+  opIndex: Map<Op, number>;
+  reachAvoiding: (from: Block, avoid: Block) => Set<Block>;
+}): (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean {
+  const { opBlock, opIndex, reachAvoiding } = deps;
+  return (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean): boolean => {
+    const b = opBlock.get(def)!;
+    const oi = opIndex.get(def)!;
+    const wDirty = (list: Op[], from: number, to: number): boolean => {
+      for (let k = from; k < to; k++) {
+        if (isWrite(list[k])) {
+          return true;
+        }
+      }
+      return false;
+    };
+    // Same block: the only def-avoiding path is the straight line between the two indices
+    // (leaving and re-entering the block re-crosses the def). A render BEFORE the def cannot
+    // happen — within a block, uses follow defs — and falls through to the path walk, whose
+    // answer is the conservative one.
+    if (render.blk === b && oi < render.idx) {
+      return wDirty(b.ops, oi + 1, render.idx);
+    }
+    if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(render.blk.ops, 0, render.idx)) {
+      return true;
+    }
+    for (const x of reachAvoiding(b, b)) {
+      if (x === render.blk && !reachAvoiding(render.blk, b).has(render.blk)) {
+        continue; // acyclic render block: head checked
+      }
+      if (x !== render.blk && !reachAvoiding(x, b).has(render.blk)) {
+        continue; // not on a def→render path
+      }
+      if (wDirty(x.ops, 0, x.ops.length)) {
+        return true;
+      }
+    }
+    return false;
+  };
+}
+
+/** INTERDEPENDENT PARALLEL-COPY ARGS. A terminator's successor args are ONE parallel copy
+ *  (argAssigns), whose every read means the PRE-copy value. An arg whose def-tree reads a SIBLING
+ *  arg of the same edge cannot read it by name there — so the sibling's whole expression is
+ *  re-derived inside this arg's copy, and `sequentialize` spills old-value temps to untangle the
+ *  order: arithmetic the compiler performed once, emitted per reader (the coupled-recurrence loop,
+ *  `a += b*c; d += a;`). The read sibling is the register the copy machinery cannot represent —
+ *  its def is the one the caller materializes. The walk crosses pure defs only (a call/load render
+ *  is those rules' question) and stops at params, which always carry a name. */
+function copyInterdependentValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
+  const copyInterdependent = new Set<Value>();
+  const pureReads = (root: Value, acc: Set<Value>) => {
+    const stack = [root];
+    while (stack.length) {
+      const x = stack.pop()!;
+      const d = defOf.get(x);
+      if (!d || acc.has(x)) {
+        continue;
+      }
+      acc.add(x);
+      if (d.opcode !== 'call' && d.opcode !== 'load' && d.opcode !== 'aload') {
+        stack.push(...d.operands);
+      }
+    }
+  };
+  for (const b of fn.blocks) {
+    for (const s of b.ops[b.ops.length - 1]?.successors ?? []) {
+      if (s.args.length < 2) {
+        continue;
+      }
+      for (const w of s.args) {
+        const d = defOf.get(w);
+        if (!d || d.opcode === 'call' || d.opcode === 'load' || d.opcode === 'aload') {
+          continue;
+        }
+        const reads = new Set<Value>();
+        for (const o of d.operands) {
+          pureReads(o, reads);
+        }
+        for (const v of s.args) {
+          if (v !== w && reads.has(v)) {
+            copyInterdependent.add(v);
+          }
+        }
+      }
+    }
+  }
+  return copyInterdependent;
+}
+
+/** PER-BLOCK LIVENESS of SSA values — backward dataflow. Successor args count as uses at the END
+ *  of the predecessor (they render in the predecessor's argAssigns), so liveIn(B) means precisely
+ *  "read at-or-after B's entry". Consumed by the coalescing interference check: merging two values
+ *  that are ever simultaneously live into one variable name is the textbook silent clobber.
+ *
+ *  `returnsVoid` suppresses the phantom `ret` operand, the same way the use registry does. */
+function blockLiveIn(fn: Fn, returnsVoid: boolean): Map<Block, Set<Value>> {
+  const liveIn = new Map<Block, Set<Value>>();
+  for (const b of fn.blocks) {
+    liveIn.set(b, new Set());
+  }
+  for (let liveChanged = true; liveChanged;) {
+    liveChanged = false;
+    for (let bi = fn.blocks.length - 1; bi >= 0; bi--) {
+      const b = fn.blocks[bi];
+      const live = new Set<Value>();
+      for (const s of successorsOf(b)) {
+        for (const v of liveIn.get(s)!) {
+          live.add(v);
+        }
+      }
+      for (let oi = b.ops.length - 1; oi >= 0; oi--) {
+        const op = b.ops[oi];
+        for (const r of op.results) {
+          live.delete(r);
+        }
+        for (const s of op.successors) {
+          for (const a of s.args) {
+            live.add(a);
+          }
+        }
+        if (!(returnsVoid && op.opcode === 'ret')) {
+          for (const u of op.operands) {
+            live.add(u);
+          }
+        }
+      }
+      for (const p of b.params) {
+        live.delete(p);
+      }
+      const cur = liveIn.get(b)!;
+      if (live.size !== cur.size || ![...live].every((v) => cur.has(v))) {
+        liveIn.set(b, live);
+        liveChanged = true;
+      }
+    }
+  }
+  return liveIn;
+}
+
+/** FORWARD REACHABILITY over the CFG, in the two flavours the materialization rules ask for.
+ *
+ *  `reachFrom` is the plain successors-transitive set, excluding the start block itself, cached per
+ *  factory — which is why this is a factory: the cache belongs to one `analyze` call.
+ *
+ *  `reachAvoiding` never passes THROUGH `avoid` — the def-block-avoiding variant for per-iteration
+ *  path checks: a path that re-enters the def's block re-executes the def, so writes on it belong
+ *  to the NEXT dynamic instance (which re-renders anyway) and must not count against this one.
+ *  Uncached (per-decision graphs are small). */
+function makeReach(): {
+  reachFrom: (b: Block) => Set<Block>;
+  reachAvoiding: (from: Block, avoid: Block) => Set<Block>;
+} {
+  const reachCache = new Map<Block, Set<Block>>();
+  const reachFrom = (b: Block): Set<Block> => {
+    let r = reachCache.get(b);
+    if (r) {
+      return r;
+    }
+    r = new Set<Block>();
+    const stack = [...successorsOf(b)];
+    while (stack.length) {
+      const x = stack.pop()!;
+      if (r.has(x)) {
+        continue;
+      }
+      r.add(x);
+      stack.push(...successorsOf(x));
+    }
+    reachCache.set(b, r);
+    return r;
+  };
+  // Reachability that never passes THROUGH `avoid` — the def-block-avoiding variant for
+  // per-iteration path checks: a path that re-enters the def's block re-executes the def, so
+  // writes on it belong to the NEXT dynamic instance (which re-renders anyway) and must not
+  // count against this one. Uncached (per-decision graphs are small).
+  const reachAvoiding = (from: Block, avoid: Block): Set<Block> => {
+    const r = new Set<Block>();
+    const stack = successorsOf(from).filter((s) => s !== avoid);
+    while (stack.length) {
+      const x = stack.pop()!;
+      if (r.has(x)) {
+        continue;
+      }
+      r.add(x);
+      for (const s of successorsOf(x)) {
+        if (s !== avoid && !r.has(s)) {
+          stack.push(s);
+        }
+      }
+    }
+    return r;
+  };
+  return { reachFrom, reachAvoiding };
+}
+
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
   const {
     defs,
@@ -923,51 +1195,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     });
   }
 
-  // ── per-block liveness of SSA values ──────────────────────────────────────────────────────
-  // Backward dataflow. Successor args count as uses at the END of the predecessor (they render
-  // in the predecessor's argAssigns), so liveIn(B) means precisely "read at-or-after B's entry".
-  // Consumed by the coalescing interference check: merging two values that are ever
-  // simultaneously live into one variable name is the textbook silent clobber.
-  const liveIn = new Map<Block, Set<Value>>();
-  for (const b of fn.blocks) {
-    liveIn.set(b, new Set());
-  }
-  for (let liveChanged = true; liveChanged;) {
-    liveChanged = false;
-    for (let bi = fn.blocks.length - 1; bi >= 0; bi--) {
-      const b = fn.blocks[bi];
-      const live = new Set<Value>();
-      for (const s of successorsOf(b)) {
-        for (const v of liveIn.get(s)!) {
-          live.add(v);
-        }
-      }
-      for (let oi = b.ops.length - 1; oi >= 0; oi--) {
-        const op = b.ops[oi];
-        for (const r of op.results) {
-          live.delete(r);
-        }
-        for (const s of op.successors) {
-          for (const a of s.args) {
-            live.add(a);
-          }
-        }
-        if (!(returnsVoid && op.opcode === 'ret')) {
-          for (const u of op.operands) {
-            live.add(u);
-          }
-        }
-      }
-      for (const p of b.params) {
-        live.delete(p);
-      }
-      const cur = liveIn.get(b)!;
-      if (live.size !== cur.size || ![...live].every((v) => cur.has(v))) {
-        liveIn.set(b, live);
-        liveChanged = true;
-      }
-    }
-  }
+  const liveIn = blockLiveIn(fn, returnsVoid);
 
   // ── the effect-ordering model — inline-at-use barriers ────────────────────────────────────
   // `expr()` renders a def's computation AT ITS USE, which silently MOVES it: a call executes
@@ -979,46 +1207,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // TEMP assigned at the def's own program position (sideEffects) — which is precisely the
   // register the compiler used.
   const materialize = new Set<Op>();
-  const reachCache = new Map<Block, Set<Block>>();
-  const reachFrom = (b: Block): Set<Block> => {
-    let r = reachCache.get(b);
-    if (r) {
-      return r;
-    }
-    r = new Set<Block>();
-    const stack = [...successorsOf(b)];
-    while (stack.length) {
-      const x = stack.pop()!;
-      if (r.has(x)) {
-        continue;
-      }
-      r.add(x);
-      stack.push(...successorsOf(x));
-    }
-    reachCache.set(b, r);
-    return r;
-  };
-  // Reachability that never passes THROUGH `avoid` — the def-block-avoiding variant for
-  // per-iteration path checks: a path that re-enters the def's block re-executes the def, so
-  // writes on it belong to the NEXT dynamic instance (which re-renders anyway) and must not
-  // count against this one. Uncached (per-decision graphs are small).
-  const reachAvoiding = (from: Block, avoid: Block): Set<Block> => {
-    const r = new Set<Block>();
-    const stack = successorsOf(from).filter((s) => s !== avoid);
-    while (stack.length) {
-      const x = stack.pop()!;
-      if (r.has(x)) {
-        continue;
-      }
-      r.add(x);
-      for (const s of successorsOf(x)) {
-        if (s !== avoid && !r.has(s)) {
-          stack.push(s);
-        }
-      }
-    }
-    return r;
-  };
+  const { reachFrom, reachAvoiding } = makeReach();
   // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
   // terminator, materialized def) it inlines into, transitively through single-use pure ops.
   // null = renders in several places / unresolvable (treated conservatively by the caller).
@@ -1092,107 +1281,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     emitPosSetCache.set(op, res);
     return res;
   };
-  // THE def→render path discipline — one implementation, three callers (the two materialization
-  // rules below and structure.ts's bitfield fold, which imports it). May an op `isWrite` accepts
-  // execute between `def` and a statement at `render`, on any def-avoiding path? The def block's
-  // tail, the render block's head, and every between-block on a path; a path re-crossing the def
-  // is the NEXT dynamic instance and does not count. Path-based on purpose: `fn.blocks` is ADDRESS
-  // order, so a linear-position scan misses a block laid out after the render that executes
-  // between def and render on the taken path (an audit round broke exactly that way).
-  const memWriteBetween = (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean): boolean => {
-    const b = opBlock.get(def)!;
-    const oi = opIndex.get(def)!;
-    const wDirty = (list: Op[], from: number, to: number): boolean => {
-      for (let k = from; k < to; k++) {
-        if (isWrite(list[k])) {
-          return true;
-        }
-      }
-      return false;
-    };
-    // Same block: the only def-avoiding path is the straight line between the two indices
-    // (leaving and re-entering the block re-crosses the def). A render BEFORE the def cannot
-    // happen — within a block, uses follow defs — and falls through to the path walk, whose
-    // answer is the conservative one.
-    if (render.blk === b && oi < render.idx) {
-      return wDirty(b.ops, oi + 1, render.idx);
-    }
-    if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(render.blk.ops, 0, render.idx)) {
-      return true;
-    }
-    for (const x of reachAvoiding(b, b)) {
-      if (x === render.blk && !reachAvoiding(render.blk, b).has(render.blk)) {
-        continue; // acyclic render block: head checked
-      }
-      if (x !== render.blk && !reachAvoiding(x, b).has(render.blk)) {
-        continue; // not on a def→render path
-      }
-      if (wDirty(x.ops, 0, x.ops.length)) {
-        return true;
-      }
-    }
-    return false;
-  };
-  // ── interdependent parallel-copy args ─────────────────────────────────────────────────────
-  // A terminator's successor args are ONE parallel copy (argAssigns), whose every read means the
-  // PRE-copy value. An arg whose def-tree reads a SIBLING arg of the same edge cannot read it by
-  // name there — so the sibling's whole expression is re-derived inside this arg's copy, and
-  // `sequentialize` spills old-value temps to untangle the order: arithmetic the compiler
-  // performed once, emitted per reader (the coupled-recurrence loop, `a += b*c; d += a;`). The
-  // read sibling is the register the copy machinery cannot represent — materialize its def. The
-  // walk crosses pure defs only (a call/load render is those rules' question) and stops at
-  // params, which always carry a name.
+  const memWriteBetween = makeMemWriteBetween({ opBlock, opIndex, reachAvoiding });
   const defOf = defs ?? defOpMap(fn);
-  const copyInterdependent = new Set<Value>();
-  const pureReads = (root: Value, acc: Set<Value>) => {
-    const stack = [root];
-    while (stack.length) {
-      const x = stack.pop()!;
-      const d = defOf.get(x);
-      if (!d || acc.has(x)) {
-        continue;
-      }
-      acc.add(x);
-      if (d.opcode !== 'call' && d.opcode !== 'load' && d.opcode !== 'aload') {
-        stack.push(...d.operands);
-      }
-    }
-  };
-  for (const b of fn.blocks) {
-    for (const s of b.ops[b.ops.length - 1]?.successors ?? []) {
-      if (s.args.length < 2) {
-        continue;
-      }
-      for (const w of s.args) {
-        const d = defOf.get(w);
-        if (!d || d.opcode === 'call' || d.opcode === 'load' || d.opcode === 'aload') {
-          continue;
-        }
-        const reads = new Set<Value>();
-        for (const o of d.operands) {
-          pureReads(o, reads);
-        }
-        for (const v of s.args) {
-          if (v !== w && reads.has(v)) {
-            copyInterdependent.add(v);
-          }
-        }
-      }
-    }
-  }
+  const copyInterdependent = copyInterdependentValues(fn, defOf);
   // ── natural loops, for the live-across-a-loop rule ────────────────────────────────────────
   // From the caller's dominators (a back edge is `latch → header` with the header dominating the
   // latch); the body is the backward closure from the latch. With no `dom` the rule stands
   // down — the same posture as the `defs`-carried rules.
-  const predsOf = new Map<Block, Block[]>();
-  for (const b of fn.blocks) {
-    predsOf.set(b, []);
-  }
-  for (const b of fn.blocks) {
-    for (const s of successorsOf(b)) {
-      predsOf.get(s)!.push(b);
-    }
-  }
+  const predsOf = predecessors(fn);
   const loopBodies = dom ? naturalLoops(fn, dom, predsOf) : [];
   /** The def's value enters some loop's header live and every consumer sits outside that loop,
    *  as does the def: the value is carried ACROSS the loop, not into it. */
@@ -1307,27 +1403,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  barrier sees either; for an ordinary cell they are worse spellings, and for a volatile one
    *  they are a missing access and a duplicated one. */
   const standsOnMovableRead = (op0: Op, blk: Block): boolean => {
-    const reads: Op[] = [];
-    const seen = new Set<Value>();
-    const cone = [op0];
-    while (cone.length) {
-      const d = cone.pop()!;
-      if (d.opcode === 'load' || d.opcode === 'aload') {
-        reads.push(d);
-        continue;
-      }
-      if (d.opcode === 'call' || d.opcode === 'gaddr' || d.opcode === 'laddr') {
-        return false;
-      }
-      for (const x of d.operands) {
-        if (!seen.has(x)) {
-          seen.add(x);
-          const dd = defOf.get(x);
-          if (dd) {
-            cone.push(dd);
-          }
-        }
-      }
+    const reads = readCone(op0, defOf);
+    if (reads === null) {
+      return false;
     }
     const at = { blk, idx: opIndex.get(op0)! };
     const coneReads = new Set(reads);
@@ -1343,52 +1421,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   };
   /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */
   const multiConsumer = (v: Value): boolean => new Set((useSitesOf.get(v) ?? []).map((s) => s.op)).size >= 2;
-  /** THE def-block placement rule's loop refusal: is `b` a PREHEADER of some loop whose body holds
-   *  one of the render blocks — outside the body, and a predecessor of the header?
-   *
-   *  Loop invariant motion (loop.c, which agbcc does compile and run at -O2) is the pass whose
-   *  landing spot the source could not have spelled: it parks the read BELOW the loop guard, where
-   *  a read the source wrote above the loop sits above it. Compiled,
-   *  `for (i=0;i<n;i++) t += gK*i;` emits `mov r2,#0 / cmp r2,r3 / bge .L4 / ldr r0,.L8 /
-   *  ldr r4,[r0]` — guard first, read after — while hoisting `gK` into a local above the loop by
-   *  hand puts both `ldr`s ahead of the guard. So a read in the preheader is evidence of a read in
-   *  the BODY, and inferring def-block placement there spells the one source the asm rules out.
-   *  (With an aliasing store in the loop agbcc hoists only the address constant and leaves the
-   *  `ldr` in the body — same conclusion, weaker premise.)
-   *
-   *  Narrow on purpose: a loop merely lying between def and render is not this shape. */
-  const preheaderOfRenderLoop = (b: Block, renders: readonly Block[]): boolean =>
-    loopBodies.some((L) => !L.body.has(b) && successorsOf(b).includes(L.header) && renders.some((x) => L.body.has(x)));
-  /** THE def-block placement rule's seam refusal: does a FALL-THROUGH alone put a render below
-   *  `b` — a chain of unconditional `br` edges, each into a block whose only predecessor is the
-   *  one before it?
-   *
-   *  The frontends start a block at every LABEL, so a label nothing branches to cuts one straight
-   *  line of asm in two and the upper half dominates the lower with no control flow between. The
-   *  rule's premise is that the compiler will not move a read ACROSS a branch, which says nothing
-   *  there — while WITHIN a straight line agbcc picks the order itself. Compiled, klonoa's
-   *  StreamCmd_SetMusicParams (a stray `sub_0804E9AC:` between its last `ldrh r2,[r4]` and the
-   *  `bl` consuming it) assembles byte-identical to its object from the inlined read and four
-   *  bytes off from the named one, which swaps that `ldrh` with the `ldr r0,pool` beside it. Of
-   *  the rule's 20 firings over the 464 klonoa agbcc functions, 13 were across such a seam. */
-  const fallThroughSeam = (b: Block, renders: readonly Block[]): boolean => {
-    const seen = new Set<Block>([b]);
-    for (let cur = b; ;) {
-      const t = cur.ops[cur.ops.length - 1];
-      if (t?.opcode !== 'br') {
-        return false;
-      }
-      const next = t.successors[0].block;
-      if (predsOf.get(next)!.length !== 1 || seen.has(next)) {
-        return false;
-      }
-      if (renders.includes(next)) {
-        return true;
-      }
-      seen.add(next);
-      cur = next;
-    }
-  };
   /** THE def-block placement rule's short-circuit refusal: values C evaluates only under a
    *  `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`, and everything it reads.
    *
@@ -1533,10 +1565,11 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             materialize.add(op);
           }
           // Sixth scope, under the merge-feed-home axis (AnalyzeOptions.homeMergeFeeds) —
-          // `mergeFeedHomes` above. The only one of the six that admits a `const`: for every other
-          // a re-derived const is re-materialization, the compiler's own behavior, while a const
-          // the arms of a branch merge is one it held in a register across them (`mov r5, #0`
-          // once, not per arm).
+          // `mergeFeedHomes` above. The only one of the FOUR AXIS scopes that admits a `const`; the
+          // other const clientele is the first scope, a const live across a call. For the sibling
+          // axes a re-derived const is re-materialization, the compiler's own behavior, while a
+          // const the arms of a branch merge is one it held in a register across them
+          // (`mov r5, #0` once, not per arm).
           if (homeMergeFeeds && mergeFeedOps.has(op)) {
             materialize.add(op);
           }
@@ -1607,8 +1640,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             rb &&
             rb.length > 0 &&
             rb.every((x) => x !== b && dom.get(x)!.has(b)) &&
-            !preheaderOfRenderLoop(b, rb) &&
-            !fallThroughSeam(b, rb)
+            !preheaderOfRenderLoop(loopBodies, b, rb) &&
+            !fallThroughSeam(predsOf, b, rb)
           ) {
             materialize.add(op);
             continue;
@@ -1674,17 +1707,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             return false;
           }
           if (x.opcode === 'store') {
-            // A store to a PROVABLY-DISJOINT slot of the same base never aliases the load: same
-            // base SSA value, both constant offset+width, ranges non-overlapping (the everyday
-            // struct interleave `… = p->field_0; p->field_4 = …`). Anything less certain bars.
-            if (!isCall && op.opcode === 'load' && x.operands[0] === op.operands[0]) {
-              const lo = op.attrs.off as number,
-                lw = op.attrs.width as number;
-              const so = x.attrs.off as number,
-                sw = x.attrs.width as number;
-              if (so + sw <= lo || lo + lw <= so) {
-                return false;
-              }
+            // A store to a PROVABLY-DISJOINT slot of the same base never aliases the load
+            // (`disjointConstSlots`, ir/alias.ts). Anything less certain bars.
+            if (!isCall && op.opcode === 'load' && disjointConstSlots(op, x)) {
+              return false;
             }
             return true;
           }

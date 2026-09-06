@@ -60,8 +60,8 @@
 // It is NOT marked sound, because it has not been shown to be, and it is BLUNTER than the rule it
 // restates: `carriesPreUpdate` branches on which emitter owns the latch and names four shapes that
 // are not the hazard, none of which this has. Dropping it over 773 benchmark rows improves 12 and
-// regresses none — `nestedloop` is `int s = 0; … s += i*j`, one accumulator the pass currently
-// emits as two. Lifting `carriesPreUpdate` itself to name classes is the work that would take those
+// regresses none, measured at #55 — `nestedloop` is `int s = 0; … s += i*j`, one accumulator the
+// pass currently emits as two. Lifting `carriesPreUpdate` itself to name classes is the work that would take those
 // 12 rows; it needs the class-level closure, since a merge can reach a loop variable's name through
 // an edge that carried no loop variable at all.
 //

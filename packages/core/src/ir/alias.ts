@@ -21,6 +21,16 @@
 // Being conservative here costs at most a match (an extra local the compiler would have folded);
 // being wrong here is a silently wrong read. Every relaxation must keep that asymmetry.
 //
+// A SECOND PREMISE LIVES HERE, on different evidence and for a different clientele:
+// `disjointConstSlots` — the same base VALUE, both accesses at a constant offset and width, and
+// byte ranges that do not overlap. Where the name rule above is about two declared OBJECTS, this
+// one is about two byte ranges of whatever single object one base denotes, so it needs no name and
+// asserts nothing about which object that is: `p->field_0` and `p->field_4` are different cells
+// whether `p` points at a global, a local or a parameter. Narrow in the same direction — a
+// different base value or a runtime index BARS — and it COMPOSES with the name rule rather than
+// widening it: a caller asks whichever question its evidence can answer, and a bar from either
+// stands.
+//
 // ONE OTHER PLACE ANSWERS THE SAME QUESTION, on a different premise, and it is not reachable from
 // here: `l3/unreduce.ts`'s `moved-read-aliasable` gate, which asks whether moving a read down to
 // the point that re-reads it lets the writes it crosses change what it sees. It runs on L3, where there are no `Value`s
@@ -74,6 +84,28 @@ export function globalCellOf(defs: Map<Value, Op>, addr: Value, off: number): Gl
     }
   }
   return null;
+}
+
+/**
+ * Are these two accesses through ONE base provably different byte cells — same base value, both at
+ * a constant offset and width, ranges non-overlapping? The everyday struct interleave
+ * `… = p->field_0; p->field_4 = …`, where the store cannot change what the load sees even though
+ * neither side resolves to a named global.
+ *
+ * False on anything less certain, which is what the callers need: a different base value, or an
+ * access with no constant slot to compare. `off`/`width` are contract-required on `load`/`store`
+ * (ir/opcodes.ts), so the casts are defensive; the comparisons are the ones the fused call site in
+ * structure/analysis.ts made, NaN behaviour included.
+ */
+export function disjointConstSlots(load: Op, store: Op): boolean {
+  if (store.operands[0] !== load.operands[0]) {
+    return false;
+  }
+  const lo = load.attrs.off as number,
+    lw = load.attrs.width as number;
+  const so = store.attrs.off as number,
+    sw = store.attrs.width as number;
+  return so + sw <= lo || lo + lw <= so;
 }
 
 /**

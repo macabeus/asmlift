@@ -166,6 +166,63 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   },
 ];
 
+// `x + 0` / `x - 0` / `x | 0` are `x`. Substituting a loop variable by its init constant turns
+// ordinary index arithmetic into exactly these, and a guard that spells the same value without
+// the arithmetic would otherwise compare unequal.
+function fold(defs: Map<Value, Op>, v: Value): Value {
+  const d = defs.get(v);
+  if (!d || d.operands.length !== 2 || !['add', 'sub', 'or'].includes(d.opcode)) {
+    return v;
+  }
+  const z = defs.get(d.operands[1]);
+  return z?.opcode === 'const' && z.attrs?.value === 0 ? fold(defs, d.operands[0]) : v;
+}
+
+// Does `a`, read on a loop's ENTRY values, denote the same thing as `b`? `entry` maps each header
+// param and back-edge arg to the arg the forward edge passes, so substituting through it models
+// the FIRST iteration — the state a guard in front of the loop tested. `negated` compares against
+// b's logical opposite instead, for the usual case where a guard spells the loop's own test the
+// other way round (`beq` to the exit vs `bne` to the header).
+//
+// Structural, not semantic: distinct ops with the same opcode, attributes and operands compare
+// equal (two `const 0`s do), anything else does not. A false negative costs a loud decline, which
+// is the direction to be wrong in. Memoised like `readsClobbered`'s `seen`: a value its own
+// consumer reads twice would otherwise double the work at every level.
+function sameAtEntry(defs: Map<Value, Op>, a: Value, b: Value, entry: Map<Value, Value>, negated = false): boolean {
+  const memo = new Map<Value, Map<Value, boolean>>();
+  const sameOp = (da: Op, db: Op, opcodeOk: boolean): boolean =>
+    opcodeOk &&
+    da.operands.length === db.operands.length &&
+    JSON.stringify(da.attrs ?? null) === JSON.stringify(db.attrs ?? null) &&
+    da.operands.every((o, i) => same(o, db.operands[i]));
+  const same = (x0: Value, y0: Value): boolean => {
+    const x = fold(defs, entry.get(x0) ?? x0);
+    const y = fold(defs, y0);
+    if (x === y) {
+      return true;
+    }
+    let row = memo.get(x);
+    if (!row) {
+      memo.set(x, (row = new Map()));
+    }
+    const hit = row.get(y);
+    if (hit !== undefined) {
+      return hit;
+    }
+    const da = defs.get(x);
+    const db = defs.get(y);
+    const r = !!da && !!db && sameOp(da, db, da.opcode === db.opcode);
+    row.set(y, r);
+    return r;
+  };
+  if (!negated) {
+    return same(a, b);
+  }
+  const da = defs.get(fold(defs, entry.get(a) ?? a));
+  const db = defs.get(fold(defs, b));
+  return !!da && !!db && sameOp(da, db, NEGATED_ICMP[da.opcode] === db.opcode);
+}
+
 export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   const { defs, varName, useSitesOf, liveIn, opBlock, materialize, respelledDefs } = deps;
 
@@ -249,7 +306,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // declines, 14 correct ones kept lifting with an identical hash. This clause then fires 0
     // times over the klonoa checkout's 732 `.s` and over the 2737 candidates the 205 agbcc
     // synthetic rows enumerate, where the predicate AROUND it fires 5 and 4 — on the condition, an
-    // exit arg, or an escaped op result (`synthetic:preupdate_escape` is the last of those).
+    // exit arg, or an escaped op result (`synthetic:preupdate_escape` is the last of those). Those
+    // counts, and the rig, were taken at #113.
     //
     // AND IT DECLINES ONLY BECAUSE OF HOW THE VALUE IS SPELLED. `sinkablePreUpdateSlots` below
     // REPAIRS this hazard, re-emitting the copy inside the body ahead of the update, whenever the
@@ -336,6 +394,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   ): Set<number> => {
     const none = new Set<number>();
     const headerNames = new Set(header.params.map((p) => varName.get(p)));
+    // Is `v` defined by the loop body itself — an op in one of its blocks, or a block param?
     // An op with no `opBlock` entry counts as INSIDE: the map is total over the function, and the
     // safe direction for an absent one is the answer that refuses.
     const definedInBody = (v: Value): boolean => {
@@ -362,7 +421,6 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       }
       return false;
     };
-    // Is `v` defined by the loop body itself — an op in one of its blocks, or a block param?
     // Everything that stops `a` from being REBUILT at the top of the body. Walks the def-tree
     // where `exprWith(null)` will when the copy is spelled — stopping at a NAMED value, which
     // renders as its name, and at a value with no reaching def, which renders as a gap.
@@ -431,64 +489,14 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     return exitArgs.some((a, j) => !dest.has(j) && readsClobbered(a, sub, names)) ? none : new Set(dest.keys());
   };
 
-  // `x + 0` / `x - 0` / `x | 0` are `x`. Substituting a loop variable by its init constant turns
-  // ordinary index arithmetic into exactly these, and a guard that spells the same value without
-  // the arithmetic would otherwise compare unequal.
-  const fold = (v: Value): Value => {
-    const d = defs.get(v);
-    if (!d || d.operands.length !== 2 || !['add', 'sub', 'or'].includes(d.opcode)) {
-      return v;
-    }
-    const z = defs.get(d.operands[1]);
-    return z?.opcode === 'const' && z.attrs?.value === 0 ? fold(d.operands[0]) : v;
+  return {
+    readsClobbered,
+    loopEscapeHazard,
+    loopUpdateHazard,
+    sinkablePreUpdateSlots,
+    sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, entry, negated),
+    loopWriteSet,
   };
-
-  // Does `a`, read on a loop's ENTRY values, denote the same thing as `b`? `entry` maps each header
-  // param and back-edge arg to the arg the forward edge passes, so substituting through it models
-  // the FIRST iteration — the state a guard in front of the loop tested. `negated` compares against
-  // b's logical opposite instead, for the usual case where a guard spells the loop's own test the
-  // other way round (`beq` to the exit vs `bne` to the header).
-  //
-  // Structural, not semantic: distinct ops with the same opcode, attributes and operands compare
-  // equal (two `const 0`s do), anything else does not. A false negative costs a loud decline, which
-  // is the direction to be wrong in. Memoised like `readsClobbered`'s `seen`: a value its own
-  // consumer reads twice would otherwise double the work at every level.
-  const sameAtEntry = (a: Value, b: Value, entry: Map<Value, Value>, negated = false): boolean => {
-    const memo = new Map<Value, Map<Value, boolean>>();
-    const sameOp = (da: Op, db: Op, opcodeOk: boolean): boolean =>
-      opcodeOk &&
-      da.operands.length === db.operands.length &&
-      JSON.stringify(da.attrs ?? null) === JSON.stringify(db.attrs ?? null) &&
-      da.operands.every((o, i) => same(o, db.operands[i]));
-    const same = (x0: Value, y0: Value): boolean => {
-      const x = fold(entry.get(x0) ?? x0);
-      const y = fold(y0);
-      if (x === y) {
-        return true;
-      }
-      let row = memo.get(x);
-      if (!row) {
-        memo.set(x, (row = new Map()));
-      }
-      const hit = row.get(y);
-      if (hit !== undefined) {
-        return hit;
-      }
-      const da = defs.get(x);
-      const db = defs.get(y);
-      const r = !!da && !!db && sameOp(da, db, da.opcode === db.opcode);
-      row.set(y, r);
-      return r;
-    };
-    if (!negated) {
-      return same(a, b);
-    }
-    const da = defs.get(fold(entry.get(a) ?? a));
-    const db = defs.get(fold(b));
-    return !!da && !!db && sameOp(da, db, NEGATED_ICMP[da.opcode] === db.opcode);
-  };
-
-  return { readsClobbered, loopEscapeHazard, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet };
 }
 
 /** THE WRITE RELOCATION THE UNDEF EDGE-COPY ELISION CANNOT SEE, as a postcondition on a whole
