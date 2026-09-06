@@ -404,10 +404,10 @@ function accessesByBase(fn: Fn, defs: Map<Value, Op>): Map<Value, MemberAccess[]
 export interface MemberArrayGroup {
   base: Value;
   c: MemberArrayCandidate;
-  /** NON-EMPTY by construction, which is why `fieldsOf` and the trailing-member gate index the ends
-   *  unguarded: `accessesByBase` only keys a base it recorded an access for, and every access puts
-   *  an entry in `byOff`, whose values these are. */
-  members: Member[];
+  /** Non-empty: `accessesByBase` only keys a base it recorded an access for, and every access puts
+   *  an entry in `byOff`, whose values these are. The type carries it so `fieldsOf` and the
+   *  trailing-member gate can index the ends without a guard the checker cannot see through. */
+  members: [Member, ...Member[]];
   accesses: MemberAccess[];
 }
 
@@ -480,7 +480,9 @@ export function memberArrayCandidates(fn: Fn): MemberArrayGroup[] {
       }
       byOff.set(a.off, m);
     }
-    const members = [...byOff.values()].sort((x, y) => x.off - y.off);
+    // `accesses` is non-empty (accessesByBase keys no base it recorded nothing for) and every
+    // access writes a `byOff` entry, so the assertion below is the loop's postcondition.
+    const members = [...byOff.values()].sort((x, y) => x.off - y.off) as [Member, ...Member[]];
     // Natural C alignment must seat every member at its observed offset. An INTERIOR member's run
     // reaches exactly the offset of the member that follows it, so the only pad this layout ever
     // needs is the leading one and the only way to mislay a member is a span its element size does

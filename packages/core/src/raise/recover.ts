@@ -35,7 +35,7 @@ export function recoverTypes(fn: Fn): void {
 
 /** PHASE 1 — signedness from op semantics: the operands of a signed comparison are signed integers,
  *  a comparison's result is a bool, and a division carries its signedness in the OPCODE. */
-export function seedSignednessFromOpcodes(fn: Fn): void {
+function seedSignednessFromOpcodes(fn: Fn): void {
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (SIGNED_CMP.has(op.opcode)) {
@@ -76,7 +76,7 @@ export function seedSignednessFromOpcodes(fn: Fn): void {
  *  is typed `T *` rather than being flattened to a plain integer. Both the constant-offset forms
  *  (load/store, width) and the variable-index forms (aload/astore, elemSize) type their base
  *  operand[0]; only the scale attribute differs. */
-export function typeDerefBases(fn: Fn): void {
+function typeDerefBases(fn: Fn): void {
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       let width: number, signed: boolean;
@@ -117,7 +117,7 @@ export function typeDerefBases(fn: Fn): void {
 
 /** PHASE 4 — default every still-unknown value to s32. This is a COMPILER default (agbcc/IDO/GCC
  *  all take plain `int` as the integer default), not a hardware fact — applied uniformly. */
-export function defaultUnknownsToS32(fn: Fn): void {
+function defaultUnknownsToS32(fn: Fn): void {
   for (const b of fn.blocks) {
     for (const p of b.params) {
       if (p.type.kind === 'unknown') {
