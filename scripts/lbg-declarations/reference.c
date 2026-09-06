@@ -1,3 +1,20 @@
+/* Reference C for the declaration-list study (docs/lbg-attribution-declarations.md).
+ *
+ * WRITTEN FOR THIS STUDY. It is not upstream source: the pinned kleod checkout carries
+ * LoadBGTilemapData as INCLUDE_ASM and has no C body for it at all, so there is nothing to copy
+ * from. What IS adapted from that checkout is the shape it is written against — the struct and
+ * global declarations below follow its include/structs/variables.h.
+ *
+ * The two trailing FAKE-marked lines are the study's own marks, not upstream annotations:
+ * generate.py drops them to build each variant's `-minus` arm, which is what the FAKE column of
+ * the curve measures.
+ *
+ * TWO PROPERTIES OF THE GENERATOR THIS FILE HAS TO RESPECT. It copies this text VERBATIM into
+ * every generated variant, header included, so an edit here rides into all 29 of them. And it
+ * builds a `-minus` arm by dropping every line that CONTAINS the marker as a substring — so
+ * nothing above may spell the marker out, including in prose, or the comment saying so is the
+ * line that disappears.
+ */
 #include "gba.h"
 struct BgInfo {
     /* 0x00 */ void *pTiles; // BG tiles

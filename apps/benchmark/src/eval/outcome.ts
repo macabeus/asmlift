@@ -13,7 +13,7 @@
 // placeholders for types the project had written down. Every real row now carries one — 246 the
 // project's vendored context, six a hand-written list of callees the headers omit (see
 // cases/manifests.ts for the provisioning policy and its residuals) — and what survives is mostly
-// a callee the CONTEXT does not declare either: `? func_80038388_38F88(?)`, 10 of the real tier's
+// a callee the CONTEXT does not declare either: `? func_800383D8_38FD8(?)`, 10 of the real tier's
 // 15 m2c declines. The SYNTHETIC tier is unchanged and deliberately starved on both sides:
 // neither tool gets project data there.
 //

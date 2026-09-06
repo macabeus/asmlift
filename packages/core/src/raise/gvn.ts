@@ -1,4 +1,5 @@
-// asmlift — value numbering for OPERAND-FREE PURE definitions (today: `gaddr`).
+// asmlift — value numbering for OPERAND-FREE PURE definitions (today `gaddr` and its frame-local
+// twin `laddr`).
 //
 // A compiler materializes a global's address wherever it needs one. Two arms of an `if` that both
 // touch `gTable` each get their own pool load, so the frontend lifts two DISTINCT SSA values that
@@ -23,13 +24,20 @@
 // alone, so two with equal attrs are equal in every execution, on every path, always. Replacing all
 // of them with ONE definition is exact.
 //
-// THE ADMISSION RULE IS `gaddr`, NOT "operand-free and pure" — and the difference is the whole
-// safety argument, so do not relax it to the general-sounding version. `const` is ALSO operand-free
-// and pure, and numbering consts function-wide would be actively harmful: structure/analysis.ts
-// materializes a multi-use `const` that is live across a call into a named local, and its own
-// comment records that this exact widening ("the small-constant regression") already cost matches
-// once. The gate is a MATCHING policy, not a property of the opcode — which is why it is not a flag
-// on the opcode table, where `const` would satisfy it.
+// THE ADMISSION RULE IS A LIST, NOT "operand-free and pure" — and the difference is the whole
+// safety argument, so do not relax it to the general-sounding version. Two more opcodes satisfy the
+// general predicate and each is deliberately out, for a different reason:
+//
+//   `const`   — numbering consts function-wide would be actively HARMFUL: structure/analysis.ts
+//               materializes a multi-use `const` that is live across a call into a named local, and
+//               its own comment records that this exact widening ("the small-constant regression")
+//               already cost matches once.
+//   `undef`   — numbering it would be VACUOUS: two `undef`s in one function always carry different
+//               `key`s (ir/opcodes.ts says so at the opcode), so "same key, therefore same value"
+//               never has two members to collapse.
+//
+// The gate is a MATCHING policy, not a property of the opcode — which is why it is not a flag on
+// the opcode table, where `const` would satisfy it.
 //
 // PLACEMENT. One fresh definition per class is created in the ENTRY block, which dominates every
 // REACHABLE block — so no reachable use can precede it (unreachable blocks are excluded from the
@@ -54,19 +62,27 @@
 // function-top `p0 = (u16 *)&gBgTilemapBufs` — the same local, one level up. Both arms are pinned
 // in `test/addr-placement.test.ts`; before that they rested on a run nobody could repeat.
 //
-// FOUR modules now answer "is this address a local?" with independent policies — here: never;
+// Several modules answer "is this address a local?" with independent policies — here: never;
 // basecse: at whichever of the two positions `l3/hoist.ts` is handed (the COMMITTED call states
 // the function top, its roster admissions also offer each init's first use), when the gate table
 // admits the base; l3/scopebase.ts: at the innermost scope holding the uses; l3/argbase.ts:
-// immediately before a call whose arguments share it. Reconciling them is recorded debt, and the same test pins the two places they actively disagree, because a
+// immediately before a call whose arguments share it. The newer placement levers — l3/nearbase.ts,
+// l3/inlinebase.ts, l3/homesplit.ts — answer it too, each with its own.
+// Reconciling them is recorded debt, and the same test pins the two places they actively disagree, because a
 // consolidation has to PICK rather than discover them: a `for`'s init (basecse reads it at loop
 // cadence and refuses, scopebase at the enclosing one and hoists) and a global name shadowed by a
 // local (scopebase must refuse — it re-spells the base as `&g` — while argbase may fire, because it
 // keeps the base expression verbatim).
 import { Block, Fn, Op, Value, mkOp, replaceAllUsesWith } from '../ir/core';
+import type { Opcode } from '../ir/opcodes';
 
-/** Ops whose result depends on `attrs` alone — no operands, no memory, no control flow. */
-const NUMBERABLE = new Set(['gaddr', 'laddr']); // laddr: same argument — operand-free, pure, attr-keyed
+/** Ops whose result depends on `attrs` alone — no operands, no memory, no control flow. The LIST,
+ *  not the predicate (see the module note); `satisfies` makes a typo a compile error rather than an
+ *  entry that silently matches nothing. `laddr` earns its place on the same argument `gaddr` does —
+ *  operand-free, pure, attr-keyed. */
+const NUMBERABLE = ['gaddr', 'laddr'] as const satisfies readonly Opcode[];
+type NumberableOpcode = (typeof NUMBERABLE)[number];
+const isNumberable = (opcode: string): opcode is NumberableOpcode => (NUMBERABLE as readonly string[]).includes(opcode);
 
 /** The value-number key: the opcode plus every attribute, in a stable order. */
 function keyOf(op: Op): string {
@@ -110,7 +126,7 @@ export function numberPureValues(fn: Fn): number {
       return;
     }
     for (const op of b.ops) {
-      if (NUMBERABLE.has(op.opcode) && op.results.length === 1) {
+      if (isNumberable(op.opcode) && op.results.length === 1) {
         const k = keyOf(op);
         groups.set(k, [...(groups.get(k) ?? []), { op, block: bi }]);
       }
@@ -129,9 +145,7 @@ export function numberPureValues(fn: Fn): number {
     // block, so no path is left reading a definition this pass has moved.
     const survivor = dups[0].op;
     const value: Value = { type: survivor.results[0].type };
-    hoisted.push(
-      mkOp(survivor.opcode as Parameters<typeof mkOp>[0], { results: [value], attrs: { ...survivor.attrs } }),
-    );
+    hoisted.push(mkOp(survivor.opcode as NumberableOpcode, { results: [value], attrs: { ...survivor.attrs } }));
     for (const d of dups) {
       replaceAllUsesWith(fn, d.op.results[0], value);
       removed++;

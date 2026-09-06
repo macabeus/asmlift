@@ -19,6 +19,7 @@ import { recoverTypes } from '../src/raise/recover';
 import { hasDerivedReadHome } from '../src/structure/analysis';
 import { structure } from '../src/structure/structure';
 import type { SymbolInfo } from '../src/symbols';
+import { count } from './helpers';
 
 const emitWith = (ir: string, on: boolean, symbols?: Map<string, SymbolInfo>, returnsVoid = true): string => {
   const fn = parse(ir);
@@ -28,8 +29,6 @@ const emitWith = (ir: string, on: boolean, symbols?: Map<string, SymbolInfo>, re
 };
 
 const emit = (ir: string, on: boolean, returnsVoid = true): string => emitWith(ir, on, undefined, returnsVoid);
-
-const count = (s: string, needle: string): number => s.split(needle).length - 1;
 
 // ── the isolate: ReadKeyInput's shape, reduced ───────────────────────────────────────────────
 // `u16 pressed = 0x3FF ^ REG_KEYINPUT;` stored twice and tested once. The read cannot render at

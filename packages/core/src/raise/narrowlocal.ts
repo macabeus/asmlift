@@ -99,9 +99,9 @@
 //   edge-reader 28 · edge-extends 40 (zext 30 / sext 10) · ACCEPT 60 (sext 51 / zext 9)
 //   flipped carriers: 0        of the 40 refusals: diamond 28, diamond AND arms hoistable 0
 //
-// Over the benchmark's own 930 base rows, decompiled twice — the conjunct as shipped and cleared —
-// exactly ONE row's emitted SOURCE BYTES change (`synthetic:mergeu16:agbcc`,
-// `45b1755f7fc7 -> c528e2a30ab2`, gapCountChanged 0 over all 930). So over every corpus anything
+// Over the benchmark's base rows, decompiled twice — the conjunct as shipped and cleared — exactly
+// ONE row's emitted SOURCE BYTES change (`synthetic:mergeu16:agbcc`; gapCountChanged 0 over all of
+// them). Measured over the 930 rows the artifact carried at the time. So over every corpus anything
 // here has measured, this rule's only inhabitant is the row that motivated it, and the `merge*`
 // rows in apps/benchmark/dataset/synthetic.ts are its whole score: four cells of the 2x2, plus
 // `mergeldcast` (both arms one load) and `mergepool` (an arm whose immediate needs a pool load),
@@ -130,7 +130,7 @@
 // the thing it reads. `NarrowLocalOptions.hoistsSingleSetArm` carries it (absent ⇒ the clause never
 // admits), and `runPreRecovery` reads the shape ahead of the pass that manufactures it —
 // `mergeShapes`.
-import { type Block, type Fn, type Op, type Value, predecessors, replaceAllUsesWith } from '../ir/core';
+import { type Block, type Fn, type Op, type Value, defOpMap, predecessors, replaceAllUsesWith } from '../ir/core';
 import { CAST_WIDTHS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -446,14 +446,7 @@ export function narrowLocalCandidates(
   opts: NarrowLocalOptions = {},
 ): { c: NarrowLocalCandidate; ext: Op }[] {
   const out: { c: NarrowLocalCandidate; ext: Op }[] = [];
-  const defs = new Map<Value, Op>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      for (const r of op.results) {
-        defs.set(r, op);
-      }
-    }
-  }
+  const defs = defOpMap(fn);
   for (const [i, b] of fn.blocks.entries()) {
     const shape = shapes.get(b) ?? { diamond: false, hoistable: false };
     for (const [pi, p] of b.params.entries()) {

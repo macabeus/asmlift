@@ -159,11 +159,12 @@ export const scopedBaseKey = (b: LeafBase, width: number, signed: boolean): stri
 interface Site {
   path: Stmt[][];
   loop: boolean[];
-  /** `idx[i]` is the index, within `path[i]`, of the statement this use sits under. Used to place
-   *  the hoist immediately before the FIRST statement that needs it rather than at the list head:
-   *  a call between the assignment and the first use is exactly what forces the pointer into a
-   *  CALLEE-SAVED register and adds the prologue push/pop the original avoided — the same failure,
-   *  one level smaller, that this module exists to fix. argbase.ts places by the same rule. */
+  /** The chain of statement indices leading to this use, read through `indexWithin` below — which
+   *  owns the off-by-one against `path`. Used to place the hoist immediately before the FIRST
+   *  statement that needs it rather than at the list head: a call between the assignment and the
+   *  first use is exactly what forces the pointer into a CALLEE-SAVED register and adds the
+   *  prologue push/pop the original avoided — the same failure, one level smaller, that this module
+   *  exists to fix. argbase.ts places by the same rule. */
   idx: number[];
   /** the use runs EVERY ITERATION of a loop whose body is not on `path` — a loop's own condition,
    *  or a `for`'s increment. No scope reachable from `path` runs at that cadence, so a key with any
@@ -174,34 +175,48 @@ interface Site {
   node: Extract<Expr, { k: 'index' }>;
 }
 
-/** Set when the tree holds a shape `collect` and `rewriteStmt` would disagree about — see the
- *  `for`-part note below. The pass then declines outright. */
-let compound = false;
+/** WHERE, within the region statement list at `depth`, the statement holding this use sits.
+ *
+ *  THE OFF-BY-ONE HAS ONE HOME AND THIS IS IT. `collect` starts `path` EMPTY and pushes a statement
+ *  index for every list it descends, so `idx` carries one entry MORE than `path`: `idx[j + 1]` is
+ *  the index within `path[j]`. A region is `path[depth - 1]`, so its own index is `idx[depth]` —
+ *  and `idx[0]` for the depth-0 body region `perRegions` synthesizes, which is why `path` must NOT
+ *  be seeded with `sfn.body`: seeding it would shift this read for every key in every function. */
+const indexWithin = (u: Site, depth: number): number => u.idx[depth];
+
+/** Everything one `collect` run carries that the descent does not change. Bundled rather than
+ *  spelled as five more positional parameters, and the bundling is what makes the walk RE-ENTRANT:
+ *  every field, `compound` included, is built per call, so nothing one run decides can reach the
+ *  next. A refusal held in module scope would instead need a reset the caller cannot forget. */
+interface CollectState {
+  readonly globals: ReadonlySet<string>;
+  /** key → its uses and the access the local's type is taken from, in first-appearance order */
+  readonly out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>;
+  readonly rules: readonly Gate<AccessCtx>[];
+  /** every eligible node already visited — meeting one twice is one object at two tree positions */
+  readonly seenNodes: Set<Expr>;
+  /** the KEYS that sharing refuses, filled here and read in `planScopedBases`, where the argument
+   *  for refusing per KEY rather than per function is written out */
+  readonly sharedKeys: Set<string>;
+  /** the tree holds a shape `collect` and `rewriteStmt` would disagree about — see the `for`-part
+   *  note below. The pass then declines outright. */
+  compound: boolean;
+}
 
 /** Walk every expression in the tree, recording each eligible access's key and its scope path. */
-function collect(
-  body: Stmt[],
-  globals: ReadonlySet<string>,
-  out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>,
-  path: Stmt[][],
-  loop: boolean[],
-  idxPath: number[],
-  rules: readonly Gate<AccessCtx>[],
-  seenNodes: Set<Expr>,
-  sharedKeys: Set<string>,
-): void {
+function collect(body: Stmt[], path: Stmt[][], loop: boolean[], idxPath: number[], st: CollectState): void {
   let at = 0;
   const visit = (e: Expr, perIteration: boolean): void => {
-    const ix = eligible(e, globals, rules);
+    const ix = eligible(e, st.globals, st.rules);
     if (ix) {
       const k = keyOf(ix);
-      if (seenNodes.has(ix)) {
-        sharedKeys.add(k);
+      if (st.seenNodes.has(ix)) {
+        st.sharedKeys.add(k);
       }
-      seenNodes.add(ix);
-      const rec = out.get(k) ?? { uses: [], sample: ix };
+      st.seenNodes.add(ix);
+      const rec = st.out.get(k) ?? { uses: [], sample: ix };
       rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at], node: ix });
-      out.set(k, rec);
+      st.out.set(k, rec);
     }
     mapExprChildren(e, (c) => {
       visit(c, perIteration);
@@ -229,7 +244,7 @@ function collect(
       // silently unreachable definition. Delete this when `stmtLists` makes collect/rewrite share
       // one traversal.
       if (stmtLists(s.init).length > 0 || stmtLists(s.inc).length > 0) {
-        compound = true;
+        st.compound = true;
       }
       // `init` and `inc` are STATEMENTS, so their expressions are reached by neither `stmtExprs`
       // nor `childLists` — yet `rewriteStmt` rewrites them. Collect and rewrite MUST see the same
@@ -240,7 +255,7 @@ function collect(
       stmtExprs(s.inc).forEach((e) => visit(e, true));
     }
     for (const child of stmtLists(s)) {
-      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i], rules, seenNodes, sharedKeys);
+      collect(child, [...path, child], [...loop, isLoop], [...idxPath, i], st);
     }
   }
 }
@@ -336,10 +351,8 @@ function wholeRegion(all: Site[], _body: Stmt[]): Region[] {
  *  scope-disjoint regions either — the body list encloses both arms and is served anyway. What
  *  separates a region from the ones nested in it is only which uses are direct.
  *
- *  The synthetic depth-0 entry is why `collect`'s `path` is NOT seeded with `sfn.body`: `idx`
- *  carries one entry more than `path` and `before` reads `idx[depth]` through that invariant, so
- *  re-seeding would shift it for every key in every function. A region at depth 0 reads `idx[0]`,
- *  which is already the index within the body. */
+ *  The synthetic depth-0 entry is why `collect`'s `path` is NOT seeded with `sfn.body` —
+ *  `indexWithin` owns that invariant and states what re-seeding would cost. */
 function perRegions(all: Site[], body: Stmt[]): Region[] {
   const byList = new Map<Stmt[], Region>();
   for (const u of all) {
@@ -353,15 +366,6 @@ function perRegions(all: Site[], body: Stmt[]): Region[] {
   return [...byList.values()];
 }
 
-/** The two loop facts, split apart because they are two different rules with two different
- *  arguments — see the gate table.
- *
- *  `perIteration` OVER-REFUSES in two shapes, deliberately: a `do { … } while (g[1]) ;` body head
- *  and a `for (…; …; i = g[5])` body head both DO run at the flagged cadence, so a hoist there
- *  would be legal. Refusing them costs a missed spelling and nothing else (bench: 0 lost, 0
- *  gained), and the precise rule needs a loop-DEPTH model. When EVERY use is inside the loop the
- *  scope IS the loop body: the assignment then runs per iteration exactly as the inline spelling
- *  did, and `nestedLoop` is false — there is nothing to refuse. */
 /** Is some literal offset reached twice among these uses? Tallied from the SITES, so the answer is
  *  scoped by whichever set the caller judges — the key's, or one region's. */
 function repeatsAConstOffset(uses: Site[]): boolean {
@@ -378,6 +382,15 @@ function repeatsAConstOffset(uses: Site[]): boolean {
   return false;
 }
 
+/** The two loop facts, split apart because they are two different rules with two different
+ *  arguments — see the gate table.
+ *
+ *  `perIteration` OVER-REFUSES in two shapes, deliberately: a `do { … } while (g[1]) ;` body head
+ *  and a `for (…; …; i = g[5])` body head both DO run at the flagged cadence, so a hoist there
+ *  would be legal. Refusing them costs a missed spelling and nothing else (bench: 0 lost, 0
+ *  gained), and the precise rule needs a loop-DEPTH model. When EVERY use is inside the loop the
+ *  scope IS the loop body: the assignment then runs per iteration exactly as the inline spelling
+ *  did, and `nestedLoop` is false — there is nothing to refuse. */
 const runsPerIteration = (uses: Site[]): boolean => uses.some((u) => u.perIteration);
 const underNestedLoop = (uses: Site[], depth: number): boolean => uses.some((u) => u.loop.slice(depth).some(Boolean));
 
@@ -467,7 +480,20 @@ const LOOP_RULES: readonly Gate<RegionCtx>[] = [
  *  gating row. It is kept, and the `relaxed` column is why: every context it rejects it would
  *  decide, the moment a counting rule stopped rejecting first. Dropping a masked rule is a change
  *  one corpus licenses; `nested-loop-use` left the region table on a proof that it CANNOT fire
- *  there, which is a different standard and the one this file holds. */
+ *  there, which is a different standard and the one this file holds.
+ *
+ *  A SECOND POPULATION, AT A DIFFERENT GRAIN, agrees on the masked rule. Over the artifact's 404
+ *  agbcc rows — `decompile()`'s default structuring, map-LESS, one tree per row — read per KEY
+ *  through `planScopedBases(...).refusals` rather than per admission context: 201 keys reach the
+ *  tables. Under `'whole'` the deciding refusal is `repeated-const-offset` on 57 keys and
+ *  `single-use` on 52 (92 keys served); under `'per-region'` it is `region-single-use` on 133,
+ *  `region-repeated-const-offset` on 50 and `regions-degenerate` on 8 (10 served).
+ *  `per-iteration-use` is the deciding refusal for ZERO keys in either table, and `nested-loop-use`
+ *  for zero of the `'whole'` ones.
+ *
+ *  BOTH CENSUSES ARE MAP-LESS, and neither says anything about the arm the real tier runs on: under
+ *  a symbol map an absolute pool constant lifts to a `gaddr`, so the base population this pass is
+ *  handed is a different one. */
 export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [...COUNTING_RULES, ...LOOP_RULES];
 
 /** A counting rule's PER-REGION reading. Same predicate, different POPULATION — under `'whole'` it
@@ -505,9 +531,12 @@ const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> => ({
  *  admits.
  *
  *  ONE RULE HERE IS PRICED BY A ROW; three are not. Ablating `region-single-use` moves
- *  `synthetic:dmascope` — the lever's own row — from 9 to 30, so it is worth 21 there, while
- *  `region-repeated-const-offset`, `per-iteration-use` and `regions-degenerate` each leave all five
- *  gating rows exactly where they stand. The OVER-SCOPING controls (`synthetic:dmascope1`,
+ *  `synthetic:dmascope` — the lever's own row — while `region-repeated-const-offset`,
+ *  `per-iteration-use` and `regions-degenerate` each leave all five gating rows exactly where they
+ *  stand. NO SCORE PAIR IS QUOTED for that move: `dmascope` is MATCH in the committed artifact, so
+ *  a pair whose unablated endpoint is a nonmatch score describes a corpus state that no longer
+ *  exists. Re-run the ablation before writing one back. The OVER-SCOPING controls
+ *  (`synthetic:dmascope1`,
  *  `synthetic:offhi_fused`) must stay MATCH but can price nothing here: censused on their own
  *  disassembly, `dmascope1` enumerates 6 candidates with 0 carrying `/regionbase` and
  *  `offhi_fused` 12 with 0. The other three are guarded by unit fixtures in test/regionbase.test.ts
@@ -638,7 +667,6 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
   const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
   const rule = opts.rule ?? REGION_RULES[opts.regions ?? 'whole'];
   const gates = opts.gates ?? rule.gates;
-  compound = false;
   const globals = addressableGlobals(sfn);
   const found = new Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>();
   /** The KEYS whose tree holds one `index` OBJECT at two positions. The rewrite repoints by node
@@ -655,18 +683,20 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
    *
    *  Not a `Gate`: it is decided during `collect`, before a `RegionCtx` exists. */
   const sharedKeys = new Set<string>();
-  collect(sfn.body, globals, found, [], [], [], rules, new Set(), sharedKeys);
-  if (compound) {
+  const st: CollectState = { globals, out: found, rules, seenNodes: new Set(), sharedKeys, compound: false };
+  collect(sfn.body, [], [], [], st);
+  if (st.compound) {
     return { keys: [...found.keys()], entries: [], repoint: new Map(), refusals: new Map(), compound: true };
   }
 
   const fresh = nameAllocator(sfn);
   // one entry per (key, admitted region) — several for one key under `'per-region'`
   const entries: ScopedBaseEntry[] = [];
-  // INSTRUMENTATION, with no production reader (`grep -rn '\.refusals' packages apps` finds only
-  // this constructor): the caller that gates on this pass counts the ENTRIES a key got, and a
-  // decline tells it only `not split`. Recorded because the id separates a region that held too few
-  // uses from a shape the pass refuses outright, which is what a probe of this pass has to know.
+  // INSTRUMENTATION, with no production reader — the only thing that reads it is
+  // test/regionbase.test.ts's `…and a key it serves nowhere names the DECIDING rule rather than
+  // vanishing`. The caller that gates on this pass counts the ENTRIES a key got, and a decline
+  // tells it only `not split`. Recorded because the id separates a region that held too few uses
+  // from a shape the pass refuses outright, which is what a probe of this pass has to know.
   // `firstRejection` short-circuits, so this is the DECIDING rule.
   const refusals = new Map<string, string>();
   for (const [key, rec] of found) {
@@ -696,11 +726,9 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
         continue;
       }
       const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
-      // the earliest statement of the region list that (transitively) holds one of its uses.
-      // `path` starts EMPTY, so `idx` carries one entry more than `path`: idx[j+1] is the index
-      // within path[j]. The region is path[depth-1], so its index is idx[depth] — and idx[0] for
-      // the depth-0 body region.
-      const before = Math.min(...r.uses.map((u) => u.idx[r.depth]));
+      // the earliest statement of the region list that (transitively) holds one of its uses —
+      // `indexWithin` carries the `idx`/`path` off-by-one this reads through.
+      const before = Math.min(...r.uses.map((u) => indexWithin(u, r.depth)));
       served = true;
       entries.push({
         scope: r.scope,
@@ -780,8 +808,7 @@ export function applyScopedBasePlan(sfn: SFn, { entries: plan, repoint, compound
     // earlier insertions do not shift the positions later ones were computed against. NOTE that two
     // hoists sharing a `before` come out REVERSED relative to `plan` order — the sort is stable and
     // descending, so both splice at the same index and the later one ends up first. Deterministic
-    // and semantically irrelevant, but it is not first-appearance order, which this comment used to
-    // claim.
+    // and semantically irrelevant, but it is not first-appearance order.
     for (const p of [...here].sort((a, b) => b.before - a.before)) {
       rewritten.splice(p.before, 0, {
         k: 'assign',

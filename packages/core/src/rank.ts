@@ -8,45 +8,42 @@
 // scorer (that stays out of @asmlift/core, which is browser-pure). `rankBy` takes an INJECTED
 // scoreFn, so the same enumeration feeds the cli's Node/objdiff scorer and the webapp's
 // wasm/objdiff scorer alike.
+//
+// THREE SIBLING FILES, one job each — never a `rank/` directory, which beside `rank.ts` is a
+// resolver trap:
+//   rank.ts        this file: the enumeration DRIVER and the two ranking drivers over it.
+//   rank-axes.ts   the TABLES the driver walks — structuring axes, shape/pre-fan products, the
+//                  base-CSE admission rosters. Their DECLARATION ORDER is published behaviour
+//                  (`compareScored` breaks a score tie by enumeration order), so reordering one
+//                  is a behaviour change and never a tidy-up.
+//   rank-declare.ts  the DECLARATION half: what a candidate's own asm says about the globals it
+//                  names, and which of those names a declaration must refuse to claim.
 import { cBackend } from './backend/c';
 import { assertDerefsTyped, assertLocalsWritten, assertPlacementSurvives, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
-import { globalCellOf } from './ir/alias';
-import { Fn, type Op, type Value, defOpMap, successorsOf } from './ir/core';
+import { Fn, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
-import {
-  BASEFOLD_GATES,
-  type BaseKey,
-  LIVEBASE_BLOCK_GATES,
-  LIVEBASE_GATES,
-  ORDERBASE_GATES,
-  UNFOLDED_GATES,
-  admittedBases,
-  hoistBaseLocals,
-} from './l3/basecse';
+import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { homeSplitTag, homeSplitWithholds, splitHomeBases } from './l3/homesplit';
-import { initFirstGuards } from './l3/initfirst';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { spellOperandMembers } from './l3/offmember';
 import { parkParamsFirst } from './l3/parkfirst';
-import { pollGuards, pollReads } from './l3/pollguard';
 import { pointerFields } from './l3/ptrfield';
 import { type RegcopyTail, registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
-import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import { unmergeJoins } from './l3/unmerge';
+import type { SymbolRef } from './l3/symbol-refs';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
@@ -59,598 +56,29 @@ import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './rai
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import {
-  hasDerivedReadHome,
-  hasHomeableSharedAddress,
-  hasLoopSharedPureValue,
-  hasMergeFeedHome,
-} from './structure/analysis';
-import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure';
+  BASEFOLD_ADMISSIONS,
+  type BaseAdmission,
+  LIVEBASE_ADMISSIONS,
+  NO_PIN_KINDS,
+  ORDERBASE_ADMISSIONS,
+  PRE_FAN_PRODUCTS,
+  SHAPE_SUBSETS,
+  SIGN_CANDS,
+  STRUCTURING_AXES,
+  type StructuringAxis,
+  UNFOLDED_ADMISSIONS,
+  applyShapes,
+  createdLocals,
+  sameBases,
+} from './rank-axes';
+import {
+  type RefusedDeclarationReason,
+  bareGlobalAccessFacts,
+  bareGlobalSymbols,
+  makeRefCollector,
+} from './rank-declare';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
-import { C_TYPEDEFS, type TargetDescription, structureOptionsFor } from './target';
-
-/** The STRUCTURING AXES — the boolean candidate dimensions crossed into every enumeration
- *  (after signedness/branch-sense/defsite/bitfields, which have their own shapes). One entry per
- *  axis; chain construction, the dropped-sibling strip closure, the per-candidate
- *  StructureOptions, and the base-axes abort guard all derive from this table, so a new axis is
- *  one entry — not four hand-edited sites that can drift.
- *
- *  `probeGate` gates the arm's ENUMERATION on the shared probe (the only thing the axis can
- *  change must exist at all); `variantGate` re-evaluates per symbol-variant on that variant's
- *  own lifted fn (a map-lifted probe spells const bases as gaddr, which would blind the
- *  /raw-globals siblings — the /addr-home lesson). `strip` opts the axis into the
- *  dropped-sibling closure: an axis-ON candidate is skipped when its OFF sibling failed the
- *  boundary contracts. Two axes are EXEMPT from structure()'s assertPrimaryAccepts invariant:
- *  `/reread-globals` only relaxes inlining barriers and `/uns-cmp` only changes spelling and
- *  declarations — neither adds materialization or merging, so neither can unlock a function the
- *  primary declines (reread also skips the strip closure). Both exemptions are stated here
- *  rather than left implicit in a missing `||` arm or trigger term. */
-interface StructuringAxis {
-  flag:
-    | 'reread'
-    | 'inplace'
-    | 'mergeNames'
-    | 'addrHome'
-    | 'exprHome'
-    | 'derivedHome'
-    | 'mergeHome'
-    | 'unsCmp'
-    | 'freshMerge'
-    | 'copyDefPos';
-  suffix: string;
-  options: (on: boolean) => Parameters<typeof structureChecked>[1];
-  probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
-  variantGate?: (fn: Fn) => boolean;
-  strip: boolean;
-}
-const STRUCTURING_AXES: readonly StructuringAxis[] = [
-  // `/reread-globals` — the VALUE-HOME axis (structure/analysis.ts AnalyzeOptions). Whether the
-  // source read a global once into a variable or re-read it at each use is not derivable from
-  // asm: the compiler CSEs the second spelling back into one load, and the round-5 dogfood
-  // watched agbcc land on both sides inside a single function (its highest-cost defect, 25 of
-  // 27 points on one klonoa function and 35/50 both ways on another). Gated on the function
-  // having a load that resolves to a named global at all.
-  {
-    flag: 'reread',
-    suffix: '/reread-globals',
-    options: (on) => ({ rereadGlobals: on }),
-    probeGate: (probe, defs) =>
-      probe.blocks.some((b) =>
-        b.ops.some((op) => op.opcode === 'load' && globalCellOf(defs, op.operands[0], op.attrs.off as number) !== null),
-      ),
-    strip: false,
-  },
-  // `/inplace` — materialize a load that feeds a `cond_br` join arg (structure.ts
-  // materializeJoinFeeds), so the merge homes in the load's own variable and the identity arm
-  // elides to a one-sided in-place overwrite (`v = *p; if (v > 31) v = 32;`). The recompiled
-  // code differs (the two-sided form needs a second register — at the margin a callee-save
-  // push — and the emptied arm flips the branch sense). Gated on a load-fed cond_br arg.
-  {
-    flag: 'inplace',
-    suffix: '/inplace',
-    options: (on) => ({ materializeJoinFeeds: on }),
-    probeGate: (probe, defs) =>
-      probe.blocks.some((b) =>
-        b.ops.some(
-          (op) =>
-            op.opcode === 'cond_br' && op.successors.some((sx) => sx.args.some((a) => defs.get(a)?.opcode === 'load')),
-        ),
-      ),
-    strip: true,
-  },
-  // `/merge-names` — coalesce two variables a merge copy would join when the values under them
-  // never interfere (structure/namecoalesce.ts). Whether the source had one variable there is
-  // not derivable, and the copies are worth less than they look — agbcc coalesces most of them
-  // itself, so which side scores better is per-function. Gated on a merge fed by 2+ edges.
-  {
-    flag: 'mergeNames',
-    suffix: '/merge-names',
-    options: (on) => ({ coalesceMergeNames: on }),
-    probeGate: (probe) =>
-      probe.blocks
-        .slice(1)
-        .some(
-          (b) => b.params.length > 0 && new Set(probe.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1,
-        ),
-    strip: true,
-  },
-  // `/addr-home` — the address-home axis (structure/analysis.ts AnalyzeOptions
-  // homeSharedAddresses): a pure computed address dereferenced at 2+ sites, and the multi-render
-  // loads through it, materialize into locals — the source's pointer-local + scalar-temp
-  // spelling, where the default re-derives per use (a pool literal per folded offset). Gated PER
-  // SYMBOL VARIANT (see the table doc) on that variant's own lifted fn having a homeable base.
-  {
-    flag: 'addrHome',
-    suffix: '/addr-home',
-    options: (on) => ({ homeSharedAddresses: on }),
-    variantGate: hasHomeableSharedAddress,
-    strip: true,
-  },
-  // `/expr-home` — the loop-expression-home axis (structure/analysis.ts AnalyzeOptions
-  // homeLoopExprs): a pure value defined outside a loop with 2+ distinct consumers, at least one
-  // of them inside it, materializes into a local carrying the value's recovered type — the register
-  // the compiler holds across the iterations (`u32 size = 16 << t;` driving a loop bound, a product
-  // and a shift), where the default re-derives per use. Gated per symbol variant like `/addr-home`
-  // (the cone refusal reads the variant's own lift).
-  {
-    flag: 'exprHome',
-    suffix: '/expr-home',
-    options: (on) => ({ homeLoopExprs: on }),
-    variantGate: hasLoopSharedPureValue,
-    strip: true,
-  },
-  // `/derived-home` — the derived-read-home axis (structure/analysis.ts AnalyzeOptions
-  // homeDerivedReads): a pure value with 2+ consumers standing on a memory read materializes, and
-  // the read then renders once inside it — the register the asm carried the DERIVED value in
-  // (`eor r1,r1,r0` keeps `0x3FF ^ REG_KEYINPUT`), where the default homes the read and re-derives
-  // the computation at every use. Both spellings compile (agbcc CSEs the re-derivation back), so
-  // the differ referees. Gated per symbol variant like its `/addr-home` and `/expr-home` siblings,
-  // and for the same reason the /addr-home lesson names: the scope refuses a cone holding a
-  // standalone address, and a pool constant the map lifts to a `gaddr` is a bare `const` in the
-  // `/raw-globals` sibling — so the two variants genuinely answer differently.
-  {
-    flag: 'derivedHome',
-    suffix: '/derived-home',
-    options: (on) => ({ homeDerivedReads: on }),
-    variantGate: hasDerivedReadHome,
-    strip: true,
-  },
-  // `/merge-home` — the merge-feed-home axis (structure/analysis.ts AnalyzeOptions
-  // homeMergeFeeds): a pure value one join's incoming edges render into the SAME parameter slot
-  // from 2+ places materializes in the block that dominates them — the value the source computed
-  // once above the branch (`s32 m = (b & 1) ? 0x400 : 0;`), where the default has no name to
-  // reference on an edge and re-derives the whole expression per arm. Gated per symbol variant on
-  // the scope itself rather than on an approximation of it.
-  //
-  // An ADMISSION, not a default: forced on, the spelling is REPLACED across the fan rather than
-  // added to it, which costs `kleod:MultiplyQ4`, `kleod:MultiplyQ8` and
-  // `pokeemerald:MathUtil_Mul16` their matches. On the roster that is unreachable — `compareScored`
-  // orders by score and the un-homed sibling rides beside it.
-  //
-  // Its fan is essentially one row's: over the 16 corpus rows the gate admits, 2790 → 5841
-  // candidates map-less and 2538 → 5363 with a map, of which `kleod:UpdateCameraScroll` (outcome
-  // `noncompile`, so they buy nothing) is +2944 and +2752, three rows add none at all where
-  // `/defsite` already spells the same tree, and the rest pay 107 and 73 between them.
-  {
-    flag: 'mergeHome',
-    suffix: '/merge-home',
-    options: (on) => ({ homeMergeFeeds: on }),
-    variantGate: hasMergeFeedHome,
-    strip: true,
-  },
-  // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
-  // icmp_u* operand takes a (u32) cast where the rendered operands do not guarantee the
-  // unsignedness, and a mixed-claimant declaration reconciles to u32 when nothing under the
-  // name needs signed. Which side the source spelled is genuinely ambiguous: a signed spelling
-  // that byte-matched was PROVED non-negative by the compiler (only then does it emit the
-  // unsigned branch from a signed compare), and emission's provable set is smaller than the
-  // compiler's. Gated on the function having an unsigned compare at all.
-  {
-    flag: 'unsCmp',
-    suffix: '/uns-cmp',
-    options: (on) => ({ unsignedCompareSpelling: on }),
-    probeGate: (probe) => probe.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
-    strip: true,
-  },
-  // `/fresh-merge` — the parameter-merge-home axis (structure.ts `freshParamMerge`, whose
-  // `FRESH_MERGE_GATES` carry the argument): a merge whose carrier is a parameter takes its own
-  // local (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }`) where the default assigns back into the
-  // parameter (`if (a1 < a0) a1 = a0;`). Both are ordinary C over the same values, so
-  // the differ decides. At TWO arguments they compile to the SAME bytes on agbcc and on mwcc
-  // (measured, both directions), which is why `maxi`/`mini` hold under the axis.
-  //
-  // IT ALSO UNLOCKS `/defsite`. `anchorConstCopies` refuses a merge whose name claims another SSA
-  // value, so a merge that adopted its parameter is never anchored, while a minted home is sole by
-  // construction and clears that one refusal — a constant arm then writes above the branch, where
-  // the remaining placement rules allow it. That pair spells m2c's own
-  // `v0 = 0xFF; if (a0 <= 0xFF) v0 = a0;`, which is how `synthetic:clampu8:mwcc_242_81` matches
-  // under `signed/defsite/fresh-merge` — `signed/defsite` is inert on the base tree and does not
-  // appear in that row's fan at all. Priced at the guard it widens: sole-claimant admissions go
-  // 196 → 245 over 679 corpus rows, 34 of them gaining 49 merges.
-  //
-  // Gated on `hasParamRootedMerge`, which lives beside the rule it over-approximates. Structural,
-  // so it cannot answer differently per symbol variant.
-  {
-    flag: 'freshMerge',
-    suffix: '/fresh-merge',
-    options: (on) => ({ freshParamMerge: on }),
-    probeGate: (probe) => hasParamRootedMerge(probe),
-    strip: true,
-  },
-  // `/copy-defpos` — the EDGE-COPY ORDER axis (structure.ts `preferDefPosCopyOrder`). The frontend
-  // measures the order each predecessor wrote its successors' keys (ir/core.ts `WriteOrder`) and
-  // the default lays the edge's copies out in it. That the compiler laid its copies out in the
-  // order it wrote them is only licensed for a CYCLIC copy set, where the spill has to be the
-  // register whose old value was displaced first; for an acyclic set it is an assumption, and the
-  // benchmark answers it BOTH WAYS INSIDE ONE COMPILER: `synthetic:gcd:mwcc_242_81` matches only
-  // with the record, while `memcpy1:mwcc_242_81` (19 → 23) and `memset1:mwcc_242_81` (19 → 21)
-  // score worse with it, as does `armfall:agbcc` (8 → 11). A per-compiler boolean cannot decide a
-  // question with rows on both sides of it inside one compiler, and a lever that emits one tree
-  // referees nothing — so the def-position spelling is enumerated beside the record's and the
-  // differ picks, exactly as `/fresh-merge` above does for the merge home.
-  //
-  // THE AXIS SPANS THE UNLICENSED HALF ONLY: its ON arm keeps the record on cyclic sets, so
-  // neither arm spells a cycle against the instruction that names the compiler's temp. Over all
-  // 988 benchmark rows that scoping moves nothing — `memcpy1`, `memset1` and `armfall` keep their
-  // `/copy-defpos` winners, so the acyclic half is what they needed — and it makes one spelling
-  // reachable that neither whole-function arm has: the record on a cycle and the proxy on an
-  // acyclic edge of the same function, which is what `synthetic:gcd:agbcc`'s two edges want.
-  //
-  // Gated on the two orders actually differing somewhere in this function, so on a row where the
-  // record changes nothing the pair is one tree and the fan does not grow. PER SYMBOL VARIANT, on
-  // that variant's own fully-raised fn, because that is `structure()`'s own input and only there
-  // is withholding provably inert: same fn, same comparators, so a false answer means the ON arm
-  // would structure the tree the OFF arm already spelled. Asked any earlier the claim does not
-  // follow, and both ways it fails are real —
-  //   - THE SYMBOL VARIANT. klonoa's `UpdateHUDCollectibleCount` answers false with the kleod map
-  //     and true on the `/raw-globals` sibling's own lift (fixture: test/corpus/agbcc-hudcount.s).
-  //   - THE STAGE. A probe stopping after `recoverTypes` is asked before `foldEmptyLatches`
-  //     (raise/latch.ts) repoints edges and rewrites the record the gate reads: klonoa's
-  //     `EntityGravityAndFloorCheck` answers false there and true after that fold.
-  // Neither costs candidates today — over 192 klonoa functions enumerated with the map the fan is
-  // 27,847 either way, 1,970 of them `/copy-defpos`. `strip` like its neighbours: a reordering
-  // cannot rescue a spelling whose OFF sibling failed the boundary contracts.
-  {
-    flag: 'copyDefPos',
-    suffix: '/copy-defpos',
-    options: (on) => ({ preferDefPosCopyOrder: on }),
-    variantGate: edgeCopyOrdersDiffer,
-    strip: true,
-  },
-];
-
-/** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
- *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
- *  spelling as sanctioned in the POLICY note at the respell site. Each shape fires alone, plus
- *  all of them together in table order — not the full subset lattice; the pairs question is
- *  settled by applyShapes' skip-on-decline below, and a row demanding a true EXCLUSION pair —
- *  all three fire, the match needs exactly two — is what would earn the lattice. */
-const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
-  { suffix: '/initfirst', apply: initFirstGuards },
-  { suffix: '/pollguard', apply: pollGuards },
-  { suffix: '/pollread', apply: pollReads },
-];
-/** The PRE-FAN products (rank's FOURTH sanctioned product mechanism): a tree rewrite applied
- *  BEFORE the re-spelling fan, so the whole fan derives from its output instead of composing onto
- *  it. Same record type as SHAPE_PRODUCTS above, and deliberately so — the only difference is
- *  WHERE it is applied, and that is the whole admission bar.
- *
- *  ADMITTED on one ground: the spelling a row demands needs a downstream lever to run on this
- *  rewrite's OUTPUT, and the measured pair shows neither order alone reaches it. For `/unmerge`
- *  (l3/unmerge.ts, the dual of the unconditional `tailmerge`) that measurement is
- *  `synthetic:dmascope`: the un-merged store has to land inside the arm's own region base
- *  (`p0[2] = …`), which only a base lever running AFTER the un-merge can spell — hand-compiled,
- *  that source is byte-exact where the merged spelling the structurer produces is 9, and applying
- *  the un-merge to the WINNER's tree instead measures 14. Every other lever derives from the base
- *  tree, so the order can only be had this way.
- *
- *  A pre-fan product only ADDS candidates, so it cannot cost a match; its price is a second fan
- *  on every tree where the rewrite fires, which is why the table is not a place to put a lever
- *  that would compose perfectly well as a `respell`. */
-const PRE_FAN_PRODUCTS: typeof SHAPE_PRODUCTS = [{ suffix: '/unmerge', apply: unmergeJoins }];
-
-const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
-  ...SHAPE_PRODUCTS.map((x) => [x]),
-  ...(SHAPE_PRODUCTS.length > 1 ? [SHAPE_PRODUCTS] : []),
-];
-
-/** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
- *  nothing rather than killing the combination — the all-shapes candidate is "everything that
- *  fires", so a pair is reachable whenever the third declines. The label is built from the
- *  members that actually FIRED, so a suffix never names a lever that declined; a fired-set that
- *  duplicates a smaller subset emits identical source and the dedup collapses it. Null when
- *  nothing fired. */
-const applyShapes = (
-  subset: readonly (typeof SHAPE_PRODUCTS)[number][],
-  from: SFn,
-): { out: SFn; suffix: string } | null => {
-  let cur = from;
-  const fired: string[] = [];
-  for (const sp of subset) {
-    const r = sp.apply(cur);
-    if (r) {
-      cur = r;
-      fired.push(sp.suffix);
-    }
-  }
-  return fired.length > 0 ? { out: cur, suffix: fired.join('') } : null;
-};
-
-/** The locals a lever added — a NAME diff rather than a positional slice, so a pass that ever
- *  reorders locals cannot silently empty the set. It is what scopes `/volatile` to the pointers
- *  the lever itself created (volatilePtrLocals' `only`), leaving the tree's own locals alone. */
-const createdLocals = (from: SFn, to: SFn): Set<string> => {
-  const before = new Set(from.locals.map((l) => l.name));
-  return new Set(to.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
-};
-
-/** The base-CSE ADMISSIONS `/livebase` offers the differ, widest first. WHICH of several numeric
- *  bases the source named is per-base knowledge the asm does not carry — a DMA register file wants
- *  one register held across the whole body while the IWRAM halfword beside it re-materializes — so
- *  each admission rides as its own candidate and the differ referees between them. A new
- *  admission is one entry here, one gate table, and that table's line in the gate-contract
- *  roster — not nine hand-edited sites that can drift; whether it also fans over the `/livebase`
- *  PRODUCTS below is the entry's own `pairings`. A MIRROR admission (bind the scalar cells, leave
- *  the register file inline) is that, with the complementary predicate; it is never another entry
- *  in LIVEBASE_BLOCK_GATES, which can only reject more.
- *
- *  WHAT BOUNDS IT. A row declines unless it binds a non-empty set of bases no earlier row already
- *  bound, and each product declines wherever its own lever does, so the list widens only where an
- *  inhabitant exists — over the 856-row corpus the second admission reaches 8 rows, its `/nearbase`
- *  pairing 3, and its `/indexed`, `/coalesce` and volatile-subset products none at all. A function
- *  inhabiting them all pays far more, and the fan is not always a win there: the mixpoll dataset
- *  entry prices one where the `/coalesce` pairing costs the most candidates of any and scores two
- *  points worse than going unpaired. THAT row fans anyway because on the `/livebase` rows a
- *  pairing belongs to the LEVER rather than to one of its admissions — but it is a per-row
- *  decision, not a property of the roster: three of the five rows below are unpaired. `pairings`
- *  is the field, and its own doc says how a row earns a `true`.
- *
- *  `/basefold` is the third and fourth admission and `/unfolded` the fifth; those three are the
- *  conditional set — `enumerateCandidates` appends them where the target declares
- *  `compilerBehaviors.foldsConstAddrOffset`. They need no second "did the primary already carry
- *  this" test: `structureChecked` runs the DEFAULT hoist to its fixpoint before any tree reaches
- *  here, so a key still admissible is by construction one `BASECSE_GATES` rejected, and binding
- *  nothing is the whole of the decline.
- *  WHAT THE EXEMPTION REACHES, over the 325 agbcc rows the artifact carries and in BOTH symbol-map
- *  configurations — 451 observations, of which 39 do not lift on this one-tree census.
- *  HOW TO REPRODUCE IT: the prototypes live inside `row.scripts.asmlift`'s `PROTO_INPUT`
- *  heredoc, and there is no `row.proto` field — a census reaching for one lifts all 451 with
- *  `prototypes: {}` while the harness scores every one of them with `--proto proto.json`, and
- *  says nothing about it. Numbers below are from the heredoc.
- *  20 observations bind a key the default table refuses, spread over 14 rows in 4 projects (6
- *  map-ful, 14 map-less), 25 keys in all. FOUR are numeric — two on `kleod:RollRandomLevelVariant`
- *  and one each on `synthetic:basecell` and `synthetic:foldsink`, all map-less, because with a map
- *  the pool constant lifts to a `gaddr` and the numeric clause stands down while the symbol clause
- *  takes over. The other 21 are SYMBOL keys over 11 rows in three projects (6 of those
- *  observations map-ful, 11 map-less), and all 21 are what the symbol half added: on the
- *  value-proxy predicate this replaced, the same census binds the 4 numeric keys and nothing else,
- *  losing none of them. `admittedBases(sfn, BASECSE_GATES)` — the COMMITTED table — differs on 0
- *  of 451, which is the check that says the widening stayed on the roster.
- *  A target that declares no fold is offered none of the three — not to protect a score (no roster
- *  row can cost one; see LIVEBASE_BLOCK_GATES) but because `unfoldedOffset` would be read as
- *  evidence on an instruction that carries the addend by construction, where there is none.
- *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
- *  ranked command in docs/ranked-repro.md — the `/basefold` admission declines on every
- *  structuring, leaving that fan the size it was, with ZERO `basefold`-labelled candidates in the
- *  control arm. NO FAN TOTAL IS QUOTED HERE ON PURPOSE: that function's fan was 112896 at this
- *  commit and two five-figure numbers ago at others, and a DELTA outlives the total it was
- *  measured beside — which is what makes a stale paragraph read as verified. Re-run the total
- *  before budgeting against it. All floors, though: the ranked path structures each function many ways
- *  where this census builds one tree per observation.
- *
- *  WHAT THE PAIR COSTS, through the HARNESS's own enumeration and re-runnable from the recipe in
- *  the BASEFOLD_ADMISSIONS note below: enumerate every agbcc row with the pair on and off,
- *  `ASMLIFT_CANDCACHE=0`, candidates only. The pair adds 3921
- *  distinct candidate sources over 14 observations — 3911 over 12 real rows and 10 over 2
- *  synthetic ones (`foldsink` 4 → 12, `basecell` 2 → 4) — and every per-row delta equals that
- *  row's count of `basefold`-labelled candidates exactly, which is both what says the ablation
- *  reached and what says these are sources nothing earlier in the roster emits.
- *  It is CONCENTRATED, not spread: in the map configuration the harness uses on real rows,
- *  `kleod:ProcessInputAndUpdateEntities` takes +2880 (14976 → 17856),
- *  `kleod:UpdateCameraScroll` +512 (5968 → 6480), `kleod:CountCollectedGems` +192 (384 → 576),
- *  `kleod:UpdateWorldMapNodeAnim` +176 (488 → 664) and nothing else more than 32. Re-run a
- *  concentration figure before budgeting against it: a DELTA can reproduce while the fan it was
- *  quoted against has moved, and that is what makes a stale paragraph read as verified.
- *  `kleod:UpdateCameraScroll` is an `outcome: noncompile` row — `decompileRanked` throws only when
- *  EVERY candidate failed to build — so its whole fan is compiled and discarded, and this made
- *  that discard 10% bigger. Timed on two full bench runs on a shared box, and not re-timed since
- *  the deltas above, so read them as a floor rather than a price: that row 377.6s → 483.0s, the
- *  second 238.4s → 313.6s, real tier 416.1s → 529.4s. Priced — and the three rows the pair was
- *  bought with DO NOT BUY IT TODAY: ablated, `sa3:sub_803213C` is MATCH with the pair removed,
- *  `kleod:ProcessInputAndUpdateEntities` 211 either way and `kleod:CountCollectedGems` 290 either
- *  way. A SCORE QUOTED HERE IS THE ARTIFACT'S: it moves whenever anything at all moves the row,
- *  a basefold change or not, so re-read it off the artifact rather than off this line. Read the
- *  ablation in the note on BASEFOLD_ADMISSIONS, which carries the fan counts that prove it
- *  reached. */
-interface BaseAdmission {
-  suffix: string;
-  gates: readonly Gate<BaseKey>[];
-  /** WHERE the locals this row binds are initialized (l3/hoist.ts). Eligibility and placement are
-   *  two questions and this roster answers both, so a row can offer the same bases in the other
-   *  position without a second gate table — and a row that wants both offers both, as the
-   *  `/basefold` pair below does. */
-  placement: HoistPlacement;
-  /** Whether the row joins the `/livebase ×` PAIRINGS below. Each of those products was added for
-   *  a row that demanded the joint spelling (see POLICY), and every demanding row so far is a
-   *  `/livebase` row — so a new admission joins them when a row demands it, not by roster
-   *  membership.
-   *
-   *  ONE BOOLEAN PER ROSTER ROW, ANSWERING A QUESTION THAT IS REALLY PER FUNCTION, so a `false`
-   *  here is a corpus claim and has to be measured like one — on the whole corpus, not on the
-   *  synthetic row that earned the entry. The measurement is candidates-only and cheap: enumerate
-   *  every agbcc row twice from `row.scripts.asmlift`'s heredocs and compare the distinct-source
-   *  sets. For `/unfolded` (see its note) that is +912 sources over 8 rows (+1.92% corpus fan) and
-   *  the only nonmatch among the 8 scores the same either way, which is what the `false` rests on.
-   *  Flipping one of these is one character; the gate on doing it is that census plus a score on
-   *  every row it moves. */
-  pairings: boolean;
-}
-
-const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
-  { suffix: '/livebase', gates: LIVEBASE_GATES, placement: 'head', pairings: true },
-  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES, placement: 'head', pairings: true },
-];
-
-/** Narrower than either `/livebase` row, so both go last: they keep both placement heuristics and
- *  exempt only `single-use`, and only for a base whose offset survived the compiler's fold.
- *
- *  They are ONE eligibility rule at the two placements, because for a base reached ONCE the
- *  question the differ has to settle is where the pool load sits, not whether the local exists:
- *  the head keeps the address live over everything above the access, the first-use position is
- *  where a single access loaded it. Which one the source wrote is per-function knowledge the asm
- *  does not carry, so both ride and the differ referees.
- *
- *  WHAT EACH ROW IS WORTH, ablated through the harness rather than read off the winning labels,
- *  because a label a row wins can be a TIE another row also reaches. THE HEAD ADMISSION IS
- *  BRACKETED AND THE SUNK ONE IS NOT. `synthetic:foldhead` is MATCH at 0 under
- *  `unsigned/basefold` and becomes NONMATCH 11 under `unsigned` the moment the HEAD entry is
- *  removed — and removing BOTH entries gives the same 11, so the sunk entry is what nothing here
- *  brackets. `synthetic:foldsink` and `synthetic:basecell` are unbracketed for a reason worth
- *  keeping: they are MATCH at 0 in every configuration because `/offmember` ALSO reaches 0 on
- *  them and wins `compareScored`'s line-count tie-break. A TIE IS NOT A SUBSUMPTION — that is
- *  why a census over winning labels reads zero here, and reading that zero as "loses" would
- *  delete a pair that no other spelling reaches.
- *  (Their fans still move: `foldsink` 12 → 8 → 8 → 4 over control/sunk/head/both, `basecell`
- *  4 → 4 → 4 → 2, the four-number sequence saying that on `basecell` the two entries emit the
- *  SAME two sources and `seen` collapses them, so only removing both takes the fan down.)
- *  `sa3:sub_803213C` MATCH, and — with the pair removed — `kleod:ProcessInputAndUpdateEntities`
- *  211, `kleod:CountCollectedGems` 290 and `kleod:RollRandomLevelVariant` 18, each of them the
- *  number the artifact already carries, and each of them ENTAILED rather than separately scored:
- *  the ablated candidate set is a strict SUBSET of the control one on every row here (enumerated
- *  both ways, 0 sources ADDED and 0 RELABELLED — `ProcessInputAndUpdateEntities` 58752 → 48384
- *  with 10368 carrying the token, `CountCollectedGems` 576 → 384 with 192, `RollRandomLevelVariant`
- *  29 → 11 with 18, `sub_803213C` 36 → 20 with 16), and no winner's label carries a `basefold`
- *  token, so the minimum cannot move. A BRACKET IS A CLAIM ABOUT THE WHOLE TREE, so it expires
- *  whenever anything else learns to reach the same spelling more cheaply: re-run one before
- *  re-quoting it, including the number that survived the last re-run.
- *  The SUNK entry is kept ONLY because it is a real spelling: 3921 distinct candidate sources over
- *  14 observations that nothing else emits (see WHAT THE PAIR COSTS for the per-row split), and
- *  a C source that initializes its base pointers where it declares them is the ordinary case.
- *  That is a weaker justification than a protected row and should be read as one — a round pricing
- *  the agbcc fan may delete it, and the gate on doing so is `bench diff`, not this note. The HEAD
- *  entry is NOT in that category: deleting it costs `synthetic:foldhead` its match, which
- *  `bench regression` fails on.
- *  HOW THE ABLATION IS DONE, since there is no shipped knob: filter this roster at its one use
- *  site (the `admissions` const in `enumerateCandidates`) behind a temporary env read, run the
- *  rows with `ASMLIFT_CANDCACHE=0`, and revert. Prove the filter REACHED before believing a null
- *  result — `synthetic:livepark` MATCH → diff:3 with `/livebase` AND `/unfolded` both removed is
- *  the positive control, and a fan count per configuration is the second. Removing `/livebase`
- *  alone leaves that row MATCH today, which is a control silently going vacuous rather than a
- *  lever going dead: `/unfolded` binds the same base there. Any positive control naming ONE roster
- *  row expires the next time a row is added — re-run it, and if it no longer moves, widen the
- *  ablation until it does before concluding anything from a null. */
-const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
-  { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
-  { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
-];
-
-/** The fifth admission: its table requires the fold evidence (l3/basecse.ts, UNFOLDED_GATES), so
- *  it binds the reused bases an operand offset says a pointer local strode and leaves the ones the
- *  pool already carried folded. `/livebase` and `/livebase-block` are a chain — all the reused
- *  bases, or those minus the scalar cells — and a source that parked one numeric base and spelled
- *  another inline is at neither end of it. This row is not a third link in that chain but beside
- *  it: `singleCell` and `unfoldedOffset` are independent fields, so each of the two tables binds
- *  keys the other refuses (censused, with its scope, in UNFOLDED_GATES' own note). Read the roster
- *  as hand-picked subsets, never as a narrowness ranking.
- *
- *  LAST on the roster, so `seen` and `sameBases` between them keep it from restating an earlier
- *  ROSTER row — but only `seen` does any work here. `sameBases` declines a row that binds what an
- *  EARLIER row binds AT THE SAME PLACEMENT, and the only earlier `first-use` row is
- *  `/basefold/sinkinit`, whose table keeps the two gates this one ablates; instrumented over every
- *  agbcc row it fires on 0 of 5541 roster observations for this entry (33 distinct functions),
- *  against 3939 for `/livebase-block`. So the shadow is available and vacuous, and what keeps this
- *  row from restating anything is `seen` — WHICH MAKES IT A RENAMER, and it renames: the roster
- *  loop below runs before the `/livebase ×` product loops, so a source one of those products would
- *  emit later is claimed by this row's label instead. `synthetic:foldpark` is that case measured —
- *  fan 34 with this entry and 34 without, the same source winning at 0 under
- *  `signed/unfolded/volatile` here and `signed/livebase-block/volatile/sinkinit` there.
- *  Corpus-wide (map-less, candidates only, over the artifact's 363 agbcc rows) 21 of the 333 rows
- *  whose distinct-source set is byte-identical either way carry `/unfolded`-labelled candidates:
- *  21 pure renames against 7 rows that really gain sources, and 0 that lose one. What that costs
- *  any census taken over labels is at the `seen` dedup site below.
- *
- *  ONE placement, unlike the `/basefold` pair, and by measurement rather than by symmetry. All
- *  four configurations scored on `synthetic:unfoldpark`, cache off — the fan, then that fan's best
- *  score:
- *    first-use, unpaired  44   0  MATCH — shipped
- *    first-use, paired    44   0  no product emits a source the unpaired row does not
- *    head,      unpaired  44   9  the score the row already had without any of this
- *    head,      paired    48   0  reached only through the `/sinkinit` product
- *  The head is where `/livebase` already offers a spelling for every base this table can bind —
- *  these are bases reached 2+ times — so what the row adds is the SUNK init, which is where a
- *  source that declares its base pointer beside the loop it feeds puts the pool load. On both
- *  neighbouring rows the head placement is shadowed outright (`/unfolded` binds set-for-set what
- *  `/livebase` binds on `synthetic:livepark` and what `/livebase-block` binds on
- *  `synthetic:foldpark`). A second row at the head is one line and no new table; add it when a row
- *  demands it, which none does today.
- *
- *  `pairings: false` for the reason the field's own doc gives — a product is added for a row that
- *  demands the joint spelling, and the row that earned this entry does not: paired and unpaired
- *  are the same 44 candidates above. ONE 15-LINE FUNCTION CANNOT SETTLE A CORPUS QUESTION, so the
- *  same knob was censused over every agbcc row the artifact carries, candidates only: `true` adds
- *  912 distinct sources over 8 rows, +1.92% of the agbcc corpus fan (quoted as the DELTA,
- *  because the total moves with the corpus and with the roster) — `kleod:UpdateCameraScroll`
- *  +608, `synthetic:sizebound` +128, `synthetic:dmascope` +64, `kleod:SetupBG3WindowOverlay` and
- *  `synthetic:maskhome` +32 each, and +16 each on `dmafield`, `dmaflat` and `dmapoll`. Five of the
- *  eight are MATCH and two are `noncompile`, where extra candidates cannot help; the one that
- *  could, `synthetic:sizebound`, scores diff:8 with the products on and diff:8 with them off. So
- *  the `false` buys 1.92% of the agbcc fan for a measured zero, on the whole corpus rather than on
- *  the row that earned the entry. Flip it when a row scores better with it, and re-run that
- *  census when one does. */
-const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
-  { suffix: '/unfolded', gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
-];
-
-/** The sixth admission, and the only one whose evidence is the INSTRUCTION ORDER rather than the
- *  shape of the accesses (l3/basecse.ts, ORDERBASE_GATES). It binds a base the assembly says was
- *  materialized before the index was scaled — including the `(struct S *)&gSym` of an
- *  array-of-struct element, which no other table on this roster can even see.
- *
- *  LAST, so `sameBases` can shadow it and it can shadow nothing: on a function whose licensed base
- *  is a plain leaf reached twice, `/livebase` already binds exactly that set at this placement and
- *  this row declines rather than restating it under a second label.
- *
- *  TWO PLACEMENTS, and the FLAT second one is a measured zero. `synthetic:bgarr` emits the identical
- *  source at `head` and `first-use` (the hoist has nothing to sit above) and that one row
- *  generalizes to nothing: over the artifact's agbcc rows the two emit DIFFERENT source on 3 of the
- *  8 rows this admission binds map-less and 4 of the 10 map-ful — `kleod:SetupBG3WindowOverlay`,
- *  `kleod:UpdateCameraScroll`, `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful
- *  `kleod:StreamCmd_SetBGScroll`. Run through the harness on all four, an entry at
- *  `placement: 'first-use'` scores nothing: 146 → 146, noncompile → noncompile, MATCH → MATCH,
- *  noncompile → noncompile, against +1129 candidates over those rows' 15167 (+7.4%) and
- *  `kleod:UpdateCameraScroll` 224 s → 278 s. That row stays withheld.
- *
- *  `scope` is a DIFFERENT question and a row demanded it. `first-use` reaches only the top-level
- *  statement list, so on a function whose licensed base is used solely inside a guarded loop it
- *  spells the same bytes `head` does — the pool word above the branch — while the reference loads
- *  it after. Compiled through the benchmark's own agbcc on `synthetic:ereadctl`'s target, with
- *  everything else held identical: the init above the `if` differs, the same init INSIDE the arm is
- *  instruction-identical. So the two flat placements are one answer here and this is the other, the
- *  way `/basefold`'s pair is one eligibility rule at two positions.
- *
- *  AND THE WITHHOLDING ABOVE IS ENFORCED BY THE PLACEMENT, not by this row's absence. `scope`
- *  reproduces `first-use` on every function where no nested list holds all of a base's uses, so a
- *  scoped row that answered there would ship the withheld candidate under this row's name — and it
- *  is the COMMON case, not the corner: over each project's whole `asm` tree, map-ful, of the 48
- *  functions this gate table admits, 41 place every init in the top-level list and only 7 reach a
- *  nested one. `hoistBaseLocals` DECLINES at `scope` in exactly that case (l3/basecse.ts) — a
- *  WITHDRAWAL and not a dedup, because on 29 of the 41 the flat spelling is one no other row here
- *  produces, which that file's header prices. Measured on
- *  `kleod:UpdateCameraScroll` map-ful, the row that priced the withheld one: 512 of its 512
- *  `/orderbase/scoped` sources placed the init at the top level, and all 512 are gone.
- *
- *  `pairings: false` on both for the field's own reason — a product is added for a row that demands
- *  the joint spelling, and neither row here demands one. */
-const ORDERBASE_ADMISSIONS: readonly BaseAdmission[] = [
-  { suffix: '/orderbase', gates: ORDERBASE_GATES, placement: 'head', pairings: false },
-  { suffix: '/orderbase/scoped', gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
-];
-
-const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
-  a.length === b.length && a.every((k, i) => k === b[i]);
-
-/** The signedness of the entry parameters — the classic ambiguity asm cannot resolve.
- *
- * Struct LAYOUT is recovered structurally (raise/structs.ts) rather than enumerated here, and the
- * reason is REACH, not neutrality. This file used to say `->field_N` and `[idx]` "compile
- * identically, so the differ cannot referee between them"; the second clause is FALSE on agbcc and
- * `synthetic:dmanest` is the counterexample — the same element read scores 0 as
- * `((struct Elem0 *)K)[a1].field_4` and 2 as `((s32 *)((a1 << 3) + K))[1]`, because an index folds
- * the field offset into the pool literal (tree reassociation) where a COMPONENT_REF leaves it in
- * the load displacement. `synthetic:dmaptrsrc` is a second counterexample on the field's TYPE.
- *
- * What is true is that no candidate is enumerated for the axis, and none is NEEDED: the recovery
- * reads the base from the observed pool word and the field offset from the observed load
- * displacement, so it reproduces the target's own split by construction. The measurements and the
- * conditions are in `raise/structs.ts`; nothing about them belongs in a roster comment. */
-const SIGN_CANDS = [
-  { label: 'unsigned', signed: false },
-  { label: 'signed', signed: true },
-];
-
-// A recovered POINTER/aggregate param must NOT be signedness-pinned: pinning a still-`unknown`
-// pointer param to a scalar int BEFORE recovery blocks pointer recovery and emits uncompilable
-// `*(s32)`. Only genuine scalars carry the signedness axis.
-const NO_PIN_KINDS = new Set(['ptr', 'struct', 'array']);
+import { type TargetDescription, structureOptionsFor } from './target';
 
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
  *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
@@ -675,174 +103,10 @@ function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): boolean 
   return pinnable;
 }
 
-/** Bare-global ACCESS FACTS for name-only map symbols — the width/signedness authority the
- *  declaration synthesis (declare.ts) uses when the map has no shape. The map knows only the
- *  NAME (symtab-only projects: marioparty3); the candidate's own IR knows exactly how the cell
- *  is accessed, and the bare `gSym = v` / `x = gSym` spelling compiles to those bytes only
- *  under a decl of that exact width (`extern u16 g;` is `sh` where a guessed u32 is `sw`).
- *  Mirrors structure()'s scalar-global rule: a fact is recorded only for a symbol accessed
- *  EXCLUSIVELY at offset 0 with ONE width and ONE load signedness — anything else (interior
- *  offsets, address arithmetic, width or sign conflicts) records nothing, because those
- *  spellings go through `&gSym` casts where every object decl is address-identical. */
-function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boolean }> {
-  const defs = defOpMap(fn);
-  const symOf = (v: Value): string | null => {
-    const d = defs.get(v);
-    return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : null;
-  };
-  const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; interior: boolean }>();
-  const get = (s: string) => acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), interior: false }).get(s)!;
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      if (op.opcode === 'load' || op.opcode === 'store') {
-        const s = symOf(op.operands[0]);
-        if (s) {
-          const a = get(s);
-          if ((op.attrs.off as number) !== 0) {
-            a.interior = true;
-          } else {
-            a.widths.add(op.attrs.width as number);
-            if (op.opcode === 'load') {
-              a.signs.add(((op.attrs.signed as boolean) ?? false) && (op.attrs.width as number) < 4);
-            }
-          }
-        }
-      } else if (op.opcode === 'aload' || op.opcode === 'astore') {
-        const s = symOf(op.operands[0]);
-        if (s) {
-          get(s).interior = true;
-        }
-      } else {
-        // any other use of the address (arithmetic, a call arg, a comparison) is interior/escape
-        for (const o of op.operands) {
-          const s = symOf(o);
-          if (s) {
-            get(s).interior = true;
-          }
-        }
-      }
-    }
-  }
-  const out = new Map<string, { width: number; signed: boolean }>();
-  for (const [s, a] of acc) {
-    if (!a.interior && a.widths.size === 1 && a.signs.size <= 1) {
-      out.set(s, { width: [...a.widths][0], signed: a.signs.has(true) });
-    }
-  }
-  return out;
-}
-
-/** Names a declaration must never claim, because `extern u32 <name>;` is not a declaration of
- *  `<name>` at all for them. Four groups, and only the first two are guessed:
- *
- *    1. the prelude's own typedef names, derived FROM `C_TYPEDEFS` rather than re-listed (a
- *       prelude that grows a name grows this set) — `extern u32 u16;` redefines the type the
- *       declaration is written in;
- *    2. the C89 keywords;
- *    3. the gnu89 keywords gcc-2.9 REJECTS in this position, and the two library objects it
- *       refuses to have redeclared. MEASURED against the pinned agbcc — 72 plausible pool names
- *       compiled as `extern u32 <name>;` at file scope, 18 exited non-zero: `syntax error before
- *       'asm'` for the keyword class, ``'exit' redeclared as different kind of symbol`` for the
- *       two built-ins;
- *    4. the gnu89 declaration SPECIFIERS that PARSE and thereby declare nothing — `inline`,
- *       `__const`, `__volatile__`, … are `warning: useless keyword or type name in empty
- *       declaration`, exit 0, and the name is still undeclared. Emitting the line would be a
- *       declaration that is not one.
- *
- *  WHAT REFUSING BUYS is less than a plain `'<name>' undeclared`, and the difference is the
- *  reason the refusal is REPORTED rather than trusted to the compiler. A hard error in the block
- *  kills that candidate's whole TU (its own — every candidate compiles alone) for a name it
- *  merely mentioned, so refusing is right. But for a KEYWORD the body spells the same token
- *  anyway and the candidate still fails: the refusal only moves the diagnostic. And for the two
- *  BUILT-INS nothing fails — agbcc reads `&exit` as the address of its own builtin, exit 0 with
- *  `warning: built-in function 'exit' used without declaration`, where the declaration would have
- *  been exit 1. There the refusal trades a candidate that cannot build for one that builds
- *  against the wrong object, which is the better half of a bad choice only because a target
- *  naming a global `exit` has no honest spelling either way. */
-const DECL_RESERVED = new Set<string>([
-  ...[...C_TYPEDEFS.matchAll(/(\w+)\s*;/g)].map((m) => m[1]),
-  ...(
-    'auto break case char const continue default do double else enum extern float for goto if int long ' +
-    'register return short signed sizeof static struct switch typedef union unsigned void volatile while'
-  ).split(' '),
-  // group 3 — measured hard errors (agbcc, `extern u32 <name>;` at file scope)
-  ...(
-    'asm __asm __asm__ typeof __typeof __typeof__ __attribute __attribute__ __extension__ __label__ ' +
-    '__alignof __alignof__ __real__ __imag__ __func__ __FUNCTION__ exit abort'
-  ).split(' '),
-  // group 4 — measured "useless keyword ... in empty declaration": parses, declares nothing
-  ...(
-    'inline __inline __inline__ __const __const__ __signed __signed__ __volatile __volatile__ ' +
-    '__restrict __restrict__ __complex__'
-  ).split(' '),
-]);
-
-/** The emitter's own NAME GRAMMAR for storage it invents: parameters `a0, a1, …` (structure.ts
- *  names them positionally, so no rename can move one) and coalesced/temp locals `v0…`/`t0…`
- *  (structure.ts's `localNames` accepts exactly `/^[vt]\d+$/`). A pool or map symbol with one of
- *  these names cannot be declared beside the C that spells it — see the refusal in `refsOf`, which
- *  is the one that kills the spelling rather than the line.
- *
- *  Checked as a grammar IN ADDITION to the tree's own bound names, because the collision that
- *  matters is the one the tree cannot show: `localNames` DROPS a local whose name a written
- *  global already claims, so where the global is stored `tree.locals` is silent about it. The
- *  price is refusing a real global that happens to be named `v3` in a function that never mints
- *  one — measured at zero: over the 930 benchmark rows, in each row's own symbol world, no
- *  candidate references such a name, and none of the six vendored symbol maps contains one
- *  (184163 names, 0 matches). */
-const EMITTER_NAME = /^[avt]\d+$/;
-
-/** Why a name the candidate's tree references got NO declaration. Reported rather than silently
- *  applied, because an undeclared name and a REFUSED one produce the same `'x' undeclared` from
- *  the compiler and only the second one is asmlift's own decision. Same argument as `onLeverError`
- *  one screen down: a refusal nobody can see is indistinguishable from a capability that was
- *  never there.
- *
- *  ALL FIVE ARE DECIDED AT ONE POINT (`refsOf`), over the names the collector actually returns
- *  and AFTER the map/pool union — so the report and the rendered block are one list read two
- *  ways. A test applied where a name ENTERS can be undone by the other half of the union, and
- *  then the report contradicts the block beside it. */
-export type RefusedDeclarationReason =
-  | 'not-an-identifier' // a relocation name like `$L1` / `.rodata.str1`
-  | 'reserved' // a name `extern u32 <name>;` cannot declare (DECL_RESERVED)
-  | 'call-target' // the name is some call's target: `void F(void);` hard-errors over args
-  | 'self-name' // the function's own name — its definition already declares it
-  | 'emitter-name'; // a name the emitted C uses for its OWN locals and parameters
-
-/** The globals a candidate names because its own asm named them, as name-only `SymbolInfo`s —
- *  half of the declaration-synthesis dictionary (the symbol map, where there is one, is the other).
- *
- *  asmlift does not need a map to EMIT a symbol name: the Thumb frontend reads it out of the
- *  `.s` file's own literal pool (`.word gBgTilemapBufs` → `gaddr`, thumb.ts's pool grammar) and
- *  the MIPS frontend out of an object relocation, and structure() spells such a `gaddr` as
- *  `&gSym`. So the invariant "a candidate's source only names symbols the map knows" is FALSE,
- *  and a consumer that compiles candidates OUTSIDE the project's own headers (the playground)
- *  needs these declarations or every candidate fails with "`gSym' undeclared".
- *
- *  `kind: 'data'` unconditionally: `code: true` is set only where a symbol MAP said so
- *  (frontend/thumb.ts), so map-less the IR cannot tell a function pointer from a data address —
- *  and it does not need to. structure() spells a `code`-less `gaddr` as `&Name`, and `&Name`
- *  under `extern u32 Name;` is the relocated address whatever Name really is.
- *
- *  NOTHING IS REFUSED HERE, deliberately: a name this walk drops is a name the union above it
- *  could put straight back. Every refusal is decided once, over the collector's output, in
- *  `refsOf` (see `RefusedDeclarationReason`).
- *
- *  A declaration built from this half is a HYPOTHESIS, and where `bareGlobalAccessFacts` gives it
- *  a width that width came out of the asm the candidate is scored against. The marker is
- *  `SymbolRef.synthesized`; the argument, and its price against the vendored maps, is declare.ts's
- *  module note. */
-function bareGlobalSymbols(fn: Fn): Map<string, SymbolInfo> {
-  const out = new Map<string, SymbolInfo>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      if (op.opcode === 'gaddr' && typeof op.attrs.sym === 'string') {
-        out.set(op.attrs.sym, { name: op.attrs.sym, kind: 'data' });
-      }
-    }
-  }
-  return out;
-}
+/** Re-exported so `@asmlift/core/rank` keeps its published surface: `onRefusedDeclaration`'s
+ *  reason type is declared beside the refusals themselves (rank-declare.ts) and consumed from
+ *  here. */
+export type { RefusedDeclarationReason };
 
 export interface EnumerateOptions {
   patterns?: RewritePattern[];
@@ -861,6 +125,26 @@ export interface EnumerateOptions {
    *  candidate fails loudly in a self-declared world — this is what lets the consumer say which
    *  undeclared name was asmlift's own refusal rather than a symbol it never saw. */
   onRefusedDeclaration?: (name: string, reason: RefusedDeclarationReason) => void;
+  /** Called with the axis suffix each time a STRUCTURING axis's shared probe gate says this
+   *  function has no inhabitant for it, so the arm is never enumerated.
+   *
+   *  The two callbacks below report the enumeration's two SILENT candidate-deleting sites, and
+   *  they exist for `onLeverError`'s reason read one level up: a candidate that was never
+   *  enumerated is indistinguishable, from outside, from one the differ simply did not pick, and
+   *  nothing else in the pipeline reports it. A gate that has stopped firing and a gate that
+   *  correctly declines on every corpus row look identical without this.
+   *
+   *  They ride `EnumerateOptions` rather than `RankedResult` deliberately: these are facts about
+   *  the enumeration's INTERNALS, and `RankedResult` is the published candidate set.
+   *
+   *  Nothing shipped passes either one, so a channel that had stopped firing would be invisible in
+   *  exactly the way the channel exists to prevent. `test/enumerate-signals.test.ts` pins that both
+   *  reach a caller. */
+  onAxisGated?: (suffix: string) => void;
+  /** Called once per axis point whose structured tree an earlier point already spelled — the tree
+   *  dedup, which is where most of the cross's factors of two go. See `onAxisGated` for why both
+   *  are here rather than on the result. */
+  onTreeDeduped?: () => void;
 }
 
 /** One distinct candidate spelling — a point in the axis cross (signedness × branch sense ×
@@ -996,6 +280,23 @@ export function composeLevers(sfn: SFn, stages: readonly ((s: SFn) => LeverResul
   return needsProof ? { sfn: cur, needsProof } : cur;
 }
 
+/** What one `fanOut` call produced: its spellings, plus the PRIMARY emit's refusal where the
+ *  backend declined the tree it was handed.
+ *
+ *  RETURNED rather than written to the enumeration's shared `lastEmitError`, because only ONE
+ *  caller may record one. `fanOut` runs over the row's own tree and over each PRE-FAN product's
+ *  REWRITTEN tree, and a backend refusal of a rewrite is not a refusal of the row's spelling —
+ *  letting it reach `lastEmitError` would put the wrong cause on the row's "no spellable
+ *  candidate" throw. With the value returned, the primary caller records and the pre-fan caller
+ *  does not, which is the rule made structural instead of saved and restored around the call.
+ *
+ *  A DISCRIMINATED FIELD, not a nullable error: a lever that throws a falsy value is still
+ *  recorded, where `?? ` would read it as "nothing was thrown". */
+interface FanResult {
+  spellings: Spelling[];
+  emit?: { error: unknown };
+}
+
 /** One emitted spelling of a structured tree: the label suffix naming the lever that produced it,
  *  the rendered source, and the tree-derived facts `compareScored` ranks by. */
 interface Spelling {
@@ -1008,8 +309,10 @@ interface Spelling {
 }
 
 /** Emit the DISTINCT type/branch-sense candidate spellings for `name` — PURE, no scoring.
- *  The ONE difference from `decompile()` is the signedness pin, injected between pre-recovery and
- *  recoverTypes via the `beforeRecover` hook. Duplicate sources are collapsed so the scorer never
+ *  It differs from `decompile()` in exactly two arguments to the shared spine — the signedness
+ *  pin, injected between pre-recovery and recoverTypes via the `beforeRecover` hook, and the
+ *  `pre.shortCircuit` connective owner (the raiseRecovered call below states both).
+ *  Duplicate sources are collapsed so the scorer never
  *  recompiles an identical spelling, and the fan runs once per distinct STRUCTURED TREE rather
  *  than once per axis point — an axis inert on this function reaches a tree an earlier point
  *  already spelled, and every re-spelling is a pure function of that tree. */
@@ -1057,53 +360,19 @@ export function enumerateCandidates(
   // reaches became unreachable. Enumerated as a CHAIN (none ⊂ plain ⊂ plain + entry) rather than a
   // 2×2 cross: the fourth point costs another quarter of the whole fan — the anchor dimension
   // multiplies everything below it — and no row has been shown to need it.
+  //
+  // The four spelling booleans that PREDATE `STRUCTURING_AXES` and are still hand-carried
+  // (`bitfields`, `ptrElems`, `declRank` and the anchor pair) start from one record, so a base
+  // point's default lives in one place instead of six literals that can disagree. Each entry
+  // states only what it VARIES — which is the whole content of the chain above.
+  const SPELLING_DEFAULTS = { anchor: false, entry: false, bitfields: true, ptrElems: true, declRank: true };
   const senseAnchor = [
-    { suffix: '', sense: defSense, anchor: false, entry: false, bitfields: true, ptrElems: true, declRank: true },
-    {
-      suffix: '/flip-branch',
-      sense: !defSense,
-      anchor: false,
-      entry: false,
-      bitfields: true,
-      ptrElems: true,
-      declRank: true,
-    },
-    {
-      suffix: '/defsite',
-      sense: defSense,
-      anchor: true,
-      entry: false,
-      bitfields: true,
-      ptrElems: true,
-      declRank: true,
-    },
-    {
-      suffix: '/flip-branch/defsite',
-      sense: !defSense,
-      anchor: true,
-      entry: false,
-      bitfields: true,
-      ptrElems: true,
-      declRank: true,
-    },
-    {
-      suffix: '/defsite/loop-entry',
-      sense: defSense,
-      anchor: true,
-      entry: true,
-      bitfields: true,
-      ptrElems: true,
-      declRank: true,
-    },
-    {
-      suffix: '/flip-branch/defsite/loop-entry',
-      sense: !defSense,
-      anchor: true,
-      entry: true,
-      bitfields: true,
-      ptrElems: true,
-      declRank: true,
-    },
+    { ...SPELLING_DEFAULTS, suffix: '', sense: defSense },
+    { ...SPELLING_DEFAULTS, suffix: '/flip-branch', sense: !defSense },
+    { ...SPELLING_DEFAULTS, suffix: '/defsite', sense: defSense, anchor: true },
+    { ...SPELLING_DEFAULTS, suffix: '/flip-branch/defsite', sense: !defSense, anchor: true },
+    { ...SPELLING_DEFAULTS, suffix: '/defsite/loop-entry', sense: defSense, anchor: true, entry: true },
+    { ...SPELLING_DEFAULTS, suffix: '/flip-branch/defsite/loop-entry', sense: !defSense, anchor: true, entry: true },
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
@@ -1119,9 +388,9 @@ export function enumerateCandidates(
   // per-function predicate decides it: a short-circuit fold choosing the orientation, a
   // conditional branch relayed past Thumb's ±256-byte reach, and a rotated loop's zero-trip guard,
   // where the `if` is the compiler's own and no source sense exists to be faithful to. The third
-  // is what keeps the residue on targets that have neither: of the 19 rows that still win on the
-  // axis, 7 are gcc2.7.2 / gcc2.7.2kmc / mwcc with no `short-circuit` tag and no Thumb branch
-  // range, and 5 of those 7 carry `loop`. A function with no two-armed joined if emits identical
+  // is what keeps the residue on targets that have neither: rows still win on the axis under
+  // gcc2.7.2 / gcc2.7.2kmc / mwcc, with no `short-circuit` tag and no Thumb branch range to
+  // explain them, and most of those carry `loop`. A function with no two-armed joined if emits identical
   // source and the dedup collapses it before any compile.
   const baseSense = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
@@ -1151,35 +420,16 @@ export function enumerateCandidates(
   // for itself: no lift may be governed by a fact measured on a different one. The pin and
   // `/setup-args` cannot move this answer — neither a parameter's type nor a call's argument list
   // moves a `cond_br` — but a SYMBOL MAP can, by lifting a pool-loaded comparison constant as a
-  // `gaddr` the const-test test then does not read. Today they agree: over the 164 real rows that
-  // lift (the other 88 are frontend declines), 21 sites mapped and 21 raw with no per-row
-  // divergence. The SYNTHETIC tier is inside that comparison rather than exempt from it: 4 of its
-  // 705 rows carry a map (`SynthSpec.symbols`), and that count moves every time a map row is
-  // added, so re-derive it rather than carrying this one forward. So this buys no candidate; what
+  // `gaddr` the const-test test then does not read. Measured once and NOT re-derived since: over
+  // the real rows that lifted, 21 sites mapped and 21 raw with no per-row divergence. Read that as
+  // the REASON the gate is asked per variant, not as a fact about today's corpus — it carries no
+  // commit stamp. The SYNTHETIC tier is inside that comparison rather than exempt from it: 9 of
+  // its 770 rows carry a map (`SynthSpec.symbols`) in the committed artifact, and that count moves
+  // every time a map row is added, so re-derive it rather than carrying this one forward. So this
+  // buys no candidate; what
   // it buys is that a lift-time change which splits them enumerates both arms rather than
   // silently dropping one, the failure nothing reports.
-  //
-  // The MAPPED variant reads it off the probe below, itself a lift in exactly that configuration —
-  // reuse, not inheritance. Only a variant lifting under DIFFERENT symbols pays a lift of its own,
-  // so the price is one per `/raw-globals` arm and zero on a map-less row, never per candidate.
   let probeTreeOwned = false;
-  const treeOwnedIn = (symbols: typeof opts.symbols): boolean => {
-    if (symbols === opts.symbols) {
-      return probeTreeOwned;
-    }
-    const p = frontend.lift(name, asm, target, prototypes, opts.asmData, symbols);
-    verify(p);
-    applyIdiomPatterns(p, target, opts.patterns);
-    let seen = false;
-    runPreRecovery(p, target, () => verify(p), prototypes[name], {
-      shortCircuit: {
-        onTreeOwned: () => {
-          seen = true;
-        },
-      },
-    });
-    return seen;
-  };
   // Probe: recover ONCE with no signedness pin, to learn which entry params are pointers/aggregates
   // so they are excluded from the signedness axis (see NO_PIN_KINDS). One extra lift+recover, no
   // compile. (The probe deliberately stops after recoverTypes — it only reads the param KINDS, so
@@ -1211,6 +461,33 @@ export function enumerateCandidates(
   // to `str` where the target says `strh`. One IR walk; on a function with no `gaddr` at all
   // (every synthetic corpus row) it returns the same empty map the gate used to hand back.
   const accessFacts = bareGlobalAccessFacts(probe);
+  //
+  // The MAPPED variant reads it off the probe below, itself a lift in exactly that configuration —
+  // reuse, not inheritance. Only a variant lifting under DIFFERENT symbols pays a lift of its own,
+  // so the price is one per `/raw-globals` arm and zero on a map-less row, never per candidate.
+  //
+  // DECLARED AFTER THE PROBE'S OWN `runPreRecovery` ON PURPOSE, and that placement is the memo's
+  // precondition: the map arm returns `probeTreeOwned`, which is only the answer once the probe's
+  // `onTreeOwned` hook has had its chance to fire. Called any earlier it would report a confident
+  // `false` for a function that owns a tree. As a `const` below that call, an early call is a TDZ
+  // ReferenceError instead — a wrong answer traded for a loud one.
+  const treeOwnedIn = (symbols: typeof opts.symbols): boolean => {
+    if (symbols === opts.symbols) {
+      return probeTreeOwned;
+    }
+    const p = frontend.lift(name, asm, target, prototypes, opts.asmData, symbols);
+    verify(p);
+    applyIdiomPatterns(p, target, opts.patterns);
+    let seen = false;
+    runPreRecovery(p, target, () => verify(p), prototypes[name], {
+      shortCircuit: {
+        onTreeOwned: () => {
+          seen = true;
+        },
+      },
+    });
+    return seen;
+  };
   // `/no-ptr-elem` — keep the honest byte arithmetic where the map would spell a whole-element
   // subscript through a pointer MEMBER (`gBg.pMap[i + 157]`). The two are the same address and
   // DIFFERENT objects — measured against agbcc, they differ in which register the `add` targets at
@@ -1289,7 +566,11 @@ export function enumerateCandidates(
   // 0 that becomes a NONMATCH when its own arm is ablated. A LABEL CENSUS IS SCOPED TO ITS TIER
   // AND ITS COMMIT: say which tier a count is over, and re-derive it rather than carrying it
   // forward.
-  const byName = opts.symbols !== undefined ? symbolsByName(opts.symbols) : undefined;
+  // The name-keyed map `baseOpts` already built, not a second `symbolsByName` walk over the same
+  // input: the function is deterministic and unmemoized, nothing in packages/core mutates a
+  // SymbolMap or a map it returns, and `baseOpts` is never reassigned — so this is the same map,
+  // 25-47 ms cheaper on the large vendored ones. The same idiom `mapSymbols` below uses.
+  const byName = baseOpts.symbols;
   const fnHasSizedPtrFields =
     byName !== undefined &&
     [...bareGlobalSymbols(probe).keys()].some((n) => {
@@ -1352,27 +633,40 @@ export function enumerateCandidates(
   // a pair wherever the axis changed nothing.
   const probeDefs = defOpMap(probe);
   type AxisCand = (typeof ptrElemCands)[number] & Record<StructuringAxis['flag'], boolean>;
-  let axisCands: AxisCand[] = declRankCands.map((s) => ({
-    ...s,
-    reread: false,
-    inplace: false,
-    mergeNames: false,
-    addrHome: false,
-    exprHome: false,
-    derivedHome: false,
-    mergeHome: false,
-    unsCmp: false,
-    freshMerge: false,
-    copyDefPos: false,
-  }));
+  /** Every axis OFF — seeded from the table so an added axis is one table entry and not a second
+   *  hand-edited literal, in table order like everything else derived from it.
+   *
+   *  WHAT THE CAST CANNOT CATCH: a `StructuringAxis['flag']` union member with NO table entry.
+   *  `Object.fromEntries` types its result by the key type it was handed, not by the union, so the
+   *  assertion is taken on trust where the hand-written literal was checked. Such a member is
+   *  inert either way — every reader of these flags iterates `STRUCTURING_AXES`, so a flag with no
+   *  entry is never read — but it stops being a type error and becomes an absent field. */
+  const axisFlagsOff = Object.fromEntries(STRUCTURING_AXES.map((ax) => [ax.flag, false])) as Record<
+    StructuringAxis['flag'],
+    boolean
+  >;
+  let axisCands: AxisCand[] = declRankCands.map((s) => ({ ...s, ...axisFlagsOff }));
   for (const ax of STRUCTURING_AXES) {
-    if (ax.probeGate === undefined || ax.probeGate(probe, probeDefs)) {
-      axisCands = [
-        ...axisCands,
-        ...axisCands.map((s) => ({ ...s, suffix: `${s.suffix}${ax.suffix}`, [ax.flag]: true }) as AxisCand),
-      ];
+    if (ax.probeGate !== undefined && !ax.probeGate(probe, probeDefs)) {
+      opts.onAxisGated?.(ax.suffix);
+      continue;
     }
+    axisCands = [
+      ...axisCands,
+      ...axisCands.map((s) => ({ ...s, suffix: `${s.suffix}${ax.suffix}`, [ax.flag]: true }) as AxisCand),
+    ];
   }
+  /** Is this the point where NO structuring lever is on? The base-axes abort guard's other half:
+   *  at the base LIFT variant a failure here aborts the row, because it says the lift is broken
+   *  rather than that one axis cannot spell this tree.
+   *
+   *  `s.suffix === ''` IS NOT THE SAME TEST, which is why this is a named predicate rather than
+   *  the string compare it looks like. `/flip-branch` and `/flip-join` name a branch sense
+   *  RELATIVE to the target's default, so BOTH senses are base axis points — the flipped one
+   *  carries a suffix and still has every lever off. The table's own flags decide, plus the four
+   *  shape booleans that predate the table. */
+  const isBaseAxisPoint = (s: AxisCand): boolean =>
+    !s.anchor && !s.join && s.bitfields && s.ptrElems && s.declRank && STRUCTURING_AXES.every((ax) => !s[ax.flag]);
 
   const seen = new Map<string, Candidate>();
   const seenTrees = new Set<string>();
@@ -1421,54 +715,9 @@ export function enumerateCandidates(
   // without), and the project map, which knows more than either.
   const mapSymbols = baseOpts.symbols;
   const declSymbols = new Map<string, SymbolInfo>([...bareGlobalSymbols(probe), ...probeShapes, ...(mapSymbols ?? [])]);
-  const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
-    // The names THIS tree binds. Computed per tree because the emitter mints local names per
-    // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
-    const bound = new Set<string>([...tree.params.map((p) => p.name), ...tree.locals.map((l) => l.name)]);
-    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, refuse).flatMap((r) => {
-      // THE ONE REFUSAL THAT IS NOT A REFUSAL — a name the emitted C uses for its OWN storage
-      // kills the SPELLING, because no declaration makes that candidate right and no declaration
-      // makes it fail either. Two shapes, and the second is why the test is the emitter's whole
-      // NAME GRAMMAR rather than this tree's bound set:
-      //   READ — the tree binds `v0` and also spells `&v0` for the pool global. The local
-      //     shadows the extern, so the candidate takes a stack address where the asm takes a
-      //     relocated one. Withholding the declaration does not stop it compiling: its SIBLING
-      //     names still get theirs, and the TU builds.
-      //   WRITE — structure.ts drops a local whose name a WRITTEN global already claims
-      //     (`localNames`, filtered by `globalNames`), so the collision is INVISIBLE in
-      //     `tree.locals`: every use of the emitter's local binds the extern instead, and the
-      //     loop pointer it was holding becomes a store to that global once per iteration.
-      // Both compile, both are wrong, and a compiling wrong answer is the one outcome this
-      // project trades nothing for — so the spelling dies here and `fanOut`'s catch reports it.
-      // If every spelling of every tree dies, the row declines LOUDLY naming the collision.
-      if (bound.has(r.name) || EMITTER_NAME.test(r.name)) {
-        refuse(r.name, 'emitter-name');
-        throw new Error(
-          `cannot spell '${tree.name}': the target names a global '${r.name}', which is a name the ` +
-            `emitted C uses for its own locals and parameters — no declaration can bind it`,
-        );
-      }
-      // Applied to the UNION, not to the pool half on its way in: a map can supply `$LC0` or
-      // `abort` as readily as a relocation can, and `extern u32 abort;` is the same hard error
-      // whichever half it came from.
-      if (!/^[A-Za-z_]\w*$/.test(r.name)) {
-        refuse(r.name, 'not-an-identifier');
-        return [];
-      }
-      if (DECL_RESERVED.has(r.name)) {
-        refuse(r.name, 'reserved');
-        return [];
-      }
-      // name-only symbols carry the IR-derived access facts — the width authority
-      // for their synthesized declaration (shaped symbols keep the map's truth)
-      const access = r.info.shape === undefined ? accessFacts.get(r.name) : undefined;
-      // A ref no MAP accounts for is a hypothesis read out of the target asm, and it is marked
-      // as one all the way to the consumer (SymbolRef.synthesized).
-      const synthesized = mapSymbols?.has(r.name) ? {} : { synthesized: true as const };
-      return [{ ...r, ...(access ? { access } : {}), ...synthesized }];
-    });
-    return refs.length ? { symbolRefs: refs } : {};
-  };
+  // The four per-enumeration constants named at the seam rather than captured across 60 lines of
+  // closure (rank-declare.ts states why they belong on one object).
+  const refsOf = makeRefCollector({ declSymbols, accessFacts, mapSymbols, refuse });
   // THE RE-SPELLING FAN, as a function whose PARAMETER LIST is the invariant the tree skip below
   // rests on: every spelling here is a pure function of the structured tree and this call's own
   // constants, so a tree an earlier axis point already spelled can only re-emit sources `seen`
@@ -1490,7 +739,7 @@ export function enumerateCandidates(
   // `/volatile` — a spelling that did not fail and is still in the fan. The order
   // is the candidate labels' own (`${pf.suffix}${sp.suffix}`), so a reported label and an
   // enumerated one name the same spelling the same way.
-  const fanOut = (sfn: SFn, leverLabel = ''): Spelling[] => {
+  const fanOut = (sfn: SFn, leverLabel = ''): FanResult => {
     // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
     // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
@@ -1509,9 +758,8 @@ export function enumerateCandidates(
     try {
       spellings.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {
-      lastEmitError = e;
-      opts.onLeverError?.(name + leverLabel, e instanceof Error ? e.message.split('\n')[0] : String(e));
-      return spellings;
+      opts.onLeverError?.(name + leverLabel, firstLine(e));
+      return { spellings, emit: { error: e } };
     }
     // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
     // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
@@ -1577,14 +825,15 @@ export function enumerateCandidates(
     // scores, and can win (the shape #106 shipped). Levers that place a def — l3/sinkinit.ts,
     // l3/basecse.ts's first-use policy, l3/nearbase.ts, l3/scopebase.ts, l3/argbase.ts — are
     // exactly the population that can produce it, so the check belongs on every lever tree
-    // rather than on theirs. It costs nothing today: 0 violations over the 34357 trees the
-    // artifact's 325 agbcc rows enumerate in both symbol-map configurations.
+    // rather than on theirs. It cost nothing when measured: 0 violations over the 34357 trees the
+    // artifact's agbcc rows enumerated in both symbol-map configurations. A count with no commit
+    // stamp — re-run it rather than reading it as today's.
     // `assertEffectsPreserved` is the fourth and is NOT here: it needs the L1 `fn`, and
     // `fanOut`'s parameter list is the invariant the tree-dedup skip rests on (see its header).
     // Widening it for a contract is a defensible change and an argued one — not a silent import.
     // A lever returns its tree, or `{ sfn, needsProof }` when it cannot establish its own
     // semantics from inside the pass (Candidate.matchOnly carries the argument).
-    const respell = (suffix: string, make: () => LeverResult): void => {
+    const respell = (suffix: string, make: () => LeverResult, alreadyShaped = false): void => {
       try {
         const made = make();
         if (!made) {
@@ -1600,7 +849,7 @@ export function enumerateCandidates(
         // product mechanism (the POLICY note above carries the admission argument). Each is
         // a statement-order/shape fact orthogonal to representation; subsets compose in the
         // fixed order below. A shape that never fires declines and costs nothing.
-        if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
+        if (!alreadyShaped) {
           // A shape REORDERS statements, and it is derived after a lever has placed its defs — so
           // the placement is re-checked on the shaped tree (contracts.ts). Differential: judged
           // only where the unshaped tree already satisfied the walk, so a lever whose placement it
@@ -1643,10 +892,7 @@ export function enumerateCandidates(
                 });
               }
             } catch (e) {
-              opts.onLeverError?.(
-                name + leverLabel + suffix + shapeSuffix,
-                e instanceof Error ? e.message.split('\n')[0] : String(e),
-              );
+              opts.onLeverError?.(name + leverLabel + suffix + shapeSuffix, firstLine(e));
             }
           }
         }
@@ -1656,7 +902,7 @@ export function enumerateCandidates(
         // so without this a lever that fails here vanishes with no trace — indistinguishable
         // from one that correctly declined, which is exactly the hidden failure
         // DroppedCandidate exists to surface.
-        opts.onLeverError?.(name + leverLabel + suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + suffix, firstLine(e));
       }
     };
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
@@ -1668,12 +914,14 @@ export function enumerateCandidates(
       try {
         const shaped = applyShapes(subset, sfn);
         if (shaped !== null) {
-          respell(shaped.suffix, () => shaped.out);
+          // the ONE call whose suffix already names shapes — say so, rather than making `respell`
+          // read it back out of the label it was handed
+          respell(shaped.suffix, () => shaped.out, true);
         }
       } catch (e) {
         // the error label falls back to the full subset — the fired set is unknown mid-throw
         const label = subset.map((x) => x.suffix).join('');
-        opts.onLeverError?.(name + leverLabel + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + label, firstLine(e));
       }
     }
     respell('/argbase', () => materializeArgBases(sfn));
@@ -1699,6 +947,9 @@ export function enumerateCandidates(
     // `/volatile` sibling rather than doubling every enumeration, and its frame-flag gate
     // costs nothing on a function with no slot.
     respell('/vol-slot', () => volatileValueLocals(sfn));
+    /** `/vol-store`'s pass with the target's device-register window handed over — the window that
+     *  keeps it off ordinary memory. Written once because five call sites take it. */
+    const volStore = (from: SFn): SFn | null => volatileDeviceStores(from, target.capabilities.deviceRegisters);
     // `/vol-store` — pin a store at a fixed DEVICE-REGISTER address `volatile` (l3/volstore.ts).
     // Where `/volatile` above qualifies a pointer LOCAL holding the address, this qualifies the
     // access itself, which is the spelling a `REG_*` macro produces and the one structure.ts
@@ -1706,7 +957,7 @@ export function enumerateCandidates(
     // hoists an unpinned fixed-address store clean out of a loop (gcc/loop.c:8934), so the pinned
     // spelling is the only one that reproduces a device-driving loop body at all. Its window gate
     // is the target's own `deviceRegisters` range, which is what keeps it off ordinary memory.
-    respell('/vol-store', () => volatileDeviceStores(sfn, target.capabilities.deviceRegisters));
+    respell('/vol-store', () => volStore(sfn));
     /** `/unreduce` with both halves of the device model handed over — the SPELLING range and the
      *  MEMORY-MODEL trigger list (target.ts). Written once because three call sites take it. */
     const unreduced = (from: SFn): UnreduceResult | null =>
@@ -1746,9 +997,10 @@ export function enumerateCandidates(
     // than loses, and RT's 32 beats the ADMITTED standalone `/unreduce`'s 35. Ranking the pairs
     // against the BEST already-admitted spelling is the comparison that holds.)
     //
-    // WHAT THE STANDALONE LINES COST, since neither of the two levers ever wins one of the 894
-    // artifact rows alone — `/unreduce` appears in 2 winners and `/ptr-field` in 1, all three
-    // inside a pairing. They are kept because a lever has to be able to LOSE on its own terms: the
+    // WHAT THE STANDALONE LINES COST, since neither of the two levers ever wins an artifact row
+    // ALONE — every `/unreduce` and `/ptr-field` winner rides inside a `/vol-store` pairing, which
+    // is the property `apps/benchmark/test/census.test.ts` asserts rather than the count it used
+    // to quote here. They are kept because a lever has to be able to LOSE on its own terms: the
     // admission posture (compareScored orders by score) is what makes a wrong re-spelling
     // harmless, and it is only observable when the single-lever spelling is in the fan —
     // `synthetic:dmastride` exists to show exactly that for `/unreduce`, at 33 against its match.
@@ -1761,7 +1013,6 @@ export function enumerateCandidates(
     //
     // Both compose through `composeLevers`, which carries `/unreduce`'s proof obligation across
     // the stages after it — hand-writing that carry made dropping it a type-correct edit.
-    const volStore = (s: SFn): SFn | null => volatileDeviceStores(s, target.capabilities.deviceRegisters);
     respell('/vol-store/unreduce', () => composeLevers(sfn, [volStore, unreduced]));
     respell('/vol-store/unreduce/ptr-field', () => composeLevers(sfn, [volStore, unreduced, pointerFields]));
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
@@ -1865,7 +1116,7 @@ export function enumerateCandidates(
         const base = from();
         variants = base ? variantsOf(base) : [];
       } catch (e) {
-        opts.onLeverError?.(name + leverLabel + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        opts.onLeverError?.(name + leverLabel + label, firstLine(e));
         return;
       }
       for (const c of variants) {
@@ -1949,10 +1200,10 @@ export function enumerateCandidates(
     // A per-row label/source diff catches the last two, and CANNOT catch the first. Both of those
     // delete `unsigned/orderbase` off `synthetic:bgarr:agbcc`, the exact source that row publishes
     // as its score-0 MATCH — a row carrying no symbol map, so its single arm is the one the gate
-    // actually runs. The per-function reading needs `/setup-args` AND
-    // `/orderbase` in ONE label, and of the corpus's 756 published winner labels three carry
-    // `/orderbase`, six carry `/setup-args` and NONE carries both — so a green corpus gate is
-    // evidence about two of these readings and none at all about the third.
+    // actually runs. The per-function reading needs `/setup-args` AND `/orderbase` in ONE label,
+    // and NO published winner label carries both — so a green corpus gate is evidence about two of
+    // these readings and none at all about the third. That property is the gate, not a count:
+    // apps/benchmark/test/census.test.ts asserts it over the committed artifact.
 
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
@@ -1968,18 +1219,28 @@ export function enumerateCandidates(
       censuses.set(g, v);
       return v;
     };
+    /** Does an EARLIER roster row already bind exactly `bound` at this placement? Then this row is
+     *  that row's spelling under a second label and declines.
+     *
+     *  Same bases in the same POSITION is the same spelling; the same bases somewhere else is not,
+     *  which is why the placement is a conjunct and not an afterthought. `rows` is the slice's
+     *  own list, so the two readers scope it differently — the roster hoist asks over the whole
+     *  admissions roster, the homesplit pairing over the PAIRED rows only, because a skip there
+     *  must never drop a withhold no other row enumerates. Captures `census`, so a repeated table
+     *  costs one memo lookup rather than a second walk. */
+    const shadowedByEarlier = (
+      rows: readonly { placement: HoistPlacement; gates: readonly Gate<BaseKey>[] }[],
+      i: number,
+      placement: HoistPlacement,
+      bound: readonly string[],
+    ): boolean => rows.slice(0, i).some((r) => r.placement === placement && sameBases(bound, census(r.gates)));
     const livebases = admissions.map(({ suffix, gates, placement, pairings }, i) => {
       const hoist = (): SFn | null => {
         const bound = census(gates);
         if (bound.length === 0) {
           return null;
         }
-        // Same bases in the same POSITION is the same spelling under a second label; the same
-        // bases somewhere else is not, so an earlier row only shadows this one at its placement.
-        const shadowed = admissions
-          .slice(0, i)
-          .some((a) => a.placement === placement && sameBases(bound, census(a.gates)));
-        return shadowed ? null : hoistBaseLocals(sfn, gates, placement);
+        return shadowedByEarlier(admissions, i, placement, bound) ? null : hoistBaseLocals(sfn, gates, placement);
       };
       const volatiles = (): SFn | null => {
         const r = hoist();
@@ -2045,10 +1306,11 @@ export function enumerateCandidates(
     }
     // The livebase x homesplit PAIRINGS — the fourth sanctioned product kind, and row-demanded
     // (synthetic:dmapoll): ONE base kept at the head and a SECOND split per region, which neither
-    // lever spells alone because each applies its own policy to every base it binds. Compiled
-    // against that row's own object the reachable cells are 69 with neither hoist, 18 with both
-    // split per region, 11 with both at function scope — and 0 only where the two policies land on
-    // DIFFERENT bases. See l3/homesplit.ts for why it is a PIPE and never a merge.
+    // lever spells alone because each applies its own policy to every base it binds: compiled
+    // against that row's own object, the score reaches 0 only where the two policies land on
+    // DIFFERENT bases, and every uniform choice is worse. The endpoint figures live in
+    // l3/homesplit.ts, which is the measurement's one home, along with why this is a PIPE and
+    // never a merge.
     //
     // WHICH key is withheld is not derivable, so every admitted key is its own candidate, LABELLED
     // with that key — a label is an identity, and one label over two withholds names two programs.
@@ -2058,14 +1320,12 @@ export function enumerateCandidates(
     // composed spelling scores 13 against its own 0 — at MATCH.
     for (const [i, { suffix, gates, placement }] of paired.entries()) {
       const bound = census(gates);
-      // The ROSTER's dedup, which `hoist` applies to every other product and this loop has to spell
-      // for itself: a row binding exactly what an earlier row bound at the same placement is that
-      // row's spelling under a second label, and so is every pairing piped from it. Asked over the
-      // PAIRED rows only, so a skip can never drop a withhold no other row enumerates — the earlier
-      // row runs the identical pipe and emits the identical source. Without it both run and `seen`
-      // collapses the pair afterwards, having paid a head hoist, region plan, rewrite and emit for
-      // each.
-      if (paired.slice(0, i).some((p) => p.placement === placement && sameBases(bound, census(p.gates)))) {
+      // The ROSTER's dedup, which `hoist` applies to every other product and this loop has to ask
+      // for itself: every pairing piped from a shadowed row is that row's spelling under a second
+      // label too. Asked over the PAIRED rows only — the earlier row runs the identical pipe and
+      // emits the identical source. Without it both run and `seen` collapses the pair afterwards,
+      // having paid a head hoist, region plan, rewrite and emit for each.
+      if (shadowedByEarlier(paired, i, placement, bound)) {
         continue;
       }
       // The function-level half of the pairing's admission, asked ONCE over the census: both its
@@ -2171,7 +1431,7 @@ export function enumerateCandidates(
       fresh: '/regcopy-ret-fresh',
     };
     registerishSpellings(sfn).forEach((alt) => respell(REGCOPY_LABEL[alt.tail], () => alt.sfn));
-    return spellings;
+    return { spellings };
   };
   // The SYMBOL-MAP spelling is itself a ranked LEVER on the same footing as signedness/branch
   // sense: naming a global changes agbcc's codegen (the eager-load effect), and which side
@@ -2247,16 +1507,18 @@ export function enumerateCandidates(
       // Only spellings the narrowing actually changed reach a compiler: one that changes nothing
       // downstream emits the base spelling's source and the dedup collapses it, and a DECLARED
       // arity records nothing and enumerates no variant at all. What survives the dedup is the
-      // product's real price, and it is not free: over the benchmark's 272 agbcc rows this arm
-      // adds 1201 distinct candidates to 3862, all of them in the 13 rows whose narrowing changes
-      // anything downstream — measured before those six kleod rows declared their callee arities,
+      // product's real price, and it is not free: this arm added 1201 distinct candidates, all of
+      // them in the 13 rows whose narrowing changes anything downstream. Quoted as a DELTA with no
+      // denominator, because the agbcc row count it was taken over has moved since — measured
+      // before those six kleod rows declared their callee arities,
       // and declaring one takes its row out of this population.
       //
       // `/connective` — spell a same-scrutinee const-test chain as `x == 0 || x == 2` rather than
       // leaving it to switch recovery. They are mutually exclusive within one raise
       // (raise/shortcircuit.ts's REFUSALS note has the mechanism: a folded `logic_or` is not the
       // `icmp` switch-recover.ts requires), so no predicate settles it — the differ does.
-      // Enumerated only where THIS VARIANT's lift reports the PAIRWISE refusal — 6 of 923 rows.
+      // Enumerated only where THIS VARIANT's lift reports the PAIRWISE refusal, which a handful of
+      // corpus rows do.
       //
       // WHAT IT IS *NOT* FOR: the shared-arm spelling `switch (x) { case 0: case 2: … }`. That is
       // the structurer's DEFAULT (switch-recover.ts groups case values sharing a body), and it is
@@ -2267,16 +1529,17 @@ export function enumerateCandidates(
       // different bytes. So on a recovered MULTI-GROUP switch the connective is a genuine second
       // spelling, and this axis is the only thing that reaches it.
       //
-      // Where it is worth 0 POINTS is one ROW, not the shape: on
-      // `kleod:ProcessInputAndUpdateEntities:agbcc` the grouping alone scores 306, and so does the
-      // grouping with this axis — same breakdown cell for cell, in half the wall clock (681s →
-      // 339s). Worth 0 points is not worth nothing: the published winner there carries
-      // `/connective` and spells its site `gUnk_030034C0 == 0 || gUnk_030034C0 == 2`, so deleting
-      // the axis moves that row's source. It moves the SCORE where switch recovery declined
-      // ENTIRELY and the tree came out as nested `if`s — `CountCollectedGems` 327 → 299,
-      // `CheckWorldCompletion` 135 → 124, neither with a `switch` at all. Telling the populations
-      // apart needs an L3 fact (did recovery produce a grouped arm?) at a raise-level hook, which
-      // is a level inversion; the fan is the price instead.
+      // WHERE IT IS WORTH 0 POINTS IT IS STILL NOT WORTH NOTHING, and the two populations differ.
+      // On `kleod:ProcessInputAndUpdateEntities` the grouping alone reaches the same score the
+      // axis reaches with it, yet the published winner there carries `/connective` and spells its
+      // site `gUnk_030034C0 == 0 || gUnk_030034C0 == 2` — so deleting the axis moves that row's
+      // SOURCE. It moves the SCORE on the other population, where switch recovery declined
+      // ENTIRELY and the tree came out as nested `if`s: `kleod:CountCollectedGems` and
+      // `kleod:CheckWorldCompletion`, neither with a `switch` at all. Telling the two apart needs
+      // an L3 fact (did recovery produce a grouped arm?) at a raise-level hook, which is a level
+      // inversion; the fan is the price instead. NO ABLATION PAIR IS QUOTED HERE: the artifact
+      // carries only the with-axis score, so half a refreshed pair would manufacture a delta
+      // across two bases — re-run the ablation to price it.
       //
       // It rides the LIFT variants because the raise mutates in place: a second raise policy needs
       // its own copy of the lifted fn, exactly as `/setup-args` needs one to narrow. Crossed with
@@ -2341,9 +1604,11 @@ export function enumerateCandidates(
             }
           }
           applyIdiomPatterns(fn, target, opts.patterns);
-          // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile()
-          // is the signedness pin, injected between pre-recovery and recoverTypes via the
-          // beforeRecover hook.
+          // The shared tower spine (pipeline.ts). TWO differences from `decompile()`, both passed
+          // here: the signedness pin, injected between pre-recovery and recoverTypes via the
+          // `beforeRecover` hook, and the `pre.shortCircuit` connective owner, which `decompile()`
+          // leaves at its default. Stated in full so this copy and pipeline.ts's cannot silently
+          // diverge again — a third argument added here is a third line in both.
           raiseRecovered(
             fn,
             target,
@@ -2364,7 +1629,7 @@ export function enumerateCandidates(
             throw e; // the base lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped lever, never an aborted enumeration — the same posture as `respell`.
-          opts.onLeverError?.(name + lv.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
+          opts.onLeverError?.(name + lv.suffix, firstLine(e));
           continue;
         }
         // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
@@ -2406,15 +1671,7 @@ export function enumerateCandidates(
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
             });
           } catch (e) {
-            if (
-              lv.suffix === '' &&
-              !s.anchor &&
-              !s.join &&
-              s.bitfields &&
-              s.ptrElems &&
-              s.declRank &&
-              STRUCTURING_AXES.every((ax) => !s[ax.flag])
-            ) {
+            if (lv.suffix === '' && isBaseAxisPoint(s)) {
               throw e; // the base lift's base axes keep their behavior: a failure aborts the row
             }
             // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
@@ -2422,7 +1679,7 @@ export function enumerateCandidates(
             droppedPrimary.add(s.suffix);
             // an anchored variant that fails structuring or its contracts is a dropped lever, never
             // an aborted enumeration — same rule as respell below
-            opts.onLeverError?.(name + lv.suffix + s.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
+            opts.onLeverError?.(name + lv.suffix + s.suffix, firstLine(e));
             continue;
           }
           // A TREE another axis point already spelled. `fanOut` reads the tree and this call's own
@@ -2453,10 +1710,16 @@ export function enumerateCandidates(
           // has no inhabitant.
           const treeKey = JSON.stringify(sfn);
           if (seenTrees.has(treeKey)) {
+            opts.onTreeDeduped?.();
             continue;
           }
           seenTrees.add(treeKey);
-          const spellings = fanOut(sfn);
+          // The row's OWN tree, so this is the one call whose backend refusal is the row's cause.
+          const primary = fanOut(sfn);
+          const spellings = primary.spellings;
+          if (primary.emit) {
+            lastEmitError = primary.emit.error;
+          }
           // The PRE-FAN products (PRE_FAN_PRODUCTS, the fourth mechanism the POLICY note names):
           // rewrite the TREE, then fan the whole re-spelling set over the result, so every lever
           // below derives from the rewrite instead of composing onto it. The gate is the pass's
@@ -2481,30 +1744,21 @@ export function enumerateCandidates(
               assertResolved(made);
               assertDerefsTyped(made);
               assertLocalsWritten(made);
-              // `fanOut` writes the shared `lastEmitError` when the PRIMARY emit throws, and that
-              // is what the row's "no spellable candidate" refusal reports. A backend refusal on a
-              // REWRITTEN tree is not a refusal of the primary spelling, so it must not be able to
-              // become the row's stated cause — saved and restored around the call, in a `finally`
-              // so a throw cannot leak it either, rather than letting the wrong cause outlive it.
+              // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
+              // spelling, so it never becomes the row's stated cause: `FanResult.emit` is dropped
+              // here and only the primary call above records one.
               //
               // It is reported instead through `onLeverError` under `pf.suffix`, which is what
-              // `fanOut`'s second argument is for, and it is the other half of the same rule: a
-              // primary emit refusal does not THROW — `fanOut` records it and returns — so the
-              // `catch` below never sees it, and under the bare function name it would read as a
-              // refusal of the primary spelling while the lever's whole half of the fan was
-              // deleted.
-              const before = lastEmitError;
-              let fanned: Spelling[];
-              try {
-                fanned = fanOut(made, pf.suffix);
-              } finally {
-                lastEmitError = before;
-              }
+              // `fanOut`'s second argument is for: a primary emit refusal does not THROW —
+              // `fanOut` returns it — so the `catch` below never sees it, and under the bare
+              // function name it would read as a refusal of the primary spelling while the lever's
+              // whole half of the fan was deleted.
+              const fanned = fanOut(made, pf.suffix).spellings;
               for (const sp of fanned) {
                 spellings.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
               }
             } catch (e) {
-              opts.onLeverError?.(`${name}${pf.suffix}`, e instanceof Error ? e.message.split('\n')[0] : String(e));
+              opts.onLeverError?.(`${name}${pf.suffix}`, firstLine(e));
             }
           }
           for (const sp of spellings) {
@@ -2572,7 +1826,9 @@ export function enumerateCandidates(
   // candidate; all of them together is the row, and it stays LOUD — the alternative is a caller
   // ranking an empty list and reporting no match for a function nothing ever tried to spell.
   if (out.length === 0) {
-    throw new Error(`no spellable candidate for '${name}': ${firstLine(lastEmitError)}`, { cause: lastEmitError });
+    throw new Error(`no spellable candidate for '${name}': ${firstLine(lastEmitError ?? 'no candidate produced')}`, {
+      cause: lastEmitError,
+    });
   }
   return out;
 }
@@ -2633,7 +1889,7 @@ export function rankBy<S extends { score: number }>(
  *  a real bug in the C that only this compiler at these flags hides — the differ cannot referee
  *  it, because the compiler was not exploiting the non-volatility on this input. Gated on the
  *  window rather than counting the word, because outside it the qualifier is a claim about
- *  ordinary memory that the asm does not support — over the 856-row bench, counting the word
+ *  ordinary memory that the asm does not support — over the bench, counting the word
  *  alone decides twelve rows and only two of them touch a device address. A declared term rather
  *  than an enumeration order, which an unrelated lever's spellings can slide between.
  *
@@ -2690,15 +1946,18 @@ function lineCount(source: string): number {
 
 /** Scalar casts in a candidate's rendered source — the readability tie-break above.
  *
- *  A TEXT count over the emitted string, matching how the benchmark's own readability metric
- *  measures the same thing (apps/benchmark/src/eval/quality.ts) — the two must agree about what
- *  "cast noise" means, or ranking optimizes for something the report then scores differently.
+ *  A WITHIN-GROUP tie-break over two spellings of ONE function, and deliberately NARROWER than
+ *  the published readability metric (apps/benchmark/src/eval/quality.ts `casts`): it counts the
+ *  decomp SCALAR typedef vocabulary only — `(u8)` … `(s32)` — so a pointer, struct or C-keyword
+ *  cast is not read as noise, those being structural spellings a candidate does not choose.
  *
- *  It counts the decomp typedef vocabulary only, so a pointer or struct cast is not read as noise
- *  — those are structural spellings a candidate does not choose. And it carries `quality.ts`'s
- *  ADDRESS-CAST exemption: `(u32)&gSym` / `(s32)&gSym` is the CORRECT source spelling of integer
- *  arithmetic on a link-time address, which decomp projects write themselves. Counting it would
- *  penalize precisely the named spelling this ranking is supposed to prefer.
+ *  ONE exemption, the `&` form: `(u32)&gSym` / `(s32)&gSym` is the CORRECT source spelling of
+ *  integer arithmetic on a link-time address, which decomp projects write themselves, and
+ *  counting it would penalize precisely the named spelling this ranking is supposed to prefer.
+ *
+ *  NOT a second copy of the published metric, and it must not be read as one: that one counts a
+ *  wider vocabulary and exempts more, so a number here is not comparable to a number there. What
+ *  the two share is only the direction — fewer casts reads better.
  *
  *  Deterministic, and total on any string. */
 function castCount(source: string): number {
@@ -2707,7 +1966,9 @@ function castCount(source: string): number {
   return all - addr;
 }
 
-/** First line of whatever the scorer threw — the compiler's own diagnostic, not a stack. */
+/** First line of whatever a lever, a backend or the scorer threw — the compiler's own diagnostic,
+ *  not a stack. TOTAL on any value, including a non-Error throw, so no caller has to re-spell the
+ *  `instanceof` test; a caller wanting a word for "nothing was thrown" supplies it at the call. */
 function firstLine(e: unknown): string {
-  return e instanceof Error ? e.message.split('\n')[0] : String(e ?? 'no candidate produced');
+  return e instanceof Error ? e.message.split('\n')[0] : String(e);
 }

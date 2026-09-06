@@ -25,6 +25,7 @@ import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
+import { c, v } from './helpers';
 
 /** IR text → C, the structure-guard.test.ts idiom (verify + recoverTypes + structure + emit). */
 function emitIr(ir: string): string {
@@ -34,9 +35,6 @@ function emitIr(ir: string): string {
   return cBackend.emit(structure(fn));
 }
 
-const V = (name: string): Expr => ({ k: 'var', name });
-const C = (value: number): Expr => ({ k: 'const', value });
-
 describe('exprCType — the C static type of a rendered expression', () => {
   const env = new Map([
     ['p', T.ptr(T.s(32))],
@@ -45,23 +43,23 @@ describe('exprCType — the C static type of a rendered expression', () => {
   const ct = (e: Expr) => exprCType(e, (n) => env.get(n));
 
   test('a literal spells int, never a pointer', () => {
-    expect(ct(C(50345188))).toEqual(T.s(32));
+    expect(ct(c(50345188))).toEqual(T.s(32));
   });
   test('pointer arithmetic keeps the pointer type; int arithmetic stays int', () => {
-    expect(ct({ k: 'bin', op: '+', l: V('p'), r: V('n') })).toEqual(T.ptr(T.s(32)));
-    expect(ct({ k: 'bin', op: '+', l: V('n'), r: V('p') })).toEqual(T.ptr(T.s(32)));
-    expect(ct({ k: 'bin', op: '+', l: V('n'), r: V('n') })).toEqual(T.s(32));
-    expect(ct({ k: 'bin', op: '-', l: V('p'), r: V('p') })).toEqual(T.s(32)); // ptr - ptr = int
+    expect(ct({ k: 'bin', op: '+', l: v('p'), r: v('n') })).toEqual(T.ptr(T.s(32)));
+    expect(ct({ k: 'bin', op: '+', l: v('n'), r: v('p') })).toEqual(T.ptr(T.s(32)));
+    expect(ct({ k: 'bin', op: '+', l: v('n'), r: v('n') })).toEqual(T.s(32));
+    expect(ct({ k: 'bin', op: '-', l: v('p'), r: v('p') })).toEqual(T.s(32)); // ptr - ptr = int
   });
   test('deref unwraps one pointer level; an over-deref types as the LEGALIZED read', () => {
-    const derefP: Expr = { k: 'index', base: V('p'), idx: C(0), width: 4, signed: true };
+    const derefP: Expr = { k: 'index', base: v('p'), idx: c(0), width: 4, signed: true };
     expect(ct(derefP)).toEqual(T.s(32)); // *p : s32
     // **p: the inner read is s32, so the outer deref is legalized by the backend at its own
     // width — its C type is the access scalar, total by construction.
-    expect(ct({ k: 'index', base: derefP, idx: C(0), width: 4, signed: true })).toEqual(T.s(32));
+    expect(ct({ k: 'index', base: derefP, idx: c(0), width: 4, signed: true })).toEqual(T.s(32));
   });
   test('a cast overrides; a call is unknowable', () => {
-    expect(ct({ k: 'cast', to: T.ptr(T.u(8)), e: V('n') })).toEqual(T.ptr(T.u(8)));
+    expect(ct({ k: 'cast', to: T.ptr(T.u(8)), e: v('n') })).toEqual(T.ptr(T.u(8)));
     expect(ct({ k: 'call', fn: 'f', args: [] })).toBeUndefined();
   });
 });
@@ -127,8 +125,8 @@ describe('adversarial-round pins — the cast must never legitimize wrong addres
   test('exprCType reports ptr + ptr as unknowable (not C), ptr - ptr as int', () => {
     const env = new Map([['p', T.ptr(T.s(32))]]);
     const ct = (e: Expr) => exprCType(e, (n) => env.get(n));
-    expect(ct({ k: 'bin', op: '+', l: V('p'), r: V('p') })).toBeUndefined();
-    expect(ct({ k: 'bin', op: '-', l: V('p'), r: V('p') })).toEqual(T.s(32));
+    expect(ct({ k: 'bin', op: '+', l: v('p'), r: v('p') })).toBeUndefined();
+    expect(ct({ k: 'bin', op: '-', l: v('p'), r: v('p') })).toEqual(T.s(32));
   });
 });
 
@@ -147,9 +145,9 @@ describe('assertDerefsTyped — the stage-boundary contract', () => {
   test('index bases are never contract errors — the backend legalizes ANY base from the node width', () => {
     // The width-carrying node makes deref-of-non-pointer a spelling decision, not an ill-formed
     // tree: the C printer casts. The contract stays silent on all of these.
-    for (const base of [V('p'), C(50345188), V('n'), { k: 'call', fn: 'g', args: [] } as Expr]) {
+    for (const base of [v('p'), c(50345188), v('n'), { k: 'call', fn: 'g', args: [] } as Expr]) {
       expect(() =>
-        assertDerefsTyped(sfn([{ k: 'return', value: { k: 'index', base, idx: C(0), width: 4, signed: true } }])),
+        assertDerefsTyped(sfn([{ k: 'return', value: { k: 'index', base, idx: c(0), width: 4, signed: true } }])),
       ).not.toThrow();
     }
     // ...and the printer's legalization is what upholds the C validity the old rule guarded:
@@ -158,20 +156,20 @@ describe('assertDerefsTyped — the stage-boundary contract', () => {
       params: [{ name: 'n', type: T.s(32) }],
       locals: [],
       retType: T.s(32),
-      body: [{ k: 'return', value: { k: 'index', base: V('n'), idx: C(0), width: 4, signed: true } }],
+      body: [{ k: 'return', value: { k: 'index', base: v('n'), idx: c(0), width: 4, signed: true } }],
     });
     expect(out).toContain('*(s32 *)n');
   });
 
   test('throws on a pointer operand under a non-additive operator (the emitter intifies these)', () => {
-    expect(() => assertDerefsTyped(sfn([{ k: 'return', value: { k: 'bin', op: '&', l: C(3), r: V('p') } }]))).toThrow(
+    expect(() => assertDerefsTyped(sfn([{ k: 'return', value: { k: 'bin', op: '&', l: c(3), r: v('p') } }]))).toThrow(
       ContractError,
     );
   });
 
   test('throws on member access through a non-struct base', () => {
     expect(() =>
-      assertDerefsTyped(sfn([{ k: 'return', value: { k: 'field', base: V('n'), name: 'field_0' } }])),
+      assertDerefsTyped(sfn([{ k: 'return', value: { k: 'field', base: v('n'), name: 'field_0' } }])),
     ).toThrow(ContractError);
   });
 });
@@ -189,7 +187,7 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
           k: 'return',
           value: {
             k: 'field',
-            base: { k: 'cast', to: T.ptr(struct), e: V('n') },
+            base: { k: 'cast', to: T.ptr(struct), e: v('n') },
             name: 'field_0',
           },
         },
@@ -203,8 +201,8 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
           k: 'return',
           value: {
             k: 'index',
-            base: { k: 'cast', to: T.ptr(T.u(8)), e: V('n') },
-            idx: V('n'),
+            base: { k: 'cast', to: T.ptr(T.u(8)), e: v('n') },
+            idx: v('n'),
             width: 1,
             signed: false,
           },
@@ -222,17 +220,17 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
       params: [{ name: 'n', type: T.s(32) }],
       locals,
       retType: T.void(),
-      body: [{ k: 'store', lval: { k: 'index', base, idx: V('n'), width: 4, signed: true }, value: C(0) }],
+      body: [{ k: 'store', lval: { k: 'index', base, idx: v('n'), width: 4, signed: true }, value: c(0) }],
     });
     // a pointee-volatile DECLARATION (the /volatile lever's local)
-    expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true }], V('p')))).toContain(
+    expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true }], v('p')))).toContain(
       '((volatile s32 *)p)[n] = 0;',
     );
     // a volatile CAST (the /inlinebase lever's re-spelled raw address)
-    const raw: Expr = { k: 'cast', to: T.ptr(T.u(16)), volatile: true, e: C(67109384) };
+    const raw: Expr = { k: 'cast', to: T.ptr(T.u(16)), volatile: true, e: c(67109384) };
     expect(cBackend.emit(mk([], raw))).toContain('((volatile s32 *)(volatile u16 *)67109384)[n] = 0;');
     // …and a base that declares nothing volatile is not over-qualified
-    expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)) }], V('p')))).toContain('((s32 *)p)[n] = 0;');
+    expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)) }], v('p')))).toContain('((s32 *)p)[n] = 0;');
   });
 
   // Two lever gates rest on this: `volatile` on a POINTER local would read as pointee volatility,
@@ -250,7 +248,7 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
       params: [{ name: 'n', type: T.s(32) }],
       locals: [{ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true }],
       retType: T.void(),
-      body: [{ k: 'store', lval: { k: 'index', base: V('p'), idx: V('n'), width: 2, signed: false }, value: C(0) }],
+      body: [{ k: 'store', lval: { k: 'index', base: v('p'), idx: v('n'), width: 2, signed: false }, value: c(0) }],
     };
     expect(cBackend.emit(fn)).toContain('p[n] = 0;');
   });
@@ -263,9 +261,9 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
       retType: T.s(32),
       body: [{ k: 'return', value }],
     });
-    const derefP: Expr = { k: 'index', base: V('p'), idx: C(0), width: 4, signed: true };
-    expect(cBackend.emit(mk({ k: 'index', base: derefP, idx: C(1), width: 4, signed: true }))).toContain('(*p)[1]'); // not *p[1]
-    expect(cBackend.emit(mk({ k: 'un', op: '-', e: { k: 'un', op: '-', e: V('p') } }))).toContain('-(-p)'); // not --p
+    const derefP: Expr = { k: 'index', base: v('p'), idx: c(0), width: 4, signed: true };
+    expect(cBackend.emit(mk({ k: 'index', base: derefP, idx: c(1), width: 4, signed: true }))).toContain('(*p)[1]'); // not *p[1]
+    expect(cBackend.emit(mk({ k: 'un', op: '-', e: { k: 'un', op: '-', e: v('p') } }))).toContain('-(-p)'); // not --p
   });
 
   test('a multi-line then-statement gets braces — the body is never truncated (gcd bug)', () => {
@@ -277,11 +275,11 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
       body: [
         {
           k: 'if',
-          cond: V('n'),
-          then: [{ k: 'dowhile', cond: V('n'), body: [{ k: 'assign', name: 'n', value: C(0) }] }],
+          cond: v('n'),
+          then: [{ k: 'dowhile', cond: v('n'), body: [{ k: 'assign', name: 'n', value: c(0) }] }],
           else: [],
         },
-        { k: 'return', value: V('n') },
+        { k: 'return', value: v('n') },
       ],
     };
     const out = cBackend.emit(fn);
@@ -289,7 +287,7 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
     const opens = (out.match(/\{/g) ?? []).length;
     expect((out.match(/\}/g) ?? []).length).toBe(opens); // balanced braces
     // the single-LINE inlining still works
-    const single: SFn = { ...fn, body: [{ k: 'if', cond: V('n'), then: [{ k: 'return', value: C(1) }], else: [] }] };
+    const single: SFn = { ...fn, body: [{ k: 'if', cond: v('n'), then: [{ k: 'return', value: c(1) }], else: [] }] };
     expect(cBackend.emit(single)).toContain('if (n) return 1;');
   });
 });
@@ -319,7 +317,7 @@ describe('F1 adversarial-round pins — hook width, dot-form typing, Pascal widt
       params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
       locals: [],
       retType: T.s(32),
-      body: [{ k: 'return', value: { k: 'index', base: V('a0'), idx: C(2), width: 2, signed: false } }],
+      body: [{ k: 'return', value: { k: 'index', base: v('a0'), idx: c(2), width: 2, signed: false } }],
     };
     const out = backend.emit(sfn);
     expect(out).toContain('((u16 *)this)[2]'); // the honest spelling
@@ -327,7 +325,7 @@ describe('F1 adversarial-round pins — hook width, dot-form typing, Pascal widt
     // ...and the word access still gets the idiomatic member rewrite:
     const word: SFn = {
       ...sfn,
-      body: [{ k: 'return', value: { k: 'index', base: V('a0'), idx: C(1), width: 4, signed: true } }],
+      body: [{ k: 'return', value: { k: 'index', base: v('a0'), idx: c(1), width: 4, signed: true } }],
     };
     expect(backend.emit(word)).toContain('return b;');
   });
@@ -342,7 +340,7 @@ describe('F1 adversarial-round pins — hook width, dot-form typing, Pascal widt
       ['a1', T.s(32)],
     ]);
     const ct = (e: Expr) => exprCType(e, (n) => env.get(n));
-    const arrIx: Expr = { k: 'index', base: V('a0'), idx: V('a1'), width: 8, signed: false };
+    const arrIx: Expr = { k: 'index', base: v('a0'), idx: v('a1'), width: 8, signed: false };
     expect(ct(arrIx)).toEqual(elem); // the struct VALUE, not s64
     const tree: SFn = {
       name: 'f',
@@ -358,7 +356,7 @@ describe('F1 adversarial-round pins — hook width, dot-form typing, Pascal widt
     // ...and a garbage width on a SCALAR index is the new contract catch:
     const garbage: SFn = {
       ...tree,
-      body: [{ k: 'return', value: { k: 'index', base: V('a1'), idx: C(0), width: 3, signed: false } }],
+      body: [{ k: 'return', value: { k: 'index', base: v('a1'), idx: c(0), width: 3, signed: false } }],
     };
     expect(() => assertDerefsTyped(garbage)).toThrow(/width 3/);
   });
@@ -373,19 +371,19 @@ describe('F1 adversarial-round pins — hook width, dot-form typing, Pascal widt
     });
     const pInt = [{ name: 'p', type: T.ptr(T.s(32)) }];
     // word deref through ^Integer — prints
-    expect(pascalBackend.emit(mk({ k: 'index', base: V('p'), idx: C(0), width: 4, signed: true }, pInt))).toContain(
+    expect(pascalBackend.emit(mk({ k: 'index', base: v('p'), idx: c(0), width: 4, signed: true }, pInt))).toContain(
       'p^',
     );
     // byte deref through ^Integer — no reinterpret cast exists: loud decline
     expect(() =>
-      pascalBackend.emit(mk({ k: 'index', base: V('p'), idx: C(0), width: 1, signed: false }, pInt)),
+      pascalBackend.emit(mk({ k: 'index', base: v('p'), idx: c(0), width: 1, signed: false }, pInt)),
     ).toThrow(/no faithful spelling/);
     // unknowable base (call): word prints, sub-word declines (the node width would be discarded)
     const call: Expr = { k: 'call', fn: 'g', args: [] };
-    expect(pascalBackend.emit(mk({ k: 'index', base: call, idx: C(0), width: 4, signed: true }, pInt))).toContain(
+    expect(pascalBackend.emit(mk({ k: 'index', base: call, idx: c(0), width: 4, signed: true }, pInt))).toContain(
       'g()^',
     );
-    expect(() => pascalBackend.emit(mk({ k: 'index', base: call, idx: C(0), width: 2, signed: false }, pInt))).toThrow(
+    expect(() => pascalBackend.emit(mk({ k: 'index', base: call, idx: c(0), width: 2, signed: false }, pInt))).toThrow(
       /unknowable/,
     );
   });
@@ -407,8 +405,8 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
     const src = cBackend.emit(
       mk(
         [
-          { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('a0'), r: V('a1') } },
-          { k: 'return', value: C(0) },
+          { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('a0'), r: v('a1') } },
+          { k: 'return', value: c(0) },
         ],
         [{ name: 'v0', type: T.ptr(T.u(8)) }],
       ),
@@ -418,7 +416,7 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
 
   test('a ptr-returning function casts an int-rendered return value', () => {
     const src = cBackend.emit(
-      mk([{ k: 'return', value: { k: 'bin', op: '+', l: V('a0'), r: V('a1') } }], [], T.ptr(T.s(32))),
+      mk([{ k: 'return', value: { k: 'bin', op: '+', l: v('a0'), r: v('a1') } }], [], T.ptr(T.s(32))),
     );
     expect(src).toContain('return (s32 *)(a0 + a1);');
   });
@@ -428,7 +426,7 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
       mk(
         [
           { k: 'assign', name: 'v0', value: { k: 'call', fn: 'g', args: [] } },
-          { k: 'return', value: C(0) },
+          { k: 'return', value: c(0) },
         ],
         [{ name: 'v0', type: T.ptr(T.u(8)) }],
       ),
@@ -441,8 +439,8 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
       pascalBackend.emit(
         mk(
           [
-            { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('a0'), r: V('a1') } },
-            { k: 'return', value: C(0) },
+            { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('a0'), r: v('a1') } },
+            { k: 'return', value: c(0) },
           ],
           [{ name: 'v0', type: T.ptr(T.u(32)) }],
         ),
@@ -456,10 +454,10 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
         [
           {
             k: 'dowhile',
-            cond: { k: 'bin', op: '>', l: V('a0'), r: C(0) },
-            body: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('v0'), r: V('a0') } }],
+            cond: { k: 'bin', op: '>', l: v('a0'), r: c(0) },
+            body: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('v0'), r: v('a0') } }],
           },
-          { k: 'return', value: V('v0') },
+          { k: 'return', value: v('v0') },
         ],
         [{ name: 'v0', type: T.s(32) }],
       ),

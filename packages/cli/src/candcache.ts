@@ -154,7 +154,11 @@ const bump = (k: string, n = 1): void => {
 const pendingAudits = new Set<Set<string>>();
 
 /** Counters for the run's `[candcache]` line: hit / failHit / miss / stored / failStored /
- *  sampled / verified / verifiedFail / mismatch / refused / refusedKeys / pruned*. `verified` and
+ *  sampled / verified / verifiedFail / mismatch / refused / refusedKeys / pruned*, plus the four
+ *  that say a STORE declined the answer it was handed — putUnreadable / putEmpty / putUnstorable /
+ *  failUnstorable, none of which fails anything and each of which otherwise leaves a store that
+ *  never warms looking like one that was never asked to. Those four are outside the sampling
+ *  identity below on purpose: they are about writing, not about auditing. `verified` and
  *  `verifiedFail` count audits that AGREED (a stored object, a stored rejection); a disagreement
  *  in either direction is `mismatch` and nothing else, so the three never have to be read against
  *  each other to learn whether the store was right. Empty object when nothing happened.
@@ -273,7 +277,10 @@ const CAP_MB = ((): number => {
 })();
 const CAP_BYTES = CAP_MB * 1024 * 1024;
 
-const sha = (b: Buffer | string): string => createHash('sha256').update(b).digest('hex');
+/** The one content hash this seam speaks. Exported because the namespace STAMP
+ *  (`compile-command.ts`) hashes toolchain files and probe objects into the same key space, and a
+ *  second definition of "the sha256 of these bytes" is a definition that can drift. */
+export const sha = (b: Buffer | string): string => createHash('sha256').update(b).digest('hex');
 
 // ---------------------------------------------------------------------------------------------
 // SAMPLED VERIFICATION — what licenses serving at all.
@@ -453,8 +460,17 @@ export const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 
 // nothing; scanning it is not conservatism, it is a different question. `compile-command.ts`
 // settled this for the compile TEMPLATE already and for the same reasons (a `# …docker…` comment
 // refused a project outright, a `# remember to clean build` put the project's output tree in the
-// namespace); the reading itself lives in `shell-text.ts`, so the template and the scripts it
-// names read one rule, not two that drift.
+// namespace).
+//
+// WHAT THE TWO SHARE is exactly one rule — `shell-text.ts` `stripShellComments`, so the template
+// and the scripts it names agree on which bytes are the program. WHAT THIS SIDE ADDS ON TOP is the
+// heredoc guard (`shellProgramText`), and it is this side's ALONE: a script's heredoc body is fed
+// to a running command, where a leading `#` is body text and an unquoted body still substitutes,
+// so the comment reading is not decidable and such a script is scanned as written. A template's
+// heredoc body is written to a FILE the compile then reads, which the namespace measures by
+// content rather than by reading it as shell — so the template scan has no such case to refuse.
+// Making it heredoc-aware anyway would only widen `containerRuntimeNamedBy`'s refusal reach, and
+// that is deliberately not done here.
 //
 // SAY WHAT THIS MOVED, PLAINLY: whole SCRIPTS cross from the refusing side to the serving side.
 // Every CONSTRUCT that refused still refuses — but a script whose only matches were in English is
@@ -552,8 +568,9 @@ const resolveOnPath = (cmd: string): string | undefined => {
  * template that assembles THROUGH the driver (`gcc -c x.c -o x.o`) reaches an assembler this
  * chain does not name — unless a `-B` operand names a DIRECTORY, which the compile template's
  * token scan then hashes by content. `-B /opt/tc/arm-` used as a filename PREFIX names nothing
- * that exists, so it contributes nothing and the residual stands; that is the same sentence
- * `docs/ranked-repro.md` publishes, and the two must not drift apart.
+ * that exists, so it contributes nothing and the residual stands. THAT `-B` CLAUSE is the sentence
+ * `docs/ranked-repro.md` publishes, and the two must not drift apart; the assemble-through-the-
+ * driver residual around it is stated here and not there.
  *
  * Only absolute, existing answers count; only names that look like a driver are asked at all
  * (agbcc IS a cc1 and takes no such flag), stdin is closed and the probe is bounded.
@@ -1397,6 +1414,18 @@ export function candCache(label: string, stamp: () => string): CandCache {
     return 'sound';
   };
 
+  /** Hand a found entry back the way this store answers: an object path, or the stored rejection
+   *  as an Error. The counter is bumped HERE, so the two paths that serve an entry (`get`, and
+   *  `abandonAudit` taking a withheld answer back) cannot come to count a serve differently. */
+  const serve = (found: { obj: string } | { fail: string }): string | Error => {
+    if ('obj' in found) {
+      bump('hit');
+      return found.obj;
+    }
+    bump('failHit');
+    return new Error(found.fail);
+  };
+
   /** Is this key one `get` withheld for an audit? Claims it, so the audit runs exactly once and a
    *  later lookup in the same run is served. `Set.prototype.delete` returns a boolean (unlike
    *  `add`, which returns the Set), and this is the only place that distinction may be relied on. */
@@ -1438,12 +1467,9 @@ export function candCache(label: string, stamp: () => string): CandCache {
         bump('sampled');
         return undefined;
       }
-      if ('obj' in found) {
-        bump('hit');
-        return found.obj;
-      }
-      bump('failHit');
-      return new Error(found.fail);
+      // The lookup above, never a second one: re-reading here would reopen a window between the
+      // withholding decision and the answer it decided about.
+      return serve(found);
     },
     put(key, symbol, objPath) {
       const n = namespace();
@@ -1470,19 +1496,26 @@ export function candCache(label: string, stamp: () => string): CandCache {
         // the fresh object still stores normally below.
         bump('sampledStale');
       }
+      // A store that cannot take this object is not a failure of the RUN — the caller's own object
+      // is the answer either way — but it is not nothing, and each of the three ways it happens is
+      // counted rather than returned silently. A store that never warms otherwise looks exactly
+      // like a store that was never asked to.
       let bytes: Buffer;
       try {
         bytes = readFileSync(objPath);
       } catch {
+        bump('putUnreadable');
         return objPath; // the caller's own object is the answer; storing it is best-effort
       }
       if (bytes.length === 0) {
+        bump('putEmpty');
         return objPath; // an empty object is not an answer; the caller's own guards speak
       }
       const dest = pathFor(n, key, symbol, 'o');
       try {
         linkInto(bytes, dest);
       } catch {
+        bump('putUnstorable');
         return objPath;
       }
       bump('stored');
@@ -1505,7 +1538,7 @@ export function candCache(label: string, stamp: () => string): CandCache {
         writeAtomic(dest, message);
         bump('failStored');
       } catch {
-        /* a store that cannot be written is a cold store */
+        bump('failUnstorable'); // a store that cannot be written is a cold store, and says so
       }
     },
     abandonAudit(key, symbol) {
@@ -1513,22 +1546,12 @@ export function candCache(label: string, stamp: () => string): CandCache {
       if (n === undefined) {
         return undefined;
       }
-      const id = keyId(n, key, symbol);
-      if (!auditing.delete(id)) {
+      if (!claimAudit(keyId(n, key, symbol))) {
         return undefined; // this key was never withheld; the caller's failure is its own
       }
-      audited.add(id);
       bump('sampledAbandoned');
       const found = lookup(n, key, symbol);
-      if (found === undefined) {
-        return undefined;
-      }
-      if ('obj' in found) {
-        bump('hit');
-        return found.obj;
-      }
-      bump('failHit');
-      return new Error(found.fail);
+      return found === undefined ? undefined : serve(found);
     },
     verify(key, symbol, objPath) {
       if (MODE !== 'verify') {

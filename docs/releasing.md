@@ -22,7 +22,11 @@ mistaken for a passing one.
 3. `pnpm run format:check`
 4. `pnpm run test:offline`
 5. **`pnpm test` — the FULL suite, including the toolchain-backed matching tests.**
-6. `pnpm bench run && pnpm bench merge && pnpm bench regression` — 0 lost, 0 missing.
+6. `pnpm bench run && pnpm bench merge`, then BOTH comparisons — they answer different
+   questions, and `regression` alone passes a release that republishes different numbers:
+   - `pnpm bench regression` — OUTCOME only: 0 match→non-match flips, 0 committed rows missing.
+   - `pnpm bench diff --base origin/main` — PER ROW and PER FIELD, `source` included, plus the
+     row set itself. See `apps/benchmark/src/cli.ts`'s `diff` case for the contract.
 
 ### Why gate 5 is on this list
 

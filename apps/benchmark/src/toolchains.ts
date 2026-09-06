@@ -56,8 +56,9 @@ export interface BuiltTarget {
  *  @asmlift/toolchains' `nonEmptyDump` guards the objdump STEPS that package runs; this guards the
  *  CONTRACT and names the ROW, and it is the only one of the two the real tier reaches —
  *  `compile/{ido,kmc,gcc272}.ts` run their own `disasm()` and agbcc's target is a `.s` read from
- *  disk, no objdump involved. Both `Case.build` implementations go through it, so all 894 rows are
- *  covered and not the 642 the cache sees. */
+ *  disk, no objdump involved. Both `Case.build` implementations go through it — the synthetic
+ *  tier's via `cache.ts`, the real tier's via `compile/real.ts` — so EVERY row is covered, not
+ *  only the ones the cache sees. */
 export function checkedTarget(built: BuiltTarget, what: string): BuiltTarget {
   if (built.asm.trim() === '') {
     throw new Error(`${what} produced an empty disassembly — refusing it as a scoring target`);

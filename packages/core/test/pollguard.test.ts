@@ -6,9 +6,8 @@ import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { pollGuards, pollReads } from '../src/l3/pollguard';
+import { c, s32, v } from './helpers';
 
-const s32 = { kind: 'int', width: 32, signed: true } as const;
-const v = (name: string): Expr => ({ k: 'var', name });
 const fn = (body: Stmt[]): SFn => ({ name: 'f', params: [{ name: 'a0', type: s32 }], locals: [], retType: s32, body });
 
 test('an empty do-while regrows its guard', () => {
@@ -32,7 +31,6 @@ test('nested inside a loop, the wrap still lands in place', () => {
 });
 
 // ── /pollread (same file): a materialized poll re-reads in its own condition ────────────────
-const c = (value: number): Expr => ({ k: 'const', value });
 const bin = (op: '&' | '!=', l: Expr, r: Expr): Expr => ({ k: 'bin', op, l, r });
 const deref2 = (base: Expr): Expr => ({ k: 'index', base, idx: c(2), width: 4, signed: true });
 const assign = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
@@ -174,4 +172,27 @@ test('refused: a param temp — the declaration to drop is not a local', () => {
     ],
   };
   expect(pollReads(f)).toBeNull();
+});
+
+// The OTHER half of `condDerefsPlain`'s refusal, and the one no test named: a deref in the
+// condition whose base is not rooted at a declared var at all — a raw address, which may be MMIO
+// with no local anywhere to declare it volatile. `rootVar` answers null for exactly those trees,
+// and null refuses just as a volatile-declared root does.
+test('refused: a raw-address deref beside the variable — no declaration says whether it is a device', () => {
+  const rawRead: Expr = {
+    k: 'index',
+    base: { k: 'cast', to: { kind: 'ptr', to: s32 }, e: c(0x4000208) },
+    idx: c(0),
+    width: 4,
+    signed: true,
+  };
+  const body: Stmt[] = [
+    assign('v4', deref2(v('p1'))),
+    {
+      k: 'while',
+      cond: bin('!=', bin('&', v('v4'), rawRead), c(0)),
+      body: [assign('v4', deref2(v('p1')))],
+    },
+  ];
+  expect(pollReads(fnP(body))).toBeNull();
 });

@@ -19,10 +19,18 @@ import { type Gate, firstRejection } from './gates';
 const isLoop = (s: Stmt): boolean => s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
 
 function namesIn(e: Expr, out: Set<string>): void {
-  // `addr` names a GLOBAL, never a local — collected anyway. A name reaching BOTH forms would
-  // otherwise get a span that ignores its `addr` mentions, and a SHORT span is a clobber while a
-  // long one is only a missed merge. `structure.ts` keeps locals to /^[vt]\d+$/ and excludes global
-  // names, so this cannot fire today; collecting is the direction that stays safe if that changes.
+  // `addr` names a GLOBAL (`&gSym`) or a LOCAL — the structurer renders an `laddr` frame object
+  // as `&sp0`, an addr node over a name that IS in `sfn.locals`. Both are collected, because a
+  // name mentioned only through `&` still has a live range: a span that ignored its `addr`
+  // mentions would be SHORT, and a short span is a clobber where a long one is only a missed
+  // merge. Collecting a global name costs nothing — it is not in `sfn.locals`, so no pair is
+  // ever built for it.
+  //
+  // `rename` DISAGREES WITH THIS, and knowingly: it rewrites only `var` leaves, so a local
+  // absorbed while mentioned through `&` leaves that mention standing against a declaration the
+  // merge deleted. Reconciling the two changes which candidates compile — a measured change, not a
+  // cleanup — so today's behaviour is pinned exactly in coalesce.test.ts ('rename') rather than
+  // repaired here.
   if (e.k === 'var' || e.k === 'addr') out.add(e.name);
   for (const c of exprChildren(e)) namesIn(c, out);
 }
@@ -72,6 +80,12 @@ const forInductionVar = (s: Extract<Stmt, { k: 'for' }>): string | null =>
   stepIsArithmetic(s.inc.value, s.inc.name)
     ? s.init.name
     : null;
+
+/** Is this local's declaration carrying a `volatile` qualifier of either kind — the object itself,
+ *  or its pointee? THE one spelling of the question both gate tables' `volatile` rule asks, kept
+ *  shared while the two rules stay separate objects: `typeToString` spells neither qualifier, so a
+ *  path that asked only about one would let a qualified local absorb into a plain one. */
+const isVolatileLocal = (l: SFn['locals'][number]): boolean => l.volatile === true || l.pointeeVolatile === true;
 
 function spans(body: Stmt[]): Map<string, Span> {
   const out = new Map<string, Span>();
@@ -194,16 +208,17 @@ export interface MergePair {
  *  execution order. The ancestor chain is what the span records, not the innermost loop: an outer
  *  loop re-runs an inner one's statements, so it can reorder a pair that no inner loop shares.
  *
- *  ABLATE `first-is-write` ALONE AND NOTHING HAPPENS — `const-fed` masks it, so a survivor first
- *  mentioned by a read was uninitialized there in the original too. Drop both to see what it does,
- *  which is to bound the accepted class below by an order of magnitude. `const-fed` likewise bounds
- *  candidate growth: merges go as `L(L-1)/2` in the local count, each a distinct compile. On a
- *  loop-heavy function it is what bounds them, because `shared-loop` refuses only pairs a back
+ *  `first-is-write` AND `const-fed` ARE INDEPENDENT, and neither masks the other: a survivor whose
+ *  every feed is a constant can still be first MENTIONED by a read, and ablating `first-is-write`
+ *  alone then offers the merge (coalesce.test.ts pins exactly that program). What `const-fed`
+ *  bounds is candidate GROWTH: merges go as `L(L-1)/2` in the local count, each a distinct compile.
+ *  On a loop-heavy function it is what bounds them, because `shared-loop` refuses only pairs a back
  *  edge can reorder: klonoa's LoadBGTilemapData declares 43 locals — 1806 ordered pairs — and
  *  `const-fed` is what keeps three of them (ablate it and the span path offers 273). A rule
  *  refusing every in-loop local would make that bound redundant; this one does not, so any further
- *  relaxation of `const-fed` is a multiplier, and three call sites pay it (`/coalesce`,
- *  `/scopebase-coalesce`, the `/livebase` pairings). */
+ *  relaxation of `const-fed` is a multiplier, and two call sites pay it (`/coalesce` and
+ *  `/scopebase-coalesce`; the `/livebase` pairings enumerate the ARM path and pay
+ *  ARM_DISJOINT_GATES' `arm-init` instead). */
 export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   {
     id: 'param',
@@ -271,6 +286,17 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
  *  ill-defined rather than one being wrong — but this is a real difference and the differ, not any
  *  gate, is what keeps it from faking a match. The fuzz asserts it stays reachable, so the carve-out
  *  that excuses it cannot quietly become dead. */
+export function coalesceCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
+  const { candidates } = coalesceUnder(COALESCE_GATES, sfn);
+  const seen = new Set(candidates.map((c) => c.merged));
+  for (const c of armDisjointCandidates(sfn)) {
+    if (!seen.has(c.merged)) {
+      candidates.push(c);
+    }
+  }
+  return candidates;
+}
+
 /** The survivor's declaration list after `gone` is absorbed into `kept`.
  *
  *  The merged local's declaration is dropped, so any attribute on it would be lost — and one of
@@ -289,17 +315,6 @@ function localsAfterMerge(locals: SFn['locals'], gone: string, kept: string): SF
       }
       return { ...l, slots: [...new Set([...(l.slots ?? []), ...goneSlots])].sort((x, y) => x - y) };
     });
-}
-
-export function coalesceCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
-  const { candidates } = coalesceUnder(COALESCE_GATES, sfn);
-  const seen = new Set(candidates.map((c) => c.merged));
-  for (const c of armDisjointCandidates(sfn)) {
-    if (!seen.has(c.merged)) {
-      candidates.push(c);
-    }
-  }
-  return candidates;
 }
 
 /** One candidate ARM-DISJOINT merge: every mention of `a` inside one arm of a single `if`, every
@@ -368,35 +383,40 @@ export function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] 
   return armDisjointUnder(ARM_DISJOINT_GATES, sfn).candidates;
 }
 
-/** `armDisjointCandidates` with the gate table supplied plus which gate refused each pair — the
- *  same ablation-as-a-value seam `coalesceUnder` provides for the span table. */
-export function armDisjointUnder(
-  gates: readonly Gate<ArmPair>[],
-  sfn: SFn,
-): { candidates: { merged: string; sfn: SFn }[]; refusals: Map<string, number> } {
-  const refusals = new Map<string, number>();
-  if (sfn.locals.length < 2) {
-    return { candidates: [], refusals };
-  }
-  // Both whole-subtree walks below are MEMOISED on node identity, for one call: `firstMention`
-  // walks a statement's whole subtree once per statement it scans, and the a×b loop's two calls
-  // each depend on only ONE of a and b. Sound because nothing here mutates the tree — the only
-  // rewrite is `rename`, which rebuilds every statement it touches and leaves `sfn` alone
-  // (structure-purity.test.ts pins the same promise one level up).
-  const countMentions = (list: Stmt[]): Map<string, number> => {
-    const out = new Map<string, number>();
-    const walk = (stmts: Stmt[]): void => {
-      for (const st of stmts) {
-        const here = new Set<string>();
-        if (st.k === 'assign') here.add(st.name);
-        for (const e of stmtExprs(st)) namesIn(e, here);
-        for (const n of here) out.set(n, (out.get(n) ?? 0) + 1);
-        walk(stmtChildren(st));
-      }
-    };
-    walk(list);
-    return out;
+/** Every name each statement of `list` MENTIONS, and how many statements mention it — an assign
+ *  target counts, and so does every name in the statement's own expressions. Nested statements are
+ *  counted too, so this is the whole subtree's census. */
+function countMentions(list: Stmt[]): Map<string, number> {
+  const out = new Map<string, number>();
+  const walk = (stmts: Stmt[]): void => {
+    for (const st of stmts) {
+      const here = new Set<string>();
+      if (st.k === 'assign') here.add(st.name);
+      for (const e of stmtExprs(st)) namesIn(e, here);
+      for (const n of here) out.set(n, (out.get(n) ?? 0) + 1);
+      walk(stmtChildren(st));
+    }
   };
+  walk(list);
+  return out;
+}
+
+/** The three mention queries the arm-disjoint path asks, sharing ONE set of memos.
+ *
+ *  MEMOISED ON NODE IDENTITY, so the index belongs to one tree and one call: build it per
+ *  `armDisjointUnder` invocation and never hold it across a rewrite. Sound because nothing on this
+ *  path mutates the tree — the only rewrite is `rename`, which rebuilds every statement it touches
+ *  and leaves the input alone (structure-purity.test.ts pins the same promise one level up). The
+ *  memos earn their keep because `firstMention` walks a statement's whole subtree once per
+ *  statement it scans, and the a×b loop's two calls each depend on only ONE of a and b.
+ *
+ *  `firstMentionIn` and `firstMention` are mutually recursive and stay inside for that reason —
+ *  the recursion runs back through the memo, not around it. */
+function mentionIndex(): {
+  mentionsOf: (list: Stmt[]) => Map<string, number>;
+  mentionsUnder: (st: Stmt) => Map<string, number>;
+  firstMention: (list: Stmt[], n: string) => 'const-write' | 'other' | null;
+} {
   const listMentions = new Map<Stmt[], Map<string, number>>();
   const mentionsOf = (list: Stmt[]): Map<string, number> => {
     let m = listMentions.get(list);
@@ -417,14 +437,6 @@ export function armDisjointUnder(
     }
     return m;
   };
-  const total = mentionsOf(sfn.body);
-  const params = new Set(sfn.params.map((p) => p.name));
-  const locals = new Map(sfn.locals.map((l) => [l.name, l]));
-  const typeOf = new Map(sfn.locals.map((l) => [l.name, typeToString(l.type)]));
-  const out: { merged: string; sfn: SFn }[] = [];
-  const declIdx = new Map(sfn.locals.map((l, i) => [l.name, i]));
-  const isVolatile = (n: string): boolean =>
-    locals.get(n)?.volatile === true || locals.get(n)?.pointeeVolatile === true;
   // The first PREORDER mention of `n` in an arm, looked for through if statements whose own
   // condition does not read it (an if's cond evaluates before either arm). 'const-write' is a
   // pure `n = K`; anything else mentioning n first — a read, a computed assign, a loop — refuses.
@@ -448,8 +460,8 @@ export function armDisjointUnder(
     }
     return null;
   };
-  // Per (arm, NAME): the answer depends on both, and the a×b loop below asks for each `a` once per
-  // `b` and each `b` once per `a`.
+  // Per (arm, NAME): the answer depends on both, and the a×b loop asks for each `a` once per `b`
+  // and each `b` once per `a`.
   const firstMentions = new Map<Stmt[], Map<string, 'const-write' | 'other' | null>>();
   const firstMention = (list: Stmt[], n: string): 'const-write' | 'other' | null => {
     let per = firstMentions.get(list);
@@ -461,6 +473,30 @@ export function armDisjointUnder(
       per.set(n, firstMentionIn(list, n));
     }
     return per.get(n)!;
+  };
+  return { mentionsOf, mentionsUnder, firstMention };
+}
+
+/** `armDisjointCandidates` with the gate table supplied plus which gate refused each pair — the
+ *  same ablation-as-a-value seam `coalesceUnder` provides for the span table. */
+export function armDisjointUnder(
+  gates: readonly Gate<ArmPair>[],
+  sfn: SFn,
+): { candidates: { merged: string; sfn: SFn }[]; refusals: Map<string, number> } {
+  const refusals = new Map<string, number>();
+  if (sfn.locals.length < 2) {
+    return { candidates: [], refusals };
+  }
+  const { mentionsOf, firstMention } = mentionIndex();
+  const total = mentionsOf(sfn.body);
+  const params = new Set(sfn.params.map((p) => p.name));
+  const locals = new Map(sfn.locals.map((l) => [l.name, l]));
+  const typeOf = new Map(sfn.locals.map((l) => [l.name, typeToString(l.type)]));
+  const out: { merged: string; sfn: SFn }[] = [];
+  const declIdx = new Map(sfn.locals.map((l, i) => [l.name, i]));
+  const isVolatile = (n: string): boolean => {
+    const l = locals.get(n);
+    return l !== undefined && isVolatileLocal(l);
   };
   const visit = (stmts: Stmt[], inLoop: boolean): void => {
     for (const st of stmts) {
@@ -526,9 +562,7 @@ export function coalesceUnder(
   }
   const params = new Set(sfn.params.map((p) => p.name));
   const typeOf = new Map(sfn.locals.map((l) => [l.name, typeToString(l.type)]));
-  const volatiles = new Set(
-    sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
-  );
+  const volatiles = new Set(sfn.locals.filter(isVolatileLocal).map((l) => l.name));
   const sp = spans(sfn.body);
   const candidates: { merged: string; sfn: SFn }[] = [];
   for (const a of sfn.locals.map((l) => l.name)) {

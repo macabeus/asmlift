@@ -155,7 +155,8 @@ describe('IDIOM-ENVELOPE widening mechanism', () => {
 //
 // Cost of that, stated: a frontend throw degrades the whole function to a stub in annotate mode,
 // where an inline marker would have kept the rest of the recovery. Nothing in the corpus pays it
-// (measured: 0 of 743 benchmark rows change outcome, score, or emitted source), because no real
+// (measured 2026-08-16: 0 of the 743 benchmark rows the corpus held then change outcome, score, or
+// emitted source), because no real
 // target combines a `div` mnemonic with hwDivide:false — this capability flip is synthetic. The
 // general repair is a zero-result `opaque` ("an unmodelled effect happened here"), which would let
 // every instruction with no modellable destination mark in place instead of stubbing; it has real

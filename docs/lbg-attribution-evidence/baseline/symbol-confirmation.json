@@ -25,5 +25,5 @@
   "asmTail": ".text\n\t.align\t2, 0\n",
   "assemblerFlags": "-mcpu=arm7tdmi -mthumb-interwork",
   "assemblyAndObjectCmp": "identical",
-  "limitation": "Confirmed captured named-symbol455 and exact fresh compile. No capture-label map: four non-raw455 labels are independently present in completed rank log. Historical462 is superseded by current455; cause not established."
+  "limitation": "Confirmed captured named-symbol 455 and exact fresh compile. No capture-label map: four non-raw 455 labels are independently present in completed rank log. Historical 462 is superseded by current 455; cause not established."
 }

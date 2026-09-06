@@ -119,9 +119,47 @@ test('a latch holding a STORE is refused — nothing downstream would notice it 
   // side-effecting op with no result. Drop a value-producing one and `verify` catches the dangling
   // value; drop a `store` and nothing does — `assertEffectsPreserved` tallies `call` and `opaque`
   // only, so the write is simply gone from the emitted C.
+  //
+  // Refused by the PRE-CHECK, not by a gate: a `store` is not a terminator, so this block offers no
+  // target and `foldEmptyLatches` never builds a candidate for it. `latch-does-work` decides the
+  // narrower question the next test reaches.
   const fn = parse(LATCH.replace('^bb2():\n  br ^bb1(%3)', '^bb2():\n  store %0, %3 {off=0, width=4}\n  br ^bb1(%3)'));
   expect(foldEmptyLatches(fn)).toBe(0);
   expect(print(fn)).toContain('store %0, %3');
+});
+
+// THE POPULATION `latch-does-work` ACTUALLY REACHES, which no fixture above does: a block whose
+// SOLE op is a terminator — so the pre-check hands it a target — but a `cond_br` rather than a `br`.
+// The fold splices in `successors[0]` and drops the block, which would take the SECOND arm's edge
+// with it. `^bb4` is reachable only from that arm, so the ablated run orphans it outright.
+test('a latch whose sole op is a cond_br is refused — folding it would drop its second arm', () => {
+  const IR = `fn c {
+^bb0(%0: s32):
+  br ^bb1(%0)
+^bb1(%1: s32):
+  %2: s32 = const {value=1}
+  %3: s32 = add %1, %2
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb2(), ^bb3(%3)
+^bb2():
+  cond_br %4, ^bb1(%3), ^bb4(%3)
+^bb3(%5: s32):
+  ret %5
+^bb4(%6: s32):
+  ret %6
+}
+`;
+  const kept = parse(IR);
+  expect(foldEmptyLatches(kept)).toBe(0);
+
+  const ablated = parse(IR);
+  const secondArm = ablated.blocks[ablated.blocks.length - 1]; // ^bb4, reached only from the latch
+  expect(foldEmptyLatches(ablated, without(LATCH_GATES, 'latch-does-work'))).toBe(1);
+  verify(ablated);
+  const ops = ablated.blocks.flatMap((b) => b.ops);
+  expect(ops.filter((o) => o.opcode === 'cond_br').length).toBe(1); // the latch's own went with it
+  const reached = new Set(ops.flatMap((o) => o.successors.map((sx) => sx.block)));
+  expect(reached.has(secondArm)).toBe(false); // …and its second arm lost its only in-edge
 });
 
 test('chained latches fold to a fixpoint, and every removal keeps dominance sound', () => {

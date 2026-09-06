@@ -34,6 +34,7 @@ import {
   candidateCacheRefusal,
   isChainMeasurement,
   noteKeyRefused,
+  sha,
   toolchainFileChain,
 } from './candcache';
 import { macroDefinesOf, renderDeclarations, selfDeclaredContext } from './declare';
@@ -398,10 +399,16 @@ function scanTokens(template: string): string[] {
  *  by the compile as surely as an `-I` operand is. A glob or an injected header with NO directory
  *  part names the project root, which is a published residual and not an operand.
  *
- *  `readDir` turns on the flag-FILE expansion: with it, a response or specs file that exists
- *  under it is read and scanned as a template in its own right. Without it the function stays
- *  pure, which is what the operand-parser unit tests want. */
-export function templatePathOperands(template: string, readDir?: string, depth = 0): string[] {
+ *  `expandFlagFilesFrom` turns on the flag-FILE expansion: with it, a response or specs file that
+ *  exists under that directory is read and scanned as a template in its own right. Omit the option
+ *  and the function touches no filesystem at all — which is what the operand-parser unit tests
+ *  want, and which is now what they ASK FOR rather than a side effect of having no directory to
+ *  hand. The recursion's depth is private to `collectOperands` below; a caller never sets it. */
+export function templatePathOperands(template: string, opts?: { expandFlagFilesFrom: string }): string[] {
+  return collectOperands(template, opts?.expandFlagFilesFrom, 0);
+}
+
+function collectOperands(template: string, readDir: string | undefined, depth: number): string[] {
   const toks = flagScanTokens(template);
   const out: string[] = [];
   const seen = new Set<string>();
@@ -430,7 +437,7 @@ export function templatePathOperands(template: string, readDir?: string, depth =
     } catch {
       return;
     }
-    for (const nested of templatePathOperands(body, readDir, depth + 1)) {
+    for (const nested of collectOperands(body, readDir, depth + 1)) {
       take(nested);
     }
     // AND every token of the body as a path in its own right, which is the same thing `stamp()`
@@ -506,6 +513,151 @@ function cdBases(template: string, cwd: string): string[] {
   return out;
 }
 
+// ─── One candidate compile, as this seam runs it ──────────────────────────────────────────────
+// Everything from here to `compilersFromCommand` is a property of the SEAM rather than of any one
+// project's command: none of it reads the template, the cwd or the probe verdict, so none of it
+// belongs inside the factory that closes over those three.
+
+// ONE scratch directory per WORKER, emptied before each compile — not one per candidate.
+// mkdtemp never removes anything, so a per-candidate directory leaked one per compile: a
+// ranked run over 20k candidates left 20k of them behind, and the temp dir had accumulated
+// 1.5M. Emptied rather than reused: a step that exits 0 without writing its output must still
+// fail LOUD, and a surviving sibling from the previous candidate is exactly what would let it
+// pass (the same class of silent truncation `compilersFromCommand`'s `sh -ec` note is about).
+//
+// Reuse is safe HERE because the template runs a fresh process per compile against the host
+// filesystem. It is NOT safe for a template that keeps a long-lived container with this
+// directory's parent bind-mounted: the benchmark's dockerized toolchains measured ~30% of
+// compiles failing on a reused path (apps/benchmark/src/compile/util.ts `scratchSlot`), which
+// is why they still mkdtemp per candidate.
+const slot = (): (() => string) => {
+  let dir: string | undefined;
+  return () => {
+    if (dir === undefined) {
+      dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
+      return dir;
+    }
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir);
+    return dir;
+  };
+};
+
+// What one template execution came to. A verdict is one of two THINGS, not one shape with four
+// fields three of which are meaningless on either branch: a success is an object path and nothing
+// else, and only a failure has a `transient` to be asked about. The union is what makes
+// `storableRejection` unable to be handed a success.
+//
+// `transient` is the half a MESSAGE cannot carry: this machine had a bad minute, the compiler
+// never gave a verdict, and nothing about the outcome may be stored.
+type Verdict = { ok: true; objPath: string } | { ok: false; transient: boolean; cmd: string; err: string };
+
+// The scratch DIRECTORY is collapsed out of every failure message. It is an mkdtemp accident:
+// two runs of the identical failure print different text, so a rejection replayed from the cache
+// (which stores the message from the run that produced it) would not be equal in RESULT to a
+// fresh one — and the ranked path publishes that first line as `dropped[].error`. Collapsing it
+// makes the cached and uncached spellings identical, and takes a machine path out of published
+// output at the same time.
+const verdict = (status: number | null, output: string, cmd: string, outPath: string): Verdict => {
+  const scrub = (t: string): string => t.split(dirname(outPath)).join('<scratch>');
+  // A KILLED compile is not a rejection, and `sh` is what hides that here. The template always
+  // runs through `sh -ec`, and a shell reports a killed child as exit 128+signal — a SIGKILLed
+  // compiler arrives as a perfectly ordinary `exit 137`, which the negative-entry guard matched
+  // and stored FOREVER (`sh: line 1: 15022 Killed: 9` in the stored body). Reach is not
+  // hypothetical: candidate compiles have no timeout, `docker run` exits 137 on an OOM-killed
+  // container, and a bench run forks 8–16 shards. `status === null` is the same thing when the
+  // shell ITSELF is killed. Both are transient and neither may be stored.
+  if (status === null || status >= 128) {
+    return {
+      ok: false,
+      transient: true,
+      cmd,
+      err: scrub(
+        `compile command did not run to completion (${status === null ? 'killed by a signal' : `exit ${status} — killed by signal ${status - 128}`}): ` +
+          `${cmd}\n${output.trim()}`,
+      ),
+    };
+  }
+  if (status !== 0) {
+    return {
+      ok: false,
+      transient: false,
+      cmd,
+      err: scrub(`compile command failed (exit ${status}): ${cmd}\n${output.trim()}`),
+    };
+  }
+  if (!existsSync(outPath)) {
+    return {
+      ok: false,
+      transient: false,
+      cmd,
+      err: scrub(`compile command exited 0 but produced no object at {{outputPath}}: ${cmd}`),
+    };
+  }
+  return { ok: true, objPath: outPath };
+};
+
+// What ONE namespace stamp may spend walking directories, and the allowance that spends it. A
+// directory measurement is unbounded by nature (`--sysroot /` names a filesystem), so running out
+// is LOUD — it throws, `candCache` turns the throw into a refusal, and the run compiles uncached.
+// The allowance is minted per STAMP rather than per instance: a second stamp against a spent one
+// would refuse a namespace the first measured happily, which is a cold start nobody could explain.
+// (`candCache` resolves a namespace at most once, so today there is exactly one stamp per cache.)
+const MAX_MEASURED_ENTRIES = 20000;
+const MAX_MEASURED_BYTES = 512 * 1024 * 1024;
+type MeasurementBudget = { entries: number; bytes: number };
+const newMeasurementBudget = (): MeasurementBudget => ({
+  entries: MAX_MEASURED_ENTRIES,
+  bytes: MAX_MEASURED_BYTES,
+});
+
+/** A file the shell would RUN, as opposed to one a compile merely reads. Only those have a
+ *  delegate chain worth following. */
+const isExecutableFile = (p: string): boolean => {
+  try {
+    const st = statSync(p);
+    return st.isFile() && (st.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+};
+
+// A negative entry is only sound for a DETERMINISTIC rejection: the template RAN and exited
+// nonzero. `compile command failed to start` (a missing shell, a fork failure) and a killed
+// process must never be stored: a transient would then drop that candidate on every future
+// run, which is the silent-wrong-answer shape this repo bans.
+const DETERMINISTIC_REJECTION = /^compile command (failed \(exit \d+\)|exited 0 but produced no object)/;
+/** A rejection is storable only when the SPAWN RESULT says the compiler gave a verdict, and only
+ *  when the message has the shape one has. Two guards, because each has been the one that held:
+ *  the message shape alone stored a SIGKILL laundered by `sh` into `exit 137`. */
+const storableRejection = (r: Extract<Verdict, { ok: false }>): boolean =>
+  !r.transient && DETERMINISTIC_REJECTION.test(r.err);
+
+/** The world probe's payload: one harmless declaration, so the only thing the compiler can be
+ *  objecting to is the context it was handed. */
+const PROBE = 'int asmlift_prelude_probe;\n';
+
+// headers world ⇒ BOTH the prelude and the synthesized declarations drop — the injected
+// headers own the types and every declaration (a second copy is a C89 collision).
+// EXCEPT the address-cast macro defines: a duplicate `#define` with an identical body is
+// legal C (unlike a duplicate typedef or struct), and the headers world does NOT
+// necessarily supply them — a PREPROCESSED context has no macros left at all, so dropping
+// these turns a macro-named candidate into `undeclared identifier`. They are emitted in
+// both worlds for that reason.
+// The self-declared half is CORE's composition (declare.ts selfDeclaredContext), not a second
+// copy of `C_TYPEDEFS + decls` — the webapp's scorer calls the same function, so the two
+// scoring worlds cannot drift on what a candidate was compiled in.
+const preludeFor = (world: boolean, declarations?: string): string =>
+  world ? selfDeclaredContext(declarations) : macroDefinesOf(declarations);
+
+/** A verdict as the caller's contract wants it: the object path, or a throw. */
+const unwrap = (r: Verdict): string => {
+  if (!r.ok) {
+    throw new Error(r.err);
+  }
+  return r.objPath;
+};
+
 /** Build a CandidateCompiler from a `decomp.yaml` command template. `{{inputPath}}` and
  *  `{{outputPath}}` are REQUIRED placeholders (substituted with absolute paths);
  *  `{{symbol}}` is optional. The placeholder style matches other decomp tools' `compiler`
@@ -528,38 +680,10 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       `compiler command has an unknown placeholder ${unknown[0]} — supported: {{inputPath}}, {{outputPath}}, {{symbol}}`,
     );
   }
-  // ONE scratch directory per WORKER, emptied before each compile — not one per candidate.
-  // mkdtemp never removes anything, so a per-candidate directory leaked one per compile: a
-  // ranked run over 20k candidates left 20k of them behind, and the temp dir had accumulated
-  // 1.5M. Emptied rather than reused: a step that exits 0 without writing its output must still
-  // fail LOUD, and a surviving sibling from the previous candidate is exactly what would let it
-  // pass (the same class of silent truncation the `sh -ec` note above is about).
-  //
-  // Reuse is safe HERE because the template runs a fresh process per compile against the host
-  // filesystem. It is NOT safe for a template that keeps a long-lived container with this
-  // directory's parent bind-mounted: the benchmark's dockerized toolchains measured ~30% of
-  // compiles failing on a reused path (apps/benchmark/src/compile/util.ts `scratchSlot`), which
-  // is why they still mkdtemp per candidate.
-  const slot = (): (() => string) => {
-    let dir: string | undefined;
-    return () => {
-      if (dir === undefined) {
-        dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
-        return dir;
-      }
-      rmSync(dir, { recursive: true, force: true });
-      mkdirSync(dir);
-      return dir;
-    };
-  };
-
-  // One template execution, in two halves: `stage` writes the input and builds the command,
-  // `verdict` reads the exit status — shared verbatim by the sync and async runners so the two
-  // can never diverge on what counts as a failed compile or on how it is reported.
-  //
-  // `transient` is the half a MESSAGE cannot carry: this machine had a bad minute, the compiler
-  // never gave a verdict, and nothing about the outcome may be stored.
-  type Verdict = { ok: boolean; transient: boolean; cmd: string; err: string };
+  // One template execution, in two halves: `stage` writes the input and builds the command, and
+  // the module-level `verdict` above reads the exit status — shared verbatim by the sync and async
+  // runners so the two can never diverge on what counts as a failed compile or on how it is
+  // reported. Only `stage` is per-instance, because only `stage` substitutes into the template.
   const stage = (dir: string, content: string, symbol: string, ext: 'c' | 'p') => {
     const inPath = join(dir, `cand.${ext}`);
     const outPath = join(dir, 'cand.o');
@@ -570,68 +694,24 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       .replaceAll('{{symbol}}', safe(symbol, 'the symbol name'));
     return { outPath, cmd };
   };
-  // The scratch DIRECTORY is collapsed out of every failure message. It is an mkdtemp accident:
-  // two runs of the identical failure print different text, so a rejection replayed from the cache
-  // (which stores the message from the run that produced it) would not be equal in RESULT to a
-  // fresh one — and the ranked path publishes that first line as `dropped[].error`. Collapsing it
-  // makes the cached and uncached spellings identical, and takes a machine path out of published
-  // output at the same time.
-  const verdict = (status: number | null, output: string, cmd: string, outPath: string): Verdict => {
-    const scrub = (t: string): string => t.split(dirname(outPath)).join('<scratch>');
-    // A KILLED compile is not a rejection, and `sh` is what hides that here. The template always
-    // runs through `sh -ec`, and a shell reports a killed child as exit 128+signal — a SIGKILLed
-    // compiler arrives as a perfectly ordinary `exit 137`, which the negative-entry guard matched
-    // and stored FOREVER (`sh: line 1: 15022 Killed: 9` in the stored body). Reach is not
-    // hypothetical: candidate compiles have no timeout, `docker run` exits 137 on an OOM-killed
-    // container, and a bench run forks 8–16 shards. `status === null` is the same thing when the
-    // shell ITSELF is killed. Both are transient and neither may be stored.
-    if (status === null || status >= 128) {
-      return {
-        ok: false,
-        transient: true,
-        cmd,
-        err: scrub(
-          `compile command did not run to completion (${status === null ? 'killed by a signal' : `exit ${status} — killed by signal ${status - 128}`}): ` +
-            `${cmd}\n${output.trim()}`,
-        ),
-      };
-    }
-    if (status !== 0) {
-      return {
-        ok: false,
-        transient: false,
-        cmd,
-        err: scrub(`compile command failed (exit ${status}): ${cmd}\n${output.trim()}`),
-      };
-    }
-    if (!existsSync(outPath)) {
-      return {
-        ok: false,
-        transient: false,
-        cmd,
-        err: scrub(`compile command exited 0 but produced no object at {{outputPath}}: ${cmd}`),
-      };
-    }
-    return { ok: true, transient: false, cmd: outPath, err: '' };
-  };
 
-  const mainSlot = slot();
-  const execute = (content: string, symbol: string, ext: 'c' | 'p'): Verdict => {
-    const { outPath, cmd } = stage(mainSlot(), content, symbol, ext);
+  /** One SYNCHRONOUS compile, into the scratch directory it is given. */
+  const executeInSlot = (dir: string, content: string, symbol: string, ext: 'c' | 'p'): Verdict => {
+    const { outPath, cmd } = stage(dir, content, symbol, ext);
     const r = spawnSync('sh', ['-ec', cmd], { encoding: 'utf8', cwd: opts.cwd });
     return verdict(r.status, r.stderr || r.stdout, cmd, outPath);
   };
+  const mainSlot = slot();
+  /** …into the instance's own slot, which is where every CANDIDATE compiled on the sync path
+   *  goes. */
+  const execute = (content: string, symbol: string, ext: 'c' | 'p'): Verdict =>
+    executeInSlot(mainSlot(), content, symbol, ext);
   // Two DEDICATED slots for the namespace stamp probe. Never `mainSlot`: the stamp is reached
   // from `warm()` and, compiled into the slot a candidate has just written, it overwrites that
   // candidate's object — measured once as 8 poisoned keys, 26 moved report fields and 2 rows
   // flipped nonmatch to noncompile, with every other gate green.
   const stampSlot = slot();
   const stampSlot2 = slot();
-  const executeInSlot = (dir: string, content: string, symbol: string, ext: 'c' | 'p'): Verdict => {
-    const { outPath, cmd } = stage(dir, content, symbol, ext);
-    const r = spawnSync('sh', ['-ec', cmd], { encoding: 'utf8', cwd: opts.cwd });
-    return verdict(r.status, r.stderr || r.stdout, cmd, outPath);
-  };
   const executeIn = (dir: string, content: string, symbol: string, ext: 'c' | 'p') =>
     new Promise<Verdict>((res) => {
       const { outPath, cmd } = stage(dir, content, symbol, ext);
@@ -680,24 +760,10 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   // OBJECT BYTES this very template produces for one fixed probe TU, compiled twice in two
   // different directories so the compiler itself answers whether its output is a pure function
   // of its input.
-  const sha256 = (b: Buffer | string): string => createHash('sha256').update(b).digest('hex');
-  /** A file the shell would RUN, as opposed to one a compile merely reads. Only those have a
-   *  delegate chain worth following. */
-  const isExecutableFile = (p: string): boolean => {
-    try {
-      const st = statSync(p);
-      return st.isFile() && (st.mode & 0o111) !== 0;
-    } catch {
-      return false;
-    }
-  };
-  /** A directory measurement is unbounded by nature: `--sysroot /` names a filesystem, and a
-   *  namespace that walks it is a hang rather than a cold start. The budget makes running out
-   *  LOUD — it throws, `candCache` turns the throw into a refusal, and the run compiles uncached.
-   *  Truncating the walk instead would be the other thing, and the other thing is a stale
-   *  object.
+  /** The walk ran out of its allowance (`MeasurementBudget`). Truncating instead would be the
+   *  other thing, and the other thing is a stale object.
    *
-   *  The budget is one running total for the whole STAMP, not per input — so the entry the walk
+   *  The allowance is one running total for the whole STAMP, not per input — so the entry the walk
    *  dies on is an accident of walk order and is not what a reader can act on. The message names
    *  the OPERAND the walk started from as well, which is the half that says what to change. */
   class MeasurementTooLarge extends Error {}
@@ -712,11 +778,13 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
    *  incomplete namespace, which is the same silent-wrong-answer shape `storableRejection`
    *  refuses to store transient rejections for. Loud refusal instead. */
   class MeasurementUnreadable extends Error {}
-  const budget = { entries: 20000, bytes: 512 * 1024 * 1024 };
-  /** `root` is the operand this walk began at — carried down the recursion for the diagnostics
-   *  only. `inDir` says the entry was NAMED by a `readdirSync` we already succeeded at, which
-   *  changes what a failed `statSync` means. */
+  /** `budget` is the walk's remaining allowance, threaded rather than captured: it is spent as the
+   *  walk runs, so it belongs to one STAMP and not to the instance. `root` is the operand this
+   *  walk began at — carried down the recursion for the diagnostics only. `inDir` says the entry
+   *  was NAMED by a `readdirSync` we already succeeded at, which changes what a failed `statSync`
+   *  means. */
   const hashPath = (
+    budget: MeasurementBudget,
     h: ReturnType<typeof createHash>,
     tag: string,
     p: string,
@@ -742,7 +810,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     }
     if (--budget.entries < 0) {
       throw new MeasurementTooLarge(
-        `refusing to measure ${root}: over 20000 files in one namespace stamp (the walk reached ` +
+        `refusing to measure ${root}: over ${MAX_MEASURED_ENTRIES} files in one namespace stamp (the walk reached ` +
           `${p}). A namespace that stops walking is an incomplete namespace, which is a stale ` +
           `object — so nothing is cached`,
       );
@@ -763,7 +831,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       // no probe TU can see).
       h.update('dir:' + tag);
       for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
-        hashPath(h, tag + '/' + e.name, join(p, e.name), root, true);
+        hashPath(budget, h, tag + '/' + e.name, join(p, e.name), root, true);
       }
       return true;
     }
@@ -772,7 +840,8 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     }
     if ((budget.bytes -= st.size) < 0) {
       throw new MeasurementTooLarge(
-        `refusing to measure ${root}: over 512MiB in one namespace stamp (the walk reached ${p}). ` +
+        `refusing to measure ${root}: over ${MAX_MEASURED_BYTES / (1024 * 1024)}MiB in one namespace stamp ` +
+          `(the walk reached ${p}). ` +
           `An incomplete namespace is a stale object, so nothing is cached`,
       );
     }
@@ -792,7 +861,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     // it as `unstattable:`, deliberately, because refusing over a dangling symlink would refuse
     // half the toolchains on earth.
     h.update(tag);
-    h.update(sha256(bytes));
+    h.update(sha(bytes));
     return true;
   };
   /** One entry of a delegate chain. A measurement entry (`UNRESOLVED:`, `ENV:`) is hashed as the
@@ -804,15 +873,16 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
    *  `h.update(cwd)` in `stamp()` keys the whole namespace on the absolute working directory, so
    *  two byte-identical worktrees with an identical template and an identical `inc/` measured as
    *  two namespaces. A tag is not a key; content is what decides. */
-  const hashChain = (h: ReturnType<typeof createHash>, tok: string, entry: string): void => {
+  const hashChain = (budget: MeasurementBudget, h: ReturnType<typeof createHash>, tok: string, entry: string): void => {
     if (isChainMeasurement(entry)) {
       h.update(tok + '>' + entry);
       return;
     }
-    hashPath(h, tok + '>' + basename(entry), entry);
+    hashPath(budget, h, tok + '>' + basename(entry), entry);
   };
   const stamp = (): string => {
     const h = createHash('sha256');
+    const budget = newMeasurementBudget();
     const cwd = resolve(opts.cwd ?? process.cwd());
     // Checked FIRST: a refusal here saves two probe compiles, and through a container those are
     // two `docker run`s.
@@ -833,13 +903,11 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     // THIS MODULE'S OWN BYTES. The bench pipeline hashes its harness code (`compile/agbcc.ts`,
     // `compile/util.ts`) because that code shapes what the compiler is handed; this one shapes it
     // too, and it shapes something the probe object structurally cannot see — most of what a warm
-    // store SERVES is a stored REJECTION, and `verdict()` above builds the text that is stored and
-    // then published as `ranked.dropped[].error`. The probe only ever exercises the success path,
-    // so perturbing that text left the namespace unmoved and the store replayed the old spelling.
-    // Cheap, too: this file has moved 3 times in the repo's whole history, against 4 for
-    // `compile/util.ts`, which has been in a namespace all along.
+    // store SERVES is a stored REJECTION, and `verdict()` builds the text that is stored and then
+    // published as `ranked.dropped[].error`. The probe only ever exercises the success path, so
+    // perturbing that text left the namespace unmoved and the store replayed the old spelling.
     h.update('self:');
-    h.update(sha256(readFileSync(fileURLToPath(import.meta.url))));
+    h.update(sha(readFileSync(fileURLToPath(import.meta.url))));
     // (1) every template token that names an existing FILE: the project's own
     //     `./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`, hashed by content.
     // (2) every remaining token that RESOLVES ON $PATH: `arm-none-eabi-cpp`, `arm-none-eabi-as`,
@@ -863,7 +931,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       if (prev !== undefined) {
         return prev;
       }
-      const r = hashPath(h, tag, p);
+      const r = hashPath(budget, h, tag, p);
       pathSeen.set(p, r);
       return r;
     };
@@ -904,7 +972,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
         // A token that names an EXECUTABLE file (`./tools/agbcc/bin/agbcc`) can be a wrapper too,
         // so follow it as well; a plain data file (`charmap.txt`) has no chain and costs one stat.
         for (const f of toolchainFileChain(execPath)) {
-          hashChain(h, tok, f);
+          hashChain(budget, h, tok, f);
         }
       }
       if (onDisk && /[/.]/.test(tok)) {
@@ -919,7 +987,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
         // delegate served a stale object with the outer file byte-identical. `toolchainFileChain`
         // THROWS where it cannot follow, and `candCache` turns that into a loud refusal.
         for (const f of toolchainFileChain(tok)) {
-          hashChain(h, tok, f);
+          hashChain(budget, h, tok, f);
         }
       }
     }
@@ -931,7 +999,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     // Tagged by BASENAME, never by absolute path, for the same reason the delegate chain is: a
     // toolchain MOVED but not changed should keep its digest. (It does not follow that two
     // worktrees share a namespace — `h.update(cwd)` settles that, and they do not.)
-    for (const operand of templatePathOperands(template, cwd)) {
+    for (const operand of templatePathOperands(template, { expandFlagFilesFrom: cwd })) {
       for (const p of candidatePaths(operand)) {
         // An operand that is not there contributes nothing and needs no MISSING marker: the
         // template TEXT is hashed unconditionally, so absent -> present still moves the namespace
@@ -981,8 +1049,8 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       if (!p1.ok || !p2.ok) {
         return NOT_CACHEABLE;
       }
-      const b1 = sha256(readFileSync(p1.cmd));
-      if (b1 !== sha256(readFileSync(p2.cmd))) {
+      const b1 = sha(readFileSync(p1.objPath));
+      if (b1 !== sha(readFileSync(p2.objPath))) {
         return NOT_CACHEABLE;
       }
       h.update(b1);
@@ -1004,15 +1072,6 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   // process-global `ASMLIFT_CANDCACHE` cannot: a user with two projects, one of them computing a
   // compiler path in a wrapper, would otherwise have to disable the cache for BOTH.
   const cache = opts.candidateCache === 'off' ? OFF_CACHE : candCache('command', stamp);
-  // A negative entry is only sound for a DETERMINISTIC rejection: the template RAN and exited
-  // nonzero. `compile command failed to start` (a missing shell, a fork failure) and a killed
-  // process must never be stored: a transient would then drop that candidate on every future
-  // run, which is the silent-wrong-answer shape this repo bans.
-  const DETERMINISTIC_REJECTION = /^compile command (failed \(exit \d+\)|exited 0 but produced no object)/;
-  /** A rejection is storable only when the SPAWN RESULT says the compiler gave a verdict, and only
-   *  when the message has the shape one has. Two guards, because each has been the one that held:
-   *  the message shape alone stored a SIGKILL laundered by `sh` into `exit 137`. */
-  const storableRejection = (r: Verdict): boolean => !r.transient && DETERMINISTIC_REJECTION.test(r.err);
   // A candidate TU whose object is not a function of its own bytes is refused PER KEY, keeping the
   // cache on for every other candidate. Two shapes, both in `candidateCacheRefusal` (shared with
   // the bench pipeline, because a predicate copied into two files is a predicate fixed in one):
@@ -1029,24 +1088,30 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     noteKeyRefused('command', reason);
     return false;
   };
-  const viaCache = (content: string, symbol: string, ext: 'c' | 'p', raw: () => Verdict): Verdict => {
-    if (!cacheable(content)) {
-      return raw();
+  /** The store's ANSWER for this key, or `undefined` when it is not serving one — a miss, a key
+   *  the sampled audit withheld, or a mode that does not serve at all. `mode` is re-read here and
+   *  at each check in `recordAnswer` rather than captured once: it is a getter over a `refused`
+   *  flag the namespace can set MID-CALL, and a captured copy would go on serving a store that has
+   *  since refused itself. */
+  const servedAnswer = (key: string, symbol: string): Verdict | undefined => {
+    if (cache.mode !== 'on') {
+      return undefined;
     }
-    const key = ext + ' ' + content;
-    if (cache.mode === 'on') {
-      const hit = cache.get(key, symbol);
-      if (typeof hit === 'string') {
-        return { ok: true, transient: false, cmd: hit, err: '' };
-      }
-      if (hit instanceof Error) {
-        return { ok: false, transient: false, cmd: '', err: hit.message };
-      }
+    const hit = cache.get(key, symbol);
+    if (typeof hit === 'string') {
+      return { ok: true, objPath: hit };
     }
-    const r = raw();
+    if (hit instanceof Error) {
+      return { ok: false, transient: false, cmd: '', err: hit.message };
+    }
+    return undefined;
+  };
+
+  /** What the store makes of a FRESH verdict, and what the caller gets back for it. */
+  const recordAnswer = (key: string, symbol: string, r: Verdict): Verdict => {
     if (r.ok) {
-      cache.verify(key, symbol, r.cmd);
-      return { ok: true, transient: false, cmd: cache.put(key, symbol, r.cmd), err: '' };
+      cache.verify(key, symbol, r.objPath);
+      return { ok: true, objPath: cache.put(key, symbol, r.objPath) };
     }
     if (cache.mode !== 'off' && storableRejection(r)) {
       // verifyFail FIRST: a STORED OBJECT for a TU that no longer compiles is a mismatch, and it
@@ -1063,7 +1128,7 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     if (cache.mode !== 'off') {
       const held = cache.abandonAudit(key, symbol);
       if (typeof held === 'string') {
-        return { ok: true, transient: false, cmd: held, err: '' };
+        return { ok: true, objPath: held };
       }
       if (held instanceof Error) {
         return { ok: false, transient: false, cmd: '', err: held.message };
@@ -1071,10 +1136,17 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
     }
     return r;
   };
-  const executeCached = (content: string, symbol: string, ext: 'c' | 'p'): Verdict =>
-    viaCache(content, symbol, ext, () => execute(content, symbol, ext));
-  // NOTE the slot is a THUNK: on a cache hit the worker's scratch dir is never emptied and
-  // recreated, which is the whole point of not spawning.
+
+  // The cache protocol itself, once. The `??` is what keeps the compile LAZY — neither runner's
+  // right-hand side is evaluated when the store answers, which for the pooled runner means the
+  // worker's scratch dir is never emptied and recreated on a hit, the whole point of not spawning.
+  const executeCached = (content: string, symbol: string, ext: 'c' | 'p'): Verdict => {
+    if (!cacheable(content)) {
+      return execute(content, symbol, ext);
+    }
+    const key = ext + ' ' + content;
+    return servedAnswer(key, symbol) ?? recordAnswer(key, symbol, execute(content, symbol, ext));
+  };
   const executeInCached = async (
     dir: () => string,
     content: string,
@@ -1085,42 +1157,11 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       return executeIn(dir(), content, symbol, ext);
     }
     const key = ext + ' ' + content;
-    if (cache.mode === 'on') {
-      const hit = cache.get(key, symbol);
-      if (typeof hit === 'string') {
-        return { ok: true, transient: false, cmd: hit, err: '' };
-      }
-      if (hit instanceof Error) {
-        return { ok: false, transient: false, cmd: '', err: hit.message };
-      }
-    }
-    const r = await executeIn(dir(), content, symbol, ext);
-    if (r.ok) {
-      cache.verify(key, symbol, r.cmd);
-      return { ok: true, transient: false, cmd: cache.put(key, symbol, r.cmd), err: '' };
-    }
-    if (cache.mode !== 'off' && storableRejection(r)) {
-      cache.verifyFail(key, symbol, r.err);
-      cache.putFail(key, symbol, r.err);
-      return r;
-    }
-    // Same as `viaCache` above: a withheld key whose compile produced no verdict takes its
-    // withheld answer back.
-    if (cache.mode !== 'off') {
-      const held = cache.abandonAudit(key, symbol);
-      if (typeof held === 'string') {
-        return { ok: true, transient: false, cmd: held, err: '' };
-      }
-      if (held instanceof Error) {
-        return { ok: false, transient: false, cmd: '', err: held.message };
-      }
-    }
-    return r;
+    return servedAnswer(key, symbol) ?? recordAnswer(key, symbol, await executeIn(dir(), content, symbol, ext));
   };
   /** Resolve the namespace EAGERLY, before any candidate compiles. */
   const warmCache = (): void => cache.warm();
 
-  const PROBE = 'int asmlift_prelude_probe;\n';
   let preludeOk: boolean | undefined;
   const probePrelude = (symbol: string): boolean => {
     if (execute(C_TYPEDEFS + PROBE_DECLS + PROBE, symbol, 'c').ok) {
@@ -1139,25 +1180,6 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       }
       return !(await executeIn(probeSlot(), PROBE, symbol, 'c')).ok;
     })());
-
-  // headers world ⇒ BOTH the prelude and the synthesized declarations drop — the injected
-  // headers own the types and every declaration (a second copy is a C89 collision).
-  // EXCEPT the address-cast macro defines: a duplicate `#define` with an identical body is
-  // legal C (unlike a duplicate typedef or struct), and the headers world does NOT
-  // necessarily supply them — a PREPROCESSED context has no macros left at all, so dropping
-  // these turns a macro-named candidate into `undeclared identifier`. They are emitted in
-  // both worlds for that reason.
-  // The self-declared half is CORE's composition (declare.ts selfDeclaredContext), not a second
-  // copy of `C_TYPEDEFS + decls` — the webapp's scorer calls the same function, so the two
-  // scoring worlds cannot drift on what a candidate was compiled in.
-  const preludeFor = (world: boolean, declarations?: string): string =>
-    world ? selfDeclaredContext(declarations) : macroDefinesOf(declarations);
-  const unwrap = (r: Verdict): string => {
-    if (!r.ok) {
-      throw new Error(r.err);
-    }
-    return r.cmd;
-  };
 
   return {
     compile: (source, symbol, backendId, declarations) => {

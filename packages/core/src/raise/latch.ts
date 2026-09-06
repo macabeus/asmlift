@@ -42,10 +42,15 @@ export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
     rejects: (c) => c.block.params.length > 0,
   },
   {
+    // WHAT THIS RULE ACTUALLY DECIDES, which is narrower than its id suggests. A block carrying real
+    // work never reaches the table at all: `foldEmptyLatches`' pre-check reads `ops[0].successors[0]`,
+    // so a first op that is a `store` (or any non-terminator) has no target and is refused there.
+    // What is left for this rule is the block whose sole op IS a terminator but not a `br` — a
+    // `cond_br`, whose SECOND successor the fold would discard along with the block.
     id: 'latch-does-work',
-    why: "the block's ops go with the block, and a result-less store leaves no trace behind",
+    why: 'the sole terminator must be an unconditional `br`: folding a `cond_br` block discards its second successor',
     sound: true,
-    guardedBy: 'a latch holding a STORE is refused — nothing downstream would notice it vanish',
+    guardedBy: 'latch.test.ts: a latch whose sole op is a cond_br is refused — folding it would drop its second arm',
     // `br` is a terminator, so a block whose FIRST op is one holds nothing but that branch.
     rejects: (c) => c.block.ops[0]?.opcode !== 'br',
   },
@@ -58,13 +63,13 @@ export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
   {
     id: 'target-dominates',
     why: "a preheader is the same empty block from the other side; folding it re-shapes another block's branch into a loop guard",
-    // Formerly `sound`: the fold once handed the guard's cond_br to a fusion that DROPPED an
-    // unproven guard outright. That burden now lives in the guarded-self-loop emitter — an
-    // unproven guard keeps its `if` (or declines loud), and a multi-block loop's guard never had
-    // a fusion path to lose it to — so ablating this gate re-shapes the C without making it
-    // wrong, which is a heuristic by the Gate contract. The named test pins the second layer.
+    // NOT `sound`, and the burden it used to carry now lives elsewhere: the guarded-self-loop
+    // emitter refuses to fuse an unproven guard — it keeps its `if`, or declines loud — and a
+    // multi-block loop's guard has no fusion path to lose it to at all. So ablating this gate
+    // re-shapes the C without making it wrong, which is a heuristic by the Gate contract. The named
+    // test pins that second layer.
     sound: false,
-    guardedBy: 'ablating the dominance gate hands a guard to the kept-guard loop emitter',
+    guardedBy: 'latch.test.ts: ablating the dominance gate hands a guard to the kept-guard loop emitter',
     rejects: (c) => !c.dominatesBlock,
   },
 ];
@@ -84,6 +89,11 @@ export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] 
   for (;;) {
     const dom = dominators(fn);
     const latch = fn.blocks.find((b) => {
+      // THE PRE-CHECK IS WHAT REFUSES A WORK-CARRYING BLOCK. A block whose first op computes
+      // something — a `store`, an arithmetic op — is not a terminator and so has no successors, and
+      // a candidate with no target is not judged at all. The gates below therefore only ever see a
+      // block whose FIRST op is a terminator; `latch-does-work` is the one that then insists it be
+      // an unconditional `br`.
       const target = b.ops[0]?.successors[0]?.block;
       return (
         target !== undefined &&

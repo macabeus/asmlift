@@ -64,7 +64,7 @@
 //
 // This does NOT recover the boolean-VALUE form `return a && b` — that is shortcircuit.ts's job
 // (the `logic_and`/`logic_or` connective plus agbcc's `(-b|b)>>31` = `b!=0` normalisation).
-import { Block, Fn, Value, defOpMap, isBodyless, mkOp, predecessors } from '../ir/core';
+import { Block, Fn, Op, Value, defOpMap, isBodyless, mkOp, predecessors, terminator } from '../ir/core';
 import { NEGATED_ICMP } from '../ir/opcodes';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -98,7 +98,7 @@ export const FALL_IN_GATES: readonly Gate<FallInCandidate>[] = [
     why: 'a `cond_br` pred CHOSE this block; that is a decision arriving, never a fall-in',
     sound: false,
     rejects: (c) => {
-      const t = c.q.ops[c.q.ops.length - 1];
+      const t = terminator(c.q);
       return t?.opcode !== 'br' || t.successors.length !== 1 || t.successors[0].block !== c.target;
     },
   },
@@ -119,31 +119,37 @@ export const FALL_IN_GATES: readonly Gate<FallInCandidate>[] = [
   },
 ];
 
-/** Tail-duplicate a return-only merge block into its unconditional-branch predecessors, but ONLY in the
- *  short-circuit shape (some branch-pred is shared, or the arms are selected by a fused connective).
- *  Returns whether anything changed. A "return-only" block is exactly one `ret` whose operands are all
- *  its own block-params, so each predecessor already carries the returned value as a successor arg. */
-export function sinkReturns(fn: Fn, gates: readonly Gate<FallInCandidate>[] = FALL_IN_GATES): boolean {
-  let changed = false;
-  const preds = predecessors(fn);
-  const defs = defOpMap(fn);
-  // THE DISPATCH MODEL. A TEST BLOCK ends in a `cond_br` on an integer comparison of exactly one
-  // non-constant value against constants — `scrutOf` records that value, the SCRUTINEE. Two test
-  // blocks belong to the same dispatch when they test the same scrutinee: `recognizeSwitch`'s own
-  // PRE1 ("every test is on the SAME Value") read at the raise level, without its dominance, purity
-  // or interval preconditions — those decide whether a `switch` can be SPELLED, and this pass only
-  // needs to know a decision tree is there. `NEGATED_ICMP` (ir/opcodes.ts) is the shared spelling
-  // of the icmp family, so an eleventh comparison joins this model for free.
-  //
-  // Constant folding is deliberately NOT reproduced (`switch-recover.ts evalConst` folds agbcc's
-  // synthesized immediates): a test whose constant side this cannot see contributes two
-  // non-constant operands and is skipped, which loses a subtraction rather than inventing one.
+/** The two questions the fall-in clauses ask of the function's comparison-tree dispatches. */
+interface DispatchModel {
+  /** Is this block part of the dispatch on `s` — either one of its tests, or an arm of one? */
+  inDispatch(b: Block, s: Value): boolean;
+  /** The scrutinees for which `q` and `target` are arms of two DIFFERENT tests: the dispatches in
+   *  which one could be the previous arm of the other. Two successors of ONE `cond_br` — the body
+   *  and the join of an `if` with no `else` — share no such scrutinee, which is the whole point. */
+  siblingArms(q: Block, target: Block): Value[];
+}
+
+/** THE DISPATCH MODEL. A TEST BLOCK ends in a `cond_br` on an integer comparison of exactly one
+ *  non-constant value against constants — the SCRUTINEE. Two test blocks belong to the same
+ *  dispatch when they test the same scrutinee: `recognizeSwitch`'s own PRE1 ("every test is on the
+ *  SAME Value") read at the raise level, without its dominance, purity or interval preconditions —
+ *  those decide whether a `switch` can be SPELLED, and this pass only needs to know a decision tree
+ *  is there. `NEGATED_ICMP` (ir/opcodes.ts) is the shared spelling of the icmp family, so an
+ *  eleventh comparison joins this model for free.
+ *
+ *  Constant folding is deliberately NOT reproduced (`switch-recover.ts evalConst` folds agbcc's
+ *  synthesized immediates): a test whose constant side this cannot see contributes two
+ *  non-constant operands and is skipped, which loses a subtraction rather than inventing one.
+ *
+ *  Built ONCE, before `sinkReturns`' merge loop, and read-only thereafter — nothing in the loop
+ *  writes either table, so the merge that is rewritten first sees the same dispatches as the last. */
+function dispatchModel(fn: Fn, defs: Map<Value, Op>): DispatchModel {
   const scrutOf = new Map<Block, Value>();
   /** Arms, indexed by the block reached and the scrutinee whose test sent it there — the test
    *  blocks are the value, because a fall-in requires the two arms to come from DIFFERENT tests. */
   const armsOf = new Map<Block, Map<Value, Set<Block>>>();
   for (const b of fn.blocks) {
-    const t = b.ops[b.ops.length - 1];
+    const t = terminator(b);
     if (t?.opcode !== 'cond_br') {
       continue;
     }
@@ -168,33 +174,45 @@ export function sinkReturns(fn: Fn, gates: readonly Gate<FallInCandidate>[] = FA
       byScrut.set(scrut, tests);
     }
   }
-  /** Is this block part of the dispatch on `s` — either one of its tests, or an arm of one? */
-  const inDispatch = (b: Block, s: Value) => scrutOf.get(b) === s || !!armsOf.get(b)?.has(s);
-  /** The scrutinees for which `q` and `target` are arms of two DIFFERENT tests: the dispatches in
-   *  which one could be the previous arm of the other. Two successors of ONE `cond_br` — the body
-   *  and the join of an `if` with no `else` — share no such scrutinee, which is the whole point. */
-  const siblingArms = (q: Block, target: Block): Value[] => {
-    const aq = armsOf.get(q);
-    const at = armsOf.get(target);
-    if (!aq || !at) {
-      return [];
-    }
-    const out: Value[] = [];
-    for (const [s, testsQ] of aq) {
-      const testsT = at.get(s);
-      if (testsT && [...testsQ].some((c) => [...testsT].some((d) => c !== d))) {
-        out.push(s);
+  return {
+    inDispatch: (b, s) => scrutOf.get(b) === s || !!armsOf.get(b)?.has(s),
+    siblingArms: (q, target) => {
+      const aq = armsOf.get(q);
+      const at = armsOf.get(target);
+      if (!aq || !at) {
+        return [];
       }
-    }
-    return out;
+      const out: Value[] = [];
+      for (const [s, testsQ] of aq) {
+        const testsT = at.get(s);
+        if (testsT && [...testsQ].some((c) => [...testsT].some((d) => c !== d))) {
+          out.push(s);
+        }
+      }
+      return out;
+    },
   };
-  // `?.` on the terminator: `ir/verify.ts` rejects an empty block and `pipeline.ts` verifies
-  // before calling this, but `sinkReturns` is exported and its tests build blocks by hand, where a
-  // refusal is a better answer than a TypeError. Only the reads that DECIDE something are guarded
-  // that way — once a block is known to end in a `br`, the rewrite below indexes its terminator
-  // directly.
+}
+
+/** Tail-duplicate a return-only merge block into its unconditional-branch predecessors, but ONLY in the
+ *  short-circuit shape (some branch-pred is shared, or the arms are selected by a fused connective).
+ *  Returns whether anything changed. A "return-only" block is exactly one `ret` whose operands are all
+ *  its own block-params, so each predecessor already carries the returned value as a successor arg. */
+export function sinkReturns(fn: Fn, gates: readonly Gate<FallInCandidate>[] = FALL_IN_GATES): boolean {
+  let changed = false;
+  const preds = predecessors(fn);
+  const defs = defOpMap(fn);
+  const { inDispatch, siblingArms } = dispatchModel(fn, defs);
+  // WHICH READS NEED `terminator`'s UNDEFINED CASE, which is not "every read of a terminator". The
+  // scan over `fn.blocks` can meet a block with no ops at all, and that is the one read the guard
+  // is for: `ir/verify.ts` rejects an empty block and `pipeline.ts` verifies before calling this,
+  // but `sinkReturns` is exported and its tests build blocks by hand, where a refusal is a better
+  // answer than a TypeError. A read over a PREDECESSOR needs none and does not have one —
+  // `predecessors` is built from `successorsOf`, which is empty for a block with no terminator, so
+  // a bodyless block never appears in anyone's predecessor list. Once a block is known to end in a
+  // `br`, the rewrite below indexes its terminator directly.
   const isBrTo = (p: Block, m: Block) => {
-    const t = p.ops[p.ops.length - 1];
+    const t = terminator(p);
     return t?.opcode === 'br' && t.successors.length === 1 && t.successors[0].block === m;
   };
   for (const m of [...fn.blocks]) {

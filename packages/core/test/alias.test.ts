@@ -4,7 +4,7 @@
 // the fold) and by the structurer's own tests.
 import { describe, expect, test } from 'vitest';
 
-import { globalCellOf, mayWriteGlobal } from '../src/ir/alias';
+import { disjointConstSlots, globalCellOf, mayWriteGlobal } from '../src/ir/alias';
 import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 
@@ -85,5 +85,44 @@ describe('mayWriteGlobal', () => {
     const defs = new Map<Value, Op>();
     expect(mayWriteGlobal(defs, 'gValue')(mkOp('add', { results: [v()] }))).toBe(false);
     expect(mayWriteGlobal(defs, 'gValue')(mkOp('load', { operands: [v()], results: [v()] }))).toBe(false);
+  });
+});
+
+describe('disjointConstSlots', () => {
+  const load = (base: Value, off: number, width: number) =>
+    mkOp('load', { operands: [base], results: [v()], attrs: { off, width } });
+  const store = (base: Value, off: number, width: number) =>
+    mkOp('store', { operands: [base, v()], attrs: { off, width } });
+
+  test('two non-overlapping constant slots of ONE base cannot be the same cell', () => {
+    const p = v();
+    expect(disjointConstSlots(load(p, 0, 4), store(p, 4, 4))).toBe(true);
+    expect(disjointConstSlots(load(p, 4, 4), store(p, 0, 4))).toBe(true);
+    expect(disjointConstSlots(load(p, 2, 2), store(p, 0, 2))).toBe(true);
+  });
+
+  test('overlapping ranges are not disjoint — touching counts as overlap only when it does', () => {
+    const p = v();
+    expect(disjointConstSlots(load(p, 0, 4), store(p, 0, 4))).toBe(false);
+    expect(disjointConstSlots(load(p, 0, 4), store(p, 2, 4))).toBe(false);
+    expect(disjointConstSlots(load(p, 0, 4), store(p, 3, 1))).toBe(false);
+  });
+
+  test('a DIFFERENT base value decides nothing, whatever the offsets say', () => {
+    expect(disjointConstSlots(load(v(), 0, 4), store(v(), 8, 4))).toBe(false);
+  });
+
+  // `off`/`width` are contract-required on `load`/`store` (ir/opcodes.ts), so the casts inside are
+  // defensive and this input cannot come from a lifted fn. Pinned anyway because the DEFENSIVE
+  // answer is the one that matters: an absent OFFSET is read by both comparisons, so both go NaN
+  // and the predicate refuses. (An absent WIDTH is not symmetric — it appears in one comparison
+  // only, and the other can still answer. Not asserted here: it is the fused call site's
+  // behaviour, preserved rather than designed.)
+  test('an absent offset bars — the NaN comparisons are false, which is the refusing answer', () => {
+    const p = v();
+    const noOff = mkOp('load', { operands: [p], results: [v()], attrs: { width: 4 } });
+    expect(disjointConstSlots(noOff, store(p, 8, 4))).toBe(false);
+    const storeNoOff = mkOp('store', { operands: [p, v()], attrs: { width: 4 } });
+    expect(disjointConstSlots(load(p, 0, 4), storeNoOff)).toBe(false);
   });
 });

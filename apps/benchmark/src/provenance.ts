@@ -97,12 +97,6 @@ export function asmliftProvenance(): { commit: string; dirty: boolean } | undefi
   return sticky;
 }
 
-/** Test seam: forget the sticky sample. Not used by the harness. */
-export function resetProvenanceSample(): void {
-  sticky = undefined;
-  lastSample = 0;
-}
-
 /** The RUN's provenance for a tier that was STITCHED from shard part files.
  *
  *  The default `bench run` path fans every tier across child processes, and only those children

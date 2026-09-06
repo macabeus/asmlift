@@ -19,33 +19,16 @@
 // where the forms genuinely differ (the body runs at least once vs at least zero times), which
 // is why it never wraps. Declines (null) when no empty do-while exists.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, exprEquals, mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, exprEquals, mapExprChildren, mapStmtLists, stmtChildren, stmtExprs } from './ast';
 
 export function pollGuards(sfn: SFn): SFn | null {
   let changed = false;
   const rewrite = (s: Stmt): Stmt => {
-    switch (s.k) {
-      case 'dowhile':
-        if (s.body.length === 0) {
-          changed = true;
-          return { k: 'if', cond: s.cond, then: [s], else: [] };
-        }
-        return { ...s, body: s.body.map(rewrite) };
-      case 'while':
-        return { ...s, body: s.body.map(rewrite) };
-      case 'for':
-        return { ...s, body: s.body.map(rewrite) };
-      case 'if':
-        return { ...s, then: s.then.map(rewrite), else: s.else.map(rewrite) };
-      case 'switch':
-        return {
-          ...s,
-          cases: s.cases.map((c) => ({ ...c, body: c.body.map(rewrite) })),
-          ...(s.default ? { default: s.default.map(rewrite) } : {}),
-        };
-      default:
-        return s;
+    if (s.k === 'dowhile' && s.body.length === 0) {
+      changed = true;
+      return { k: 'if', cond: s.cond, then: [s], else: [] };
     }
+    return mapStmtLists(s, (list) => list.map(rewrite));
   };
   const body = sfn.body.map(rewrite);
   return changed ? { ...sfn, body } : null;
@@ -65,17 +48,70 @@ export function pollGuards(sfn: SFn): SFn | null {
 // What differs is bytes: the pre-read + temp spelling materializes an extra register and
 // instruction the in-condition spelling does not.
 //
-// SCOPE (decline over approximate): the temp must be the function's OWN non-volatile LOCAL —
-// a bare global's assigns are stores other code observes, and its declaration cannot be
-// dropped; the body must be EXACTLY the one re-read assign of the same variable and the same
-// expression; the condition must read the variable EXACTLY once as a bare var — an `&v` there
-// is not a read and cannot be substituted — with a second read doubling the per-iteration
-// evaluation of X; the condition must be call/marker-free with every deref rooted at a
-// non-volatile-declared var (a volatile-rooted or raw-address deref is an observable read the
-// fold would unsequence against X inside one expression); the expression must not mention the
-// variable and must be call/marker-free; and the variable — address-taken uses included — must
-// appear NOWHERE else in the function, since its declaration is dropped with the temp.
+// SCOPE (decline over approximate): each admission is one named predicate below and carries its own
+// refusal's reason; the temp must additionally be the function's OWN non-volatile LOCAL, because a
+// bare global's assigns are stores other code observes and its declaration cannot be dropped.
 // Declines (null) when no poll matches.
+const countVar = (e: Expr, n: string): number =>
+  (e.k === 'var' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + countVar(c, n), 0);
+
+const countAddr = (e: Expr, n: string): number =>
+  (e.k === 'addr' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + countAddr(c, n), 0);
+
+/** call- and marker-free: no effect the fold could move or duplicate. */
+const pure = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(pure);
+
+/** The var a deref's base stands on, through casts only — null for anything else (a raw address, an
+ *  arithmetic base), which is exactly the set `condDerefsPlain` refuses. */
+const rootVar = (e: Expr): string | null => (e.k === 'var' ? e.name : e.k === 'cast' ? rootVar(e.e) : null);
+
+/** ORDER-safety for the condition's other reads: a deref there must be rooted at a var declared
+ *  non-volatile — a volatile-rooted or raw-address deref is (or may be) an OBSERVABLE read the
+ *  fold would unsequence against X inside one expression, where the original sequenced them. */
+const condDerefsPlain = (e: Expr, volatileLocals: ReadonlySet<string>): boolean => {
+  if (e.k === 'index' || e.k === 'field') {
+    const rv = rootVar(e.base);
+    if (rv === null || volatileLocals.has(rv)) {
+      return false;
+    }
+  }
+  return exprChildren(e).every((c) => condDerefsPlain(c, volatileLocals));
+};
+
+/** Every mention of `n` in a statement list — reads, `&n`, and assign targets, at any depth. */
+const occurs = (list: Stmt[], n: string): number =>
+  list.reduce(
+    (a, st) =>
+      a +
+      stmtExprs(st).reduce((x, e) => x + countVar(e, n) + countAddr(e, n), 0) +
+      (st.k === 'assign' && st.name === n ? 1 : 0) +
+      occurs(stmtChildren(st), n),
+    0,
+  );
+
+/** The loop body must be EXACTLY the one re-read: a single assign of the same variable to the same
+ *  expression. Any other statement there is one the fold would delete along with the loop's body. */
+const bodyIsTheSoleReread = (w: Extract<Stmt, { k: 'while' }>, a: Extract<Stmt, { k: 'assign' }>): boolean =>
+  w.body.length === 1 && w.body[0].k === 'assign' && w.body[0].name === a.name && exprEquals(w.body[0].value, a.value);
+
+/** The condition must read the variable EXACTLY once, as a bare var: a second read would double X's
+ *  per-iteration evaluation, and an `&v` is not a read at all and cannot be substituted. */
+const condReadsVarOnce = (cond: Expr, n: string): boolean => countVar(cond, n) === 1 && countAddr(cond, n) === 0;
+
+/** X must not mention the variable it is assigned to — the folded form evaluates X in a condition
+ *  where that variable no longer exists. */
+const valueIsSelfFree = (value: Expr, n: string): boolean => countVar(value, n) === 0 && countAddr(value, n) === 0;
+
+/** The condition carries no effect and no observable read of its own, which is what makes the
+ *  embedded X unsequenceable against anything: call/marker-free, every deref `condDerefsPlain`. */
+const condFoldable = (cond: Expr, volatileLocals: ReadonlySet<string>): boolean =>
+  pure(cond) && condDerefsPlain(cond, volatileLocals);
+
+/** The pattern owns EVERY occurrence of the variable: both assign targets and the one condition
+ *  read, three in all, counted over the whole function and counting `&v`. Its declaration is dropped
+ *  with the temp, so anything else mentioning it would be left naming a variable that is gone. */
+const ownsEveryOccurrence = (body: Stmt[], n: string): boolean => occurs(body, n) === 3;
+
 export function pollReads(sfn: SFn): SFn | null {
   const ownPlain = new Set(
     sfn.locals.filter((l) => l.volatile !== true && l.pointeeVolatile !== true).map((l) => l.name),
@@ -83,34 +119,6 @@ export function pollReads(sfn: SFn): SFn | null {
   const volatileLocals = new Set(
     sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
   );
-  const countVar = (e: Expr, n: string): number =>
-    (e.k === 'var' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + countVar(c, n), 0);
-  const countAddr = (e: Expr, n: string): number =>
-    (e.k === 'addr' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + countAddr(c, n), 0);
-  const pure = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(pure);
-  const varRooted = (e: Expr): boolean => (e.k === 'var' ? true : e.k === 'cast' ? varRooted(e.e) : false);
-  // ORDER-safety for the condition's other reads: a deref there must be rooted at a var declared
-  // non-volatile — a volatile-rooted or raw-address deref is (or may be) an OBSERVABLE read the
-  // fold would unsequence against X inside one expression, where the original sequenced them.
-  const rootVar = (e: Expr): string | null => (e.k === 'var' ? e.name : e.k === 'cast' ? rootVar(e.e) : null);
-  const condDerefsPlain = (e: Expr): boolean => {
-    if (e.k === 'index' || e.k === 'field') {
-      const rv = varRooted(e.base) ? rootVar(e.base) : null;
-      if (rv === null || volatileLocals.has(rv)) {
-        return false;
-      }
-    }
-    return exprChildren(e).every(condDerefsPlain);
-  };
-  const occurs = (list: Stmt[], n: string): number =>
-    list.reduce(
-      (a, st) =>
-        a +
-        stmtExprs(st).reduce((x, e) => x + countVar(e, n) + countAddr(e, n), 0) +
-        (st.k === 'assign' && st.name === n ? 1 : 0) +
-        occurs(stmtChildren(st), n),
-      0,
-    );
   const subst = (e: Expr, n: string, x: Expr): Expr =>
     e.k === 'var' && e.name === n ? x : mapExprChildren(e, (c) => subst(c, n, x));
   const dropped = new Set<string>();
@@ -124,19 +132,12 @@ export function pollReads(sfn: SFn): SFn | null {
         ownPlain.has(a.name) &&
         w !== undefined &&
         w.k === 'while' &&
-        w.body.length === 1 &&
-        w.body[0].k === 'assign' &&
-        w.body[0].name === a.name &&
-        exprEquals(w.body[0].value, a.value) &&
-        countVar(w.cond, a.name) === 1 &&
-        countAddr(w.cond, a.name) === 0 &&
-        countVar(a.value, a.name) === 0 &&
-        countAddr(a.value, a.name) === 0 &&
+        bodyIsTheSoleReread(w, a) &&
+        condReadsVarOnce(w.cond, a.name) &&
+        valueIsSelfFree(a.value, a.name) &&
         pure(a.value) &&
-        pure(w.cond) &&
-        condDerefsPlain(w.cond) &&
-        // the pattern owns exactly three occurrences: both assign targets and the cond read
-        occurs(sfn.body, a.name) === 3
+        condFoldable(w.cond, volatileLocals) &&
+        ownsEveryOccurrence(sfn.body, a.name)
       ) {
         out.push({ k: 'while', cond: subst(w.cond, a.name, a.value), body: [] });
         dropped.add(a.name);
@@ -147,24 +148,7 @@ export function pollReads(sfn: SFn): SFn | null {
     }
     return out;
   };
-  const recurse = (s0: Stmt): Stmt => {
-    switch (s0.k) {
-      case 'if':
-        return { ...s0, then: rewriteList(s0.then), else: rewriteList(s0.else) };
-      case 'while':
-      case 'dowhile':
-      case 'for':
-        return { ...s0, body: rewriteList(s0.body) };
-      case 'switch':
-        return {
-          ...s0,
-          cases: s0.cases.map((c) => ({ ...c, body: rewriteList(c.body) })),
-          ...(s0.default ? { default: rewriteList(s0.default) } : {}),
-        };
-      default:
-        return s0;
-    }
-  };
+  const recurse = (s0: Stmt): Stmt => mapStmtLists(s0, rewriteList);
   const body = rewriteList(sfn.body);
   return dropped.size > 0 ? { ...sfn, body, locals: sfn.locals.filter((l) => !dropped.has(l.name)) } : null;
 }

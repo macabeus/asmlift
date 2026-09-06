@@ -11,7 +11,7 @@
 import { IrType, typeToString } from '../ir/types';
 import { BinOp, Expr, LanguageBackend, SFn, Stmt } from '../l3/ast';
 import { orderSlotLocals } from '../l3/slotorder';
-import { type VarTypes, declaredTypes, derefStrideOk, exprCType } from '../l3/typing';
+import { type VarTypes, declaredTypes, derefStrideOk, exprCType, writesNonPointerIntoPointer } from '../l3/typing';
 
 // Infix operators IDO Pascal spells directly.
 const OP: Partial<Record<BinOp, string>> = {
@@ -156,15 +156,13 @@ function makePrinter(vt: VarTypes) {
       stmts.flatMap((x, i) => ps(fnName, x, ind, tl && i === stmts.length - 1));
     switch (s.k) {
       case 'assign': {
-        // The write-side sibling of the index case's deref discipline: Pascal has no reinterpret
-        // cast, so a definitely-non-pointer value assigned into a pointer-declared var (the shape
-        // the C family legalizes with `(u8 *)…`, cfamily.ts legalizePointerWrites) declines LOUD
-        // here instead of failing three stages later in upas.
-        const dt = vt(s.name);
-        const ct = exprCType(s.value, vt);
-        if (dt?.kind === 'ptr' && ct && ct.kind !== 'ptr' && ct.kind !== 'array') {
+        // The write-side sibling of the index case's deref discipline. The C family answers the
+        // same question (l3/typing.ts writesNonPointerIntoPointer) with a reinterpret cast;
+        // Pascal has none, so it declines LOUD here instead of failing three stages later in upas.
+        if (writesNonPointerIntoPointer(vt(s.name), s.value, vt)) {
+          const ct = exprCType(s.value, vt);
           throw new Error(
-            `pascal backend: assigning a ${typeToString(ct)} value into pointer var '${s.name}' has no faithful spelling (no reinterpret cast)`,
+            `pascal backend: assigning a ${ct ? typeToString(ct) : '<unknowable>'} value into pointer var '${s.name}' has no faithful spelling (no reinterpret cast)`,
           );
         }
         return [`${indent}${s.name} := ${pe(s.value)};`];

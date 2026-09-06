@@ -11,7 +11,8 @@
 // `p = a; … p++` compile to the same induction variable. asmlift recovers the reduced form
 // because that is what the machine ran; the un-reduced form is the other pre-image, and the differ
 // referees. (l3/reindex.ts makes the same argument for a POINTER WALK; this is its scalar-value
-// sibling, and the two do not overlap — `reindexWalks` refuses a function with no pointer local.)
+// sibling, and the two do not overlap — `reindexWalks` refuses a function with no pointer local or
+// param.)
 //
 // WHAT IT BUYS, and it is not readability. A compiler-created giv init is emitted by
 // `emit_iv_add_mult` at `loop_start` (gcc/loop.c:4761, inserted at :6985) — during
@@ -165,7 +166,7 @@
 // `revarr`, `dotprod`, `findfirst`, `mergeloop` and `synthetic:dmanest` among them. On klonoa's
 // `LoadBGTilemapData` the count is zero, over all 1344 trees its enumeration produces: a decline
 // there names no gate, and a reader will attribute one anyway. Widening the scan is a REACH change
-// and belongs to a row that demands it (dmanest is the obvious candidate), not to a soundness pass.
+// and belongs to a row that demands it, not to a soundness pass.
 //
 // AND THE TABLE ANSWERS FOR A SMALLER POPULATION STILL. Censused at the `firstRejection` call
 // site over the benchmark's two tiers, counting FIRST rejections rather than reach — short-circuit
@@ -420,6 +421,36 @@ function arithScale(t: IrType | undefined): number | null {
     return bytes > 0 ? bytes : null;
   }
   return t.kind === 'int' && t.width === 32 ? 1 : null;
+}
+
+/** Does this local's DECLARATION pin it against deletion? Every flag `SFn.locals` can carry, because
+ *  each is a fact about the ASM that only the declaration states: two qualifiers (deleting a
+ *  `volatile u16 *` local re-spells `*p = 0` as a raw cast with no qualifier on it — l3/inlinebase.ts
+ *  carries it onto the minted cast instead, and this lever has no local left to carry anything), a
+ *  frame home, an `undef` whose whole content is the assignment that is MISSING, and the SPILL HOMES.
+ *
+ *  WHY `slots` PINS, which is not the obvious reading. Deleting a slot-carrying local does not
+ *  mis-order the survivors: they stay a subset of one total order and rank correctly among
+ *  themselves. What it can do is flip a REFUSAL into an ordering. `l3/slotorder.ts` refuses the whole
+ *  function when two declared locals share one offset, because reload hands each spilled pseudo a
+ *  fresh slot and a duplicate proves the offsets did not come from reload. Delete one sharer and the
+ *  survivors are injective — so the ordering fires on a frame whose evidence was already known not to
+ *  be declaration ranks, and it fires silently. Refusing to delete keeps the duplicate, and keeps the
+ *  refusal.
+ *
+ *  MEASURED, so this is a stated zero and not an assumption: instrumented at the deletion site, it
+ *  fires on none of the three agbcc rows that spill AND lift — `spillorder`, `dma_fill_uninit`,
+ *  `uninit_spill` — so the clause costs no candidate today. (`spill10` spills too but declines in the
+ *  Thumb frontend, so it never reaches this pass and its zero says nothing.) It is here for the day
+ *  one does. */
+function declarationPins(l: SFn['locals'][number]): boolean {
+  return (
+    l.volatile !== undefined ||
+    l.pointeeVolatile !== undefined ||
+    l.frame !== undefined ||
+    l.uninit !== undefined ||
+    l.slots !== undefined
+  );
 }
 
 /** Read a constant the FRONTEND spelled as arithmetic as its VALUE. Thumb's `add rd, #imm8`
@@ -738,6 +769,23 @@ const counterStepStmt = (loop: Extract<Stmt, { k: 'while' | 'dowhile' | 'for' }>
 const controlStmts = (loop: Extract<Stmt, { k: 'while' | 'dowhile' | 'for' }>): Stmt[] =>
   loop.k === 'for' ? [loop.init, loop.inc] : [];
 
+/** The statements a DEVICE armed in could still be writing memory from while the moved reads run:
+ *  the loop, and the WHOLE prefix above it — deliberately wider than the motion region below,
+ *  because a device armed anywhere before the reads happen keeps writing memory WHILE they happen,
+ *  so a repeating transfer armed above the init is as asynchronous as one armed inside the loop. */
+function armedPrefix(body: readonly Stmt[], loop: Stmt, li: number): Stmt[] {
+  return [...body.slice(0, li), loop];
+}
+
+/** THE MOTION REGION: everything that runs between where the init stood and the reads that replace
+ *  it. Both endpoints move — the init is DELETED, and the counter's start is what the substitution
+ *  reads the closed form through — so the region opens at whichever of the two comes first and runs
+ *  to the loop's last iteration. The loop enters WHOLE, so a walk over this region reaches its
+ *  condition and a `for`'s own init and inc as well as its body. */
+function motionRegion(body: readonly Stmt[], loop: Stmt, li: number, initIdx: number, startIdx: number): Stmt[] {
+  return [...body.slice(Math.min(initIdx, startIdx) + 1, li), loop];
+}
+
 /** The `/unreduce` candidate. `sfn` is a fresh tree, the input left untouched; `needsProof` says
  *  the closed form re-reads memory over a loop whose device writes may THEMSELVES write memory
  *  (see the header), so rank.ts may publish it only at a byte-exact score. */
@@ -788,10 +836,7 @@ export function unreduceAccumulators(
     }
     const outside = [...sfn.body.slice(0, li), ...sfn.body.slice(li + 1)];
     const startIdx = loop.k === 'for' ? li : sfn.body.indexOf(startStmt);
-    // A device armed anywhere before the reads happen keeps writing memory WHILE they happen, so
-    // the trigger scan is the whole prefix rather than the motion region — a repeating transfer
-    // armed above the init is as asynchronous as one armed inside the loop.
-    const armed: Stmt[] = [...sfn.body.slice(0, li), loop];
+    const armed = armedPrefix(sfn.body, loop, li);
     const rewrites = new Map<string, Expr>();
     for (const cand of sfn.locals) {
       const initStmt = sfn.body.slice(0, li).find((s) => s.k === 'assign' && s.name === cand.name);
@@ -801,13 +846,8 @@ export function unreduceAccumulators(
       }
       const k = foldConsts(stepOf(loop.body[stepIdx], cand.name)!);
       const closed = relate(initStmt.value, startStmt.value, ctr, k, d.value);
-      // THE MOTION REGION: everything that runs between where the init stood and the reads that
-      // replace it. Both endpoints move — the init is DELETED, and the counter's start is what the
-      // substitution reads the closed form through — so the region opens at whichever of the two
-      // comes first and runs to the loop's last iteration. The loop enters WHOLE, so the walk
-      // below reaches its condition and a `for`'s own init and inc as well as its body.
       const initIdx = sfn.body.indexOf(initStmt);
-      const evaluated: Stmt[] = [...sfn.body.slice(Math.min(initIdx, startIdx) + 1, li), loop];
+      const evaluated = motionRegion(sfn.body, loop, li, initIdx, startIdx);
       const ctrLocal = sfn.locals.find((l) => l.name === ctr);
       // The units the accumulator's step counts in, against the units the closed form's `+` would
       // scale by. Both sides must be KNOWN and equal — see `stride-units`.
@@ -817,32 +857,7 @@ export function unreduceAccumulators(
         unitsDisagree: accScale === null || initScale === null || accScale !== initScale,
         assigns: assignCount(sfn.body, cand.name),
         addrTaken: addrTakenIn(sfn.body, cand.name),
-        // Every flag `SFn.locals` can carry, because each is a fact about the ASM that only the
-        // declaration states: two qualifiers (deleting a `volatile u16 *` local re-spells `*p = 0`
-        // as a raw cast with no qualifier on it — l3/inlinebase.ts carries it onto the minted cast
-        // instead, and this lever has no local left to carry anything), a frame home, an `undef`
-        // whose whole content is the assignment that is MISSING, and the SPILL HOMES.
-        //
-        // WHY `slots` PINS, which is not the obvious reading. Deleting a slot-carrying local does
-        // not mis-order the survivors: they stay a subset of one total order and rank correctly
-        // among themselves. What it can do is flip a REFUSAL into an ordering. `l3/slotorder.ts`
-        // refuses the whole function when two declared locals share one offset, because reload
-        // hands each spilled pseudo a fresh slot and a duplicate proves the offsets did not come
-        // from reload. Delete one sharer and the survivors are injective — so the ordering fires
-        // on a frame whose evidence was already known not to be declaration ranks, and it fires
-        // silently. Refusing to delete keeps the duplicate, and keeps the refusal.
-        //
-        // MEASURED, so this is a stated zero and not an assumption: instrumented at the deletion
-        // below, it fires on none of the three agbcc rows that spill AND lift — `spillorder`,
-        // `dma_fill_uninit`, `uninit_spill` — so the clause costs no candidate today. (`spill10`
-        // spills too but declines in the Thumb frontend, so it never reaches this pass and its
-        // zero says nothing.) It is here for the day one does.
-        pinned:
-          cand.volatile !== undefined ||
-          cand.pointeeVolatile !== undefined ||
-          cand.frame !== undefined ||
-          cand.uninit !== undefined ||
-          cand.slots !== undefined,
+        pinned: declarationPins(cand),
         liveOutside: mentions(
           outside.filter((s) => s !== initStmt),
           cand.name,

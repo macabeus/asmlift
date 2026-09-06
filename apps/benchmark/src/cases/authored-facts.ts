@@ -46,10 +46,7 @@ export interface CompiledSignature {
  *  Unlisted spellings are deliberately NOT ignored: an unknown token in a signature fails the
  *  check BY NAME and the fix is to add it here. A pattern that skipped anything ALL-CAPS would
  *  also skip `UNK_8085D14`, which is a type. The names listed here are reserved dataset-wide: the
- *  token is blanked wherever it appears in a signature, so one may not double as a parameter name.
- *
- *  cases/real.ts strips these from the prototype line it hands m2c: m2c's context parser is a real
- *  C parser and hard-fails on the unexpanded macro (`Syntax error when parsing C context`). */
+ *  token is blanked wherever it appears in a signature, so one may not double as a parameter name. */
 export const ATTRIBUTE_MACROS: ReadonlySet<string> = new Set(['UNUSED']);
 
 /** A callee prototype whose subject the row's own TU never DECLARES: the project declares it in a
@@ -115,10 +112,10 @@ function stripAttributes(s: string): string {
 }
 
 /** Remove the ATTRIBUTE_MACROS tokens — WITH their argument list where they take one — from a
- *  signature. This is what makes a hand-quoted signature comparable to the preprocessed one, and
- *  what keeps the prototype line handed to m2c parseable as C: blanking `ALIGNED` and leaving the
- *  `(4)` behind produces `void (4) DoThing(…)`, which is neither. */
-export function stripAttributeMacros(s: string): string {
+ *  signature. This is what makes a hand-quoted signature comparable to the preprocessed one:
+ *  blanking `ALIGNED` and leaving the `(4)` behind produces `void (4) DoThing(…)`, which is
+ *  neither a signature nor C. */
+function stripAttributeMacros(s: string): string {
   for (const macro of ATTRIBUTE_MACROS) {
     const re = new RegExp(`\\b${escapeRe(macro)}\\b`);
     for (let m = re.exec(s); m; m = re.exec(s)) {

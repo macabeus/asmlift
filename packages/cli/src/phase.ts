@@ -6,6 +6,11 @@
 // The clock is a VALUE the ranked path owns, not a module global: `main.ts` mints one per run and
 // threads it through `rank.ts`. A caller that mints none takes no timing and keeps no state.
 //
+// A phase nobody framed is simply ABSENT from the line, and one of them is absent by default: the
+// serial driver (`--jobs 1`) does not frame its ordering pass, so `rank` appears only on a pooled
+// run, and on a serial one that pass's cost sits inside `main-thread idle+other` with everything
+// else this clock does not name. An absent phase is not a phase that cost nothing.
+//
 // `compile` is summed ACROSS workers and legitimately exceeds the wall clock; that ratio is the
 // pool's average parallelism, and it is the number that says whether more `--jobs` would help.
 

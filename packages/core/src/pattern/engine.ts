@@ -483,7 +483,9 @@ function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): bo
  *
  *  Everything checked here is a property of the pattern OBJECT, so the answer is memoized against it
  *  rather than recomputed per lift — patterns may still be built at runtime, which is why this is a
- *  WeakSet and not module-scope validation of the DEFAULT list. */
+ *  WeakSet and not module-scope validation of the DEFAULT list. Only a PASSING run is recorded: a
+ *  pattern that threw must throw again on the next lift, or the first caller (annotate mode, which
+ *  swallows the throw into a stub) would silently license the malformed pattern for the whole run. */
 const UNSEQUENCED_RIGHT_FIRST_MEASURED_ON = ['mwcc'];
 const validated = new WeakSet<RewritePattern>();
 
@@ -491,7 +493,6 @@ function validatePattern(pat: RewritePattern): void {
   if (validated.has(pat)) {
     return;
   }
-  validated.add(pat);
   const walk = (n: MatchNode): void => {
     if (!('op' in n)) {
       return;
@@ -505,24 +506,24 @@ function validatePattern(pat: RewritePattern): void {
     n.args.forEach(walk);
   };
   walk(pat.match);
-  if (!pat.unsequencedRightFirst) {
-    return;
-  }
-  for (const name of pat.unsequencedRightFirst) {
-    if (!pat.replaceWith.args.includes(name)) {
+  if (pat.unsequencedRightFirst) {
+    for (const name of pat.unsequencedRightFirst) {
+      if (!pat.replaceWith.args.includes(name)) {
+        throw new Error(
+          `pattern '${pat.id}' names '${name}' in 'unsequencedRightFirst', which is not a replaceWith operand`,
+        );
+      }
+    }
+    const on = pat.applies.compilers ?? [];
+    const measured = UNSEQUENCED_RIGHT_FIRST_MEASURED_ON;
+    if (on.length !== measured.length || !measured.every((c) => on.includes(c))) {
       throw new Error(
-        `pattern '${pat.id}' names '${name}' in 'unsequencedRightFirst', which is not a replaceWith operand`,
+        `pattern '${pat.id}' declares 'unsequencedRightFirst' but applies to compilers [${on.join(', ')}]; ` +
+          `the operand direction is only measured for [${measured.join(', ')}] — measure the new one and widen the set`,
       );
     }
   }
-  const on = pat.applies.compilers ?? [];
-  const measured = UNSEQUENCED_RIGHT_FIRST_MEASURED_ON;
-  if (on.length !== measured.length || !measured.every((c) => on.includes(c))) {
-    throw new Error(
-      `pattern '${pat.id}' declares 'unsequencedRightFirst' but applies to compilers [${on.join(', ')}]; ` +
-        `the operand direction is only measured for [${measured.join(', ')}] — measure the new one and widen the set`,
-    );
-  }
+  validated.add(pat);
 }
 
 /** Would this fold DE-SEQUENCE the two named operands — leave the recompiling compiler, rather than

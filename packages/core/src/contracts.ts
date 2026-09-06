@@ -3,7 +3,7 @@
 // decompileRanked / decompileWithReport).
 // A pass that regresses fails AT its boundary with a diagnostic, not three stages later as
 // wrong C.
-import { type Block, type Fn, type Value, successorsOf } from './ir/core';
+import { type Fn, type Value, reachableBlocks } from './ir/core';
 import { type IrType, typeToString } from './ir/types';
 import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
 import {
@@ -14,6 +14,7 @@ import {
   stmtChildren,
   stmtExprs,
   stmtLists,
+  walkExprs,
 } from './l3/ast';
 import { declaredTypes, exprCType } from './l3/typing';
 
@@ -177,15 +178,7 @@ function countCalls(stmts: Stmt[]): { total: CallCounts; path: CallCounts } {
  */
 export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   // Reachable blocks only: an unreachable block's call is legitimately never emitted.
-  const seen = new Set<Block>([fn.blocks[0]]);
-  for (const stack = [fn.blocks[0]]; stack.length;) {
-    for (const s of successorsOf(stack.pop()!)) {
-      if (!seen.has(s)) {
-        seen.add(s);
-        stack.push(s);
-      }
-    }
-  }
+  const seen = reachableBlocks(fn);
   const irCalls: CallCounts = new Map();
   // Unmodelled instructions, by the mnemonic the frontend stamped. Same "never dropped" property as
   // a call, and it needs its own tally because an `opaque` carries no `target`.
@@ -209,17 +202,11 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   // only mode with no other backstop against a silently dropped opaque.
   if (irOpaques.size) {
     const emitted = new Set<string>();
-    const we = (e: Expr): void => {
+    for (const e of walkExprs(sfn.body)) {
       if (e.k === 'marker') {
         emitted.add(e.reason);
       }
-      exprChildren(e).forEach(we);
-    };
-    const ws = (s: Stmt): void => {
-      stmtExprs(s).forEach(we);
-      stmtChildren(s).forEach(ws);
-    };
-    sfn.body.forEach(ws);
+    }
     for (const reason of irOpaques) {
       if (!emitted.has(reason)) {
         throw new ContractError(
@@ -308,9 +295,10 @@ export function assertLocalsWritten(sfn: SFn): void {
  *  l3/nearbase.ts, l3/reindex.ts, l3/scopebase.ts, l3/argbase.ts — are the population that can
  *  produce the failure, so the check belongs on every lever tree rather than on one lever's.
  *
- *  ABSOLUTELY, it has one caller (l3/scopebase.ts, over its own plan). Everywhere else it is
- *  reached through `assertPlacementSurvives` below, which is a DIFFERENTIAL — so a placement no
- *  lever's tree ever satisfied is not judged, and a lever that mints nothing is not judged at all.
+ *  Called ABSOLUTELY by the placing levers that put an init inside a nested list, each over its own
+ *  plan; everywhere else it is reached through `assertPlacementSurvives` below, which is a
+ *  DIFFERENTIAL — so a placement no lever's tree ever satisfied is not judged, and a lever that
+ *  mints nothing is not judged at all.
  *
  *  A nested list gets a COPY of the reaching set, so an assignment inside one arm does not count as
  *  reaching anything after the `if`. */
@@ -430,11 +418,13 @@ export function assertDerefsTyped(sfn: SFn): void {
   // Dot-form field bases (struct-array elements) carry the struct STRIDE as their width — any
   // stride matching the element size is legal there (the tree-level struct cast governs the
   // spelling; a stride/size MISMATCH types scalar in exprCType and the field rule flags it).
-  // Collected as fields are visited, BEFORE recursing into their children. Identity-keyed: a
-  // future subtree-SHARING pass (CSE-style) would leak the exemption to aliased bare uses —
-  // trees are freshly built per node today (structure.ts), which this relies on.
+  // Collected as fields are visited, BEFORE recursing into their children — which is what makes
+  // `walkExprs`' PRE-ORDER load-bearing here rather than incidental: the exemption is recorded on
+  // the `field` node and read at the `index` node beneath it. Identity-keyed: a future
+  // subtree-SHARING pass (CSE-style) would leak the exemption to aliased bare uses — trees are
+  // freshly built per node today (structure.ts), which this relies on.
   const structElem = new Set<Expr>();
-  const checkExpr = (e: Expr): void => {
+  for (const e of walkExprs(sfn.body)) {
     if (e.k === 'index' && !structElem.has(e) && !SCALAR_WIDTHS.has(e.width)) {
       bad.push(`index width ${e.width} is not a C scalar width`);
     }
@@ -494,13 +484,7 @@ export function assertDerefsTyped(sfn: SFn): void {
         }
       }
     }
-    exprChildren(e).forEach(checkExpr);
-  };
-  const checkStmt = (s: Stmt): void => {
-    stmtExprs(s).forEach(checkExpr);
-    stmtChildren(s).forEach(checkStmt);
-  };
-  sfn.body.forEach(checkStmt);
+  }
   if (bad.length) {
     throw new ContractError(
       `structuring emitted ill-typed C in '${sfn.name}': ${bad[0]}${bad.length > 1 ? ` (+${bad.length - 1} more)` : ''}`,

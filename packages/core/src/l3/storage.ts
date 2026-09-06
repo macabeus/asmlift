@@ -14,7 +14,9 @@
 //   • it keeps the reference verbatim (`(u8 *)g`) — the shadow is harmless, the spelling denotes
 //     whatever the original access denoted: `declaredGlobals`;
 //   • it re-spells the reference as an ADDRESS (`&g`) — a shadow then names the LOCAL's storage,
-//     silently a different object: `addressableGlobals`.
+//     silently a different object: `addressableGlobals`;
+//   • it asks which of the three classes a bare `assign` name denotes at all: `nameStorage`, the
+//     primitive the other two are the shadow-sensitive projections over.
 import type { SFn } from './ast';
 
 export type Storage = 'local' | 'param' | 'global';

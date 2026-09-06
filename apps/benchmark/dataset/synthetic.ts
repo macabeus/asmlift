@@ -3049,8 +3049,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // `.word gReadBgs`), which is also why m2c reads noncompile on one and declined on the other.
   //
   // `erbctl` is an intervention control, not a MATCH control, and is not `value-home`: its twelve
-  // are seven register-only rows plus an opcode mismatch and four insertion/deletion rows, which
-  // is not a diff dominated by where a value lives. `ereadctl` MATCHes.
+  // rows are six strictly register-only, one mixed immediate/operand-structure/register, an opcode
+  // mismatch and four insertion/deletion — which is not a diff dominated by where a value lives.
+  // (Its `argMismatch 7` is objdiff's diffKind tally, not a register census: the seventh
+  // arg-mismatch row is the mixed one.) `ereadctl` MATCHes.
   //
   // m2c declines every row here, first emitting the extern as `extern ? gReadBgs;`, so the family
   // yields no cross-tool number: unknown extern-type recovery owns that blocker, not this

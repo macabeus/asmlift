@@ -25,6 +25,7 @@ import { decompile, structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { c } from './helpers';
 
 // `fromOperand` marks the access whose offset reached the MEMORY OPERAND — the DISPLACEMENT the
 // structurer records as `index.operandOff`, which `BaseKey.unfoldedOffset` reads the presence of
@@ -46,7 +47,6 @@ const cidx = (value: number, i: Expr, width = 4, evidence: object = {}): Expr =>
   signed: true,
   ...evidence,
 });
-const c = (value: number): Expr => ({ k: 'const', value });
 const fn = (body: Stmt[]): SFn => ({ name: 'f', params: [], locals: [], retType: T.void(), body });
 
 // The L2→L3 fact the fold evidence rests on. agbcc spells a constant SUBSCRIPT off a symbol by
@@ -1132,5 +1132,39 @@ ${body}
     expect(labels).toContain('unsigned/orderbase');
     // …and it is not offered where the order says otherwise
     expect(enumerateCandidates('f', NOT_ORDERED, ARMV4T_AGBCC).map((c) => c.label)).not.toContain('unsigned/orderbase');
+  });
+
+  test('a key whose accesses DISAGREE on the stamp is refused whole, never half-homed', () => {
+    // `Collected.ordered` folds the stamp with `&&`, and this is what that `&&` decides. No
+    // assembly reaches it: `structure.ts`'s `stampOrderedBases` runs over the finished body and
+    // stamps per SYMBOL, so every access of one key leaves it agreeing — which is exactly why the
+    // fixture is built by hand. What the rule guards is a LATER pass that rebuilds one node and
+    // drops the stamp, and the answer it gives there is REFUSE rather than hoist a base only some
+    // of whose accesses evidence a home.
+    const at = (idx: number, stamped: boolean): Expr => ({
+      k: 'index',
+      base: { k: 'addr', name: 'gArr' },
+      idx: { k: 'const', value: idx },
+      width: 4,
+      signed: true,
+      ...(stamped ? { baseOrdered: true as const } : {}),
+    });
+    const twoAccesses = (second: Expr): SFn => ({
+      name: 'f',
+      params: [],
+      locals: [
+        { name: 'v0', type: T.s(32) },
+        { name: 'v1', type: T.s(32) },
+      ],
+      retType: T.void(),
+      body: [
+        { k: 'assign', name: 'v0', value: at(0, true) },
+        { k: 'assign', name: 'v1', value: second },
+      ],
+    });
+    // CONTROL: both stamped, and the key binds — so the refusal below is the disagreement's and
+    // not the fixture's.
+    expect(admittedBases(twoAccesses(at(1, true)), ORDERBASE_GATES)).toEqual(['a:gArr 4 true']);
+    expect(admittedBases(twoAccesses(at(1, false)), ORDERBASE_GATES)).toEqual([]);
   });
 });

@@ -39,10 +39,10 @@
 //     call instead of before it. The third is why the assignment's TARGET is not either: an
 //     `assign` names a variable, and structure.ts spells a write to a scalar GLOBAL as one, so
 //     `gBlendValue = v;` is an `assign` with an effect-free value that writes MEMORY. Not a
-//     corner of the corpus. Over the artifact's 957 rows: 22 winning sources emit a
+//     corner of the corpus. Measured over a 957-row artifact (#140): 22 winning sources emit a
 //     statement-level assignment to a name they declare nowhere — 71 occurrences, 7 of them in
-//     `kleod:ProcessInputAndUpdateEntities` alone, the largest single row being `sa3:GetInput` at
-//     8. RE-DERIVE THIS RATHER THAN QUOTING IT: one pass over the artifact does it — collect each
+//     `kleod:ProcessInputAndUpdateEntities` alone.
+//     RE-DERIVE THIS RATHER THAN QUOTING IT: one pass over the artifact does it — collect each
 //     winning source's declared locals and parameters, then count its statement-level `name = `
 //     lines whose name is not among them. `exprHasEffect` answers "a call, or a marker" and cannot
 //     see one, the same way it could not see a qualifier;
@@ -64,10 +64,10 @@
 // arm's end, past every kept statement. A plain read may make that trip, because the kept
 // statements from the first definition on are effect-free assignments to DECLARED LOCALS and so
 // none of them writes memory that could answer it differently — which is what the three gates
-// above establish, the local-target one included. An observable read may not make the trip, and it
-// is observable
-// against the other device accesses beside it — which is why THAT gate is stated on the moved
-// value and needs no clause for the statements that stay put.
+// above establish, the local-target one included. An observable read may not make the trip: a
+// volatile access is one the source pinned so it would not be duplicated or moved, and its ORDER
+// against the other device accesses beside it is observable — which is why THAT gate is stated on
+// the moved value and needs no clause for the statements that stay put.
 //
 // WHAT THE LOCAL-TARGET GATE DOES NOT CLOSE, stated rather than implied: ALIASING. A moved value
 // reading `*p` and a kept assignment to an address-taken local can name the same object under two
@@ -77,7 +77,7 @@
 // found no inhabitant: 0 arms this pass ACCEPTS hold a kept assignment to an address-taken local
 // after the first definition, the same sweep that found 0 holding one to a global. That sweep's
 // population was the agbcc rows whose BASE TREE the rig could build, which is not the corpus's
-// agbcc row count — the artifact carries 358 — so re-run it before quoting a count off it.
+// agbcc row count, so re-run it before quoting a count off it.
 import {
   type Expr,
   type SFn,

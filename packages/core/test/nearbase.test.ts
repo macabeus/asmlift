@@ -5,11 +5,10 @@ import { expect, test } from 'vitest';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { nearBaseClusters } from '../src/l3/nearbase';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
+import { c, s32 } from './helpers';
 
 const nearBaseClusters255 = (sfn: SFn) => nearBaseClusters(sfn, 255);
 
-const s32 = { kind: 'int', width: 32, signed: true } as const;
-const c = (value: number): Expr => ({ k: 'const', value });
 const deref = (addr: number, width: number): Expr => ({ k: 'index', base: c(addr), idx: c(0), width, signed: false });
 const v_ = (): Expr => ({ k: 'var', name: 'i0' });
 const fn = (body: Stmt[]): SFn => ({ name: 'f', params: [], locals: [], retType: s32, body });

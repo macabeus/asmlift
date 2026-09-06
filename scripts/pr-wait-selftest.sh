@@ -85,5 +85,13 @@ expect neterr 2 "silence gives up on its OWN budget, not the whole --timeout" \
 expect pending 2 "a pending check is an ANSWER: the silence budget must not cut it short" \
   "--timeout 2 --interval 1 --unknown-timeout 1" "no check verdict after 2s"
 
+# A deadline is arithmetic, so a non-numeric one has to be refused at parse time. Unchecked, it
+# reached `$((… + TIMEOUT))` and aborted with status 1 — the code reserved for a verdict GitHub
+# gave — leaving the caller hunting a red build that was never reported.
+expect green 64 "a malformed --timeout is a usage error, not a red build" "--timeout abc"
+expect green 64 "a malformed --interval is a usage error, not a red build" "--interval 1.5"
+expect green 64 "a malformed --unknown-timeout is a usage error, not a red build" \
+  "--timeout 1 --interval 1 --unknown-timeout -5"
+
 [ "$fails" -eq 0 ] || { echo "pr-wait-selftest: $fails case(s) failed"; exit 1; }
 echo "pr-wait-selftest: all cases hold"

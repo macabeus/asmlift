@@ -1,7 +1,7 @@
 // Pins for `bench setup` + checkout pinning: manifest repo/branch validation, and setup's
 // NEVER-MUTATE rule for existing checkouts (the maintainer's checkouts carry WIP — a harness
 // command must not touch them). Remote lookups are stubbed — no network in CI.
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -206,6 +206,32 @@ describe('bench setup never mutates an existing checkout', () => {
     // the checkout itself is untouched: same HEAD, same uncommitted WIP
     expect(g('rev-parse HEAD')).toBe(head);
     expect(readFileSync(join(dir, 'file.c'), 'utf8')).toContain('uncommitted');
+  });
+
+  // The harness's `git` is an ARGV array through execFileSync, never a command string through a
+  // shell: an `ASMLIFT_PROJ_*` path is a value, not source. Written from the failure the string
+  // spelling had — `JSON.stringify(dir)` quotes a path but a shell still EXPANDS inside double
+  // quotes, so a checkout under a directory containing `$(...)` was handed to git as a different
+  // path and every status read threw.
+  test('a checkout path is a value, not shell source', () => {
+    const dir = join(scratch(), 'proj $(echo pwned) dir');
+    mkdirSync(dir);
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 't',
+      GIT_AUTHOR_EMAIL: 't@t',
+      GIT_COMMITTER_NAME: 't',
+      GIT_COMMITTER_EMAIL: 't@t',
+    };
+    execFileSync('git', ['-C', dir, 'init', '-q'], { env });
+    writeFileSync(join(dir, 'f'), 'x\n');
+    execFileSync('git', ['-C', dir, 'add', 'f'], { env });
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'base'], { env });
+    process.env.ASMLIFT_PROJ_FAKEPROJ = dir;
+    const st = checkoutStatus(base, () => null);
+    expect(st.present).toBe(true);
+    expect(st.head).toMatch(/^[0-9a-f]{40}$/);
+    expect(st.dirty).toBe(false);
   });
 
   test('checkoutStatus itself is read-only and reports offline provenance state', () => {

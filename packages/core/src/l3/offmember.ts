@@ -87,25 +87,32 @@
 // AND THE TIGHTER RULE IS PRICED, so it is not re-derived from scratch. Refusing a base whose
 // siblings this pass cannot spell removes `a:gCallbackQueue` from
 // `kleod:ProcessInputAndUpdateEntities` (asserted by dumping that row's winning source both ways:
-// 9 `struct Off*` declarations become 2, and the survivor is `gUnk_03004C20`) and costs that row
-// 248 → 273, while protecting no row anywhere in the artifact. RE-PRICE IT BEFORE QUOTING IT: a
-// bracket is a claim about the whole tree, so both endpoints move whenever anything else does.
+// 9 `struct Off*` declarations become 2, and the survivor is `gUnk_03004C20`) and COSTS that row
+// score, while protecting no row anywhere in the artifact. NO BRACKET IS QUOTED, and that is a
+// discipline rather than a gap: a bracket is a claim about the whole tree, so BOTH endpoints move
+// whenever anything else does. Read the unablated endpoint off the committed artifact — where
+// `kleod:ProcessInputAndUpdateEntities` scores 211 — and re-measure the ablated one before writing
+// a pair anywhere.
 // "PROTECTS NO ROW" IS A CENSUS AND NOT A SAMPLE, and the population is small because this is an
-// extra GATE: it only ever removes candidates, so only a row whose winner carries `/offmember`
-// can move at all. The artifact holds NINE, and eight are unmoved with the rule on —
+// extra GATE: it only ever removes candidates, so only a row whose winner carries `/offmember` can
+// move at all. THAT POPULATION IS A QUERY, not a count to keep in step by hand — the rows of
+// `apps/benchmark/results/results.json` whose `asmlift.candidateLabel` contains `offmember` — and
+// it grows with the corpus, so re-run it before repeating the result. It held eight rows besides
+// `ProcessInputAndUpdateEntities` when the census ran, all unmoved with the rule on:
 // `synthetic:basecell`, `synthetic:bgfixed`, `synthetic:foldsink`, `sa3:sub_802DFC8` and
-// `sa3:sub_803213C` all still MATCH, `kleod:RollRandomLevelVariant` 18, `kleod:CountCollectedGems`
-// 290, `kleod:UpdateWorldMapNodeAnim` 157, each the artifact's own number. A gate needs a row it
-// protects. (One side effect worth recording: with the rule on, PI's winner becomes
-// `unsigned/setup-args/no-ptr-elem/offmember` — an arm that wins no REAL row wins there. It is an
-// ablation's artifact, not a reason to ship either.)
+// `sa3:sub_803213C` all still MATCH, `kleod:RollRandomLevelVariant` 18,
+// `kleod:CountCollectedGems` 290, `kleod:UpdateWorldMapNodeAnim` 157, each the artifact's own
+// number. A gate needs a row it protects. (One side effect worth recording: with the rule on, PI's
+// winner becomes `unsigned/setup-args/no-ptr-elem/offmember` — an arm that wins no REAL row wins
+// there. It is an ablation's artifact, not a reason to ship either.)
 //
 // ALL-OR-NOTHING PER FUNCTION, and that is a PRICE rather than a property. Every admitted base is
 // respelled together in one candidate, so a function with two admitted bases where the target
 // folded one and kept the other in the operand has no reachable spelling — the coverage hole
 // `l3/ptrfield.ts` measures for its fields. `l3/basecse.ts` is NOT a second witness to it but the
 // counterexample: its `UNFOLDED_GATES` cuts across `LIVEBASE_BLOCK_GATES` rather than refining it,
-// so a partial answer IS reachable there — a proper nonempty subset on 13 of its 363 agbcc rows,
+// so a partial answer IS reachable there — a proper nonempty subset on 13 of the agbcc rows the
+// artifact carried when that census ran,
 // one of three bases on `synthetic:dmascope` — and that is the way out of this hole too: not a
 // per-base fork, but a SECOND PREDICATE separating the bases the differ has to choose between.
 // The per-base fork is 2^n and the family's standing price for forking ten refusal sites per site

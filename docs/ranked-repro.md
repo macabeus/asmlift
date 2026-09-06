@@ -31,7 +31,9 @@ A project can exist on this machine more than once — the benchmark's own
 different trees with different symbol maps and different `decomp.yaml` compile templates, and they
 produce different fans from byte-identical assembly.**
 
-Measured on `LoadBGTilemapData`, one asmlift commit, one command, the same `.s` bytes:
+Measured on `LoadBGTilemapData`, one asmlift commit, one command, the same `.s` bytes — and
+measured **before #148 shipped `/copy-defpos`**, which the next section shows doubled both columns.
+The ratio between the two rows is what this table teaches; neither absolute fan is current.
 
 | checkout                                           | branch                  | FUNC/OBJECT syms |         fan |
 | -------------------------------------------------- | ----------------------- | ---------------: | ----------: |

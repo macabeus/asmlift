@@ -21,5 +21,8 @@
   // `apps/benchmark/test` is in scope because its RANKING STUBS stand in for a core return type:
   // outside the typecheck, a stub that stopped satisfying `RankedResult` still compiled, and the
   // harness turned the resulting TypeError into a `noncompile` row.
-  "include": ["packages/*/src", "packages/*/test", "apps/benchmark/src", "apps/benchmark/test"]
+  // `scripts` is in scope for the same reason one step out: the few .ts/.mts tools there reach
+  // into `packages/*/src`, and outside the typecheck a signature they call could move without
+  // anything saying so until someone reruns the tool by hand months later.
+  "include": ["packages/*/src", "packages/*/test", "apps/benchmark/src", "apps/benchmark/test", "scripts"]
 }

@@ -16,6 +16,7 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { hasLoopSharedPureValue } from '../src/structure/analysis';
 import { structure } from '../src/structure/structure';
+import { count } from './helpers';
 
 const emit = (ir: string, on: boolean): string => {
   const fn = parse(ir);
@@ -23,8 +24,6 @@ const emit = (ir: string, on: boolean): string => {
   recoverTypes(fn);
   return cBackend.emit(structure(fn, { homeLoopExprs: on }));
 };
-
-const count = (s: string, needle: string): number => s.split(needle).length - 1;
 
 // The sizebound shape, reduced: `16 << a0` defined at entry, consumed by the loop bound and a
 // product inside the loop.

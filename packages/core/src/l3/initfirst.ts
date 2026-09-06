@@ -38,7 +38,7 @@
 // re-enters everything, a case can fall through), so there the variable must appear nowhere
 // outside the rewritten `if` at all. Declines (null) when nothing changes.
 import type { Expr, SFn, Stmt } from './ast';
-import { NEGATE_REL, exprChildren, exprEquals, stmtChildren, stmtExprs } from './ast';
+import { NEGATE_REL, exprChildren, exprEquals, exprHasEffect, stmtChildren, stmtExprs, walkExprs } from './ast';
 import { arithConversionSignedness, declaredTypes, provablyNonNegative } from './typing';
 
 const readsVar = (e: Expr, name: string): boolean =>
@@ -59,85 +59,105 @@ const isConstAssign = (s: Stmt): s is Extract<Stmt, { k: 'assign' }> & { value: 
 const stripWideIntCast = (e: Expr): Expr =>
   e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 && e.volatile !== true ? stripWideIntCast(e.e) : e;
 
+/** Every deref rooted at a var through casts only. The var-root rule is a TWO-WORLD argument, not a
+ *  volatility proof: a deref through a plain-declared pointer local may still be MMIO, but the
+ *  /volatile axis enumerates the qualified sibling — where this lever refuses — so both worlds reach
+ *  the differ and collapsing reads here is the plain world's own premise. A raw `*(u16 *)CONST` deref
+ *  has NO local for /volatile to qualify, so no sibling carries the volatile world and the collapse
+ *  would silently discard it. */
+const varRooted = (e: Expr): boolean => (e.k === 'var' ? true : e.k === 'cast' ? varRooted(e.e) : false);
+
+/** A guard re-spell's X: call/marker-free, every named leaf a non-volatile param/local of THIS
+ *  function (a global or `&gSym` could be project-declared volatile), and every deref `varRooted`. */
+const hoistableRead = (e: Expr, ownNames: ReadonlySet<string>, volatileLocals: ReadonlySet<string>): boolean => {
+  if (e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
+    return false;
+  }
+  if (e.k === 'var' && (!ownNames.has(e.name) || volatileLocals.has(e.name))) {
+    return false;
+  }
+  if ((e.k === 'index' || e.k === 'field') && !varRooted(e.base)) {
+    return false;
+  }
+  return exprChildren(e).every((c) => hoistableRead(c, ownNames, volatileLocals));
+};
+
+/** A compare operand and the init's value denote the same 32-bit value under different SPELLINGS
+ *  when a width-32 cast is all that separates them: `/uns-cmp` wraps one side in `(u32)` to make
+ *  the branch unsigned, and on a zero-trip guard that side is the very const the init assigns.
+ *  The swap is still exact — `v = X` stores X's 32 bits and `v` is 32-bit-declared
+ *  (meaningPreserved refuses otherwise), so `v` and `(u32)X` carry the same bit pattern and only
+ *  the compare's rendered signedness can differ, which meaningPreserved checks separately. A
+ *  NARROWING cast changes the value and never matches, and a `volatile` one is not peeled at all. */
+const sameValue = (a: Expr, b: Expr): boolean => exprEquals(stripWideIntCast(a), stripWideIntCast(b));
+
+/** The compare-meaning gate (see SCOPE): substituting `v` for X may change the compare's
+ *  rendered signedness through v's declared type. Sufficiency: v's declared width must be 32
+ *  (the assignment `v = X` then represents any 32-bit-or-narrower X exactly, so v's runtime
+ *  value EQUALS X's — a narrow-declared v would truncate and no signedness reasoning survives
+ *  that), and then (a) both original sides provably in [0, 2^31) ⇒ signed and unsigned
+ *  compares agree on the actual values whatever the swap does to rendered signedness; (b)
+ *  otherwise a defined, UNCHANGED rendered signedness over equal values gives the identical
+ *  result. Anything indeterminate refuses. */
+const meaningPreserved = (
+  l: Expr,
+  r: Expr,
+  side: 'l' | 'r',
+  v: string,
+  env: ReturnType<typeof declaredTypes>,
+): boolean => {
+  const vt = env(v);
+  if (vt?.kind !== 'int' || vt.width !== 32) {
+    return false;
+  }
+  if (provablyNonNegative(l, env) && provablyNonNegative(r, env)) {
+    return true;
+  }
+  const before = arithConversionSignedness(l, r, env);
+  const vv: Expr = { k: 'var', name: v };
+  const after = side === 'l' ? arithConversionSignedness(vv, r, env) : arithConversionSignedness(l, vv, env);
+  return before !== undefined && before === after;
+};
+
+/** TOTAL (reads and pure writes) — see the note on stmtTouches. Runs against the pre-rewrite
+ *  tree (`skip` is an original-tree statement, found by identity); the rewrites never change a
+ *  name's presence in a subtree, so the verdict carries over to the rewritten one. */
+const touchesOutside = (list: Stmt[], skip: Stmt, name: string): boolean =>
+  list.some(
+    (st) =>
+      st !== skip &&
+      (stmtExprs(st).some((e) => readsVar(e, name)) ||
+        (st.k === 'assign' && st.name === name) ||
+        touchesOutside(stmtChildren(st), skip, name)),
+  );
+
+/** Every name whose ADDRESS this function takes anywhere — a local read through the captured
+ *  pointer with no name in sight. */
+function addressTakenNames(sfn: SFn): Set<string> {
+  const taken = new Set<string>();
+  for (const e of walkExprs(sfn.body)) {
+    if (e.k === 'addr') {
+      taken.add(e.name);
+    }
+  }
+  return taken;
+}
+
 export function initFirstGuards(sfn: SFn): SFn | null {
   let changed = false;
-  const fnLocal = new Set([
-    ...sfn.params.map((d) => d.name),
-    ...sfn.locals.filter((l) => l.volatile !== true).map((l) => l.name),
-  ]);
-  // an address-taken local can be read through the captured pointer with no name in sight
-  const dropAddressTaken = (e: Expr): void => {
-    if (e.k === 'addr') {
-      fnLocal.delete(e.name);
-    }
-    exprChildren(e).forEach(dropAddressTaken);
-  };
-  const sweep = (stmts: Stmt[]): void => {
-    for (const st of stmts) {
-      stmtExprs(st).forEach(dropAddressTaken);
-      sweep(stmtChildren(st));
-    }
-  };
-  sweep(sfn.body);
+  // the names both rewrites may move a write of: this function's params and its non-volatile
+  // locals, minus everything whose address escapes
+  const addressTaken = addressTakenNames(sfn);
+  const fnLocal = new Set(
+    [...sfn.params.map((d) => d.name), ...sfn.locals.filter((l) => l.volatile !== true).map((l) => l.name)].filter(
+      (n) => !addressTaken.has(n),
+    ),
+  );
   const volatileLocals = new Set(
     sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
   );
   const ownNames = new Set([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
-  // a guard re-spell's X: call/marker-free, every named leaf a non-volatile param/local of THIS
-  // function (a global or &gSym could be project-declared volatile), and every deref rooted at a
-  // var through casts only. The var-root rule is a TWO-WORLD argument, not a volatility proof: a
-  // deref through a plain-declared pointer local may still be MMIO, but the /volatile axis
-  // enumerates the qualified sibling — where this lever refuses — so both worlds reach the
-  // differ and collapsing reads here is the plain world's own premise. A raw `*(u16 *)CONST`
-  // deref has NO local for /volatile to qualify, so no sibling carries the volatile world and
-  // the collapse would silently discard it.
-  const varRooted = (e: Expr): boolean => (e.k === 'var' ? true : e.k === 'cast' ? varRooted(e.e) : false);
-  const hoistableRead = (e: Expr): boolean => {
-    if (e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
-      return false;
-    }
-    if (e.k === 'var' && (!ownNames.has(e.name) || volatileLocals.has(e.name))) {
-      return false;
-    }
-    if ((e.k === 'index' || e.k === 'field') && !varRooted(e.base)) {
-      return false;
-    }
-    return exprChildren(e).every(hoistableRead);
-  };
-  // A READ X's hoist moves its evaluation ABOVE the whole condition, so the condition must
-  // carry no effect it could cross (a call there could write the cell X reads); a CONST init
-  // crosses nothing and keeps the wider admission.
-  const effectFree = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(effectFree);
-  // A compare operand and the init's value denote the same 32-bit value under different SPELLINGS
-  // when a width-32 cast is all that separates them: `/uns-cmp` wraps one side in `(u32)` to make
-  // the branch unsigned, and on a zero-trip guard that side is the very const the init assigns.
-  // The swap is still exact — `v = X` stores X's 32 bits and `v` is 32-bit-declared
-  // (meaningPreserved refuses otherwise), so `v` and `(u32)X` carry the same bit pattern and only
-  // the compare's rendered signedness can differ, which meaningPreserved checks separately. A
-  // NARROWING cast changes the value and never matches, and a `volatile` one is not peeled at all.
-  const sameValue = (a: Expr, b: Expr): boolean => exprEquals(stripWideIntCast(a), stripWideIntCast(b));
   const env = declaredTypes(sfn);
-  // The compare-meaning gate (see SCOPE): substituting `v` for X may change the compare's
-  // rendered signedness through v's declared type. Sufficiency: v's declared width must be 32
-  // (the assignment `v = X` then represents any 32-bit-or-narrower X exactly, so v's runtime
-  // value EQUALS X's — a narrow-declared v would truncate and no signedness reasoning survives
-  // that), and then (a) both original sides provably in [0, 2^31) ⇒ signed and unsigned
-  // compares agree on the actual values whatever the swap does to rendered signedness; (b)
-  // otherwise a defined, UNCHANGED rendered signedness over equal values gives the identical
-  // result. Anything indeterminate refuses.
-  const meaningPreserved = (l: Expr, r: Expr, side: 'l' | 'r', v: string): boolean => {
-    const vt = env(v);
-    if (vt?.kind !== 'int' || vt.width !== 32) {
-      return false;
-    }
-    if (provablyNonNegative(l, env) && provablyNonNegative(r, env)) {
-      return true;
-    }
-    const before = arithConversionSignedness(l, r, env);
-    const vv: Expr = { k: 'var', name: v };
-    const after = side === 'l' ? arithConversionSignedness(vv, r, env) : arithConversionSignedness(l, vv, env);
-    return before !== undefined && before === after;
-  };
 
   // `tails`: for each ancestor list, the statements after the ancestor on the path here.
   // `strong`: a loop or switch ancestor exists, so tails stop bounding what runs after.
@@ -145,17 +165,6 @@ export function initFirstGuards(sfn: SFn): SFn | null {
     tails: Stmt[][];
     strong: boolean;
   }
-  // TOTAL (reads and pure writes) — see the note on stmtTouches. Runs against the pre-rewrite
-  // tree (`skip` is an original-tree statement, found by identity); the rewrites never change a
-  // name's presence in a subtree, so the verdict carries over to the rewritten one.
-  const touchesOutside = (list: Stmt[], skip: Stmt, name: string): boolean =>
-    list.some(
-      (st) =>
-        st !== skip &&
-        (stmtExprs(st).some((e) => readsVar(e, name)) ||
-          (st.k === 'assign' && st.name === name) ||
-          touchesOutside(stmtChildren(st), skip, name)),
-    );
   // Assigns this pass itself hoisted to an arm head's parent list. An ancestor `if` whose arm now
   // BEGINS with one would otherwise re-spell it again — rewriting its own condition's accidental
   // matching const into the variable and stealing the arrangement the inner guard needed.
@@ -233,7 +242,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         const init = then[0];
         const rest = list.slice(i + 1);
         const side =
-          isConstAssign(init) || hoistableRead(init.value)
+          isConstAssign(init) || hoistableRead(init.value, ownNames, volatileLocals)
             ? sameValue(cond.l, init.value)
               ? ('l' as const)
               : sameValue(cond.r, init.value)
@@ -248,8 +257,11 @@ export function initFirstGuards(sfn: SFn): SFn | null {
           side !== null &&
           !readsVar(cond, init.name) &&
           deadAfter &&
-          (isConstAssign(init) || effectFree(cond)) &&
-          meaningPreserved(cond.l, cond.r, side, init.name)
+          // A READ X's hoist moves its evaluation ABOVE the whole condition, so the condition must
+          // carry no effect it could cross (a call there could write the cell X reads); a CONST
+          // init crosses nothing and keeps the wider admission.
+          (isConstAssign(init) || !exprHasEffect(cond)) &&
+          meaningPreserved(cond.l, cond.r, side, init.name, env)
         ) {
           out.push(init);
           moved.add(init);

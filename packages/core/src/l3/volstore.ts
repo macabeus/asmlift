@@ -72,8 +72,10 @@
 // unifies the COUNT side, which is the half where one answer really is enough. Nor do they
 // COMPOSE over the tree's OWN locals: that pairing would qualify a function's existing pointer-local
 // homes and its raw-constant stores together, and over 834 corpus trees both levers fire on ONE —
-// `kleod:SetupBG3WindowOverlay:agbcc`, which is `noncompile` on both decompilers. A pairing whose
-// whole reach is a row that does not compile is one a row has yet to demand.
+// `kleod:SetupBG3WindowOverlay:agbcc`, which neither decompiler scores — and under two DIFFERENT
+// published classifications: asmlift `noncompile` (agbcc rejects its call to `m4aSoundVSyncOff`),
+// m2c `declined`. A pairing whose whole reach is a row asmlift cannot compile is one a row has yet
+// to demand.
 //
 // A lever that MINTS the locals is a different question with a different answer, and `rank.ts`
 // pairs this pass with one: `/regionbase` homes the regions holding two or more direct uses of a
@@ -91,7 +93,7 @@
 // inhabitant is what "earn the level" forbids.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import { cellAddress, inRange } from './address';
-import { type Expr, type SFn, type Stmt } from './ast';
+import { type Expr, type SFn, type Stmt, stmtChildren } from './ast';
 import { type Gate, firstRejection } from './gates';
 
 /** One STORE lvalue as the gates read it. */
@@ -145,18 +147,25 @@ const qualifiedBase = (e: Expr): boolean => e.k === 'cast' && (e.volatile === tr
 /** The pointee the deref cast carries: the access's own scalar type. */
 const pointee = (ix: Extract<Expr, { k: 'index' }>): IrType => scalarTypeForAccess(ix.width, ix.signed);
 
-/** The store lvalue the gates admit, rewritten — or the input unchanged. */
-function qualify(lval: Expr, window: readonly [number, number] | undefined): Expr {
-  if (lval.k !== 'index') {
-    return lval; // a `field` lvalue is a recovered struct view, whose declaration owns volatility
-  }
+/** What the gates read about one indexed access: its cell address, and whether that address is
+ *  evidence — a window to place it in, the placement itself, and whether the base already carries
+ *  the qualifier. */
+function accessCtx(lval: Extract<Expr, { k: 'index' }>, window: readonly [number, number] | undefined): AccessCtx {
   const address = cellAddress(lval);
-  const ctx: AccessCtx = {
+  return {
     hasWindow: window !== undefined,
     address,
     inWindow: inRange(address, window),
     qualified: qualifiedBase(lval.base),
   };
+}
+
+/** The store lvalue the gates admit, rewritten — or the input unchanged. */
+function qualify(lval: Expr, window: readonly [number, number] | undefined): Expr {
+  if (lval.k !== 'index') {
+    return lval; // a `field` lvalue is a recovered struct view, whose declaration owns volatility
+  }
+  const ctx = accessCtx(lval, window);
   if (firstRejection(VOL_STORE_GATES, ctx) !== null) {
     return lval;
   }
@@ -170,7 +179,10 @@ function qualify(lval: Expr, window: readonly [number, number] | undefined): Exp
 }
 
 /** How many stores this tree would qualify — the enumeration gate, so a function with no device
- *  store costs one walk and no candidate. */
+ *  store costs one walk and no candidate.
+ *
+ *  A COUNT, so the shared `stmtChildren` walk order (a switch's default at `defaultAt`, not last)
+ *  cannot reach the answer. */
 export function deviceStoreCount(sfn: SFn, window?: readonly [number, number]): number {
   let n = 0;
   const visit = (stmts: readonly Stmt[]): void => {
@@ -178,31 +190,11 @@ export function deviceStoreCount(sfn: SFn, window?: readonly [number, number]): 
       if (s.k === 'store' && qualify(s.lval, window) !== s.lval) {
         n++;
       }
-      for (const c of children(s)) {
-        visit(c);
-      }
+      visit(stmtChildren(s));
     }
   };
   visit(sfn.body);
   return n;
-}
-
-/** The nested statement lists of one statement. Local rather than `stmtChildren` because the
- *  rewrite has to REBUILD each list in place, so it needs the lists themselves. */
-function children(s: Stmt): Stmt[][] {
-  switch (s.k) {
-    case 'if':
-      return [s.then, s.else];
-    case 'while':
-    case 'dowhile':
-      return [s.body];
-    case 'for':
-      return [[s.init], [s.inc], s.body];
-    case 'switch':
-      return [...s.cases.map((c) => c.body), s.default ?? []];
-    default:
-      return [];
-  }
 }
 
 /** The `/vol-store` candidate, or null when no store qualifies. Read-only: returns a fresh SFn

@@ -6,16 +6,21 @@ mixed: **194 of 376 aligned differing rows (51.6%) are strictly register-only**.
 count nor the other 182 rows is an additive price for a proposed missing capability.
 
 The run used the benchmark's `asmlift-benchmark` checkout, its assembly, symbol ELF, compile
-configuration and `build/src/gfx.o`, with the required `thunk_HeapFree` arity. The CLI bundle
-reported source `a56952a`. The completed record is:
+configuration and `build/src/gfx.o`, with the required `thunk_HeapFree` arity. The completed
+record is the four lines the run itself printed, quoted verbatim from
+[run-summary.json](lbg-attribution-evidence/baseline/run-summary.json)'s `summary` array so this
+block can be diffed against it character for character:
 
 ```text
-225792 candidates scored, 0 dropped, 0 withheld, 0 synthesized
-179712 raw labels; 46080 symbol labels
-best unsigned/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/coalesce-v20-v14/initfirst/raw-globals: 376
-candidate cache: 225792 misses, 225792 stored; sample=2%
-wall 8517.2s; RANKED_COMPLETE exit=1
+asmlift: [phase] wall 8517.2s · enumerate 415.6s (1 call) · compile 47272.0s over 6 workers (225792 calls) · score 619.2s (225792 calls) · rank 117.5s (1 call) · main-thread idle+other 7365.0s
+asmlift: [ranked] 225792 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best unsigned/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/coalesce-v20-v14/initfirst/raw-globals: 376 [asmlift source a56952a]
+asmlift: [candcache] on sample=2%/seed=7839463a3c43bcca {"miss":225792,"stored":225792}
+RANKED_COMPLETE exit=1
 ```
+
+The `[ranked]` line carries one total; the raw/symbol split is not in it and lives in the same
+file's `raw_count`/`symbol_count`/`raw_min`/`symbol_min` fields — 179,712 raw labels at minimum
+376, 46,080 symbol labels at minimum 455.
 
 Exit 1 denotes the completed nonmatch; this was not a stale-object exit 3. Input hashes and the
 full completion lines are retained in [run-summary.json](lbg-attribution-evidence/baseline/run-summary.json).
@@ -119,13 +124,13 @@ multiplicities are observed materialization shapes, not proof of an unobserved o
 This carries F1–F5 for the required independent remediation re-audit; prior D/R1/R2 ledgers
 remain in [the review record](lbg-attribution-review.md).
 
-| ID  | Finding                                                                                      | Verdict and completed remedy                                                                                                                                                   |
-| --- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| F1  | Literal-load destination annotations were labeled branch targets.                            | Accepted. Contextually relabeled the 20 ldr/ldr rows; retained original labels and affected IDs. Ten actual branch rows remain. Score376 and strict-register194 are unchanged. |
-| F2  | Supplied symbol462 disagreed with completed455.                                              | Accepted. Marked462 superseded and independently found, rescored and freshly compiled a captured named-symbol455 object. Cause remains unestablished.                          |
-| F3  | Stack/frame differences might imply the shipped spill-order rule failed.                     | Rejected attribution. Frame60→52 and offset changes do not isolate declaration order; matching spill controls and explicit no-new-row disposition retained.                    |
-| F4  | Nineteen aligned data rows might mean nineteen changed literal words or a constant pad cost. | Rejected interpretation. Full20/20-word and0/6-halfword census retained; mapping/order caveats explicit; no constant subtraction.                                              |
-| F5  | All182 non-register rows might name one missing capability.                                  | Rejected aggregation. Separate ownership boundaries and no-row reasons retained; no causal minimal pair, additive price or new implementation inferred.                        |
+| ID  | Finding                                                                                      | Verdict and completed remedy                                                                                                                                                     |
+| --- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1  | Literal-load destination annotations were labeled branch targets.                            | Accepted. Contextually relabeled the 20 ldr/ldr rows; retained original labels and affected IDs. Ten actual branch rows remain. Score 376 and strict-register 194 are unchanged. |
+| F2  | Supplied symbol 462 disagreed with completed 455.                                            | Accepted. Marked 462 superseded and independently found, rescored and freshly compiled a captured named-symbol 455 object. Cause remains unestablished.                          |
+| F3  | Stack/frame differences might imply the shipped spill-order rule failed.                     | Rejected attribution. Frame 60→52 and offset changes do not isolate declaration order; matching spill controls and explicit no-new-row disposition retained.                     |
+| F4  | Nineteen aligned data rows might mean nineteen changed literal words or a constant pad cost. | Rejected interpretation. Full 20/20-word and 0/6-halfword census retained; mapping/order caveats explicit; no constant subtraction.                                              |
+| F5  | All 182 non-register rows might name one missing capability.                                 | Rejected aggregation. Separate ownership boundaries and no-row reasons retained; no causal minimal pair, additive price or new implementation inferred.                          |
 
 ## Ownership, remedies, and row dispositions
 
@@ -135,7 +140,7 @@ name ownership boundaries; their probe scores are not prices to subtract from th
 | Finding / review remedy                                                                      | Compiler and asmlift ownership                                                                                                                                                                                                                                                                                                                                                                                                   | Row or explicit no-row reason                                                                                                                                                                          |
 | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Allocation: retain 194 strict rows without promising headroom                                | Established priority/search in `gcc/global.c:605` and `:926`. **No asmlift inverse-allocator site exists**; post-optimization compiler feedback would surround L3 candidate formation. `packages/core/src/ir/core.ts:108` records information lost when copies become one SSA value.                                                                                                                                             | Existing `reread`, new `erback`, and sibling sub_0804C484's 54/106 provide generality. No declaration-reorder lever is inferred.                                                                       |
-| Pool/base-plus-offset materialization: retain both new literals and multiplicities (F4/F5)   | Established `gcc/explow.c:45` constant-address folding and `gcc/config/arm/thumb.h:926` empty address legalization. Existing inference `packages/core/src/raise/globalshape.ts:890`, ordering licence `:924`, and L3 base shaping `packages/core/src/l3/basecse.ts:639` are distinct seams, not observed firing guards here.                                                                                                     | Existing `harridx`/`arrbias`, `bgfixed`/`bgbaked`, and extern ordering controls are boundaries. No new minimal raw-basin pair or guard attribution was established, so no duplicate row.               |
+| Pool/base-plus-offset materialization: retain both new literals and multiplicities (F4/F5)   | Established `gcc/explow.c:45` constant-address folding and `gcc/config/arm/thumb.h:926` empty address legalization. Existing inference `raise/globalshape.ts`'s `inferGlobalArrays`, its `orderLicensedGlobals` ordering licence, and `l3/basecse.ts`'s `order-licensed` gate are distinct seams, not observed firing guards here.                                                                                               | Existing `harridx`/`arrbias`, `bgfixed`/`bgbaked`, and extern ordering controls are boundaries. No new minimal raw-basin pair or guard attribution was established, so no duplicate row.               |
 | Frame/stack: do not call frame 60→52 an ascending-order failure (F3)                         | Established declaration/reload/frame mechanisms `gcc/stmt.c:3323`, `gcc/reload1.c:769`, `gcc/function.c:703`; shipped policy `packages/core/src/target.ts:343` and L3 `packages/core/src/l3/slotorder.ts:90`.                                                                                                                                                                                                                    | `spillorder`/`spillorder_rev` freshly MATCH. Address/out-parameter families own different operations. No isolated new spill-order failure was measured, so no additional row.                          |
 | Loop/branch/instruction structure: keep twenty PC annotations out of CFG attribution (F1/F5) | Established loop threshold `gcc/loop.c:1833`; structuring boundary `packages/core/src/structure/structure.ts:1295` and switch machinery `packages/core/src/structure/switch-recover.ts:92`. These are ownership boundaries, not causal findings for every unmatched region.                                                                                                                                                      | Existing loop/merge/switch families do not prove which region belongs to which mechanism. No causal region-level minimal pair was performed; bulk counts license no new row or computed-jump frontend. |
 | Mapping/alignment presentation: no constant subtraction (F4)                                 | The observed compiler `.align 2, 0` spelling is emitted by `ASM_OUTPUT_ALIGN` at `gcc/config/arm/thumb.h:100` (flattened as `gcc/thumb.h:100` in this compiler checkout). The comparison gate is `packages/cli/src/objdiff.ts:151`; frontend pad interpretation begins at `packages/core/src/frontend/thumb.ts:152` (L1). Frame/code length and assembler mapping symbols affect presentation; no new compiler pass is inferred. | Existing frontend alignment controls own presentation. Nineteen data rows are not a new pad-price family; no additional minimized failure was measured.                                                |
@@ -156,10 +161,11 @@ preprocessor **diagnostic filenames** are replaced with `captured-input.c`; decl
 function tokens are unchanged. Both original-capture and retained-file hashes are recorded.
 Both filename-sanitized archival `.i` files were independently compiled with the exact canonical
 flags and footer, then assembled. Both resulting `.s` files are byte-identical to their retained
-assembly, and both object SHA-256 values equal the original captured objects listed above. This
-validates archival reproduction as well as the original-capture checks. Command logs and compiled
-outputs are retained under ignored `apps/benchmark/results/lbg-archive-check.log/`, including
-`confirmation.json`. No object binaries or machine-specific sibling paths are required in the
+assembly, and both object SHA-256 values equal the original captured objects. This validates
+archival reproduction as well as the original-capture checks, and the hashes it was checked
+against are the committed ones: [run-summary.json](lbg-attribution-evidence/baseline/run-summary.json)'s
+`retainedArtifacts` records, per file, the captured hash, the retained hash and the one
+normalization applied. No object binaries or machine-specific sibling paths are required in the
 committed evidence.
 
 Canonical compile flags are `-mthumb-interwork -Wimplicit -Wparentheses -O2 -fhex-asm

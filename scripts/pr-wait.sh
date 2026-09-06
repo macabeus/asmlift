@@ -78,6 +78,15 @@ done
 case "$PR" in
   '' | *[!0-9]*) usage ;;
 esac
+# The three deadlines are arithmetic, so a non-numeric one is a USAGE error and has to be caught
+# here. Unchecked, `--timeout abc` reached `$((… + TIMEOUT))`, which under `set -u` aborts with
+# status 1 — this script's code for A CHECK GITHUB REPORTED AS FAILED, handed to the caller with
+# no verdict behind it.
+for v in "$TIMEOUT" "$INTERVAL" "$UNKNOWN_TIMEOUT"; do
+  case "$v" in
+    '' | *[!0-9]*) usage ;;
+  esac
+done
 command -v gh >/dev/null 2>&1 || {
   echo "pr-wait: gh is not installed — this needs the GitHub CLI" >&2
   exit 64

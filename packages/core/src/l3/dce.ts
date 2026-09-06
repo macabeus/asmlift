@@ -55,7 +55,7 @@ function reads(e: Expr): Set<string> {
  *   - a read of a VOLATILE local (the frame object whose address escaped) — a volatile read is an
  *     observable access the machine performed; deleting the dead assignment would delete the read.
  *  A dead assignment whose value contains any of these is kept. */
-function mustKeep(e: Expr, volatiles: ReadonlySet<string> = new Set()): boolean {
+function mustKeep(e: Expr, volatiles: ReadonlySet<string>): boolean {
   if (e.k === 'call' || e.k === 'marker' || e.k === 'index' || e.k === 'field') {
     return true;
   }
@@ -101,7 +101,7 @@ function dceBlock(
   stmts: Stmt[],
   liveOut: ReadonlySet<string>,
   locals: ReadonlySet<string>,
-  volatiles: ReadonlySet<string> = new Set(),
+  volatiles: ReadonlySet<string>,
 ): { out: Stmt[]; liveIn: Set<string> } {
   const live = new Set(liveOut);
   const rev: Stmt[] = [];

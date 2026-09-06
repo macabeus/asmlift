@@ -3,8 +3,13 @@
 // here, `pasType` in the Pascal backend). The empirical fact grounding the sharing: a
 // CodeWarrior member function's BODY is byte-identical to the same C with `this` as an
 // explicit pointer — so the C++ backend reuses this body spelling VERBATIM and owns only its
-// DIVERGENT surface (the mangled/scoped signature, references, `this`). c.ts and cpp.ts
-// consume exactly the exported seam: `emitCFamily` + `cType` + `LeafHook`.
+// DIVERGENT surface (the mangled/scoped signature, references, `this`).
+//
+// THE SEAM, stated as what it means rather than as a list that rots: a C-family backend owns its
+// SIGNATURE LINE and — for C++, whose member access spells differently — a leaf hook. Everything
+// below the signature is this file's: declarations, statements, expressions, precedence, the
+// legalizing casts, and the recovered-struct declaration spelling (which is why that lives here
+// too, shared with the scoring layer's synthesized declarations so the two cannot drift).
 import { IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, dotBase } from '../l3/ast';
 import { orderSlotLocals } from '../l3/slotorder';
@@ -17,6 +22,7 @@ import {
   exprCType,
   printEnv,
   renderedIntSignedness,
+  writesNonPointerIntoPointer,
 } from '../l3/typing';
 
 // C operator precedence (lower binds tighter). Used to emit MINIMAL parentheses. Shared: C++ has
@@ -116,6 +122,79 @@ export function renderStructDecl(name: string, fields: StructFieldDecl[]): strin
 // backend uses. The default (no hook) is byte-identical C.
 export type LeafHook = (e: Expr, rec: (e: Expr, p: number) => string) => string | null;
 
+/** C-FAMILY LEGALIZATION (owned here, per the width-carrying `index` node contract in l3/ast.ts):
+ *  the BASE an `index` node prints through — a deref whose base does not render as a pointer/array
+ *  STRIDING the access width is spelled through the honest reinterpret cast at that width, the
+ *  machine semantics of the access. Materialized as a synthetic cast node so the spelling (text,
+ *  precedence, parens) is exactly that of a tree-level cast, and returns the base UNCHANGED (===)
+ *  when no cast is needed, which is what the multidimensional guard tests.
+ *
+ *  AND IT CARRIES THE QUALIFIER. In C the access takes the OUTER type, so a plain cast over a
+ *  base the tree declared volatile spells an MMIO access the compiler may CSE, reorder or drop —
+ *  `((s32 *)(volatile u16 *)0x4000208)[i]` reads once where `((volatile s32 *)0x4000208)[i]`
+ *  reads twice (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
+ *  -fprologue-bugfix`), and referring to a volatile object through a non-volatile lvalue is
+ *  undefined behaviour (C99 6.7.3p5). */
+function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Expr {
+  return derefStrideOk(exprCType(ix.base, vt.type), ix.width, ix.signed)
+    ? ix.base
+    : {
+        k: 'cast',
+        to: T.ptr(scalarTypeForAccess(ix.width, ix.signed)),
+        ...(assertsVolatile(ix.base, vt) ? { volatile: true as const } : {}),
+        e: ix.base,
+      };
+}
+
+/** The 32-bit integer cast that PINS an operand's signedness.
+ *
+ *  An existing 32-bit integer cast is REPLACED rather than wrapped — `(u32)(s32)&g` and `(u32)&g`
+ *  are the same bytes, and the arithmetic rules upstream do emit that inner cast (intifyAddr).
+ *  The replacement CARRIES the qualifier: re-typing a `volatile` cast without it drops an
+ *  assertion the differ cannot referee the loss of, which is why l3/initfirst.ts's
+ *  `stripWideIntCast` refuses the same peel one pass over. */
+function recast32(x: Expr, signed: boolean): Expr {
+  const replaced = x.k === 'cast' && x.to.kind === 'int' && x.to.width === 32 ? x : undefined;
+  return {
+    k: 'cast',
+    to: T.int(32, signed),
+    ...(replaced?.volatile === true ? { volatile: true as const } : {}),
+    e: replaced ? replaced.e : x,
+  };
+}
+
+/** C-FAMILY OPERAND-SIGNEDNESS LEGALIZATION, the same discipline as the deref cast one operator
+ *  over. The tower keeps the signedness-carrying pairs apart (`>>>` logical / `>>` arithmetic,
+ *  `/u` `%u` unsigned / `/` `%` signed); C spells each pair with ONE token and picks between them
+ *  from the operand types. So the operands must be made to carry the choice, or an `shr_u`
+ *  recompiles to `asr` where the target has `lsr` AND evaluates differently
+ *  (`*(u8 *)&g << 30 >> 30` promotes to `int`, so a 2-bit field holding 2 comes out -1), and a
+ *  `udiv` calls `__divsi3` where the target called `__udivsi3`.
+ *
+ *  (engine.ts's zext fold covers the same hazard for widths C can NAME, by folding the whole
+ *  shift pair to a cast op. Every other extract width — every bitfield read — lands here.)
+ *
+ *  A SHIFT and a DIVIDE read their operands differently, so the pin does too. A SHIFT takes the
+ *  type of its left operand alone, and the cast goes on unless that operand PROVABLY renders as
+ *  the op needs (renderedIntSignedness's header carries the rule for reading `undefined`).
+ *
+ *  A DIVIDE takes the usual arithmetic conversions over BOTH operands, where unsigned wins at
+ *  equal rank, so the question is what the PAIR renders as. Once the pair renders wrong the two
+ *  directions cost differently: unsigned takes ONE cast, which carries the whole operation, while
+ *  signed has to pin EVERY operand short of a proof, because one unsigned side is enough to make
+ *  the division unsigned. Verified by compiling: `((u32)a / b) / 7` calls `__udivsi3` twice,
+ *  `(s32)((u32)a / b) / 7` calls `__udivsi3` then `__divsi3`. */
+function pinnedOperands(e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean, vt: PrintEnv): [Expr, Expr] {
+  if (e0.op === '>>' || e0.op === '>>>') {
+    return [renderedIntSignedness(e0.l, vt.type) === wantSigned ? e0.l : recast32(e0.l, wantSigned), e0.r];
+  }
+  if (arithConversionSignedness(e0.l, e0.r, vt.type) === wantSigned) {
+    return [e0.l, e0.r];
+  }
+  const pinSigned = (x: Expr): Expr => (renderedIntSignedness(x, vt.type) === true ? x : recast32(x, true));
+  return wantSigned ? [pinSigned(e0.l), pinSigned(e0.r)] : [recast32(e0.l, false), e0.r];
+}
+
 function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): string {
   const rec = (x: Expr, p: number) => printExpr(x, p, vt, leaf);
   if (leaf) {
@@ -124,72 +203,6 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       return s;
     }
   }
-  // C-FAMILY LEGALIZATION (owned here, per the width-carrying `index` node contract in l3/ast.ts):
-  // a deref whose base does not render as a pointer/array STRIDING the access width is spelled
-  // through the honest reinterpret cast at that width — the machine semantics of the access.
-  // Materialized as a synthetic cast node so the spelling (text, precedence, parens) is exactly
-  // that of a tree-level cast.
-  //
-  // AND IT CARRIES THE QUALIFIER. In C the access takes the OUTER type, so a plain cast over a
-  // base the tree declared volatile spells an MMIO access the compiler may CSE, reorder or drop —
-  // `((s32 *)(volatile u16 *)0x4000208)[i]` reads once where `((volatile s32 *)0x4000208)[i]`
-  // reads twice (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
-  // -fprologue-bugfix`), and referring to a volatile object through a non-volatile lvalue is
-  // undefined behaviour (C99 6.7.3p5).
-  const legalized = (ix: Extract<Expr, { k: 'index' }>): Expr =>
-    derefStrideOk(exprCType(ix.base, vt.type), ix.width, ix.signed)
-      ? ix.base
-      : {
-          k: 'cast',
-          to: T.ptr(scalarTypeForAccess(ix.width, ix.signed)),
-          ...(assertsVolatile(ix.base, vt) ? { volatile: true as const } : {}),
-          e: ix.base,
-        };
-  // C-FAMILY OPERAND-SIGNEDNESS LEGALIZATION, the same discipline as the deref cast above one
-  // operator over. The tower keeps the signedness-carrying pairs apart (`>>>` logical / `>>`
-  // arithmetic, `/u` `%u` unsigned / `/` `%` signed); C spells each pair with ONE token and picks
-  // between them from the operand types. So the operands must be made to carry the choice, or an
-  // `shr_u` recompiles to `asr` where the target has `lsr` AND evaluates differently
-  // (`*(u8 *)&g << 30 >> 30` promotes to `int`, so a 2-bit field holding 2 comes out -1), and a
-  // `udiv` calls `__divsi3` where the target called `__udivsi3`.
-  //
-  // (engine.ts's zext fold covers the same hazard for widths C can NAME, by folding the whole
-  // shift pair to a cast op. Every other extract width — every bitfield read — lands here.)
-  //
-  // An existing 32-bit integer cast is REPLACED rather than wrapped — `(u32)(s32)&g` and `(u32)&g`
-  // are the same bytes, and the arithmetic rules upstream do emit that inner cast (intifyAddr).
-  // The replacement CARRIES the qualifier: re-typing a `volatile` cast without it drops an
-  // assertion the differ cannot referee the loss of, which is why l3/initfirst.ts's
-  // `stripWideIntCast` refuses the same peel one pass over.
-  const recast = (x: Expr, signed: boolean): Expr => {
-    const replaced = x.k === 'cast' && x.to.kind === 'int' && x.to.width === 32 ? x : undefined;
-    return {
-      k: 'cast',
-      to: T.int(32, signed),
-      ...(replaced?.volatile === true ? { volatile: true as const } : {}),
-      e: replaced ? replaced.e : x,
-    };
-  };
-  // A SHIFT and a DIVIDE read their operands differently, so the pin does too. A SHIFT takes the
-  // type of its left operand alone, and the cast goes on unless that operand PROVABLY renders as
-  // the op needs (renderedIntSignedness's header carries the rule for reading `undefined`).
-  //
-  // A DIVIDE takes the usual arithmetic conversions over BOTH operands, where unsigned wins at
-  // equal rank, so the question is what the PAIR renders as. Once the pair renders wrong the two
-  // directions cost differently: unsigned takes ONE cast, which carries the whole operation, while
-  // signed has to pin EVERY operand short of a proof, because one unsigned side is enough to make
-  // the division unsigned. Verified by compiling: `((u32)a / b) / 7` calls `__udivsi3` twice,
-  // `(s32)((u32)a / b) / 7` calls `__udivsi3` then `__divsi3`.
-  const pinnedOperands = (e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean): [Expr, Expr] => {
-    if (e0.op === '>>' || e0.op === '>>>') {
-      return [renderedIntSignedness(e0.l, vt.type) === wantSigned ? e0.l : recast(e0.l, wantSigned), e0.r];
-    }
-    if (arithConversionSignedness(e0.l, e0.r, vt.type) === wantSigned) {
-      return [e0.l, e0.r];
-    }
-    const pinSigned = (x: Expr): Expr => (renderedIntSignedness(x, vt.type) === true ? x : recast(x, true));
-    return wantSigned ? [pinSigned(e0.l), pinSigned(e0.r)] : [recast(e0.l, false), e0.r];
-  };
   switch (e.k) {
     case 'var':
       return e.name;
@@ -209,7 +222,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       // `(*p)[1]`, never `*p[1]` which C groups as `*(p[1])`), `base[idx]` otherwise (POSTFIX —
       // binds tighter than any prefix operator, so a cast/unary/deref base is printed at prec 1
       // and parenthesizes itself: `((u8 *)p)[1]`). The postfix form needs no outer parentheses.
-      const base = legalized(e);
+      const base = legalizedIndexBase(e, vt);
       // Leading constant subscripts (a multidimensional array global's bare spelling) keep the
       // postfix form whatever `idx` is: `g[0][0]` is the element, `*g[0]` would be its ROW.
       //
@@ -289,7 +302,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       // Each signedness-carrying pair spells with ONE C token; `pinnedOperands` supplies the
       // operand cast that says which of the pair it is.
       const pair = C_SPELLING[e.op];
-      const [l, r] = pair ? pinnedOperands(e, pair.signed) : [e.l, e.r];
+      const [l, r] = pair ? pinnedOperands(e, pair.signed, vt) : [e.l, e.r];
       const s = `${rec(l, p)} ${pair ? pair.token : e.op} ${rec(r, p - 1)}`;
       return p > parentPrec ? `(${s})` : s;
     }
@@ -365,81 +378,89 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       return [`${indent}break;`];
     case 'continue':
       return [`${indent}continue;`];
-    case 'switch': {
-      // A `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in C,
-      // so printing one between `case` labels rebinds it — a changed program that reads as ordinary
-      // C. Refused HERE because the rebinding is the printer's, for every producer rather than for
-      // the two switch regimes. No recovery reaches it today (both regimes decline a loop-exiting
-      // arm first, loudly), so it is a contract on the next one.
-      //
-      // `continue;` is deliberately NOT refused: C binds it to the smallest enclosing ITERATION
-      // statement, which a `switch` is not, so it already means what L3 means. What a loop-respelling
-      // pass must preserve is exactly that — the three that can re-spell a loop into one whose
-      // `continue` would run a different increment (`recognizeForLoops` in structure.ts,
-      // `respellCountdown` in l3/reindex.ts, and l3/unreduce.ts) each scan switch arms for the node
-      // before firing, and a fourth must too.
-      for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {
-        if (switchBoundBreakIn(body)) {
-          throw new Error('c backend: a switch arm carries a loop-scoped `break;`, which C would bind to the switch');
-        }
-      }
-      const out = [`${indent}switch (${pe(s.scrutinee, 99)}) {`];
-      const ci = indent + '    '; // case-label indent
-      const bi = indent + '        '; // case-body indent
-      // `?.length`, not just presence: a label with no statement under it is not valid C89, and an
-      // L3 pass (dce, reindex) may empty a default that arrived with statements — the structurer's
-      // own "don't attach an empty default" rule cannot see that.
-      const hasDefault = !!s.default?.length;
-      // Where the `default:` label goes, as a COUNT of case arms before it (l3/ast.ts): absent ⇒
-      // after all of them. A count past the arms matches no position at all and the label would
-      // simply not be printed — the default arm vanishing from a switch that has one — so a
-      // producer that hands one over fails loud, like the falling-arm placement below.
-      const defAt = hasDefault ? (s.defaultAt ?? s.cases.length) : -1;
-      if (hasDefault && (defAt < 0 || defAt > s.cases.length)) {
-        throw new Error(`c backend: a switch places its default at arm ${defAt} of ${s.cases.length}`);
-      }
-      const printDefault = (): void => {
-        out.push(`${ci}default:`);
-        for (const t of s.default!) {
-          out.push(...printStmt(t, bi, vt, leaf));
-        }
-        // A default that is NOT last would otherwise fall into the case below it — the mirror of the
-        // rule for cases. The last one needs no `break;` because there is nothing under it.
-        if (defAt < s.cases.length && !endsTerminated(s.default!)) {
-          out.push(`${bi}break;`);
-        }
-      };
-      s.cases.forEach((c, i) => {
-        if (i === defAt) {
-          // Moving the label in FRONT of a falling arm would divert that arm into the default —
-          // a silent control-flow change. Recovery only positions a default among closed arms, so
-          // this is a producer bug rather than an input shape: fail loud.
-          if (i > 0 && s.cases[i - 1].fallsThrough) {
-            throw new Error(
-              `c backend: a switch places its default after a case that falls through, which would divert it`,
-            );
-          }
-          printDefault();
-        }
-        for (const v of c.values) {
-          out.push(`${ci}case ${v}:`);
-        }
-        for (const t of c.body) {
-          out.push(...printStmt(t, bi, vt, leaf));
-        }
-        // A case whose body ends in `return`/`break` (a terminated arm) needs no `break;`; only an
-        // open non-fall-through arm gets one. `fallsThrough` omits it so control drops to the next case.
-        if (!c.fallsThrough && !endsTerminated(c.body)) {
-          out.push(`${bi}break;`);
-        }
-      });
-      if (defAt === s.cases.length) {
-        printDefault();
-      }
-      out.push(`${indent}}`);
-      return out;
+    case 'switch':
+      return printSwitchStmt(s, indent, vt, leaf);
+  }
+}
+
+/** A C `switch`: the arm bodies, the `default:` label's position among them, and the three
+ *  producer-contract refusals that stand between an L3 `switch` node and valid C. Its own function
+ *  because it is the one statement kind whose printing is a program of its own; `printStmt`'s arm
+ *  is one call. */
+function printSwitchStmt(s: Extract<Stmt, { k: 'switch' }>, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
+  const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
+  // A `break;` in an arm BODY is the innermost LOOP's in L3 (l3/ast.ts) and the SWITCH's in C,
+  // so printing one between `case` labels rebinds it — a changed program that reads as ordinary
+  // C. Refused HERE because the rebinding is the printer's, for every producer rather than for
+  // the two switch regimes. No recovery reaches it today (both regimes decline a loop-exiting
+  // arm first, loudly), so it is a contract on the next one.
+  //
+  // `continue;` is deliberately NOT refused: C binds it to the smallest enclosing ITERATION
+  // statement, which a `switch` is not, so it already means what L3 means. What a loop-respelling
+  // pass must preserve is exactly that — the three that can re-spell a loop into one whose
+  // `continue` would run a different increment (`recognizeForLoops` in structure.ts,
+  // `respellCountdown` in l3/reindex.ts, and l3/unreduce.ts) each scan switch arms for the node
+  // before firing, and a fourth must too.
+  for (const body of [...s.cases.map((c) => c.body), s.default ?? []]) {
+    if (switchBoundBreakIn(body)) {
+      throw new Error('c backend: a switch arm carries a loop-scoped `break;`, which C would bind to the switch');
     }
   }
+  const out = [`${indent}switch (${pe(s.scrutinee, 99)}) {`];
+  const ci = indent + '    '; // case-label indent
+  const bi = indent + '        '; // case-body indent
+  // `?.length`, not just presence: a label with no statement under it is not valid C89, and an
+  // L3 pass (dce, reindex) may empty a default that arrived with statements — the structurer's
+  // own "don't attach an empty default" rule cannot see that.
+  const hasDefault = !!s.default?.length;
+  // Where the `default:` label goes, as a COUNT of case arms before it (l3/ast.ts): absent ⇒
+  // after all of them. A count past the arms matches no position at all and the label would
+  // simply not be printed — the default arm vanishing from a switch that has one — so a
+  // producer that hands one over fails loud, like the falling-arm placement below.
+  const defAt = hasDefault ? (s.defaultAt ?? s.cases.length) : -1;
+  if (hasDefault && (defAt < 0 || defAt > s.cases.length)) {
+    throw new Error(`c backend: a switch places its default at arm ${defAt} of ${s.cases.length}`);
+  }
+  const printDefault = (): void => {
+    out.push(`${ci}default:`);
+    for (const t of s.default!) {
+      out.push(...printStmt(t, bi, vt, leaf));
+    }
+    // A default that is NOT last would otherwise fall into the case below it — the mirror of the
+    // rule for cases. The last one needs no `break;` because there is nothing under it.
+    if (defAt < s.cases.length && !endsTerminated(s.default!)) {
+      out.push(`${bi}break;`);
+    }
+  };
+  s.cases.forEach((c, i) => {
+    if (i === defAt) {
+      // Moving the label in FRONT of a falling arm would divert that arm into the default —
+      // a silent control-flow change. Recovery only positions a default among closed arms, so
+      // this is a producer bug rather than an input shape: fail loud.
+      if (i > 0 && s.cases[i - 1].fallsThrough) {
+        throw new Error(
+          `c backend: a switch places its default after a case that falls through, which would divert it`,
+        );
+      }
+      printDefault();
+    }
+    for (const v of c.values) {
+      out.push(`${ci}case ${v}:`);
+    }
+    for (const t of c.body) {
+      out.push(...printStmt(t, bi, vt, leaf));
+    }
+    // A case whose body ends in `return`/`break` (a terminated arm) needs no `break;`; only an
+    // open non-fall-through arm gets one. `fallsThrough` omits it so control drops to the next case.
+    if (!c.fallsThrough && !endsTerminated(c.body)) {
+      out.push(`${bi}break;`);
+    }
+  });
+  if (defAt === s.cases.length) {
+    printDefault();
+  }
+  out.push(`${indent}}`);
+  return out;
 }
 
 /** Does this arm body carry a `break` C would bind to the enclosing SWITCH rather than to the loop
@@ -463,26 +484,15 @@ function endsTerminated(body: Stmt[]): boolean {
   );
 }
 
-/** The body of a C-family function: local declarations + statements, one string per line. The
- *  SIGNATURE (return type + name + params, plus any C++ scope/`this`/mangling) is the caller's —
- *  that is the language-divergent part each backend owns. */
 // C-FAMILY WRITE LEGALIZATION (the assign-side sibling of the deref legalization in printExpr):
-// a value whose rendered C type is definitely NON-pointer written into a pointer-declared slot
-// (`v2 = a1 + v0` with `v2: u8 *`; `return a0 + v0` from a ptr-returning fn; `*pp = intexpr`
-// through a pointer-element slot) is an ERROR on mwcc (gcc merely warns) — the honest spelling
-// is the reinterpret cast to the DECLARED type, exactly what the machine's register move does.
-// Unknowable renderings (calls) are left alone: their C type comes from prototypes outside this
-// function. (A rebuilding transform with per-kind semantics — its own switch, per the l3/ast.ts
+// the C family's answer to `writesNonPointerIntoPointer` is the reinterpret cast to the DECLARED
+// type — exactly what the machine's register move does — where Pascal, having no such cast,
+// declines. (A rebuilding transform with per-kind semantics — its own switch, per the l3/ast.ts
 // traversal-vocabulary exemption.)
 function legalizePointerWrites(fn: SFn): SFn {
   const vt = declaredTypes(fn);
-  const castTo = (t: IrType | undefined, e: Expr): Expr => {
-    if (t?.kind !== 'ptr') {
-      return e;
-    }
-    const ct = exprCType(e, vt);
-    return ct && ct.kind !== 'ptr' && ct.kind !== 'array' ? { k: 'cast', to: t, e } : e;
-  };
+  const castTo = (t: IrType | undefined, e: Expr): Expr =>
+    writesNonPointerIntoPointer(t, e, vt) ? { k: 'cast', to: t, e } : e;
   const fix = (s: Stmt): Stmt => {
     switch (s.k) {
       case 'assign':
@@ -514,6 +524,9 @@ function legalizePointerWrites(fn: SFn): SFn {
   return { ...fn, body: fn.body.map(fix) };
 }
 
+/** The body of a C-family function: local declarations + statements, one string per line. The
+ *  SIGNATURE (return type + name + params, plus any C++ scope/`this`/mangling) is the caller's —
+ *  that is the language-divergent part each backend owns. */
 function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
   const fn = legalizePointerWrites(fn0);
   // The legalization env: every printed var's declared type and pointee volatility, from the SAME

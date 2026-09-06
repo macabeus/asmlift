@@ -7,10 +7,8 @@ import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { initFirstGuards } from '../src/l3/initfirst';
+import { c, s32, v } from './helpers';
 
-const s32 = { kind: 'int', width: 32, signed: true } as const;
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
 const assign = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
 const bin = (op: '<' | '>=' | '!=', l: Expr, r: Expr): Expr => ({ k: 'bin', op, l, r });
 const fn = (body: Stmt[]): SFn => ({

@@ -10,6 +10,7 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { COALESCE_GATES, type MergePair, coalesceCandidates, coalesceUnder } from '../src/l3/coalesce';
 import { type Gate, gateTableDefects, without } from '../src/l3/gates';
+import { mulberry32 } from './helpers';
 
 // Control flow comes from a pre-drawn list, not from the values, so both trees take the same path by
 // construction: traces align index for index and every difference is a value difference. Conditions
@@ -129,16 +130,6 @@ function compare(orig: SFn, cand: SFn, draws: number[]): 'same' | 'undefined-onl
 // three nor a loop standing in an init/inc. Nothing else covers the first three; the init case is
 // pinned directly by coalesce.test.ts ('a loop in a `for`s INIT encloses its own …').
 const LOCALS = ['a', 'b', 'c'];
-
-function mulberry32(seed: number): () => number {
-  let t = seed >>> 0;
-  return () => {
-    t = (t + 0x6d2b79f5) >>> 0;
-    let x = Math.imul(t ^ (t >>> 15), 1 | t);
-    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 function generate(seed: number): SFn {
   const rnd = mulberry32(seed);
@@ -262,6 +253,17 @@ describe('COALESCE_GATES', () => {
       expect(sweep(under(without(COALESCE_GATES, id))).clobbered.length).toBeGreaterThan(0);
     },
   );
+
+  // …and the other half of "load-bearing", for a gate that is NOT sound. A heuristic cannot be
+  // priced by clobbering, because dropping it clobbers nothing by definition — what it does is
+  // ADMIT more, and an admission the differ then referees. Measured rather than argued, over the
+  // same generator: 282 candidates → 563 with `first-is-write` dropped (58 → 118 over seeds
+  // 1..400 alone). Written against the baseline sweep rather than a literal, so tuning the
+  // generator moves both sides together.
+  test('the HEURISTIC gate `first-is-write` is load-bearing the other way — dropping it admits more', () => {
+    const baseline = sweep(coalesceCandidates).candidates;
+    expect(sweep(under(without(COALESCE_GATES, 'first-is-write'))).candidates).toBeGreaterThan(baseline);
+  });
 
   test('every gate actually refuses something — a rule nothing reaches guards nothing', () => {
     // Reachability, not correctness: a gate the corpus never exercises is one no test could be

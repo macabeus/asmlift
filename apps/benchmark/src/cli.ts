@@ -289,9 +289,7 @@ switch (command) {
     console.log(
       `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id}${elf ? ' + symbol-map ELF' : ''}${
         symbolsFile ? ' + authored symbol map' : ''
-      }${
-        ctxFile ? ` + scoring context (escalation rung ${ctxRung}: ${RUNG_NAMES[ctxRung - 1] ?? 'vendored ctx'})` : ''
-      })`,
+      }${ctxFile ? ` + scoring context (escalation rung ${ctxRung}: ${RUNG_NAMES[ctxRung - 1]})` : ''})`,
     );
     break;
   }
@@ -334,16 +332,14 @@ switch (command) {
     // any committed row missing from the fresh run. Needs a merged results/results.json.
     const { regressionGate } = await import('./report/regression');
     process.exit(regressionGate(opts.base));
-    break;
   }
   case 'diff': {
-    // The NEUTRALITY gate: exit 1 if any row's asmlift {outcome,score,candidateLabel,source} or
-    // m2c {outcome,score,source} moved, or if the row set changed. What a refactor, a harness
-    // change or a tooling change has to prove, and what `regression` (outcome only) and
+    // The NEUTRALITY gate: exit 1 if any published field of a row moved, or if the row set
+    // changed. `report/diff.ts`'s FIELDS owns which fields those are, per side. What a refactor,
+    // a harness change or a tooling change has to prove, and what `regression` (outcome only) and
     // `stale-check` (one word, no row named) each answer half of.
     const { diffGate } = await import('./report/diff');
     process.exit(diffGate(opts.base));
-    break;
   }
   case 'smoke':
     smoke();

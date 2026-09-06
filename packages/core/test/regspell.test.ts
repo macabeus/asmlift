@@ -7,9 +7,7 @@ import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { Expr, SFn } from '../src/l3/ast';
 import { registerishSpellings } from '../src/l3/regspell';
-
-const V = (name: string): Expr => ({ k: 'var', name });
-const C = (value: number): Expr => ({ k: 'const', value });
+import { c, v } from './helpers';
 
 /** the MultiplyQ8 shape: `if (E >= 0) v0 = E; else v0 = E + 255; return v0 << 8 >> 16;` */
 function diamond(E: Expr): SFn {
@@ -24,17 +22,17 @@ function diamond(E: Expr): SFn {
     body: [
       {
         k: 'if',
-        cond: { k: 'bin', op: '>=', l: E, r: C(0) },
+        cond: { k: 'bin', op: '>=', l: E, r: c(0) },
         then: [{ k: 'assign', name: 'v0', value: E }],
-        else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: E, r: C(255) } }],
+        else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: E, r: c(255) } }],
       },
       {
         k: 'return',
         value: {
           k: 'bin',
           op: '>>',
-          l: { k: 'bin', op: '<<', l: V('v0'), r: C(8) },
-          r: C(16),
+          l: { k: 'bin', op: '<<', l: v('v0'), r: c(8) },
+          r: c(16),
         },
       },
     ],
@@ -43,8 +41,8 @@ function diamond(E: Expr): SFn {
 const MUL: Expr = {
   k: 'bin',
   op: '*',
-  l: { k: 'cast', to: T.s(16), e: V('a0') },
-  r: { k: 'cast', to: T.s(16), e: V('a1') },
+  l: { k: 'cast', to: T.s(16), e: v('a0') },
+  r: { k: 'cast', to: T.s(16), e: v('a1') },
 };
 
 describe('R1 — diamond → copy + in-place update', () => {
@@ -89,8 +87,8 @@ describe('R2 — constant-expression staging', () => {
           value: {
             k: 'bin',
             op: '/',
-            l: { k: 'bin', op: '<<', l: C(128), r: C(9) },
-            r: { k: 'cast', to: T.s(16), e: V('a0') },
+            l: { k: 'bin', op: '<<', l: c(128), r: c(9) },
+            r: { k: 'cast', to: T.s(16), e: v('a0') },
           },
         },
       ],
@@ -108,7 +106,7 @@ describe('R2 — constant-expression staging', () => {
       retType: T.s(32),
       params: [{ name: 'a0', type: T.s(32) }],
       locals: [],
-      body: [{ k: 'return', value: { k: 'bin', op: '+', l: V('a0'), r: C(5) } }],
+      body: [{ k: 'return', value: { k: 'bin', op: '+', l: v('a0'), r: c(5) } }],
     };
     expect(registerishSpellings(sfn)).toHaveLength(0);
   });
@@ -125,20 +123,20 @@ describe('adversarial-round guards', () => {
       ],
       locals: [{ name: 'v0', type: T.s(32) }],
       body: [
-        { k: 'assign', name: 'v0', value: C(0) },
+        { k: 'assign', name: 'v0', value: c(0) },
         {
           k: 'while',
-          cond: { k: 'bin', op: '<', l: V('a1'), r: C(10) },
+          cond: { k: 'bin', op: '<', l: v('a1'), r: c(10) },
           body: [
             {
               k: 'if',
-              cond: { k: 'bin', op: '>=', l: V('a0'), r: C(0) },
-              then: [{ k: 'assign', name: 'v0', value: V('a0') }],
-              else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('a0'), r: C(255) } }],
+              cond: { k: 'bin', op: '>=', l: v('a0'), r: c(0) },
+              then: [{ k: 'assign', name: 'v0', value: v('a0') }],
+              else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('a0'), r: c(255) } }],
             },
           ],
         },
-        { k: 'return', value: V('v0') },
+        { k: 'return', value: v('v0') },
       ],
     };
     expect(registerishSpellings(sfn)).toHaveLength(0);
@@ -151,14 +149,14 @@ describe('adversarial-round guards', () => {
       params: [{ name: 'a0', type: T.s(32) }],
       locals: [{ name: 'v0', type: T.s(32) }],
       body: [
-        { k: 'assign', name: 'v0', value: C(7) },
+        { k: 'assign', name: 'v0', value: c(7) },
         {
           k: 'if',
-          cond: { k: 'bin', op: '<', l: V('a0'), r: V('v0') },
-          then: [{ k: 'assign', name: 'v0', value: V('a0') }],
-          else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('a0'), r: C(5) } }],
+          cond: { k: 'bin', op: '<', l: v('a0'), r: v('v0') },
+          then: [{ k: 'assign', name: 'v0', value: v('a0') }],
+          else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('a0'), r: c(5) } }],
         },
-        { k: 'return', value: V('v0') },
+        { k: 'return', value: v('v0') },
       ],
     };
     expect(registerishSpellings(sfn)).toHaveLength(0);
@@ -173,11 +171,11 @@ describe('adversarial-round guards', () => {
       body: [
         {
           k: 'if',
-          cond: { k: 'bin', op: '>', l: V('a0'), r: C(5) },
-          then: [{ k: 'assign', name: 'v0', value: V('a0') }],
-          else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('a0'), r: C(3) } }],
+          cond: { k: 'bin', op: '>', l: v('a0'), r: c(5) },
+          then: [{ k: 'assign', name: 'v0', value: v('a0') }],
+          else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('a0'), r: c(3) } }],
         },
-        { k: 'return', value: V('v0') },
+        { k: 'return', value: v('v0') },
       ],
     };
     const out = registerishSpellings(sfn);
@@ -215,8 +213,8 @@ describe('adversarial-round guards', () => {
           value: {
             k: 'bin',
             op: '/',
-            l: { k: 'bin', op: '<<', l: C(128), r: C(9) },
-            r: { k: 'cast', to: T.s(16), e: V('a0') },
+            l: { k: 'bin', op: '<<', l: c(128), r: c(9) },
+            r: { k: 'cast', to: T.s(16), e: v('a0') },
           },
         },
       ],
@@ -238,18 +236,18 @@ describe('adversarial-round guards', () => {
       body: [
         {
           k: 'if',
-          cond: { k: 'bin', op: '>=', l: { k: 'call', fn: 'g', args: [] }, r: C(0) },
+          cond: { k: 'bin', op: '>=', l: { k: 'call', fn: 'g', args: [] }, r: c(0) },
           then: [{ k: 'assign', name: 'v0', value: { k: 'call', fn: 'g', args: [] } }],
           else: [
-            { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: { k: 'call', fn: 'g', args: [] }, r: C(1) } },
+            { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: { k: 'call', fn: 'g', args: [] }, r: c(1) } },
           ],
         },
         {
           k: 'assign',
           name: 'v0',
-          value: { k: 'bin', op: '/', l: { k: 'bin', op: '<<', l: C(128), r: C(9) }, r: V('v0') },
+          value: { k: 'bin', op: '/', l: { k: 'bin', op: '<<', l: c(128), r: c(9) }, r: v('v0') },
         },
-        { k: 'return', value: V('v0') },
+        { k: 'return', value: v('v0') },
       ],
     };
     const out = registerishSpellings(sfn);

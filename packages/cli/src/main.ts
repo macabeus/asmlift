@@ -9,9 +9,8 @@
 // absent symbol declines loud). Scoring (--score-against) compiles candidates with the
 // project's own decomp.yaml `compiler` command — never with a bundled toolchain.
 //
-// Exit codes: 0 = clean; 1 = gaps (ASMLIFT_ERROR markers) or a failure — the stderr prefix
-// says whether it was a principled decline or an internal error; 64 = usage error;
-// 66 = input unreadable (or an object that could not be disassembled).
+// Exit codes: `EXIT` below, plus `CACHE_MISMATCH_EXIT` from candcache.ts — one table, so a status
+// this file returns and a status the README documents cannot drift apart.
 import { cBackend } from '@asmlift/core/backend/c';
 import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { ContractError } from '@asmlift/core/contracts';
@@ -45,17 +44,19 @@ import { renderDeclarations } from './declare';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
+// TYPE-ONLY, and it must stay that way: `./rank` pulls in objdiff-wasm, which this module loads
+// through a dynamic `import()` on the ranked path alone so a plain decompile stays toolchain-light.
+// An `import type` is erased outright and adds no runtime edge.
+import type { RankedResult } from './rank';
 
-// The `[candcache]` line, and — when a stored answer disagreed with a fresh compile — the loud
-// second line that turns a verify run into a FAILING one. A counter that only prints cannot stop
-// anything: a verify pass writes one line among sixteen shard logs, so the mismatch has to reach
-// the exit status. The same is true of an `on` run now: its sampled audit fails the run exactly
-// as verify's does.
-//
-// `cacheSampleNote()` carries the sampling RATE and the run's SEED, so a reader can tell an
-// audited serve from an unaudited one and replay the exact selection
-// (ASMLIFT_CANDCACHE_SAMPLE_SEED). Without it a run with the audit switched off would print the
-// same line as one with it on.
+/** Every status this CLI returns, named. `CACHE_MISMATCH_EXIT` (3) is candcache.ts's and is
+ *  imported rather than restated, because the code that DETECTS a mismatch is what should own the
+ *  number for it. */
+const EXIT = { clean: 0, gaps: 1, usage: 64, unreadable: 66 } as const;
+
+// A cache mismatch has to reach the EXIT STATUS, not merely the log. A counter that only prints
+// cannot stop anything: a verify pass writes one line among sixteen shard logs. The same is true
+// of an `on` run, whose sampled audit fails the run exactly as verify's does.
 
 /**
  * The exit status of a ranked run, ON EITHER OF ITS TWO RETURNS — and both is the point.
@@ -67,7 +68,15 @@ import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
  * decline every wrapper keying on the status expects. Which reason it was is not lost: `[declined]`
  * / `[internal error]` and the `[candcache]` lines are both in the stderr returned beside the code.
  */
-export const rankedExitCode = (match: boolean): number => (cacheMismatches() > 0 ? CACHE_MISMATCH_EXIT : match ? 0 : 1);
+export const rankedExitCode = (match: boolean): number =>
+  cacheMismatches() > 0 ? CACHE_MISMATCH_EXIT : match ? EXIT.clean : EXIT.gaps;
+/** The run's `[candcache]` line, and — when a stored answer disagreed with a fresh compile — the
+ *  loud second line that says the store is serving objects this toolchain no longer produces.
+ *
+ *  `cacheSampleNote()` carries the sampling RATE and the run's SEED, so a reader can tell an
+ *  audited serve from an unaudited one and replay the exact selection
+ *  (ASMLIFT_CANDCACHE_SAMPLE_SEED). Without it a run with the audit switched off would print the
+ *  same line as one with it on. */
 const candCacheLine = (): string => {
   if (cacheMode() === 'off') {
     return '';
@@ -79,6 +88,15 @@ const candCacheLine = (): string => {
         `asmlift: [candcache] ${cacheMismatches()} STORED ANSWER(S) DISAGREED WITH A FRESH COMPILE — ` +
         `the store is serving objects this toolchain no longer produces. See ${MISMATCH_LOG}\n`;
 };
+
+/** A declaration block as stderr lines: rendered, blank lines dropped, each one under the
+ *  `asmlift:` prefix that separates this tool's output from the compiler's in a shared log. */
+const indentedDeclarations = (refs: Parameters<typeof renderDeclarations>[0]): string =>
+  renderDeclarations(refs)
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => `asmlift:   ${l}\n`)
+    .join('');
 
 export { detectName };
 
@@ -133,8 +151,10 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --asm-data       for text input: objdump -s -r -t dump of the source object
                    (jump tables, anonymous constants)
   --proto          function prototypes, inline JSON or a path to it:
-                   {"sym":{"params":2|["u8","s32"]}} — a callee's count gives
-                   its call-site arity, a typed list also gives its widths
+                   {"sym":{"params":2|["u8","s32"],"returnsVoid":true}} — a
+                   callee's count gives its call-site arity, a typed list also
+                   gives its widths, and the decompiled function's OWN entry
+                   gives its void-ness
   --jobs           with --score-against: compile n candidates at a time (default 1)
   --progress       with --score-against: stream a liveness line to stderr while
                    scoring; the [score] table it prints at the end is unchanged
@@ -160,16 +180,197 @@ export interface CliResult {
   stderr: string;
 }
 
-export async function runCli(
+/** Everything a ranked run writes to stderr, in the order a reader reads it.
+ *
+ *  A TIMING VALUE, never a timing call: `phaseReport` and `stamp` are computed by the caller at
+ *  the moment the run ended, because both measure the run and neither may be re-measured by the
+ *  act of rendering it. */
+function rankedStderr(a: {
+  targetTrace: string;
+  warn: string;
+  ranked: RankedResult;
+  leverErrors: Map<string, string>;
+  /** the probe's verdict: `true` = candidates compiled in the SELF-DECLARED world */
+  selfDeclared: boolean;
+  phaseReport: string;
+  stamp: string;
+  protoNote: string;
+}): string {
+  const { ranked } = a;
+  const table = ranked.candidates
+    .map((c) => `asmlift: [score] ${c.label}: ${c.score.score}${c.score.match ? ' (match)' : ''}\n`)
+    .join('');
+  // Spellings the scorer refused are recorded, not silent: a lever whose every candidate
+  // fails to build looks identical to one that declined unless the drops are visible.
+  // …and the same idea one stage EARLIER: `[dropped]` reports a spelling the SCORER refused,
+  // which presumes the spelling was enumerated at all. A lever that threw produced no
+  // candidate to drop.
+  const levers = [...a.leverErrors]
+    .map(([label, error]) => `asmlift: [lever] ${label} threw (no candidate from it): ${error}\n`)
+    .join('');
+  const drops = ranked.dropped.length
+    ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
+      `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
+    : '';
+  // WITHHELD is a different fact from dropped and gets its own line: these compiled and scored
+  // and were then refused publication for want of a byte-exact proof (Candidate.matchOnly).
+  // Folding them into `dropped` would report compile failures that did not happen; leaving
+  // them out entirely would make `candidates scored` under-count the fan with no trace.
+  const held = ranked.withheld.length
+    ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
+      `${ranked.withheld[0].label} at ${ranked.withheld[0].score}: ${ranked.withheld[0].why}\n`
+    : '';
+  // THE ASSUMPTIONS THE SCORE RESTS ON. A candidate names globals the asm's own literal pool
+  // named, and where no symbol map knows them asmlift synthesizes their declarations — width
+  // and signedness read out of the TARGET's own asm (core rank.ts bareGlobalSymbols). Such a
+  // declaration is fitted to the bytes it is scored against: it cannot lose score, only
+  // manufacture agreement, so a published `(match)` that depends on one has to name it. Only
+  // in the SELF-DECLARED world, which is the probe's verdict and nobody else's — in the
+  // headers world the block is dropped and the project's own declarations did the work, so the
+  // COUNT is zero there whatever the fan named.
+  const assumed = (ranked.best.symbolRefs ?? []).filter((r) => r.synthesized);
+  const synthesized = a.selfDeclared ? assumed.length : 0;
+  const declared =
+    synthesized > 0
+      ? `asmlift: [declared] ${synthesized} declaration(s) synthesized from the target asm — no symbol ` +
+        `map knows these names, so the score is about this block plus the source; check it against your ` +
+        `headers:\n` +
+        indentedDeclarations(assumed)
+      : '';
+  // The counts docs/ranked-repro.md requires beside every ranked score, as ONE line that is
+  // ALWAYS PRESENT. AN ABSENT LINE IS NOT EVIDENCE: a clean run, a truncated log and a killed
+  // run are indistinguishable to a reader counting `[dropped]` lines that are not there, and
+  // every published score in this loop rests on the claim those counts make. So each is
+  // stated, including when it is zero. That covers `dropped`, `withheld`, and `synthesized` —
+  // whose block above is conditional, so a `(match)` fitted to the target asm by declarations
+  // asmlift invented would otherwise be publishable by pasting exactly the line the doc asks
+  // for.
+  //
+  // …plus WHICH TREE produced them, because a run against different SOURCES is otherwise
+  // indistinguishable from a clean one (provenance.ts). On the same line as the score
+  // deliberately: the doc tells readers to quote this one line, so a stamp anywhere else is a
+  // stamp nobody pastes.
+  const summary =
+    `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
+    `${ranked.withheld.length} withheld, ${synthesized} synthesized, ` +
+    `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
+    `[${a.stamp}]\n`;
+  // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
+  // tail stay adjacent.
+  return (
+    a.targetTrace +
+    a.warn +
+    table +
+    levers +
+    drops +
+    held +
+    declared +
+    a.phaseReport +
+    summary +
+    a.protoNote +
+    candCacheLine()
+  );
+}
+
+/** A run that THREW, as its result. The stderr prefix is what separates a principled decline from
+ *  a bug, and `tail` is the ranked path's `[candcache]` line — which belongs on a failure too,
+ *  because a decline drops out before the success-path stderr is assembled and a reader would
+ *  otherwise not learn that the store had disagreed. */
+const failureResult = (e: unknown, targetTrace: string, warn: string, code: number, tail = ''): CliResult => {
+  const kind = isDecline(e) ? 'declined' : 'internal error';
+  return {
+    code,
+    stdout: '',
+    stderr: `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n${tail}`,
+  };
+};
+
+/** The project's symbol map — `tools.asmlift.elf` (derive from a built ELF) or
+ *  `tools.asmlift.symbols` (a map already derived, as JSON) — or the CliResult that refuses the
+ *  run. Every failure here is LOUD and none is a fallback: this is explicit config, and a map that
+ *  quietly failed to load reads exactly like a project that never had one, while producing
+ *  different source. */
+async function loadProjectSymbolMap(
+  toolCfg: AsmliftToolConfig | undefined,
+  configDir: string | undefined,
+): Promise<{ map: SymbolMap | undefined } | { failure: CliResult }> {
+  const failure = (r: CliResult): { failure: CliResult } => ({ failure: r });
+  // tools.asmlift.elf → the project's symbol map (names + declaration shapes). Explicit
+  // config, so an unreadable ELF is a loud input error, never a silent names-less run.
+  let symbols: SymbolMap | undefined;
+  if (toolCfg?.elf && toolCfg?.symbols) {
+    return failure({
+      code: EXIT.usage,
+      stdout: '',
+      stderr:
+        'asmlift: tools.asmlift declares BOTH elf and symbols — two sources for one map. ' +
+        'Name the one this project has (elf: derive from the built ELF; symbols: a map already ' +
+        'derived, as JSON).\n',
+    });
+  }
+  if (toolCfg?.elf) {
+    const elfPath = resolve(configDir!, toolCfg.elf);
+    try {
+      const { loadSymbolMap } = await import('./symbols-provider');
+      symbols = await loadSymbolMap(elfPath);
+    } catch (e) {
+      return failure({
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: cannot load symbols from tools.asmlift.elf (${elfPath}): ${e instanceof Error ? e.message : e}\n`,
+      });
+    }
+  } else if (toolCfg?.symbols) {
+    // The already-derived map. Same loudness rule as `tools.asmlift.elf`: explicit config, so an
+    // unreadable or malformed file is an input error and never a silent names-less run — a map
+    // that quietly failed to load reads exactly like a row that never had one, and the two
+    // produce different source.
+    const mapPath = resolve(configDir!, toolCfg.symbols);
+    let parsed;
+    try {
+      const { parseSymbolMapJson } = await import('@asmlift/core/symbols');
+      parsed = parseSymbolMapJson(JSON.parse(readFileSync(mapPath, 'utf8')));
+    } catch (e) {
+      return failure({
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: cannot load symbols from tools.asmlift.symbols (${mapPath}): ${e instanceof Error ? e.message : e}\n`,
+      });
+    }
+    // A file that PARSES and still declares nothing is the failure this key exists to prevent, and
+    // it is the one an exception cannot report: `[]`, `{}` and `{"nope": []}` are all valid JSON
+    // that reduce to an EMPTY map, which is byte-for-byte the state a map-less run is in. The run
+    // would then exit 0 having scored a different source under a different label — a silent wrong
+    // answer wearing a published repro script's provenance. Both shapes are input errors here.
+    if ('error' in parsed) {
+      return failure({
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: tools.asmlift.symbols (${mapPath}) is not a symbol map — ${parsed.error}\n`,
+      });
+    }
+    if (parsed.map.size === 0) {
+      return failure({
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: tools.asmlift.symbols (${mapPath}) declares no symbols — remove the key to run without a map\n`,
+      });
+    }
+    symbols = parsed.map;
+  }
+  return { map: symbols };
+}
+
+/** `argv` read as this CLI's flags and its ONE operand — or the shape of the usage error, with
+ *  `message` absent where the complaint is the operand count and the bare USAGE dump is the whole
+ *  answer.
+ *
+ *  Order is part of the contract and not an accident of the loop: the FIRST unknown flag wins, and
+ *  it wins over the operand count, so `asmlift --nmae x a b` names the typo rather than counting
+ *  operands at someone who has not been told their flag was discarded. */
+function parseFlags(
   argv: string[],
-  readInput: (path: string) => string | Uint8Array = defaultRead,
-  objInput?: ObjInput,
-  /** where `--progress` writes. Absent (every non-process caller, including the tests) ⇒ the
-   *  flag has nothing to write to and the run is silent, so `runCli`'s result stays the whole
-   *  output. The process entry point below supplies stderr. */
-  progressSink?: (line: string) => void,
-): Promise<CliResult> {
-  const usage = (msg: string) => ({ code: 64, stdout: '', stderr: `asmlift: ${msg}\n${USAGE}\n` });
+): { ok: true; flags: Map<string, string | true>; input: string } | { ok: false; message?: string } {
   const args = [...argv];
   const flags = new Map<string, string | true>();
   const positional: string[] = [];
@@ -183,24 +384,46 @@ export async function runCli(
     const eq = a.indexOf('=');
     const key = eq === -1 ? a.slice(2) : a.slice(2, eq);
     if (!KNOWN_FLAGS.has(key)) {
-      return usage(`unknown flag --${key}`);
+      return { ok: false, message: `unknown flag --${key}` };
     }
     if (BOOL_FLAGS.has(key)) {
       if (eq !== -1) {
-        return usage(`--${key} takes no value`);
+        return { ok: false, message: `--${key} takes no value` };
       }
       flags.set(key, true);
       continue;
     }
     const v = eq === -1 ? args.shift() : a.slice(eq + 1);
     if (v === undefined) {
-      return usage(`missing value for --${key}`);
+      return { ok: false, message: `missing value for --${key}` };
     }
     flags.set(key, v);
   }
   if (positional.length !== 1) {
-    return { code: 64, stdout: '', stderr: `${USAGE}\n` };
+    return { ok: false };
   }
+  return { ok: true, flags, input: positional[0] };
+}
+
+export async function runCli(
+  argv: string[],
+  readInput: (path: string) => string | Uint8Array = defaultRead,
+  objInput?: ObjInput,
+  /** where `--progress` writes. Absent (every non-process caller, including the tests) ⇒ the
+   *  flag has nothing to write to and the run is silent, so `runCli`'s result stays the whole
+   *  output. The process entry point below supplies stderr. */
+  progressSink?: (line: string) => void,
+): Promise<CliResult> {
+  const usage = (msg: string) => ({ code: EXIT.usage, stdout: '', stderr: `asmlift: ${msg}\n${USAGE}\n` });
+  const parsed = parseFlags(argv);
+  if (!parsed.ok) {
+    // A named complaint gets `usage(msg)`; the wrong number of operands gets the bare USAGE dump,
+    // which is what a reader who typed nothing at all wants to see.
+    return parsed.message === undefined
+      ? { code: EXIT.usage, stdout: '', stderr: `${USAGE}\n` }
+      : usage(parsed.message);
+  }
+  const { flags, input } = parsed;
 
   // decomp.yaml (decomp_settings): nearest ancestor of the INPUT file (cwd for stdin), or the
   // explicit --config path. Supplies the target when --target is absent, plus the
@@ -210,7 +433,7 @@ export async function runCli(
   let targetKey: string;
   let targetTrace = '';
   try {
-    const startDir = positional[0] === '-' ? undefined : dirname(resolve(positional[0]));
+    const startDir = input === '-' ? undefined : dirname(resolve(input));
     const loaded = loadDecompConfig(flags.get('config') as string | undefined, startDir);
     toolCfg = loaded?.config.tools?.asmlift;
     configDir = loaded ? dirname(loaded.path) : undefined;
@@ -223,7 +446,7 @@ export async function runCli(
       targetTrace = `asmlift: [config] target ${targetKey} (${res.trace})\n`;
     }
   } catch (e) {
-    return { code: 66, stdout: '', stderr: `asmlift: ${e instanceof Error ? e.message : e}\n` };
+    return { code: EXIT.unreadable, stdout: '', stderr: `asmlift: ${e instanceof Error ? e.message : e}\n` };
   }
   const target = TARGETS[targetKey];
   if (!target) {
@@ -240,13 +463,13 @@ export async function runCli(
 
   let raw: string | Uint8Array;
   try {
-    raw = readInput(positional[0]);
+    raw = readInput(input);
   } catch (e) {
     // a clean message on ITS OWN exit code — never a stack trace, never conflated with "gaps"
     return {
-      code: 66,
+      code: EXIT.unreadable,
       stdout: '',
-      stderr: `asmlift: cannot read ${positional[0]}: ${e instanceof Error ? e.message : e}\n`,
+      stderr: `asmlift: cannot read ${input}: ${e instanceof Error ? e.message : e}\n`,
     };
   }
 
@@ -257,9 +480,9 @@ export async function runCli(
   let asmData: AsmData | undefined;
   let warn = '';
   if (typeof raw !== 'string' && isElfObject(raw)) {
-    if (positional[0] === '-') {
+    if (input === '-') {
       return {
-        code: 66,
+        code: EXIT.unreadable,
         stdout: '',
         stderr: 'asmlift: object-file input via stdin is not supported — pass a file path\n',
       };
@@ -269,19 +492,19 @@ export async function runCli(
       asmData: (path, t) => asmDataForObject(path, t, toolCfg?.objdump),
     };
     try {
-      asm = obj.disasm(positional[0], target);
+      asm = obj.disasm(input, target);
     } catch (e) {
       if (e instanceof ObjectInputUnsupportedError) {
-        return { code: 1, stdout: '', stderr: `asmlift: [declined] ${e.message}\n` };
+        return { code: EXIT.gaps, stdout: '', stderr: `asmlift: [declined] ${e.message}\n` };
       }
       return {
-        code: 66,
+        code: EXIT.unreadable,
         stdout: '',
-        stderr: `asmlift: cannot disassemble ${positional[0]}: ${e instanceof Error ? e.message : e}\n`,
+        stderr: `asmlift: cannot disassemble ${input}: ${e instanceof Error ? e.message : e}\n`,
       };
     }
     try {
-      asmData = obj.asmData(positional[0], target);
+      asmData = obj.asmData(input, target);
     } catch (e) {
       warn = `asmlift: warning: no jump-table side-table (${e instanceof Error ? e.message : e}) — a dense switch will decline\n`;
     }
@@ -298,7 +521,7 @@ export async function runCli(
       dump = readFileSync(resolve(asmDataFlag), 'utf8');
     } catch (e) {
       return {
-        code: 66,
+        code: EXIT.unreadable,
         stdout: '',
         stderr: `asmlift: cannot read --asm-data file: ${e instanceof Error ? e.message : e}\n`,
       };
@@ -309,18 +532,17 @@ export async function runCli(
   let prototypes: Prototypes | undefined;
   const protoFlag = flags.get('proto') as string | undefined;
   if (protoFlag !== undefined) {
-    // A table INLINE (`--proto '{"sym":{"params":1}}'`) or the path to one. Inline is the form
-    // docs/ranked-repro.md's canonical command uses, and the form the `[proto]` note below prints
-    // as its own remedy — but it used to be resolved as a path, so following either exited 66 on
-    // a missing file literally named `{"sym":{"params":1}}`. Three different scratch proto.json
-    // files got invented around that, carrying two different tables for the same "canonical" run.
+    // A table INLINE (`--proto '{"sym":{"params":1}}'`) or the path to one. Both forms are
+    // accepted because both are PUBLISHED: inline is what docs/ranked-repro.md's canonical command
+    // uses, and what the `[proto]` note below prints as its own remedy. Reading only one of them
+    // would make a documented command an unreadable-file error. (cli.test.ts pins both.)
     const inline = protoFlag.trimStart().startsWith('{');
     let parsed: unknown;
     try {
       parsed = JSON.parse(inline ? protoFlag : readFileSync(resolve(protoFlag), 'utf8'));
     } catch (e) {
       return {
-        code: 66,
+        code: EXIT.unreadable,
         stdout: '',
         stderr: `asmlift: cannot ${inline ? 'parse --proto JSON' : 'read --proto file'}: ${
           e instanceof Error ? e.message : e
@@ -336,74 +558,15 @@ export async function runCli(
     prototypes = parsed as Prototypes;
   }
 
-  // tools.asmlift.elf → the project's symbol map (names + declaration shapes). Explicit
-  // config, so an unreadable ELF is a loud input error, never a silent names-less run.
-  let symbols: SymbolMap | undefined;
-  if (toolCfg?.elf && toolCfg?.symbols) {
-    return {
-      code: 64,
-      stdout: '',
-      stderr:
-        'asmlift: tools.asmlift declares BOTH elf and symbols — two sources for one map. ' +
-        'Name the one this project has (elf: derive from the built ELF; symbols: a map already ' +
-        'derived, as JSON).\n',
-    };
-  }
-  if (toolCfg?.elf) {
-    const elfPath = resolve(configDir!, toolCfg.elf);
-    try {
-      const { loadSymbolMap } = await import('./symbols-provider');
-      symbols = await loadSymbolMap(elfPath);
-    } catch (e) {
-      return {
-        code: 66,
-        stdout: '',
-        stderr: `asmlift: cannot load symbols from tools.asmlift.elf (${elfPath}): ${e instanceof Error ? e.message : e}\n`,
-      };
-    }
-  } else if (toolCfg?.symbols) {
-    // The already-derived map. Same loudness rule as `tools.asmlift.elf`: explicit config, so an
-    // unreadable or malformed file is an input error and never a silent names-less run — a map
-    // that quietly failed to load reads exactly like a row that never had one, and the two
-    // produce different source.
-    const mapPath = resolve(configDir!, toolCfg.symbols);
-    let parsed;
-    try {
-      const { parseSymbolMapJson } = await import('@asmlift/core/symbols');
-      parsed = parseSymbolMapJson(JSON.parse(readFileSync(mapPath, 'utf8')));
-    } catch (e) {
-      return {
-        code: 66,
-        stdout: '',
-        stderr: `asmlift: cannot load symbols from tools.asmlift.symbols (${mapPath}): ${e instanceof Error ? e.message : e}\n`,
-      };
-    }
-    // A file that PARSES and still declares nothing is the failure this key exists to prevent, and
-    // it is the one an exception cannot report: `[]`, `{}` and `{"nope": []}` are all valid JSON
-    // that reduce to an EMPTY map, which is byte-for-byte the state a map-less run is in. The run
-    // would then exit 0 having scored a different source under a different label — a silent wrong
-    // answer wearing a published repro script's provenance. Both shapes are input errors here.
-    if ('error' in parsed) {
-      return {
-        code: 66,
-        stdout: '',
-        stderr: `asmlift: tools.asmlift.symbols (${mapPath}) is not a symbol map — ${parsed.error}\n`,
-      };
-    }
-    if (parsed.map.size === 0) {
-      return {
-        code: 66,
-        stdout: '',
-        stderr: `asmlift: tools.asmlift.symbols (${mapPath}) declares no symbols — remove the key to run without a map\n`,
-      };
-    }
-    symbols = parsed.map;
+  const loadedMap = await loadProjectSymbolMap(toolCfg, configDir);
+  if ('failure' in loadedMap) {
+    return loadedMap.failure;
   }
 
   const name = nameFlag ?? detectName(asm);
   if (!name) {
     return {
-      code: 64,
+      code: EXIT.usage,
       stdout: '',
       stderr: 'asmlift: could not detect the function name from the asm — pass --name <symbol>\n',
     };
@@ -415,9 +578,12 @@ export async function runCli(
   // decompiling an `INCLUDE_ASM` function cannot have. Globals, struct layouts and CALLEE
   // signatures all survive; only the target's own compiled facts are withheld. The benchmark
   // applies the same filter, so a reproduction of a published row grades what was scored.
-  if (symbols) {
-    symbols = asIfUndecompiled(symbols, name);
-  }
+  //
+  // The FILTERED map is what the rest of this function has, under its own name; `loadedMap.map` is
+  // the unfiltered one and stays visible on purpose, because the load has to happen ABOVE the name
+  // detection — an unreadable ELF and an undetectable name are two different user-visible exits,
+  // and swapping them would change which one a broken project sees first.
+  const symbols = loadedMap.map === undefined ? undefined : asIfUndecompiled(loadedMap.map, name);
 
   // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled`, so the
   // target's own withheld signature cannot make the note claim a fact the run did not use.
@@ -463,7 +629,11 @@ export async function runCli(
   if (scoreAgainst !== undefined) {
     const targetObj = resolve(scoreAgainst);
     if (!existsSync(targetObj)) {
-      return { code: 66, stdout: '', stderr: `asmlift: cannot read --score-against object: ${scoreAgainst}\n` };
+      return {
+        code: EXIT.unreadable,
+        stdout: '',
+        stderr: `asmlift: cannot read --score-against object: ${scoreAgainst}\n`,
+      };
     }
     // Scoring REQUIRES the project's own compiler command — a wrong compiler silently
     // mis-scores every candidate, the one failure mode this project never permits. (asmlift's
@@ -520,99 +690,25 @@ export async function runCli(
               worker: compilers.worker,
             })
           : decompileRanked(name, asm, target, targetObj, rankOpts);
-      const table = ranked.candidates
-        .map((c) => `asmlift: [score] ${c.label}: ${c.score.score}${c.score.match ? ' (match)' : ''}\n`)
-        .join('');
-      // Spellings the scorer refused are recorded, not silent: a lever whose every candidate
-      // fails to build looks identical to one that declined unless the drops are visible.
-      // …and the same idea one stage EARLIER: `[dropped]` reports a spelling the SCORER refused,
-      // which presumes the spelling was enumerated at all. A lever that threw produced no
-      // candidate to drop.
-      const levers = [...leverErrors]
-        .map(([label, error]) => `asmlift: [lever] ${label} threw (no candidate from it): ${error}\n`)
-        .join('');
-      const drops = ranked.dropped.length
-        ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
-          `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
-        : '';
-      // WITHHELD is a different fact from dropped and gets its own line: these compiled and scored
-      // and were then refused publication for want of a byte-exact proof (Candidate.matchOnly).
-      // Folding them into `dropped` would report compile failures that did not happen; leaving
-      // them out entirely would make `candidates scored` under-count the fan with no trace.
-      const held = ranked.withheld.length
-        ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
-          `${ranked.withheld[0].label} at ${ranked.withheld[0].score}: ${ranked.withheld[0].why}\n`
-        : '';
-      // THE ASSUMPTIONS THE SCORE RESTS ON. A candidate names globals the asm's own literal pool
-      // named, and where no symbol map knows them asmlift synthesizes their declarations — width
-      // and signedness read out of the TARGET's own asm (core rank.ts bareGlobalSymbols). Such a
-      // declaration is fitted to the bytes it is scored against: it cannot lose score, only
-      // manufacture agreement, so a published `(match)` that depends on one has to name it. Only
-      // in the SELF-DECLARED world, which is the probe's verdict and nobody else's — in the
-      // headers world the block is dropped and the project's own declarations did the work.
-      const assumed = (ranked.best.symbolRefs ?? []).filter((r) => r.synthesized);
-      const declared =
-        assumed.length > 0 && compilers.selfDeclared() === true
-          ? `asmlift: [declared] ${assumed.length} declaration(s) synthesized from the target asm — no symbol ` +
-            `map knows these names, so the score is about this block plus the source; check it against your ` +
-            `headers:\n` +
-            renderDeclarations(assumed)
-              .split('\n')
-              .filter((l) => l.trim() !== '')
-              .map((l) => `asmlift:   ${l}\n`)
-              .join('')
-          : '';
-      // The three counts docs/ranked-repro.md requires beside every ranked score, as ONE line that
-      // is always present. They used to be recoverable only as the line count of a 2 MB stderr
-      // stream, and "0 dropped" was asserted by the ABSENCE of the `[dropped]` line above — so a
-      // clean run, a truncated log and a killed run left identical evidence for the claim this
-      // loop's every published score rests on.
-      //
-      // …plus WHICH TREE produced them. The counts make a truncated run distinguishable from a clean
-      // one; the stamp makes a run against different SOURCES distinguishable from both, which no
-      // part of the log used to be (provenance.ts). On the same line as the score deliberately: the
-      // doc tells readers to quote this one line, so a stamp anywhere else is a stamp nobody pastes.
-      //
-      // SYNTHESIZED is the fourth count, and it is here for the same reason as the other three:
-      // the `[declared]` block below is CONDITIONAL, so "this score rests on no declaration
-      // asmlift invented" would otherwise be spelled as an absent line — and a `(match)` whose
-      // declaration block was fitted to the target asm would be publishable by pasting exactly
-      // the one line the doc asks for. The count travels with the score; the block stays below.
-      const summary =
-        `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
-        `${ranked.withheld.length} withheld, ${declared === '' ? 0 : assumed.length} synthesized, ` +
-        `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
-        `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
+      const stamp = sourceStamp(treeBefore, sampleSourceTree(), bakedBuild());
+      // Read AFTER the tree sample, which is work this run did and the clock should have charged.
+      const phaseReport = clock?.report() ?? '';
       return {
         code: rankedExitCode(ranked.best.score.match),
         stdout: ranked.best.source,
-        // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
-        // tail stay adjacent.
-        stderr:
-          targetTrace +
-          warn +
-          table +
-          levers +
-          drops +
-          held +
-          declared +
-          (clock?.report() ?? '') +
-          summary +
-          protoNote +
-          candCacheLine(),
+        stderr: rankedStderr({
+          targetTrace,
+          warn,
+          ranked,
+          leverErrors,
+          selfDeclared: compilers.selfDeclared() === true,
+          phaseReport,
+          stamp,
+          protoNote,
+        }),
       };
     } catch (e) {
-      // …and the cache line belongs HERE too. A decline or an internal error drops out of the
-      // ranked path before the success-path stderr is assembled, so a reader on this path could
-      // not tell an audited run from an unaudited one — nor that the store had disagreed, even
-      // though `MISMATCHES.log` was already written.
-      const kind = isDecline(e) ? 'declined' : 'internal error';
-      return {
-        code: rankedExitCode(false),
-        stdout: '',
-        stderr:
-          `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n` + candCacheLine(),
-      };
+      return failureResult(e, targetTrace, warn, rankedExitCode(false), candCacheLine());
     }
   }
 
@@ -634,25 +730,16 @@ export async function runCli(
         ? ''
         : `asmlift: [assumed] ${result.assumedSymbols.length} array shape(s) derived from this assembly — the ` +
           `source spells them BARE, so it is about these declarations; check them against your headers:\n` +
-          renderDeclarations(result.assumedSymbols.map((info) => ({ name: info.name, info })))
-            .split('\n')
-            .filter((l) => l.trim() !== '')
-            .map((l) => `asmlift:   ${l}\n`)
-            .join('');
+          indentedDeclarations(result.assumedSymbols.map((info) => ({ name: info.name, info })));
     const stderr =
       targetTrace +
       warn +
       result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') +
       assumedNote +
       protoNote;
-    return { code: result.diagnostics.length === 0 ? 0 : 1, stdout: result.source, stderr };
+    return { code: result.diagnostics.length === 0 ? EXIT.clean : EXIT.gaps, stdout: result.source, stderr };
   } catch (e) {
-    const kind = isDecline(e) ? 'declined' : 'internal error';
-    return {
-      code: 1,
-      stdout: '',
-      stderr: `${targetTrace}${warn}asmlift: [${kind}] ${e instanceof Error ? e.message : String(e)}\n`,
-    };
+    return failureResult(e, targetTrace, warn, EXIT.gaps);
   }
 }
 

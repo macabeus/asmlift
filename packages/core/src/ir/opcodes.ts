@@ -211,11 +211,10 @@ export function opSig(opcode: string): OpSig | undefined {
  *  holds by construction (a hand-written map is one typo away from breaking it, and the symptom is a
  *  plainly inverted condition in the emitted C). Completeness against the icmp family is the part
  *  construction cannot give, so a test asserts it (test/pattern.test.ts) — an eleventh comparison
- *  added to `OPCODES` would otherwise degrade three consumers three different ways.
+ *  added to `OPCODES` would otherwise degrade its consumers several different ways.
  *
  *  It lives here for the reason HOIST_UNSAFE_OPS does: every consumer that has to say "the opposite
- *  of this compare" reads THIS one — the MIPS frontend's `slt …; beqz` branch-when-false fold, the
- *  short-circuit recognizer's diamond negation, and the idiom layer's `cmp ^ 1` fold — so they
+ *  of this compare" reads THIS one, so they
  *  cannot drift apart the way inline copies did. Two adjacent facts worth knowing: raise/
  *  shortcircuit.ts derives its `BOOL_OPS` from these keys (asserting negatable-icmp == boolean-op,
  *  true today), and l3/ast.ts `NEGATE_REL` is the SAME relation over the neutral L3 operator
@@ -236,10 +235,13 @@ export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries
 );
 
 /** Ops with an observable side effect: the flag on the signature, derived rather than re-listed.
- *  Consumed by `isDceSafe`, by `HOIST_UNSAFE_OPS` below, by structure.ts's `sideEffects` walk (an
- *  effectful op whose result nobody reads is still an execution), by analysis.ts's memory-write
- *  barrier, and by divpow2's bias block, which is DELETED rather than moved. Those last three each
- *  carried a hand-written copy of this membership, which is how the models drifted apart before. */
+ *  `isDceSafe` asks the same question of the FLAG through `opSig` rather than of this set, so the
+ *  two cannot disagree. The SET's own consumers are `HOIST_UNSAFE_OPS` below, structure.ts's
+ *  `sideEffects` walk (an effectful op whose result nobody reads is still an execution),
+ *  analysis.ts's memory-write barrier, divpow2's bias block (which is DELETED rather than moved),
+ *  and the idiom layer's de-sequencing guard (pattern/engine.ts). Three of them —  the
+ *  `sideEffects` walk, the barrier and the bias block — each carried a hand-written copy of this
+ *  membership, which is how the models drifted apart before. */
 export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
 );

@@ -20,6 +20,7 @@ import { hasHomeableSharedAddress, sharedBaseClasses } from '../src/structure/an
 import { structure } from '../src/structure/structure';
 import { type SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { count } from './helpers';
 
 const emit = (ir: string, on: boolean): string => {
   const fn = parse(ir);
@@ -27,8 +28,6 @@ const emit = (ir: string, on: boolean): string => {
   recoverTypes(fn);
   return cBackend.emit(structure(fn, { homeSharedAddresses: on }));
 };
-
-const count = (s: string, needle: string): number => s.split(needle).length - 1;
 
 // The entry-pair shape: one computed address, two byte loads through it (offsets 1 and 0), each
 // loaded value read again past the branch.

@@ -62,7 +62,16 @@
 // FreeAllDecompBuffers, TransformSingleEntityToScreen and ConfigureEntityBehavior among them).
 // Declining there is right; being unable to say which of the two happened is the defect.
 import { type IrType, T } from '../ir/types';
-import { type Expr, type SFn, type Stmt, type StructType, mapExprChildren, mapStmtExprs, walkExprs } from './ast';
+import {
+  type Expr,
+  type SFn,
+  type Stmt,
+  type StructType,
+  mapExprChildren,
+  mapStmtExprs,
+  stmtChildren,
+  walkExprs,
+} from './ast';
 import { type Gate, firstRejection } from './gates';
 import { declaredTypes, exprCType } from './typing';
 
@@ -154,30 +163,18 @@ function plan(sfn: SFn): Map<string, IrType> {
   return out;
 }
 
+/** Every `store` in the tree. ORDER-FREE by construction, which is what lets it use the shared
+ *  `stmtChildren` (a switch's default sits at `defaultAt`, not last): its one caller only sets
+ *  `written` on entries the preceding `walkExprs` pass already created — `note` builds an entry
+ *  from the DECLARED field type, a function of the key alone, so this loop mints no key. */
 function* stores(body: readonly Stmt[]): Generator<Extract<Stmt, { k: 'store' }>> {
   for (const s of body) {
     if (s.k === 'store') {
       yield s;
     }
-    yield* stores(stmtLists(s));
+    yield* stores(stmtChildren(s));
   }
 }
-
-const stmtLists = (s: Stmt): Stmt[] => {
-  switch (s.k) {
-    case 'if':
-      return [...s.then, ...s.else];
-    case 'while':
-    case 'dowhile':
-      return s.body;
-    case 'for':
-      return [s.init, s.inc, ...s.body];
-    case 'switch':
-      return [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])];
-    default:
-      return [];
-  }
-};
 
 /** The `/ptr-field` candidate, or null when no field qualifies. Read-only: returns a fresh SFn.
  *

@@ -9,11 +9,20 @@
 // sibling and the differ referees.
 //
 // SCOPE (decline over approximate): only plain assigns in the ENTRY straight-line prefix (the
-// leading run of assigns) move; a park's RHS must read parameters alone through pure scalar
-// nodes (var/const/un/bin/cast — a memory read or a call would be re-scheduled, not re-spelled);
-// and a park never crosses a statement that writes a name it reads, reads or writes its
-// destination (`&v` counts as touching v), or carries an effect. Relative order — of the parks and
-// of everything else — is preserved. Declines (null) when nothing moves.
+// leading run of assigns) move; a park's RHS must be pure over PARAMETERS AND CONSTANTS through
+// scalar nodes only (var/const/un/bin/cast — a memory read or a call would be re-scheduled, not
+// re-spelled), so a constant initializer qualifies as a park and a param leaf is NOT required —
+// what this lever moves is the leading run's ORDER, and a constant is as free of position as a
+// parked register is; and a park never crosses a statement that writes a name it reads, reads or
+// writes its destination (`&v` counts as touching v), or carries an effect. Relative order — of the
+// parks and of everything else — is preserved. Declines (null) when nothing moves.
+//
+// WHAT THE DESTINATION TEST IS, stated because it is narrower than "a local": the target is checked
+// against the PARAMS alone, so every other name an `assign` can carry qualifies — and structure.ts
+// spells a store to a bare scalar GLOBAL as an `assign` like any other, so such a store parks too.
+// The crossing checks are NAME-KEYED, so a crossed statement that reaches the destination (or a
+// name the park reads) through an ALIAS rather than by name is invisible to them — the same
+// name-keyed model every lever at this level defers aliasing to.
 //
 // The kmc hipress residual is this axis's OTHER projection — its keep-load renders first while
 // gcc2.7.2 schedules it last — so a second inhabitant consolidates both into one entry-prefix

@@ -48,6 +48,7 @@ import { print } from '../src/ir/print';
 import { decompile } from '../src/pipeline';
 import { StructureError } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
+import { mulberry32 } from './helpers';
 
 // The DESIGNED loud-failure classes. A degradation must be ONE of these — not an incidental crash
 // (TypeError/RangeError/…), which would mean the frontend blew up by accident rather than failing
@@ -222,21 +223,11 @@ describe('CONTRACT-AS-INVARIANT: real unmodelled opcodes with a live dest all fa
 });
 
 // ── Layer 4: seeded garbage fuzz ─────────────────────────────────────────────────────────────────
-// Deterministic PRNG (mulberry32) so CI is reproducible — the repo treats nondeterminism as hostile
-// (Math.random/Date.now are banned in workflow scripts for the same reason). Every mnemonic is
-// `zz`-prefixed: no real ISA opcode starts with `zz`, so it is guaranteed unmodelled in ALL
-// frontends and can never be a false failure, while still exercising the shared default path with
-// varied inputs across the registry.
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// Deterministic PRNG (`mulberry32`, test/helpers.ts) so CI is reproducible — the repo treats
+// nondeterminism as hostile (Math.random/Date.now are banned in workflow scripts for the same
+// reason). Every mnemonic is `zz`-prefixed: no real ISA opcode starts with `zz`, so it is
+// guaranteed unmodelled in ALL frontends and can never be a false failure, while still exercising
+// the shared default path with varied inputs across the registry.
 
 describe('CONTRACT-AS-INVARIANT: garbage fuzz — every unmodelled mnemonic fails loud', () => {
   const rnd = mulberry32(0xa5c1f70d);
@@ -281,16 +272,25 @@ describe('CONTRACT-AS-INVARIANT: known non-default-path constructs fail loud', (
 // POSITIVE check — stronger than banning one spelling), and (c) contains no silent-drop default
 // form (`break`/`return`/`continue` with no opaque). The file list is DERIVED FROM THE REGISTRY
 // (frontend.id === filename), so a new frontend is auto-linted — it can't ship un-checked by a
-// human forgetting to append it here.
+// human forgetting to append it here. THAT SPELLING RULE IS ITSELF UNWRITTEN: nothing declares
+// that a frontend's `id` must be its filename, and the only thing enforcing it is the
+// `readFileSync` below, which throws ENOENT on a frontend that names itself something else.
 describe('CONTRACT-AS-INVARIANT: frontends route their decode default to the shared opaque policy', () => {
   const files = registeredFrontendIds().map((id) => frontendFor({ id } as TargetDescription).id);
   for (const f of files) {
     test(`${f}.ts routes its decode default through the shared opaque emitter`, () => {
       const src = readFileSync(new URL(`../src/frontend/${f}.ts`, import.meta.url), 'utf8');
       expect(src).toContain("from './opaque'");
+      // REACH, and it is not a formality: BOTH checks below are satisfied by ABSENCE. A frontend
+      // that decodes through a lookup table or an if-chain rather than a `switch` has no
+      // `default:` at all, so the loop runs zero times and the negative regex matches nothing —
+      // and this test would then pass while asserting nothing about where its unmodelled path
+      // goes. Fail here instead, so such a frontend has to be given a check of its own.
+      const defaults = [...src.matchAll(/default:/g)];
+      expect(defaults.length, `${f}.ts has no \`default:\` — the two checks below assert nothing`).toBeGreaterThan(0);
       // POSITIVE: every `default:` in the file reaches `emitOpaqueDest` within a short window (the
       // decode default may guard terminators first, but must end at the opaque emitter, not a drop).
-      for (const m of src.matchAll(/default:/g)) {
+      for (const m of defaults) {
         const window = src.slice(m.index!, m.index! + 240);
         expect(window).toContain('emitOpaqueDest');
       }

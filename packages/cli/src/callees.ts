@@ -18,9 +18,14 @@ const LABEL_DEF = /^\s*([A-Za-z_.$][\w.$]*)\s*:/;
  *  a pret-style `/* addr bytes *​/` block comment, and objdump's `  8004b60:\tf7ff fffe \t`. */
 const PREFIX = /\/\*[\s\S]*?\*\//g;
 const OBJDUMP_PREFIX = /^\s*[0-9a-fA-F]+:\s+(?:[0-9a-fA-F]{2,8} )*\s*/;
-/** A call and its target. Every backend's call mnemonic, and both operand spellings: a bare
- *  symbol (`bl foo`, hand-written and compiler `.s`) and objdump's `8004b50 <foo>`. */
-const CALL = /^\s*(?:bl|blx|jal|bctrl|bctrlx)\s+(?:[^<]*<([^>+]+)>|([A-Za-z_.$][\w.$]*))\s*(?:@|#|;|\/\/|$)/;
+/** A DIRECT call and its target — the mnemonics that NAME the function they call, in both
+ *  operand spellings: a bare symbol (`bl foo`, hand-written and compiler `.s`) and objdump's
+ *  `8004b50 <foo>`.
+ *
+ *  Indirect calls are deliberately absent, because there is nothing here for them to report: PPC's
+ *  `bctrl` branches to CTR and MIPS' `jalr` to a register, so the callee is not in the text and no
+ *  arity can be asked for by name. */
+const CALL = /^\s*(?:bl|blx|jal)\s+(?:[^<]*<([^>+]+)>|([A-Za-z_.$][\w.$]*))\s*(?:@|#|;|\/\/|$)/;
 
 /** The names this asm CALLS, in first-appearance order.
  *

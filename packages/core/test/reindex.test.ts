@@ -9,14 +9,14 @@ import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { COUNTDOWN_GATES, reindexWalks } from '../src/l3/reindex';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
+import { v } from './helpers';
 
-const V = (name: string): Expr => ({ k: 'var', name });
 const C = (value: number): Expr => ({ k: 'const', value });
-const deref = (name: string): Expr => ({ k: 'index', base: V(name), idx: C(0), width: 4, signed: true });
+const deref = (name: string): Expr => ({ k: 'index', base: v(name), idx: C(0), width: 4, signed: true });
 const step = (name: string): Stmt => ({
   k: 'assign',
   name,
-  value: { k: 'bin', op: '+', l: V(name), r: C(1) },
+  value: { k: 'bin', op: '+', l: v(name), r: C(1) },
 });
 
 /** `v0 = 0; v1 = a0; while (v1 < a0 + a1) { v0 = v0 + *v1; v1 = v1 + 1; } return v0;` */
@@ -34,13 +34,13 @@ function walkSum(cond?: Expr, tail?: Stmt[]): SFn {
     ],
     body: [
       { k: 'assign', name: 'v0', value: C(0) },
-      { k: 'assign', name: 'v1', value: V('a0') },
+      { k: 'assign', name: 'v1', value: v('a0') },
       {
         k: 'while',
-        cond: cond ?? { k: 'bin', op: '<', l: V('v1'), r: { k: 'bin', op: '+', l: V('a0'), r: V('a1') } },
-        body: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('v0'), r: deref('v1') } }, step('v1')],
+        cond: cond ?? { k: 'bin', op: '<', l: v('v1'), r: { k: 'bin', op: '+', l: v('a0'), r: v('a1') } },
+        body: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('v0'), r: deref('v1') } }, step('v1')],
       },
-      { k: 'return', value: V('v0') },
+      { k: 'return', value: v('v0') },
       ...(tail ?? []),
     ],
   };
@@ -66,19 +66,19 @@ describe('reindexWalks — the golden shape', () => {
 
 describe('reindexWalks — out-of-scope shapes decline (null), never approximate', () => {
   test('a bound that is not base + N', () => {
-    expect(reindexWalks(walkSum({ k: 'bin', op: '<', l: V('v1'), r: V('a1') }))).toBeNull();
+    expect(reindexWalks(walkSum({ k: 'bin', op: '<', l: v('v1'), r: v('a1') }))).toBeNull();
   });
 
   test('the pointer read AFTER the loop (its final value would be base + iterations)', () => {
     expect(
-      reindexWalks(walkSum(undefined, [{ k: 'exprstmt', value: { k: 'call', fn: 'g', args: [V('v1')] } }])),
+      reindexWalks(walkSum(undefined, [{ k: 'exprstmt', value: { k: 'call', fn: 'g', args: [v('v1')] } }])),
     ).toBeNull();
   });
 
   test('a bare (non-deref) use of the pointer inside the loop', () => {
     const sfn = walkSum();
     const loop = sfn.body[2] as Extract<Stmt, { k: 'while' }>;
-    loop.body.unshift({ k: 'exprstmt', value: { k: 'call', fn: 'g', args: [V('v1')] } });
+    loop.body.unshift({ k: 'exprstmt', value: { k: 'call', fn: 'g', args: [v('v1')] } });
     expect(reindexWalks(sfn)).toBeNull();
   });
 
@@ -88,7 +88,7 @@ describe('reindexWalks — out-of-scope shapes decline (null), never approximate
     loop.body[loop.body.length - 1] = {
       k: 'assign',
       name: 'v1',
-      value: { k: 'bin', op: '+', l: V('v1'), r: C(2) },
+      value: { k: 'bin', op: '+', l: v('v1'), r: C(2) },
     };
     expect(reindexWalks(sfn)).toBeNull();
   });
@@ -100,7 +100,7 @@ describe('reindexWalks — out-of-scope shapes decline (null), never approximate
         retType: T.s(32),
         params: [{ name: 'a0', type: T.s(32) }],
         locals: [],
-        body: [{ k: 'return', value: V('a0') }],
+        body: [{ k: 'return', value: v('a0') }],
       }),
     ).toBeNull();
   });
@@ -114,8 +114,8 @@ describe('reindexWalks — adversarial-round soundness gate', () => {
     (loop.body[0] as Extract<Stmt, { k: 'assign' }>).value = {
       k: 'bin',
       op: '+',
-      l: V('v0'),
-      r: { k: 'index', base: V('v1'), idx: C(0), width: 1, signed: false },
+      l: v('v0'),
+      r: { k: 'index', base: v('v1'), idx: C(0), width: 1, signed: false },
     };
     expect(reindexWalks(sfn)).toBeNull();
   });
@@ -134,8 +134,8 @@ describe('reindexWalks — adversarial-round soundness gate', () => {
       ...inner,
       body: [
         inner.body[0],
-        { k: 'if', cond: V('a1'), then: [inner.body[1], inner.body[2]], else: [] },
-        { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [V('v1')] } },
+        { k: 'if', cond: v('a1'), then: [inner.body[1], inner.body[2]], else: [] },
+        { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [v('v1')] } },
         inner.body[3],
       ],
     };
@@ -144,7 +144,7 @@ describe('reindexWalks — adversarial-round soundness gate', () => {
 
   test('p === base declines (the walk bound would chase the stepped var)', () => {
     const sfn = walkSum();
-    (sfn.body[1] as Extract<Stmt, { k: 'assign' }>).value = V('v1'); // p = p
+    (sfn.body[1] as Extract<Stmt, { k: 'assign' }>).value = v('v1'); // p = p
     expect(reindexWalks(sfn)).toBeNull();
   });
 
@@ -168,29 +168,29 @@ function guardedCountdown(mut?: (body: Stmt[], fn: SFn) => void): SFn {
   const body: Stmt[] = [
     {
       k: 'if',
-      cond: { k: 'bin', op: '>=', l: C(0), r: V('a1') },
+      cond: { k: 'bin', op: '>=', l: C(0), r: v('a1') },
       then: [{ k: 'assign', name: 'v1', value: C(0) }],
       else: [
-        { k: 'assign', name: 'v0', value: V('a0') },
+        { k: 'assign', name: 'v0', value: v('a0') },
         { k: 'assign', name: 'v1', value: C(0) },
-        { k: 'assign', name: 'v2', value: V('a1') },
+        { k: 'assign', name: 'v2', value: v('a1') },
         {
           k: 'dowhile',
-          cond: { k: 'bin', op: '!=', l: V('v2'), r: C(0) },
+          cond: { k: 'bin', op: '!=', l: v('v2'), r: C(0) },
           body: [
             {
               k: 'if',
               cond: { k: 'bin', op: '>', l: deref('v0'), r: C(0) },
-              then: [{ k: 'assign', name: 'v1', value: { k: 'bin', op: '+', l: V('v1'), r: C(1) } }],
+              then: [{ k: 'assign', name: 'v1', value: { k: 'bin', op: '+', l: v('v1'), r: C(1) } }],
               else: [],
             },
             step('v0'),
-            { k: 'assign', name: 'v2', value: { k: 'bin', op: '-', l: V('v2'), r: C(1) } },
+            { k: 'assign', name: 'v2', value: { k: 'bin', op: '-', l: v('v2'), r: C(1) } },
           ],
         },
       ],
     },
-    { k: 'return', value: V('v1') },
+    { k: 'return', value: v('v1') },
   ];
   const fn: SFn = {
     name: 'countpos',
@@ -248,7 +248,7 @@ describe('v2 — the guarded countdown re-spells as a counted for', () => {
 
     test('the counter read after the loop (no single trip count owns its exit value)', () => {
       declined((body) => {
-        body[1] = { k: 'return', value: V('v2') };
+        body[1] = { k: 'return', value: v('v2') };
       });
     });
 
@@ -260,7 +260,7 @@ describe('v2 — the guarded countdown re-spells as a counted for', () => {
 
     test('a guard testing a DIFFERENT var than the counter init', () => {
       declined((body) => {
-        (body[0] as Stmt & { k: 'if' }).cond = { k: 'bin', op: '>=', l: C(0), r: V('v1') };
+        (body[0] as Stmt & { k: 'if' }).cond = { k: 'bin', op: '>=', l: C(0), r: v('v1') };
       });
     });
 
@@ -284,7 +284,7 @@ describe('v2 — the guarded countdown re-spells as a counted for', () => {
         inner.cond = {
           k: 'bin',
           op: '>',
-          l: { k: 'index', base: V('v0'), idx: C(0), width: 1, signed: false },
+          l: { k: 'index', base: v('v0'), idx: C(0), width: 1, signed: false },
           r: C(0),
         };
       });
@@ -293,7 +293,7 @@ describe('v2 — the guarded countdown re-spells as a counted for', () => {
     test('a do-while exit that is not `k != 0`', () => {
       declined((body) => {
         const dw = (body[0] as Stmt & { k: 'if' }).else[3] as Stmt & { k: 'dowhile' };
-        dw.cond = { k: 'bin', op: '>', l: V('v2'), r: C(0) };
+        dw.cond = { k: 'bin', op: '>', l: v('v2'), r: C(0) };
       });
     });
   });
@@ -308,14 +308,14 @@ describe('the counter is policed in EVERY role (each shape reproduced as a wrong
 
   test('the body reads the counter (`*p = k` — a countdown store)', () => {
     declined((body) => {
-      dw(body).body[0] = { k: 'store', lval: deref('v0'), value: V('v2') };
+      dw(body).body[0] = { k: 'store', lval: deref('v0'), value: v('v2') };
     });
   });
 
   test('a leftover reads the counter (its init is what the rewrite deletes)', () => {
     declined((body) => {
       const iff = body[0] as Stmt & { k: 'if' };
-      const extra: Stmt = { k: 'assign', name: 'v1', value: { k: 'bin', op: '+', l: V('v2'), r: C(5) } };
+      const extra: Stmt = { k: 'assign', name: 'v1', value: { k: 'bin', op: '+', l: v('v2'), r: C(5) } };
       iff.then = [extra];
       iff.else = [iff.else[0], iff.else[2], extra, iff.else[3]];
     });
@@ -323,7 +323,7 @@ describe('the counter is policed in EVERY role (each shape reproduced as a wrong
 
   test('a second decrement in the body core', () => {
     declined((body) => {
-      dw(body).body.splice(1, 0, { k: 'assign', name: 'v2', value: { k: 'bin', op: '-', l: V('v2'), r: C(1) } });
+      dw(body).body.splice(1, 0, { k: 'assign', name: 'v2', value: { k: 'bin', op: '-', l: v('v2'), r: C(1) } });
     });
   });
 
@@ -331,8 +331,8 @@ describe('the counter is policed in EVERY role (each shape reproduced as a wrong
     declined((body) => {
       dw(body).body[0] = {
         k: 'while',
-        cond: { k: 'bin', op: '<', l: V('v1'), r: V('v2') },
-        body: [{ k: 'assign', name: 'v1', value: { k: 'bin', op: '+', l: V('v1'), r: C(1) } }],
+        cond: { k: 'bin', op: '<', l: v('v1'), r: v('v2') },
+        body: [{ k: 'assign', name: 'v1', value: { k: 'bin', op: '+', l: v('v1'), r: C(1) } }],
       };
     });
   });
@@ -372,7 +372,7 @@ describe('the remaining stated gates, pinned', () => {
 
   test('a guard in the ENTERING sense with the loop in the else arm', () => {
     declined((body) => {
-      (body[0] as Stmt & { k: 'if' }).cond = { k: 'bin', op: '<', l: C(0), r: V('a1') };
+      (body[0] as Stmt & { k: 'if' }).cond = { k: 'bin', op: '<', l: C(0), r: v('a1') };
     });
   });
 
@@ -386,7 +386,7 @@ describe('the remaining stated gates, pinned', () => {
     const out = reindexWalks(
       guardedCountdown((body) => {
         const iff = body[0] as Stmt & { k: 'if' };
-        iff.cond = { k: 'bin', op: '<', l: C(0), r: V('a1') };
+        iff.cond = { k: 'bin', op: '<', l: C(0), r: v('a1') };
         const loopArm = iff.else;
         iff.else = iff.then;
         iff.then = loopArm;
@@ -403,11 +403,11 @@ describe('the remaining stated gates, pinned', () => {
         fn.locals.push({ name: 'v3', type: T.ptr(T.s(32)) });
         const iff = body[0] as Stmt & { k: 'if' };
         const dw = iff.else[3] as Stmt & { k: 'dowhile' };
-        iff.else.splice(1, 0, { k: 'assign', name: 'v3', value: V('a2') });
+        iff.else.splice(1, 0, { k: 'assign', name: 'v3', value: v('a2') });
         dw.body[0] = {
           k: 'assign',
           name: 'v1',
-          value: { k: 'bin', op: '+', l: V('v1'), r: { k: 'bin', op: '*', l: deref('v0'), r: deref('v3') } },
+          value: { k: 'bin', op: '+', l: v('v1'), r: { k: 'bin', op: '*', l: deref('v0'), r: deref('v3') } },
         };
         dw.body.splice(1, 0, step('v3'));
       }),
@@ -447,7 +447,6 @@ test('keptWalks collects the v1 while-walk base (here a param — harmless to th
 describe('v3 — expression-base byte walk', () => {
   const u8p = { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as const;
   const s32t = { kind: 'int', width: 32, signed: true } as const;
-  const v = (name: string): Expr => ({ k: 'var', name });
   const cn = (value: number): Expr => ({ k: 'const', value });
   const inc = (name: string): Stmt => ({ k: 'assign', name, value: { k: 'bin', op: '+', l: v(name), r: cn(1) } });
   const derefP: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 1, signed: false };
@@ -595,19 +594,19 @@ function constCountdown(mut?: (fn: SFn) => void): SFn {
       { name: 'v2', type: T.s(32) },
     ],
     body: [
-      { k: 'assign', name: 'v1', value: V('a0') },
+      { k: 'assign', name: 'v1', value: v('a0') },
       { k: 'assign', name: 'v0', value: C(0) },
       { k: 'assign', name: 'v2', value: C(7) },
       {
         k: 'dowhile',
-        cond: { k: 'bin', op: '>=', l: V('v2'), r: C(0) },
+        cond: { k: 'bin', op: '>=', l: v('v2'), r: C(0) },
         body: [
-          { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('v0'), r: deref('v1') } },
+          { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('v0'), r: deref('v1') } },
           step('v1'),
-          { k: 'assign', name: 'v2', value: { k: 'bin', op: '-', l: V('v2'), r: C(1) } },
+          { k: 'assign', name: 'v2', value: { k: 'bin', op: '-', l: v('v2'), r: C(1) } },
         ],
       },
-      { k: 'return', value: V('v0') },
+      { k: 'return', value: v('v0') },
     ],
   };
   mut?.(fn);
@@ -650,14 +649,14 @@ describe('v4 — the unguarded constant-trip countdown re-spells as a counted fo
       reindexWalks(
         constCountdown((fn) => {
           fn.params.push({ name: 'a1', type: T.s(32) });
-          (fn.body[2] as Stmt & { k: 'assign' }).value = V('a1');
+          (fn.body[2] as Stmt & { k: 'assign' }).value = v('a1');
         }),
       ),
     ).toBeNull();
   });
 
   test('refused: the `!= 0` exit — an unguarded loop with it counts one iteration fewer', () => {
-    expect(reindexWalks(constCountdown((fn) => (cdLoop(fn).cond = { k: 'bin', op: '!=', l: V('v2'), r: C(0) })))).toBe(
+    expect(reindexWalks(constCountdown((fn) => (cdLoop(fn).cond = { k: 'bin', op: '!=', l: v('v2'), r: C(0) })))).toBe(
       null,
     );
   });
@@ -668,7 +667,7 @@ describe('v4 — the unguarded constant-trip countdown re-spells as a counted fo
 
   test('refused: the counter is read a fifth time (`*p = k`)', () => {
     expect(
-      reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: V('v2') }))),
+      reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: v('v2') }))),
     ).toBeNull();
   });
 
@@ -685,8 +684,8 @@ describe('v4 — the unguarded constant-trip countdown re-spells as a counted fo
           (cdLoop(fn).body[0] as Stmt & { k: 'assign' }).value = {
             k: 'bin',
             op: '+',
-            l: V('v0'),
-            r: { k: 'index', base: V('v1'), idx: C(0), width: 1, signed: false },
+            l: v('v0'),
+            r: { k: 'index', base: v('v1'), idx: C(0), width: 1, signed: false },
           };
         }),
       ),
@@ -716,15 +715,15 @@ const globalCounter: SFn = {
   locals: [{ name: 'v1', type: T.ptr(T.s(32)) }],
   globals: [{ name: 'gCount', type: T.s(32) }],
   body: [
-    { k: 'assign', name: 'v1', value: V('a0') },
+    { k: 'assign', name: 'v1', value: v('a0') },
     { k: 'assign', name: 'gCount', value: C(7) },
     {
       k: 'dowhile',
-      cond: { k: 'bin', op: '>=', l: V('gCount'), r: C(0) },
+      cond: { k: 'bin', op: '>=', l: v('gCount'), r: C(0) },
       body: [
         { k: 'store', lval: deref('v1'), value: C(0) },
         step('v1'),
-        { k: 'assign', name: 'gCount', value: { k: 'bin', op: '-', l: V('gCount'), r: C(1) } },
+        { k: 'assign', name: 'gCount', value: { k: 'bin', op: '-', l: v('gCount'), r: C(1) } },
       ],
     },
   ],
@@ -768,11 +767,11 @@ test('a v2 loop that declines on its skip arm mints nothing: no dead iv, no kept
     1,
     0,
     { k: 'assign', name: 'v4', value: C(0) },
-    { k: 'assign', name: 'v3', value: V('a2') },
+    { k: 'assign', name: 'v3', value: v('a2') },
     {
       k: 'while',
-      cond: { k: 'bin', op: '<', l: V('v3'), r: { k: 'bin', op: '+', l: V('a2'), r: V('a1') } },
-      body: [{ k: 'assign', name: 'v4', value: { k: 'bin', op: '+', l: V('v4'), r: deref('v3') } }, step('v3')],
+      cond: { k: 'bin', op: '<', l: v('v3'), r: { k: 'bin', op: '+', l: v('a2'), r: v('a1') } },
+      body: [{ k: 'assign', name: 'v4', value: { k: 'bin', op: '+', l: v('v4'), r: deref('v3') } }, step('v3')],
     },
   );
   const kept = new Set<string>();
@@ -799,13 +798,13 @@ test('v4 inside an outer loop: the counter re-inits per outer iteration, so the 
       { k: 'assign', name: 'v3', value: C(0) },
       {
         k: 'while',
-        cond: { k: 'bin', op: '<', l: V('v3'), r: C(4) },
+        cond: { k: 'bin', op: '<', l: v('v3'), r: C(4) },
         body: [
           ...inner.body.slice(0, 4),
-          { k: 'assign', name: 'v3', value: { k: 'bin', op: '+', l: V('v3'), r: C(1) } },
+          { k: 'assign', name: 'v3', value: { k: 'bin', op: '+', l: v('v3'), r: C(1) } },
         ],
       },
-      { k: 'return', value: V('v0') },
+      { k: 'return', value: v('v0') },
     ],
   };
   const c = cBackend.emit(reindexWalks(fn)!);
@@ -863,7 +862,7 @@ const GATE_ABLATIONS: { id: string; title: string; fixture: () => SFn }[] = [
   {
     id: 'counter-roles',
     title: 'a fifth mention of the counter declines',
-    fixture: () => constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: V('v2') })),
+    fixture: () => constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: v('v2') })),
   },
   {
     id: 'walk-confined',
@@ -878,8 +877,8 @@ const GATE_ABLATIONS: { id: string; title: string; fixture: () => SFn }[] = [
         (cdLoop(fn).body[0] as Stmt & { k: 'assign' }).value = {
           k: 'bin',
           op: '+',
-          l: V('v0'),
-          r: { k: 'index', base: V('v1'), idx: C(0), width: 1, signed: true },
+          l: v('v0'),
+          r: { k: 'index', base: v('v1'), idx: C(0), width: 1, signed: true },
         };
       }),
   },
@@ -943,7 +942,7 @@ test('a walk pointer whose ADDRESS escapes declines too', () => {
       constCountdown((fn) =>
         fn.body.splice(3, 0, {
           k: 'store',
-          lval: { k: 'index', base: V('a0'), idx: C(0), width: 4, signed: true },
+          lval: { k: 'index', base: v('a0'), idx: C(0), width: 4, signed: true },
           value: { k: 'addr', name: 'v1' },
         }),
       ),
@@ -971,7 +970,7 @@ test('a walk base holding a free VARIABLE is not a rematerializable address', ()
   expect(
     reindexWalks(
       constCountdown((fn) => {
-        (fn.body[0] as Stmt & { k: 'assign' }).value = { k: 'bin', op: '+', l: V('a0'), r: C(4) };
+        (fn.body[0] as Stmt & { k: 'assign' }).value = { k: 'bin', op: '+', l: v('a0'), r: C(4) };
       }),
     ),
   ).toBeNull();

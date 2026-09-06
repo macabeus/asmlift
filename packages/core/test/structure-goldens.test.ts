@@ -237,7 +237,8 @@ test('a swap cycle with a write-order record spills the member the pred wrote fi
 // copy is ordered ahead of both — and being first, v1 is the member the cycle spills. (`v2 = v2 + 1`
 // still leads the body: it is the one copy outside the cycle, and `sequentialize` emits every
 // emittable copy before it breaks one.) Pinning an unrecorded copy at its param-order slot instead
-// loses armdef, loopfall, loopset and structarr over the 736 synthetic rows, all agbcc.
+// loses armdef, loopfall, loopset and structarr, all agbcc (measured 2026-09-04, over the 736
+// synthetic rows the tier held then).
 test('a destination the pred never wrote keeps the front slot, and the record orders the rest', () => {
   const fn = parse(SWAP_CYCLE);
   verify(fn);

@@ -92,10 +92,7 @@ export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number
   if (window === undefined) {
     return 0;
   }
-  const inWindow = (e: Expr): boolean => {
-    const c = addrConst(e);
-    return c !== null && c >= window[0] && c < window[1];
-  };
+  const inWindow = (e: Expr) => inRange(addrConst(e), window);
   let n = 0;
   const underSubscript = new Set<Expr>();
   for (const e of walkExprs(sfn.body)) {
@@ -127,7 +124,7 @@ export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number
  *  carry (an MMIO block and a plain RAM table can sit side by side, and qualifying the table
  *  blocks the read collapse its region wants), so each non-empty subset is its own candidate
  *  when few enough locals qualify, and the differ referees. */
-export function volatileEligibleLocals(sfn: SFn): string[] {
+function volatileEligibleLocals(sfn: SFn): string[] {
   return sfn.locals.filter(eligibility(sfn)).map((l) => l.name);
 }
 

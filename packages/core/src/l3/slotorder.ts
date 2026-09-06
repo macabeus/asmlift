@@ -34,7 +34,8 @@ import type { SFn } from './ast';
  *  PURE: the structurer's own list is never mutated, so `emit` cannot leak an ordered list back to
  *  a caller that expects the structurer's order.
  *
- *  REFUSAL CONDITIONS, all of them:
+ *  REFUSAL CONDITIONS, all of them — 1, 2 and 6 are checked below; 3, 4 and 5 hold by construction
+ *  (see each):
  *   1. `fn.slotOrder` absent — the target's direction is unknown, or it ships `'unknown'`: the
  *      ordering is the IDENTITY. There is no default direction.
  *   2. Fewer than two sortable locals: nothing to order.

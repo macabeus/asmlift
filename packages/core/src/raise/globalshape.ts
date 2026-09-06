@@ -68,9 +68,14 @@
 // compiles index-first), which is why `ORDER_SHAPE_GATES` below owns its rules instead of
 // selecting that one.
 //
+// EVERY CENSUS IN THIS FILE WAS TAKEN OVER ONE ARTIFACT AND IS DATED BY IT: `186360ca`
+// (2026-09-03), whose 370 agbcc rows include 359 that lift. Refusals are retaken through
+// `arrayShapeRefusals`, the licence tables through `orderLicensedGlobals` and `inferGlobalArrays`;
+// a later artifact re-dates them all, and none of them is a rule.
+//
 // So the order half licenses the HOME on its own, for every name the declaration half refuses for a
-// reason that is NOT about the order. Censused over the artifact's 370 agbcc rows in BOTH
-// symbol-map arms. The population narrows twice, so each line says which step it counts:
+// reason that is NOT about the order. Censused in BOTH symbol-map arms; the population narrows
+// twice, so each line says which step it counts:
 //
 //                                                MAP-LESS                MAP-FUL
 //     licence-only NAMES                         10 on 8 rows            11 on 9 rows
@@ -191,6 +196,16 @@ interface Access {
   gaddr: Op;
 }
 
+/** An access the DECLARATION path recorded: a whole-element read or write, so it evidences an
+ *  element width and the `null` case does not arise. `accessesBySymbol` runs with
+ *  `interiorIsEvidence` false there and takes only `isElementAccess` consumers, which is what makes
+ *  this narrowing a fact about the path rather than an assumption — and it is what lets `shapeOf`
+ *  read `elemSize` without spelling a case that would be a declaration carrying a sub-word read's
+ *  width as if it were the element's. */
+interface ElementAccess extends Access {
+  elementWidth: number;
+}
+
 // ── the refusals, as DATA ────────────────────────────────────────────────────────────────────
 //
 // Two tables, because the decision has two stages with different subjects. `ADDRESS_GATES` runs
@@ -203,9 +218,18 @@ interface Access {
 // so `firstRejection` names the one rule that decided rather than the set that co-occurred.
 //
 // THAT DISTINCTION IS NOT COSMETIC HERE, and the three readings of "what is this rule worth" pull
-// apart. Instrumented over the 359 benchmark agbcc target functions that lift (7 of which derive a
-// shape), per rule: how many symbols it would reject ON ITS OWN, how many it is the FIRST to
-// reject, and how many functions' derived maps change when it alone is removed from the table —
+// apart. Instrumented over the dated artifact's 359 lifting agbcc functions (7 of which derive a
+// shape), per rule — and each column is a DIFFERENT experiment, which is why they disagree:
+//
+//   1. ON ITS OWN — how many symbols this rule alone would reject, run with the rest of the address
+//      table EMPTY, so a symbol another rule reaches first is still counted here.
+//   2. FIRST — how many it is the first rejection of in the SHIPPED order, which is the attribution
+//      `arrayShapeRefusals` reports.
+//   3. MOVED — how many functions' derived maps change when this rule alone is removed from the
+//      shipped table, which is the only column that prices the rule against the shipped pass.
+//
+// The three columns, in that order (a dated measurement, not an invariant — re-take it through
+// `arrayShapeRefusals` rather than trusting it):
 //
 //     address-escapes            141    137    0
 //     interior-or-non-access      33     24    1
@@ -218,8 +242,8 @@ interface Access {
 //     index-materialized-first      1      1    0
 //     (the other five)              0      0    0
 //
-// — so twelve of the fourteen rules change nothing on this corpus when removed, and the rule the
-// first column nominates loudest is one of them: `address-escapes` rejects 141 symbols, is FIRST
+// — so on the dated artifact twelve of the fourteen rules change nothing when removed, and the rule
+// the first column nominates loudest is one of them: `address-escapes` rejects 141 symbols, is FIRST
 // for 137, and moves NOTHING. On this corpus the uses it rejects are the symbol's only ones, so
 // with the rule gone they simply contribute no access and the name ends with nothing to shape —
 // same outcome, and the rule's value there is the ATTRIBUTION. It is still `sound`, because a
@@ -337,34 +361,36 @@ export const ADDRESS_GATES: readonly Gate<AddressUse>[] = [...ELEMENT_ADDRESS_GA
  *  over. Per-access fields stay per-access on purpose: a rank is a property of ONE address
  *  expression, never of the union of several (see `ranks-disagree`). */
 interface ShapeEvidence {
-  /** Distinct ELEMENT widths under this name — `null` among them where an access reads an interior
-   *  of the element and so evidences no element width at all (`Access.elementWidth`). Every rule
-   *  below that reads a width spells that case, and spells it as a REFUSAL.
+  /** The three questions the rules below ask of the DISTINCT element widths under this name, and
+   *  nothing more — a set is not offered, because a rule handed one reads it positionally sooner or
+   *  later and `widths[0]` is "the FIRST recorded access", never "the only one".
    *
-   *  A RULE MUST NOT ASK THIS SET POSITIONALLY. `widths[0] === null` is not "no access has an
-   *  element width" — it is "the FIRST recorded access has none", and the two come apart the
-   *  moment a clean access is recorded before an interior one, which is `interior-or-non-access`'s
-   *  own fixture. Measured on it, three width rules composed onto `ORDER_SHAPE_GATES` read the
-   *  clean access's 2, applied it to the access that has no element width, and ADMITTED. So the
-   *  null case is spelled over the whole set (`widths.includes(null)`) or, where the rule is
-   *  really about one address, off that access's own `elementWidth` below.
+   *  AN INTERIOR ACCESS EVIDENCES NO ELEMENT WIDTH. It reads at a non-zero displacement, so the
+   *  load's own width is the sub-word read's and not the element's — `Access.elementWidth` records
+   *  it as `null` for exactly that reason, and a rule that read `2` out of a `ldrh` two bytes into
+   *  a 28-byte element would be reading a fabricated element. Only the ORDER consumer records one
+   *  (`interiorIsEvidence`); the declaration consumer's own `interior-or-non-access` refuses the
+   *  whole symbol first.
    *
-   *  THE SHAPE HAS A CORPUS INHABITANT. Instrumented over the artifact's 370 agbcc rows on BOTH
-   *  symbol-map arms, three licensed
-   *  symbols record a clean access and an interior one under one name — `kleod:EntityDeathAnimation`'s
-   *  `gEntityArray` (`widths` `[null, 2]`), `kleod:EntityItemDrop`'s `gEntity` (`[null, 2, 1]`) and
-   *  `kleod:TransformSingleEntityToScreen`'s `gUnk_03002920` (`[2, null]`). Only the third records
-   *  the clean access FIRST, so it alone is the shape the positional read got wrong.
+   *  Three named symbols on the dated artifact (see the module note) record a clean access and an
+   *  interior one under ONE name, in both symbol-map arms — `kleod:EntityDeathAnimation`'s
+   *  `gEntityArray` and `kleod:EntityItemDrop`'s `gEntity` record the interior one first,
+   *  `kleod:TransformSingleEntityToScreen`'s `gUnk_03002920` records the clean one first. That last
+   *  is the inhabitant a positional read gets wrong, which is why this is a summary and not a list.
    *  `kleod:UpdateCameraScroll` is NOT one of them: it is the DECLARATION half's worked example
    *  (`interior-or-non-access` ablated derives `elemSize 2` there), and in the order consumer its
-   *  `gSineTable` records no interior access at all — every width rule composed onto the licence,
-   *  `mixed-access-width` included, still admits it.
-   *
-   *  The invariant is about rules that read a width VALUE. `mixed-access-width` reads only this
-   *  set's shape (`length !== 1`), and on a symbol read ONLY at interiors — `[null]` — it admits,
-   *  correctly: "one name, two element types" is not what that symbol violates, and every rule
-   *  that would then go on to read the null refuses. */
-  readonly widths: (number | null)[];
+   *  `gSineTable` records no interior access at all. */
+  readonly widths: {
+    /** more than one distinct width under the name — no single element type to declare. A symbol
+     *  read ONLY at interiors is NOT mixed, and admitting it is right: "one name, two element
+     *  types" is not what it violates, and every rule that goes on to want a width refuses. */
+    readonly mixed: boolean;
+    /** some access reads an INTERIOR, so some access evidences no element width at all */
+    readonly hasInterior: boolean;
+    /** some access reads a sub-word element — the only widths at which the declared signedness
+     *  changes the emitted bytes */
+    readonly anySubWord: boolean;
+  };
   /** distinct extensions, a store's implicit `false` included */
   readonly signs: boolean[];
   readonly perAccess: readonly {
@@ -397,9 +423,9 @@ const noOrderEvidence = (e: ShapeEvidence): boolean => !e.perAccess.some((a) => 
 export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
   {
     // Attributing on the fixture below: with it removed `mixed-extension` refuses the same symbol.
-    // Measured there, `widths` is `[2, 4]` and `signs` is `[false, true]`, so the substitute refuses
-    // on `some(w < 4) && signs.length !== 1` — the sub-word read really does disagree about its
-    // extension — while `stride-is-not-the-element` DERIVES on that fixture (each access's stride IS
+    // Measured there, the widths are 2 and 4 and `signs` is `[false, true]`, so the substitute
+    // refuses on `anySubWord && signs.length !== 1` — the sub-word read really does disagree about
+    // its extension — while `stride-is-not-the-element` DERIVES on that fixture (each access's stride IS
     // its own element width, which is what reading `perAccess[i].elementWidth` buys). Only the order
     // of the two rules keeps the attribution here. It is first because "one name, two element types"
     // is the reason and the extension disagreement is a symptom of it.
@@ -407,7 +433,7 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     why: 'two widths under one name have no single element type to declare',
     sound: false,
     guardedBy: 'global-array-shape.test.ts: two access widths under one name refuse',
-    rejects: (e) => e.widths.length !== 1,
+    rejects: (e) => e.widths.mixed,
   },
   {
     // Asked only where it CHANGES the emitted bytes. A 4-byte element extends nothing, so
@@ -417,7 +443,7 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     why: 'the declared element type is the only thing in the emitted C saying how a sub-word read fills',
     sound: true,
     guardedBy: 'global-array-shape.test.ts: one name read signed and unsigned refuses',
-    rejects: (e) => e.widths.includes(null) || (e.widths.some((w) => w !== null && w < 4) && e.signs.length !== 1),
+    rejects: (e) => e.widths.hasInterior || (e.widths.anySubWord && e.signs.length !== 1),
   },
   {
     // Attributing: an address with no variable term also has no stride, so
@@ -506,8 +532,8 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
  *  command, `extern u8 gTbl[]; s8 *p = (s8 *)gTbl; return gTbl[i + 1] + p[j];` has no scaling
  *  anywhere — every access is width 1 — so `baseFirst` is `undefined` at every access, and the
  *  selected table licenses `gTbl` on the constant alone, handing `/orderbase` a home the assembly
- *  never evidenced. Over the artifact's 370 agbcc rows the difference between the two tables is ONE
- *  name on both symbol-map arms (`synthetic:harridx`'s `gTbl`, licensed by the selection with no
+ *  never evidenced. On the dated artifact (see the module note) the difference between the two
+ *  tables is ONE name on both symbol-map arms (`synthetic:harridx`'s `gTbl`, licensed by the selection with no
  *  access whose `baseFirst` is `true`, and shaped there so the structurer spells it bare); the
  *  compiled counterexample is what says the class is not that one row.
  *
@@ -531,9 +557,9 @@ export const ORDER_SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     // index-first half the single access has `baseFirst === false` and `no-order-evidence` — which
     // wants ONE access that says `true` — refuses anyway. The input where the two rules come apart
     // is a name with one index-first access AND one base-first access: there `no-order-evidence` is
-    // satisfied and only this rule refuses. Over the artifact's 370 agbcc rows that shape has no
-    // inhabitant, and "no inhabitant" is two censuses rather than one inferred from the other, both
-    // taken on BOTH symbol-map arms: of the symbols that reach this table (33 map-less, 34 map-ful)
+    // satisfied and only this rule refuses. On the dated artifact (see the module note) that shape
+    // has no inhabitant, and "no inhabitant" is two censuses rather than one inferred from the
+    // other, both taken on BOTH symbol-map arms: of the symbols that reach this table (33 map-less, 34 map-ful)
     // 1 has an index-first access and 0 have accesses in both orders, and this rule alone blocks 0
     // names where `no-order-evidence` blocks 13. So it is kept for the class rather than for a row,
     // and the fixture is what shows the class is real: compiled through the benchmark's own agbcc
@@ -654,10 +680,24 @@ function residualTerms(root: Value, defs: Map<Value, Op>): Term[] | null {
  *  does not model makes the name keep the cast form everywhere. The id is carried rather than a
  *  bare null so a census asks which rule decided instead of re-deriving the predicates.
  *
+ *  An array-valued entry is NEVER EMPTY: `record` below is the only writer of the array form and
+ *  every call appends, so a symbol reaches the map either with at least one access or as a refusal.
+ *  Callers index `[0]` on that basis.
+ *
  *  `interiorIsEvidence` is the second consumer's half of the filter below: an access at a non-zero
  *  displacement says nothing about the ELEMENT (its width is the sub-word read's, not the
  *  element's) and everything about the ORDER (its terms and its `gaddr` are the same ones). The
- *  declaration derivation keeps the default and never sees one. */
+ *  declaration derivation keeps the default and never sees one — which is what the two overloads
+ *  say in the type. */
+function accessesBySymbol(
+  fn: Fn,
+  gates: readonly Gate<AddressUse>[],
+): Map<string, ElementAccess[] | { refusedBy: string }>;
+function accessesBySymbol(
+  fn: Fn,
+  gates: readonly Gate<AddressUse>[],
+  interiorIsEvidence: true,
+): Map<string, Access[] | { refusedBy: string }>;
 function accessesBySymbol(
   fn: Fn,
   gates: readonly Gate<AddressUse>[],
@@ -800,8 +840,13 @@ function evidenceOf(accs: Access[], pos: Map<Op, { b: number; i: number }>): Sha
       baseFirst: baseFirst(a, pos),
     };
   });
+  const ws = new Set(accs.map((a) => a.elementWidth));
   return {
-    widths: [...new Set(accs.map((a) => a.elementWidth))],
+    widths: {
+      mixed: ws.size !== 1,
+      hasInterior: ws.has(null),
+      anySubWord: [...ws].some((w) => w !== null && w < 4),
+    },
     signs: [...new Set(accs.map((a) => a.signed))],
     perAccess,
     constOnIndex: accs.some((a) => a.terms.some((t) => t.v === null && t.konst !== 0)),
@@ -809,31 +854,23 @@ function evidenceOf(accs: Access[], pos: Map<Op, { b: number; i: number }>): Sha
 }
 
 function shapeOf(
-  accs: Access[],
+  accs: ElementAccess[],
   pos: Map<Op, { b: number; i: number }>,
   gates: readonly Gate<ShapeEvidence>[],
 ): SymbolInfo | null {
-  if (accs.length === 0 || firstRejection(gates, evidenceOf(accs, pos)) !== null) {
+  const ev = evidenceOf(accs, pos);
+  if (firstRejection(gates, ev) !== null) {
     return null;
   }
-  const perAccess = evidenceOf(accs, pos).perAccess;
   // The DECLARED signedness is the loads' — a store extends nothing, and `mixed-extension` has
   // already refused a name whose loads disagree at a width where it shows.
   const loadSigns = new Set(accs.filter((a) => a.isLoad).map((a) => a.signed));
-  const dims = perAccess[0].extents ?? [];
-  const elemSize = accs[0].elementWidth;
-  if (elemSize === null) {
-    // Unreachable on the shipped declaration path — `interior-or-non-access` refuses every symbol
-    // with an interior access, and only the ORDER consumer passes `interiorIsEvidence`, which does
-    // not call this function. Spelled anyway rather than asserted away, because the alternative is
-    // a declaration carrying a sub-word read's width as if it were the element's.
-    return null;
-  }
+  const dims = ev.perAccess[0].extents ?? [];
   return {
     name: (accs[0].gaddr.attrs.sym as string) ?? '',
     kind: 'data',
     shape: 'array',
-    elemSize,
+    elemSize: accs[0].elementWidth,
     elemSigned: loadSigns.size === 1 ? [...loadSigns][0] : false,
     ...(dims.length ? { dims: [null, ...dims] } : {}),
   };
@@ -932,7 +969,7 @@ export function orderLicensedGlobals(
   }
   const pos = positions(fn);
   for (const [sym, accs] of accessesBySymbol(fn, gates.address, true)) {
-    if (Array.isArray(accs) && accs.length > 0 && firstRejection(gates.shape, evidenceOf(accs, pos)) === null) {
+    if (Array.isArray(accs) && firstRejection(gates.shape, evidenceOf(accs, pos)) === null) {
       out.add(sym);
     }
   }
@@ -955,14 +992,7 @@ export function arrayShapeRefusals(
   }
   const pos = positions(fn);
   for (const [sym, accs] of accessesBySymbol(fn, gates.address)) {
-    out.set(
-      sym,
-      Array.isArray(accs)
-        ? accs.length === 0
-          ? 'no-accesses'
-          : firstRejection(gates.shape, evidenceOf(accs, pos))
-        : accs.refusedBy,
-    );
+    out.set(sym, Array.isArray(accs) ? firstRejection(gates.shape, evidenceOf(accs, pos)) : accs.refusedBy);
   }
   return out;
 }

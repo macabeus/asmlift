@@ -23,7 +23,7 @@
 // A signed and an unsigned right shift of the same value by the same amount differ only in the bits
 // the shift brings in, so `%134` is `sext(%133, 32 - 16)` — the same rewrite, and the reason this
 // pass matches the pair rather than either extension on its own.
-import { Fn, Op, Value } from '../ir/core';
+import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { CAST_WIDTHS, Opcode } from '../ir/opcodes';
 
 /** WHICH BITS a narrowing op keeps, as a key two ops can be compared on. The two spellings live in
@@ -35,7 +35,7 @@ const domainOf = (op: Op, low: Opcode, high: Opcode): { key: string; width: numb
   if (op.opcode === low && CAST_WIDTHS.has(op.attrs.width as number)) {
     return { key: `low${op.attrs.width}`, width: op.attrs.width as number };
   }
-  if (op.opcode === high && typeof op.attrs.imm === 'number' && CAST_WIDTHS.has(32 - (op.attrs.imm as number))) {
+  if (op.opcode === high && typeof op.attrs.imm === 'number' && CAST_WIDTHS.has(32 - op.attrs.imm)) {
     return { key: `high${op.attrs.imm}`, width: 32 - (op.attrs.imm as number) };
   }
   return null;
@@ -50,14 +50,7 @@ export function rerootNarrowReads(fn: Fn): number {
   // is that parameter's next value, i.e. a loop variable, which the structurer materializes and
   // renders `(s16)i`. Anywhere else the re-root only puts `(s16)(u16)x` where `(s16)x` stood —
   // byte-identical through agbcc, so noise for nothing.
-  const defs = new Map<Value, Op>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      for (const res of op.results) {
-        defs.set(res, op);
-      }
-    }
-  }
+  const defs = defOpMap(fn);
   const feedsBack = (from: Value, param: Value): boolean => {
     const seen = new Set<Value>();
     for (const stack = [from]; stack.length;) {
@@ -78,7 +71,7 @@ export function rerootNarrowReads(fn: Fn): number {
   const carried = new Set<Value>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      for (const s of op.successors ?? []) {
+      for (const s of op.successors) {
         s.args.forEach((a, i) => {
           const param = s.block.params[i];
           if (param !== undefined && feedsBack(a, param)) {
