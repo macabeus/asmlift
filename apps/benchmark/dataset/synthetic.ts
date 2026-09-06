@@ -2632,6 +2632,55 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { getbuf: { params: 1 }, offgiv: { returnsVoid: true } },
   },
 
+  // TWO MORE STRIDES, because `offgiv` varies nothing. It is `offloop` with two terms deleted and
+  // the SAME `<< 6`, so between them the class has one shape measured twice — which is not
+  // evidence that the closed form is a relation rather than one function's arithmetic. These two
+  // move the only parameter the additive form has.
+  //
+  // `offgiv2` is the stride `<< 2`, a shift Thumb's `add rd, #imm8` CAN spell in the step. It is a
+  // genuine inhabitant and not a row the lever was tuned on: in its own ranked table the best
+  // candidate carrying no `/unreduce` scores 3 and every `/unreduce` product scores 0, so the
+  // whole residual is the un-reduction at a stride the branch was never measured on.
+  //
+  // `offgiv3` is the stride `<< 8`, and it is the one that is NOT about the class. 256 does not
+  // fit Thumb's 8-bit add immediate, so agbcc spells the giv's step `mov #128 / lsl #1` and
+  // asmlift's L3 tree keeps it as the `bin` node `128 << 1`. Every stated scope condition holds —
+  // the start is the literal 0, the counter steps by 1, the stride is a constant power of two —
+  // and the lever refused anyway, on the SPELLING of the stride node rather than on its value.
+  // That is a refusal of asmlift's own folding, in a lever whose entire framing is the COMPILER's
+  // folding, and it was pre-existing on the substitutional path too (`rec` reads
+  // `k.k === 'const'` the same way).
+  {
+    sym: 'offgiv2',
+    src:
+      'void *getbuf(s32 k);\n' +
+      '#define gDma ((volatile s32 *)0x040000d4)\n' +
+      'void offgiv2(s32 k, s32 n){ u8 *p; s32 i;' +
+      ' p = (u8 *)getbuf(k);' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gDma[0] = (s32)(p + (i << 2));' +
+      ' gDma[2] = p[i]; } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void offgiv2(s32 k, s32 n);',
+    proto: { getbuf: { params: 1 }, offgiv2: { returnsVoid: true } },
+  },
+  {
+    sym: 'offgiv3',
+    src:
+      'void *getbuf(s32 k);\n' +
+      '#define gDma ((volatile s32 *)0x040000d4)\n' +
+      'void offgiv3(s32 k, s32 n){ u8 *p; s32 i;' +
+      ' p = (u8 *)getbuf(k);' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gDma[0] = (s32)(p + (i << 8));' +
+      ' gDma[2] = p[i]; } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void offgiv3(s32 k, s32 n);',
+    proto: { getbuf: { params: 1 }, offgiv3: { returnsVoid: true } },
+  },
+
   {
     sym: 'offhi_split',
     src:
