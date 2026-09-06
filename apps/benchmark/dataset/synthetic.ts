@@ -5830,7 +5830,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // no appeal to them justifies anything here. COUNTED IN ROWS, which is what `bench` reports and
   // what "rows" means everywhere else in this file, and read off THE ARTIFACT THIS BRANCH
   // PUBLISHES: `uninit-local` is 16 rows (agbcc 7, ido7.1 3, gcc2.7.2kmc 3, mwcc_242_81 3) and
-  // `value-home` is 72 (agbcc 51, gcc2.7.2kmc 8, ido7.1 7, mwcc_242_81 6 — 67 synthetic plus 5
+  // `value-home` is 78 (agbcc 57, gcc2.7.2kmc 8, ido7.1 7, mwcc_242_81 6 — 73 synthetic plus 5
   // real). A cross-family census in a comment is a fact about the whole file, so it goes stale on
   // someone ELSE's merge: re-run it after every rebase, from the artifact and not from a `grep`
   // over this file, which counts prose lines. The reason these stay agbcc-only is direct: whether

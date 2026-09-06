@@ -21,9 +21,10 @@ gets its own capture directory; `cand.i`/`cand.s` worker paths are reused and ca
 candidate. The preprocessed unit, assembly and object are retained together. The source bundle
 was built in the separate attribution worktree. No source under `packages/` was edited.
 
-The full captured run and its final structural census are still being collected in this draft.
-The task's supplied 376 baseline and 376/386 spill-order ablation remain prior measurements
-until the completed log is recorded below. No partial best-so-far score is a baseline.
+The completed captured run scored all 225,792 candidates and reproduced the raw winner at
+376. The best symbol candidate was 455, independently recompiled and rescored; the supplied
+462 was not reproduced. The 376/386 spill-order ablation remains prior evidence, not a new
+measurement here. See the [completed baseline census](lbg-attribution-baseline.md).
 
 The target still contains four `lsls r0, r0, #0x00` alignment pads, confirmed by the prescribed
 assembly search. Identical bytes can therefore have different ARM mapping-symbol presentation.
@@ -130,7 +131,18 @@ declaration block is not a substitute for the scored compile unit.
 
 Source rows were committed as `b2f4506a`; review corrected the ordering control’s feature tag
 in `8f2aeb0b`. Two full runs are budgeted exactly: the zero-flip gate and the final post-rebase
-publication run. Those benchmark gates and final artifact provenance remain pending in this draft.
+publication run. The first full run completed 751 synthetic and 252 real rows at `aa3c8093`.
+A clean scoped synthetic rerun replaced a tier whose dirty stamp correctly detected an
+accidental Python bytecode file; the stamp was never edited. Merge, regression and diff
+then ran in that order. Regression found `llcmp:agbcc` MATCH→11 against the newly advanced
+`origin/main`; full cache verification reproduced 11 (6 objects verified, no disagreements).
+Upstream `5efc34cc` contains the corresponding short-circuit fix; the final rebase and
+publication gate must verify it. Final artifact provenance is still pending.
+
+The first full run took 8,288 seconds with the default cache cap. Subsequent runs use
+`ASMLIFT_CANDCACHE_MAX_MB=16384` to avoid repeated eviction scans; scoring and compiler
+flags are unchanged, and normal runs retain default cache verification. The clean synthetic
+rerun completed in 171.8 seconds.
 
 Validation uses Node 24.15 and the installed GNU cpp-14 shim on PATH. Node 23.11 reproduced an
 `rmSync` directory-symlink failure in both a standalone script and the unchanged source checkout;
@@ -139,7 +151,7 @@ test; the documented GNU preprocessor passed all 21 focused tests. Neither issue
 changing project sources or test assertions.
 
 - `npx vitest run` was executed against the root config. After fixing the Node prerequisite,
-  fork-pool runs passed all 3,370 assertions but exited 1 on a worker `onTaskUpdate` RPC timeout.
+  fork-pool runs passed all 3,370 tests but exited 1 on a worker `onTaskUpdate` RPC timeout.
   One-worker execution reproduced it. An all-thread experiment was stopped after the focused
   environment test demonstrated that changing HOME inside a thread does not reproduce fork
   behavior; it is not reported as a passing gate.
@@ -165,3 +177,9 @@ changing project sources or test assertions.
 The four individual benchmark smoke commands were repeated under Node 24/GNU cpp and reproduced
 11/2/12/12, with the same m2c placeholder declines. A full benchmark was not used to discover
 these environment prerequisites.
+
+Later validation attempts must also be retained: the unmodified root command passed 3,321
+and failed 49 tests (7 RPC errors); affected-file retries reduced this to the isolated
+`nearbase rides at BOTH orderings` 5-second timeout, which still failed alone. No test
+deadline or assertion was changed. These failures prevent claiming the required unmodified
+root gate is green, despite the earlier complete 3,370-test supplemental pass.
