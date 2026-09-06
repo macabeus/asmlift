@@ -22,6 +22,17 @@
 // synthetic:dmafill, holding the rest fixed — a plain statement before the loop scores 19, the
 // same statement under an explicit guard 15, and letting the compiler create the giv 0.
 //
+// AND THE SECOND WAY A GIV RELATES TO ITS COUNTER, which is the SAME way after constant folding.
+// The substitution above needs the counter's start to still be present in the init. A source
+// `for (i = 0; …) use(base + (i << 6))` gives the giv the init `base + (0 << 6)`, and the compiler
+// folds that to `base` long before any of it reaches the asm — the start term is GONE and there is
+// nothing to substitute for. Every corpus inhabitant of this lever starts its counter at a
+// PARAMETER (`dmafill`'s `lo`), which is exactly why none of them needed the other rule: a
+// symbolic start cannot fold. `synthetic:offloop` and `synthetic:offgiv` are the shape that does.
+// For them the closed form is ADDITIVE rather than substitutional — `INIT + (ctr << s)`, the init
+// kept whole — and `relateFolded` below carries it, as a FALLBACK reached only where the
+// substitutional rule already declined. Its three scope refusals are stated there.
+//
 // THE ARITHMETIC. The rewrite rests on one invariant: at every read, `acc == g(ctr)`, where `g` is
 // the init expression with the counter's own start substituted by the counter. It holds at entry
 // because `ctr == start` there, and is preserved because `g` is linear with exactly the
@@ -116,8 +127,11 @@
 // and belongs to a row that demands it (dmanest is the obvious candidate), not to a soundness pass.
 //
 // AND THE TABLE ANSWERS FOR A SMALLER POPULATION STILL. Instrumented over those same 834 trees,
-// the 15 gates are consulted 36 times and only four ever decide: `acc-live-outside` 14,
-// `acc-read-at-step` 10, `unrelated-step` 7, `acc-multi-assign` 2, admit 3. The other eleven —
+// the 16 gates are consulted 36 times and only four ever decide: `acc-live-outside` 14,
+// `acc-read-at-step` 10, `unrelated-step` 7, `acc-multi-assign` 2, admit 3. That census was taken
+// when `unrelated-step` and `folded-start` were ONE gate, so its 7 counts two questions as one and
+// the split has not been re-censused; the shape of the finding (four gates decide, the rest are
+// held by their tests) is what it is good for, not the 7. The other eleven —
 // `moved-read-aliasable`, which the device-memory argument above rests on, among them — are held
 // by their unit tests and by the fuzz, and by nothing the corpus has yet shown them. Short-circuit
 // order hides a later gate behind an earlier one, so this counts FIRST rejections and not reach.

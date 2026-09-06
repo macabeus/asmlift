@@ -2469,9 +2469,21 @@ export const SYNTHETIC: SynthSpec[] = [
   // rule that always hoisted a constant offset into the home would break it, and the loop gate is
   // why this one cannot (`offuse` has no loop, so the axis is not even enumerated). `offloop` is
   // the real function's shape rather than an isolate: the same bias with a strength-reduced
-  // induction variable also riding it. Its residual is not the bias — it is the IV's init copy
-  // sitting above the zero-trip guard where the ROM has it below, which is the guard-placement
-  // family, not this one.
+  // induction variable also riding it. Its residual is not the bias — it is the induction
+  // variable, and `offgiv` below is the isolate that proves it (the same 3, with no `/expr-home`
+  // in the winner). Both are MATCH now.
+  //
+  // AND THE GUARD-PLACEMENT ATTRIBUTION THIS COMMENT USED TO CARRY WAS WRONG, recorded because a
+  // later round will otherwise re-derive it. It read "the IV's init copy sitting above the
+  // zero-trip guard where the ROM has it below, which is the guard-placement family, not this
+  // one", and it was a reading rather than a measurement. Falsified twice over, by compiling
+  // asmlift's own emitted C with this agbcc: moving the copy below the guard by hand still scores
+  // 3, and deleting the induction variable outright is byte-exact WITH the guard and WITHOUT it,
+  // both. The guard is irrelevant in either direction. `/initfirst`, the shipped guard-placement
+  // lever, was instrumented on this row and has NO REACH — 64 calls, 64 declines, because the
+  // recovered tree has no `if` in it at all — against `armfall`, where the same probe shows it
+  // firing and LOSING (it scores 9, the winner 8). Those are two different arms of the
+  // no-reach/loses/does-not-compose distinction, and neither of them was this row's residual.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; ido7.1, gcc2.7.2kmc and mwcc_242_81 were NOT measured, so those lanes are left
@@ -3225,9 +3237,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // exactly: 0 with one base, 11 with four, same lever, same poll, same loop.
   //
   // The loop is spelled `i = 0; do … while` rather than `for` deliberately: a `for` puts the
-  // family below's zero-trip guard into the same row, and this row is about the bases. With the
-  // `for` spelling the same shape scores 15, of which 11 is these bases and 4 is that guard
+  // family below's zero-trip guard into the same row, and this row is about the bases. When that
+  // was written the `for` spelling scored 15, of which 11 was these bases and 4 was that guard
   // (verified by composing both fixes by hand: 15 → 4 → 0).
+  //
+  // THAT NUMBER IS STALE and the separation it argues for has since been closed by shipped levers.
+  // Re-measured on the same hand-compiled `for` shape, `docs/ranked-repro.md`'s command: 76
+  // candidate(s) scored, 0 dropped, 0 withheld, best `signed/livebase-block/volatile/initfirst`:
+  // 0 (match). `/initfirst` is IN that winner, so the guard-placement lever does close a real
+  // instance of the shape — which is worth knowing next to `armfall`, where the same lever is
+  // enumerated and loses, and `offloop`, where it has no reach at all. The `do … while` spelling
+  // is kept anyway: this row is still about the bases, and a row that two levers close jointly no
+  // longer isolates either.
   //
   // Cut from kleod:LoadBGTilemapData:agbcc, and it pays there. The row exists because a base census
   // over that function's enumeration returned four shapes and no others: bind nothing, bind
