@@ -1,7 +1,7 @@
 // Pin tests for the runner's pure pieces: the shard math the orchestrator's parent/child
 // contract rides on, the ONE meta builder, and the no-silent-row-loss build-fail contract.
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -50,6 +50,40 @@ describe('runCases toolchain availability (pinned)', () => {
     const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'part.json');
     const results = runCases([c], outPath);
     expect(results).toEqual([]);
+    expect(JSON.parse(readFileSync(outPath, 'utf8')).results).toEqual([]);
+  });
+
+  test('writeEmpty: false leaves an EXISTING tier file byte-for-byte alone when every row SKIPs', () => {
+    // The default above is the shard CHILD's contract: a part file is always written and the
+    // stitcher owns <tier>.json. The serial path writes <tier>.json DIRECTLY, and a row that is
+    // SELECTED and then SKIPPED walks past cli.ts's `cases.length === 0` guard with cases.length
+    // > 0 and 0 results — which replaced a 594-row synthetic.json with a 287-byte `results: []`
+    // and exited 0, and the next `bench merge` published the other tier alone. The loss is
+    // SILENT, so only a test that puts real content in the file first can see it.
+    const c: Case = {
+      id: 'synthetic:ghost:agbcc',
+      tier: 'synthetic',
+      sym: 'ghost',
+      project: 'synthetic',
+      language: 'c',
+      features: [],
+      loc: 1,
+      refSource: 'int ghost;',
+      toolchain: { available: () => false } as Case['toolchain'],
+      build: () => {
+        throw new Error('build must never run for an unavailable toolchain');
+      },
+    };
+    const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'synthetic.json');
+    const sentinel = JSON.stringify({ meta: { counts: { total: 1 } }, results: [{ id: 'synthetic:kept:agbcc' }] });
+    writeFileSync(outPath, sentinel);
+
+    expect(runCases([c], outPath, { idx: 0, n: 1 }, { writeEmpty: false })).toEqual([]);
+    expect(readFileSync(outPath, 'utf8'), 'the previous tier file survives a run that measured nothing').toBe(sentinel);
+
+    // …and the DEFAULT still clobbers it, which is what makes `writeEmpty: false` the load-bearing
+    // half rather than a flag that happens to agree with the behaviour either way.
+    expect(runCases([c], outPath)).toEqual([]);
     expect(JSON.parse(readFileSync(outPath, 'utf8')).results).toEqual([]);
   });
 });

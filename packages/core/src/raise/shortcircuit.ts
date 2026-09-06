@@ -403,8 +403,12 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //
 // What neither reaches is the MIXED spelling. `negateJoinedBranchSense` is a per-FUNCTION boolean,
 // so the axis negates every joined `if` at once — and of the 28 real rows carrying the
-// `short-circuit` tag, 22 hold two or more. A per-SITE negation is the open lever; a gate on
-// whether to ENUMERATE the axis does not reach it, and removes a spelling the differ would referee.
+// `short-circuit` tag, 16 hold two or more TWO-ARMED ifs (counted by `else`, which is what the
+// axis's own `thenS.length && elseS.length` gate needs) and 12 hold two or more conditions
+// carrying a connective. An earlier version of this comment said 22, which is the count of `if (`
+// of ANY kind — one-armed ifs included, and both sense booleans exclude those by construction.
+// A per-SITE negation is the open lever; a gate on whether to ENUMERATE the axis does not reach
+// it, and removes a spelling the differ would referee.
 //
 // The De Morgan negation below forecloses a third spelling, at a measured price: it DISTRIBUTES, so
 // the leaves come out negated (`a || (!b && !c)`) and `a || !(b || c)` has no
@@ -425,6 +429,18 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // reaches, so `bne ^g` always arrives at ^g directly and no relay can sit between them. The
 // `logic_and` half is the one that lands on the source's own orientation; it is the `logic_or` half
 // that has no dual candidate (synthetic:ifand_near:agbcc).
+//
+// `gIsFall` IS NOT THE CARRIER FOR A PER-SITE SENSE, and that was measured rather than argued. It
+// reads the branch RANGE, exactly as the table above says — so in any function small enough for
+// every branch to be short it is the SAME at every site, including sites whose sources wrote
+// opposite connectives. Instrumented at the fold and run through the bench: a two-site row whose
+// first site wrote `&&` and whose second wrote its dual reads `gIsFall=true` at BOTH
+// (`synthetic:joinsense`), and a four-site ladder row with two sites inverted in the source reads
+// `true` at all four (`synthetic:mixsense`). The positive control reads the other way —
+// `synthetic:ifand_far`, the long-branch row, gives `false` against
+// `synthetic:ifand_near`'s `true`. So carrying this boolean to L3
+// as a node stamp (the `#144` `Expr.baseOrdered` shape) would hand every site of such a function
+// one answer and reach exactly the two configurations `negateJoinedBranchSense` already reaches.
 //
 // Every refusal falls through untouched — a miss, never a miscompile.
 /** Per-call options for `recognizeBranchShortCircuit` — the tree-ownership refusal's two ends. */

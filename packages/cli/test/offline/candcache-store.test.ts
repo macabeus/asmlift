@@ -349,6 +349,57 @@ describe('the LRU cap evicts whole namespaces, oldest first, and never the one i
     expect(readdirSync(join(root, 'ns'))).toEqual([NS_B.slice(0, 16)]);
   });
 
+  test('the prune stops at a WALL-CLOCK BUDGET, and says both that it started and that it stopped', async () => {
+    // `pruneOnce` runs in EVERY process that resolves a namespace — both halves of a ~1800 s
+    // `pnpm bench run` included — and nothing above it on that path has a timeout, while its two
+    // eviction loops each re-walk the whole store. So an over-cap store is a stall that produces
+    // no output and cannot be told apart from a hang. A budget of 0 is that bound at its limit:
+    // the cap is still checked and still announced, and nothing is evicted.
+    const root = scratch();
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
+      m.candCache('t', () => NS_A).put('k1', 'f', object('A-ONE'));
+    });
+    age(root, NS_A);
+
+    const said = await load(
+      {
+        ASMLIFT_CANDCACHE: '1',
+        ASMLIFT_CANDCACHE_DIR: root,
+        ASMLIFT_CANDCACHE_MAX_MB: '0',
+        ASMLIFT_CANDCACHE_PRUNE_MS: '0',
+      },
+      (m) => {
+        let out = '';
+        const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+          out += typeof c === 'string' ? c : Buffer.from(c).toString();
+          return true;
+        });
+        try {
+          m.candCache('t', () => NS_B).warm();
+          expect(m.cacheStats().prunedNamespaces, 'the budget outranks the cap').toBeUndefined();
+          expect(m.cacheStats().prunedKeys).toBeUndefined();
+        } finally {
+          spy.mockRestore();
+        }
+        return out;
+      },
+    );
+
+    expect(said, 'a prune that says nothing is indistinguishable from a hang').toContain('pruning (0s budget)');
+    expect(said, 'and it says WHICH reason left the store over cap').toContain('the prune stopped at its 0s budget');
+    expect(readdirSync(join(root, 'ns')).sort(), 'nothing was evicted').toEqual(
+      [NS_A.slice(0, 16), NS_B.slice(0, 16)].sort(),
+    );
+
+    // The SAME store, the SAME cap, with the default budget: the cold namespace goes. Without
+    // this half the test above would pass on a prune that had simply stopped working.
+    await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '0' }, (m) => {
+      m.candCache('t', () => NS_B).warm();
+      expect(m.cacheStats()).toMatchObject({ prunedNamespaces: 1 });
+    });
+    expect(readdirSync(join(root, 'ns'))).toEqual([NS_B.slice(0, 16)]);
+  });
+
   test('under the cap: nothing is pruned at all', async () => {
     const root = scratch();
     await load({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: root, ASMLIFT_CANDCACHE_MAX_MB: '4096' }, (m) => {
