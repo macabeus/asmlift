@@ -773,3 +773,18 @@ test('an accumulator and an init in the SAME units still relate', () => {
   const ptrInit: Expr = { k: 'cast', to: T.ptr(T.u(16)), e: c(0x03000900) };
   expect(emit(unreduceAccumulators(ptrWalk(T.ptr(T.u(16)), ptrInit), GBA))).toContain('(u16 *)50333952 + (i << 5)');
 });
+
+test('a stride the frontend spelled as a constant expression still relates', () => {
+  // 256 does not fit Thumb's `add rd, #imm8`, so agbcc emits `mov #128 / lsl #1` and the recovered
+  // step is the NODE `128 << 1`. Every stated scope condition holds — start 0, counter steps by 1,
+  // the stride is a constant power of two — so refusing on the spelling refuses the class's own
+  // member. synthetic:offgiv3 is the row.
+  expect(emit(unreduceAccumulators(folded({ accStep: shl(c(128), c(1)) }), GBA))).toContain(
+    '*(s32 *)67109080 = a1 + (i << 8);',
+  );
+  // …and the same for the other two ways a constant stride is spelled arithmetically
+  expect(emit(unreduceAccumulators(folded({ accStep: mul(c(8), c(8)) }), GBA))).toContain('a1 + (i << 6);');
+  expect(emit(unreduceAccumulators(folded({ accStep: plus(c(60), c(4)) }), GBA))).toContain('a1 + (i << 6);');
+  // a folded stride that is still not a power of two is still refused
+  expect(unreduceAccumulators(folded({ accStep: plus(c(40), c(8)) }), GBA)).toBeNull();
+});

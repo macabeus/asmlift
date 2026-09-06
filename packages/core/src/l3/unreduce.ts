@@ -397,6 +397,39 @@ function arithScale(t: IrType | undefined): number | null {
   return t.kind === 'int' && t.width === 32 ? 1 : null;
 }
 
+/** Constant-fold a stride the FRONTEND spelled as arithmetic. Thumb's `add rd, #imm8` cannot spell
+ *  256, so agbcc emits `mov #128 / lsl #1` and the recovered step is the node `128 << 1` rather
+ *  than the constant 256. Every relation check below reads the stride's VALUE, so without this a
+ *  stride refuses on its SPELLING and names a gate whose `why` is about the value — measured on
+ *  synthetic:offgiv3, where the start is the literal 0, the counter steps by 1 and 256 is a
+ *  constant power of two, and the lever declined anyway. The refusal was pre-existing on the
+ *  substitutional path too (`rec` reads `k.k === 'const'` the same way).
+ *
+ *  ONLY all-constant nodes fold, which is what keeps this from being a general simplifier: nothing
+ *  that mentions a name is touched, so `acc-read-at-step` — which reads the same expression for
+ *  the accumulator's own name — sees exactly the names it saw before. */
+function foldConsts(e: Expr): Expr {
+  if (e.k !== 'bin') {
+    return e;
+  }
+  const l = foldConsts(e.l);
+  const r = foldConsts(e.r);
+  if (l.k !== 'const' || r.k !== 'const') {
+    return e;
+  }
+  // int32 arithmetic, because that is what the machine did and what the C will do
+  switch (e.op) {
+    case '+':
+      return { k: 'const', value: (l.value + r.value) | 0 };
+    case '*':
+      return { k: 'const', value: Math.imul(l.value, r.value) };
+    case '<<':
+      return r.value >= 0 && r.value < 32 ? { k: 'const', value: l.value << r.value } : e;
+    default:
+      return e;
+  }
+}
+
 /** `name = name + <expr>` as a step, or null. */
 function stepOf(s: Stmt, name: string): Expr | null {
   if (s.k !== 'assign' || s.name !== name || s.value.k !== 'bin' || s.value.op !== '+') {
@@ -740,7 +773,7 @@ export function unreduceAccumulators(
       if (initStmt === undefined || initStmt.k !== 'assign' || stepIdx < 0 || cand.name === ctr) {
         continue;
       }
-      const k = stepOf(loop.body[stepIdx], cand.name)!;
+      const k = foldConsts(stepOf(loop.body[stepIdx], cand.name)!);
       const closed = relate(initStmt.value, startStmt.value, ctr, k, d.value);
       // THE MOTION REGION: everything that runs between where the init stood and the reads that
       // replace it. Both endpoints move — the init is DELETED, and the counter's start is what the
