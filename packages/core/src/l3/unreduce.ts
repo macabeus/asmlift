@@ -504,7 +504,7 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
     //     rebuilding it in a canonical order would answer that question here instead.
     if (x.k === 'bin' && x.op === '*' && (exprEquals(x.l, start) || exprEquals(x.r, start))) {
       const startLeft = exprEquals(x.l, start);
-      const m = startLeft ? x.r : x.l;
+      const m = foldConsts(startLeft ? x.r : x.l);
       const ok = d === 1 ? exprEquals(m, k) : m.k === 'const' && kConst !== null && d * m.value === kConst;
       return ok ? { k: 'bin', op: '*', l: startLeft ? idx() : m, r: startLeft ? m : idx() } : null;
     }
@@ -539,13 +539,18 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
   // own scale, and an `index` node on that path refuses. So the misrouting costs reach, not
   // soundness — and trying `rec` first and asking about the START's shape second fixes the reach
   // without touching the safety argument.)
-  if (start.k !== 'const') {
+  // The start's SHAPE is what routes this, so it is read as a VALUE: `128 << 1` is the constant
+  // 256, and taking it for a symbolic start would name a gate whose `why` says the start is one.
+  // `rec` above keeps matching the init's subterms against the ORIGINAL spelling, which is what
+  // the init carries.
+  const startConst = foldConsts(start);
+  if (startConst.k !== 'const') {
     // A symbolic start cannot have folded, so the init either does not name it at all or names it
     // twice (and which occurrence is the index is not decidable) — `unrelated-start`; or it names
     // it once and `rec` refused the scale — `scale-mismatch`.
     return { declined: occurrences === 1 ? 'scale-mismatch' : 'unrelated-start' };
   }
-  return relateFolded(init, start, ctr, k, d);
+  return relateFolded(init, startConst.value, ctr, k, d);
 }
 
 /** THE OTHER relation, and it is the same one after CONSTANT FOLDING. `relate` above recovers the
@@ -584,8 +589,8 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
  *      condition holds (synthetic:offgiv3, 5 without the fold and MATCH with it).
  *  The soundness refusal is pinned by a unit test and reached by no corpus row; the two spelling
  *  refusals are pinned by unit tests and by `offgiv3`'s neighbours. */
-function relateFolded(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relation {
-  if (start.k !== 'const' || start.value !== 0) {
+function relateFolded(init: Expr, start: number, ctr: string, k: Expr, d: number): Relation {
+  if (start !== 0) {
     return { declined: 'nonzero-start' };
   }
   if (d !== 1) {
@@ -797,7 +802,8 @@ export function unreduceAccumulators(
       continue;
     }
     const ctr = ctrStep.name;
-    const d = stepOf(ctrStep, ctr);
+    const dStep = stepOf(ctrStep, ctr);
+    const d = dStep === null ? null : foldConsts(dStep);
     if (d === null || d.k !== 'const' || d.value === 0) {
       continue;
     }

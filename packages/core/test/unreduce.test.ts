@@ -221,6 +221,32 @@ test('an ABLATED relation gate declines rather than emitting a deleted local', (
   }
 });
 
+test('a constant the frontend spelled as arithmetic is read as its VALUE, wherever the relation reads one', () => {
+  // Thumb's `add rd, #imm8` cannot spell 256, so agbcc emits `mov #128 / lsl #1` and the frontend
+  // recovers the node `128 << 1`. Every input the relation compares is a value, so each is folded
+  // before it is read — otherwise the same number refuses on its spelling, and names a gate whose
+  // `why` is about the value (synthetic:offgiv3 was the accumulator's stride).
+  const spelled = shl(c(128), c(1));
+  // the counter's START: 256 is a nonzero constant however it is written, and one gate owns both
+  expect(ctxFor(folded({ start: spelled })).declined).toBe('nonzero-start');
+  expect(ctxFor(folded({ start: c(256) })).declined).toBe('nonzero-start');
+  // the counter's own STEP: without the fold it never reaches the table at all, and a decline
+  // outside the table names no gate
+  expect(ctxFor(folded({ ctrStep: shl(c(1), c(1)) })).declined).toBe('step-ratio');
+  // and a PRODUCT's invariant multiplier, on the substitutional path: the stride is folded, so
+  // comparing it against an unfolded multiplier refuses a relation that holds
+  const s = fill({}, [
+    set('i', v('a0')),
+    set('acc', plus(mul(spelled, v('a0')), c(8))),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+      body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), spelled)), set('i', plus(v('i'), c(1)))],
+    },
+  ]);
+  expect(emit(unreduceAccumulators(s, GBA))).toContain('*(s32 *)67109080 = 256 * i + 8;');
+});
+
 test('a folded init that READS MEMORY still answers to the device-write proof gate', () => {
   // The new branch admits a class the substitutional one could not reach — an init that is a bare
   // memory read, which under the old rule had no counter subterm and so never related at all. The
