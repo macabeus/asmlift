@@ -1563,7 +1563,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // WHERE A VALUE LIVES, NOT WHAT IT COMPUTES. In each of these rows both decompilers can
   // recover the computation; the diff is dominated by value placement — a base address kept in
   // one register and reused at immediate offsets, a clamp overwriting its own variable, a value
-  // parked across a high-pressure loop. The family is cut from kleod:LoadBGTilemapData:agbcc,
+  // parked across a high-pressure loop. The family is cut from LoadBGTilemapData in the kleod checkout (agbcc),
   // whose residual diff is almost entirely this class, but every shape is spelled with absolute
   // addresses so the rows stay self-contained. (A named extern global would compile and score —
   // asmlift synthesizes the declaration off the target asm, and rows elsewhere in this file
@@ -1576,7 +1576,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // register file (the osPiRawStartDma store pattern) and KSEG0 RDRAM; under mwcc the GC DI
   // register file (the DVDLowRead store pattern) and MEM1. Same spelling, same capability —
   // only the constant and the register offsets differ — so a sym appears in several specs with
-  // DISJOINT toolchain lists and every `synthetic:sym:toolchain` id stays unique.
+  // DISJOINT toolchain lists and every `synthetic:<sym>:<toolchain>` id stays unique.
   //
   // What each row isolates, measured by compiling both spellings under agbcc -O2:
   // `dma_burst` is the control — a plain store block through one pointer local, recovered
@@ -1607,7 +1607,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // MATCHes with candidate label `unsigned/livebase/volatile`, so the volatile-base capability
   // exists and that row pins it. What is NOT pinned is that the same capability is EXCLUDED once
   // the device base is spelled as a NAMED symbol rather than a numeric address. Measured on
-  // kleod:LoadBGTilemapData with the project's symbol map on: of the 66,816 ranked candidates
+  // LoadBGTilemapData in the kleod checkout with the project's symbol map on: of the 66,816 ranked candidates
   // 14,592 spell globals by name and 52,224 by raw address; 18,432 of the raw ones carry a
   // `/volatile*` label and ZERO of the named ones do — counted both from the run's `[score]`
   // labels and from the 66,816 captured candidate `.c` files, 18,432 of which declare a volatile
@@ -2002,7 +2002,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // that read per arm. Verified by compiling the pair: the two spellings differ, and the compiler
   // moves neither.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, where re-reading ONE entry byte in two sibling arms
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), where re-reading ONE entry byte in two sibling arms
   // is 15 points of the residual. Spelled with absolute GBA addresses so the rows stay
   // self-contained. (Not because a named global is impossible — the GLOBAL ARRAY SHAPE family far
   // below relocates against one and scores — but because these rows isolate a re-read, and the
@@ -2092,7 +2092,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // therefore fixes both the grouping and the arm order, and getting either wrong moves every
   // instruction after the first arm.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, where it is the single largest class in the residual:
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), where it is the single largest class in the residual:
   // respelling its `if (v1 != 1) { if (v1 <= 1) { if (v1 == 0) … } else { switch { case 2, 3 } } }
   // else { … }` as one four-case `switch` is worth 46 of 547 points — more than every capability
   // the three previous rounds landed for that function, combined. Of the 46, the grouping is 8 and
@@ -2298,7 +2298,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // So both conditions are needed — the memory home AND a load issued before the store — and
   // together they are what a decompiler has to reproduce to get the byte count right.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc. At its best hand-built spelling (479 against
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc). At its best hand-built spelling (479 against
   // `build/src/gfx.o`, from a 531 baseline) the residual's largest nameable group is exactly this:
   // 15 stores to `[sp,#16..32]` and 5 `ldrh [rN,#18]` in the ROM with no counterpart in the
   // candidate, where the candidate keeps the same values in registers and reads the field once.
@@ -2475,7 +2475,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // So the compiler moves NEITHER spelling toward the other: the offset stays where the source put
   // it, and getting it wrong costs one operand on every use plus the two ends of the round trip.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, which allocates twice and frees twice through exactly
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), which allocates twice and frees twice through exactly
   // this shape (`thunk_HeapFree(alloc + 4 - 4)`). At the round's best hand-built spelling, homing
   // both `+ 4`s is worth 1 point (475 -> 474 against `build/src/gfx.o`) and removes 3 of the 4 ROM
   // instructions that had no counterpart — `mov r1, #4`, `ldrb r0, [r0, #0]` and `sub r0, #4` go,
@@ -2773,7 +2773,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // in r2", so `armfall` still declares four parameters for a two-parameter source and still opens
   // its loop with `v3 = a2;`. That is an arity question, not an initialisation one.
   //
-  // Measured on kleod:LoadBGTilemapData:agbcc, both directions. The reference source carries three
+  // Measured on LoadBGTilemapData in the kleod checkout (agbcc), both directions. The reference source carries three
   // register-allocation coercions (statements with no semantic content, marked `// FAKE?` there)
   // and the ADDING number is quoted with them deleted, because they and the materialisation
   // contend for the same registers and stacking them double-counts:
@@ -2968,7 +2968,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // claim above under the harness instead of in a commit message, and it MATCHes — so the pair
   // brackets the gap exactly, 0 without the statement and 8 with it.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, where the second decomp's 98.24% attempt writes the
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), where the second decomp's 98.24% attempt writes the
   // same construct as `gBgInfo[2].vLength += 0;` and marks it `// FAKE`. It is worth 178 points
   // there: deleting that one statement takes the spelling from 12 to 190 against the ROM object.
   //
@@ -3212,7 +3212,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // the real tier.
   //
   // THE LBG NOTE, with this family's own share of that row priced rather than assumed away. On
-  // `kleod:LoadBGTilemapData:agbcc` the 386 winner's pool holds 20 `.word` against the ROM's 20
+  // `LoadBGTilemapData in the kleod checkout (agbcc)` the 386 winner's pool holds 20 `.word` against the ROM's 20
   // `.4byte`, and it bakes four `gBgInfo` addends (+0x4, +0x3c, +0x48, +0x4a) where the ROM bakes
   // three (+0x4, +0x48, +0x4a), carrying 8 plain `0x3003430` words against the ROM's 9. The extra
   // `+0x3c` is the pool word the two `((s32 *)50345008)[15]` sites share — surface 2, `bgfixed`'s.
@@ -3403,7 +3403,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // is kept anyway: this row is still about the bases, and a row that two levers close jointly no
   // longer isolates either.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, and it pays there. The row exists because a base census
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), and it pays there. The row exists because a base census
   // over that function's enumeration returned four shapes and no others: bind nothing, bind
   // 0x03003430 alone (`/nearbase`'s cluster), bind all five of 0x03003430 / 0x03003478 /
   // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and bind those
@@ -3494,7 +3494,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // hand-composing the two spellings on that branch recovers a single point (31 → 30 on a hand
   // probe of the `/expr-home` shape). So no row demands it and none was written. What would earn
   // one: a target whose ranked winner carries `/expr-home` with the hoist INSIDE the guard.
-  // THAT CRITERION IS NOW MET, and the answer did not change. kleod:LoadBGTilemapData:agbcc's
+  // THAT CRITERION IS NOW MET, and the answer did not change. LoadBGTilemapData in the kleod checkout (agbcc)'s
   // ranked winner (386) carries `/expr-home` AND `/initfirst`, with the hoist landing exactly
   // here — `if (0 < *(u16 *)50345082) { v5 = 128 << 24; v14 = 0; do …`, so `then[0]` is the
   // hoist and the pass never looks at the init on the next line. Priced on that winner's own C,
@@ -3507,7 +3507,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // is parameter-derived and agbcc materialises it before the guard — that composition is not the
   // broken one.)
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, whose L1 guard is `movs r3, #0 / … / cmp r3, r2 / bge`
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), whose L1 guard is `movs r3, #0 / … / cmp r3, r2 / bge`
   // in the ROM and `if (0 < *(u16 *)50345082)` in the ranked winner.
   //
   // agbcc only, as the poll rows above: `ucmp` already carries the compare-polarity axis on all
@@ -4146,15 +4146,16 @@ export const SYNTHETIC: SynthSpec[] = [
   //   than one with it, it is a different claim. With the target
   //   assembled by hand from the checkout's own `.s` (`.syntax unified` prepended, else the
   //   unified Thumb mnemonics do not assemble) and ranked through the benchmark's own agbcc
-  //   candidate compiler, `ASMLIFT_CANDCACHE=0`, BOTH configurations:
-  //     kleod:InitPauseMenu             map-less 28 vs 30 ablated · map-ful 28 vs 30 — REPRODUCES,
-  //                                     and it is the one function of the three the two
-  //                                     configurations agree on.
-  //     kleod:UpdateUIElementAnimation  map-less 102 vs 106 (runner-up IS `/offmember`) —
-  //                                     REPRODUCES map-less; map-ful it is 99 vs 105, still won by
-  //                                     `/basefold`, so the WIN survives the configuration and the
-  //                                     numbers do not.
-  //     kleod:StreamCmd_SetTimerAndMode map-less 11 vs 12 on this rig. A 17-vs-18 reading of the
+  //   candidate compiler, `ASMLIFT_CANDCACHE=0`, BOTH configurations. All three are functions in
+  //   the klonoa checkout, ranked outside the benchmark, so none of them is a row:
+  //     InitPauseMenu             map-less 28 vs 30 ablated · map-ful 28 vs 30 — REPRODUCES,
+  //                               and it is the one function of the three the two
+  //                               configurations agree on.
+  //     UpdateUIElementAnimation  map-less 102 vs 106 (runner-up IS `/offmember`) —
+  //                               REPRODUCES map-less; map-ful it is 99 vs 105, still won by
+  //                               `/basefold`, so the WIN survives the configuration and the
+  //                               numbers do not.
+  //     StreamCmd_SetTimerAndMode map-less 11 vs 12 on this rig. A 17-vs-18 reading of the
   //                                     same function comes off a DIFFERENT target: 13 candidates
   //                                     either way, so the fan is identical and a hand-assembled
   //                                     object's pool alignment is not the project build's.
@@ -4447,7 +4448,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // the real function's shape — a loop whose two arms each expand the macro, plus a third
   // expansion after the loop — and it is where the conjunction above is measured.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, and the two counts are the family in one line: the
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), and the two counts are the family in one line: the
   // preprocessed reference declares FIVE `vu32 *dmaRegs`, one per DMA macro expansion
   // (`grep -c 'vu32 \*dmaRegs'` over it: 5), while asmlift's ranked winner at the time (386,
   // pre-`/unmerge`/`/regionbase`,
@@ -4696,7 +4697,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // labels on the commit that ships it. On the `/regionbase` side the census is already a reach
   // count — no row in the tier holds a `/regionbase` tree whose labels the source dedup eats.
   //
-  // CUT FROM kleod:LoadBGTilemapData:agbcc, AND `dmapoll` DEMANDS STRICTLY MORE THAN IT DOES.
+  // CUT FROM LoadBGTilemapData in the kleod checkout (agbcc), AND `dmapoll` DEMANDS STRICTLY MORE THAN IT DOES.
   // Enumerating all 117760 of that function's candidates: `/regionbase` splits 0x040000D4 into
   // three locals and leaves 0x03003430 at ONE, while `/livebase-block` binds each of the two at
   // one — so there the second base is one the first lever declines to split and the policies need
@@ -4921,7 +4922,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // The one other guard that reads the field, `BASEFOLD_GATES`, reaches none of these keys: its
   // census is empty on all three rows here.
   //
-  // CUT FROM kleod:LoadBGTilemapData:agbcc, where the same three-way split is 399 / 386 / 383 —
+  // CUT FROM LoadBGTilemapData in the kleod checkout (agbcc), where the same three-way split is 399 / 386 / 383 —
   // `/livebase` parks five bases, `/livebase-block` parks one, and parking exactly the two whose
   // offsets survived the fold is what a hand-compiled spelling reaches. NAME THE SET FROM THE FILE
   // AND NOT FROM THE SENTENCE: that hand-compiled 383 is the 386 winner plus one local, so it
@@ -5303,7 +5304,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // this" tag to be about (the rule that keeps `rereadctl` untagged in `read-once`), so `dmafill`
   // and `dmaptrsrc` carried it while they were gaps and lost it when they closed.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, whose inner loop is a `DmaFill16` with no wait and
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), whose inner loop is a `DmaFill16` with no wait and
   // whose reference source ends FIVE macro expansions in a bare read-back (`grep -c` over the
   // preprocessed reference: 5). SAID PLAINLY BECAUSE IT IS EASY TO ASSUME OTHERWISE: closing
   // these rows is not predicted to move that function. Its winner already declares the DMA base
@@ -5400,7 +5401,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // Its enumeration gate (rank.ts, `mapHasBitfields`) reads `opts.symbols`, so a MAP-LESS row is
   // structurally incapable of producing one candidate for it, and a census over a map-less tier
   // measures the CORPUS rather than the axis.
-  // What the corpus does contain is the fold's own five reach rows, all kleod:agbcc, and on all
+  // What the corpus does contain is the fold's own five reach rows, all kleod rows on agbcc, and
+  // on all
   // five the fold ON wins — so a census reads the OFF arm as dead. These two rows are the shapes
   // the axis was built for, where it is the ONLY spelling that matches.
   //
