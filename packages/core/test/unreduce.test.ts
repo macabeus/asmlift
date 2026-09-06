@@ -203,6 +203,22 @@ test('a counter-free init declines when the accumulator’s stride is not a powe
   ).toBeNull();
 });
 
+test('an ABLATED relation gate declines rather than emitting a deleted local', () => {
+  // `gates.ts` prescribes the differential ablation: drop one entry and re-run the pass, the real
+  // predicate on real input. Five gates reject a reason `relate` declined for, so with one of them
+  // gone the pass reaches a candidate that has NO closed form — while the init statement and the
+  // declaration are deleted regardless. Substituting nothing there emits C reading a variable that
+  // is no longer declared, silently; the pass refuses instead.
+  for (const [id, tree] of [
+    ['nonzero-start', folded({ start: c(1) })],
+    ['step-ratio', folded({ ctrStep: c(2) })],
+    ['stride-not-shift', folded({ accStep: c(48) })],
+    ['unrelated-start', folded({ start: v('a1'), init: v('a0') })],
+  ] as const) {
+    expect(unreduceAccumulators(tree, GBA, undefined, without(UNREDUCE_GATES, id))).toBeNull();
+  }
+});
+
 test('a folded init that READS MEMORY still answers to the device-write proof gate', () => {
   // The new branch admits a class the substitutional one could not reach — an init that is a bare
   // memory read, which under the old rule had no counter subterm and so never related at all. The

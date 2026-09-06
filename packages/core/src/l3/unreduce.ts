@@ -892,12 +892,21 @@ export function unreduceAccumulators(
       if (firstRejection(gates, ctx) !== null) {
         continue;
       }
+      // AND THE CLOSED FORM ITSELF, which the gates alone do not establish. Five of them reject a
+      // reason `relate` declined for, so the full table implies one exists — but the table is a
+      // VALUE, and `gates.ts`'s differential ablation drops an entry and re-runs this pass. With
+      // one of those five gone there is still nothing to substitute, while the init statement and
+      // the declaration would be deleted anyway: C naming a variable that is no longer there,
+      // emitted with no marker. The refusal keeps an ablation a DECLINE.
+      if (!('ok' in closed)) {
+        continue;
+      }
       // The gates have placed every write the C performs; what they cannot place is a write the
       // DEVICE performs in answer to one. A moved read over such a loop is offered under PROOF.
       if (accessesIn(initStmt.value).length > 0 && deviceWritesMemory(armed, triggers)) {
         needsProof = true;
       }
-      rewrites.set(cand.name, (closed as { ok: Expr }).ok);
+      rewrites.set(cand.name, closed.ok);
       deletedInits.add(initStmt);
       deletedLocals.add(cand.name);
     }
