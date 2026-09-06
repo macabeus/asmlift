@@ -144,9 +144,18 @@ switch (command) {
           console.log(`\nNo ${tier} row selected — ${out} left unchanged`);
           continue;
         }
-        const n = runCases(cases, out, shard).length;
+        const n = runCases(cases, out, shard, { writeEmpty: !filtered }).length;
         if (filtered) {
           selected = (selected ?? 0) + n;
+        }
+        // A row that is SELECTED and then SKIPPED (its toolchain is unavailable) reaches here
+        // with n === 0 and cases.length > 0 — the guard above cannot see it, and the write is
+        // suppressed by `writeEmpty` rather than by that guard. Say so, and add the tier to
+        // `untouched` so the verdict below names a file instead of a blank.
+        if (filtered && n === 0) {
+          untouched.push(tier);
+          console.log(`\nNo ${tier} row was MEASURED — ${out} left unchanged`);
+          continue;
         }
         console.log(`\nWrote ${n} ${tier} results → ${out}`);
       }

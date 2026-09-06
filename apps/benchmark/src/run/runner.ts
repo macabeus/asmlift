@@ -59,8 +59,22 @@ export function inShard(idx: number, shard: Shard): boolean {
   return idx % shard.n === shard.idx;
 }
 
-/** Run this shard's slice of `cases`, writing `outPath` after every case. Returns the results. */
-export function runCases(cases: Case[], outPath: string, shard: Shard = { idx: 0, n: 1 }): FunctionResult[] {
+/** Run this shard's slice of `cases`, writing `outPath` after every case. Returns the results.
+ *
+ *  `writeEmpty: false` suppresses the write while there is nothing to write — the same rule
+ *  `orchestrate.ts`'s `stitch` already applies to the fanned path (`filtered && results.length
+ *  === 0` returns without touching `<tier>.json`). The serial path had no such guard, and a row
+ *  that is SELECTED and then SKIPPED walks straight past cli.ts's `cases.length === 0` check:
+ *  `--tier synthetic --only <row> --toolchain agbcc --serial` with that toolchain unavailable
+ *  wrote a 287-byte `results: []` over the tier file and then threw an error announcing the file
+ *  had been "left unchanged". A shard CHILD always writes its part file (the stitcher owns
+ *  `<tier>.json`), so this stays opt-in. */
+export function runCases(
+  cases: Case[],
+  outPath: string,
+  shard: Shard = { idx: 0, n: 1 },
+  { writeEmpty = true }: { writeEmpty?: boolean } = {},
+): FunctionResult[] {
   const mine = cases.filter((_, idx) => inShard(idx, shard));
   const results: FunctionResult[] = [];
   const tag = shard.n > 1 ? ` s${shard.idx}` : '';
@@ -72,6 +86,9 @@ export function runCases(cases: Case[], outPath: string, shard: Shard = { idx: 0
   let skips = 0;
 
   const flush = (): void => {
+    if (!writeEmpty && results.length === 0) {
+      return;
+    }
     const out: BenchOutput = { meta: benchMeta(results), results };
     writeFileSync(outPath, JSON.stringify(out, null, 2));
   };

@@ -108,10 +108,14 @@ export function emptySelectionError(
     opts.project && `--project ${opts.project}`,
     opts.toolchain && `--toolchain ${opts.toolchain}`,
   ].filter(Boolean);
-  const files = untouched.map((t) => `results/${t}.json`).join(' and ');
+  // `untouched` empty rendered this as "in tier(s)  — … and  left unchanged": two blanks, in the
+  // one message whose whole job is to name what was and was not written.
+  const where = untouched.length > 0 ? untouched.join('+') : 'the selected tier(s)';
+  const files = untouched.length > 0 ? untouched.map((t) => `results/${t}.json`).join(' and ') : 'the tier file(s)';
   return new Error(
-    `no row matched ${shown.join(' ')} in tier(s) ${untouched.join('+')} — nothing was measured ` +
-      `there, and ${files} left unchanged. Check the symbol with ` +
+    `no row matched ${shown.join(' ')} in tier(s) ${where} — nothing was measured ` +
+      `there, and ${files} left unchanged. A row whose toolchain is UNAVAILABLE is SKIPPED, and a ` +
+      `skip is nothing measured. Check the symbol with ` +
       `\`grep -rn "sym: '<name>'" apps/benchmark/dataset\`.`,
   );
 }
