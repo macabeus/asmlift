@@ -1,4 +1,4 @@
-import type { SymbolMap } from './symbols';
+import type { SymbolMap, SymbolTypeFacts } from './symbols';
 
 // asmlift — function prototypes: the single carrier for the caller-supplied facts a
 // matching-decomp project reads from its headers (arg counts, parameter widths, void-ness). One
@@ -144,7 +144,7 @@ export function validatePrototypes(value: unknown): string[] {
  *  makes every stride explicit — so nothing is guessed about what it points at. A richer spelling
  *  would also be INERT: `declaredWidth` answers 32 for every `*`, and a CALLEE's parameter types
  *  are read for the list's length alone (test/param-pointee-axis.test.ts). */
-function typeSpelling(t: { size: number | null; signed: boolean | null; pointer?: boolean }): ParamType | null {
+function typeSpelling(t: SymbolTypeFacts): ParamType | null {
   if (t.pointer) {
     return 'void *';
   }

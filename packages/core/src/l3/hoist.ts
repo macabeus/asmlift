@@ -10,7 +10,7 @@
 // see `HoistPlacement` and `BaseInitPlacement`. Everything lives in one file because each half was
 // a per-caller copy once and every copy drifted from its original.
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, mapStmtLists, stmtChildren, stmtExprs, stmtLists } from './ast';
+import { exprChildren, mapStmtLists, stmtChildren, stmtExprs, stmtLists } from './ast';
 import { localMentions } from './mentions';
 
 /** Every identifier a MINTED name must not collide with, anywhere in `sfn` — the hoists below,
@@ -31,10 +31,9 @@ export function takenNames(sfn: SFn): Set<string> {
     if (e.k === 'call') {
       taken.add(e.fn);
     }
-    mapExprChildren(e, (c) => {
+    for (const c of exprChildren(e)) {
       visit(c);
-      return c;
-    });
+    }
   };
   const walk = (stmts: Stmt[]): void => {
     for (const s of stmts) {
@@ -119,10 +118,9 @@ function mentionsHere(s: Stmt, name: string): boolean {
     if ((e.k === 'var' || e.k === 'addr') && e.name === name) {
       found = true;
     }
-    mapExprChildren(e, (c) => {
+    for (const c of exprChildren(e)) {
       visit(c);
-      return c;
-    });
+    }
   };
   stmtExprs(s).forEach(visit);
   return found;

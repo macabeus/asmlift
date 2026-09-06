@@ -429,3 +429,18 @@ test('`unsequencedRightFirst` on a compiler the direction was not measured for t
   };
   expect(() => applyPattern(parse(MOD_BEFORE), widened)).toThrow(/test\/widened-seq.*mwcc, gcc/);
 });
+
+// The validation memo is keyed on the pattern OBJECT, and the three tests above each build a fresh
+// one — so none of them can see whether a pattern that threw is still refused the SECOND time it is
+// lifted with. It has to be: the caller that swallows the throw (annotate mode, which turns it into
+// a stub) would otherwise license the malformed pattern for every remaining function of the run.
+test('a malformed pattern throws on EVERY lift, not only the first', () => {
+  const inert: RewritePattern = {
+    id: 'test/inert-ordered-twice',
+    applies: {},
+    match: { op: 'sub', ordered: true, args: [{ bind: 'X' }, { bind: 'Y' }] },
+    replaceWith: { op: 'add', args: ['X', 'Y'] },
+  };
+  expect(() => applyPattern(parse(NEG_FIRST), inert)).toThrow(/test\/inert-ordered-twice.*'sub'/);
+  expect(() => applyPattern(parse(NEG_FIRST), inert)).toThrow(/test\/inert-ordered-twice.*'sub'/);
+});

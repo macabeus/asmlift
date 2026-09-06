@@ -51,11 +51,11 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
       const incoming = edgesTo(b);
       for (let i = b.params.length - 1; i >= 0; i--) {
         const param = b.params[i];
-        const distinct = [...new Set(incoming.map((s) => s.args[i]).filter((v) => v !== param))];
-        if (distinct.length !== 1) {
+        const collapsed = trivialPhiValue(incoming, i, param);
+        if (collapsed === null) {
           continue; // a genuine join, or unreachable (no in-edges at all)
         }
-        replaceAllUsesWith(fn, param, distinct[0]);
+        replaceAllUsesWith(fn, param, collapsed);
         onRemoved?.(param);
         b.params.splice(i, 1);
         for (const s of incoming) {
@@ -69,6 +69,22 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
       return removed;
     }
   }
+}
+
+/** The ONE value block param `i` collapses to — the value every in-edge passes it, ignoring a
+ *  back edge's self-reference — or null when it is a genuine join (two distinct values) or the
+ *  block is unreachable (no in-edges at all). THE trivial-phi predicate, shared by the mutating
+ *  fixpoint and the non-mutating check below so the two cannot come to disagree about which params
+ *  are trivial.
+ *
+ *  `=== null` IS THE ONLY SAFE TEST. A genuine collapse value is never null, but it CAN be
+ *  `undefined` where an edge carries fewer args than the block has params — a malformed graph the
+ *  verifier catches elsewhere, and one today's callers pass straight through rather than treat as
+ *  "not trivial". A truthiness test would silently change that.
+ */
+function trivialPhiValue(incoming: readonly Successor[], i: number, param: Value): Value | null {
+  const distinct = [...new Set(incoming.map((s) => s.args[i]).filter((v) => v !== param))];
+  return distinct.length === 1 ? distinct[0] : null;
 }
 
 /**
@@ -110,7 +126,7 @@ export function firstTrivialPhi(fn: Fn): { block: Block; param: Value } | null {
     const incoming = incomingOf.get(b) ?? [];
     for (let i = 0; i < b.params.length; i++) {
       const param = b.params[i];
-      if (new Set(incoming.map((s) => s.args[i]).filter((v) => v !== param)).size === 1) {
+      if (trivialPhiValue(incoming, i, param) !== null) {
         return { block: b, param };
       }
     }

@@ -12,11 +12,16 @@
 // either as a compile error or, through a name-deduping consumer, as one access reading another
 // layout's member. That is the class of silent loss PR #127 named for `localNames`.
 //
-// AND AT BOTH SHIPPED CALL SITES THE SEED IS 0. Measured, not assumed: instrumenting both and
+// AND AT THE Elem AND Off CALL SITES THE SEED IS 0. Measured, not assumed: instrumenting both and
 // lifting every corpus function gives 1498 `Elem` seeds and 1417 `Off` seeds map-less, 417 and 398
-// map-ful, all zero. Each prefix has exactly one minter and each minter runs once per function
-// (raise/pre-recovery.ts is a linear pass list, `/offmember` a single respell), so no tree either
-// one is handed can already carry its own prefix.
+// map-ful, all zero. Each of those two prefixes has exactly one minter and each minter runs once
+// per function (raise/pre-recovery.ts is a linear pass list, `/offmember` a single respell), so no
+// tree either one is handed can already carry its own prefix.
+//
+// THE `Struct` PREFIX IS THE COUNTER-EXAMPLE, and it is why the contract is not simply "return 0":
+// TWO passes mint it, raise/memberarrays.ts ahead of raise/structs.ts in the pre-recovery list, so
+// the second is routinely handed a graph already carrying the first's `Struct<N>` types and seeds
+// past them (its own note at the seeding site says so).
 //
 // THAT IS NOT THE SAME AS A GUARD WITH NO INHABITANT, and the difference is why this is kept
 // where such a guard is not. A refusal with no inhabitant still asserts a hazard, and starts

@@ -127,7 +127,7 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
 
 /**
  * The C SIGNEDNESS a rendered integer expression actually has — `true`/`false`, or `undefined`
- * when it is not determinable here. The deliberate complement to `exprCType` above, which is
+ * when it is not determinable here. The deliberate complement to `exprCType`, which is
  * pointer-ness-accurate and reports every integer as `s32` by contract; this models the two C
  * rules that contract omits, integer PROMOTION and the usual arithmetic CONVERSIONS.
  *
@@ -226,6 +226,31 @@ export function provablyNonNegative(e: Expr, varType: VarTypes): boolean {
       return t?.kind === 'int' && t.width < 32 && !t.signed;
     }
   }
+}
+
+/** Does this write put a value that renders as a DEFINITELY-NON-POINTER C expression into a
+ *  pointer-declared slot? — `v2 = a1 + v0` with `v2: u8 *`, a `return a0 + v0` from a
+ *  pointer-returning function, a store through a pointer-element lvalue. The machine's register
+ *  move says nothing about types; C does, and mwcc makes it an ERROR (gcc merely warns).
+ *
+ *  ONE question, TWO answers: the C family legalizes it with the reinterpret cast to the declared
+ *  type (backend/cfamily.ts), Pascal has no reinterpret cast and declines LOUD (backend/pascal.ts).
+ *  The question is shared so the two backends cannot come to disagree about WHICH writes are the
+ *  hazard while still disagreeing about what to do with one.
+ *
+ *  A rendering the model cannot reach (a call, whose C type comes from a prototype outside the
+ *  emitted function) is NOT the hazard: the answer has to be definite in the non-pointer
+ *  direction. A type predicate so the cast site keeps its narrowing on the declared type. */
+export function writesNonPointerIntoPointer(
+  declared: IrType | undefined,
+  value: Expr,
+  varType: VarTypes,
+): declared is Extract<IrType, { kind: 'ptr' }> {
+  if (declared?.kind !== 'ptr') {
+    return false;
+  }
+  const ct = exprCType(value, varType);
+  return ct !== undefined && ct.kind !== 'ptr' && ct.kind !== 'array';
 }
 
 export function exprCType(e: Expr, varType: (name: string) => IrType | undefined): IrType | undefined {

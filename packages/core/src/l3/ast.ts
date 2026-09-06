@@ -47,17 +47,7 @@ export type Expr =
   // `lead` prefixes the LEADING subscripts before `idx` — `g[0][i]` or `g[r][i]` rather than
   // `g[i]`. It exists for exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL
   // array global, where one subscript reaches a row and the element needs the leading dimensions
-  // pinned first. What that costs and what it buys, measured over the published artifact rather
-  // than carried from the sweep the field was proposed under. Over the artifact's 957 rows: 5
-  // spell a two-subscript access at all (kleod CopyBGScrollTiles, ProcessInputAndUpdateEntities,
-  // SetupBG3WindowOverlay, UpdateHUDCounterDisplay, UpdateWorldMapNodeAnim), and the `Expr[]` —
-  // the part every generic walk pays for — is earned by the 2 whose OUTER subscript is not the
-  // literal 0 (`ProcessInputAndUpdateEntities`, `SetupBG3WindowOverlay`; the second is
-  // `noncompile`, for an unrelated callee arity, on this branch and on its base alike).
-  // RE-DERIVE THIS RATHER THAN QUOTING IT: one pass over the artifact does it — match each
-  // winning `asmlift.source` against `] [`, then against a literal-0 outer subscript for the
-  // second number. A rank-2 access with a constant row needs `number[]` and no
-  // more. The node still denotes ONE `width`-byte element, so its type, its legalization
+  // pinned first. The node still denotes ONE `width`-byte element, so its type, its legalization
   // and its stride contract are unchanged — this is a spelling of the same address, not a new kind
   // of access. Absent for every rank-1 access, which is why it is optional rather than an empty
   // array. A leading subscript is an EXPRESSION because a row index the asm computed is a value,
@@ -372,8 +362,17 @@ export function fieldSpellsDot(f: Extract<Expr, { k: 'field' }>): boolean {
 }
 
 /** Structural equality of two expression trees. THE one copy of Expr deep-equal (like
- *  fieldSpellsDot/derefStrideOk): key-order-independent by construction (a switch, not a
- *  stringify), exhaustive under noImplicitReturns like the walkers below. */
+ *  fieldSpellsDot/derefStrideOk), exhaustive under noImplicitReturns like the walkers below.
+ *
+ *  Key-order-independent for every EXPR field — a switch, not a stringify. NOT for the `cast`
+ *  arm's TARGET TYPE, which is compared by serialization and so is order-sensitive: two `IrType`
+ *  objects with the same fields written in a different order compare UNEQUAL. That is why the
+ *  inline `IrType` literals elsewhere in the codebase are written in `T.int`/`T.ptr` key order —
+ *  matching the constructors keeps them comparable against constructed types.
+ *
+ *  `typeEquals` (ir/types.ts) is NOT the fix: it ignores `struct.size`, so it is strictly more
+ *  permissive, and swapping it in here would let a CSE collapse two accesses whose struct stride
+ *  differs. */
 export function exprEquals(a: Expr, b: Expr): boolean {
   if (a.k !== b.k) {
     return false;
@@ -444,14 +443,6 @@ export function exprEquals(a: Expr, b: Expr): boolean {
   }
 }
 
-// ── the ONE traversal vocabulary ───────────────────────────────────────────────────────────────
-// Every generic walker derives from these helpers, so a NEW node kind is a compile error in
-// exactly one place per union (the switches are exhaustive under noImplicitReturns) — a
-// hand-rolled walker that misses a node kind is a silent bug. Specialized walkers with per-kind
-// SEMANTICS (loop-boundary scans like hasEnclosingContinue, rebuilding transforms like
-// recognizeForLoops) rightly keep their own switches.
-
-/** The direct sub-expressions of `e`, in syntactic order. */
 /** THE spelling of an unmodelled instruction's gap reason, in one place: `structure.ts` writes it
  *  into the marker, `contracts.ts` matches on it to prove the gap was not dropped, and the benchmark
  *  classifies declines by it. Two spellings make that contract silently vacuous — enforced-looking
@@ -460,6 +451,14 @@ export function gapReasonFor(mnemonic: unknown): string {
   return `unmodelled instruction '${typeof mnemonic === 'string' ? mnemonic : '?'}'`;
 }
 
+// ── the ONE traversal vocabulary ───────────────────────────────────────────────────────────────
+// Every generic walker derives from these helpers, so a NEW node kind is a compile error in
+// exactly one place per union (the switches are exhaustive under noImplicitReturns) — a
+// hand-rolled walker that misses a node kind is a silent bug. Specialized walkers with per-kind
+// SEMANTICS (loop-boundary scans like hasEnclosingContinue, rebuilding transforms like
+// recognizeForLoops) rightly keep their own switches.
+
+/** The direct sub-expressions of `e`, in syntactic order. */
 export function exprChildren(e: Expr): Expr[] {
   switch (e.k) {
     case 'var':
@@ -531,11 +530,13 @@ export function stmtExprs(s: Stmt): Expr[] {
 }
 
 /** Rebuild `s` with EVERY expression position mapped through `f` — store lvalues and loop/switch
- *  heads included, nested statements recursively. The rewrite dual of stmtExprs/stmtChildren for
- *  the PURE 1:1 case (basecse, mulfirst). The other levers' hand-rolled mappers have DIFFERENT
- *  contracts, not missed migrations: reindex's is fallible (Stmt|null declines), scopebase's
- *  recurses through its hoist-INSERTING list rewriter, regspell rewrites assign TARGETS, argbase
- *  produces statement lists. */
+ *  heads included, nested statements recursively. The rewrite dual of stmtExprs/stmtChildren, for
+ *  the PURE 1:1 case: one expression in, one expression out, every statement kept.
+ *
+ *  A LEVER THAT HAND-ROLLS ITS OWN MAPPER IS NOT A MISSED MIGRATION. Several do, because their
+ *  contract is not this one — a rewrite that may DECLINE, one that INSERTS statements, one that
+ *  rewrites assign TARGETS as well as expressions, one that turns a statement into a list. Check
+ *  the contract before pointing one of them here. */
 export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
   const mapS = (x: Stmt): Stmt => mapStmtExprs(x, f);
   switch (s.k) {
@@ -587,8 +588,9 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
  *  need the VALUE, which is the evaluator above. Declining a shift-encoded base there costs a
  *  lever that does not fire, and the population is small: over klonoa's 531 lifting functions,
  *  one inlinebase-shaped local with no symbol map and none with it; a folded nearbase would form
- *  a new cluster in 4 functions mapless and 1 with the map. Zero of either on the 324 agbcc
- *  benchmark rows that lift. */
+ *  a new cluster in 4 functions mapless and 1 with the map. Both counts were zero over the agbcc
+ *  benchmark rows that lifted when the levers landed — a MEASUREMENT over a corpus that grows, so
+ *  re-take it rather than quoting it: a new row falsifies the number, not the argument. */
 export function rematerializableAddress(e: Expr): boolean {
   let nonZero = false;
   let ok = true;
@@ -605,10 +607,9 @@ export function rematerializableAddress(e: Expr): boolean {
         ok = false; // var, addr, index, field, call, marker
         return;
     }
-    mapExprChildren(x, (c) => {
+    for (const c of exprChildren(x)) {
       visit(c);
-      return c;
-    });
+    }
   };
   visit(e);
   return ok && nonZero;
@@ -741,8 +742,8 @@ export function mapStmtLists(s: Stmt, f: (list: Stmt[]) => Stmt[]): Stmt {
 }
 
 /** Every expression node in a body, statements nested and children included — the whole-tree walk
- *  the three functions above compose into, kept here so a new node kind is a compile error in one
- *  of them rather than a silent miss in each caller's own recursion.
+ *  `stmtChildren`, `stmtExprs` and `exprChildren` compose into, kept here so a new node kind is a
+ *  compile error in one of them rather than a silent miss in each caller's own recursion.
  *
  *  An EXPLICIT stack, not `yield*` recursion. A delegated generator costs a frame per nesting
  *  level on every value it forwards, so an expression ten levels down was handed off ten times; this
@@ -778,11 +779,11 @@ export function* walkExprs(body: Stmt[]): Generator<Expr> {
 
 // THE negation of a CONDITION — the one implementation, shared by every L3 pass that flips one.
 //
-// There were two, and they drifted: structure.ts's empty-then peephole learned to distribute over
-// the short-circuit connectives while l3/dce.ts's copy kept wrapping in `!`, and because
-// `eliminateDeadStores` runs AFTER structuring it re-introduced the very spelling the other one had
-// just removed. That is the l3/hoist.ts failure mode verbatim — a copied helper silently losing the
-// newer rule — so this lives with the AST vocabulary and the passes call it.
+// WHY IT IS SHARED RATHER THAN COPIED PER PASS: the passes that flip a condition do not run at one
+// time. The structurer's empty-then peephole flips one, and `eliminateDeadStores` flips another
+// AFTER structuring — so a copy that lacked a rule the other had would re-introduce the exact
+// spelling the earlier pass just removed, and nothing downstream could tell that apart from a
+// spelling the input really had. The negation therefore lives with the AST vocabulary.
 //
 // Three rules, in order:
 //   1. a relational operator flips directly (`!=` → `==`, `<` → `>=`, …), exact over C's total

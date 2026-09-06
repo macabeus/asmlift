@@ -9,6 +9,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { stmtChildren, walkExprs } from '../src/l3/ast';
 import {
   ARM_DISJOINT_GATES,
   COALESCE_GATES,
@@ -16,6 +17,7 @@ import {
   coalesceCandidates,
   coalesceUnder,
 } from '../src/l3/coalesce';
+import { without } from '../src/l3/gates';
 
 const asg = (n: string, v: number): Stmt => ({ k: 'assign', name: n, value: { k: 'const', value: v } });
 const use = (n: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'f', args: [{ k: 'var', name: n }] } });
@@ -84,6 +86,11 @@ describe('gates', () => {
     // otherwise the merge makes the survivor's first read see the absorbed value
     const body: Stmt[] = [asg('a', 1), use('a'), use('b'), asg('b', 2)];
     expect(coalesceCandidates(fn(body))).toEqual([]);
+    // AND `const-fed` does not mask it. Every feed here IS a constant, so the pair clears that gate
+    // and `first-is-write` is the only thing refusing it: ablate that one alone and the merge is
+    // offered. The two rules are independent — a survivor whose feeds are all const can still be
+    // first MENTIONED by a read.
+    expect(coalesceUnder(without(COALESCE_GATES, 'first-is-write'), fn(body)).candidates).toHaveLength(1);
   });
 
   test('different declared TYPES never merge — the survivor keeps its own', () => {
@@ -335,5 +342,89 @@ describe('the induction-variable model', () => {
     const r = coalesceUnder(COALESCE_GATES, fn([forLoop('a', c0, [use('a')]), reloaded]));
     expect(r.candidates).toHaveLength(0);
     expect(r.refusals.get('const-fed')).toBeGreaterThan(0);
+  });
+});
+
+// ── the rewrite is EXHAUSTIVE over the Stmt vocabulary ─────────────────────────────────────────
+// `rename` is the one rewrite this pass performs, and it is hand-rolled rather than derived from
+// l3/ast.ts's traversal vocabulary — it rewrites assign TARGETS as well as expressions, and its
+// object key order feeds the candidate dedup, so it is deliberately not `mapStmtExprs`. The price
+// of a hand-rolled walk is that a new `Stmt` kind is a silent miss instead of a compile error, and
+// a missed position leaves the absorbed local's name standing in a tree whose declaration is gone.
+// This plants the name in EVERY expression and nested-list position of EVERY statement kind and
+// asserts none survives.
+describe('rename', () => {
+  const v = (n: string): Expr => ({ k: 'var', name: n });
+  const call1 = (n: string): Expr => ({ k: 'call', fn: 'g', args: [v(n)] });
+
+  /** every mention of `n` a reader could see: an assign target, or a `var`/`addr` leaf anywhere */
+  const occurrences = (body: Stmt[], n: string): number => {
+    let k = 0;
+    const stmts = (list: Stmt[]): void => {
+      for (const s of list) {
+        if (s.k === 'assign' && s.name === n) {
+          k++;
+        }
+        stmts(stmtChildren(s));
+      }
+    };
+    stmts(body);
+    for (const e of walkExprs(body)) {
+      if ((e.k === 'var' || e.k === 'addr') && e.name === n) {
+        k++;
+      }
+    }
+    return k;
+  };
+
+  test('no mention of the absorbed local survives, in any statement kind or position', () => {
+    const a = 'aaa';
+    const body: Stmt[] = [
+      { k: 'assign', name: a, value: call1(a) },
+      { k: 'store', lval: { k: 'index', base: v(a), idx: v(a), width: 4, signed: true, lead: [v(a)] }, value: v(a) },
+      { k: 'exprstmt', value: { k: 'marker', reason: 'r', args: [v(a), { k: 'addr', name: a }] } },
+      {
+        k: 'if',
+        cond: { k: 'bin', op: '!=', l: v(a), r: { k: 'un', op: '-', e: v(a) } },
+        then: [{ k: 'exprstmt', value: { k: 'cast', to: T.u(8), e: v(a) } }],
+        else: [{ k: 'exprstmt', value: { k: 'field', base: v(a), name: 'field_4' } }],
+      },
+      { k: 'while', cond: v(a), body: [{ k: 'exprstmt', value: v(a) }, { k: 'break' }] },
+      { k: 'dowhile', cond: v(a), body: [{ k: 'exprstmt', value: v(a) }, { k: 'continue' }] },
+      {
+        k: 'for',
+        init: { k: 'assign', name: a, value: v(a) },
+        cond: v(a),
+        inc: { k: 'assign', name: a, value: v(a) },
+        body: [{ k: 'exprstmt', value: v(a) }],
+      },
+      {
+        k: 'switch',
+        scrutinee: v(a),
+        cases: [{ values: [1], body: [{ k: 'exprstmt', value: v(a) }], fallsThrough: false }],
+        default: [{ k: 'exprstmt', value: v(a) }],
+      },
+      { k: 'return', value: v(a) },
+      use('bbb'),
+    ];
+    // the fixture really does plant the name everywhere — otherwise the assertion below is vacuous
+    expect(occurrences(body, a)).toBeGreaterThanOrEqual(25);
+
+    // Every gate DROPPED: this is about the rewrite, not about which pairs are admissible, and the
+    // gate table is what the rest of this file measures. `coalesceUnder`'s table parameter is the
+    // ablation seam that makes reaching it possible without a shipped-path change.
+    const out = coalesceUnder([], fn(body, L(a, 'bbb'))).candidates;
+    const merged = out.find((c) => c.merged === `${a}-bbb`);
+    expect(merged).toBeDefined();
+
+    // KNOWN GAP, PINNED RATHER THAN FIXED: `namesIn` counts an `addr` leaf (`&sp0`, the frame
+    // object an `laddr` renders as) toward a local's span, so a pair CAN be built for such a local
+    // — but `rename` rewrites only `var` leaves, so the `&` form of the absorbed name survives a
+    // merge that deleted its declaration. Closing it changes which candidates compile, which is a
+    // measured change and not a cleanup, so this asserts today's behaviour EXACTLY: every position
+    // but the `&` form is rewritten. A fix must flip both expectations together.
+    const survivors = [...walkExprs(merged!.sfn.body)].filter((e) => (e.k === 'var' || e.k === 'addr') && e.name === a);
+    expect(survivors).toEqual([{ k: 'addr', name: a }]);
+    expect(occurrences(merged!.sfn.body, a)).toBe(1);
   });
 });

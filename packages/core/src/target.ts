@@ -87,17 +87,13 @@ export interface TargetDescription {
     // direction and what every other target gets.
     readOnlyAddressSinks?: readonly number[];
     // The device-register window, `[start, end)`. A cell in it changes under the program's feet,
-    // so a source that touched one all but certainly declared it `volatile`. THREE consumers read
-    // it and all three ask the same SPELLING question — "would a source have written `volatile`
-    // here": it is the ELIGIBILITY predicate for the `/vol-store` lever (l3/volstore.ts), which
-    // offers the qualified spelling of a fixed-address store; the GATE on rank.ts's volatility
-    // tie-break, which picks the qualified twin when the bytes cannot separate the two; and the
-    // half of `/unreduce`'s disjointness gate that keeps a DEVICE read from being duplicated.
-    // None of them decides for the reader: which cells a source qualified is not derivable from
-    // the asm, so both spellings are enumerated and the differ referees. ABSENT ⇒ the lever
-    // declines everywhere and the tie-break has no preference, which is the neutral direction —
-    // outside a declared window the qualifier is a claim about ordinary memory that the target
-    // does not support.
+    // so a source that touched one all but certainly declared it `volatile`. Its readers all ask
+    // the same SPELLING question — "would a source have written `volatile` here" — and the file
+    // header's ledger names them and what each does with the answer. None of them decides for the
+    // reader: which cells a source qualified is not derivable from the asm, so both spellings are
+    // enumerated and the differ referees. ABSENT ⇒ the lever declines everywhere and the tie-break
+    // has no preference, which is the neutral direction — outside a declared window the qualifier
+    // is a claim about ordinary memory that the target does not support.
     //
     // IT IS NOT A MEMORY-MODEL CLAIM, and reading it as one is how a false premise got recorded
     // in four places (`deviceMemoryWriters` below carries the correction). Approximating the
