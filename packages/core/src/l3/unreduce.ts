@@ -22,16 +22,33 @@
 // synthetic:dmafill, holding the rest fixed — a plain statement before the loop scores 19, the
 // same statement under an explicit guard 15, and letting the compiler create the giv 0.
 //
-// AND THE SECOND WAY A GIV RELATES TO ITS COUNTER, which is the SAME way after constant folding.
-// The substitution above needs the counter's start to still be present in the init. A source
-// `for (i = 0; …) use(base + (i << 6))` gives the giv the init `base + (0 << 6)`, and the compiler
-// folds that to `base` long before any of it reaches the asm — the start term is GONE and there is
-// nothing to substitute for. Every corpus inhabitant of this lever starts its counter at a
-// PARAMETER (`dmafill`'s `lo`), which is exactly why none of them needed the other rule: a
-// symbolic start cannot fold. `synthetic:offloop` and `synthetic:offgiv` are the shape that does.
-// For them the closed form is ADDITIVE rather than substitutional — `INIT + (ctr << s)`, the init
-// kept whole — and `relateFolded` below carries it, as a FALLBACK reached only where the
-// substitutional rule already declined. Its three scope refusals are stated there.
+// ONE RELATION, TWO SPELLINGS — and getting that the right way round is what keeps a third
+// spelling from becoming a third function. From the driver's two facts alone — `acc` starts at
+// `INIT` and is stepped by the constant `k`; `ctr` starts at `start` and is stepped by the
+// constant `d` — the identity
+//
+//     acc(ctr) = INIT + (ctr - start) * (k / d)
+//
+// follows, and it says NOTHING about the init's shape. `rec` is not a second relation: it is a
+// prettier spelling of that same value, and its `+`-spine walk exists precisely to prove that
+// `INIT[start := ctr]` equals it. `relateFolded` is the identity's degenerate corner written out.
+//
+// WHICH SPELLING APPLIES IS DECIDED BY CONSTANT FOLDING. The substitution needs the counter's
+// start to still be present in the init. A source `for (i = 0; …) use(base + (i << 6))` gives the
+// giv the init `base + (0 << 6)`, and the compiler folds that to `base` long before any of it
+// reaches the asm — the start term is GONE and there is nothing to substitute for. Every corpus
+// inhabitant of the substitutional spelling starts its counter at a PARAMETER (`dmafill`'s `lo`),
+// which is exactly why none of them needed the other: a symbolic start cannot fold.
+// `synthetic:offloop`, `offgiv`, `offgiv2` and `offgiv3` are the shape that does. For them the
+// closed form is ADDITIVE — `INIT + (ctr << s)`, the init kept whole — and `relateFolded` below
+// carries it, as a FALLBACK reached only where the substitutional rule already declined.
+//
+// AND ITS THREE REFUSALS ARE NOT OF A KIND, which the SCOPE section below files under one heading
+// and should not. Only ONE of them has soundness content: a non-constant `start` would put a NEW
+// read of the start expression at every use, which none of the five re-evaluation gates asks
+// about. `d != 1` and a `k` that is not a power of two are SPELLING refusals of a form that is
+// already sound — the identity holds, this file just does not write `(ctr - start) * (k / d)`.
+// A round that needs `d = 2` should widen `relateFolded`, not write a third function beside it.
 //
 // THE ARITHMETIC. The rewrite rests on one invariant: at every read, `acc == g(ctr)`, where `g` is
 // the init expression with the counter's own start substituted by the counter. It holds at entry
@@ -114,6 +131,28 @@
 // read `gBg[bg].pTilemap` inside the loop. Barring it instead costs that match and buys nothing —
 // the sound alternative, the read hoisted into a local above the loop, scores 16, because a C
 // statement lands above the loop's ENTRY GUARD while the compiler's own hoist lands below it.
+//
+// AND THE STRIDE'S UNITS, which is the half of the arithmetic the invariant above hides. `k` is
+// read off `acc = acc + K`, so it counts in the units of the ACCUMULATOR's declared type: on a
+// `u16 *` a step of 32 advances 64 BYTES. The closed form spells that stride onto the INIT, whose
+// `+` scales by whatever the INIT's own C type says. Where the two disagree the candidate
+// addresses the wrong byte, compiles clean, and carries no marker — structure.ts's `bytePtr`
+// states the same rule from the other end ("a `u16 *` walked by a computed offset addresses TWICE
+// the intended byte, and nothing downstream can see the error"). `stride-units` refuses unless
+// both scales are KNOWN and equal; a narrow integer accumulator is the same question in the other
+// direction, since `u16 acc` wraps at 65536 where `init + (i << 6)` does not.
+//
+// THAT GATE IS THE WHOLE OF THIS LEVER'S REAL-CORPUS REACH TODAY, which is worth stating plainly.
+// Diffed function by function against the commit before it, over 2,755 lifted functions
+// (klonoa 467, sa3 2,288) in both symbol-map configurations — and the benchmark's own REAL tier,
+// where all 252 rows lift and NOT ONE fires, so no real-tier row and no zero-flip gate can see
+// this lever at all: exactly ONE function fires
+// (klonoa's `UpdateHUDTimePanel`, in BOTH configurations), and it is the mis-typed one. With a
+// symbol map its accumulator lifts `u16 *` against an integer init and the gate refuses it
+// (`LOST=1 GAINED=0 RESPELLED=0`); with raw addresses the same asm lifts all-integer and the
+// candidate is correct and survives (`50335396 + (v15 << 6)`, 64 bytes an iteration, which is the
+// ROM's own `adds r1, #0x40`). Same assembly, same loop, same stride — a raw-address sweep alone
+// is BLIND to the defect and reports the lever as correct.
 //
 // SCOPE, stated because a decline outside it names no gate and so looks exactly like a gate that
 // refused. This pass walks TOP-LEVEL loops only: the counter's start and the accumulator's init are
@@ -527,19 +566,23 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
  *  what the additive form re-evaluates at each read. It is strictly more exact than the
  *  substitutional case, where a subterm is replaced before the form is spelled.
  *
- *  SCOPE, stated as three refusals rather than left implicit, because a decline outside a gate
- *  names nothing and a reader will attribute one anyway. The general closed form is
- *  `INIT + ((ctr - start) * (K / d))`, and this branch takes only its degenerate corner:
- *    • `start` must be the CONSTANT 0. A non-constant start would put a NEW read of the start
- *      expression at every use — a question none of the five gates asks, because in the
- *      substitutional case the start is a subterm of the init they already range over. A non-zero
- *      constant start is sound but spells a bias term no corpus row asks for.
- *    • `d` must be 1, or the closed form carries the ratio `K / d` and is not a shift.
- *    • `k` must be a constant power of two. `INIT + ctr * k` is the general spelling and compiles
- *      identically at agbcc (the shift and the product were compiled and diffed: byte-identical),
- *      so a second spelling would double the fan and buy no score. The shift is what this class's
- *      references spell.
- *  Each is pinned by its own unit test; none is reached by a corpus row today. */
+ *  SCOPE, and its three refusals are NOT of a kind (see the header). Each returns its own tag, so
+ *  each names its own gate and its own `why`:
+ *    • SOUNDNESS. `start` must be the CONSTANT 0 (`nonzero-start`). A non-constant start would put
+ *      a NEW read of the start expression at every use — a question none of the five
+ *      re-evaluation gates asks, because in the substitutional case the start is a subterm of the
+ *      init they already range over. A non-ZERO constant start is sound and merely unspelled: it
+ *      wants the bias term `- start * k`, which no corpus row asks for.
+ *    • SPELLING. `d` must be 1 (`step-ratio`), or the closed form carries the ratio `K / d`.
+ *    • SPELLING. `k` must be a power of two AFTER `foldConsts` (`stride-not-shift`).
+ *      `INIT + ctr * k` is the general spelling and compiles identically at agbcc (the shift and
+ *      the product were compiled and diffed: byte-identical), so a second spelling would double
+ *      the fan and buy no score. The shift is what this class's references spell. The FOLD is not
+ *      optional politeness: without it a stride agbcc had to spell `mov #128 / lsl #1` — because
+ *      256 does not fit Thumb's `add rd, #imm8` — refuses on its own node kind while every stated
+ *      condition holds (synthetic:offgiv3, 5 without the fold and MATCH with it).
+ *  The soundness refusal is pinned by a unit test and reached by no corpus row; the two spelling
+ *  refusals are pinned by unit tests and by `offgiv3`'s neighbours. */
 function relateFolded(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relation {
   if (start.k !== 'const' || start.value !== 0) {
     return { declined: 'nonzero-start' };
