@@ -52,12 +52,28 @@ import {
   mkOp,
   mkValue,
   predecessors,
+  reachableBlocks,
   replaceAllUsesWith,
 } from '../ir/core';
 import { HOIST_UNSAFE_OPS, NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 
 const BOOL_OPS = new Set([...Object.keys(NEGATED_ICMP), 'logic_and', 'logic_or']);
+
+/** Run `step` until it stops rewriting, and answer whether it ever did.
+ *
+ *  Both folds in this file are driven the same way and have to be: `defOpMap` and `predecessors`
+ *  are stale the moment a block is spliced or dropped, so a scan performs at most ONE rewrite and
+ *  then starts over. `step` is that scan — it recomputes everything it reads, does at most one
+ *  rewrite, and returns whether it did — which makes the rescan point a function boundary instead
+ *  of a `break` to a label. */
+function untilFixpoint(step: () => boolean): boolean {
+  let changed = false;
+  while (step()) {
+    changed = true;
+  }
+  return changed;
+}
 
 /** Fold `(-x | x) >> 31` (logical shift) → `x != 0`, in place. agbcc's branchless is-nonzero idiom. */
 // NOT exported: it must run before the diamond fold, an ordering only recognizeShortCircuit's
@@ -101,7 +117,6 @@ function recognizeBoolNormalize(fn: Fn): boolean {
 
 /** Collapse a simple boolean short-circuit diamond into one `logic_and`/`logic_or`, in place. */
 export function recognizeShortCircuit(fn: Fn): boolean {
-  let changed = recognizeBoolNormalize(fn);
   const term = (b: Block) => b.ops[b.ops.length - 1];
   const constOf = (defs: Map<Value, Op>, v: Value): number | null => {
     const d = defs.get(v);
@@ -112,12 +127,15 @@ export function recognizeShortCircuit(fn: Fn): boolean {
     return !!d && BOOL_OPS.has(d.opcode);
   };
 
-  let progress = true;
-  while (progress) {
-    progress = false;
+  // TWO STATEMENTS, not `recognizeBoolNormalize(fn) || untilFixpoint(…)`: the normalisation must
+  // run BEFORE the fold (it is what turns agbcc's branchless is-nonzero into the `icmp_ne` the
+  // diamond's second operand has to be), and `||` would skip the fold whenever it reported a
+  // change. Both results are returned, because either one is a change to the IR.
+  const normalized = recognizeBoolNormalize(fn);
+  const folded = untilFixpoint(() => {
     const defs = defOpMap(fn);
     const preds = predecessors(fn);
-    outer: for (const m of fn.blocks) {
+    for (const m of fn.blocks) {
       if (m.params.length !== 1) {
         continue;
       }
@@ -139,9 +157,8 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         // below: `predecessors()` walks successor edges only, so an entry block that is also a loop
         // header shows one predecessor while actually running BEFORE it on the first iteration.
         // Hoisting its body then reorders it and deleting it moves `fn.blocks[0]`. Silent — verify,
-        // assertResolved and assertDerefsTyped all pass. PRE-EXISTING (this fold predates the branch
-        // form and `main` miscompiles the same MIPS input); fixed here because the branch form's
-        // note used to assert this one was safe.
+        // assertResolved and assertDerefsTyped all pass. Pinned by 'a feeder that is the entry block
+        // is not folded away'; the branch form has the same refusal and its own test.
         if (bfeed === fn.blocks[0]) {
           continue;
         }
@@ -188,7 +205,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         // a `cond_br`, which reads truthiness — which is why this gate lives here and not in the
         // shared helper, whose own result is boolean by construction and so covers the negated case.
         //
-        // Instrumented over the 782 benchmark rows under BOTH lift configurations, it refuses
+        // Instrumented over the whole benchmark under BOTH lift configurations, it refuses
         // NOTHING — every head reaching it is a negatable icmp — while the pass folds 6 value-form
         // diamonds per configuration, 3 of them through the const/const reduction. An invariant's
         // guard, not a filter any row depends on.
@@ -247,13 +264,12 @@ export function recognizeShortCircuit(fn: Fn): boolean {
           m.params = [];
         }
         fn.blocks = fn.blocks.filter((x) => x !== bfeed);
-        changed = true;
-        progress = true;
-        break outer; // defs/preds are stale after mutation — recompute on the next iteration
+        return true; // defs/preds are stale after mutation — the driver rescans
       }
     }
-  }
-  return changed;
+    return false;
+  });
+  return normalized || folded;
 }
 
 // ── the CONTROL-FLOW form ───────────────────────────────────────────────────────────────────────
@@ -317,8 +333,8 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     is the shared block the entry of a region with dispatch-shaped in-edges, is the scrutinee
 //     defined by the enclosing loop header — and is UNBUILT.
 //     The relayed clause below is a different statement (see its own note: a blunt proxy that
-//     fires on an ordinary loop counter), it has NO inhabitant anywhere in the benchmark's 923
-//     rows, and a candidate born there would carry a `/connective` label for a fold that answers
+//     fires on an ordinary loop counter), it has NO inhabitant anywhere in the benchmark, and a
+//     candidate born there would carry a `/connective` label for a fold that answers
 //     no connective-vs-tree question. It stays absolute.
 //   - the shared block was reached through a RELAY, and either test's scrutinee is compared against
 //     constants more than once in the function. This one is ABSOLUTE — `foldTreeOwned` does not
@@ -377,12 +393,12 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     helper but no use-count condition: `definedValuesStayLocal` (bottom of this file)
 //     independently forbids a ^g-defined value with a second consumer HERE, while the value form
 //     relies on the original cone dying to the pass list's own `dce: true`. There is nothing to
-//     transfer the number to yet either — instrumenting the value form over the 782 benchmark rows
+//     transfer the number to yet either — instrumenting the value form over the whole benchmark
 //     under both lift configurations counts 6 folds per configuration, every head a single icmp.
 //
 //     The `/connective` LIFT AXIS is a separate question from the default lift, and is unwidened:
 //     `onTreeOwned` below is what tells rank.ts the axis exists for a row, and this check sits ABOVE
-//     it. Over all 999 benchmark rows under BOTH configurations rank.ts lifts with (`foldTreeOwned`
+//     it. Over the whole benchmark under BOTH configurations rank.ts lifts with (`foldTreeOwned`
 //     false and true), against the same rows with the connective case ablated: the recovered IR
 //     moves on the same 2 rows under each, `onTreeOwned` fires on the same rows either way, and
 //     nothing new throws.
@@ -405,8 +421,8 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // so the axis negates every joined `if` at once — and of the 28 real rows carrying the
 // `short-circuit` tag, 16 hold two or more TWO-ARMED ifs (counted by `else`, which is what the
 // axis's own `thenS.length && elseS.length` gate needs) and 12 hold two or more conditions
-// carrying a connective. An earlier version of this comment said 22, which is the count of `if (`
-// of ANY kind — one-armed ifs included, and both sense booleans exclude those by construction.
+// carrying a connective. TWO-ARMED is the count that matters: both sense booleans exclude a
+// one-armed `if` by construction, so a tally of `if (` of any kind is the wrong denominator.
 // A per-SITE negation is the open lever; a gate on whether to ENUMERATE the axis does not reach
 // it, and removes a spelling the differ would referee.
 //
@@ -420,15 +436,19 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // WHICH slot ^g lands in is decided by the asm's branch POLARITY, and on Thumb the branch RANGE
 // decides the polarity — so the same source `&&` reaches this pass two different ways:
 //
-//   short branch   `beq shared`         ^g is ^h's FALL  → logic_or  → arms swapped (the miss)
-//   long branch    `bne ^g / b shared`  ^g is ^h's TAKEN → logic_and → source orientation
+//   short branch   `beq shared`         ^g is ^h's FALL  → logic_or
+//   long branch    `bne ^g / b shared`  ^g is ^h's TAKEN → logic_and
 //
 // agbcc inverts a conditional it cannot reach, so past ±256 bytes it emits the second form, and the
 // trampoline it leaves on the `b` sits on the edge into the SHARED block — which `forwardingTarget`
 // (ir/core.ts) looks through. Only that edge needs it: the INVERTED branch is the one that still
-// reaches, so `bne ^g` always arrives at ^g directly and no relay can sit between them. The
-// `logic_and` half is the one that lands on the source's own orientation; it is the `logic_or` half
-// that has no dual candidate (synthetic:ifand_near:agbcc).
+// reaches, so `bne ^g` always arrives at ^g directly and no relay can sit between them.
+//
+// SO THE CONNECTIVE THIS FOLD MINTS IS THE RANGE'S, NEVER THE SOURCE'S: both `synthetic:ifand_near`
+// (source `&&`) and `synthetic:ifor_near` (source `||`) are short-branch rows and both come out
+// `logic_or`. Which SPELLING then wins is the joined-sense default's question, one layer up, and
+// BOTH halves have a dual candidate there — `ifand_near:agbcc` matches at the default (`unsigned`),
+// while `ifor_near:agbcc` and the long-branch `ifand_far:agbcc` each match on `/flip-join`.
 //
 // `gIsFall` IS NOT THE CARRIER FOR A PER-SITE SENSE, and that was measured rather than argued. It
 // reads the branch RANGE, exactly as the table above says — so in any function small enough for
@@ -470,14 +490,11 @@ export interface BranchShortCircuitOptions {
 }
 
 export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOptions = {}): boolean {
-  let changed = false;
   const term = (b: Block) => b.ops[b.ops.length - 1];
-  let progress = true;
-  while (progress) {
-    progress = false;
+  return untilFixpoint(() => {
     const defs = defOpMap(fn);
     const preds = predecessors(fn);
-    outer: for (const h of fn.blocks) {
+    for (const h of fn.blocks) {
       const ht = term(h);
       if (ht.opcode !== 'cond_br') {
         continue;
@@ -607,6 +624,13 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // leave a block just as orphaned, and the thumb frontend does hand over unreachable blocks
         // (see raise/gvn.ts). Only relays are dropped — the chain ends at the first block that does
         // real work, and that one stays whatever its in-edges look like.
+        //
+        // The relay test below is `isBodyless` (ir/core.ts) MINUS its parameter clause, and the
+        // omission is what the reachability guard above buys: an unreachable block binds nothing, so
+        // a param on one says nothing about a live edge, while refusing it would leave the chain
+        // HALF-DROPPED — and a half-dropped chain fails `verify` two passes later with a
+        // def-does-not-dominate-use. `isBodyless` itself is unchanged and right for its own three
+        // callers, every one of which asks about a block that is still reached.
         for (let link = sharedFromH.block; link.ops.length === 1 && link.ops[0].opcode === 'br';) {
           const dead = link;
           if (dead === fn.blocks[0] || reachableBlocks(fn).has(dead)) {
@@ -615,13 +639,11 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           link = dead.ops[0].successors[0].block;
           fn.blocks = fn.blocks.filter((x) => x !== dead);
         }
-        changed = true;
-        progress = true;
-        break outer; // defs/preds are stale after the mutation — recompute on the next round
+        return true; // defs/preds are stale after the mutation — the driver rescans
       }
     }
-  }
-  return changed;
+    return false;
+  });
 }
 
 /** How many ops `negateCondOps` may KEEP for one negation. De Morgan rebuilds the cone PER PATH and
@@ -636,10 +658,11 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
  *  connective negations, 0 refused). Clause COUNT is not the axis either: a FLAT `a || b || c || …`
  *  chain pays nothing at all, because ^g's condition is never a connective in that shape.
  *
- *  The bound is on ops KEPT, and the frontier is a NODE COUNT — not a shape. Measured EXHAUSTIVELY
- *  against this helper rather than sampled: a cone is accepted iff its node count is `<= budget`,
- *  over all 82,500 binary cone shapes up to 23 nodes at budget 8, and over all 23,714 up to 21 nodes
- *  at every budget from 1 to 10. Shape decides only WHICH guard refuses and how many ops had been
+ *  The bound is on ops KEPT, and the frontier is a NODE COUNT — not a shape. Pinned as such rather
+ *  than argued: branch-shortcircuit.test.ts's "the fold's frontier is the cone's NODE COUNT, not its
+ *  shape" enumerates all 23,714 binary cone shapes with up to 10 internal nodes (21 nodes) and
+ *  asserts the PUBLIC fold takes one exactly when `2k + 1 <= budget`.
+ *  Shape decides only WHICH guard refuses and how many ops had been
  *  minted when it did, neither of them visible to a caller — at budget 8 a 15-node cone is caught by
  *  the ENTRY guard at 9 (left chain) or 8 (balanced cone) or by the POST-check at 15 (right chain).
  *  Because `go` pushes a parent only after its children, a refused walk transiently mints more than
@@ -649,7 +672,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
  *  A refusal here is SILENT, unlike the `onTreeOwned` gate above which exists so a sweep need not
  *  re-instrument. So raising this constant is not free advice: finding a corpus site that wants it
  *  means patching a hook back into this file. No callback is added because no consumer has asked for
- *  one; the tests below pin both sides of the frontier instead. */
+ *  one; test/branch-shortcircuit.test.ts pins both sides of the frontier instead. */
 const NEGATE_BUDGET = 8;
 
 /** The ops computing `!v`, or `null` when `v` cannot be negated.
@@ -733,21 +756,6 @@ function negateCondOps(defs: Map<Value, Op>, v: Value, budget: number): { ops: O
   return result === null || ops.length > budget ? null : { ops, result };
 }
 
-/** Blocks reachable from the entry, following successor edges. */
-function reachableBlocks(fn: Fn): Set<Block> {
-  const seen = new Set<Block>([fn.blocks[0]]);
-  const queue = [fn.blocks[0]];
-  for (let i = 0; i < queue.length; i++) {
-    for (const succ of queue[i].ops[queue[i].ops.length - 1]?.successors ?? []) {
-      if (!seen.has(succ.block)) {
-        seen.add(succ.block);
-        queue.push(succ.block);
-      }
-    }
-  }
-  return seen;
-}
-
 /** Do `c1` and `c2` compare the SAME value against CONSTANTS? The signature of a comparison-tree
  *  `switch`, which switch-recover.ts owns — see the REFUSALS note. Equality tests only: a switch
  *  dispatches on `==`/`!=`, while a RELATIONAL pair (`x >= lo && x <= hi`, the range check) is a
@@ -803,11 +811,11 @@ function constTestScrutinee(defs: Map<Value, Op>, c: Value): Value | null {
  *  ends in `cond_br` and its `other` successor IS ^g-dominated, so a ^g-defined value genuinely can
  *  escape, and only this check stops it.
  *
- *  An earlier version of this note justified the asymmetry by "the feeder dominates nothing but
- *  itself because M has 2+ predecessors", and told the reader not to unify the guards. That was
- *  WRONG — the entry block dominates every block whatever M's predecessor count — and it was wrong
- *  about the one guard the two folds genuinely DO share, the `fn.blocks[0]` refusal, which the value
- *  form was missing entirely. Both now have it. When changing either fold, check the other. */
+ *  What the two folds genuinely DO share is the `fn.blocks[0]` refusal, and each has a test that
+ *  pins its own half: 'a feeder that is the entry block is not folded away' for the value form, and
+ *  'the ENTRY block is never folded away' for the branch form. They are deliberately NOT routed
+ *  through one shared `isEntry` helper — a helper enforces nothing, and it is the two tests that
+ *  hold each fold to the refusal. When changing either fold, check the other. */
 function definedValuesStayLocal(fn: Fn, g: Block): boolean {
   const defined = new Set<Value>(g.ops.flatMap((op) => op.results));
   if (defined.size === 0) {

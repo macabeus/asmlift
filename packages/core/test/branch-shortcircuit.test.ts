@@ -952,6 +952,57 @@ describe('negating a fused connective (De Morgan)', () => {
       expect(folds(at9)).toBe(false); // 9 nodes
     }
   });
+
+  /** EVERY binary cone with `k` internal `logic_or`s over `k + 1` icmp leaves — the Catalan family,
+   *  memoised because `shapes(k)` is built out of every smaller pair. Each has `2k + 1` nodes
+   *  WHATEVER its shape, which is the whole point: the three hand-written shapes above are three
+   *  points of this family, and the sweep is what turns "the frontier is the node count, not the
+   *  shape" from three samples into an enumeration. Ops are pushed after both children, the order
+   *  `negateCondOps` mints in. */
+  const shapeCache = new Map<number, ((out: Value) => Op[])[]>();
+  const shapes = (k: number): ((out: Value) => Op[])[] => {
+    const hit = shapeCache.get(k);
+    if (hit !== undefined) {
+      return hit;
+    }
+    const out: ((out: Value) => Op[])[] = [];
+    if (k === 0) {
+      out.push((dest) => cmp(dest, 'icmp_ne'));
+    } else {
+      for (let l = 0; l < k; l++) {
+        for (const left of shapes(l)) {
+          for (const right of shapes(k - 1 - l)) {
+            out.push((dest) => {
+              const a = mkValue(T.unk(32));
+              const b = mkValue(T.unk(32));
+              return [...left(a), ...right(b), mkOp('logic_or', { operands: [a, b], results: [dest] })];
+            });
+          }
+        }
+      }
+    }
+    shapeCache.set(k, out);
+    return out;
+  };
+
+  // The claim `NEGATE_BUDGET`'s own note makes, asserted through the PUBLIC fold rather than against
+  // the helper: a cone is taken iff its node count is within the budget, for every shape there is.
+  // Which guard refuses, and how many ops had been minted when it did, differ by shape and are not
+  // observable here — that is what makes the node count the whole frontier.
+  test("the fold's frontier is the cone's NODE COUNT, not its shape", () => {
+    const BUDGET = 8; // NEGATE_BUDGET, which the module does not export
+    let swept = 0;
+    for (let k = 0; k <= 10; k++) {
+      const family = shapes(k);
+      expect(family.length).toBeGreaterThan(0);
+      for (const shape of family) {
+        expect(folds(shape)).toBe(2 * k + 1 <= BUDGET);
+        swept++;
+      }
+    }
+    // 1 + 1 + 2 + 5 + 14 + 42 + 132 + 429 + 1430 + 4862 + 16796 — the Catalan numbers C(0..10)
+    expect(swept).toBe(23714);
+  });
 });
 
 // The VALUE form's head gate. A head whose condition is a fused connective — what the branch form

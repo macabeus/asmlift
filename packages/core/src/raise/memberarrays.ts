@@ -404,6 +404,9 @@ function accessesByBase(fn: Fn, defs: Map<Value, Op>): Map<Value, MemberAccess[]
 export interface MemberArrayGroup {
   base: Value;
   c: MemberArrayCandidate;
+  /** NON-EMPTY by construction, which is why `fieldsOf` and the trailing-member gate index the ends
+   *  unguarded: `accessesByBase` only keys a base it recorded an access for, and every access puts
+   *  an entry in `byOff`, whose values these are. */
   members: Member[];
   accesses: MemberAccess[];
 }
@@ -496,7 +499,6 @@ export function memberArrayCandidates(fn: Fn): MemberArrayGroup[] {
         inBounds = false;
       }
     }
-    const trailing = members[members.length - 1];
     out.push({
       base,
       accesses,
@@ -514,7 +516,7 @@ export function memberArrayCandidates(fn: Fn): MemberArrayGroup[] {
         aligned,
         consistent,
         seatable,
-        trailingBounded: trailing !== undefined && trailing.bounds.length > 0,
+        trailingBounded: members[members.length - 1].bounds.length > 0,
         inBounds,
       },
     });

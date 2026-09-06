@@ -174,10 +174,53 @@ export function mkOp(opcode: Opcode, o: Partial<Op> = {}): Op {
   };
 }
 
+/** A block's last op — its terminator on well-formed IR, `undefined` on a block with no ops.
+ *
+ *  `ir/verify.ts` rejects an empty block and every entry path verifies before raising, so the
+ *  `undefined` case is reachable only from hand-built IR: a test, or a pass reading a block it is
+ *  itself midway through rewriting. A reader that DECIDES something off the terminator therefore
+ *  spells that case (`terminator(b)?.opcode === 'br'`); one that has already established the shape
+ *  indexes `b.ops` directly, so a broken invariant surfaces as a TypeError rather than as a silent
+ *  skip. */
+export function terminator(b: Block): Op | undefined {
+  return b.ops[b.ops.length - 1];
+}
+
 /** The successor blocks of `b`, read off its terminator. */
 export function successorsOf(b: Block): Block[] {
-  const term = b.ops[b.ops.length - 1];
-  return term ? term.successors.map((s) => s.block) : [];
+  return terminator(b)?.successors.map((s) => s.block) ?? [];
+}
+
+/** The blocks reachable from the entry along successor edges — the entry's own reflexive closure,
+ *  so a function with no blocks yields the empty set rather than a set holding `undefined`.
+ *
+ *  A SET, so the walk order is not observable and no caller can come to depend on it. Three passes
+ *  ask this question — `contracts.ts` (an unreachable block's call is legitimately never emitted),
+ *  `pipeline.ts`'s opaque attribution, and `raise/shortcircuit.ts`'s relay drop — and each had its
+ *  own copy. They agree on every input any of them sees, because `successorsOf` reads the
+ *  terminator and `verify` rejects successors on a non-terminator.
+ *
+ *  REACHABILITY, not predecessor count: in-edges from blocks that are themselves unreachable leave
+ *  a block just as orphaned, and the thumb frontend does hand over unreachable blocks. `raise/gvn.ts`
+ *  keeps a walk of its own rather than calling this one — it descends through EVERY op's successors,
+ *  which is the same relation on verified IR and a wider one on the hand-built IR its own note is
+ *  about. */
+export function reachableBlocks(fn: Fn): Set<Block> {
+  const seen = new Set<Block>();
+  const entry = fn.blocks[0];
+  if (entry === undefined) {
+    return seen;
+  }
+  seen.add(entry);
+  for (const stack = [entry]; stack.length;) {
+    for (const s of successorsOf(stack.pop()!)) {
+      if (!seen.has(s)) {
+        seen.add(s);
+        stack.push(s);
+      }
+    }
+  }
+  return seen;
 }
 
 /** Predecessor map for the whole function's CFG. */

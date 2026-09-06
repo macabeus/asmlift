@@ -12,12 +12,12 @@ import {
 import type { AsmData } from './frontend/asmdata';
 import { FrontendUnsupportedError } from './frontend/errors';
 import { frontendFor } from './frontend/registry';
-import { type Block, type Fn, successorsOf } from './ir/core';
+import { type Fn, reachableBlocks } from './ir/core';
 import { print } from './ir/print';
 import { firstTrivialPhi } from './ir/simplify';
 import { T } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
-import { Expr, LanguageBackend, SFn, Stmt, exprChildren, gapReasonFor, stmtChildren, stmtExprs } from './l3/ast';
+import { LanguageBackend, SFn, gapReasonFor, walkExprs } from './l3/ast';
 import { BASECSE_GATES, hoistBaseLocals } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
@@ -199,12 +199,12 @@ function runTower(
 }
 
 // ── the shared raising tower ────────────────────────────────────────────────────────────────
-// decompile(), decompileTraced (trace.ts), and the cli's decompileRanked (rank.ts) /
-// decompileWithReport + its score probe (report.ts) all raise a lifted fn through the SAME
-// stage sequence. The optional hooks are the only per-caller
-// differences: rank pins its signedness candidate `beforeRecover`; the report pushes trace
-// entries after each stage. Every hook fires AFTER the stage's verify, so a hook can never
-// observe unverified IR.
+// decompile(), decompileTraced (trace.ts), rank.ts's decompileRanked and the cli's
+// decompileWithReport + its score probe (report.ts) all raise a lifted fn through the SAME stage
+// sequence. Two things vary per caller and nothing else does: the optional HOOKS — rank pins its
+// signedness candidate at `beforeRecover`, decompileTraced pushes a trace entry after each stage —
+// and the `pre` options bag, which reaches the pre-recovery passes themselves. Every hook fires
+// AFTER the stage's verify, so a hook can never observe unverified IR.
 
 /** Stage 2 — idiom fold: filter the pattern set by target capabilities, apply, dce + verify.
  *  Returns total hits. `patterns` defaults to DEFAULT_IDIOM_PATTERNS exactly like decompile(). */
@@ -243,7 +243,17 @@ export interface RaiseHooks {
  *  nothing across a 3337-function agbcc corpus. Worth saying, because folding an empty block ahead
  *  of return-sinking does take away `br` predecessors it needs — the dominance gate is what makes
  *  that unreachable, since the blocks retsink wants are never back-edge sources. It goes last
- *  because that is where the CFG stops moving. */
+ *  because that is where the CFG stops moving.
+ *
+ *  The tail is three separate parameters rather than an options bag on purpose: this is the
+ *  published package root export, so every caller outside this repo is pinned to the positions.
+ *
+ *  @param hooks per-stage observers; see {@link RaiseHooks}. Each fires after that stage's verify.
+ *  @param self  this function's own prototype, where the caller has one — what the pre-recovery
+ *               passes read to type the parameters they are narrowing.
+ *  @param pre   per-caller PRE-RECOVERY options. One shipped user: rank.ts's `/connective`
+ *               candidate, which passes `{ shortCircuit: { foldTreeOwned: true } }` to take the
+ *               fold the comparison-tree refusal owns (raise/shortcircuit.ts). */
 export function raiseRecovered(
   fn: Fn,
   target: TargetDescription,
@@ -311,15 +321,7 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
     if (!(e instanceof StructureError) || !fn.blocks[0]) {
       throw e;
     }
-    const seen = new Set<Block>([fn.blocks[0]]);
-    for (const stack = [fn.blocks[0]]; stack.length;) {
-      for (const s of successorsOf(stack.pop()!)) {
-        if (!seen.has(s)) {
-          seen.add(s);
-          stack.push(s);
-        }
-      }
-    }
+    const seen = reachableBlocks(fn);
     const names = new Set<string>();
     for (const b of seen) {
       for (const op of b.ops) {
@@ -428,20 +430,14 @@ export function stubResult(name: string, asm: string, backend: LanguageBackend, 
 /** Every ASMLIFT_ERROR marker in the emitted AST, as a structured diagnostic (one per marker,
  *  document order). The harness/self-improve loop reads THIS; the source text is for humans. */
 function collectMarkers(sfn: SFn): Diagnostic[] {
-  // On the shared exprChildren/stmtExprs/stmtChildren traversal. Order is exprs-then-children
-  // per statement — deterministic and near-document-order (a `for`'s cond is visited before its
-  // init; see the note on stmtChildren).
+  // On the shared `walkExprs` traversal (l3/ast.ts). Order is exprs-then-nested-statements per
+  // statement — deterministic and near-document-order (a `for`'s cond is visited before its init;
+  // see the note on stmtChildren).
   const out: Diagnostic[] = [];
-  const we = (e: Expr): void => {
+  for (const e of walkExprs(sfn.body)) {
     if (e.k === 'marker') {
       out.push({ stage: 'structure', reason: e.reason });
     }
-    exprChildren(e).forEach(we);
-  };
-  const ws = (s: Stmt): void => {
-    stmtExprs(s).forEach(we);
-    stmtChildren(s).forEach(ws);
-  };
-  sfn.body.forEach(ws);
+  }
   return out;
 }

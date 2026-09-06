@@ -12,13 +12,30 @@ const UNSIGNED_CMP = new Set(['icmp_ult', 'icmp_ule', 'icmp_ugt', 'icmp_uge']);
 const SIGNED_DIV = new Set(['sdiv', 'smod']);
 const UNSIGNED_DIV = new Set(['udiv', 'umod']);
 
+/** Type an as-yet-untyped value as an integer of its own width. Only `unknown`s: a value some
+ *  earlier rule already typed keeps that answer, so the phases below compose without an order
+ *  between the rules INSIDE one of them. */
+function setInt(v: Value, signed: boolean): void {
+  if (v.type.kind === 'unknown') {
+    v.type = T.int(v.type.width, signed);
+  }
+}
+
+/** The four phases, in the one order they are sound in: seed signedness from the opcodes that carry
+ *  it, type the bases of memory accesses as pointers, propagate that pointer-ness across the SSA,
+ *  then default whatever is left. Each is in place over `fn`, and each depends on the previous one
+ *  having already refused to overwrite a type — the pointer phases must run BEFORE the s32 default
+ *  or a loop-carried pointer is flattened to an integer. */
 export function recoverTypes(fn: Fn): void {
-  const setInt = (v: Value, signed: boolean) => {
-    if (v.type.kind === 'unknown') {
-      v.type = T.int(v.type.width, signed);
-    }
-  };
-  // Seed: operands of a signed comparison are signed integers.
+  seedSignednessFromOpcodes(fn);
+  typeDerefBases(fn);
+  propagatePointers(fn);
+  defaultUnknownsToS32(fn);
+}
+
+/** PHASE 1 — signedness from op semantics: the operands of a signed comparison are signed integers,
+ *  a comparison's result is a bool, and a division carries its signedness in the OPCODE. */
+export function seedSignednessFromOpcodes(fn: Fn): void {
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (SIGNED_CMP.has(op.opcode)) {
@@ -52,12 +69,14 @@ export function recoverTypes(fn: Fn): void {
       }
     }
   }
-  // A value used as the base of a memory access is a pointer; its pointee type comes from the
-  // access width (and, for loads, signedness). This must run before the s32 default so the
-  // base is typed `T *` rather than being flattened to a plain integer. Both the constant-offset
-  // forms (load/store, width) and the variable-index forms (aload/astore, elemSize) type their
-  // base operand[0]; only the scale attribute differs.
+}
 
+/** PHASE 2 — a value used as the base of a memory access is a pointer; its pointee type comes from
+ *  the access width (and, for loads, signedness). This must run before the s32 default so the base
+ *  is typed `T *` rather than being flattened to a plain integer. Both the constant-offset forms
+ *  (load/store, width) and the variable-index forms (aload/astore, elemSize) type their base
+ *  operand[0]; only the scale attribute differs. */
+export function typeDerefBases(fn: Fn): void {
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       let width: number, signed: boolean;
@@ -89,16 +108,16 @@ export function recoverTypes(fn: Fn): void {
       }
     }
   }
-  // Propagate pointer-ness across the SSA. The seed above types only the DIRECT base of a dereference;
-  // a loop-carried pointer reaches its dereference through a block-arg phi (its incoming `a0`) and a
-  // `p = p + stride` walk, so those values stay `unknown` and the s32 default below would spell them
-  // `int` — an `int→int*` assignment mwcc/agbcc REJECT (gcc warns). Flow the pointer type across the
-  // exact same-value edges (a phi is one value; `ptr ± const` is the same pointer type). Union-find over
-  // Value identity. SOUND: every edge connects values that provably hold the same pointer, and we only
-  // fill `unknown`s — a class with a conflicting int member or two distinct pointees is left untouched.
-  propagatePointers(fn);
-  // Default every still-unknown value to s32. This is a COMPILER default (agbcc/IDO/GCC all take
-  // plain `int` as the integer default), not a hardware fact — applied uniformly.
+}
+
+// PHASE 3 is `propagatePointers` (below, with its own note). Phase 2 types only the DIRECT base of
+// a dereference; a loop-carried pointer reaches its dereference through a block-arg phi (its
+// incoming `a0`) and a `p = p + stride` walk, so those values stay `unknown` and phase 4 would
+// spell them `int` — an `int→int*` assignment mwcc/agbcc REJECT (gcc warns).
+
+/** PHASE 4 — default every still-unknown value to s32. This is a COMPILER default (agbcc/IDO/GCC
+ *  all take plain `int` as the integer default), not a hardware fact — applied uniformly. */
+export function defaultUnknownsToS32(fn: Fn): void {
   for (const b of fn.blocks) {
     for (const p of b.params) {
       if (p.type.kind === 'unknown') {

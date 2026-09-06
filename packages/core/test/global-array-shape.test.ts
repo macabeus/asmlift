@@ -1126,13 +1126,14 @@ describe('the order licence, split out for the value-home consumer', () => {
     );
     expect([...licensed('f', structElem)]).toEqual(['gBgInfo']);
 
-    // ASKED OF EVERY WIDTH-READING RULE, ON BOTH SHAPES, because the guarantee is positional and
-    // one rule on one shape does not pin it. `widths[0] === null` says "the FIRST recorded access
-    // has no element width", and where a CLEAN access is recorded ahead of the interior one —
-    // `interior-or-non-access`'s own fixture, and `kleod:TransformSingleEntityToScreen`'s
-    // `gUnk_03002920` on the corpus (`widths` `[2, null]`, both symbol-map arms) — a positional
-    // read takes the clean access's 2, applies it to the access that has none, and licenses the
-    // name.
+    // ASKED OF EVERY WIDTH-READING RULE, ON BOTH SHAPES, because a rule reading ONE access's width
+    // is not pinned by another rule on another shape. `ShapeEvidence.widths.hasInterior` is the
+    // whole-set question — "does SOME access read an interior" — and it is what a rule must ask
+    // instead of looking at one access and generalising: where a CLEAN access sits beside an
+    // interior one (`interior-or-non-access`'s own fixture, and
+    // `kleod:TransformSingleEntityToScreen`'s `gUnk_03002920` on the corpus, both symbol-map arms)
+    // the clean access's 2 says nothing about the access that has no width at all, and a rule that
+    // carried it across would license the name.
     const widthRules = ['stride-is-not-the-element', 'mixed-extension', 'mid-element-constant'];
     for (const asm of [structElem, fixture('interior-or-non-access')]) {
       for (const id of widthRules) {
@@ -1143,9 +1144,9 @@ describe('the order licence, split out for the value-home consumer', () => {
         expect([id, [...orderLicensedGlobals(lift('f', asm), ARMV4T_AGBCC, withAWidthRule)]]).toEqual([id, []]);
       }
     }
-    // …and the boundary is exact: `mixed-access-width` reads the SET's shape and no width value,
-    // so on a name read only at interiors (`widths` = `[null]`, one entry) it admits. That is the
-    // right answer — "one name, two element types" is not what such a symbol violates — and it is
+    // …and the boundary is exact: `mixed-access-width` reads `widths.mixed` and no width value, so
+    // on a name read ONLY at interiors — one distinct width, which happens to be "none" — it
+    // admits. That is the right answer — "one name, two element types" is not what such a symbol violates — and it is
     // pinned so the invariant above cannot be read as covering a rule it does not.
     const countRule = {
       address: ELEMENT_ADDRESS_GATES,
