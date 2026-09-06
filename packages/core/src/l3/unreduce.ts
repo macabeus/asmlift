@@ -146,6 +146,7 @@
 // could not wait.
 //
 // Nothing qualifying ⇒ decline (null), never a duplicate of the primary.
+import { type IrType } from '../ir/types';
 import { cellAddress, inRange, rootConst } from './address';
 import {
   type Expr,
@@ -160,6 +161,7 @@ import {
   walkExprs,
 } from './ast';
 import { type Gate, firstRejection } from './gates';
+import { type VarTypes, declaredTypes, exprCType, ptrElemBytes } from './typing';
 
 /** One (loop, accumulator) pair as the gates read it. */
 interface AccCtx {
@@ -179,6 +181,9 @@ interface AccCtx {
   counterVolatile: boolean;
   /** a `continue` anywhere in the body */
   hasContinue: boolean;
+  /** the accumulator's own step and its init count in DIFFERENT C units, so the closed form's
+   *  `+` would scale by the wrong element size (or by none) */
+  unitsDisagree: boolean;
   /** the init relates to the counter's start by the accumulator's own stride */
   related: boolean;
   /** the counter starts at a CONSTANT, so whatever the source scaled by it the compiler folded
@@ -217,6 +222,22 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
     sound: true,
     guardedBy: 'unreduce.test.ts: a pinned accumulator declines, on every pin a local can carry',
     rejects: (c) => c.pinned,
+  },
+  {
+    // The accumulator's step is read off `acc = acc + K`, so K counts in the units of the
+    // ACCUMULATOR's declared type — elements for a pointer, and a `u16 *` stepped by 32 advances
+    // 64 bytes. The closed form spells that stride onto the INIT expression, whose `+` scales by
+    // whatever the INIT's own C type says. Where the two disagree the candidate addresses the
+    // wrong byte, compiles clean, and carries no marker — structure.ts:`bytePtr` states the same
+    // rule from the other end ("a `u16 *` walked by a computed offset addresses TWICE the intended
+    // byte, and nothing downstream can see the error"). A narrow integer accumulator is the same
+    // question in the other direction: `u16 acc` WRAPS at 65536 where `init + (i << 6)` does not,
+    // so only a full-width integer counts as a unit-1 arithmetic type.
+    id: 'stride-units',
+    why: 'a step counted in the accumulator’s own units is not the init’s, and the closed form would scale by the wrong one',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: an accumulator whose step counts different units than its init declines',
+    rejects: (c) => c.unitsDisagree,
   },
   {
     id: 'acc-live-outside',
@@ -334,6 +355,23 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
 ];
 
 // ── the induction shapes ────────────────────────────────────────────────────────────────────
+
+/** The BYTE scale of one unit of C arithmetic on a value of this type — what `x + 1` advances
+ *  `x` by. A pointer scales by its pointee; a full-width integer scales by one. Everything else is
+ *  `null` = NOT ADMISSIBLE rather than a guess: a struct/void/array pointee has no scale this file
+ *  can name (`ptrElemBytes` returns 0 for exactly those), a narrow integer WRAPS where the closed
+ *  form does not, and an unknown type is unknown. `stride-units` compares the accumulator's
+ *  declared scale against the init expression's, and refuses unless both are known and equal. */
+function arithScale(t: IrType | undefined): number | null {
+  if (t === undefined) {
+    return null;
+  }
+  if (t.kind === 'ptr') {
+    const bytes = ptrElemBytes(t.to);
+    return bytes > 0 ? bytes : null;
+  }
+  return t.kind === 'int' && t.width === 32 ? 1 : null;
+}
 
 /** `name = name + <expr>` as a step, or null. */
 function stepOf(s: Stmt, name: string): Expr | null {
@@ -626,8 +664,10 @@ export function unreduceAccumulators(
   sfn: SFn,
   window?: readonly [number, number],
   triggers?: readonly (readonly [number, number])[],
+  gates: readonly Gate<AccCtx>[] = UNREDUCE_GATES,
 ): UnreduceResult | null {
   const body = [...sfn.body];
+  const vt: VarTypes = declaredTypes(sfn);
   const deletedInits = new Set<Stmt>();
   const deletedLocals = new Set<string>();
   let changed = false;
@@ -678,7 +718,12 @@ export function unreduceAccumulators(
       const initIdx = sfn.body.indexOf(initStmt);
       const evaluated: Stmt[] = [...sfn.body.slice(Math.min(initIdx, startIdx) + 1, li), loop];
       const ctrLocal = sfn.locals.find((l) => l.name === ctr);
+      // The units the accumulator's step counts in, against the units the closed form's `+` would
+      // scale by. Both sides must be KNOWN and equal — see `stride-units`.
+      const accScale = arithScale(cand.type);
+      const initScale = arithScale(exprCType(initStmt.value, vt));
       const ctx: AccCtx = {
+        unitsDisagree: accScale === null || initScale === null || accScale !== initScale,
         assigns: assignCount(sfn.body, cand.name),
         addrTaken: addrTakenIn(sfn.body, cand.name),
         // Every flag `SFn.locals` can carry, because each is a fact about the ASM that only the
@@ -732,7 +777,7 @@ export function unreduceAccumulators(
         movedVolatile: exprReadsVolatile(initStmt.value, sfn),
         movedAliasable: movedReadAliasable(initStmt.value, evaluated, window),
       };
-      if (firstRejection(UNREDUCE_GATES, ctx) !== null) {
+      if (firstRejection(gates, ctx) !== null) {
         continue;
       }
       // The gates have placed every write the C performs; what they cannot place is a write the

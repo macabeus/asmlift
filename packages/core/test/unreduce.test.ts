@@ -7,7 +7,7 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
-import { T } from '../src/ir/types';
+import { type IrType, T } from '../src/ir/types';
 import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
 import { firstRejection, without } from '../src/l3/gates';
 import { UNREDUCE_GATES, type UnreduceResult, unreduceAccumulators } from '../src/l3/unreduce';
@@ -138,6 +138,7 @@ const foldedCtx = (
   assigns: 2,
   addrTaken: false,
   pinned: false,
+  unitsDisagree: false,
   liveOutside: false,
   readAtOrBelowStep: false,
   counterAssigns: 2,
@@ -681,4 +682,85 @@ test('a call inside the counter start declines — the init statement is deleted
     },
   ]);
   expect(unreduceAccumulators(s, GBA)).toBeNull();
+});
+
+// ── stride-units ────────────────────────────────────────────────────────────────────────────
+
+/** `fill`'s shape with a POINTER accumulator: `p = INIT; … p = p + 32`, which on a `u16 *`
+ *  advances 64 BYTES per iteration. `init` and the accumulator's declared type are the two facts
+ *  this family edits. */
+const ptrWalk = (accType: IrType, init: Expr, body?: Stmt[]): SFn => ({
+  name: 'f',
+  params: [
+    { name: 'a0', type: T.s(32) },
+    { name: 'a1', type: T.s(32) },
+  ],
+  locals: [
+    { name: 'p', type: accType },
+    { name: 'i', type: T.s(32) },
+  ],
+  retType: T.void(),
+  body: body ?? [
+    set('i', c(0)),
+    set('p', init),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: v('i'), r: v('a0') },
+      body: [st(cell(0x040000d4), v('p')), set('p', plus(v('p'), c(32))), set('i', plus(v('i'), c(1)))],
+    },
+  ],
+});
+
+test('an accumulator whose step counts different units than its init declines', () => {
+  // (a) THE FOLDED PATH. `p` is a `u16 *`, so `p + 32` is 64 bytes; the init is an INTEGER
+  // expression, so `init + (i << 5)` is 32. Found on klonoa's UpdateHUDTimePanel under a symbol
+  // map, where the same asm lifts with a `u16 *` accumulator and the candidate walked half the
+  // intended stride — clean-compiling, marker-free, and addressing the wrong halfword.
+  const intInit = plus({ k: 'cast', to: T.u(32), e: { k: 'addr', name: 'gBuf' } }, c(1444));
+  expect(unreduceAccumulators(ptrWalk(T.ptr(T.u(16)), intInit), GBA)).toBeNull();
+  // and it is the GATE that refuses, not the relation: ablated, the wrong stride ships
+  expect(
+    emit(
+      unreduceAccumulators(ptrWalk(T.ptr(T.u(16)), intInit), GBA, undefined, without(UNREDUCE_GATES, 'stride-units')),
+    ),
+  ).toContain('+ (i << 5)');
+  // (b) THE SUBSTITUTIONAL PATH, which has the same hazard and predates the folded branch: the
+  // init names the counter's start under the accumulator's own numeric stride, and `rec` rebuilds
+  // it in the INIT's units rather than the accumulator's.
+  const subst = ptrWalk(T.ptr(T.u(16)), plus(shl(v('a0'), c(5)), v('a1')), [
+    set('i', v('a0')),
+    set('p', plus(shl(v('a0'), c(5)), v('a1'))),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: v('i'), r: c(31) },
+      body: [st(cell(0x040000d4), v('p')), set('p', plus(v('p'), c(32))), set('i', plus(v('i'), c(1)))],
+    },
+  ]);
+  expect(unreduceAccumulators(subst, GBA)).toBeNull();
+  expect(emit(unreduceAccumulators(subst, GBA, undefined, without(UNREDUCE_GATES, 'stride-units')))).toContain(
+    '(i << 5) + a1',
+  );
+  // (c) A NARROW INTEGER accumulator is the same question in the other direction: `u16 acc`
+  // stepped by 64 WRAPS at 65536 and the closed form does not, so the two agree for 1024
+  // iterations and then do not.
+  expect(
+    unreduceAccumulators(
+      fill({
+        locals: [
+          { name: 'acc', type: T.u(16) },
+          { name: 'i', type: T.s(32) },
+        ],
+      }),
+      GBA,
+    ),
+  ).toBeNull();
+  // (d) …and a pointee with no size this file can name — `void *`, a struct — is unknown, not one.
+  expect(unreduceAccumulators(ptrWalk(T.ptr(T.void()), intInit), GBA)).toBeNull();
+});
+
+test('an accumulator and an init in the SAME units still relate', () => {
+  // The gate is a units check and not a pointer ban: `p` and the init are both `u16 *`, so the
+  // closed form's `+` scales by 2 exactly as `p + 32` does.
+  const ptrInit: Expr = { k: 'cast', to: T.ptr(T.u(16)), e: c(0x03000900) };
+  expect(emit(unreduceAccumulators(ptrWalk(T.ptr(T.u(16)), ptrInit), GBA))).toContain('(u16 *)50333952 + (i << 5)');
 });
