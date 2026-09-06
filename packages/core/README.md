@@ -58,8 +58,8 @@ Everything under `src/` is importable as `@asmlift/core/<path>` (e.g.
 
 ## Architecture
 
-Three ISA frontends (ARMv4T/Thumb, MIPS, PowerPC), four compilers (agbcc, IDO, KMC GCC,
-CodeWarrior), three language backends over one neutral AST — all scored across the package seam
+Three ISA frontends (ARMv4T/Thumb, MIPS, PowerPC), five compilers (agbcc, IDO, KMC GCC, GCC
+2.7.2, CodeWarrior), three language backends over one neutral AST — all scored across the package seam
 by [`@asmlift/cli`](../cli/README.md) with the community `objdiff` engine (in-process, pinned
 `objdiff-wasm`; asmlift never hand-rolls a diff).
 
