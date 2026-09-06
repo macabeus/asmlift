@@ -788,3 +788,10 @@ test('a stride the frontend spelled as a constant expression still relates', () 
   // a folded stride that is still not a power of two is still refused
   expect(unreduceAccumulators(folded({ accStep: plus(c(40), c(8)) }), GBA)).toBeNull();
 });
+
+test('a zero init leaves the scaled counter standing alone', () => {
+  // `0 + (i << 6)` is a spelling no source writes. Reached on synthetic:nestedloop:mwcc_242_81,
+  // whose accumulator starts at 0 — a PPC row, in a lever whose gate census is agbcc-shaped.
+  expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).toContain('*(s32 *)67109080 = i << 6;');
+  expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).not.toContain('0 +');
+});

@@ -557,10 +557,14 @@ function relateFolded(init: Expr, start: Expr, ctr: string, k: Expr, d: number):
   // `sh === 0` is the counter standing on its own — `i << 0` is the same value spelled worse, and
   // `rec`'s branch (c) already writes the bare counter for the substitutional case.
   const scaled: Expr = sh === 0 ? idx : { k: 'bin', op: '<<', l: idx, r: { k: 'const', value: sh } };
-  // The INIT stays on the LEFT: it is the base the source names, and `rec` builds the same shape
-  // for the same loop where the fold did not happen. Product operand order is `/mulfirst`'s
-  // question, not this file's.
-  return { ok: { k: 'bin', op: '+', l: init, r: scaled } };
+  // A ZERO init contributes nothing and `0 + (i << 3)` is a spelling no source writes, so the
+  // scaled counter stands alone — this is `rec`'s branch (c) reached the other way. (Found on
+  // synthetic:nestedloop:mwcc_242_81, whose accumulator starts at 0.)
+  //
+  // Otherwise the INIT stays on the LEFT: it is the base the source names, and `rec` builds the
+  // same shape for the same loop where the fold did not happen. Product operand order is
+  // `/mulfirst`'s question, not this file's.
+  return { ok: init.k === 'const' && init.value === 0 ? scaled : { k: 'bin', op: '+', l: init, r: scaled } };
 }
 
 /** how many times the counter's start stands as a subterm of the init. ONE is the substitutional
