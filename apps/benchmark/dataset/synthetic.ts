@@ -2469,9 +2469,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // rule that always hoisted a constant offset into the home would break it, and the loop gate is
   // why this one cannot (`offuse` has no loop, so the axis is not even enumerated). `offloop` is
   // the real function's shape rather than an isolate: the same bias with a strength-reduced
-  // induction variable also riding it. Its residual is not the bias — it is the IV's init copy
-  // sitting above the zero-trip guard where the ROM has it below, which is the guard-placement
-  // family, not this one.
+  // induction variable also riding it. Its residual is not the bias — it is the induction
+  // variable, and `offgiv` below is the isolate that proves it (the same 3, with no `/expr-home`
+  // in the winner). Both are MATCH now.
+  //
+  // AND THE ZERO-TRIP GUARD IS NOT `offloop`'S RESIDUAL, pinned here because the shape invites
+  // that reading. Measured by compiling asmlift's own emitted C with this agbcc: moving the
+  // induction variable's init copy below the guard by hand still scores 3, while deleting the
+  // variable outright is byte-exact WITH the guard and WITHOUT it, both — the guard is irrelevant
+  // in either direction. `/initfirst`, the shipped guard-placement lever, has NO REACH here — it
+  // declines on every call because the recovered tree carries no `if` at all (the call count is
+  // the candidate fan and moves whenever the fan does, so it is not quoted) — against `armfall`,
+  // where the same probe shows it firing and LOSING at 9 to the winner's 8. Two different arms of the
+  // no-reach/loses/does-not-compose distinction, and neither is this row's residual.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; ido7.1, gcc2.7.2kmc and mwcc_242_81 were NOT measured, so those lanes are left
@@ -2575,6 +2585,94 @@ export const SYNTHETIC: SynthSpec[] = [
       putbuf: { params: 1, returnsVoid: true },
       offloop: { returnsVoid: true },
     },
+  },
+
+  // THE COUNTER'S START, WHEN IT IS THE LITERAL 0 — `offgiv` is `offloop` with the `+ 4` bias
+  // removed, and it is the isolate that separates this family's two mechanisms. It was authored at
+  // the same 3 as `offloop`, with no `/expr-home` in its winner (`signed/vol-store` against
+  // `offloop`'s `signed/expr-home/vol-store`), so the residual was not the value home: it was the
+  // strength-reduced induction variable's init copy, alone. The guard is not that residual either
+  // — see the family comment above `offhome`.
+  //
+  // AND IT IS THE `/unreduce` FAMILY, one class its lever could not reach. `dmafill` and friends
+  // start the counter at the PARAMETER `lo`, so the compiler-created giv's init is
+  // `base + lo * 64` — it NAMES the start, and the substitutional closed form `INIT[lo := i]`
+  // recovers it. Start the counter at a constant and agbcc folds `p + (0 << 6)` to `p` before
+  // anything reaches the asm: the start term is GONE from the init, and the same loop needs the
+  // ADDITIVE closed form `INIT + (i << 6)` instead. Same giv, same compiler pass, other pre-image.
+  //
+  // WHY THE ISOLATE HAS TO LOOK LIKE THIS, established by compiling four rejected drafts of it.
+  // The class needs all three of: (a) the counter's start is the literal 0, or nothing folds;
+  // (b) some OTHER use pins the counter, here `p[i]` — with the counter unused agbcc reverses the
+  // loop into a countdown on the trip count and the reduced spelling matches outright (measured:
+  // MATCH); and (c) the base arrives in a register from a computation, here the call, so its copy
+  // competes with the loop-invariant hoist for the preheader slot — with a base that is already a
+  // parameter the copy is free and the row MATCHes too (measured: MATCH). A draft missing any one
+  // of the three is not an inhabitant.
+  {
+    sym: 'offgiv',
+    src:
+      'void *getbuf(s32 k);\n' +
+      '#define gDma ((volatile s32 *)0x040000d4)\n' +
+      'void offgiv(s32 k, s32 n){ u8 *p; s32 i;' +
+      ' p = (u8 *)getbuf(k);' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gDma[0] = (s32)(p + (i << 6));' +
+      ' gDma[2] = p[i]; } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void offgiv(s32 k, s32 n);',
+    proto: { getbuf: { params: 1 }, offgiv: { returnsVoid: true } },
+  },
+
+  // TWO MORE STRIDES, because `offgiv` varies nothing. It is `offloop` with two terms deleted and
+  // the SAME `<< 6`, so between them the class has one shape measured twice — which is not
+  // evidence that the closed form is a relation rather than one function's arithmetic. These two
+  // move the only parameter the additive form has.
+  //
+  // `offgiv2` is the stride `<< 2`, a shift Thumb's `add rd, #imm8` CAN spell in the step. It is a
+  // genuine inhabitant and not a row the lever was tuned on: in its own ranked table the best
+  // candidate carrying no `/unreduce` scores 3 and every `/unreduce` product scores 0, so the
+  // whole residual is the un-reduction at a stride the branch was never measured on.
+  //
+  // `offgiv3` is the stride `<< 8`, and it is the one that is NOT about the class. 256 does not
+  // fit Thumb's 8-bit add immediate, so agbcc spells the giv's step `mov #128 / lsl #1` and
+  // asmlift's L3 tree keeps it as the `bin` node `128 << 1`. Every stated scope condition holds —
+  // the start is the literal 0, the counter steps by 1, the stride is a constant power of two —
+  // and the lever refused anyway, on the SPELLING of the stride node rather than on its value.
+  // That is a refusal of asmlift's own folding, in a lever whose entire framing is the COMPILER's
+  // folding, and it was never confined to the folded branch — the substitutional path compared an
+  // unfolded multiplier against a folded stride the same way. The relation reads every constant
+  // as its value, on both paths.
+  {
+    sym: 'offgiv2',
+    src:
+      'void *getbuf(s32 k);\n' +
+      '#define gDma ((volatile s32 *)0x040000d4)\n' +
+      'void offgiv2(s32 k, s32 n){ u8 *p; s32 i;' +
+      ' p = (u8 *)getbuf(k);' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gDma[0] = (s32)(p + (i << 2));' +
+      ' gDma[2] = p[i]; } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void offgiv2(s32 k, s32 n);',
+    proto: { getbuf: { params: 1 }, offgiv2: { returnsVoid: true } },
+  },
+  {
+    sym: 'offgiv3',
+    src:
+      'void *getbuf(s32 k);\n' +
+      '#define gDma ((volatile s32 *)0x040000d4)\n' +
+      'void offgiv3(s32 k, s32 n){ u8 *p; s32 i;' +
+      ' p = (u8 *)getbuf(k);' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gDma[0] = (s32)(p + (i << 8));' +
+      ' gDma[2] = p[i]; } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void offgiv3(s32 k, s32 n);',
+    proto: { getbuf: { params: 1 }, offgiv3: { returnsVoid: true } },
   },
 
   {
@@ -3182,9 +3280,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // exactly: 0 with one base, 11 with four, same lever, same poll, same loop.
   //
   // The loop is spelled `i = 0; do … while` rather than `for` deliberately: a `for` puts the
-  // family below's zero-trip guard into the same row, and this row is about the bases. With the
-  // `for` spelling the same shape scores 15, of which 11 is these bases and 4 is that guard
-  // (verified by composing both fixes by hand: 15 → 4 → 0).
+  // family below's zero-trip guard into the same row, and this row is about the bases. That
+  // separation is closed: measured on the same hand-compiled `for` shape with
+  // `docs/ranked-repro.md`'s command, 76
+  // candidate(s) scored, 0 dropped, 0 withheld, best `signed/livebase-block/volatile/initfirst`:
+  // 0 (match). `/initfirst` is IN that winner, so the guard-placement lever does close a real
+  // instance of the shape — which is worth knowing next to `armfall`, where the same lever is
+  // enumerated and loses, and `offloop`, where it has no reach at all. The `do … while` spelling
+  // is kept anyway: this row is still about the bases, and a row that two levers close jointly no
+  // longer isolates either.
   //
   // Cut from kleod:LoadBGTilemapData:agbcc, and it pays there. The row exists because a base census
   // over that function's enumeration returned four shapes and no others: bind nothing, bind

@@ -7,9 +7,10 @@
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
-import { T } from '../src/ir/types';
+import { type IrType, T } from '../src/ir/types';
 import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
-import { type UnreduceResult, unreduceAccumulators } from '../src/l3/unreduce';
+import { type Gate, firstRejection, without } from '../src/l3/gates';
+import { type AccCtx, UNREDUCE_GATES, type UnreduceResult, unreduceAccumulators } from '../src/l3/unreduce';
 import { ARMV4T_AGBCC } from '../src/target';
 
 /** the GBA I/O page, as target.ts declares it */
@@ -112,6 +113,164 @@ test('a `for` loop reads its counter out of init and inc', () => {
   expect(emit(unreduceAccumulators(s, GBA))).toContain('*(s32 *)67109080 = (i << 6) + a1;');
 });
 
+/** synthetic:offgiv's shape: the counter starts at the LITERAL 0, so the compiler folded its
+ *  start out of the giv's init and left `acc = a1` — counter-free. `o` edits one fact. */
+const folded = (o: { start?: Expr; accStep?: Expr; ctrStep?: Expr; init?: Expr } = {}): SFn =>
+  fill({}, [
+    set('i', o.start ?? c(0)),
+    set('acc', o.init ?? v('a1')),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: v('i'), r: v('a0') },
+      body: [
+        st(cell(0x040000d8), v('acc')),
+        set('acc', plus(v('acc'), o.accStep ?? c(64))),
+        set('i', plus(v('i'), o.ctrStep ?? c(1))),
+      ],
+    },
+  ]);
+
+/** The context the PASS builds for a tree's accumulator, captured through the `gates` seam. The
+ *  five relation gates are keyed on WHICH reason `relate` returned, so a hand-written `declined`
+ *  would test the table against itself and a tag that stopped matching its tree would pass: every
+ *  ablation below therefore reads its context off the tree it also runs the pass on. The capture
+ *  rejects, so nothing is rewritten. */
+const ctxFor = (s: SFn): AccCtx => {
+  const seen: AccCtx[] = [];
+  const capture: Gate<AccCtx> = {
+    id: 'capture',
+    why: 'test probe: record the context and admit nothing',
+    sound: false,
+    rejects: (x) => {
+      seen.push(x);
+      return true;
+    },
+  };
+  unreduceAccumulators(s, GBA, undefined, [capture]);
+  if (seen.length !== 1) {
+    throw new Error(`expected one accumulator to reach the gates, got ${seen.length}`);
+  }
+  return seen[0];
+};
+test('an init the compiler folded the counter’s start out of relates ADDITIVELY', () => {
+  // The other of the two ways a compiler's giv relates to its counter. `dmafill` starts at the
+  // parameter `lo`, so the init `base + lo * 64` NAMES the start and substitution recovers it.
+  // Start at a constant and agbcc folds `base + 0 * 64` to `base` before anything reaches the
+  // asm — nothing to substitute, and the closed form is the init PLUS the scaled counter.
+  expect(emit(unreduceAccumulators(folded(), GBA))).toContain('*(s32 *)67109080 = a1 + (i << 6);');
+  expect(emit(unreduceAccumulators(folded(), GBA))).not.toContain('acc');
+});
+
+test('a folded init whose stride is the counter’s own needs no shift', () => {
+  expect(emit(unreduceAccumulators(folded({ accStep: c(1) }), GBA))).toContain('*(s32 *)67109080 = a1 + i;');
+});
+
+test('a counter-free init declines unless its start is the constant 0', () => {
+  // SCOPE, and the reason it is a refusal rather than a widening: the general closed form is
+  // `INIT + (ctr - start) * (K / d)`, and a non-zero start spells a bias term no corpus row asks
+  // for. This is `nonzero-start`'s own population — the start IS a constant, and it is not 0.
+  const tree = folded({ start: c(1) });
+  expect(unreduceAccumulators(tree, GBA)).toBeNull();
+  expect(ctxFor(tree).declined).toBe('nonzero-start');
+  // …and ablating the gate is what makes the guard differential rather than decorative: with
+  // `nonzero-start` gone, no other gate catches this row — each of the five owns one tag.
+  expect(firstRejection(without(UNREDUCE_GATES, 'nonzero-start'), ctxFor(tree))).toBeNull();
+});
+
+test('an init that never names the counter declines', () => {
+  // A symbolic start cannot have folded, so an init that does not name it is simply not a function
+  // of the counter — and the additive form is unavailable, because re-deriving `ctr - start` would
+  // put a new read of the start expression at every use, which none of the five re-evaluation
+  // gates asks about. `unrelated-start`'s own population, and no other gate covers it.
+  const tree = folded({ start: v('a1'), init: v('a0') });
+  expect(unreduceAccumulators(tree, GBA)).toBeNull();
+  expect(ctxFor(tree).declined).toBe('unrelated-start');
+  expect(firstRejection(without(UNREDUCE_GATES, 'unrelated-start'), ctxFor(tree))).toBeNull();
+});
+
+test('a counter-free init declines when the counter does not step by one', () => {
+  // the closed form would carry the ratio `K / d`, which is not a shift when `d` is not 1
+  const tree = folded({ ctrStep: c(2) });
+  expect(unreduceAccumulators(tree, GBA)).toBeNull();
+  expect(ctxFor(tree).declined).toBe('step-ratio');
+  expect(firstRejection(without(UNREDUCE_GATES, 'step-ratio'), ctxFor(tree))).toBeNull();
+});
+
+test('a counter-free init declines when the accumulator’s stride is not a power of two', () => {
+  const tree = folded({ accStep: c(48) });
+  expect(unreduceAccumulators(tree, GBA)).toBeNull();
+  expect(unreduceAccumulators(folded({ accStep: v('a1') }), GBA)).toBeNull();
+  expect(ctxFor(tree).declined).toBe('stride-not-shift');
+  expect(ctxFor(folded({ accStep: v('a1') })).declined).toBe('stride-not-shift');
+  expect(firstRejection(without(UNREDUCE_GATES, 'stride-not-shift'), ctxFor(tree))).toBeNull();
+});
+
+test('an ABLATED relation gate declines rather than emitting a deleted local', () => {
+  // `gates.ts` prescribes the differential ablation: drop one entry and re-run the pass, the real
+  // predicate on real input. Five gates reject a reason `relate` declined for, so with one of them
+  // gone the pass reaches a candidate that has NO closed form — while the init statement and the
+  // declaration are deleted regardless. Substituting nothing there emits C reading a variable that
+  // is no longer declared, silently; the pass refuses instead.
+  for (const [id, tree] of [
+    ['nonzero-start', folded({ start: c(1) })],
+    ['step-ratio', folded({ ctrStep: c(2) })],
+    ['stride-not-shift', folded({ accStep: c(48) })],
+    ['unrelated-start', folded({ start: v('a1'), init: v('a0') })],
+  ] as const) {
+    expect(unreduceAccumulators(tree, GBA, undefined, without(UNREDUCE_GATES, id))).toBeNull();
+  }
+});
+
+test('a constant the frontend spelled as arithmetic is read as its VALUE, wherever the relation reads one', () => {
+  // Thumb's `add rd, #imm8` cannot spell 256, so agbcc emits `mov #128 / lsl #1` and the frontend
+  // recovers the node `128 << 1`. Every input the relation compares is a value, so each is folded
+  // before it is read — otherwise the same number refuses on its spelling, and names a gate whose
+  // `why` is about the value (synthetic:offgiv3 was the accumulator's stride).
+  const spelled = shl(c(128), c(1));
+  // the counter's START: 256 is a nonzero constant however it is written, and one gate owns both
+  expect(ctxFor(folded({ start: spelled })).declined).toBe('nonzero-start');
+  expect(ctxFor(folded({ start: c(256) })).declined).toBe('nonzero-start');
+  // the counter's own STEP: without the fold it never reaches the table at all, and a decline
+  // outside the table names no gate
+  expect(ctxFor(folded({ ctrStep: shl(c(1), c(1)) })).declined).toBe('step-ratio');
+  // and a PRODUCT's invariant multiplier, on the substitutional path: the stride is folded, so
+  // comparing it against an unfolded multiplier refuses a relation that holds
+  const s = fill({}, [
+    set('i', v('a0')),
+    set('acc', plus(mul(spelled, v('a0')), c(8))),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+      body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), spelled)), set('i', plus(v('i'), c(1)))],
+    },
+  ]);
+  expect(emit(unreduceAccumulators(s, GBA))).toContain('*(s32 *)67109080 = 256 * i + 8;');
+});
+
+test('a folded init that READS MEMORY still answers to the device-write proof gate', () => {
+  // The new branch admits a class the substitutional one could not reach — an init that is a bare
+  // memory read, which under the old rule had no counter subterm and so never related at all. The
+  // proof requirement is not weakened by getting there another way.
+  const read = { ...cell(0x03001048) };
+  const armed = fill({}, [
+    set('i', c(0)),
+    set('acc', read),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: v('i'), r: v('a0') },
+      body: [
+        st(cell(0x040000dc), c(0x81000020)),
+        st(cell(0x040000d8), v('acc')),
+        set('acc', plus(v('acc'), c(64))),
+        set('i', plus(v('i'), c(1))),
+      ],
+    },
+  ]);
+  const out = unreduceAccumulators(armed, GBA, ARMV4T_AGBCC.capabilities?.deviceMemoryWriters);
+  expect(emit(out)).toContain('*(s32 *)50335816 + (i << 6)');
+  expect(out!.needsProof).toBe(true);
+});
+
 test('a stride that does not match the init’s scale declines', () => {
   // the init scales the counter by 2^6 but the accumulator walks by 32 — no linear relation
   const s = fill({}, [
@@ -124,9 +283,11 @@ test('a stride that does not match the init’s scale declines', () => {
     },
   ]);
   expect(unreduceAccumulators(s, GBA)).toBeNull();
+  expect(ctxFor(s).declined).toBe('scale-mismatch');
+  expect(firstRejection(without(UNREDUCE_GATES, 'scale-mismatch'), ctxFor(s))).toBeNull();
 });
 
-test('an init that never names the counter declines', () => {
+test('an init that never names a symbolic counter start declines, in a `while` too', () => {
   const s = fill({}, [
     set('i', v('a0')),
     set('acc', v('a1')),
@@ -573,4 +734,107 @@ test('a call inside the counter start declines — the init statement is deleted
     },
   ]);
   expect(unreduceAccumulators(s, GBA)).toBeNull();
+});
+
+// ── stride-units ────────────────────────────────────────────────────────────────────────────
+
+/** `fill`'s shape with a POINTER accumulator: `p = INIT; … p = p + 32`, which on a `u16 *`
+ *  advances 64 BYTES per iteration. `init` and the accumulator's declared type are the two facts
+ *  this family edits. */
+const ptrWalk = (accType: IrType, init: Expr, body?: Stmt[]): SFn => ({
+  name: 'f',
+  params: [
+    { name: 'a0', type: T.s(32) },
+    { name: 'a1', type: T.s(32) },
+  ],
+  locals: [
+    { name: 'p', type: accType },
+    { name: 'i', type: T.s(32) },
+  ],
+  retType: T.void(),
+  body: body ?? [
+    set('i', c(0)),
+    set('p', init),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: v('i'), r: v('a0') },
+      body: [st(cell(0x040000d4), v('p')), set('p', plus(v('p'), c(32))), set('i', plus(v('i'), c(1)))],
+    },
+  ],
+});
+
+test('an accumulator whose step counts different units than its init declines', () => {
+  // (a) THE FOLDED PATH. `p` is a `u16 *`, so `p + 32` is 64 bytes; the init is an INTEGER
+  // expression, so `init + (i << 5)` is 32. Found on klonoa's UpdateHUDTimePanel under a symbol
+  // map, where the same asm lifts with a `u16 *` accumulator and the candidate walked half the
+  // intended stride — clean-compiling, marker-free, and addressing the wrong halfword.
+  const intInit = plus({ k: 'cast', to: T.u(32), e: { k: 'addr', name: 'gBuf' } }, c(1444));
+  expect(unreduceAccumulators(ptrWalk(T.ptr(T.u(16)), intInit), GBA)).toBeNull();
+  // and it is the GATE that refuses, not the relation: ablated, the wrong stride ships
+  expect(
+    emit(
+      unreduceAccumulators(ptrWalk(T.ptr(T.u(16)), intInit), GBA, undefined, without(UNREDUCE_GATES, 'stride-units')),
+    ),
+  ).toContain('+ (i << 5)');
+  // (b) THE SUBSTITUTIONAL PATH, which asks the same question of the same two types: the
+  // init names the counter's start under the accumulator's own numeric stride, and `rec` rebuilds
+  // it in the INIT's units rather than the accumulator's.
+  const subst = ptrWalk(T.ptr(T.u(16)), plus(shl(v('a0'), c(5)), v('a1')), [
+    set('i', v('a0')),
+    set('p', plus(shl(v('a0'), c(5)), v('a1'))),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: v('i'), r: c(31) },
+      body: [st(cell(0x040000d4), v('p')), set('p', plus(v('p'), c(32))), set('i', plus(v('i'), c(1)))],
+    },
+  ]);
+  expect(unreduceAccumulators(subst, GBA)).toBeNull();
+  expect(emit(unreduceAccumulators(subst, GBA, undefined, without(UNREDUCE_GATES, 'stride-units')))).toContain(
+    '(i << 5) + a1',
+  );
+  // (c) A NARROW INTEGER accumulator is the same question in the other direction: `u16 acc`
+  // stepped by 64 WRAPS at 65536 and the closed form does not, so the two agree for 1024
+  // iterations and then do not.
+  expect(
+    unreduceAccumulators(
+      fill({
+        locals: [
+          { name: 'acc', type: T.u(16) },
+          { name: 'i', type: T.s(32) },
+        ],
+      }),
+      GBA,
+    ),
+  ).toBeNull();
+  // (d) …and a pointee with no size this file can name — `void *`, a struct — is unknown, not one.
+  expect(unreduceAccumulators(ptrWalk(T.ptr(T.void()), intInit), GBA)).toBeNull();
+});
+
+test('an accumulator and an init in the SAME units still relate', () => {
+  // The gate is a units check and not a pointer ban: `p` and the init are both `u16 *`, so the
+  // closed form's `+` scales by 2 exactly as `p + 32` does.
+  const ptrInit: Expr = { k: 'cast', to: T.ptr(T.u(16)), e: c(0x03000900) };
+  expect(emit(unreduceAccumulators(ptrWalk(T.ptr(T.u(16)), ptrInit), GBA))).toContain('(u16 *)50333952 + (i << 5)');
+});
+
+test('a stride the frontend spelled as a constant expression still relates', () => {
+  // 256 does not fit Thumb's `add rd, #imm8`, so agbcc emits `mov #128 / lsl #1` and the recovered
+  // step is the NODE `128 << 1`. Every stated scope condition holds — start 0, counter steps by 1,
+  // the stride is a constant power of two — so refusing on the spelling refuses the class's own
+  // member. synthetic:offgiv3 is the row.
+  expect(emit(unreduceAccumulators(folded({ accStep: shl(c(128), c(1)) }), GBA))).toContain(
+    '*(s32 *)67109080 = a1 + (i << 8);',
+  );
+  // …and the same for the other two ways a constant stride is spelled arithmetically
+  expect(emit(unreduceAccumulators(folded({ accStep: mul(c(8), c(8)) }), GBA))).toContain('a1 + (i << 6);');
+  expect(emit(unreduceAccumulators(folded({ accStep: plus(c(60), c(4)) }), GBA))).toContain('a1 + (i << 6);');
+  // a folded stride that is still not a power of two is still refused
+  expect(unreduceAccumulators(folded({ accStep: plus(c(40), c(8)) }), GBA)).toBeNull();
+});
+
+test('a zero init leaves the scaled counter standing alone', () => {
+  // `0 + (i << 6)` is a spelling no source writes. Reached on synthetic:nestedloop:mwcc_242_81,
+  // whose accumulator starts at 0 — a PPC row, in a lever whose gate census is agbcc-shaped.
+  expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).toContain('*(s32 *)67109080 = i << 6;');
+  expect(emit(unreduceAccumulators(folded({ init: c(0) }), GBA))).not.toContain('0 +');
 });
