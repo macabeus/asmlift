@@ -1,6 +1,5 @@
-// Gates for the five questions a dataset AUDIT asks and no suite asked before it. Each is the
-// mechanical half of a review finding — a defect this repository actually shipped, reduced to the
-// part a machine can decide. The judgement half stays with the reviewer, and is said so at each.
+// Gates for the five questions a dataset AUDIT asks. Each is the mechanical half of one — the part
+// a machine can decide; the judgement half stays with the reviewer, and is said so at each.
 //
 // Why here and not in `authored-facts.test.ts`: that file polices whether a row's authored facts
 // agree with the function the compiler saw. These police the DATASET AS A WHOLE — one row against
@@ -181,9 +180,9 @@ describe('no synthetic row is another one alpha-renamed', () => {
 
 // ── 4. the C++ specs are held to the C specs' rules ───────────────────────────────────────────
 //
-// `SYNTHETIC_CPP` is a second export, and every authored-fact gate reads `SYNTHETIC`. The specs
-// were therefore unread by any of them — which is how `extern "C"` came to survive into a parsed
-// return type as `"C" void`, a defect no suite could see because no suite looked.
+// `SYNTHETIC_CPP` is a second export, and every authored-fact gate reads `SYNTHETIC`, so nothing
+// holds the C++ specs to those rules unless it names the second export. An `extern "C"` linkage
+// specifier parsed into the return type — `"C" void` — is what a gate-less second export lets past.
 describe('the C++ specs answer to the same authored-fact rules as the C ones', () => {
   it('each src yields exactly one definition of its symbol', () => {
     const noOracle = SYNTHETIC_CPP.filter((s) => typeof oracleFor('', s.sym, s.src) === 'string').map((s) => s.sym);
@@ -238,8 +237,8 @@ describe('every FeatureDef demonstrates the tag it defines', () => {
 // `project:sym[:toolchain]` is reserved for benchmark rows — it promises a `bench regression` can
 // re-run the claim. `citations.test.ts` holds that for packages/ and docs/ and deliberately
 // excludes the benchmark's own sources, which manipulate row ids as DATA. The dataset FILES are
-// not that: they are prose, and 19 sites in them had come to spell klonoa checkout functions as
-// rows. This scans the prose and leaves the code out.
+// not that: they are prose, and a citation there promises a row `bench regression` can re-run.
+// This scans the prose and leaves the code out.
 describe('the dataset cites only benchmark rows that exist', () => {
   const DATASET = join(import.meta.dirname, '..', 'dataset');
   const rows = (
