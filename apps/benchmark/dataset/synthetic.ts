@@ -2577,6 +2577,49 @@ export const SYNTHETIC: SynthSpec[] = [
     },
   },
 
+  // THE COUNTER'S START, WHEN IT IS THE LITERAL 0 — `offgiv` is `offloop` with the `+ 4` bias
+  // removed, and it is the isolate that separates this family's two mechanisms. It scores the
+  // SAME 3 and its winner carries no `/expr-home` (`signed/vol-store` against `offloop`'s
+  // `signed/expr-home/vol-store`), so the residual is not the value home: it is the
+  // strength-reduced induction variable's init copy, alone.
+  //
+  // WHAT THE RESIDUAL ACTUALLY IS, because this family's prose got it wrong once. It is NOT the
+  // zero-trip guard. Moving the copy below the guard by hand, in asmlift's own emitted C, still
+  // scores 3 — while deleting the induction variable outright and re-deriving its value
+  // (`gDma[0] = (s32)(p + (i << 6));`) is byte-exact WITH the guard and WITHOUT it, both. The
+  // guard is irrelevant in either direction; the un-reduction is the whole 3.
+  //
+  // AND IT IS THE `/unreduce` FAMILY, one class its lever could not reach. `dmafill` and friends
+  // start the counter at the PARAMETER `lo`, so the compiler-created giv's init is
+  // `base + lo * 64` — it NAMES the start, and the substitutional closed form `INIT[lo := i]`
+  // recovers it. Start the counter at a constant and agbcc folds `p + (0 << 6)` to `p` before
+  // anything reaches the asm: the start term is GONE from the init, and the same loop needs the
+  // ADDITIVE closed form `INIT + (i << 6)` instead. Same giv, same compiler pass, other pre-image.
+  //
+  // WHY THE ISOLATE HAS TO LOOK LIKE THIS, established by compiling four rejected drafts of it.
+  // The class needs all three of: (a) the counter's start is the literal 0, or nothing folds;
+  // (b) some OTHER use pins the counter, here `p[i]` — with the counter unused agbcc reverses the
+  // loop into a countdown on the trip count and the reduced spelling matches outright (measured:
+  // MATCH); and (c) the base arrives in a register from a computation, here the call, so its copy
+  // competes with the loop-invariant hoist for the preheader slot — with a base that is already a
+  // parameter the copy is free and the row MATCHes too (measured: MATCH). A draft missing any one
+  // of the three is not an inhabitant.
+  {
+    sym: 'offgiv',
+    src:
+      'void *getbuf(s32 k);\n' +
+      '#define gDma ((volatile s32 *)0x040000d4)\n' +
+      'void offgiv(s32 k, s32 n){ u8 *p; s32 i;' +
+      ' p = (u8 *)getbuf(k);' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gDma[0] = (s32)(p + (i << 6));' +
+      ' gDma[2] = p[i]; } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void offgiv(s32 k, s32 n);',
+    proto: { getbuf: { params: 1 }, offgiv: { returnsVoid: true } },
+  },
+
   {
     sym: 'offhi_split',
     src:
