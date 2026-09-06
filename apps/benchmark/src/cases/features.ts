@@ -34,6 +34,11 @@ export { KNOWN_FEATURES };
  *  and are absent on purpose: kleod spells several globals as address macros
  *  (`#define gStreamPtr (*(u8**)0x03004D84)`), which emit a raw `.word` rather than a symbol, and
  *  `union`/`bitfield` need the project's headers to resolve. */
+/** A `struct`/`union` DEFINITION's members are not locals. The body a floor is handed starts at
+ *  the first `{` in `src`, which for a row opening with an aggregate definition is the
+ *  aggregate's brace — so the members would otherwise be counted as declaration statements. */
+const withoutAggregates = (b: string): string => b.replace(/\b(?:struct|union)\b[^{;]*\{[^{}]*\}/g, ' ');
+
 export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: string) => boolean> = {
   arithmetic: (b) => /[+%]|(?<!-)-(?!>)|(?<!\/)\/(?![/*])|\*/.test(b),
   array: (b) => /\[/.test(b),
@@ -58,14 +63,15 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // evidence. Which local goes uninitialised, and on which path, stays a human call.
   'uninit-local': (b) =>
     /(?:^|[;{}])\s*(?:(?:unsigned|signed|const|struct|union)\s+)*(?:void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)\s+\**\s*[A-Za-z_][\w\s,*]*;/.test(
-      b,
+      withoutAggregates(b),
     ),
   continue: (b) => /\bcontinue\b/.test(b),
   // The necessary condition is a UNARY `&` on an identifier — `use(&w)`, `*p = &tmp`. `&&` and a
-  // binary `&` are excluded by requiring the character before it to be neither an identifier
-  // character, nor a closing `)`/`]`, nor another `&`. Whether the address-taken object is the one
-  // the diff turns on stays a human call.
-  'stack-addr': (b) => /(?:^|[^\w)\]&])&(?!&)\s*[A-Za-z_]/.test(b),
+  // binary `&` are excluded by requiring the nearest NON-SPACE character before it to be neither
+  // an identifier character, nor a closing `)`/`]`, nor another `&` — the whitespace has to be
+  // skipped, or a spaced binary `a & b` passes. Whether the address-taken object is the one the
+  // diff turns on stays a human call.
+  'stack-addr': (b) => /(?:^|[^\w)\]&\s])\s*&(?!&)\s*[A-Za-z_]/.test(b),
 
   // The necessary condition is a counted loop whose induction variable is DECLARED narrow —
   // `s16 i; … for (i = 0; …)`. BOTH halves are required, because either alone is a different tag:
@@ -90,6 +96,14 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // original used, and whether that is what the diff turns on, is the judgement.
   'guard-init': (b) => /\bfor\s*\(\s*\w+\s*=\s*0\s*;/.test(b),
 
+  // A pre-update value needs a loop for the update to be hoisted above. WHICH of the three shapes
+  // the row turns on — condition, exiting edge, or a value read after the loop — is the judgement.
+  'loop-preupdate': (b) => /\bfor\s*\(|\bwhile\s*\(|\bdo\b/.test(b),
+
+  // A device access is a `volatile` one. Whether that access is what the diff turns on stays the
+  // judgement.
+  'device-access': (b) => /\bvolatile\b/.test(b),
+
   // A merged value chain needs a branching construct AND more than one local for the arms to
   // decide. COUNTED ACROSS DECLARATION STATEMENTS, not within one: `void *a; void *b;` and
   // `void *a, *b;` declare the same two locals, and an earlier version of this rule required the
@@ -97,6 +111,7 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // decides the same four locals, for spelling them one per line. Split into statements rather
   // than swept with a /g/ regex, because a match that CONSUMES the `;` leaves the next declaration
   // without the separator it would have anchored on, and consecutive declarations then count once.
+  // An aggregate DEFINITION's members are stripped first — they are not locals for arms to decide.
   // Whether the arms all decide the SAME ones, and whether those values are computed rather than
   // already named, stays a human call.
   'merge-chain': (b) => {
@@ -106,7 +121,7 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
     const DECL =
       /^\s*(?:(?:unsigned|signed|const|struct|union)\s+)*(?:void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)\s+[^;{}()]*$/;
     return (
-      b
+      withoutAggregates(b)
         .split(/[;{}]/)
         .filter((stmt) => DECL.test(stmt))
         .reduce((n, stmt) => n + stmt.split(',').length, 0) >= 2
@@ -295,8 +310,14 @@ export function sourceEvidence(funcC: string): Set<string> {
   if (hasControllingConnective(body)) out.add('short-circuit');
   if (/\bsizeof\b/.test(body)) out.add('sizeof');
   if (/<<|>>/.test(body)) out.add('shift');
-  // require a LEFT operand so `&x` (address-of) and `&&`/`||` do not count
-  if (/[\w)\]]\s*&(?!&)/.test(body) || /[\w)\]]\s*\|(?!\|)/.test(body) || /\^|~/.test(body)) {
+  // require a LEFT operand so `&x` (address-of) and `&&`/`||` do not count. A cast's closing
+  // paren is NOT a left operand — `(u32)&tmp` is address-of — so casts come out first. (A
+  // parenthesised MACRO operand would be blanked too; no such row exists in the corpus today.)
+  const noCasts = body.replace(
+    /\(\s*(?:struct|union|enum|const|unsigned|signed|volatile|void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)[\w\s]*\**\s*\)/g,
+    ' ',
+  );
+  if (/[\w)\]]\s*&(?!&)/.test(noCasts) || /[\w)\]]\s*\|(?!\|)/.test(noCasts) || /\^|~/.test(noCasts)) {
     out.add('bitwise');
   }
   return out;
