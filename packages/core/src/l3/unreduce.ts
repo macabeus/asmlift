@@ -128,10 +128,11 @@
 //
 // AND THE TABLE ANSWERS FOR A SMALLER POPULATION STILL. Instrumented over those same 834 trees,
 // the 16 gates are consulted 36 times and only four ever decide: `acc-live-outside` 14,
-// `acc-read-at-step` 10, `unrelated-step` 7, `acc-multi-assign` 2, admit 3. That census was taken
-// when `unrelated-step` and `folded-start` were ONE gate, so its 7 counts two questions as one and
-// the split has not been re-censused; the shape of the finding (four gates decide, the rest are
-// held by their tests) is what it is good for, not the 7. The other eleven —
+// `acc-read-at-step` 10, `unrelated-step` 7, `acc-multi-assign` 2, admit 3. `unrelated-step` has
+// since been split into the FIVE reasons `relate` can decline for (`scale-mismatch`,
+// `unrelated-start`, `nonzero-start`, `step-ratio`, `stride-not-shift`), so its 7 counted five
+// questions as one and the split has not been re-censused; the shape of the finding (four gates
+// decide, the rest are held by their tests) is what it is good for, not the 7. The others —
 // `moved-read-aliasable`, which the device-memory argument above rests on, among them — are held
 // by their unit tests and by the fuzz, and by nothing the corpus has yet shown them. Short-circuit
 // order hides a later gate behind an earlier one, so this counts FIRST rejections and not reach.
@@ -140,7 +141,7 @@
 // shape of gate table, and it already handles the `if (guard) do {} while` rotation this file
 // cannot see. The split is by the induction variable's TYPE rather than by the question asked, and
 // it costs the duplication a reader will notice — `counter-roles` ≈ `acc-multi-assign` +
-// `acc-live-outside`, `walk-stride` ≈ `unrelated-step`, `body-exit` ≈ `continue-in-body`. Folding
+// `acc-live-outside`, `walk-stride` ≈ `scale-mismatch`, `body-exit` ≈ `continue-in-body`. Folding
 // them into one pass over one table is a real improvement and a real refactor; the gate this file
 // was actually MISSING from that table (`volatile-counter`) is in it now, which is the part that
 // could not wait.
@@ -163,6 +164,14 @@ import {
 import { type Gate, firstRejection } from './gates';
 import { type VarTypes, declaredTypes, exprCType, ptrElemBytes } from './typing';
 
+/** Why `relate` refused — one tag per question it asks, and the five gates below test one tag
+ *  each. `relate` is the only place that knows which question failed, so it says so rather than
+ *  handing back a bare null the gate table has to re-derive from a proxy. */
+type RelDecline = 'scale-mismatch' | 'unrelated-start' | 'nonzero-start' | 'step-ratio' | 'stride-not-shift';
+
+/** `relate`'s answer: the closed form, or the reason there is none. */
+type Relation = { readonly ok: Expr } | { readonly declined: RelDecline };
+
 /** One (loop, accumulator) pair as the gates read it. */
 interface AccCtx {
   /** the accumulator is assigned exactly twice: its init above the loop and its step inside */
@@ -184,11 +193,10 @@ interface AccCtx {
   /** the accumulator's own step and its init count in DIFFERENT C units, so the closed form's
    *  `+` would scale by the wrong element size (or by none) */
   unitsDisagree: boolean;
-  /** the init relates to the counter's start by the accumulator's own stride */
-  related: boolean;
-  /** the counter starts at a CONSTANT, so whatever the source scaled by it the compiler folded
-   *  away before the asm — there is no start term left in the init to substitute for */
-  foldedStart: boolean;
+  /** WHY `relate` refused, or null where it produced a closed form. One tag per question asked,
+   *  so each gate below tests one reason and its `why` is true of its whole population — a gate
+   *  routed on a PROXY for a decision `relate` has already taken is a `why` that drifts. */
+  declined: RelDecline | null;
   /** the init reads a name something in the motion region assigns */
   initLoopVar: boolean;
   /** the init reads a name whose address the function hands out */
@@ -286,32 +294,48 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
     guardedBy: 'unreduce.test.ts: a `continue` in the body declines',
     rejects: (c) => c.hasContinue,
   },
+  // ── the five refusals `relate` can produce, one gate each ─────────────────────────────────
+  //
+  // These five PARTITION the non-null `declined` tags, so together they reject exactly what a
+  // single `!related` rule rejected — and each one's `why` is true of its whole population by
+  // construction rather than by a reader's reading. That is the point: routing a gate on a tree
+  // FACT (`the start is a constant`) rather than on the decision `relate` actually took makes the
+  // `why` drift the moment a second reason shares the fact, which is how one conflated gate
+  // becomes two conflated gates.
   {
-    // The FIRST of the two questions `unrelated-step` used to answer under one id. Where the
-    // counter starts at a CONSTANT, the source's `start * K` term folded away before the asm, so
-    // the init cannot name the start and substitution has nothing to work on. Such an init is
-    // recoverable additively (`INIT + (ctr << s)`) in one corner and not at all outside it;
-    // `relate` decides which, and this gate publishes the refusal for the rest.
-    id: 'folded-start',
-    why: 'a counter starting at a constant leaves no start term in the init, and only a zero relates',
-    sound: true,
-    guardedBy: 'unreduce.test.ts: a counter-free init declines unless its start is the constant 0',
-    rejects: (c) => c.foldedStart && !c.related,
-  },
-  {
-    // …and the SECOND: the counter's start is symbolic, so it cannot have folded, and the init
-    // either does not name it or names it under a scale that does not carry the whole stride.
-    //
-    // The two clauses PARTITION `!related` — `foldedStart` decides which gate owns a refusal, and
-    // together they reject exactly what the single `!c.related` rule rejected before the split.
-    // The partition is what makes each guard differential: overlapping them would leave either
-    // gate ablatable with the other still catching its rows, which is a `guardedBy` that names a
-    // test the gate's removal does not break.
-    id: 'unrelated-step',
+    id: 'scale-mismatch',
     why: 'an init whose scale does not carry the accumulator’s whole stride proves nothing',
     sound: true,
     guardedBy: 'unreduce.test.ts: a stride that does not match the init’s scale declines',
-    rejects: (c) => !c.foldedStart && !c.related,
+    rejects: (c) => c.declined === 'scale-mismatch',
+  },
+  {
+    id: 'unrelated-start',
+    why: 'a symbolic start the init does not name exactly once leaves nothing to substitute for',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: an init that never names the counter declines',
+    rejects: (c) => c.declined === 'unrelated-start',
+  },
+  {
+    id: 'nonzero-start',
+    why: 'a counter starting at a nonzero constant leaves a bias term this file does not spell',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: a counter-free init declines unless its start is the constant 0',
+    rejects: (c) => c.declined === 'nonzero-start',
+  },
+  {
+    id: 'step-ratio',
+    why: 'a counter stepping by more than one leaves the ratio K/d, which is not a shift',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: a counter-free init declines when the counter does not step by one',
+    rejects: (c) => c.declined === 'step-ratio',
+  },
+  {
+    id: 'stride-not-shift',
+    why: 'a stride that is not a constant power of two has no shift to carry it',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: a counter-free init declines when the accumulator’s stride is not a power of two',
+    rejects: (c) => c.declined === 'stride-not-shift',
   },
   {
     id: 'init-loop-var',
@@ -388,7 +412,7 @@ function stepOf(s: Stmt, name: string): Expr | null {
  *  spelled — a scaled shift, a product, and the bare index — and each is verified rather than
  *  assumed: the substituted subterm must be structurally the counter's start, and the stride must
  *  come out of the scale. */
-function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr | null {
+function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relation {
   const kConst = k.k === 'const' ? k.value : null;
   const idx = (): Expr => ({ k: 'var', name: ctr });
   const holds = (e: Expr): boolean => [...subterms(e)].some((x) => exprEquals(x, start));
@@ -430,9 +454,10 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr 
   // re-spell one.
   //
   // `!== 1` — zero: the init does not depend on the counter. two: which one is the index?
-  const substituted = startOccurrences(init, start) === 1 ? rec(init) : null;
+  const occurrences = startOccurrences(init, start);
+  const substituted = occurrences === 1 ? rec(init) : null;
   if (substituted !== null) {
-    return substituted;
+    return { ok: substituted };
   }
   // …AND THE FOLDED FORM AS THE FALLBACK. Note that the occurrence COUNT above cannot be trusted
   // to route this on its own: where the start is the constant 0, every unrelated literal zero in
@@ -442,7 +467,13 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr 
   // own scale, and an `index` node on that path refuses. So the misrouting costs reach, not
   // soundness — and trying `rec` first and asking about the START's shape second fixes the reach
   // without touching the safety argument.)
-  return start.k === 'const' ? relateFolded(init, start, ctr, k, d) : null;
+  if (start.k !== 'const') {
+    // A symbolic start cannot have folded, so the init either does not name it at all or names it
+    // twice (and which occurrence is the index is not decidable) — `unrelated-start`; or it names
+    // it once and `rec` refused the scale — `scale-mismatch`.
+    return { declined: occurrences === 1 ? 'scale-mismatch' : 'unrelated-start' };
+  }
+  return relateFolded(init, start, ctr, k, d);
 }
 
 /** THE OTHER relation, and it is the same one after CONSTANT FOLDING. `relate` above recovers the
@@ -476,18 +507,19 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr 
  *      so a second spelling would double the fan and buy no score. The shift is what this class's
  *      references spell.
  *  Each is pinned by its own unit test; none is reached by a corpus row today. */
-function relateFolded(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr | null {
-  if (start.k !== 'const' || start.value !== 0 || d !== 1 || k.k !== 'const') {
-    return null;
+function relateFolded(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relation {
+  if (start.k !== 'const' || start.value !== 0) {
+    return { declined: 'nonzero-start' };
   }
-  const step = k.value;
-  if (step <= 0 || (step & (step - 1)) !== 0) {
-    return null; // not a power of two, so no shift carries the stride
+  if (d !== 1) {
+    return { declined: 'step-ratio' };
+  }
+  const step = k.k === 'const' ? k.value : 0;
+  // not a constant power of two in shift range, so no shift carries the stride
+  if (step <= 0 || (step & (step - 1)) !== 0 || Math.log2(step) >= 31) {
+    return { declined: 'stride-not-shift' };
   }
   const sh = Math.log2(step);
-  if (sh >= 31) {
-    return null;
-  }
   const idx: Expr = { k: 'var', name: ctr };
   // `sh === 0` is the counter standing on its own — `i << 0` is the same value spelled worse, and
   // `rec`'s branch (c) already writes the bare counter for the substitutional case.
@@ -495,7 +527,7 @@ function relateFolded(init: Expr, start: Expr, ctr: string, k: Expr, d: number):
   // The INIT stays on the LEFT: it is the base the source names, and `rec` builds the same shape
   // for the same loop where the fold did not happen. Product operand order is `/mulfirst`'s
   // question, not this file's.
-  return { k: 'bin', op: '+', l: init, r: scaled };
+  return { ok: { k: 'bin', op: '+', l: init, r: scaled } };
 }
 
 /** how many times the counter's start stands as a subterm of the init. ONE is the substitutional
@@ -765,8 +797,7 @@ export function unreduceAccumulators(
         counterAddrTaken: addrTakenIn(sfn.body, ctr),
         counterVolatile: ctrLocal?.volatile === true || ctrLocal?.pointeeVolatile === true,
         hasContinue: hasContinueIn(loop.body),
-        related: closed !== null,
-        foldedStart: startStmt.value.k === 'const',
+        declined: 'ok' in closed ? null : closed.declined,
         // `evaluated`, not `loop.body`: a `for`'s counter is stepped in `loop.inc`
         initLoopVar: [...namesUnder(initStmt.value)].some((n) => assignCount(evaluated, n) > 0),
         initNameEscapes: [...namesUnder(initStmt.value)].some((n) => addrTakenIn(sfn.body, n)),
@@ -785,7 +816,7 @@ export function unreduceAccumulators(
       if (accessesIn(initStmt.value).length > 0 && deviceWritesMemory(armed, triggers)) {
         needsProof = true;
       }
-      rewrites.set(cand.name, closed!);
+      rewrites.set(cand.name, (closed as { ok: Expr }).ok);
       deletedInits.add(initStmt);
       deletedLocals.add(cand.name);
     }

@@ -130,10 +130,13 @@ const folded = (o: { start?: Expr; accStep?: Expr; ctrStep?: Expr; init?: Expr }
     },
   ]);
 
-/** the gate context `folded()` produces, for the ablation tests — every field but the two this
- *  family turns on is the accepted fixture's, so a rejection is attributable to the edit. */
+/** The gate context `folded()` produces, for the ablation tests — every field but `declined` is
+ *  the accepted fixture's, so a rejection is attributable to the edit. `declined` is stated rather
+ *  than derived because it IS the thing under test: each of the five relation gates owns exactly
+ *  one tag, and every test that states one also asserts the pass itself declines on the matching
+ *  tree, so a stale tag cannot pass alone. */
 const foldedCtx = (
-  o: { start?: Expr; init?: Expr } = {},
+  o: { declined?: Parameters<(typeof UNREDUCE_GATES)[number]['rejects']>[0]['declined'] } = {},
 ): Parameters<(typeof UNREDUCE_GATES)[number]['rejects']>[0] => ({
   assigns: 2,
   addrTaken: false,
@@ -145,8 +148,7 @@ const foldedCtx = (
   counterAddrTaken: false,
   counterVolatile: false,
   hasContinue: false,
-  related: unreduceAccumulators(folded(o), GBA) !== null,
-  foldedStart: (o.start ?? c(0)).k === 'const',
+  declined: o.declined ?? null,
   initLoopVar: false,
   initNameEscapes: false,
   movedEffect: false,
@@ -169,32 +171,36 @@ test('a folded init whose stride is the counter’s own needs no shift', () => {
 test('a counter-free init declines unless its start is the constant 0', () => {
   // SCOPE, and the reason it is a refusal rather than a widening: the general closed form is
   // `INIT + (ctr - start) * (K / d)`, and a non-zero start spells a bias term no corpus row asks
-  // for. This is `folded-start`'s own population — the start IS a constant, and it is not 0.
+  // for. This is `nonzero-start`'s own population — the start IS a constant, and it is not 0.
   expect(unreduceAccumulators(folded({ start: c(1) }), GBA)).toBeNull();
   // …and ablating the gate is what makes the guard differential rather than decorative: with
-  // `folded-start` gone, `unrelated-step` does NOT catch this row, because it asks `!related` and
-  // the reason this one is refused is the start's value, not the stride.
-  expect(firstRejection(without(UNREDUCE_GATES, 'folded-start'), foldedCtx({ start: c(1) }))).toBeNull();
+  // `nonzero-start` gone, no other gate catches this row — each of the five owns one tag.
+  expect(firstRejection(without(UNREDUCE_GATES, 'nonzero-start'), foldedCtx({ declined: 'nonzero-start' }))).toBeNull();
 });
 
-test('a counter-free init whose start is SYMBOLIC is `unrelated-step`, not `folded-start`', () => {
-  // The two halves of the refusal `unrelated-step` used to answer alone. A symbolic start cannot
-  // have folded, so an init that does not name it is simply not a function of the counter — and
-  // the additive form is unavailable, because re-deriving `ctr - start` would put a new read of
-  // the start expression at every use, which none of the five re-evaluation gates asks about.
-  const s = folded({ start: v('a1'), init: v('a0') });
-  expect(unreduceAccumulators(s, GBA)).toBeNull();
-  expect(firstRejection(UNREDUCE_GATES, foldedCtx({ start: v('a1'), init: v('a0') }))).toBe('unrelated-step');
+test('an init that never names the counter declines', () => {
+  // A symbolic start cannot have folded, so an init that does not name it is simply not a function
+  // of the counter — and the additive form is unavailable, because re-deriving `ctr - start` would
+  // put a new read of the start expression at every use, which none of the five re-evaluation
+  // gates asks about. `unrelated-start`'s own population, and no other gate covers it.
+  expect(unreduceAccumulators(folded({ start: v('a1'), init: v('a0') }), GBA)).toBeNull();
+  expect(
+    firstRejection(without(UNREDUCE_GATES, 'unrelated-start'), foldedCtx({ declined: 'unrelated-start' })),
+  ).toBeNull();
 });
 
 test('a counter-free init declines when the counter does not step by one', () => {
   // the closed form would carry the ratio `K / d`, which is not a shift when `d` is not 1
   expect(unreduceAccumulators(folded({ ctrStep: c(2) }), GBA)).toBeNull();
+  expect(firstRejection(without(UNREDUCE_GATES, 'step-ratio'), foldedCtx({ declined: 'step-ratio' }))).toBeNull();
 });
 
 test('a counter-free init declines when the accumulator’s stride is not a power of two', () => {
   expect(unreduceAccumulators(folded({ accStep: c(48) }), GBA)).toBeNull();
   expect(unreduceAccumulators(folded({ accStep: v('a1') }), GBA)).toBeNull();
+  expect(
+    firstRejection(without(UNREDUCE_GATES, 'stride-not-shift'), foldedCtx({ declined: 'stride-not-shift' })),
+  ).toBeNull();
 });
 
 test('a folded init that READS MEMORY still answers to the device-write proof gate', () => {
@@ -233,9 +239,12 @@ test('a stride that does not match the init’s scale declines', () => {
     },
   ]);
   expect(unreduceAccumulators(s, GBA)).toBeNull();
+  expect(
+    firstRejection(without(UNREDUCE_GATES, 'scale-mismatch'), foldedCtx({ declined: 'scale-mismatch' })),
+  ).toBeNull();
 });
 
-test('an init that never names the counter declines', () => {
+test('an init that never names a symbolic counter start declines, in a `while` too', () => {
   const s = fill({}, [
     set('i', v('a0')),
     set('acc', v('a1')),
