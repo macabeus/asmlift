@@ -304,7 +304,11 @@ export const FEATURES: readonly FeatureDef[] = [
       'derives from it.',
     example: {
       c: 'int b = 0; while (((i >> b++) & 1) == 0) ; return b;',
-      asm: '\tasr\tr0, r0, r1\t@ the shift reads the OLD b\n\tadd\tr1, r1, #0x1\t@ b++ hoisted ABOVE the test\n\tcmp\tr0, #0',
+      asm:
+        '\tasr\tr0, r0, r1\t@ the shift reads the OLD b\n' +
+        '\tand\tr0, r0, r3\n' +
+        '\tadd\tr1, r1, #0x1\t@ b++ hoisted ABOVE the test\n' +
+        '\tcmp\tr0, #0',
       toolchain: 'agbcc',
     },
     seeAlso: ['loop', 'do-while', 'nested-loop'],
@@ -1078,10 +1082,10 @@ export const FEATURES: readonly FeatureDef[] = [
     evidence: 'judgement',
     summary: 'a C++ member function, with its implicit `this`',
     detail:
-      'A C++ member function: the object is the implicit first argument. The two rows that carry ' +
-      'it measure the member through an `extern "C"` wrapper — the symbol both decompilers can ' +
-      'spell — so what is scored is the member ACCESS through that pointer, not a mangled name ' +
-      'or the C++ calling convention; a mangled-method axis is future dataset work. ' +
+      'A C++ member function: the object is the implicit first argument, which is what changes the ' +
+      'calling convention. Where a row reaches the member through an `extern "C"` wrapper — the ' +
+      'symbol both decompilers can spell — what is scored is the member ACCESS through that ' +
+      'pointer rather than a mangled name. ' +
       "The row's `language` field records that it is C++.",
     seeAlso: ['call', 'struct', 'pointer'],
   },
