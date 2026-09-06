@@ -40,8 +40,8 @@
 // on the region plan) still run. What the pairing can get WRONG is bytes, and one qualifier.
 import { addrConst, inRange } from './address';
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, stmtExprs, stmtLists } from './ast';
-import { type BaseKey, baseSites, hoistBaseLocals, parseBaseKey } from './basecse';
+import { exprChildren, stmtExprs, stmtLists } from './ast';
+import { type BaseKey, baseSites, hoistBaseLocals, leafId, parseBaseKey } from './basecse';
 import { type Gate, firstRejection } from './gates';
 import type { HoistPlacement } from './hoist';
 import { applyScopedBasePlan, planScopedBases, scopedBaseKey } from './scopebase';
@@ -185,9 +185,9 @@ export interface HomeSplitOpts {
   readonly admission?: readonly Gate<HomeSplitCtx>[];
 }
 
-/** A leaf deref base's identity, ignoring the access width — `l3/basecse.ts`'s spelling of it. */
-const leafBaseId = (b: Expr): string | null =>
-  b.k === 'const' ? `c:${b.value}` : b.k === 'addr' ? `a:${b.name}` : null;
+/** A leaf deref base's identity, ignoring the access width — `l3/basecse.ts`'s spelling of it,
+ *  taken from that module rather than re-spelled here, and `null` for every other base kind. */
+const leafBaseId = (b: Expr): string | null => (b.k === 'const' || b.k === 'addr' ? leafId(b) : null);
 
 /** Every leaf-based READ in the tree, by base identity — an access reached anywhere but as a
  *  store's own lvalue. A store's lvalue is what `/vol-store` can still qualify; nothing else is. */
@@ -199,13 +199,13 @@ function baseReads(body: Stmt[], out: Set<string>): void {
         out.add(id);
       }
     }
-    childrenOf(e).forEach(visit);
+    exprChildren(e).forEach(visit);
   };
   const walk = (s: Stmt): void => {
     for (const e of stmtExprs(s)) {
       // a store's LVALUE is the one position `/vol-store` reaches, so it is not a read
       if (s.k === 'store' && e === s.lval) {
-        childrenOf(e).forEach(visit);
+        exprChildren(e).forEach(visit);
         continue;
       }
       visit(e);
@@ -224,15 +224,6 @@ function baseReads(body: Stmt[], out: Set<string>): void {
   body.forEach(walk);
 }
 
-const childrenOf = (e: Expr): Expr[] => {
-  const out: Expr[] = [];
-  mapExprChildren(e, (c) => {
-    out.push(c);
-    return c;
-  });
-  return out;
-};
-
 /**
  * The pairing for ONE withheld key: the tree with every OTHER admitted base homed at `placement`,
  * and the withheld one split per region. `homed` is the intermediate — the caller re-checks the
@@ -241,12 +232,8 @@ const childrenOf = (e: Expr): Expr[] => {
  */
 export function splitHomeBases(sfn: SFn, opts: HomeSplitOpts): { homed: SFn; split: SFn } | null {
   const gates = opts.admission ?? HOMESPLIT_GATES;
-  // `null` only at `placement: 'scope'`, and for either of that placement's two refusals
-  // (l3/basecse.ts): no init reached a nested list, or `withholdingKey` left the table admitting
-  // nothing at all — which happens whenever the caller's table admits exactly one key, where the
-  // flat placements still answer with the unhoisted tree. Either way the PIPE has no intermediate
-  // and this pairing declines, the same answer it gives when either half refuses. No inhabitant
-  // yet: every roster admission at `scope` carries `pairings: false`, so no pair reaches here.
+  // `null` only at `placement: 'scope'` (l3/basecse.ts), and no PAIRING roster row sits at that
+  // placement today — so this is a guard rather than a path.
   const homed = hoistBaseLocals(sfn, withholdingKey(opts.gates, opts.key), opts.placement);
   if (homed === null) {
     return null;

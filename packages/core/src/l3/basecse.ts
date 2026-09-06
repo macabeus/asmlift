@@ -18,9 +18,10 @@
 // the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
 // gate can leave one of them inline while the other binds.
 //
-// COVERAGE: the roster is SIX rows over FIVE gate tables (`/basefold` and `/basefold/sinkinit`
-// share one, differing only in placement), and it is a set of hand-picked SUBSETS rather than a
-// narrowness ranking — only `/livebase` ⊇ `/livebase-block` are ordered by inclusion. A table
+// COVERAGE: the roster (rank.ts) is SEVEN rows over FIVE gate tables — two PAIRS share a table and
+// differ only in placement, `/basefold` with `/basefold/sinkinit` and `/orderbase` with
+// `/orderbase/scoped` — and it is a set of hand-picked SUBSETS rather than a narrowness ranking;
+// only `/livebase` ⊇ `/livebase-block` are ordered by inclusion. A table
 // whose predicate cuts across the others therefore carves out a PARTIAL answer, which is what
 // `UNFOLDED_GATES` does. Measured at ONE stated scope, `decompile()`'s default structuring,
 // map-less, one tree per row over the artifact's 363 agbcc rows (23 unstructurable):
@@ -68,11 +69,13 @@
 // — the inline spelling rides beside it in every case and `compareScored` orders by score, so the
 // hint FIRING wrongly costs a candidate compile and never a match. Note which direction that
 // covers: it does not say the flag is free to LOSE. A `/basefold*` candidate that is never
-// enumerated takes whatever it would have won with it (deleting the sunk roster row costs
-// `synthetic:foldsink` and `sa3:sub_803213C` their matches), which is why `index.operandOff` is
-// carried from the lift instead of re-derived, and why a committed pass that can drop it is worth
-// a test (test/basecse.test.ts, the tail-merge describe). Promoting the hint to a default would
-// need this paragraph to say something it does not.
+// enumerated takes whatever it would have won with it — deleting the HEAD roster row costs
+// `synthetic:foldhead` its match — which is why `index.operandOff` is carried from the lift
+// instead of re-derived, and why a committed pass that can drop it is worth a test
+// (test/basecse.test.ts, the "`operandOff` is provenance" describe). WHAT EACH ROW IS WORTH is
+// measured in rank.ts's note on `BASEFOLD_ADMISSIONS`, not here, and the two rows are not worth
+// the same thing. Promoting the hint to a default would need this paragraph to say something it
+// does not.
 //
 // It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a
 // relaxation of the default table. agbcc folds a subscript but keeps an aggregate MEMBER offset in
@@ -104,7 +107,7 @@
 import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { type BaseInit, type HoistPlacement, nameAllocator, placeBaseLocals } from './hoist';
 
@@ -133,7 +136,10 @@ type HoistableBase = HoistableLeaf | HoistableCast;
 const isHoistableLeaf = (e: Expr): e is HoistableLeaf => e.k === 'addr' || e.k === 'const';
 const isHoistableBase = (e: Expr): e is HoistableBase =>
   isHoistableLeaf(e) || (e.k === 'cast' && e.to.kind === 'ptr' && e.volatile !== true && isHoistableLeaf(e.e));
-const leafId = (b: HoistableLeaf): string => (b.k === 'addr' ? `a:${b.name}` : `c:${b.value}`);
+/** A hoistable LEAF's identity, ignoring the access width: `a:<symbol>` or `c:<numeric address>`.
+ *  Exported because `l3/homesplit.ts` identifies bases in this same vocabulary, and two producers
+ *  of one string are two places for the spelling to drift. */
+export const leafId = (b: HoistableLeaf): string => (b.k === 'addr' ? `a:${b.name}` : `c:${b.value}`);
 const baseId = (b: HoistableBase): string => (b.k === 'cast' ? `${leafId(b.e)} <${typeToString(b.to)}>` : leafId(b));
 
 /** The (base, access-shape) key an `index`-of-hoistable-base shares with its reuse siblings. */
@@ -226,7 +232,7 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
       }
       c.ordered.set(k, (c.ordered.get(k) ?? true) && e.baseOrdered === true);
     }
-    for (const ch of exprChildrenOf(e)) {
+    for (const ch of exprChildren(e)) {
       visitExpr(ch, inLoop);
     }
   };
@@ -239,16 +245,6 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
     }
     collect(stmtChildren(s), c, nested);
   }
-}
-
-// local re-export to avoid importing exprChildren twice (mapExprChildren covers rewrite).
-function exprChildrenOf(e: Expr): Expr[] {
-  const out: Expr[] = [];
-  mapExprChildren(e, (c) => {
-    out.push(c);
-    return c;
-  });
-  return out;
 }
 
 /** Rewrite every `index`-of-hoistable-base whose key is hoisted so its base becomes the hoist local. */
@@ -334,9 +330,9 @@ export interface BaseKey {
   unfoldedOffset: boolean;
   /** The base is a REINTERPRET CAST of a leaf (`(struct S *)&gSym`) rather than the leaf itself —
    *  the array-of-struct element shape. Its own field because it is about what the base IS, not
-   *  about how often it is reached, and because every shipped table refuses it: the default
-   *  spelling of a struct element is the inline cast, and homing it is a candidate `/orderbase`
-   *  offers where the assembly licenses it. */
+   *  about how often it is reached, and because every shipped table refuses it EXCEPT
+   *  `ORDERBASE_GATES`, which ablates `cast-base`: the default spelling of a struct element is the
+   *  inline cast, and homing it is a candidate `/orderbase` offers where the assembly licenses it. */
   castBase: boolean;
   /** No access through this base scaled the index before the base was materialized, and at least
    *  one materialized the base first (l3/ast.ts `index.baseOrdered`, from raise/globalshape.ts).
@@ -347,10 +343,13 @@ export interface BaseKey {
    *  symbols have one on both symbol-map arms (`kleod:EntityDeathAnimation`'s `gEntityArray` is 11
    *  of 28 accesses). Per SYMBOL is the right grain here and not a shortcut:
    *  agbcc CSEs the pool word, so one `ldr` is shared by every access of the name and there is one
-   *  order fact to have. The `&&` is therefore vacuous BY CONSTRUCTION — `stampOrderedBases` stamps
-   *  per symbol, so a key's accesses cannot disagree — and what it is really guarding is a pass
-   *  that rebuilt one node and dropped the stamp, which it turns into a refusal rather than a
-   *  half-homed base.
+   *  order fact to have. WITHIN ONE STRUCTURING the `&&` therefore decides nothing:
+   *  `structure/structure.ts`'s `stampOrderedBases` is a post-pass over the finished body that
+   *  stamps per SYMBOL, so the accesses of one key leave it agreeing. What the `&&` guards is a
+   *  LATER pass that rebuilt one node and dropped the stamp — a tree whose stamps are MIXED — and
+   *  what it does there is refuse the key whole rather than half-home it, which no assembly can
+   *  reach and test/basecse.test.ts pins on a hand-built tree ('a key whose accesses DISAGREE on
+   *  the stamp is refused whole, never half-homed').
    *
    *  On agbcc a base-first order is what a declared array produces (`build_array_ref`'s fork) and
    *  what a pointer local's own initializer STATEMENT produces (see raise/globalshape.ts's header
@@ -374,8 +373,10 @@ const reachedOnce = (c: BaseKey): boolean => c.uses < 2;
 export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
   {
     // FIRST, so a cast base attributes here rather than to whichever use-count rule it also trips.
-    // Every table derived from this one inherits it, which is what keeps the widened
-    // `isHoistableBase` inert: the shape is collectable and no shipped admission binds it.
+    // Every table derived from this one inherits it EXCEPT `ORDERBASE_GATES`, which ablates it — so
+    // a cast base is collectable under every table and bound by exactly one roster family.
+    // Censused at `decompile()`'s default structuring, map-less, one tree per row over the
+    // artifact's 404 agbcc rows: `ORDERBASE_GATES` admits 12 keys on 10 rows, 11 of them cast keys.
     id: 'cast-base',
     why: 'a struct element’s reinterpret cast is the inline spelling unless the assembly says the base had a home',
     sound: false,
@@ -482,8 +483,8 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  someone runs it. Enumeration only, no compiles, both arms — `single-cell` spliced out of this
  *  array in process, prototypes only, map-less, over all artifact rows; run twice with the working
  *  tree hashed either side and byte-identical both times. THE ARTIFACT HELD 951 ROWS THAT DAY (358
- *  agbcc, 593 not) and holds 957 (363 / 594) now: this paragraph is at the earlier scope and is not
- *  re-run against the later one, so its per-row fans still stand and its two TOTALS do not.
+ *  agbcc, 593 not) and has grown since: this paragraph is at the earlier scope and is not re-run
+ *  against the later one, so its per-row fans still stand and its two TOTALS do not.
  *  THIRTEEN rows change their distinct-source set, corpus fan 48995 → 42701, and ZERO non-agbcc
  *  rows are reached — the arm easiest to skip, because this table sits on the UNCONDITIONAL half of
  *  the roster and is offered to ido/kmc/mwcc/gcc272 too. READ THAT POPULATION HONESTLY, since a denominator is a rig
@@ -665,6 +666,14 @@ export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[]): readon
  *  `l3/scopebase.ts` spells an `addr` base's identity differently, so a string compare across the
  *  two would silently never match. Every key the tree holds, admitted or not. */
 export function baseSites(sfn: SFn): ReadonlyMap<string, { base: HoistableBase; width: number; signed: boolean }> {
+  return collectFrom(sfn).meta;
+}
+
+/** The whole census for one tree — every field seeded empty and one `collect` walk over the body.
+ *  ONE constructor, because `baseSites` and `admit` must judge the same census: a field added to
+ *  `Collected` and seeded in only one of two copies reads as an empty tally rather than as a type
+ *  error. */
+function collectFrom(sfn: SFn): Collected {
   const c: Collected = {
     count: new Map(),
     order: [],
@@ -676,22 +685,12 @@ export function baseSites(sfn: SFn): ReadonlyMap<string, { base: HoistableBase; 
     ordered: new Map(),
   };
   collect(sfn.body, c, false);
-  return c.meta;
+  return c;
 }
 
 /** The keys `gates` admits, in first-use order, with the census they were judged from. */
 function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys: string[] } {
-  const c: Collected = {
-    count: new Map(),
-    order: [],
-    meta: new Map(),
-    inLoop: new Set(),
-    constOffCount: new Map(),
-    varIndexed: new Set(),
-    operandOff: new Set(),
-    ordered: new Map(),
-  };
-  collect(sfn.body, c, false);
+  const c = collectFrom(sfn);
   const keys = c.order.filter((k) => {
     const offsets = c.constOffCount.get(k);
     return (
