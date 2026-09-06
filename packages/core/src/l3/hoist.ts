@@ -224,7 +224,7 @@ export type HoistPlacement = 'head' | 'first-use' | 'scope';
 export type BaseInitPlacement = HoistPlacement | 'prepend';
 
 /** `sfn.body` rebuilt with `minted` added to its leading base-init run and the whole run placed
- *  per `placement`, plus how many inits ended up away from the head.
+ *  per `placement`, plus which inits ended up away from the head.
  *
  *  `sfn` is both the statements and the DECLARATION ENVIRONMENT the first-use and mention queries
  *  resolve against, so a caller that mints must pass a shell that already declares the new names
@@ -256,8 +256,7 @@ export type BaseInitPlacement = HoistPlacement | 'prepend';
  *  `nested` empty under `scope` means the placement DEGENERATED — every init went exactly where
  *  `first-use` would have put it, so the emitted tree is that placement's spelling under a second
  *  name. A caller offering placements as candidates has to know, or it enumerates one spelling
- *  twice (l3/basecse.ts's `hoistBaseLocals`).
- *  `moved` stays a count: how many inits left the run. */
+ *  twice (l3/basecse.ts's `hoistBaseLocals`). */
 export function placeBaseLocals(
   sfn: SFn,
   minted: readonly BaseInit[],

@@ -299,8 +299,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   where they put it: `scopebase` plans its own locals over `addr`/`const`/`var` leaf bases, while the
   `scope` placement moves a run already minted, over the cast base no leaf pass can spell. A
   placement that lands nothing in a nested list has emitted the flat spelling under a second label,
-  so `hoistBaseLocals` declines there rather than offering it — the roster's dedup rule for base
-  SETS, applied to positions.
+  so `hoistBaseLocals` declines there rather than offering it. That is the roster's dedup rule for
+  base SETS read onto positions, but a WITHDRAWAL in effect rather than a collapse: the roster
+  carries no row at the spelling being refused, so the candidate has no twin to fold into.
   `l3/scopebase.ts` also answers a SECOND question the others do not have, and it is a different
   axis from placement: HOW MANY locals one address gets. Its `REGION_RULES` carry both readings —
   `'whole'` gives a key one local (`/scopebase`), `'per-region'` one per disjoint region
@@ -326,8 +327,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   mentions it nowhere outside the lists it opens, and exactly one of those lists holds it — and it
   reproduces `first-use` exactly where no nested list holds every mention, which is what keeps it a
   position rather than a policy. It is also the only one whose result is not above every use by
-  construction, so `hoistBaseLocals` runs `assertHoistsDominate` over its mints there and nowhere
-  else. The setter half of `stmtLists` (`mapStmtLists`, beside it in `l3/ast.ts`) is what lets the
+  construction, so `hoistBaseLocals` runs `assertHoistsDominate` there and nowhere else, over every
+  init the placer reports having MOVED — the run it inherits from the committed default hoist
+  included, not only the ones it minted itself. The setter half of `stmtLists` (`mapStmtLists`, beside it in `l3/ast.ts`) is what lets the
   rebuild reach a nested list without a second `Stmt`-kind switch.
   `l3/nearbase.ts`'s `prepend` is not a third position: it returns before the query and the sort,
   so it is `[...minted, ...body]` and shares the rebuild only. It is a separate type and not a

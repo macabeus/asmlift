@@ -425,12 +425,12 @@ describe('`scope` is the third placement: the init goes INSIDE the block holding
 });
 
 describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', () => {
-  // A `scope` run that put nothing in a nested list emitted the `first-use` tree — the same
-  // spelling under a second label. `rank.ts` withholds the flat `first-use` row for this gate table
-  // deliberately (ORDERBASE_ADMISSIONS: measured at zero over the four rows where it differs from
-  // `head`), so returning that tree here shipped the withheld candidate under the scoped one's
-  // name. Measured over the two agbcc corpora map-ful: of the 39 functions `ORDERBASE_GATES`
-  // admits, 6 place an init inside a nested list and 33 do not.
+  // A `scope` run that put nothing in a nested list emits the `first-use` tree. `rank.ts` withholds
+  // the flat `first-use` row for this gate table deliberately (ORDERBASE_ADMISSIONS: measured at
+  // zero over the four rows where it differs from `head`), so returning that tree here ships the
+  // withheld candidate under the scoped one's name. Over each project's whole `asm` tree, map-ful:
+  // of the 48 functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do
+  // not — and for 29 of the 41 the withheld spelling is one no other roster row produces.
   const held = (body: Stmt[], locals: SFn['locals'] = []): SFn => ({
     name: 'f',
     params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
@@ -490,9 +490,9 @@ describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', 
 });
 
 describe('`scope` descends through every construct that opens a list, not just `if`', () => {
-  // `stmtLists`/`mapStmtLists` are exhaustive over the five list-carrying kinds; only `if` had a
-  // test. `switch` has real inhabitants in the sa3 checkout, no benchmark row among them:
-  // `Task_809A1C4` sinks two bases into a case arm, in both symbol-map arms.
+  // `stmtLists`/`mapStmtLists` are exhaustive over the five list-carrying kinds. `switch` has real
+  // inhabitants in the sa3 checkout, no benchmark row among them: `Task_809A1C4` sinks one base
+  // into its `case 0` arm and a second into its `case 90`, in both symbol-map arms.
   const around = (s: Stmt): SFn => fn([init('p0', 0x3001100), plain(), s]);
   const inside = (sfn: SFn): unknown => {
     const body = placeBaseLocals(sfn, [], 'scope').body;

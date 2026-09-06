@@ -610,13 +610,14 @@ const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *  AND THE WITHHOLDING ABOVE IS ENFORCED BY THE PLACEMENT, not by this row's absence. `scope`
  *  reproduces `first-use` on every function where no nested list holds all of a base's uses, so a
  *  scoped row that answered there would ship the withheld candidate under this row's name — and it
- *  is the COMMON case, not the corner: over the two agbcc corpora map-ful, of the 39 functions this
- *  gate table admits, 33 place every init in the top-level list and only 6 reach a nested one.
- *  `hoistBaseLocals` DECLINES at `scope` in exactly that case (l3/basecse.ts), which is the roster's
- *  own dedup rule — the same bases in the same POSITION is the same spelling under a second label —
- *  applied to a position instead of to a base set. Measured on `kleod:UpdateCameraScroll` map-ful,
- *  the row that priced the withheld one: 512 of its 512 `/orderbase/scoped` sources placed the init
- *  at the top level, and all 512 are gone.
+ *  is the COMMON case, not the corner: over each project's whole `asm` tree, map-ful, of the 48
+ *  functions this gate table admits, 41 place every init in the top-level list and only 7 reach a
+ *  nested one. `hoistBaseLocals` DECLINES at `scope` in exactly that case (l3/basecse.ts). That is
+ *  the roster's dedup rule read onto a POSITION rather than a base set, but only in its intent: on
+ *  29 of the 41 the flat spelling is one no other row here produces, so the decline WITHDRAWS a
+ *  candidate rather than collapsing a duplicate, and l3/basecse.ts's header prices it. Measured on
+ *  `kleod:UpdateCameraScroll` map-ful, the row that priced the withheld one: 512 of its 512
+ *  `/orderbase/scoped` sources placed the init at the top level, and all 512 are gone.
  *
  *  `pairings: false` on both for the field's own reason — a product is added for a row that demands
  *  the joint spelling, and neither row here demands one. */
@@ -1610,6 +1611,16 @@ export function enumerateCandidates(
           // holds locals the lever never PLACED. Harmless and deliberate: the differential's
           // early return absorbs a name the unshaped tree already fails on, and a renamed local
           // whose def a shape moved below a read is the same wrongness as a placed one.
+          //
+          // KNOWN GAP on the other side of the same diff: a lever that RELOCATES a local it did not
+          // mint contributes no name, so the shape differential does not judge it. The `scope`
+          // placement is the one that does this — it sinks the run `structureChecked` already
+          // committed (l3/basecse.ts judges those itself, over the placer's own report of the
+          // motion) — and closing it here needs that report threaded out to this level. Left open
+          // rather than widened to every relocated local: judging those absolutely would drop
+          // candidates across the whole fan with nothing measured to license it. What keeps it
+          // uninhabited today is `initFirstGuards`, which moves only const or pure-read assigns and
+          // so cannot lift a read of a base local above its init.
           const minted = createdLocals(sfn, alt);
           for (const subset of SHAPE_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.

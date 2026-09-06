@@ -636,9 +636,10 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  the fork is agbcc's and no other compiler has been shown to make it.
  *
  *  ITS REACH IS A FUNCTION OF THE SYMBOL MAP, and unevenly so — a sweep that runs one arm is
- *  evidence about that arm only. Over every cleanly-lifting function of the two agbcc corpora:
- *  klonoa binds 9 of 69 map-ful and ZERO map-less, sa3 29 of 1709 map-less and 30 map-ful.
- *  The klonoa collapse is THIS GATE and not a missing base: ablating `order-licensed` admits 35
+ *  evidence about that arm only, and one that runs a subtree is evidence about the subtree. Over
+ *  every cleanly-lifting function of each project's WHOLE `asm` tree, `asm/matchings` included:
+ *  klonoa binds 18 of 284 map-ful and ZERO map-less, sa3 30 of 1709 map-ful and 29 map-less.
+ *  The klonoa collapse is THIS GATE and not a missing base: ablating `order-licensed` admits 118
  *  map-less klonoa functions where the full table admits none — so the bases are collected and it
  *  is the ORDER EVIDENCE that map-less klonoa does not carry. Why the evidence depends on the map is not
  *  attributed here; instrument `collect`'s `ordered` before assuming. What follows for a reader
@@ -715,12 +716,22 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
  *
  *  `scope` DECLINES, and the overload is how a caller is told: `null` means the placement had
  *  nothing to say about this function, because no init landed inside a nested list. That tree is
- *  not "no answer" — it is byte-for-byte the `first-use` spelling (l3/hoist.ts's `nested`), so
- *  returning it would offer one spelling under two labels, and on a roster whose `first-use` row
- *  for this table is deliberately WITHHELD (rank.ts, ORDERBASE_ADMISSIONS) it would ship the
- *  withheld candidate under the scoped one's name. Measured over the two agbcc corpora, map-ful:
- *  33 of the 39 functions `ORDERBASE_GATES` admits emit a flat spelling under `scope` — 25 of them
- *  the `first-use` one — and only 6 place an init inside a nested list. */
+ *  byte-for-byte the `first-use` spelling (l3/hoist.ts's `nested`), and the roster withholds the
+ *  `first-use` row for this table deliberately (rank.ts, ORDERBASE_ADMISSIONS) — so returning it
+ *  ships the withheld candidate under the scoped row's name.
+ *
+ *  IT WITHDRAWS A SPELLING, it does not collapse a duplicate, and a reader pricing this decline has
+ *  to read it that way. `ORDERBASE_ADMISSIONS` holds exactly two rows, `head` and `scope`, so
+ *  nothing on the roster is ever enumerated at `first-use` for this table and the refused tree has
+ *  no twin to be deduplicated against — its shape and `/volatile` products go with it. Checked
+ *  rather than argued: on `kleod:StreamCmd_SetBGScroll` (fan 11) and `sa3:sub_808A4EC` (fan 40),
+ *  both map-ful and both degenerate here, the `head` source is among the candidates
+ *  `enumerateCandidates` returns and the withheld `first-use` source is not.
+ *
+ *  Over each project's whole `asm` tree, map-ful: 41 of the 48 functions `ORDERBASE_GATES` admits
+ *  emit a flat spelling under `scope` and only 7 place an init inside a nested list. For 29 of the
+ *  41 that flat spelling differs from the `head` row's, so those are the withdrawals; the other 12
+ *  spell what `head` already ships. */
 export function hoistBaseLocals(sfn: SFn, gates?: readonly Gate<BaseKey>[], placement?: 'head' | 'first-use'): SFn;
 export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[], placement: HoistPlacement): SFn | null;
 export function hoistBaseLocals(
