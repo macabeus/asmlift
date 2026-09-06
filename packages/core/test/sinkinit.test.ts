@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { stmtLists } from '../src/l3/ast';
 import { BASECSE_GATES, hoistBaseLocals } from '../src/l3/basecse';
 import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
@@ -484,5 +485,82 @@ describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', 
     const r = placeBaseLocals(sfn, [init('p1', 0x4000000) as BaseInit], 'scope');
     expect(r.moved).toEqual(['p0', 'p1']);
     expect(r.nested).toEqual(['p0', 'p1']);
+  });
+});
+
+describe('`scope` descends through every construct that opens a list, not just `if`', () => {
+  // `stmtLists`/`mapStmtLists` are exhaustive over the five list-carrying kinds; only `if` had a
+  // test. `switch` has real inhabitants — `sa3:Task_809A1C4` sinks two bases into a case arm.
+  const around = (s: Stmt): SFn => fn([init('p0', 0x3001100), plain(), s]);
+  const inside = (sfn: SFn): unknown => {
+    const body = placeBaseLocals(sfn, [], 'scope').body;
+    const lists = (s: Stmt): unknown => stmtLists(s).map((l) => l.map((x) => x.k));
+    return body.map((s) => (s.k === 'assign' ? s.name : stmtLists(s).length === 0 ? s.k : [s.k, lists(s)]));
+  };
+
+  test('a `while` body holding every mention takes the init', () => {
+    expect(inside(around({ k: 'while', cond: c(1), body: [read('p0', 1), plain()] }))).toEqual([
+      'store',
+      ['while', [['assign', 'store', 'store']]],
+    ]);
+  });
+
+  test('a `dowhile` body does too', () => {
+    expect(inside(around({ k: 'dowhile', cond: c(1), body: [plain(), read('p0', 1)] }))).toEqual([
+      'store',
+      ['dowhile', [['store', 'assign', 'store']]],
+    ]);
+  });
+
+  test('a `for` body does, and a mention in its `init`/`inc` — statements no list holds — stops it', () => {
+    const counted = (body: Stmt[], inc: Stmt = plain()): Stmt => ({
+      k: 'for',
+      init: plain(),
+      cond: c(1),
+      inc,
+      body,
+    });
+    expect(inside(around(counted([read('p0', 1)])))).toEqual(['store', ['for', [['assign', 'store']]]]);
+    // the `inc` mentions it and no nested list holds that mention: the init stays above the loop
+    const withInc = around(counted([read('p0', 1)], read('p0', 2)));
+    expect(placeBaseLocals(withInc, [], 'scope').body).toEqual(placeBaseLocals(withInc, [], 'first-use').body);
+  });
+
+  test('one `switch` arm holding every mention takes the init; two arms stop at the switch', () => {
+    const arm = (values: number[], body: Stmt[]) => ({ values, body, fallsThrough: false });
+    const one: Stmt = {
+      k: 'switch',
+      scrutinee: c(1),
+      cases: [arm([0], [plain()]), arm([1], [read('p0', 1)])],
+    };
+    expect(inside(around(one))).toEqual(['store', ['switch', [['store'], ['assign', 'store']]]]);
+    const two: Stmt = {
+      k: 'switch',
+      scrutinee: c(1),
+      cases: [arm([0], [read('p0', 1)]), arm([1], [read('p0', 2)])],
+    };
+    expect(placeBaseLocals(around(two), [], 'scope').body).toEqual(placeBaseLocals(around(two), [], 'first-use').body);
+  });
+
+  test('a `switch` DEFAULT arm is a list like any other — `mapStmtLists` rebuilds it', () => {
+    const sw: Stmt = {
+      k: 'switch',
+      scrutinee: c(1),
+      cases: [{ values: [0], body: [plain()], fallsThrough: false }],
+      default: [read('p0', 1)],
+      defaultAt: 1,
+    };
+    const out = placeBaseLocals(around(sw), [], 'scope').body[1];
+    expect(out.k === 'switch' && out.default?.map((s) => s.k)).toEqual(['assign', 'store']);
+    // the rebuild carries the fields `mapStmtLists` spreads rather than dropping them
+    expect(out.k === 'switch' && out.defaultAt).toBe(1);
+  });
+
+  test('two nesting levels: the descent continues while each level holds every mention', () => {
+    const inner: Stmt = { k: 'while', cond: c(1), body: [read('p0', 1)] };
+    const out = placeBaseLocals(around({ k: 'if', cond: c(1), then: [plain(), inner], else: [] }), [], 'scope').body;
+    const arm = out[1];
+    const loop = arm.k === 'if' ? arm.then[1] : null;
+    expect(loop?.k === 'while' && loop.body.map((s) => s.k)).toEqual(['assign', 'store']);
   });
 });
