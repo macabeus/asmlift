@@ -607,6 +607,17 @@ const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *  instruction-identical. So the two flat placements are one answer here and this is the other, the
  *  way `/basefold`'s pair is one eligibility rule at two positions.
  *
+ *  AND THE WITHHOLDING ABOVE IS ENFORCED BY THE PLACEMENT, not by this row's absence. `scope`
+ *  reproduces `first-use` on every function where no nested list holds all of a base's uses, so a
+ *  scoped row that answered there would ship the withheld candidate under this row's name — and it
+ *  is the COMMON case, not the corner: over the two agbcc corpora map-ful, of the 39 functions this
+ *  gate table admits, 33 place every init in the top-level list and only 6 reach a nested one.
+ *  `hoistBaseLocals` DECLINES at `scope` in exactly that case (l3/basecse.ts), which is the roster's
+ *  own dedup rule — the same bases in the same POSITION is the same spelling under a second label —
+ *  applied to a position instead of to a base set. Measured on `kleod:UpdateCameraScroll` map-ful,
+ *  the row that priced the withheld one: 512 of its 512 `/orderbase/scoped` sources placed the init
+ *  at the top level, and all 512 are gone.
+ *
  *  `pairings: false` on both for the field's own reason — a product is added for a row that demands
  *  the joint spelling, and neither row here demands one. */
 const ORDERBASE_ADMISSIONS: readonly BaseAdmission[] = [

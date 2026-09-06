@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { BASECSE_GATES, hoistBaseLocals } from '../src/l3/basecse';
 import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 import { enumerateCandidates } from '../src/rank';
@@ -102,10 +103,12 @@ describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)
   test('`head` keeps the run at the top; `first-use` moves what it can, and says how much moved', () => {
     const body = [init('p0', 0x3001100), plain(), plain(), read('p0', 2)];
     const sfn = fn(body);
-    expect(placeBaseLocals(sfn, [], 'head')).toEqual({ body, moved: 0 });
+    expect(placeBaseLocals(sfn, [], 'head')).toEqual({ body, moved: 0, nested: [] });
     const sunk = placeBaseLocals(sfn, [], 'first-use');
     expect(sunk.body.map((s) => s.k)).toEqual(['store', 'store', 'assign', 'store']);
     expect(sunk.moved).toBe(1);
+    // a flat placement can put nothing in a nested list, which is what `nested` is for
+    expect(sunk.nested).toEqual([]);
   });
 
   test('a MINTED init obeys the same policy — the minting caller adds no placement of its own', () => {
@@ -243,7 +246,7 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
     const body: Stmt[] = [named('q1', 'gQ1'), named('q0', 'gQ0'), touch('q0'), touch('p0'), touch('q1')];
     const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
     const minted = [named('p0', 'gP0')];
-    expect(placeBaseLocals(sfn, minted, 'prepend')).toEqual({ body: [...minted, ...body], moved: 0 });
+    expect(placeBaseLocals(sfn, minted, 'prepend')).toEqual({ body: [...minted, ...body], moved: 0, nested: [] });
     // …and sinking a prepend result is NOT the same as asking for `first-use` outright, because
     // the run it hands the stable sort is in prepend's order: where first use does not separate a
     // minted init from an existing one, the minted one keeps the lead `prepend` gave it. That is
@@ -416,5 +419,53 @@ describe('`scope` is the third placement: the init goes INSIDE the block holding
       { k: 'if', cond: c(1), then: [init('p0', 0x3001200), read('p0', 1)], else: [] },
     ]);
     expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'head').body);
+  });
+});
+
+describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', () => {
+  // A `scope` run that put nothing in a nested list emitted the `first-use` tree — the same
+  // spelling under a second label. `rank.ts` withholds the flat `first-use` row for this gate table
+  // deliberately (ORDERBASE_ADMISSIONS: measured at zero over the four rows where it differs from
+  // `head`), so returning that tree here shipped the withheld candidate under the scoped one's
+  // name. Measured over the two agbcc corpora map-ful: of the 39 functions `ORDERBASE_GATES`
+  // admits, 6 place an init inside a nested list and 33 do not.
+  const held = (body: Stmt[], locals: SFn['locals'] = []): SFn => ({
+    name: 'f',
+    params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
+    locals,
+    retType: T.void(),
+    body,
+  });
+  // Three reads of one const base — the smallest shape BASECSE_GATES admits (2+ uses, no loop, no
+  // repeated constant offset).
+  const cuse = (i: number): Stmt => ({
+    k: 'store',
+    lval: { k: 'index', base: c(0x40000d4), idx: c(i), width: 4, signed: true },
+    value: c(0),
+  });
+  const uses = [0, 1, 2].map(cuse);
+
+  test('every init landed in the TOP-LEVEL list: `scope` declines, and the flat placements answer', () => {
+    const flat = held([plain(), ...uses]);
+    expect(hoistBaseLocals(flat, BASECSE_GATES, 'scope')).toBeNull();
+    // …and it is not that the shape has no hoist: the flat placements both produce one, and they
+    // produce DIFFERENT trees, so the withheld row is exactly what `scope` would have restated.
+    const head = hoistBaseLocals(flat, BASECSE_GATES, 'head');
+    const firstUse = hoistBaseLocals(flat, BASECSE_GATES, 'first-use');
+    expect(head.body.map((s) => s.k)).toEqual(['assign', 'store', 'store', 'store', 'store']);
+    expect(firstUse.body.map((s) => s.k)).toEqual(['store', 'assign', 'store', 'store', 'store']);
+  });
+
+  test('an init that reaches a nested list still answers, and the init is INSIDE it', () => {
+    const nested = held([plain(), { k: 'if', cond: c(1), then: uses, else: [] }]);
+    const out = hoistBaseLocals(nested, BASECSE_GATES, 'scope');
+    expect(out).not.toBeNull();
+    const arm = out!.body[1];
+    expect(arm.k === 'if' && arm.then.map((s) => s.k)).toEqual(['assign', 'store', 'store', 'store']);
+  });
+
+  test('no base admitted at all is a decline too, not the unhoisted tree under a scoped label', () => {
+    expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'scope')).toBeNull();
+    expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'head').body).toHaveLength(2);
   });
 });

@@ -633,7 +633,8 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  every table, at the cost of the ablation handle below — the trade `BASEFOLD_GATES`' fused
  *  exemption already made once, and not one to make for a class with no inhabitant. rank.ts offers this row only where
  *  `compilerBehaviors.arrayShapeFromStride` — the same opt-in the licence itself carries, because
- *  the fork is agbcc's and no other compiler has been shown to make it. */
+ *  the fork is agbcc's and no other compiler has been shown to make it.
+ */
 export const ORDERBASE_GATES: readonly Gate<BaseKey>[] = [
   ...ablateHeuristic(ablateHeuristic(BASECSE_GATES, 'cast-base'), 'single-use'),
   {
@@ -699,15 +700,29 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
   return { c, keys };
 }
 
+/** THE TWO FLAT PLACEMENTS ALWAYS ANSWER. Both put the run in the top-level statement list, so
+ *  there is always a tree to return and the caller has no decline to handle — which is why
+ *  `pipeline.ts` can commit one of them.
+ *
+ *  `scope` DECLINES, and the overload is how a caller is told: `null` means the placement had
+ *  nothing to say about this function, because no init landed inside a nested list. That tree is
+ *  not "no answer" — it is byte-for-byte the `first-use` spelling (l3/hoist.ts's `nested`), so
+ *  returning it would offer one spelling under two labels, and on a roster whose `first-use` row
+ *  for this table is deliberately WITHHELD (rank.ts, ORDERBASE_ADMISSIONS) it would ship the
+ *  withheld candidate under the scoped one's name. Measured over the two agbcc corpora, map-ful:
+ *  33 of the 39 functions `ORDERBASE_GATES` admits emit a flat spelling under `scope` — 25 of them
+ *  the `first-use` one — and only 6 place an init inside a nested list. */
+export function hoistBaseLocals(sfn: SFn, gates?: readonly Gate<BaseKey>[], placement?: 'head' | 'first-use'): SFn;
+export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[], placement: HoistPlacement): SFn | null;
 export function hoistBaseLocals(
   sfn: SFn,
   gates: readonly Gate<BaseKey>[] = BASECSE_GATES,
   placement: HoistPlacement = 'head',
-): SFn {
+): SFn | null {
   const { c, keys: hoisted } = admit(sfn, gates);
   const { meta } = c;
   if (hoisted.length === 0) {
-    return sfn;
+    return placement === 'scope' ? null : sfn;
   }
 
   const fresh = nameAllocator(sfn);
@@ -744,7 +759,12 @@ export function hoistBaseLocals(
   // The shell carries the minted DECLARATIONS and the REWRITTEN statements together: first-use
   // would not know the new names without the first, and would query the pre-rewrite accesses
   // without the second.
-  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
+  const { body, nested } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
+  // DEGENERATE SCOPE IS A DECLINE, not a candidate: nothing reached a nested list, so this is the
+  // `first-use` tree and the header above says why offering it is wrong.
+  if (placement === 'scope' && nested.length === 0) {
+    return null;
+  }
   const out = { ...sfn, body, locals };
   // The two FLAT placements can only put the run in the top-level list, above every use of it by
   // construction. `scope` puts an init inside a nested list, which is where a placing lever can ship

@@ -224,25 +224,35 @@ export type BaseInitPlacement = HoistPlacement | 'prepend';
  *
  *  Under `first-use`, an init then moves down if the function assigns its local exactly ONCE (the
  *  move would otherwise cross that other write), something in the remaining body mentions it, and
- *  it is not already sitting at the first such statement. */
+ *  it is not already sitting at the first such statement.
+ *
+ *  IT REPORTS WHERE THE MOTION LANDED, not just its size: `nested` names the inits that ended up in
+ *  a list OTHER than the top-level one, which only `scope` can produce.
+ *
+ *  `nested` empty under `scope` means the placement DEGENERATED — every init went exactly where
+ *  `first-use` would have put it, so the emitted tree is that placement's spelling under a second
+ *  name. A caller offering placements as candidates has to know, or it enumerates one spelling
+ *  twice (l3/basecse.ts's `hoistBaseLocals`).
+ *  `moved` stays a count: how many inits left the run. */
 export function placeBaseLocals(
   sfn: SFn,
   minted: readonly BaseInit[],
   placement: BaseInitPlacement,
-): { body: Stmt[]; moved: number } {
+): { body: Stmt[]; moved: number; nested: readonly string[] } {
+  const still = { moved: 0, nested: [] };
   const body = sfn.body;
   const { inits: head, rest } = splitLeadingBaseInits(sfn, body);
   if (head.length + minted.length === 0) {
-    return { body: [...body], moved: 0 };
+    return { body: [...body], ...still };
   }
   if (placement === 'prepend') {
-    return { body: [...minted, ...head, ...rest], moved: 0 };
+    return { body: [...minted, ...head, ...rest], ...still };
   }
   const firstUse = firstUseIn(sfn, rest);
   const at = (s: BaseInit): number => firstUse.get(s.name) ?? rest.length;
   const all = [...head, ...minted].sort((a, b) => at(a) - at(b));
   if (placement === 'head') {
-    return { body: [...all, ...rest], moved: 0 };
+    return { body: [...all, ...rest], ...still };
   }
   const whole = localMentions({ ...sfn, body: [...all, ...rest] });
   const stay: BaseInit[] = [];
@@ -303,5 +313,11 @@ export function placeBaseLocals(
     }
     return mapped;
   };
-  return { body: [...stay, ...rebuild(rest)], moved: sunk.length };
+  // `site !== rest` is the whole nesting question: every site is a list of the tree the sites were
+  // computed on, and the top-level one is `rest` by identity.
+  return {
+    body: [...stay, ...rebuild(rest)],
+    moved: sunk.length,
+    nested: sunk.filter((s) => s.site !== rest).map((s) => s.init.name),
+  };
 }

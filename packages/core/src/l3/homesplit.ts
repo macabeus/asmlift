@@ -241,7 +241,13 @@ const childrenOf = (e: Expr): Expr[] => {
  */
 export function splitHomeBases(sfn: SFn, opts: HomeSplitOpts): { homed: SFn; split: SFn } | null {
   const gates = opts.admission ?? HOMESPLIT_GATES;
+  // `null` only at `placement: 'scope'`, where it means the homing half had no scoped tree to
+  // offer (l3/basecse.ts) — so the PIPE has no intermediate and this pairing declines, the same
+  // answer it gives when either half refuses.
   const homed = hoistBaseLocals(sfn, withholdingKey(opts.gates, opts.key), opts.placement);
+  if (homed === null) {
+    return null;
+  }
   // The withheld key in the REGION pass's vocabulary. The two passes key on the same address but
   // spell an `addr` base's identity differently, so the translation is explicit — a string compare
   // across them would silently never match for an `addr` base. A CAST base (an array-of-struct
