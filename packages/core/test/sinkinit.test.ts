@@ -4,16 +4,16 @@ import { describe, expect, test } from 'vitest';
 
 import { assertHoistsDominate } from '../src/contracts';
 import { T } from '../src/ir/types';
-import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import type { SFn, Stmt } from '../src/l3/ast';
 import { stmtLists } from '../src/l3/ast';
 import { BASECSE_GATES, ORDERBASE_GATES, admittedBases, hoistBaseLocals } from '../src/l3/basecse';
 import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { c } from './helpers';
 
 const U8P = T.ptr(T.int(8, false));
-const c = (value: number): Expr => ({ k: 'const', value });
 const init = (name: string, addr: number): Stmt => ({ k: 'assign', name, value: { k: 'cast', to: U8P, e: c(addr) } });
 const read = (name: string, i: number): Stmt => ({
   k: 'store',

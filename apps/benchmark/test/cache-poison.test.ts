@@ -125,8 +125,10 @@ describe('the PPC dump cache does not serve an empty entry', () => {
 // THE REAL TIER REACHES NEITHER GUARD ABOVE. Its `Case.build` is `buildRealTarget`, which never
 // touches this cache, and its disassembly comes from `compile/{ido,kmc,gcc272}.ts`'s own `disasm()`
 // — or, for agbcc, from a `.s` read off disk with no objdump in the path at all, so
-// @asmlift/toolchains' `nonEmptyDump` cannot see it either. 252 of the artifact's 894 rows are
-// real. The invariant is therefore stated over the CONTRACT, and both tiers cross it.
+// @asmlift/toolchains' `nonEmptyDump` cannot see it either. Real rows are a large minority of the
+// artifact (`meta.counts` in apps/benchmark/results/results.json holds the current split), so what
+// the two guards above miss is not a corner. The invariant is therefore stated over the CONTRACT,
+// and both tiers cross it.
 describe('the BuiltTarget invariant covers the real tier too', () => {
   const obj = join(mkdtempSync(join(tmpdir(), 'checked-target-')), 'a.o');
   writeFileSync(obj, 'obj');

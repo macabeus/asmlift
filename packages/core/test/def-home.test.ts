@@ -22,6 +22,7 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
+import { count } from './helpers';
 
 const emit = (ir: string, on: boolean, returnsVoid = true, rereadGlobals = false): string => {
   const fn = parse(ir);
@@ -29,8 +30,6 @@ const emit = (ir: string, on: boolean, returnsVoid = true, rereadGlobals = false
   recoverTypes(fn);
   return cBackend.emit(structure(fn, { readsStayWhereWritten: on, rereadGlobals, returnsVoid }));
 };
-
-const count = (s: string, needle: string): number => s.split(needle).length - 1;
 
 // ── the isolate: one absolute byte read, two sibling arms ────────────────────────────────────
 // `u32 s = *gKind; if (c & 1) *gOutA = s << 3; else *gOutB = s << 4;` — the benchmark's

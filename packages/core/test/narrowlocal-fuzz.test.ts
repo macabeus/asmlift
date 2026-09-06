@@ -27,16 +27,7 @@ import { without } from '../src/l3/gates';
 import { NARROW_LOCAL_GATES, narrowBlockLocals } from '../src/raise/narrowlocal';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
-
-function mulberry32(seed: number): () => number {
-  let t = seed >>> 0;
-  return () => {
-    t = (t + 0x6d2b79f5) >>> 0;
-    let x = Math.imul(t ^ (t >>> 15), 1 | t);
-    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  };
-}
+import { mulberry32 } from './helpers';
 
 /** A random SSA function whose block parameters are often EXTENDED at their reads — the shape this
  *  pass judges. Definitions dominate uses by construction (entry values plus the reading block's

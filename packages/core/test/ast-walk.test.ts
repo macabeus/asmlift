@@ -6,6 +6,7 @@
 import { expect, test } from 'vitest';
 
 import { type Expr, type Stmt, exprChildren, stmtChildren, stmtExprs, walkExprs } from '../src/l3/ast';
+import { c, v } from './helpers';
 
 const I32 = { kind: 'int', width: 4, signed: true } as const;
 
@@ -24,9 +25,6 @@ function* reference(body: Stmt[]): Generator<Expr> {
     yield* reference(stmtChildren(s));
   }
 }
-
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
 
 // Every statement kind and every expression kind in one body — a `for` (whose init/inc are
 // CHILDREN while its cond is an expr, the documented quirk), a `switch` with its default spliced

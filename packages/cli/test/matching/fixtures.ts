@@ -629,7 +629,7 @@ export const FIXTURES: DecompFixture[] = [
       // licenses the count's position and the recompile is indifferent — both orders score 3 with
       // the same breakdown (insert 1, delete 1, arg 1) — but the front slot is priced: pinning
       // unrecorded copies at their param-order slot loses armdef, loopfall, loopset and structarr
-      // over the 736 synthetic rows.
+      // (measured 2026-09-04, over the 736 synthetic rows the tier held then).
       '    v1 = a1;\n' +
       '    v0 = a0;\n' +
       '    if (v1 > 0) {\n' +

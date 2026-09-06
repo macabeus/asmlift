@@ -19,6 +19,7 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { hasMergeFeedHome } from '../src/structure/analysis';
 import { structure } from '../src/structure/structure';
+import { count } from './helpers';
 
 const emit = (ir: string, on: boolean, returnsVoid = true): string => {
   const fn = parse(ir);
@@ -26,8 +27,6 @@ const emit = (ir: string, on: boolean, returnsVoid = true): string => {
   recoverTypes(fn);
   return cBackend.emit(structure(fn, { homeMergeFeeds: on, returnsVoid }));
 };
-
-const count = (s: string, needle: string): number => s.split(needle).length - 1;
 
 // ── the isolate: armexpr's shape ─────────────────────────────────────────────────────────────
 // `s32 m = (b & 1) ? 0x400 : 0;` above an `if`, whose two arms merge it. The whole

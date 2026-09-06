@@ -5,10 +5,9 @@ import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { parkParamsFirst } from '../src/l3/parkfirst';
+import { s32, v } from './helpers';
 
-const s32 = { kind: 'int', width: 32, signed: true } as const;
 const assign = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
-const v = (name: string) => ({ k: 'var' as const, name });
 const deref = (base: string, idx: number) => ({
   k: 'index' as const,
   base: v(base),

@@ -10,9 +10,8 @@ import { describe, expect, test } from 'vitest';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { unmergeJoins } from '../src/l3/unmerge';
+import { c, v } from './helpers';
 
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
 const asg = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
 const deref = (p: Expr): Expr => ({ k: 'index', base: p, idx: c(0), width: 2, signed: false });
 const store = (p: Expr, value: Expr): Stmt => ({ k: 'store', lval: deref(p), value });

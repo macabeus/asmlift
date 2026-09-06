@@ -7,8 +7,10 @@ import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
+import { inRange } from '../src/l3/address';
 import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
-import { deviceStoreCount, volatileDeviceStores } from '../src/l3/volstore';
+import { firstRejection, without } from '../src/l3/gates';
+import { VOL_STORE_GATES, deviceStoreCount, volatileDeviceStores } from '../src/l3/volstore';
 
 /** the GBA I/O page, as target.ts declares it */
 const GBA: readonly [number, number] = [0x04000000, 0x04000400];
@@ -48,6 +50,26 @@ test('a store to ordinary memory declines — the window is the eligibility pred
 
 test('a target that declares no device window declines', () => {
   expect(volatileDeviceStores(fn([store(cell(0x040000d4))]), undefined)).toBeNull();
+});
+
+test('`inRange` fails for all three reasons, so the first two rules only NAME which one', () => {
+  // The header's claim, made executable. `outside-window` alone would refuse everything the other
+  // two refuse — `inRange` is false when there is no window, when the address is not a constant,
+  // and when the constant is the wrong one — so what the first two rules buy is an attributable
+  // refusal, and this pins that they still do.
+  const noWindow = { hasWindow: false, address: 0x040000d4, inWindow: false, qualified: false };
+  const runtimeAddress = { hasWindow: true, address: null, inWindow: false, qualified: false };
+  expect(firstRejection(VOL_STORE_GATES, noWindow)).toBe('no-window');
+  expect(firstRejection(VOL_STORE_GATES, runtimeAddress)).toBe('non-const-address');
+  // …and ABLATED, each hands its ctx to `outside-window` rather than admitting it. That is the
+  // subsumption: dropping either changes the reason a row is refused and never whether it is.
+  expect(firstRejection(without(VOL_STORE_GATES, 'no-window'), noWindow)).toBe('outside-window');
+  expect(firstRejection(without(VOL_STORE_GATES, 'non-const-address'), runtimeAddress)).toBe('outside-window');
+  // The subsumption is a property of `inRange`, which is what `accessCtx` derives `inWindow` from:
+  // `inWindow` cannot be true without both halves, so no ctx the first two rules refuse could have
+  // reached `outside-window` as an admission.
+  expect(inRange(0x040000d4, undefined)).toBe(false);
+  expect(inRange(null, GBA)).toBe(false);
 });
 
 test('a runtime address declines — it names no cell', () => {

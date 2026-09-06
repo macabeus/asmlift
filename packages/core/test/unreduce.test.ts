@@ -12,12 +12,11 @@ import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
 import { type Gate, firstRejection, without } from '../src/l3/gates';
 import { type AccCtx, UNREDUCE_GATES, type UnreduceResult, unreduceAccumulators } from '../src/l3/unreduce';
 import { ARMV4T_AGBCC } from '../src/target';
+import { c, v } from './helpers';
 
 /** the GBA I/O page, as target.ts declares it */
 const GBA: readonly [number, number] = [0x04000000, 0x04000400];
 
-const v = (name: string): Expr => ({ k: 'var', name });
-const c = (value: number): Expr => ({ k: 'const', value });
 const cell = (addr: number): Expr => ({
   k: 'index',
   base: c(addr),

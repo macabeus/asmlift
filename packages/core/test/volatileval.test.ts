@@ -14,7 +14,8 @@ import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { type SFn, type Stmt } from '../src/l3/ast';
-import { volatileValueLocals } from '../src/l3/volatileval';
+import { firstRejection, without } from '../src/l3/gates';
+import { VOL_SLOT_GATES, volatileValueLocals } from '../src/l3/volatileval';
 import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
@@ -48,6 +49,20 @@ test('a stack-homed scalar local becomes a volatile object', () => {
 test('a register-homed scalar never qualifies — the machine gave it no slot to force', () => {
   const s = fn([{ name: 'v0', type: T.s(32) }], [{ k: 'assign', name: 'v0', value: { k: 'const', value: 3 } }]);
   expect(volatileValueLocals(s)).toBeNull();
+});
+
+test('`no-frame` is the rule that refuses it, and it is the FIRST one that would', () => {
+  // The test above pins that a register-homed local is refused. This pins WHICH rule refuses it,
+  // which is the half a decline report reads and no tree-level assertion can see.
+  //
+  // ASKED OVER THE CTX, not over a tree, because the tree-level fixture does not exist: a local
+  // with no `frame` also fails `access-set` (`eligibility` derives `accessSetKept` from
+  // `l.frame?.loads`, which is `undefined` when there is no frame, and no read count equals
+  // `undefined`). So the two rules always fire together on a real local and the SHAPE that
+  // separates them is uninhabited — the ablation is the only way to see the order.
+  const registerHomed = { hasFrame: false, isScalar: true, alreadyVolatile: false, addrTaken: 0, accessSetKept: false };
+  expect(firstRejection(VOL_SLOT_GATES, registerHomed)).toBe('no-frame');
+  expect(firstRejection(without(VOL_SLOT_GATES, 'no-frame'), registerHomed)).toBe('access-set');
 });
 
 test('an already-volatile frame local declines rather than duplicating the primary', () => {

@@ -15,6 +15,7 @@ import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
+import { v } from './helpers';
 
 const emit = (ir: string): string => {
   const fn = parse(ir);
@@ -67,7 +68,6 @@ test('the bg_area shape end-to-end: loads re-spell w-first through the full pipe
 
 // ---- /mulfirst (l3/mulfirst.ts) ----
 
-const V = (name: string): Expr => ({ k: 'var', name });
 const fnOf = (value: Expr): SFn => ({
   name: 'f',
   params: [
@@ -83,19 +83,19 @@ const mul = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '*', l, r });
 const add = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '+', l, r });
 
 test('/mulfirst flips `c + a*b` to product-first and declines when already product-first', () => {
-  const out = mulFirstSums(fnOf(add(V('c'), mul(V('a'), V('b')))));
+  const out = mulFirstSums(fnOf(add(v('c'), mul(v('a'), v('b')))));
   expect(out).not.toBeNull();
   expect(cBackend.emit(out!)).toContain('a * b + c');
-  expect(mulFirstSums(fnOf(add(mul(V('a'), V('b')), V('c'))))).toBeNull();
+  expect(mulFirstSums(fnOf(add(mul(v('a'), v('b')), v('c'))))).toBeNull();
 });
 
 test('/mulfirst declines a two-product sum (nothing anchors the flip)', () => {
-  expect(mulFirstSums(fnOf(add(mul(V('a'), V('b')), mul(V('b'), V('c')))))).toBeNull();
+  expect(mulFirstSums(fnOf(add(mul(v('a'), v('b')), mul(v('b'), v('c')))))).toBeNull();
 });
 
 test('/mulfirst never moves a side containing a call', () => {
   const call: Expr = { k: 'call', fn: 'g', args: [] };
-  expect(mulFirstSums(fnOf(add(call, mul(V('a'), V('b')))))).toBeNull();
+  expect(mulFirstSums(fnOf(add(call, mul(v('a'), v('b')))))).toBeNull();
 });
 
 test('a var naming a MATERIALIZED load does not swap: its evaluation is not at this site', () => {

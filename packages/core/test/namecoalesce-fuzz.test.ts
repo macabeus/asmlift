@@ -24,6 +24,7 @@ import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { structure } from '../src/structure/structure';
+import { mulberry32 } from './helpers';
 
 // CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
 // budget. Solo these tests run in 0.9-1.7 s; inside a full `pnpm test:offline` at loadavg ~26 this
@@ -32,16 +33,6 @@ import { structure } from '../src/structure/structure';
 // hang is still loud, just 60 s later. (Not caused by the candidate-object cache: nothing under
 // packages/core imports it, and the test fence's positive control passed in the same red run.)
 vi.setConfig({ testTimeout: 60_000 });
-
-function mulberry32(seed: number): () => number {
-  let t = seed >>> 0;
-  return () => {
-    t = (t + 0x6d2b79f5) >>> 0;
-    let x = Math.imul(t ^ (t >>> 15), 1 | t);
-    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /** A random SSA function. Every value comes from the entry block or from the block using it, so
  *  definitions dominate uses by construction and `verify` passes without a repair pass. */

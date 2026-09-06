@@ -21,6 +21,7 @@ import { structure } from '../src/structure/structure';
 import type { StructureOptions } from '../src/structure/structure';
 import { makeSwitchRecovery } from '../src/structure/switch-recover';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
+import { count } from './helpers';
 
 // agbcc's own output for `switch (mode) { case 0..3 }` with the arms in `order`, reduced to the
 // shape that matters: the balanced comparison tree, four one-instruction bodies, a merge that
@@ -48,7 +49,6 @@ const dispatch = (order: readonly (number | 'D')[], out = '.Lend', tail = '') =>
 
 const ZERO = { k: 'const', value: 0 } as const;
 const of = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
-const count = (s: string, needle: string): number => s.split(needle).length - 1;
 /** the case labels in the order they are EMITTED */
 const armOrder = (out: string) => [...out.matchAll(/case (\d+):/g)].map((m) => Number(m[1]));
 
@@ -1142,9 +1142,15 @@ test('\u2026and a jump table that falls through fails LOUD for it, naming the ta
 });
 
 // ── where the `default:` label may be read off the layout ───────────────────────────────
-// `defaultLayoutPos` is the one definition both regimes read, and it states SEVEN withholdings.
-// Three of them decide no call the benchmark makes, so they have no row to guard them and are
-// pinned here instead — at the seam itself, one call each, beside the four that do.
+// `defaultLayoutPos` is the one definition both regimes read, and it states SEVEN withholdings,
+// W1..W7 — the numbering is its own, in the order it asks them. TWO of them decide no call the
+// benchmark makes — a re-threaded order (W5) and a position landing after a falling arm (W7) — so
+// they have no row to guard them and are pinned here instead, at the seam itself, one call each.
+// W3 (a default the walk also read as an arm) is pinned here too, but it is NOT in that class:
+// the shape occurs, and the fixture above builds it — a jump-table slot for an unwritten value
+// points at the default's own block, so grouping hands that block a `case` arm as well ('a
+// default the table also reaches as a CASE has that arm's index, not a position'). What the call
+// below adds is the seam's own answer, in the order the seven are asked.
 
 test('every withholding on the `default:` position, one call each', () => {
   const body = (): Block => ({ params: [], ops: [mkOp('const', { attrs: { value: 0 } }), mkOp('br')] });
@@ -1174,15 +1180,15 @@ test('every withholding on the `default:` position, one call each', () => {
   expect(rec.defaultLayoutPos(dflt, arms(-1), intact)).toBe(2);
   // The four that decide the tier's calls. A bare exit is a block the dispatch minted rather than
   // an arm body, and is the one that decides most of them.
-  expect(rec.defaultLayoutPos({ params: [], ops: [mkOp('br')] }, arms(-1), intact)).toBeUndefined();
+  expect(rec.defaultLayoutPos({ params: [], ops: [mkOp('br')] }, arms(-1), intact)).toBeUndefined(); // W2
   expect(
     makeSwitchRecovery({ ...deps, switchArmsFollowLayout: false }).defaultLayoutPos(dflt, arms(-1), intact),
-  ).toBeUndefined();
-  expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, placedByDispatch: true })).toBeUndefined();
-  expect(rec.defaultLayoutPos(dflt, arms(2), intact)).toBeUndefined(); // the LAST arm falls
-  // …and the three that decide none of them: a default the walk also read as an arm (which never
-  // even co-occurs), a re-threaded order, and a position landing after a falling arm.
-  expect(rec.defaultLayoutPos(dflt, [...arms(-1), { entry: dflt, fallsThrough: false }], intact)).toBeUndefined();
-  expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, orderIntact: false })).toBeUndefined();
-  expect(rec.defaultLayoutPos(dflt, arms(1), intact)).toBeUndefined(); // the label would land after a1
+  ).toBeUndefined(); // W1
+  expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, placedByDispatch: true })).toBeUndefined(); // W4
+  expect(rec.defaultLayoutPos(dflt, arms(2), intact)).toBeUndefined(); // W6, the LAST arm falls
+  // …and the remaining three: a default the walk also read as an arm (which DOES co-occur — see
+  // the jump-table fixture above), a re-threaded order, and a position landing after a falling arm.
+  expect(rec.defaultLayoutPos(dflt, [...arms(-1), { entry: dflt, fallsThrough: false }], intact)).toBeUndefined(); // W3
+  expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, orderIntact: false })).toBeUndefined(); // W5
+  expect(rec.defaultLayoutPos(dflt, arms(1), intact)).toBeUndefined(); // W7, the label would land after a1
 });
