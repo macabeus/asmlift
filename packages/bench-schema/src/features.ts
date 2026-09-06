@@ -120,15 +120,15 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Switch arm grouping and order',
     group: 'control-flow',
     evidence: 'judgement',
-    summary: 'the diff turns on how the dispatch is grouped into arms, and in what order they are emitted',
+    summary: 'how the dispatch is grouped into arms, and in what order they are emitted',
     detail:
       'A multi-way dispatch can be spelled as one `switch` or as nested `if`/`else`, and its arms ' +
       'can be written in any order — all of them behave identically and none of them compile ' +
       'identically. An old compiler with no instruction scheduler and no block reordering pass ' +
       'lays case bodies out in SOURCE order, so the assembly fixes both the grouping and the ' +
       'sequence, and getting either wrong shifts every instruction after the first arm. The tag ' +
-      'marks rows where that is the whole diff: the arithmetic, the types and the case values all ' +
-      'agree. Floor: a `switch` in the body. Whether the original grouped its arms the way this ' +
+      'marks rows where that grouping and that order are the whole of what a recovery has to get ' +
+      'right: the arithmetic, the types and the case values all agree. Floor: a `switch` in the body. Whether the original grouped its arms the way this ' +
       "row's assembly implies is a human call — the same reason `read-once` has no machine floor.",
     example: {
       c: 'switch (mode) { case 2: …  case 0: …  case 3: …  case 1: … }',
@@ -171,15 +171,17 @@ export const FEATURES: readonly FeatureDef[] = [
     evidence: 'judgement',
     summary: 'several values are decided by several arms and merged at one join',
     detail:
-      'The shape that makes destroying SSA cost something. Each arm of a conditional or switch ' +
-      'decides the same set of locals, so the join takes one merge value per local and every arm ' +
-      'hands them over on its edge. A decompiler that gives the merge and one arm the same variable ' +
+      'The shape that makes destroying SSA cost something. Several arms of a conditional or ' +
+      'switch decide the values one join reads, so the join takes one merge value per local and ' +
+      'each arm hands them over on its edge. A decompiler that gives the merge and one arm the same variable ' +
       'pays nothing; for every other arm it emits a copy the source never wrote — and the compiled ' +
       'code below shows what that copy corresponds to, which is nothing: the arms already share ' +
-      'registers, and the join reads its values where they lie. Reserved for bodies where the arms ' +
-      'decide MORE THAN ONE value, and where those values are themselves computed rather than ' +
-      'named already — one value, or a value the arm merely passes through, is coalesced by ' +
-      'walking backward along its own edge and leaves no chain behind.',
+      'registers, and the join reads its values where they lie. Reserved for bodies where MORE ' +
+      'THAN ONE value is merged at the join — whether every arm decides all of them (`mergechain`) ' +
+      'or each arm decides one and the rest stay live across it (`mergeif`) — and where those ' +
+      'values are themselves computed rather than named already: one value, or a value the arm ' +
+      'merely passes through, is coalesced by walking backward along its own edge and leaves no ' +
+      'chain behind.',
     example: {
       c:
         'int x, y, z;\n' +
@@ -302,7 +304,11 @@ export const FEATURES: readonly FeatureDef[] = [
       'derives from it.',
     example: {
       c: 'int b = 0; while (((i >> b++) & 1) == 0) ; return b;',
-      asm: '\tadd\tr2, r2, #1\t@ b++ hoisted ABOVE the test that reads the old b\n\tcmp\tr1, #0',
+      asm:
+        '\tasr\tr0, r0, r1\t@ the shift reads the OLD b\n' +
+        '\tand\tr0, r0, r3\n' +
+        '\tadd\tr1, r1, #0x1\t@ b++ hoisted ABOVE the test\n' +
+        '\tcmp\tr0, #0',
       toolchain: 'agbcc',
     },
     seeAlso: ['loop', 'do-while', 'nested-loop'],
@@ -871,17 +877,19 @@ export const FEATURES: readonly FeatureDef[] = [
     detail:
       'A local declared with no initialiser and assigned only inside some arms of a conditional ' +
       'or a `switch`, then read at the join — the commonest source being a `switch` with no ' +
-      '`default`. It compiles, and the compiler emits the unassigned path faithfully, so ' +
+      '`default`. The other flavour is a local that no path in the function assigns at all — its ' +
+      'address is handed to a callee that owns the write, so the frame word is store-less on the ' +
+      'way in (`s32 v; fill(&v); return v;`). It compiles, and the compiler emits the unassigned path faithfully, so ' +
       'recovering it means being able to say "undefined here" rather than inventing a value. ' +
       'Where the local lives decides what a decompiler must not do: in a stack slot the danger ' +
       'is inventing a parameter for memory the function owns, and in a register it is inventing ' +
       'one for a callee-saved register the function never wrote.',
     example: {
       c: 'int r; switch (k) { case 0: r = a; break; case 1: r = a * 2; break; } return r + 1;',
-      asm: '  2c:\tb\t58\n  30:\tlw\tv0,4(sp)   # the default arm: no store reaches here',
+      asm: '  14:\tb\t2c\n  18:\tlw\tv0,4(sp)   # the default arm: no store reaches here',
       toolchain: 'ido7.1',
     },
-    seeAlso: ['switch', 'branch', 'load', 'store'],
+    seeAlso: ['switch', 'branch', 'load', 'store', 'stack-addr'],
   },
   {
     id: 'value-home',
@@ -902,7 +910,7 @@ export const FEATURES: readonly FeatureDef[] = [
       'from incidental style.',
     example: {
       c: 'volatile u32 *dma = (volatile u32 *)0x040000d4; dma[0] = src; dma[1] = dst;',
-      asm: '  ldr r3, =0x040000d4\n  str r0, [r3]\n  str r1, [r3, #0x4]   @ one base, offset stores',
+      asm: '  ldr r2, .L3        @ .word 0x40000d4\n  str r0, [r2]\n  str r1, [r2, #0x4]   @ one base, offset stores',
       toolchain: 'agbcc',
     },
     seeAlso: ['pointer', 'struct', 'mmio', 'uninit-local'],
@@ -912,7 +920,7 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Read once, above the branch',
     group: 'memory',
     evidence: 'judgement',
-    summary: 'the original read a value once before a branch; the candidate re-reads it in each arm',
+    summary: 'the original read a value once above a branch, where a decompiler renders the read at each use',
     detail:
       'A decompiler renders a value where it is USED. An old compiler emits a read where the ' +
       'SOURCE put it — agbcc has no instruction scheduler, and its code-hoisting pass is gated ' +
@@ -928,7 +936,7 @@ export const FEATURES: readonly FeatureDef[] = [
       'style that no scan can distinguish from an incidental one.',
     example: {
       c: 'u32 s = *gKind; if (c & 1) { *gOutA = s << 3; } else { *gOutB = s << 4; }',
-      asm: '  ldr r1, =gKind\n  ldrb r1, [r1]      @ read ONCE, above the branch\n  cmp r0, #0',
+      asm: '  ldr r1, .L6        @ .word 0x8057acc\n  ldrb r2, [r1]      @ read ONCE, above the branch\n  mov r1, #0x1\n  and r1, r1, r0\n  cmp r1, #0',
       toolchain: 'agbcc',
     },
     seeAlso: ['value-home', 'load', 'pointer', 'branch'],
@@ -1019,10 +1027,12 @@ export const FEATURES: readonly FeatureDef[] = [
       'applies and the row is where the other terms are named and priced. ' +
       'Distinct from `mmio`/`dma`, which are derived from the ADDRESS and say only that a ' +
       'device register is referenced; this one is the judgement that the diff turns on it. ' +
-      'No machine-checked floor: whether a given access is the thing the diff turns on is ' +
-      'exactly the judgement the tag records.',
+      'Floor: a `volatile` in the body. Whether that access is the thing the diff turns on ' +
+      'stays the judgement.',
     example: {
-      c: 'for (i = lo; i < 32; i++) { gDma[1] = base + i * 64; gDma[2] = 0x81000020; }',
+      c:
+        '#define gDma ((volatile u32 *)0x040000d4)\n' +
+        'for (i = lo; i < 32; i++) { gDma[1] = base + i * 64; gDma[2] = 0x81000020; }',
       asm:
         '  str  r0, [r5]     @ INSIDE the loop, once per iteration\n' +
         '  add  r0, r0, #0x40\n  ble  .L6\n' +
@@ -1072,9 +1082,11 @@ export const FEATURES: readonly FeatureDef[] = [
     evidence: 'judgement',
     summary: 'a C++ member function, with its implicit `this`',
     detail:
-      'Carries the implicit `this` pointer in the first argument register and a mangled symbol ' +
-      "name. The row's `language` field records that it is C++; this tag records that the " +
-      'function is a MEMBER, which is what changes the calling convention.',
+      'A C++ member function: the object is the implicit first argument, which is what changes the ' +
+      'calling convention. Where a row reaches the member through an `extern "C"` wrapper — the ' +
+      'symbol both decompilers can spell — what is scored is the member ACCESS through that ' +
+      'pointer rather than a mangled name. ' +
+      "The row's `language` field records that it is C++.",
     seeAlso: ['call', 'struct', 'pointer'],
   },
 

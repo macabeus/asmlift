@@ -652,7 +652,7 @@
         "branch",
         "signed"
       ],
-      "note": "The group index is an s16 field used both as a signed sentinel (`!= -1`) and as an array subscript; asmlift infers no signedness for a sub-word location, so the compare and the index are spelled at the wrong signedness.",
+      "note": "Two adjacent sub-word fields of opposite signedness — `s16 group` (a `!= -1` sentinel) and `u16 group_idx` (an array subscript). asmlift reads both at the declared signedness (`lh` for the sentinel, `lhu` for the subscript), and the one instruction of residual is the sentinel’s WRITE-BACK: spelled through a `u16` cast it materializes as `li v0,0xffff` where the source’s `obj->group = -1` on the s16 field gives `li v0,-1`.",
       "prependC": "typedef struct {\n    u16 next_idx;\n    u16 max_objs;\n    u16 num_objs;\n    u16 *next;\n    omObjData **objs;\n} omObjGroup;\n\nextern omObjGroup omgroup[];",
       "funcC": "void func_80047D4C_4894C(omObjData *obj) {\n    omObjGroup *grp;\n\n    if (obj->group != -1) {\n        grp = &omgroup[obj->group];\n        grp->objs[obj->group_idx] = NULL;\n        grp->next[obj->group_idx] = grp->next_idx;\n        grp->next_idx = obj->group_idx;\n        obj->group = -1;\n        grp->num_objs--;\n    }\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e/src/objmain.c#L480-L491",
@@ -674,7 +674,7 @@
         "pointer",
         "branch"
       ],
-      "note": "Three list stores whose value is a single load (`a->b = a->c`). asmlift binds that pattern wrongly, so the stored value and the store’s own base come from the wrong place.",
+      "note": "Three list stores whose value is a single load (`a->b = a->c`). asmlift recovers all three bindings correctly; the three-instruction residual is confined to the last arm, where materializing the stored value into a local (`v1 = a0[4]; ((s32 *)a0[3])[2] = v1;`) emits the value’s load before the base’s, and gcc 2.7.2 then allocates the two registers the other way round than it does for the source’s direct `relative->oldest_child = parent_oldest_child`.",
       "funcC": "void HuPrcChildUnlink(Process *process) {\n    if (process->relative) {\n        if (process->parent_oldest_child) {\n            process->parent_oldest_child->new_process = process->new_process;\n        }\n        if (process->new_process) {\n            process->new_process->parent_oldest_child = process->parent_oldest_child;\n        } else {\n            process->relative->oldest_child = process->parent_oldest_child;\n        }\n        process->relative = NULL;\n    }\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/6b4380b9493a2bf9a60e3be5f5b6b6e70e4b927e/src/process.c#L103-L115",
       "m2cCtx": true,

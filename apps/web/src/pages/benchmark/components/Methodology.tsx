@@ -121,7 +121,7 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
       </section>
 
       <section>
-        <H>The four toolchains</H>
+        <H>The toolchains</H>
         <div className="mt-2 overflow-x-auto rounded-lg border border-slate-800">
           <table className="w-full text-sm">
             <thead>

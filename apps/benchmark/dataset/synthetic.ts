@@ -1,7 +1,7 @@
 // Tier A — synthetic dataset. Functions I author to exercise COMMON decompilation features with
-// known ground truth, spread across the four toolchains. Deliberately breadth-first over the idioms
-// that dominate real game code (arithmetic, bitwise, compare/logic, width casts, memory, structs,
-// arrays, loops, calls) rather than exotic constructs — the anti-overfitting goal.
+// known ground truth, spread across the toolchains asmlift supports. Deliberately breadth-first over
+// the idioms that dominate real game code (arithmetic, bitwise, compare/logic, width casts, memory,
+// structs, arrays, loops, calls) rather than exotic constructs — the anti-overfitting goal.
 //
 // `toolchains` lists which toolchains to run each function on. MIPS-IDO is steered away from calls
 // (its PIC codegen makes external calls unfriendly to both decompilers).
@@ -11,6 +11,20 @@
 // there the map's declarations are rendered into `ctx` too, by `src/cases/synthetic.ts`, so the
 // two channels still carry the same facts. What a row measures is its SOURCE SPELLING, which is in
 // neither channel.
+//
+// A NAMED EXTERN DATA GLOBAL IS DECLARED IN NEITHER CHANNEL EITHER. 29 rows spell one in `src`
+// (`extern u8 gGrid[5][7];`); the 9 carrying a `symbols` map hand it to both, and on the other 20 —
+// all agbcc — `ctx` and `proto` carry neither the name nor the type. For the array and struct rows
+// among those 20 the global's SHAPE is the thing being recovered, so a channel that spelled it
+// would be spelling the answer. The two tools then differ in how they say "I do not know this
+// type": asmlift emits `(u8 *)&gGrid` and the scoring layer supplies the declaration from the
+// target's relocations, m2c emits `extern ? gGrid;`, which `eval/outcome.ts` reads as a decline.
+// 12 of the 20 are an asmlift MATCH against 20 m2c declines, and that gap is NOT an artifact of a
+// fact withheld from one side: adding the declaration to `ctx` ALONE does not dissolve it.
+// Measured on `calad` — m2c then recovers `gGrid[0][6]`, the row's own spelling, and the candidate
+// fails to compile with ``gGrid' undeclared`, because declarations reach the m2c compile only
+// through `symbols` (`m2cDeclarationsFor`, src/eval/evaluate.ts). The map is the symmetric way to
+// hand a row that fact, and it is what the other 9 do.
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
 
@@ -713,7 +727,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'sw_void',
     src: 'void sw_void(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p=2;break;default:*p=0;} }',
-    features: ['memory'],
+    features: ['store'],
     toolchains: ALL,
     ctx: 'void sw_void(int,int*);',
     proto: { sw_void: { returnsVoid: true } },
@@ -738,7 +752,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // Three values per arm, not one: a single value is coalesced by walking backward along its own
   // edge, which the naming pipeline already did. It takes a chain — a value whose own definition is
   // ANOTHER join, in an arm named after the one the outer join adopted — to leave a copy behind.
-  // Loads through a pointer parameter give that shape without a global, which no synthetic row has.
+  // Loads through a pointer parameter give that shape with no global at all.
   //
   // mergeif is not mergechain at a smaller size: each arm decides only ONE of the two locals, so
   // the other is live ACROSS the arm that does not write it — the shape the interference rule has
@@ -799,8 +813,10 @@ export const SYNTHETIC: SynthSpec[] = [
   },
 
   // ── uninitialised locals (a local read on a path that never assigns it) ─────────────────────
-  // Every switch above carries a `default`, so until these rows the dataset never asked what
-  // happens when one does NOT. The C compiles, and the compiler emits the unassigned path
+  // The `switch`es above with no `default` — `sw_fall`, `sw_fallmem`, `sw_fall4`, `sw_jtfall` and
+  // the rest of that family — each write through a pointer or start from an initialised
+  // accumulator, so until these rows the dataset never asked what happens when the unassigned
+  // path READS the local. The C compiles, and the compiler emits the unassigned path
   // faithfully, so recovery has to be able to SAY "undefined here" — asmlift's IR has no `undef`,
   // and Braun's construction resolves a def-less read to a live-in, which at the entry block is a
   // PARAMETER. WHERE the local lands decides which way that goes, and the two differ sharply:
@@ -826,14 +842,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // then have no row reaching it through the THUMB frontend, which is the path the motivating
   // klonoa function (LoadBGTilemapData, a `switch` with no default whose arms are the only
   // writers of three frame slots) actually takes. uninit_spill keeps ten locals live across a
-  // loop so agbcc has to spill, and it reproduces that decline verbatim. Its bulk IS the point:
+  // loop so agbcc has to spill, which is how the shape reaches the THUMB frontend. Its bulk IS
+  // the point:
   // below roughly ten live locals agbcc has the registers to avoid the frame entirely. No calls,
   // deliberately — a store to [sp,#0] that reaches a `bl` is ambiguous with an outgoing stack
   // argument, and the row would decline on THAT instead.
   // Attribution, so nothing here is credited to the wrong gap: of the twelve rows, five turn on
   // this capability — uninit_join:ido7.1, uninit_sw:ido7.1, uninit_sw:agbcc, and both slot halves
-  // of uninit_spill (agbcc, ido7.1). The rest decline on branch-likely (gcc2.7.2kmc), a cr0
-  // reaching-compare, or r1-as-data (mwcc_242_81) — all pre-existing and unrelated.
+  // of uninit_spill (agbcc, ido7.1). Of the other seven, four decline for pre-existing and
+  // unrelated reasons — branch-likely (uninit_join and uninit_sw on gcc2.7.2kmc), a cr0
+  // reaching-compare (uninit_sw:mwcc_242_81), r1-as-data (uninit_spill:mwcc_242_81) — and three
+  // recover without touching this gap (uninit_join:agbcc and uninit_join:mwcc_242_81 MATCH,
+  // uninit_spill:gcc2.7.2kmc scores 53).
   // Of those five, only uninit_spill:agbcc is recovered: the ido7.1 pair declines because that
   // frontend claims no frame partition (its slot keys reach O32's caller-owned argument home area),
   // and uninit_sw:agbcc is the register half, which `undef` does not touch.
@@ -863,7 +883,8 @@ export const SYNTHETIC: SynthSpec[] = [
   },
 
   // SPILL-SLOT ORDER — the one property of a declaration list the allocator answers by a law, and
-  // the one asmlift has nowhere to put. When agbcc runs out of registers, the locals that lose
+  // the one asmlift now places by reading the target's own frame order (l3/slotorder.ts). When
+  // agbcc runs out of registers, the locals that lose
   // global allocation each get a frame slot, and WHICH slot is decided by declaration order:
   // reload hands out slots walking pseudos in ascending number (gcc/reload1.c:769-770), a user
   // local's pseudo is numbered at its `expand_decl` (gcc/stmt.c:3323-3324; line numbers are the
@@ -882,21 +903,23 @@ export const SYNTHETIC: SynthSpec[] = [
   //   • `spillorder` is `uninit_spill` (above) with ONE token changed, `case 1:` → `default:`, so
   //     every path defines every local — no undef, no fabricated parameter, no DMA, which are the
   //     two machineries `uninit_spill` and `dma_fill_uninit` carry. Two locals spill; asmlift's
-  //     walk declares them in the reverse of the target's slot order and the winner scores 6 —
-  //     six `[sp,#k]` operand rows and nothing else (recompiled and classified: no other class).
+  //     walk declared them in the REVERSE of the target's slot order, which cost six
+  //     `[sp,#k]` operand rows and nothing else (recompiled and classified: no other class). The
+  //     per-target slot ordering `emit` now applies (l3/slotorder.ts) closed that: the row
+  //     MATCHes, and is the gate that keeps the ordering right.
   //   • `spillorder_rev` is the CONTROL: the identical body with the declaration list reversed in
   //     the source, so the target's slot order is the one asmlift's walk already emits. It
   //     MATCHES, which proves the six rows are the order alone. It is also the zero-flip read for
-  //     the rule once it ships: an agreeing order must be a no-op. Its limit: it detects a sort
-  //     that DISAGREES with the target (its target differs from `spillorder`'s in exactly six
-  //     `[sp,#k]` lines), but it cannot tell a correct sort from no sort, so it scores 0 today and
-  //     pins nothing on its own — `spillorder` is the row that moves.
+  //     the shipped rule: an agreeing order must stay a no-op. Its limit: it detects a sort that
+  //     DISAGREES with the target (its target differs from `spillorder`'s in exactly six
+  //     `[sp,#k]` lines), but it cannot tell a correct sort from no sort, so it scored 0 before
+  //     the rule and scores 0 after it — `spillorder` is the row that moved (6 → MATCH).
   //
   // Attribution: `spillorder` declines nothing — it lifts, structures and ranks 40 candidates —
-  // and its 6 is a missing per-target DEFAULT, not a missing axis: no site sorts a candidate's
-  // slot-homed locals by the target's frame offsets. Reordering the winner's two declarations by
-  // hand compiles to 0. The same hand reorder of `dma_fill_uninit`'s published candidate takes
-  // its 12 (twelve `[sp,#k]` rows) to 0, and on the klonoa function this family was cut from,
+  // and its 6 was a missing per-target DEFAULT, not a missing axis: no site sorted a candidate's
+  // slot-homed locals by the target's frame offsets. `emit` now does (l3/slotorder.ts), and the
+  // same rule closed `dma_fill_uninit`'s identical twelve `[sp,#k]` rows (12 → MATCH). On the
+  // klonoa function this family was cut from,
   // LoadBGTilemapData, permuting the six spilled locals of the winning candidate in place takes
   // 386 → 376 against `build/src/gfx.o` (of its stack-slot classes, 12 `stack slot` + 17 `register +
   // stack slot` rows, the permutation leaves 2 + 2, a reload eviction; the other 15 mixed rows
@@ -907,10 +930,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // That register half is a published null and gets NO row, because the capability that would
   // move it is the compiler's allocator, which asmlift answers by compiling.
   //
-  // WHY a second gate beside `dma_fill_uninit` (whose block comment, at "NO ROW HERE for
-  // declaration order", once named it THE gate): that row is confounded — it carries the undef envelope (a `switch`
-  // with no `default`) and the DMA family, so a change in either moves its 12 for a reason that is
-  // not this one. This pair carries neither. The pair cannot tell head placement from an in-place
+  // WHY a second gate beside `dma_fill_uninit`: that row is confounded — it carries the undef
+  // envelope (a `switch` with no `default`) and the DMA family, so a change in either moves its
+  // stack-slot rows for a reason that is not this one. This pair carries neither. The pair cannot tell head placement from an in-place
   // permutation of the slot locals (both compile to 0 here; on LoadBGTilemapData they differ by
   // one register row, 375 vs 376); a discriminating row needs a non-slot local between two spilled
   // ones and a spilled compiler temporary — not authored.
@@ -971,9 +993,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // `preupdate_exit` is the EXITING EDGE carrying it, and `preupdate_escape` is a body value read
   // after the loop deriving from it. Only the middle one reaches the repair that already exists
   // (`sinkablePreUpdateSlots`, the trailing-pointer sink) and is turned away there by the
-  // `arg-is-loop-variable` gate, which is where every real function on this link is refused.
+  // `arg-safe-to-reevaluate` gate (PREUPDATE_SINK_GATES, structure/hazards.ts): the row's exit
+  // arg `*q + n` reads memory, so its def-tree cannot be rebuilt at the top of the body. That gate
+  // is the memory-read tier alone — the PURE tier the real functions inhabit passes it, and
+  // `preupdate_exit_pure` recovers at 2 with the copy sunk into the body.
   //
-  // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions that gate is the LAST
+  // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions the SINK is the last
   // link, but they do not all need the same thing behind it: the copy is spelled from the arg's
   // NAME, so a computed arg needs an expression, and what its def-tree holds decides whether one
   // can be placed at the top of the body at all. Measured over the corpus, the tree is PURE
@@ -981,19 +1006,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`preupdate_exit`), and a CALL in one (`preupdate_exit_call`, and `_wrapup_reent`).
   //
   // So the three EXIT rows are the three tiers, not three copies: a fix for the pure tier closes
-  // the real bucket, and the other two are what say it did not overreach. The CALL tier used to
-  // stop one guard later still, on "a post-loop value inlines a 'call' from inside the loop"; it
-  // no longer does. `structure/analysis.ts` materializes any call whose value rides a branch edge
-  // — the placement that guard existed to refuse — so `preupdate_exit_call` now RECOVERS, at 2,
-  // with `cb` inside the loop where the asm calls it. What still reaches that guard is an
-  // `opaque`, the other member of `REPEATED_EFFECT`, for which no such rule exists. The pure row puts a STORE in the body AHEAD of the def, which is the
+  // the real bucket, and the other two are what say it did not overreach. The CALL tier clears the
+  // guard on "a post-loop value inlines a 'call' from inside the loop": `structure/analysis.ts`
+  // materializes any call whose value rides a branch edge — the placement that guard refuses — so
+  // `preupdate_exit_call` RECOVERS, at 2, with `cb` inside the loop where the asm calls it. What
+  // still reaches that guard is an `opaque`, the other member of `REPEATED_EFFECT`, for which no
+  // such rule exists. The pure row puts a STORE in the body AHEAD of the def, which is the
   // harder of the two shapes the corpus has — ten of the twelve have no effect in the latch block
   // at all, and `LoadBGTilemapData`, the function this link is being walked for, is the one that
   // does. A pure tree may be recomputed across it; a tree that read memory could not.
   //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
-  // rows would be four more ordinary loops on those toolchains rather than coverage.
+  // rows would be five more ordinary loops on those toolchains rather than coverage.
   {
     sym: 'preupdate_cond',
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
@@ -1096,8 +1121,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
   //
   // The two `near` rows run on agbcc AND mwcc, because the orientation defect is not an agbcc
-  // fact: on PowerPC the fold commits to the same `||` spelling, `ifand_near` misses by 18 and
-  // `ifor_near` matches, exactly as on Thumb. Two ISAs and two compilers agreeing is what says the
+  // fact: on PowerPC the fold commits to the same `&&` spelling, so `ifand_near` matches at the
+  // default joined sense and `ifor_near` lands on the dual, missing by 18 until `/flip-join` emits
+  // the other sense — exactly as on Thumb. Two ISAs and two compilers agreeing is what says the
   // gap is in the recogniser and the sense lever rather than in anything about ARM.
   //
   // The other two toolchains are excluded because on them THE CONSTRUCT IS NOT THERE, which is a
@@ -1120,8 +1146,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // would spill past it into a pointer walk — a second recovery idiom riding along inside what is
   // supposed to be a one-variable control.
   //
-  // WHAT THESE ROWS MOVE, so the headline is not read as progress: five rows take asmlift 372 →
-  // 375 and m2c 348 → 348. All three gained matches are synthetic rows authored for an
+  // WHAT THESE ROWS MOVE, so the headline is not read as progress: the five rows added three
+  // asmlift matches and no m2c match. All three gained matches are synthetic rows authored for an
   // asmlift-specific gap, one of them (`ifand_far`) scoring MATCH either way — a byte score cannot
   // see the difference between the recovered `&&` and the tail-duplicated spelling agbcc
   // cross-jumps back together, so a test pins that orientation, not this row; and every row reads
@@ -1168,13 +1194,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // The DMA-fill idiom, WITH an uninitialised local — the pair no real row carries. An escaping
   // frame address retracts every `undef` in the function, on the premise that a callee may write
   // any frame offset; a DMA SOURCE register is the case where that premise is false, because the
-  // engine only reads through it and the register is write-only, so the address cannot come back. This row is the ACCEPTING half of that rule, and what it is worth
-  // is bounded: ablating `readOnlyAddressSinks` takes it from `nonmatch` to `declined`, so it is a
-  // real gate — but `bench regression` fails only on a LOST MATCH, and this row does not match, so
-  // a re-widening lands in the flip list rather than breaking the build. The failing guard is the
-  // frontend unit test, where the direction is pinned by ablation. Note also that asmlift lifts
-  // this and m2c declines it, so a row authored for an asmlift capability moves the declined/
-  // nonmatch columns one in asmlift's favour.
+  // engine only reads through it and the register is write-only, so the address cannot come back.
+  // This row is the ACCEPTING half of that rule, and it MATCHes today
+  // (`unsigned/defsite/loop-entry/derived-home/indexed`), so `bench regression` holds it — a
+  // re-widening of the rule loses a match rather than only moving a flip list. Ablating
+  // `readOnlyAddressSinks` was measured to turn it into a DECLINE, so it is a real gate, and the
+  // direction is pinned directly by the frontend unit test (packages/core/test/thumb-frontend.ts,
+  // 'an escape that the hardware only READS through keeps the undef'). Note also that asmlift
+  // lifts this and m2c declines it, so a row authored for an asmlift capability moves the
+  // declined/match columns one in asmlift's favour.
   // agbcc only: the addresses are GBA MMIO, and on the other toolchains this is three stores to
   // nothing in particular. Ten live locals for the same reason uninit_spill has them — below that
   // agbcc keeps the uninitialised local in a register and the frame is never touched.
@@ -1550,7 +1578,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // WHERE A VALUE LIVES, NOT WHAT IT COMPUTES. In each of these rows both decompilers can
   // recover the computation; the diff is dominated by value placement — a base address kept in
   // one register and reused at immediate offsets, a clamp overwriting its own variable, a value
-  // parked across a high-pressure loop. The family is cut from kleod:LoadBGTilemapData:agbcc,
+  // parked across a high-pressure loop. The family is cut from LoadBGTilemapData in the kleod checkout (agbcc),
   // whose residual diff is almost entirely this class, but every shape is spelled with absolute
   // addresses so the rows stay self-contained. (A named extern global would compile and score —
   // asmlift synthesizes the declaration off the target asm, and rows elsewhere in this file
@@ -1563,24 +1591,28 @@ export const SYNTHETIC: SynthSpec[] = [
   // register file (the osPiRawStartDma store pattern) and KSEG0 RDRAM; under mwcc the GC DI
   // register file (the DVDLowRead store pattern) and MEM1. Same spelling, same capability —
   // only the constant and the register offsets differ — so a sym appears in several specs with
-  // DISJOINT toolchain lists and every `synthetic:sym:toolchain` id stays unique.
+  // DISJOINT toolchain lists and every `synthetic:<sym>:<toolchain>` id stays unique.
   //
   // What each row isolates, measured by compiling both spellings under agbcc -O2:
   // `dma_burst` is the control — a plain store block through one pointer local, recovered
   // today by the base-pointer lever. `dma_wait` adds the busy-wait read-back through the SAME
-  // pointer; the lever withdraws and the candidate falls back to one literal per store, which
-  // costs the shared base register (gcc 2.9 folds `(vu32*)0x040000d8` to a fresh constant at
-  // parse time, so only a spelling that keeps ONE base expression gets `str [rN, #imm]`).
-  // `bg_area` groups three fields of one struct element — recovered, leaving only the operand
-  // order of the commutative multiply (the target loads .w then .h; the candidate the reverse).
-  // `bg_mix` adds a FIXED element of the same array: the target derives `[2].h` from the same
-  // base register (`add #0x38`); the candidate anchors a second absolute base, splitting the
-  // object in two. `clamp_inplace` is a one-sided overwrite (`if (w > 31) w = 32;`): rendering
-  // it as a two-sided assignment into a fresh temp costs a register, a callee-save push, and
-  // flips the branch polarity. `hipress` parks one byte across a loop hot enough to fill r0-r7,
-  // so the target homes it in a call-saved HI register touched only by `mov` (gcc's alternate-
-  // class allocation; hi regs cost 4 vs 2 to move but beat an 8-cost SImode reload) — the
-  // candidate instead sinks the load below the loop and re-associates the accumulator chain.
+  // pointer, which the placement gates refuse; `/livebase` is basecse without them, and the row
+  // MATCHes on agbcc and mwcc_242_81 (`unsigned/livebase/volatile`). What the row still prices is
+  // the shared base register: without it the candidate falls back to one literal per store (gcc
+  // 2.9 folds `(vu32*)0x040000d8` to a fresh constant at parse time, so only a spelling that keeps
+  // ONE base expression gets `str [rN, #imm]`).
+  // `bg_area` groups three fields of one struct element and MATCHes on all four toolchains; the
+  // operand order of the commutative multiply (the target loads .w then .h) is what `/mulfirst`
+  // referees, and it is the winning label on ido7.1. `bg_mix` adds a FIXED element of the same
+  // array: the target derives `[2].h` from the same base register (`add #0x38`), where a per-cell
+  // spelling anchors a second absolute base and splits the object in two — recovered on
+  // agbcc/gcc2.7.2kmc/mwcc_242_81, still 1 on ido7.1. `clamp_inplace` is a one-sided overwrite
+  // (`if (w > 31) w = 32;`): rendering it as a two-sided assignment into a fresh temp costs a
+  // register, a callee-save push, and flips the branch polarity. `hipress` parks one byte across a
+  // loop hot enough to fill r0-r7, so the target homes it in a call-saved HI register touched only
+  // by `mov` (gcc's alternate-class allocation; hi regs cost 4 vs 2 to move but beat an 8-cost
+  // SImode reload) — `/parkfirst` is what reproduces that home and it is the winning label on
+  // agbcc; gcc2.7.2kmc is still 29 and ido7.1 declines in the frontend on `beql`.
   //
   // The placement question is universal (MIPS %hi/%lo anchoring, PPC @ha/@l pairs, all four
   // compilers' in-place-update patterns), and where a toolchain's own addressing rules make a
@@ -1590,14 +1622,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // MATCHes with candidate label `unsigned/livebase/volatile`, so the volatile-base capability
   // exists and that row pins it. What is NOT pinned is that the same capability is EXCLUDED once
   // the device base is spelled as a NAMED symbol rather than a numeric address. Measured on
-  // kleod:LoadBGTilemapData with the project's symbol map on: of the 66,816 ranked candidates
+  // LoadBGTilemapData in the kleod checkout with the project's symbol map on: of the 66,816 ranked candidates
   // 14,592 spell globals by name and 52,224 by raw address; 18,432 of the raw ones carry a
   // `/volatile*` label and ZERO of the named ones do — counted both from the run's `[score]`
   // labels and from the 66,816 captured candidate `.c` files, 18,432 of which declare a volatile
   // pointer local, none in the named basin. Instrumented rather than read: `l3/volatileptr.ts`'s
   // eligibility prints `verdict=NOT-numericFed` for every pointer local there, and the FIRST veto
-  // is `numericFed` — `rematerializableAddress` (l3/ast.ts:484) reaches `default: ok = false`
-  // (:497) on an `addr` node, so `(s32 *)&REG_DMA3SAD` is not a rematerializable feed.
+  // is `numericFed` — `rematerializableAddress` (l3/ast.ts) reaches its `default: ok = false` arm
+  // on an `addr` node, so `(s32 *)&REG_DMA3SAD` is not a rematerializable feed.
   // `feedsSymbolAddress` (volatileptr.ts:136) is a real second veto, but ablating it ALONE moves
   // no candidate; a lever has to lift both. A synthetic row cannot express any of that:
   // `SynthSpec` at the top of this file has no map or ELF field, only the real-tier manifests
@@ -1777,8 +1809,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // whole third's control: the same mask reused once, in a function small enough that
   // re-materializing is what the compiler does too.
   //
-  // agbcc only. The poll loops decline on ido7.1/gcc2.7.2kmc's branch-likely lift gap, so those
-  // lanes would measure that link, not this family (`dma_wait` already carries the attributed
+  // agbcc only. The poll loops decline on both MIPS lanes, for two different reasons:
+  // `dma_wait:ido7.1` hits the branch-likely lift gap (`bnezl`), and `dma_wait:gcc2.7.2kmc`
+  // declines in the structurer ('a post-loop read reaches a temp the guarded body may never
+  // assign'). Either way those lanes would measure that link, not this family (`dma_wait`
+  // already carries the attributed
   // declines); mwcc_242_81 stays off per the `hipress` hazard policy until a probe clears it.
   {
     sym: 'sizehome',
@@ -1895,11 +1930,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // hoist REGRESSES the real function, so a home lever without the width/sign choice cannot
   // close it). `ucmp` isolates the compare polarity alone, home-less: a u32 counter and a cast
   // bound flip four branches and ripple two register picks — the /uns-cmp axis spells the
-  // compares from the lifted icmp facts, and the lane's residual is the register ripple those
-  // picks leave behind. `entrypair` — one COMPUTED address (`(a0 << 2) +
-  // (a1 << 1) + table`) held in a pointer local with its two bytes read at `[r,#1]`/`[r,#0]`:
-  // the per-site spelling recomputes the chain and anchors a pool literal per baked offset
-  // (`table`, `table+1`) where the original anchors one. /nearbase cannot see it — its clusters
+  // compares from the lifted icmp facts, and `ucmp:agbcc` matches on it today;
+  // `ucmp:gcc2.7.2kmc` still stands at 15, unattributed. `entrypair` — one COMPUTED address
+  // (`(a0 << 2) + (a1 << 1) + table`) held in a pointer local with its two bytes read at
+  // `[r,#1]`/`[r,#0]`: the per-site spelling recomputes the chain and anchors a pool literal per
+  // baked offset (`table`, `table+1`) where the original anchors one. /nearbase cannot see it —
+  // its clusters
   // are CONST deref bases; this base is an expression.
   //
   // `sizebound` is agbcc-only like its siblings (its poll loop declines on the MIPS lanes'
@@ -1909,18 +1945,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // staleExit decline (the kept-guard family's link, not this one); `entrypair:gcc2.7.2kmc`
   // declines on the MIPS `jal` call link exactly as `call1:gcc2.7.2kmc` does. Those lanes
   // measure their links; the family's signal lanes are agbcc (all three), `ucmp:gcc2.7.2kmc`,
-  // and `entrypair:mwcc_242_81`. `sizebound:agbcc`'s residual after the typed home landed is
-  // TWO placement classes, measured disjoint and additive (8 + 8 = 16): the u16 pointer's init
-  // placed at its OWN scope while the dma pointer's stays at the function top (the leaf-base
-  // hoist is all-or-nothing, so the split placement is reachable from neither its function-top
-  // nor its scoped form alone), and ONE counter shared across the two sequential inner loops.
-  // Neither needs a new row. `ucmp:agbcc` already carries the shared-counter shape standalone —
-  // merging its two counters closes it 6 -> 0 — and once that ships, this row is the split
-  // placement's own demanding row (8 -> 0). What blocks them is existing code: two un-gated
-  // heuristics in scopebase.ts (repeated-const-offset, nested-loop) that are not in a gate
-  // table, and coalesce.ts's SOUND `loop` gate, whose blanket refusal stands in front of the
-  // span model that already reasons about sequential siblings correctly — so it must be
-  // replaced by a liveness argument, never ablated. The mwcc lane's residual is NOT the shared-base home the agbcc
+  // and `entrypair:mwcc_242_81`. `sizebound:agbcc` still stands at `nonmatch:8`, all of it
+  // argMismatch, on the `signed/expr-home/uns-cmp/livebase-block/volatile/initfirst/pollread`
+  // winner — whose two sequential inner loops still count with two separate locals, and which
+  // reads the u16 bound inline rather than through a pointer local. Neither spelling needs a new
+  // row. `ucmp:agbcc` carries the shared-counter shape standalone and MATCHES today on
+  // `unsigned/uns-cmp/coalesce-v0-v1`, its two counters merged into one; whether that merged
+  // spelling is absent from `sizebound`'s own fan or merely scores worse there is UNMEASURED.
+  // The mwcc lane's residual is NOT the shared-base home the agbcc
   // lane closed (`/addr-home`): struct-arrays recovery consumes the full element address into
   // `[a0]` indexing, so the value the PPC target holds in r3 no longer exists in the IR to
   // home — a struct-element-home class the lane keeps measuring.
@@ -1985,7 +2017,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // that read per arm. Verified by compiling the pair: the two spellings differ, and the compiler
   // moves neither.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, where re-reading ONE entry byte in two sibling arms
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), where re-reading ONE entry byte in two sibling arms
   // is 15 points of the residual. Spelled with absolute GBA addresses so the rows stay
   // self-contained. (Not because a named global is impossible — the GLOBAL ARRAY SHAPE family far
   // below relocates against one and scores — but because these rows isolate a re-read, and the
@@ -1995,11 +2027,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // `readarm` is its control — the same read with BOTH uses inside ONE arm, which asmlift
   // already anchors at the def site, so the capability must leave it exactly where it is.
   // `armshare` is the real function's shape (an indexed byte PAIR above two branches, the low
-  // byte used in both arms); it moves further than the isolate because its residual also carries
-  // the struct-array index that the /addr-home axis owns, so it is coverage, not an isolate.
+  // byte used in both arms); it is coverage rather than an isolate, because its shape also
+  // carries the struct-array index the /addr-home axis owns. It matches today on the same
+  // `/unmerge` axis as the isolate.
   // `readcall` is the one shape a "two or more sibling arms" rule would MISS: a single use,
-  // inside a short-circuit's right operand, feeding a call argument. It fails today for the same
-  // reason, and separates a placement rule keyed on strict dominance from one keyed on arm count.
+  // inside a short-circuit's right operand, feeding a call argument. It is the family's one open
+  // row — nonmatch 6, winner `unsigned`, carrying no `/unmerge` — and its residual is NOT
+  // attributed to the placement rule the other three satisfy. It separates a placement rule keyed
+  // on strict dominance from one keyed on arm count.
   //
   // agbcc only. The mechanism above is a fact about THIS compiler, established by reading its
   // pass list and confirmed by compiling both spellings. Whether ido7.1, gcc2.7.2kmc and
@@ -2043,7 +2078,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'void armshare(u32 a0, u32 a1){ struct Ent *e = &gEnts[(a0 << 1) + a1];' +
       ' u32 mode = e->mode; u32 kind = e->kind;' +
       ' if (*gFlag & 1){ if (mode == 2){ *gOutA = kind << 3; } else { *gOutB = kind << 4; } } }',
-    features: ['read-once', 'struct'],
+    features: ['read-once', 'struct', 'branch'],
     toolchains: ['agbcc'],
     ctx: 'void armshare(u32 a0, u32 a1);',
     proto: { armshare: { returnsVoid: true } },
@@ -2060,7 +2095,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'void readcall(u32 a0, u32 a1){ struct Ent *e = &gEnts[(a0 << 1) + a1];' +
       ' u32 mode = e->mode; u32 kind = e->kind;' +
       ' if ((*gFlag & 1) && mode == 2){ decomp(gTiles[kind].size); } }',
-    features: ['read-once', 'branch'],
+    features: ['read-once', 'struct', 'branch'],
     toolchains: ['agbcc'],
     ctx: 'u32 decomp(s32 n); void readcall(u32 a0, u32 a1);',
     proto: { decomp: { params: 1 }, readcall: { returnsVoid: true } },
@@ -2074,15 +2109,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // therefore fixes both the grouping and the arm order, and getting either wrong moves every
   // instruction after the first arm.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, where it is the single largest class in the residual:
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), where it is the single largest class in the residual:
   // respelling its `if (v1 != 1) { if (v1 <= 1) { if (v1 == 0) … } else { switch { case 2, 3 } } }
   // else { … }` as one four-case `switch` is worth 46 of 547 points — more than every capability
   // the three previous rounds landed for that function, combined. Of the 46, the grouping is 8 and
   // the ARM ORDER is 38: asmlift emits the `!= 1` arm last because an if/else has nowhere else to
   // put it, while the asm lays that body out second.
   //
-  // Two separate defects, one per row, both in structure/switch-recover.ts:
-  //   • `swarms` — a switch with NO default, declining to if-nesting. The attribution that
+  // Two defects, one per row, both since CLOSED in structure/switch-recover.ts — the rows now
+  // guard them:
+  //   • `swarms` — a switch with NO default, which declined to if-nesting. The attribution that
   //     authored this row named the "default entry with a phi" guard, reasoning that the fall-out
   //     edge lands on the phi-carrying MERGE. The run falsified that: instrumenting every
   //     `return null` showed the shape declining at `defaults.length > 1`, and the phi guard never
@@ -2091,9 +2127,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //     through two bare `b .Ldefault` blocks — which recovery counted as two different defaults.
   //     The default candidate is one of those bare blocks, never the merge, which is why the phi
   //     guard cannot be what refuses this shape.
-  //   • `swlayout` — the arms come back sorted by case VALUE. Its source order is 2, 0, 3, 1 and
-  //     agbcc lays the bodies out in exactly that order; asmlift emits 0, 1, 2, 3, so every
-  //     instruction after the first arm shifts. It carries a default, so recognition succeeds and
+  //   • `swlayout` — the arms once came back sorted by case VALUE. Its source order is 2, 0, 3, 1
+  //     and agbcc lays the bodies out in exactly that order (target.o: bodies at
+  //     0x18/0x1c/0x20/0x24 = 2, 0, 3, 1); emitting 0, 1, 2, 3 shifts every instruction after the
+  //     first arm. It carries a default, so recognition succeeds and
   //     ONLY the order is left — which is what separates it from `swarms`.
   //
   // `swdefault` is the control: byte-identical C to `swarms` except that the fall-out is spelled
@@ -2123,8 +2160,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //     default is written LAST, where the layout spelling and C's conventional one coincide.
   //
   // `swmulti` is the real function's shape rather than an isolate: a defaultless switch inside a
-  // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
-  // residual also carries the arm-order half and the loop's own value placement.
+  // do-while whose four arms all decide the same three locals. It is the composition rather than
+  // an isolate — the arm-order half and the loop's own value placement have to land in the same
+  // candidate — and it matches today on `signed/vol-store`.
   //
   // NOT the same gap as `uninit_sw` above, which contains the identical dispatch: there the arms
   // leave a local undefined on the fall-out path, and the arm grouping alone takes that row to
@@ -2252,7 +2290,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '  gDma[0] = a; gDma[1] = b; gDma[2] = c;\n' +
       '  i++;\n' +
       ' } while (i < n); }',
-    features: ['switch-arms', 'struct'],
+    features: ['switch-arms', 'merge-chain', 'struct'],
     toolchains: ['agbcc'],
     ctx: 'void swmulti(s32 mode, s32 idx, s32 n);',
     proto: { swmulti: { returnsVoid: true } },
@@ -2277,7 +2315,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // So both conditions are needed — the memory home AND a load issued before the store — and
   // together they are what a decompiler has to reproduce to get the byte count right.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc. At its best hand-built spelling (479 against
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc). At its best hand-built spelling (479 against
   // `build/src/gfx.o`, from a 531 baseline) the residual's largest nameable group is exactly this:
   // 15 stores to `[sp,#16..32]` and 5 `ldrh [rN,#18]` in the ROM with no counterpart in the
   // candidate, where the candidate keeps the same values in registers and reads the field once.
@@ -2293,9 +2331,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // alarm, and three of these rows carried the decline.
   //
   // That gate is now open for ONE shape and no wider: a frame of exactly one word whose base a
-  // bare `mov rD, sp` hands to a callee, and which the caller either WRITES itself or passes at an
-  // argument above r0. NOT via callee arity, which this first tried and which cannot license an
-  // acceptance — a declared parameter list is a LOWER bound (variadics, multi-word parameters, a
+  // bare `mov rD, sp` hands to a callee, and which the caller either WRITES itself, passes at an
+  // argument above r0, or hands only to callees the project declares `void` — any one of the
+  // three, since a struct-return temp has none of them. NOT via callee arity, which cannot
+  // license an acceptance — a declared parameter list is a LOWER bound (variadics, multi-word parameters, a
   // hidden struct-return pointer), so `arity <= 4` proves nothing and supplying a TRUE fact turned
   // a correct decline into a call with its stack arguments deleted. What the frame size buys
   // instead is that agbcc emits a bare `mov rD, sp` for a block-copy base too — a by-value struct
@@ -2453,7 +2492,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // So the compiler moves NEITHER spelling toward the other: the offset stays where the source put
   // it, and getting it wrong costs one operand on every use plus the two ends of the round trip.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, which allocates twice and frees twice through exactly
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), which allocates twice and frees twice through exactly
   // this shape (`thunk_HeapFree(alloc + 4 - 4)`). At the round's best hand-built spelling, homing
   // both `+ 4`s is worth 1 point (475 -> 474 against `build/src/gfx.o`) and removes 3 of the 4 ROM
   // instructions that had no counterpart — `mov r1, #4`, `ldrb r0, [r0, #0]` and `sub r0, #4` go,
@@ -2518,9 +2557,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // NO REACH for the row without a census: a candidate carrying the split spelling would have
   // scored 0 and the row would read MATCH, not diff:12.
   // The shape of the fan is a separate observation and belongs to a STANDALONE probe of the same
-  // asm rather than to this row — that probe was run without a `ctx`, so it recovered a
-  // two-parameter `void offhi_split(s32 a0, s32 a1)` where the row declares one parameter, and
-  // the two fans are not proven identical. In it, of 12 candidates 6 spell `v0 = getbuf(a0) + 4;`
+  // asm rather than to this row — that probe was run without a `ctx` at all, so
+  // its candidates score against a differently-lifted call — best 23 where this row's best is 12.
+  // The enumeration itself is the same either way: 12 candidates under the same axis labels, and
+  // a two-parameter `void offhi_split(u32 a0, u32 a1)` with the row's `ctx` and `proto` as without
+  // (asmlift does not read a function's OWN `params` as its arity). In it, of 12 candidates 6
+  // spell `v0 = getbuf(a0) + 4;`
   // and 6 spell `v0 = getbuf(a0);` with the bias re-derived at every use (`*(u8 *)(v0 + 4 + v6)`,
   // `putbuf(v0 + 4 - 4)`). Those are the two points of the `/expr-home` lattice `offhome` and
   // `offuse` bracket, and neither of them is the split — a home that receives the RAW call result
@@ -2619,7 +2661,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' gDma[0] = (s32)(p + (i << 6));' +
       ' gDma[2] = p[i]; } }',
-    features: ['value-home', 'pointer'],
+    features: ['pointer'],
     toolchains: ['agbcc'],
     ctx: 'void *getbuf(s32 k); void offgiv(s32 k, s32 n);',
     proto: { getbuf: { params: 1 }, offgiv: { returnsVoid: true } },
@@ -2639,11 +2681,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // fit Thumb's 8-bit add immediate, so agbcc spells the giv's step `mov #128 / lsl #1` and
   // asmlift's L3 tree keeps it as the `bin` node `128 << 1`. Every stated scope condition holds —
   // the start is the literal 0, the counter steps by 1, the stride is a constant power of two —
-  // and the lever refused anyway, on the SPELLING of the stride node rather than on its value.
-  // That is a refusal of asmlift's own folding, in a lever whose entire framing is the COMPILER's
-  // folding, and it was never confined to the folded branch — the substitutional path compared an
-  // unfolded multiplier against a folded stride the same way. The relation reads every constant
-  // as its value, on both paths.
+  // and the relation reads that node as its VALUE rather than its SPELLING, on both paths — the
+  // substitutional one compares an unfolded multiplier against a folded stride the same way — so
+  // `/unreduce` fires here and wins (`signed/copy-defpos/vol-store/unreduce`, MATCH). What the row
+  // pins is that a refusal on asmlift's own folding, in a lever whose framing is the COMPILER's
+  // folding, must not come back.
   {
     sym: 'offgiv2',
     src:
@@ -2654,7 +2696,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' gDma[0] = (s32)(p + (i << 2));' +
       ' gDma[2] = p[i]; } }',
-    features: ['value-home', 'pointer'],
+    features: ['pointer'],
     toolchains: ['agbcc'],
     ctx: 'void *getbuf(s32 k); void offgiv2(s32 k, s32 n);',
     proto: { getbuf: { params: 1 }, offgiv2: { returnsVoid: true } },
@@ -2669,7 +2711,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' gDma[0] = (s32)(p + (i << 8));' +
       ' gDma[2] = p[i]; } }',
-    features: ['value-home', 'pointer'],
+    features: ['pointer'],
     toolchains: ['agbcc'],
     ctx: 'void *getbuf(s32 k); void offgiv3(s32 k, s32 n);',
     proto: { getbuf: { params: 1 }, offgiv3: { returnsVoid: true } },
@@ -2748,22 +2790,20 @@ export const SYNTHETIC: SynthSpec[] = [
   // in r2", so `armfall` still declares four parameters for a two-parameter source and still opens
   // its loop with `v3 = a2;`. That is an arity question, not an initialisation one.
   //
-  // Measured on kleod:LoadBGTilemapData:agbcc, both directions. PRICE CORRECTED: the ADDING number
-  // was first taken against a reference source that carries three register-allocation coercions
-  // (statements with no semantic content, marked `// FAKE?` there). Deleting them halves it, so
-  // both endpoints are quoted:
+  // Measured on LoadBGTilemapData in the kleod checkout (agbcc), both directions. The reference source carries three
+  // register-allocation coercions (statements with no semantic content, marked `// FAKE?` there)
+  // and the ADDING number is quoted with them deleted, because they and the materialisation
+  // contend for the same registers and stacking them double-counts:
   //   • REMOVING the five preheader reads from asmlift's own ranked winner (20608 candidates, 0
   //     dropped, `unsigned/flip-branch/flip-join/merge-names/addr-home/expr-home/coalesce-v9-v23/
   //     initfirst/raw-globals`) takes it from 473 to 459 against `build/src/gfx.o` — 14 points of
   //     today's residual. The same edit against the OTHER decomp's object reads 479 to 462; that
   //     rig scores the identical winner C 6 points higher, so the two are not interchangeable.
-  //   • ADDING five preheader reads of the same shape to the reference C: 207 to 386, i.e. +179,
-  //     with the three coercions deleted. With them in play the same edit reads 12 to 366 (+354),
-  //     which is the number this comment first recorded. +179 is the honest one — the coercions
-  //     and the materialisation contend for the same registers, so stacking them double-counts.
+  //   • ADDING five preheader reads of the same shape to the reference C: 207 to 386, i.e. +179.
   // Both endpoints were taken against the ranked winner OF THAT RUN, and its label is not a handle
   // that survives: an axis suffix names a sense relative to the target's DEFAULT, so `/flip-join`
-  // in it denotes the opposite spelling to the one it denotes now. The same command today reports
+  // in it denotes the opposite spelling to the one it denotes now. Measured at #107 (`b227590e`)
+  // and not re-run since, the same command reported
   // `40320 candidate(s) scored, 0 dropped, best unsigned/flip-branch/defsite/merge-names/
   // addr-home/uns-cmp/livebase-block/volatile/coalesce-v17-v10/initfirst/raw-globals: 395`. What
   // transfers between runs is the SHAPE of the edit, never the label.
@@ -2804,28 +2844,30 @@ export const SYNTHETIC: SynthSpec[] = [
   // fabrication the rules above cannot reach. It costs `armfall` nothing at this rung, for the
   // reason `loopfall` records: `a2` arrives in the register `v3` is allocated to, the copy
   // coalesces, and agbcc emits no instruction for it. `armfall`'s residual 8 is the ZERO-TRIP
-  // GUARD instead — the ROM inits the counter above the test (`mov r6,#0 / cmp r6,r7 / bcs`)
+  // GUARD instead — the reference inits the counter above the test (`mov r6,#0 / cmp r6,r7 / bcs`)
   // where the candidate tests the bound against zero and then stages the second induction
-  // register in two moves. The `/initfirst` sibling is enumerated and scores 9, so the
+  // register in two moves. Compiled both ways and diffed: the reference's `movs r6,#0 / cmp r6,r7 /
+  // bcs / mov ip,r6` is four instructions to the winner's `cmp r7,#0 / beq / movs r0,#0 / mov ip,r0
+  // / movs r6,#0` — one insert, and the `ip` stage reads a different register because the guard did
+  // not leave a zero in the counter. That is the whole 8 (breakdown: insert 2, delete 2,
+  // opMismatch 1, argMismatch 3). The `/initfirst` sibling is enumerated and scores 9, so the
   // guard-placement family does not close this shape on its own.
   //
   // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. A ladder was measured off this family's own
   // shape, holding it fixed and varying only how many locals the arm decides (agbcc; each control
   // the same C plus the `else`, and every control MATCHes). Re-measured with the two rules above in
-  // place, because the first ladder was taken without them and its symptoms no longer reproduce:
-  // rung 1 is `loopfall` itself at 0, rung 4 is 14, rung 5 is 28, rung 6 is 31.
+  // place: rung 1 is `loopfall` itself at 0, rung 4 is 14, rung 5 is 28, rung 6 is 31.
   //
   // The rungs do not stay in one class, and the claim is only about the one they leave. Every entry
   // agbcc homes in r4-r7 costs nothing now. What the higher rungs add is entries homed in an
   // ARGUMENT register — at rung 4 agbcc takes r7/r5/r4/r3 and asmlift fabricates `a1` for the r3
   // one, and no `nonArgRegs` rule can cover that, because a caller really can pass a value in r3.
   // So: no longer rung is a REGISTER fabrication this pair does not already hold, and the residue
-  // above rung 3 is the argument-register fabrication `armfall` gates at 23. (The first ladder
-  // reported the rung-4/5 read as `ldr r3, [sp, #N]`, an incoming STACK argument. That was the
-  // pre-rules shape: rung 6 spills a real entry to `[sp]` and asmlift still fabricates a register
-  // for it, so nothing here reaches a fabricated stack argument.)
+  // above rung 3 is the argument-register fabrication `armfall` gates at 23. Nothing here reaches
+  // a fabricated stack argument: rung 6 spills a real entry to `[sp]` and asmlift still fabricates
+  // a REGISTER for it.
   //
-  // Multiplicity was severity in the first ladder and stays so: NO choice of fabricated parameter
+  // Multiplicity is severity: NO choice of fabricated parameter
   // was free at ANY rung (at rung 1 the three spellings scored 13/12/9, at rung 3 all six
   // permutations 8..11), and only a spelling that materialised NOTHING reached 0 — which is what
   // the two rules above now emit for the callee-saved homes.
@@ -2892,7 +2934,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' case 1: w = 32; h = gBgs[i].v; break;' +
       ' case 2: w = gBgs[i].h; h = gBgs[i].v; break; }' +
       ' gOut[i] = w + h; } }',
-    features: ['uninit-local', 'merge-chain'],
+    features: ['uninit-local', 'merge-chain', 'guard-init'],
     toolchains: ['agbcc'],
     ctx: 'void armfall(u32 mode, u32 n);',
     proto: { armfall: { returnsVoid: true } },
@@ -2948,7 +2990,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // claim above under the harness instead of in a commit message, and it MATCHes — so the pair
   // brackets the gap exactly, 0 without the statement and 8 with it.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, where the second decomp's 98.24% attempt writes the
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), where the second decomp's 98.24% attempt writes the
   // same construct as `gBgInfo[2].vLength += 0;` and marks it `// FAKE`. It is worth 178 points
   // there: deleting that one statement takes the spelling from 12 to 190 against the ROM object.
   //
@@ -2982,15 +3024,13 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { rereadctl: { returnsVoid: true } },
   },
 
-  // A DECLARED EXTERN ARRAY SUBSCRIPTED INSIDE A LOOP: two facts that cost nothing apart and
-  // two points together. `ereadctl` is the conjunction — `extern struct Bg gReadBgs[];` reached
-  // as `gReadBgs[k].dst[i]` under a loop — and it scores 2. `ername` keeps the loop and drops
-  // the array shape, reaching the same named symbol through `&gReadBgsObj`; `erflat` keeps the
-  // array shape and drops the loop. Both MATCH, so the pair brackets the conjunction from both
-  // sides and neither term is the price on its own. The declared bound is not the axis either:
-  // spelling it `gReadBgs[4]` instead of `[]` also scores 2. `erflat` wins on
-  // `unsigned/orderbase` and the loop arm's winner does not carry that axis at all, which is the
-  // family's open question and not a claim about where the two points are paid.
+  // A DECLARED EXTERN ARRAY SUBSCRIPTED INSIDE A LOOP. `ereadctl` is the conjunction —
+  // `extern struct Bg gReadBgs[];` reached as `gReadBgs[k].dst[i]` under a loop — and it MATCHes
+  // on `unsigned/fresh-merge/orderbase/scoped/initfirst`. `ername` keeps the loop and drops the
+  // array shape, reaching a named symbol through `&gReadBgsObj`; `erflat` keeps the array shape
+  // and drops the loop; both MATCH too. The conjunction cost two points when this family was
+  // authored and costs nothing now, so these three rows are MATCH controls and the family's open
+  // rows are the read-back pairs below.
   //
   // The named data relocation is free. It is what makes this family look different from the
   // raw-address reread/rereadctl pair above, and it is not what costs anything: `ername` carries
@@ -2998,27 +3038,27 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // WHAT THE READ-BACK PAIRS ADD, on top of that conjunction. `ereread` adds a same-value
   // fixed-index field write to `ereadctl`; `erback`/`erbctl` make the same comparison with a
-  // read-back of that field after the indexed store. agbcc scores: ereread 11, ereadctl 2,
-  // erback 12, erbctl 12. So the same-value write is worth 9 with no read-back (11 against 2)
+  // read-back of that field after the indexed store. agbcc scores: ereread 11, ereadctl 0,
+  // erback 12, erbctl 12. So the same-value write is worth 11 with no read-back (11 against 0)
   // and 0 with one (12 against 12): the read-back collapses the statement's price, and that
   // collapse is what this family measures.
   //
-  // `ereread`'s 11 decomposes into residual fields its neighbours each carry alone — the
-  // insert/delete pair is `ereadctl`'s whole residual, the replaces are `reread`'s. It prices
-  // the extern basin's same-value write against a control that does not MATCH, which is why the
-  // raw `reread`/`rereadctl` pair stays: that one brackets 0 against 8.
+  // `ereread`'s 11 is `insert 1, delete 1, replace 2, argMismatch 7`; the replaces are `reread`'s
+  // residual and the rest is its own. BOTH pairs stay: their residuals differ in kind (`reread`
+  // has zero insert/delete) and the relocations differ (`.word 0x3003430` against
+  // `.word gReadBgs`), which is also why m2c reads noncompile on one and declined on the other.
   //
-  // `ereadctl` and `erbctl` are intervention controls, not MATCH controls, and neither is
-  // `value-home`. `ereadctl`'s residual is a moved shift; `erbctl`'s twelve are six
-  // register-only rows plus an opcode mismatch and four insertion/deletion rows, which is not a
-  // diff dominated by where a value lives.
+  // `erbctl` is an intervention control, not a MATCH control, and is not `value-home`: its twelve
+  // are seven register-only rows plus an opcode mismatch and four insertion/deletion rows, which
+  // is not a diff dominated by where a value lives. `ereadctl` MATCHes.
   //
   // m2c declines every row here, first emitting the extern as `extern ? gReadBgs;`, so the family
   // yields no cross-tool number: unknown extern-type recovery owns that blocker, not this
   // allocator/aliasing experiment. That is a fact about the context THESE rows pass. Rows such as
   // `sbscope` and `ptrelem` hand the global's declaration to both tools instead, and supplying
   // it to `ereadctl`'s spelling moves m2c from `declined` to `noncompile` — past the
-  // placeholder, still without a score, with asmlift unmoved at 2.
+  // placeholder, still without a score; whether asmlift is unmoved has not been re-measured since
+  // `ereadctl` began to MATCH.
   //
   // agbcc only, for the same reason as the raw family above, and no row here is a proposed fix;
   // the measured attribution is in docs/lbg-attribution.md.
@@ -3078,8 +3118,8 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { erflat: { returnsVoid: true } },
   },
 
-  // A BASE THE ARMS SHARE, AND A CONSTANT INDEX THAT NEEDS NONE: one fold, two surfaces, and
-  // asmlift loses a different thing to each. The struct and the base are LoadBGTilemapData's —
+  // A BASE THE ARMS SHARE, AND A CONSTANT INDEX THAT NEEDS NONE: one fold, two surfaces, and one
+  // row pinning each. The struct and the base are LoadBGTilemapData's —
   // a 28-byte `gBgInfo` element at 0x03003430.
   //
   // THE COMPILER FACT, from the pair compiled with the benchmark's agbcc. When an address
@@ -3119,29 +3159,23 @@ export const SYNTHETIC: SynthSpec[] = [
   // materializes as `mov #0x80` + `lsl #0x12` and reaches at `add #0x38`, so there is no pool
   // word for an addend to hide in. A pool-loaded base is a precondition of surface 2.
   //
-  // WHAT ASMLIFT DOES WITH SURFACE 1, measured. Where the target emits a member's load ONCE in a
-  // block that more than one arm reaches, the base is live OUT of each arm; asmlift correctly
-  // homes it — `v0 = (u16 *)(a0 * 28 + 50345008);` — and then spells the arm-local access beside
-  // it as `((u16 *)(a0 * 28 + 50345008))[8]` instead of `v0[8]`. Taking asmlift's own printed
-  // winner and changing ONLY those inline re-spellings to read the local it had already minted
-  // compiles BYTE-IDENTICAL to the target (`cmp -l` reports 0 differing bytes) on both gap rows,
-  // where the unmodified winners differ in 237 and 250 bytes. The whole residual is that one
-  // choice, and no axis in the fan reaches it: `bgshare`'s entire fan is 4 candidates scoring
-  // 8, 8, 9, 9 (`unsigned`, `signed`, `unsigned/flip-join`, `signed/flip-join`) and `bgswitch`'s
-  // is 2, both 8. `bgfixed`'s endpoint is byte-exact too, and it is the OPPOSITE edit: re-spell
-  // its one folded site as the fixed element's member and 4 becomes 0 differing bytes, while the
-  // fan's own attempt to home that base — `/livebase`, present at 11 and 13 against the winner's
-  // 4 — is the mint, and loses.
+  // WHAT ASMLIFT DOES WITH SURFACE 1. Where the target emits a member's load ONCE in a block that
+  // more than one arm reaches, the base is live OUT of each arm; asmlift homes it —
+  // `v0 = (u16 *)(a0 * 28 + 50345008);` — and reads the arm-local access off that same local
+  // (`v0[8]`). `bgshare` and `bgswitch` both MATCH on `unsigned/merge-names/addr-home`. Surface 2
+  // is closed the same way: `bgfixed` MATCHes on `unsigned/offmember`, which spells the folded
+  // site as the fixed element's member (`((struct Off0 *)50345064)->m14`). All six rows here
+  // MATCH, so what they hold is the two spellings against each other, not a gap.
   //
   // SURFACE 1'S DISCRIMINATOR IS A PROPERTY OF THE TARGET, not of the source. A member named in
   // two arms is NECESSARY and NOT SUFFICIENT; what decides it is whether agbcc puts that load in
   // a join block, and both the dispatch construct and the ORDER of the two reads decide THAT:
-  //   two-arm if/else, shared member read LAST   -> 8      `bgshare`   target: `ldrh [r0,#0x12]` once, at `.L5`
-  //   two-arm if/else, shared member read FIRST  -> MATCH  no row      target: its own copy in EACH arm
-  //   two-arm if/else, members disjoint          -> MATCH  `bgsplit`
-  //   three-arm switch, one member shared        -> 8      `bgswitch`  target: once at `.L8`, case 1 falls in
-  //   three-arm switch, members disjoint         -> MATCH  `bgswsplit`
-  //   three-arm if/else-IF chain, shared         -> 12     no row      target: its own copy in EACH arm
+  //   two-arm if/else, shared member read LAST   -> shared join block    `bgshare`   `ldrh [r0,#0x12]` once, at `.L5`
+  //   two-arm if/else, shared member read FIRST  -> own copy in EACH arm  no row
+  //   two-arm if/else, members disjoint          -> nothing shared       `bgsplit`
+  //   three-arm switch, one member shared        -> shared join block    `bgswitch`  once at `.L8`, case 1 falls in
+  //   three-arm switch, members disjoint         -> nothing shared       `bgswsplit`
+  //   three-arm if/else-IF chain, shared         -> own copy in EACH arm  no row
   // Reading the shared member FIRST shares it in the source exactly as `bgshare` does and the
   // class does not fire, so do not prune or widen the family on "one member shared" alone.
   // `bgswitch`'s own `default` arm makes the same point from inside a row — it reads `hLength`,
@@ -3153,32 +3187,35 @@ export const SYNTHETIC: SynthSpec[] = [
   // local — there is none there to prefer. `bgbaked` is the family's real over-fire guard, and it
   // guards the other surface: its target genuinely wants the folded word, asmlift spells it
   // straight (`*(s32 *)50345068`) and MATCHes, and re-spelling that one site as the fixed
-  // element's member — the edit that takes `bgfixed` to byte-exact — costs it 2. The two gap rows
-  // therefore pull in OPPOSITE directions at the same kind of site, and neither endpoint is safe
-  // as an unconditional default.
+  // element's member — the edit that takes `bgfixed` to byte-exact — costs it 2. Both endpoints
+  // now ship, and `bgbaked` is what keeps the fixed-element spelling from over-firing where the
+  // target wants the baked word.
   // `bgswsplit` is also not a one-member contrast, and cannot be: changing ONLY `case 1`'s second
-  // member of `bgswitch` (`vLength` -> `tileRow`) still scores 8, because the sharing moves to
-  // cases 1/`default`. Two arms have to change to remove it, so `bgswsplit`'s MATCH is consistent
-  // both with "the sharing is gone" and with "this member set happens to match"; `bgsplit`, where
+  // member of `bgswitch` (`vLength` -> `tileRow`) still scored 8 when this family was cut, because
+  // the sharing moves to cases 1/`default`. Two arms have to change to remove it, so `bgswsplit`'s
+  // MATCH is consistent both with "the sharing is gone" and with "this member set happens to
+  // match"; `bgsplit`, where
   // one member changes and nothing else does, carries the clean contrast.
   //
-  // THE STRUCT IS THE REAL FUNCTION'S, NOT A PRECONDITION of surface 1. With `pad19[7]` (sizeof
-  // 32, a single `lsl #5` scale and no lsl/sub/lsl chain) `bgshare` still scores 8 with the
-  // identical mint-then-respell winner, and with the arm-local members moved to offsets 0 and 2 —
-  // nothing for a displacement to hold — it scores 10 with the same winner shape. The 28-byte
+  // THE STRUCT IS THE REAL FUNCTION'S, NOT A PRECONDITION of surface 1. Measured before this
+  // family closed: with `pad19[7]` (sizeof 32, a single `lsl #5` scale and no lsl/sub/lsl chain)
+  // `bgshare` still scored 8 with the identical mint-then-respell winner, and with the arm-local
+  // members moved to offsets 0 and 2 — nothing for a displacement to hold — it scored 10 with the
+  // same winner shape. The 28-byte
   // stride and the 0xc–0x16 member offsets are here because they are `gBgInfo`'s.
   //
   // ATTRIBUTION, so nothing here is credited to the wrong gap:
   //  • `bg_area`/`bg_mix` above already pin the STRAIGHT-LINE variable-index capability over this
   //    same 28-byte stride: `bg_area` MATCHes on all four toolchains, `bg_mix` on agbcc/kmc/mwcc
   //    and is 1 on ido7.1. They are coverage for that, and for neither surface here.
-  //  • `armfall` (agbcc, nonmatch 8, `unsigned/merge-names`) is a switch over struct-array members
-  //    at this very base and is NOT coverage: its winner spells the base as a pointer induction
-  //    variable (`v0 = v0 + 2;`) and reads `*v0`/`v0[1]` — the safe local form, with no inline
-  //    re-spelling anywhere. Its 8 is its own `uninit-local`/`merge-chain` axis. `armdef` MATCHes.
+  //  • `armfall` (agbcc, nonmatch 8, `unsigned/merge-names/copy-defpos`) is a switch over
+  //    struct-array members at this very base and is NOT coverage: its winner spells the base as
+  //    a pointer induction variable (`v0 = v0 + 2;`) and reads `*v0`/`v0[1]` — the safe local
+  //    form, with no inline re-spelling anywhere. Its 8 is the zero-trip guard placement priced
+  //    with the `uninit-local` family above, not surface 1. `armdef` MATCHes.
   //  • No `uninit-local`: every local is assigned on every path. `merge-chain` goes on the four
   //    whose arms decide `a` AND `b`, both computed loads — the tag describes the body, not
-  //    the residual, so the two MATCH rows carry it as well.
+  //    the residual, so all four carry it.
   //  • EXCLUDED, with the machinery it belongs to: a clamp over the same base (`a = m[i].hLength;
   //    if (sel) a = 32; b = m[i].vLength;`) scores 22, but its winner uses the struct-member form
   //    throughout and mints no base local — clamp/merge-init, not this.
@@ -3197,7 +3234,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // the real tier.
   //
   // THE LBG NOTE, with this family's own share of that row priced rather than assumed away. On
-  // `kleod:LoadBGTilemapData:agbcc` the 386 winner's pool holds 20 `.word` against the ROM's 20
+  // `LoadBGTilemapData in the kleod checkout (agbcc)` the 386 winner's pool holds 20 `.word` against the ROM's 20
   // `.4byte`, and it bakes four `gBgInfo` addends (+0x4, +0x3c, +0x48, +0x4a) where the ROM bakes
   // three (+0x4, +0x48, +0x4a), carrying 8 plain `0x3003430` words against the ROM's 9. The extra
   // `+0x3c` is the pool word the two `((s32 *)50345008)[15]` sites share — surface 2, `bgfixed`'s.
@@ -3323,17 +3360,19 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // ATTRIBUTED BY ABLATION, not by reading. Adding one more gate to LIVEBASE_GATES that rejects a
   // numeric base outside MMIO — per-base selectivity in its crudest form — takes this row from 11
-  // to MATCH. Re-running the WHOLE synthetic tier under it (604 rows) moves exactly one other row,
-  // and that row is the finding's other half: `sizebound` goes 16 → 20, because it reads
+  // to MATCH. Re-running the WHOLE synthetic tier under it moves exactly one other row,
+  // and that row is the finding's other half: `sizebound` goes 16 → 20 — measured when that row
+  // stood at 16, where it now stands at 8 — because it reads
   // `*(u16 *)0x03001048` in two loop bounds and hoisting THAT base is correct. So the pass is
   // right about the spelling and wrong about which bases get it — and an address threshold is NOT
   // the predicate to fix it with: it pays 4 points on `sizebound` for the 11 it wins here.
   // `sizebound` is the row that referees whatever predicate a future lever proposes, and the
-  // shipped `single-cell` gate FAILS it as a rule, exactly as the address threshold does: that
-  // base is reached at one fixed offset only, so `-block` leaves it inline and its best spelling
-  // scores 36 where the winner that binds it scores 16. The row holds at 16 because the gate never
-  // SUBTRACTS a candidate — `/livebase` rides beside it and wins — and that coexistence is the
-  // whole reason a per-base predicate is allowed to be wrong. One that PRUNES has to be right.
+  // shipped `single-cell` gate treats it exactly as the address threshold does: that base is
+  // reached at one fixed offset only, so `-block` leaves `*(u16 *)0x03001048` inline and binds
+  // 0x040000d4 alone. The row does not pay for that, because the gate never SUBTRACTS a
+  // candidate — sizebound stands at 8 on `signed/expr-home/uns-cmp/livebase-block/volatile/
+  // initfirst/pollread`, the `-block` spelling itself — and that coexistence is the whole reason
+  // a per-base predicate is allowed to be wrong. One that PRUNES has to be right.
   //
   // WATCH THE SIGN when writing one. `dma_wait:mwcc_242_81`'s base is 0xcc006000, which the IR
   // carries as a NEGATIVE 32-bit constant; a first cut of the probe compared the key as a signed
@@ -3368,7 +3407,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // NOT on rank.ts's roster, and what it would cost is measured rather than guessed: one gate table
   // with the complementary predicate plus one row there (a gate can only reject MORE, so it is
   // never an extra entry in LIVEBASE_BLOCK_GATES), and with it in the list the corpus enumerates
-  // 8141 candidates against 7405 while not one of the 856 rows changes outcome, score or winning
+  // 8141 candidates against 7405 while not one row changes outcome, score or winning
   // label. It goes on the roster when a row asks for it.
   //
   // `onepoll` is the control — byte-identical C with the three IWRAM statements deleted. One base,
@@ -3386,7 +3425,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // is kept anyway: this row is still about the bases, and a row that two levers close jointly no
   // longer isolates either.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, and it pays there. The row exists because a base census
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), and it pays there. The row exists because a base census
   // over that function's enumeration returned four shapes and no others: bind nothing, bind
   // 0x03003430 alone (`/nearbase`'s cluster), bind all five of 0x03003430 / 0x03003478 /
   // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and bind those
@@ -3462,7 +3501,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //     unsigned/uns-cmp/livebase/volatile ..........................  5
   // What stands between them is the cast alone, not a hoist — `/uns-cmp` moves no statement — and
   // the tolerance stops at WIDTH 32, since a narrowing cast is not the value `v = X` stores. This
-  // is the only row in the 604-row synthetic tier that tolerance moves, `sizebound` included,
+  // is the only row in the synthetic tier that tolerance moves, `sizebound` included,
   // which carries both axes.
   //
   // `signguard` is the control, and it differs by ONE token: `s32 i` for `u32 i`. Nothing else in
@@ -3477,7 +3516,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // hand-composing the two spellings on that branch recovers a single point (31 → 30 on a hand
   // probe of the `/expr-home` shape). So no row demands it and none was written. What would earn
   // one: a target whose ranked winner carries `/expr-home` with the hoist INSIDE the guard.
-  // THAT CRITERION IS NOW MET, and the answer did not change. kleod:LoadBGTilemapData:agbcc's
+  // THAT CRITERION IS NOW MET, and the answer did not change. LoadBGTilemapData in the kleod checkout (agbcc)'s
   // ranked winner (386) carries `/expr-home` AND `/initfirst`, with the hoist landing exactly
   // here — `if (0 < *(u16 *)50345082) { v5 = 128 << 24; v14 = 0; do …`, so `then[0]` is the
   // hoist and the pass never looks at the init on the next line. Priced on that winner's own C,
@@ -3490,7 +3529,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // is parameter-derived and agbcc materialises it before the guard — that composition is not the
   // broken one.)
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, whose L1 guard is `movs r3, #0 / … / cmp r3, r2 / bge`
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), whose L1 guard is `movs r3, #0 / … / cmp r3, r2 / bge`
   // in the ROM and `if (0 < *(u16 *)50345082)` in the ranked winner.
   //
   // agbcc only, as the poll rows above: `ucmp` already carries the compare-polarity axis on all
@@ -3661,17 +3700,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // carrier has a second reader. What the six counter rows add is ISOLATION and SIZE: the shape
   // alone, plus memory, plus a struct member, each on its target.
   //
-  // TOOLCHAIN SCOPING. All nine ship `toolchains: ALL` as COVERAGE; the analysis above is agbcc's
+  // TOOLCHAIN SCOPING. All twelve ship `toolchains: ALL` as COVERAGE; the analysis above is agbcc's
   // alone. On mwcc_242_81 `membnarrow`, `basefold` and `sibwalk` all MATCH outright, so the gap
   // does not exist on that compiler; `narrowcnt` is 16 there, and the MIPS lanes score something
   // structurally different (ido7.1 4/4/12, gcc2.7.2kmc 7/7/21). Those cells are coverage, not
   // evidence for the thesis.
   //
-  // THE THREE `merge*` ROWS ASK A DIFFERENT QUESTION: not what a narrow counter is worth, but
-  // WHERE THE EVIDENCE FOR A NARROW LOCAL IS. Off a loop there is no back edge to carry the
+  // THE FOUR CELL-DEFINING `merge*` ROWS ASK A DIFFERENT QUESTION: not what a narrow counter is
+  // worth, but WHERE THE EVIDENCE FOR A NARROW LOCAL IS. Off a loop there is no back edge to carry the
   // write-back truncation, so gcc sinks it past the join and it arrives as the carrier's own
   // reader. `raise/narrowlocal.ts`'s `edge-extends` is the rule that decides that, and not one of
-  // the carriers it judges over the sa3 corpus is on a real row — these three are what price it:
+  // the carriers it judges over the sa3 corpus is on a real row — these are what price it:
   //     mergenarrow  `s16 v` across an if/else, read once      MATCH  without the sunk-write-back
   //                                                                   rule it is 6
   //     mergecast    the same merge as `s32 v` + `(s16)v`      MATCH  ADVERSE: a rule that narrows
@@ -3681,6 +3720,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //                                                                   unsigned column
   //     mergecastu   the same merge as `s32 v` + `(u16)v`       —     the HOISTED half; the row
   //                                                                   the diamond rule must not win
+  // `mergeldcast` and `mergepool` belong to the same file's ARM clause rather than to this table,
+  // and carry their own per-row comments.
+  //
   // The unsigned column was authored as UNDECIDABLE and it is not. `u16 v` and `s32 v` + `(u16)v`
   // do reach `raise/narrowlocal.ts` as the same IR — one `zext16` over raw in-edges — but they do
   // not compile to the same CFG: `gcc/jump.c:443-445` hoists the else arm above the compare for the
@@ -3947,14 +3989,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // WHERE A VALUE THAT SEVERAL PLACES NEED GETS ITS ONE HOME, in a function with no loop. The
   // `value-home` rows above are all loop-shaped or address-shaped: `/addr-home` homes a base
   // dereferenced at 2+ sites, `/expr-home` homes a pure value defined outside a LOOP, and
-  // `/derived-home` homes a pure value standing on a memory READ (rank.ts:128-164, all three
-  // gated in structure/analysis.ts). Nothing homes a plain computed value shared by two BRANCH
-  // ARMS, or a parameter's narrowing re-spelled at every use — and both are what a bit-test
-  // prologue is made of.
+  // `/derived-home` homes a pure value standing on a memory READ (rank.ts:156-195, all three
+  // gated in structure/analysis.ts). When this family was cut nothing homed a plain computed value
+  // shared by two BRANCH ARMS, nor a parameter's narrowing re-spelled at every use — both are what
+  // a bit-test prologue is made of, and both have since shipped (`/merge-home`, rank.ts:197-218,
+  // and the recovered narrow parameter declaration; every row below is MATCH).
   //
-  // Cut from sa3:sub_802DFC8:agbcc (62) and sa3:sub_803213C:agbcc (48), the two rows this family
-  // was written to explain. Both are m2c MATCHes; both were tagged `['struct','field']`, and that
-  // attribution is FALSIFIED — starting from asmlift's own winning source and changing only the
+  // Cut from sa3:sub_802DFC8:agbcc and sa3:sub_803213C:agbcc, the two rows this family was
+  // written to explain — both scored 62 and 48 when it was cut and both are MATCH today; m2c
+  // NONCOMPILEs both. The `['struct','field']` attribution they were cut under is FALSIFIED
+  // — starting from asmlift's own winning source and changing only the
   // three homes below, 802 reaches 0 (`rows=128`) and 832 reaches 0 (`rows=71`) while still
   // carrying asmlift's synthesized `struct Struct0 { s32 field_0; u8 _pad0[4]; … }`, its `field_N`
   // member names, `16 - 17` for -1 and the raw `(-(x)|x)>>31 & C` branchless idiom. asmlift's
@@ -3987,29 +4031,35 @@ export const SYNTHETIC: SynthSpec[] = [
   // each use instead, which is why the same three homes are missing at once.
   //
   // THE ROWS. Every score below is a round-trip: compile the reference with the benchmark's own
-  // agbcc, run the CLI on the produced `.s` and `--score-against` the produced `.o`. All seven
+  // agbcc, run the CLI on the produced `.s` and `--score-against` the produced `.o`. All nine
   // score with 0 dropped candidates and none declines, so no number here stands in for a frontend
   // link.
   //
-  //   `sxparam` diff:19 — an `s16` parameter tested at three sites. agbcc extends it ONCE at entry
+  //   `sxparam` MATCH — an `s16` parameter tested at three sites. agbcc extends it ONCE at entry
   //   (`lsl r0,#0x10 / asr r2,r0,#0x10`) and all three tests then read r2 with the constant in the
-  //   other operand; asmlift declares `u32 a0` and re-spells `(s16)a0` at each use, which agbcc
+  //   other operand; asmlift declared `u32 a0` and re-spelled `(s16)a0` at each use, which agbcc
   //   ELIDES (an `& 8` does not care) — so the extended value never gets a register of its own and
   //   the stream instead pays `add r2,r0,#0` at entry, `add r0,r2,#0` to read it back, and a
   //   different allocation from there on. FIVE-RUNG LADDER, all compiled against this row's own
   //   target:
-  //     19  asmlift today
+  //     19  asmlift when this row was cut (today it declares the narrow parameter and scores 0)
   //     16  the same source with ONLY the home added (`s32 t0 = (s16)a0;`)
   //      2  …and the now-redundant inner narrowing dropped (`-(t0 & 2)` for `-(s16)(t0 & 2)`)
   //      0  the home given the NARROW type (`s16 t0 = (s16)a0;`)
   //      0  the parameter declared `s16`
+  //   Today asmlift emits the last rung itself — `void sxparam(s16 a0, s32 * a1)`, 2 candidates,
+  //   `unsigned: 0`. The NARROW parameter is recovered from the prologue extension, not handed
+  //   over: dropping `--proto` leaves the same 2 candidates and the same `unsigned: 0 (match)`
+  //   with `s16 a0` still declared (only the return type falls back to `s32`, which is the one
+  //   fact `proto` does carry).
   //   The two middle rungs are what a builder needs: the capability is a home that CARRIES THE
   //   WIDTH, or an s32 home plus the cast-cleanup a width-carrying home makes automatic. (On the
   //   real rows the s32 home alone is enough — their re-spellings are not nested inside a cast.)
-  //   `zxparam` diff:8 is the unsigned side (`lsl #0x18 / lsr #0x18` once per parameter): 8 today,
+  //   `zxparam` MATCH is the unsigned side (`lsl #0x18 / lsr #0x18` once per parameter): 8 when cut,
   //   and 0 for the homed `u8` temp, the homed `s32` temp AND the declared `u8` parameter alike.
   //
-  //   `armexpr` diff:35 — a pure expression the source computed ONCE above an `if`, whose only
+  //   `armexpr` MATCH (`/merge-home`; the no-lever candidate is still 35) — a pure expression the
+  //   source computed ONCE above an `if`, whose only
   //   consumers are the two arms. asmlift sinks it into BOTH arms and agbcc does not re-hoist:
   //   compiled pair, the pre-branch spelling emits the 8-instruction `mov/and/neg/orr/asr#31/mov/
   //   lsl/and` chain once in the entry block, the per-arm spelling emits that entire chain TWICE,
@@ -4018,13 +4068,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //   folds the whole `>>31` idiom to `mov r3, #0x0` and the same repair scores 18. The lever is a
   //   home, not a re-typing, and it must not disturb the signedness the ranked candidate picked.
   //
-  //   `maskchain` diff:21 — `s32 m = 0;` above a four-arm chain whose arms conditionally overwrite
+  //   `maskchain` MATCH (`/defsite/merge-home`; `signed/defsite` alone is still 21) — `s32 m = 0;`
+  //   above a four-arm chain whose arms conditionally overwrite
   //   it. asmlift re-materializes the 0 as an `else { v0 = 0; }` arm in three places and agbcc
   //   IF-CONVERTS each two-armed form into the branchless `neg/orr/asr #31/and` idiom the source
   //   never wrote — 4 `neg`s against the reference's 1. FIRST BLOCKER WATCHED FIRING, not inferred,
   //   then ABLATED: `structure.ts`'s anchorConstCopies declines any merge variable whose name is
-  //   claimed by more than one SSA value (the `nameCount.get(name) !== 1` refusal at
-  //   structure.ts:1766, documented in that block's REFUSAL CONDITIONS list), and instrumented it
+  //   claimed by more than one SSA value (the `nameCount.get(name) === 1` accept condition at
+  //   structure.ts:2452, documented in that block's REFUSAL CONDITIONS list at structure.ts:2371),
+  //   and instrumented it
   //   fires 48× on `v0` here. With that one condition ablated and the bundle rebuilt the row's
   //   ranked line goes from `best signed/defsite: 21` to a MATCH. `/defsite` IS enumerated here
   //   and wins the row — for the OTHER variable, the four-way `v`.
@@ -4035,7 +4087,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   //   `basecell` MATCH — ONE access through a numeric base at a nonzero byte offset. gcc 2.9
   //   folds a constant SUBSCRIPT into the pool word, so the inline cast compiles to
-  //   `.word 0x3001103` + `ldrb r1, [r1]` where the pointer-local spelling keeps
+  //   `.word 0x3001103` + `ldrb r2, [r1]` where the pointer-local spelling keeps
   //   `.word 0x3001100` + `ldrb r1, [r1, #0x3]` (compiled pair, both dumped). `l3/basecse.ts`'s
   //   `single-use` gate rejected a base with `uses < 2` — its stated rationale, "one access
   //   re-materializes as cheaply as a named local", is false at a nonzero offset — so the offset
@@ -4059,13 +4111,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //   first statement. The hoist fires here, but `l3/basecse.ts` emits every init at the head of
   //   `sfn.body`, so the base is live across the prologue and agbcc pays a callee-saved register
   //   for it: compiled pair, assigning at the top adds `push {r4, lr}` / `pop {r4}` / `pop {r0}` /
-  //   `bx r0` where assigning at first use keeps a plain `bx lr`. LADDER: asmlift today (top) 11;
+  //   `bx r0` where assigning at first use keeps a plain `bx lr`. LADDER: the base local at the
+  //   top of the body 11;
   //   NOT hoisting at all 9 (three fresh pool words, `.word 0x3001103` / `0x300110a` /
   //   `0x3001109`); assigning at the first use that needs it 0. The current placement is worse
   //   than no hoist, which is the same signal the real row gives — on sub_802DFC8 the inline
   //   spelling scores 4, a top-assigned base local 8, a first-use-assigned one 0, and asmlift's
-  //   own `/livebase` candidate (which does emit the base local, at the top) scores 66 against the
-  //   winner's 62. `l3/sinkinit.ts` is that placement, carried as the differ-refereed `/sinkinit`
+  //   own `/livebase` candidate (which does emit the base local, at the top) scored 66 against the
+  //   then-winner's 62. `l3/sinkinit.ts` is that placement, carried as the differ-refereed `/sinkinit`
   //   candidate rather than as basecse's own `[...inits, ...rest]` — taken as a DEFAULT the same
   //   move costs `mixpoll` and `onepoll` their matches, which is the ledger below. `l3/scopebase.ts`
   //   is the scope-aware sibling and does not help: the innermost enclosing scope here IS the
@@ -4098,11 +4151,13 @@ export const SYNTHETIC: SynthSpec[] = [
   //   11, `/offmember` 11, no lever at all 11 — so deleting the HEAD entry of
   //   `BASEFOLD_ADMISSIONS` costs this row its match while deleting the SUNK entry does not, which
   //   is the separation `foldsink` makes in the other direction.
-  //   WHAT SPLITS THE THREE SPELLINGS, on compiled objects rather than on a theory: agbcc emits the
-  //   pool words in the order the source materializes them and allocates the store's operands to
-  //   match. The head-assigned local puts `.word 0x8024c35` first and stores `str r1, [r0, #0x4]`;
-  //   the same local assigned at its first use, and the inline member cast, both put
-  //   `.word 0x3001100` first and store `str r0, [r1, #0x4]`. So the claim in `basecell`'s
+  //   WHAT SPLITS THE THREE SPELLINGS, on compiled objects rather than on a theory: the pool order
+  //   is IDENTICAL in all three (`.word 0x3001100` then `.word 0x8024c35`) and the head-assigned
+  //   local is the one whose live range spans the two `out[]` stores, so agbcc gives it a
+  //   call-saved register and pays the prologue: `push {r4, lr}` / `str r0, [r4, #0x4]` /
+  //   `pop {r4}` / `pop {r0}` / `bx r0`, where the same local assigned at its first use and the
+  //   inline member cast both use r1 and keep `bx lr` — and those two assemble to the SAME BYTES
+  //   (`diff` of the two `.s`: empty), which is why they tie at 11. So the claim in `basecell`'s
   //   paragraph that a member access is "byte-identical to the named base" holds only where the two
   //   spellings materialize the base at the SAME program point — move the assignment above the use
   //   and `/offmember` is a different program, which is why it rides beside this row and loses.
@@ -4116,15 +4171,16 @@ export const SYNTHETIC: SynthSpec[] = [
   //   than one with it, it is a different claim. With the target
   //   assembled by hand from the checkout's own `.s` (`.syntax unified` prepended, else the
   //   unified Thumb mnemonics do not assemble) and ranked through the benchmark's own agbcc
-  //   candidate compiler, `ASMLIFT_CANDCACHE=0`, BOTH configurations:
-  //     kleod:InitPauseMenu             map-less 28 vs 30 ablated · map-ful 28 vs 30 — REPRODUCES,
-  //                                     and it is the one function of the three the two
-  //                                     configurations agree on.
-  //     kleod:UpdateUIElementAnimation  map-less 102 vs 106 (runner-up IS `/offmember`) —
-  //                                     REPRODUCES map-less; map-ful it is 99 vs 105, still won by
-  //                                     `/basefold`, so the WIN survives the configuration and the
-  //                                     numbers do not.
-  //     kleod:StreamCmd_SetTimerAndMode map-less 11 vs 12 on this rig. A 17-vs-18 reading of the
+  //   candidate compiler, `ASMLIFT_CANDCACHE=0`, BOTH configurations. All three are functions in
+  //   the klonoa checkout, ranked outside the benchmark, so none of them is a row:
+  //     InitPauseMenu             map-less 28 vs 30 ablated · map-ful 28 vs 30 — REPRODUCES,
+  //                               and it is the one function of the three the two
+  //                               configurations agree on.
+  //     UpdateUIElementAnimation  map-less 102 vs 106 (runner-up IS `/offmember`) —
+  //                               REPRODUCES map-less; map-ful it is 99 vs 105, still won by
+  //                               `/basefold`, so the WIN survives the configuration and the
+  //                               numbers do not.
+  //     StreamCmd_SetTimerAndMode map-less 11 vs 12 on this rig. A 17-vs-18 reading of the
   //                                     same function comes off a DIFFERENT target: 13 candidates
   //                                     either way, so the fan is identical and a hand-assembled
   //                                     object's pool alignment is not the project build's.
@@ -4152,51 +4208,23 @@ export const SYNTHETIC: SynthSpec[] = [
   //   WIDTH home exists anywhere in the corpus. What would earn one is a shape where the home
   //   forces a SPILL that per-use re-derivation avoids — unbuilt.
   //
-  // WHAT ALREADY GATES THESE LEVERS (Phase 5, by ABLATION — the measure is whether a ROW moves,
-  // not whether a test exists). Each ablation was applied to `packages/`, the bundle rebuilt, all
-  // 887 rows re-run, and reverted. Read the regression columns first: two of the three levers pay
-  // for their wins in lost matches, and both bills are on the REAL tier.
-  //   `nameCount !== 1` off — 19 rows move, NONE of the 887 regresses. Synthetic (13): `mergeloop`
-  //   agbcc 10→MATCH and mwcc_242_81 18→MATCH and gcc2.7.2kmc 18→7, `maskchain` 21→MATCH,
-  //   `breakloop` kmc 11→5 and mwcc 15→14, `structarr` agbcc 5→2 and mwcc 45→44, `nestedloop` kmc
-  //   16→13, `countdown` mwcc 23→18, `clampu8` kmc 6→5, `arraysum` mwcc 45→44, `powi` mwcc 32→31.
-  //   Real (6): `sub_802DFC8` 62→23, `CalcCRC16` 38→23, `TrySetCantSelectMoveBattleScript` 192→146,
-  //   `VramGetTotalAllocatedTiles` 18→7, `CountCollectedGems` 328→324, `ConfigureEntityBehavior`
-  //   266→265. So the pre-existing `mergeloop` rows (tagged `merge-chain`) ALREADY gate this
-  //   capability and are the stronger gate — two of them go all the way to MATCH, where
-  //   `maskchain` is the non-loop isolate closest to the real rows. Zero regressions is NOT
-  //   permission to delete the refusal: its rationale is that a shared name has readers and
-  //   writers between the def site and the edge, a MEANING concern a score cannot referee. The
-  //   lever is "refine the refusal", and 0 regressions bounds only its placement cost.
-  //   `single-use` off (the `basecell` lever) — the NAIVE ablation, which is not what shipped:
-  //   19 rows move, 7 better and 12 WORSE, and one of the twelve is a lost match. What shipped is
-  //   a separate ADMISSION, narrower than the ablation and read by no committed path. Better:
-  //   `basecell` 2→MATCH, `sub_803213C` 48→46 (exactly its
-  //   v(C)), `GetInput` 68→58, `RollRandomLevelVariant` 24→18, `EntityItemDrop` 118→116,
-  //   `ProcessInputAndUpdateEntities` 370→366, `CountCollectedGems` 328→327. Worse:
-  //   `UpdateFadeEffect` MATCH→2, `readarm` MATCH→8 and `armshare` MATCH→17 (both `read-once`),
-  //   `readcall` 6→17, `bg_mix` ido7.1 1→10, `dma_fill_uninit` 68→71, `StreamCmd_SetWindowRegs`
-  //   5→15, `Sin2` 23→31, `ModifyStatByNature` 53→57, `Random` 7→10, `CalculatePPWithBonus` 17→19,
-  //   `UpdateWorldMapNodeAnim` 159→162.
-  //   placement → first use (the `basehome` lever), as a DEFAULT rather than the candidate that
-  //   shipped — 8 rows move, 4 better and 4 worse. Better:
-  //   `basehome` 11→MATCH, `DecompressDma` 19→3 (the largest single move any lever here makes),
-  //   `sub_802DFC8` 62→58 (exactly its v(C)), `sa2__sub_8083504` 70→68. Worse: `mixpoll` MATCH→2
-  //   and `onepoll` MATCH→2 (both `value-home`), `sizebound` 16→20,
-  //   `ProcessInputAndUpdateEntities` 370→376.
-  //   The two base levers INTERACT, so ship them together and re-measure rather than one at a
-  //   time: with BOTH ablated 21 rows move, 11 better and 10 worse, `armshare` and `readcall`
-  //   recover and `StreamCmd_SetWindowRegs` reaches MATCH, while `readarm`, `mixpoll`, `onepoll`
-  //   and `UpdateFadeEffect` stay lost — net −1 match, against −2 for `single-use` alone.
-  //   The `sxparam`/`zxparam` lever has no ablation (the capability does not exist yet), but two
-  //   pre-existing rows already move under exactly its repair: `addu8` and `truncmul` (both
-  //   `narrow`, both diff:4 on agbcc) reach 0 with the homed spelling AND with the declared narrow
-  //   parameter. Expect those two to flip WITH this family's rows, as confirmation, not collateral.
+  // WHAT ALREADY GATES THESE LEVERS. The three levers were priced by ablation over the corpus as
+  // it stood when this family was cut (887 rows); every row-level number that ledger carried has
+  // since moved, so it is not reproduced here — re-measure against the committed artifact before
+  // resting anything on it. The two findings that survive are structural: `nameCount !== 1` cost
+  // ZERO regressions when ablated, which bounds only its placement cost and is not permission to
+  // delete a refusal whose rationale is a MEANING concern a score cannot referee; and the two base
+  // levers INTERACT, so ship them together and re-measure rather than one at a time.
+  //
+  // The `sxparam`/`zxparam` capability HAS since shipped: asmlift declares the narrow parameter
+  // itself and both rows are MATCH, as are `addu8` and `truncmul` (both `narrow`) on agbcc — the
+  // two pre-existing rows this family predicted would flip with it. Both still carry an ido7.1
+  // residual (4 and 7), which is a different lane and not this family's evidence.
   //
   // WHERE A FIX WOULD GO. `packages/core/src/structure/structure.ts` (anchorConstCopies'
-  // single-claimant refusal, ~1766) and `structure/analysis.ts` + `rank.ts` for the home itself —
+  // single-claimant refusal, ~2452) and `structure/analysis.ts` + `rank.ts` for the home itself —
   // the three axes there are ONE capability gated on three incidental shapes, and this family's
-  // remaining rows are exactly the cases none of the three admits. The two BASE rows are closed
+  // rows were exactly the cases none of the three admitted. The two BASE rows are closed
   // (`l3/basecse.ts`'s BASEFOLD_GATES carries the eligibility, `l3/sinkinit.ts` the placement,
   // both as candidates), and what the ledger above still prices is the SYMBOL side of
   // `single-use`. No GATE can decide that side, and the reason is the unit rather than the data:
@@ -4211,7 +4239,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // `gCallbackQueue` alone on both rows — if 159→162 is carried by them and not by it, the win
   // survives and the loss does not. Run that before assuming this side needs a candidate.
   // The per-site-signedness round that shares two of those files has LANDED (5df7ced) and this
-  // family is measured on top of it: all seven synthetic rows and both real rows score identically
+  // family is measured on top of it: all seven synthetic rows then in the family (`foldsink` and
+  // `foldhead` postdate it) and both real rows score identically
   // before and after, and its structure.ts hunks (577, 1648, 1976-2048, 2221) do not touch
   // anchorConstCopies. Nothing here needs `l3/typing.ts`, `backend/cfamily.ts` or `rank.ts`'s
   // `SIGN_CANDS` either: every `signed/` candidate scores identically to its `unsigned/` twin on
@@ -4227,14 +4256,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // extension already states. The rows carry the list anyway, so both decompilers hold the same
   // facts — the harness hands m2c the function's own prototype.
   //
-  // m2c, on the identical `ctx` asmlift receives, MATCHES `sxparam` and NONCOMPILES the other six
-  // — for two reasons, neither of them this family, and it REACHES the construct in every case.
-  // (1) Five of the six (`zxparam`, `armexpr`, `armkeep`, `maskchain`, `basehome`) store through a
-  // pointer PARAMETER at more than one offset and m2c renders those as `out->unk0` / `out->unk4`
-  // on an `s32 *` it has no struct for — its documented raw-pointer member rendering, not context
-  // withheld, since the `ctx` declares the full prototype, parameter names and all. (2) Two
-  // (`basecell`, `basehome`) type the address constant as `void *` and read members off it
-  // (`(void *)0x03001100->unk3`), as every raw-address row in this file already records; on
+  // m2c, on the identical `ctx` asmlift receives, MATCHES `sxparam` and NONCOMPILES the other
+  // eight — for two reasons, neither of them this family, and it REACHES the construct in every
+  // case. (1) Seven of the eight (`zxparam`, `armexpr`, `armkeep`, `maskchain`, `basehome`,
+  // `foldsink`, `foldhead`) store through a pointer PARAMETER at more than one offset and m2c
+  // renders those as `out->unk0` / `out->unk4` on an `s32 *` it has no struct for — its
+  // documented raw-pointer member rendering, not context
+  // withheld, since the `ctx` declares the full prototype, parameter names and all. (2) Four
+  // (`basecell`, `basehome`, `foldsink`, `foldhead`) type the address constant as `void *` and
+  // read members off it (`(void *)0x03001100->unk3`), as every raw-address row in this file
+  // already records; on
   // `basecell` that is the ONLY cause — its single store through the parameter renders as `*out`. What the output SHOWS is the point: on `armexpr` m2c hoists the
   // whole chain above the branch (`var_r2 = …;` then `if (a != 0)`), on `armkeep` it keeps BOTH
   // per-arm copies exactly as the reference wrote them, on `maskchain` it emits `var_r1 = 0;`
@@ -4302,7 +4333,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '  else { v = 0; if (d & 1) m = 0x800; }\n' +
       '  out[0] = v; out[1] = m;\n' +
       '}',
-    features: ['value-home', 'mask'],
+    features: ['value-home', 'mask', 'merge-chain'],
     toolchains: ['agbcc'],
     ctx: 'void maskchain(s32 d, s32 *out);',
     proto: { maskchain: { params: ['s32', 's32 *'], returnsVoid: true } },
@@ -4398,9 +4429,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // all FIRST-IN from asmlift's OWN winner C so no number crosses a spelling basin:
   //
   //     base placement \ third store        MERGED below the arms    PER ARM
-  //     bare cast at every use              40  (asmlift's winner)   36
+  //     bare cast at every use              40                       36
   //     ONE function-scope local            39                       19
   //     N locals, one per region            30                       0  MATCH
+  //
+  // (That lattice is the pre-lever measurement; `/unmerge` + `/regionbase` have since shipped and
+  // asmlift's winner is the 0 cell — `signed/unmerge/regionbase/volatile/initfirst`, 544
+  // candidates.)
   //
   // So it is a CONJUNCTION and the row exists to gate it as one, and the two conventions disagree
   // by more than 3x on each term — state which one any later number uses. The base-placement term
@@ -4408,15 +4443,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // LAST-OUT. The ONE-function-local row is a third point on the placement axis, not this
   // family's term.
   //
-  // AND THE TERM IS ADVERSE WHERE IT WAS CUT FROM. Applied FIRST-IN to LoadBGTilemapData's own
-  // ranked winner (386, its `/raw-globals` basin), giving each DMA region its own base local
+  // AND THE TERM IS ADVERSE WHERE IT WAS CUT FROM. Applied FIRST-IN to LoadBGTilemapData's
+  // then-ranked winner (386, its `/raw-globals` basin), giving each DMA region its own base local
   // scores 406 — twenty points WORSE, with every neighbouring divergence still in place. Pairing
   // it with the reference's read-back reads 401, still worse than the winner (the read-back alone
   // is 433). This family's OTHER term, the third-store un-merge, has not been priced on that
   // function at all. It pays only once the sibling divergences are gone; gate it here as a
   // conjunction term and never ship it as a default on its own evidence.
   //
-  // NO REACH, censused on the candidate SOURCES asmlift compiled rather than read off a gate, and
+  // NO REACH WHEN THIS FAMILY WAS CUT, censused on the candidate SOURCES asmlift compiled rather
+  // than read off a gate, and
   // on the invariant that actually discriminates: TWO DISTINCT LOCALS BOUND TO THE SAME BASE, one
   // per region. Across 188 captured `dmascope` candidate sources not one binds `0x040000D4` to
   // more than a single local; across 120 `dmascope2` sources 48 do bind two, and every one of
@@ -4425,17 +4461,22 @@ export const SYNTHETIC: SynthSpec[] = [
   // into both arms), which is the 34-point spelling above and not the 0-point one. Nor does the
   // third store un-merge: all 188 `dmascope` candidates write it through a merge temp
   // (`…[2] = v1;`, spelled `p1[2] = v1;` in 136 of them) and 0 write the constant per arm.
+  // Both absences are now reachable — `/regionbase` binds one base local per region and `/unmerge`
+  // un-merges the third store, and the two together are the winning label on `dmascope2` (184
+  // candidates) and `dmascope` (544).
   //
   // `dmascope1` is the CONTROL and asmlift MATCHes it (`best unsigned/volatile: 0 (match)`, 6
   // candidates): the same macro, the same base, expanded ONCE. Naming an MMIO base is not the gap
   // — counting it is. `dmascope2` is the minimal failing shape, one structural step from the
-  // control: that same expansion in two disjoint `if` arms, and it already fails. `dmascope` is
+  // control: that same expansion in two disjoint `if` arms, and it failed until
+  // `/unmerge/regionbase` shipped. `dmascope` is
   // the real function's shape — a loop whose two arms each expand the macro, plus a third
   // expansion after the loop — and it is where the conjunction above is measured.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, and the two counts are the family in one line: the
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), and the two counts are the family in one line: the
   // preprocessed reference declares FIVE `vu32 *dmaRegs`, one per DMA macro expansion
-  // (`grep -c 'vu32 \*dmaRegs'` over it: 5), while asmlift's ranked winner (386,
+  // (`grep -c 'vu32 \*dmaRegs'` over it: 5), while asmlift's ranked winner at the time (386,
+  // pre-`/unmerge`/`/regionbase`,
   // `unsigned/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/livebase-block/volatile/
   // coalesce-v20-v14/initfirst/raw-globals`) declares ONE — `volatile s32 * p0;` at function top,
   // assigned once at the head of the body. One long live range where the source had five short
@@ -4452,10 +4493,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // per-region homes for a MASK and loop invariants, one home per arm of an `if`, and `sizebound`
   // (nonmatch 8) is one base's init placed at its own scope while a second base's stays at
   // function top. Both are about WHERE one home goes; this family is about HOW MANY there are.
-  // And NOT what `/livebase-block` names, whose label invites the wrong reading: `rank.ts:376-379`
+  // And NOT what `/livebase-block` names, whose label invites the wrong reading: `rank.ts:468-470`
   // gives `/livebase` and `/livebase-block` the same `placement: 'head'`, and "block" there is the
-  // single-cell ELIGIBILITY gate, not a scope (`HoistPlacement = 'head' | 'first-use'`,
-  // hoist.ts:121 — both function-scope). A winner carrying `/livebase-block` is not evidence that
+  // single-cell ELIGIBILITY gate, not a scope (`HoistPlacement = 'head' | 'first-use' | 'scope'`,
+  // hoist.ts:215 — the two this pair uses are both function-scope). A winner carrying
+  // `/livebase-block` is not evidence that
   // the base count was considered.
   //
   // agbcc only. Every claim above is a pair of spellings compiled with THIS compiler; whether
@@ -4467,7 +4509,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // raw-address row in this file records rather than for anything in this family: it types the
   // address constant as `void *` and reads members off it (`(void *)0x040000D4->unk0 = ...`,
   // `invalid type argument of '->'`). It REACHES the construct in every case, and its output shows
-  // it has the same two absences asmlift does — no base local anywhere (all three expansions
+  // it has the same two absences asmlift had before `/regionbase` and `/unmerge` — no base local
+  // anywhere (all three expansions
   // spelled through the raw constant) and the third store merged below the arms through `var_r0`.
   {
     sym: 'dmascope1',
@@ -4539,7 +4582,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // single head-assigned local `/livebase-block` already mints.
   //
   // WHAT THE ROW DEMANDS IS A CONJUNCTION, AND NEITHER HALF IS SEPARATELY WORTH BUILDING. asmlift
-  // ranks 11 here today. A per-base region reading ALONE — DMA split per region, 0x03004000 left
+  // ranked 11 here before the pairing below landed (`7e78d80c`; the pairing shipped in
+  // `649dee56`), and is MATCH now. A per-base region reading ALONE — DMA split per region,
+  // 0x03004000 left
   // inline — is the 41 cell. Today's whole-function region reading, composed with nothing, is the
   // 18 cell. Both LOSE to the 11 the ranker already finds, so a round that ships either half and
   // re-runs `dmapoll` reads 11 and cannot tell a wrong order from a wrong row. Only the pair
@@ -4576,7 +4621,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // (rank.ts LIVEBASE_ADMISSIONS), which is the OTHER lever — so the freedom that reaches 0 is not
   // which RULE a key gets, it is which key the head hoist WITHHOLDS.
   //
-  // WHAT ASMLIFT DOES TODAY, AND WHAT EACH LEVER IS WORTH HERE — one ranked run of the row's own
+  // WHAT ASMLIFT DID BEFORE THE PAIRING (`7e78d80c`), AND WHAT EACH LEVER WAS WORTH HERE — one
+  // ranked run of the row's own
   // target per cell. The instrument is a reversible source edit at the ONE site that produces the
   // lever (core is browser-pure, so no env switch can live there): the lever's own thunk in
   // `rank.ts` for `/regionbase`, its admission row for `/livebase-block`, `ablateHeuristic` from
@@ -4590,14 +4636,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //     `region-single-use` off  56 cands, 11                          56, 0 MATCH
   //
   // `single-cell` and the whole `/livebase-block` admission give identical numbers, and the site
-  // that makes them identical is the SHADOW at `rank.ts:1293`, not the gate table: neutering the
+  // that makes them identical is the SHADOW — `enumerateCandidates`' `shadowed`/`sameBases` test
+  // in rank.ts — not the gate table: neutering the
   // one gate leaves `LIVEBASE_BLOCK_GATES` binding exactly what `LIVEBASE_GATES` binds, so the
   // admission is refused before `hoistBaseLocals` runs. Watched with the ablation applied, all 52
   // of `/livebase-block`'s admission contexts on `dmapoll` report `shadowed=true` and it emits 0
   // labels, against 0 shadowed / 24 labels at baseline.
   //
-  // The pair's live gate TODAY is the `/livebase-block` half, and it is the MATCH FLIP on
-  // `dmaflat` (0 -> 10) rather than the single point on `dmapoll`. The `/regionbase` half is inert
+  // The pair's live gate before the pairing was the `/livebase-block` half, and it was the MATCH
+  // FLIP on `dmaflat` (0 -> 10) rather than the single point on `dmapoll`. The `/regionbase` half is inert
   // on both rows until the pairing exists — nothing here can fail a `bench regression` on it.
   //
   // THE TWO-SIDED ABLATION THIS FAMILY CANNOT HAVE IS A THEOREM. Ablation only
@@ -4608,7 +4655,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // THE OTHER LEVER LEAVES THE EXISTING ROWS UNMOVED FOR TWO DIFFERENT REASONS, AND ONLY ONE OF
   // THEM IS ABSENCE. A fan carrying no `/livebase-block` LABEL is not evidence that lever did not
-  // run: `rank.ts:1293` refuses an admission binding the same bases at the same placement as an
+  // run: that same `shadowed` test refuses an admission binding the same bases at the same
+  // placement as an
   // earlier one, and `LIVEBASE_BLOCK_GATES` is `LIVEBASE_GATES` plus a REJECTS-ONLY gate, so
   // wherever `single-cell` rejects nothing the two tables admit the same set and the second is
   // shadowed. Watched at the two sites rather than read off labels: on `dmascope`/`dmascope2`
@@ -4639,22 +4687,30 @@ export const SYNTHETIC: SynthSpec[] = [
   // table (which key the source homed is not derivable), on the FIRST roster row binding those
   // bases at that placement — so the ceiling is three withholds, `homesplit-fan-cap`, and the floor
   // is 0. `synthetic:dmapoll` and `synthetic:dmaflat` sit at the ceiling for two bases: both
-  // withholds admit, 16 of each row's 72 candidates. `synthetic:dmascope` is unmoved at diff:9 but
+  // withholds admit, 16 of each row's 72 candidates under the roster at `7e78d80c` (the next block
+  // re-enumerated that fan at 80 at `acd64605`; a fan count expires with every roster row — re-run
+  // it). `synthetic:dmascope` is unmoved by the pairing (diff:9 when this was measured, MATCH now)
+  // but
   // STOPS BEING a lever-clean control for `/regionbase`: the pairing pipes THROUGH that pass, so 36
-  // of its 260 candidates bind the DMA base three times too — and they ride `/livebase`, not
+  // of its 260 candidates there (the roster at `7e78d80c`; the next block's census re-enumerated
+  // that fan at 544 at `acd64605`) bind the DMA base three times too — and they ride `/livebase`,
+  // not
   // `/livebase-block`, whose identical census at the same placement makes it the second label on
   // one program. Of the three bases bound there exactly ONE withhold admits: the region rule splits
   // neither of the others (`homesplit-no-region`). That is why test/regionbase.test.ts asks about
-  // the PASS rather than the label. `synthetic:dmascope2` (diff:13) stays lever-clean: its census
+  // the PASS rather than the label. `synthetic:dmascope2` (MATCH) stays lever-clean: its census
   // is one key, so the pairing is degenerate there and contributes no candidate at all.
   //
   // NEIGHBOURS THAT READ LIKE THIS AND ARE NOT. `armhomes` (MATCH) is per-region placement with
   // exactly ONE decision to get right; `sizebound` (8) has two bases but one axis, WHERE one init
-  // goes, not two policies. And `rank.ts:378` gives `/livebase` and `/livebase-block` the SAME
+  // goes, not two policies. And `LIVEBASE_ADMISSIONS` (rank.ts) gives `/livebase` and
+  // `/livebase-block` the SAME
   // `placement: 'head'`: "block" is an eligibility gate, not a scope.
   //
   // NO EXISTING ROW COVERS THIS, censused at the SITES rather than off the labels. Building every
-  // agbcc synthetic row's target and enumerating it: 212 rows enumerate, 8 decline on unrelated
+  // agbcc synthetic row's target and enumerating it, at `7e78d80c` over the 220 the tier then
+  // carried (278 today — re-run it rather than reading it): 212 rows enumerate, 8 decline on
+  // unrelated
   // links (`uhalf`/`utag` overlapping struct fields, three `preupdate_*` do-while pre-update,
   // `lladd`/`llsub` unmodelled `adc`/`sbc`, `stkarg` stack-as-data) and 0 targets fail to build,
   // the two failure modes counted apart. Fans carrying BOTH LABELS: 2, these two
@@ -4666,7 +4722,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // labels on the commit that ships it. On the `/regionbase` side the census is already a reach
   // count — no row in the tier holds a `/regionbase` tree whose labels the source dedup eats.
   //
-  // CUT FROM kleod:LoadBGTilemapData:agbcc, AND `dmapoll` DEMANDS STRICTLY MORE THAN IT DOES.
+  // CUT FROM LoadBGTilemapData in the kleod checkout (agbcc), AND `dmapoll` DEMANDS STRICTLY MORE THAN IT DOES.
   // Enumerating all 117760 of that function's candidates: `/regionbase` splits 0x040000D4 into
   // three locals and leaves 0x03003430 at ONE, while `/livebase-block` binds each of the two at
   // one — so there the second base is one the first lever declines to split and the policies need
@@ -4688,7 +4744,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`, so its WINNER carries
   // `/scopebase` and not `/regionbase` even though its fan holds one. Neither closes the hole. The
   // PRE-EXISTING row census this pair fills stays 2 / 4 / 0; with these two rows in it the
-  // winner-carries counts read 2 `/regionbase` / 6 `/livebase-block` / 0 both.
+  // winner-carries counts read 2 `/regionbase` / 5 `/livebase-block` / 0 both
+  // (`kleod:ProcessInputAndUpdateEntities` carried the sixth at `7e78d80c` and its winner no
+  // longer does).
   //
   // The number to carry to LBG is a DEFICIT of 31, not a ceiling on available gain: `/regionbase`'s
   // own basin ceiling there is 417 against the 386 winner, so a composition must clear 417 before
@@ -4828,7 +4886,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // agbcc synthetic row, FIVE carry a plain `/scopebase` candidate — `dmascope` 12 of 260,
   // `livepark` 2 of 28, `foldpark` 2 of 34, `unfoldpark` 2 of 36, `dmastride` 2 of 18 — and on
   // every one of the five the best candidate carrying no `scopebase` token equals the row's own
-  // best (`dmascope` 9, `livepark` 0, `foldpark` 0, `unfoldpark` 9, `dmastride` 0). Measured
+  // best (all five 0 at this commit; `dmascope` and `unfoldpark` read 9 when the counts above were
+  // taken, under earlier rosters — re-run it rather than reading it). Measured
   // through the harness with the plain respell ablated, all five are UNMOVED — same outcome, same
   // score, same label.
   // A SIXTH ROW REACHES IT AND WINS: `synthetic:sbscope`, in this file, under
@@ -4836,7 +4895,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // the reaching population is six and the plain admission wins one of them. A CENSUS SENTENCE IN
   // A COMMENT EXPIRES THE MOMENT A ROW IS ADDED BESIDE IT — re-run it rather than reading it.
   // AND A ROW ADDED TO THE ROSTER EXPIRES IT TOO, not only a row added to the dataset: a fan count
-  // is a fact about the roster it was taken under. Re-enumerated at this commit, candidates only:
+  // is a fact about the roster it was taken under. Re-enumerated at `acd64605`, candidates only:
   // `dmascope` 24 of 544, `livepark` 2 of 32, `foldpark` 2 of 34, `unfoldpark` 2 of 44,
   // `dmastride` 2 of 18 — the plain
   // admission is reached in the same five fans and the counts under it moved on two of them.
@@ -4873,7 +4932,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // Zero losses is the roster's additivity holding: the entry is appended, so no earlier row's
   // shadow decision moves and no source stops being emitted.
   // TWO SCOPES IN ONE TABLE, and the per-row figures are stable across them while the TOTALS are
-  // not. The map-less arm is re-run at this commit over 363 agbcc rows (23 throw identically, 333
+  // not. The map-less arm was re-run at `acd64605` over the 363 agbcc rows the artifact then
+  // carried (404 today; 23 throw identically, 333
   // hash identically, 7 gain): corpus fan 45223 → 47411 distinct sources, +4.84%. The map-ful
   // column and its total, 81747 → 85471 (+4.6%), were taken over the 358 agbcc rows the artifact
   // carried before this family's last rebase and are NOT re-run here; the seven rows and the zero
@@ -4887,7 +4947,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // The one other guard that reads the field, `BASEFOLD_GATES`, reaches none of these keys: its
   // census is empty on all three rows here.
   //
-  // CUT FROM kleod:LoadBGTilemapData:agbcc, where the same three-way split is 399 / 386 / 383 —
+  // CUT FROM LoadBGTilemapData in the kleod checkout (agbcc), where the same three-way split is 399 / 386 / 383 —
   // `/livebase` parks five bases, `/livebase-block` parks one, and parking exactly the two whose
   // offsets survived the fold is what a hand-compiled spelling reaches. NAME THE SET FROM THE FILE
   // AND NOT FROM THE SENTENCE: that hand-compiled 383 is the 386 winner plus one local, so it
@@ -5003,7 +5063,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // (the other three land after the `ble`), and on the `dmavolsrc` control both hold 4.
   //
   // WHY NO EXISTING ROW CATCHES IT, by a census of the artifact as it stood BEFORE the six rows
-  // below existed (207 distinct synthetic syms today): of its 200 distinct synthetic rows, 22
+  // below existed: of its 200 distinct synthetic rows, 22
   // reference a device register and 14 of
   // those also contain a loop — but 11 of the 14 carry a `while (dma[2] & 0x80000000) {}` wait
   // poll, whose read of the register file blocks the promotion outright. Of the three that do not
@@ -5076,8 +5136,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // local at all; what keeps it off ordinary memory is the target's own declared window
   // (`capabilities.deviceRegisters`), which is a REACH gate rather than a soundness one — over the
   // corpus it excludes a const-address store on 7 rows, and lifting it would move the fan on two
-  // of them (`readarm` 6 candidates would become 8, `fieldbase` 14 would become 20 — 6 and 14 are
-  // what they enumerate today), with no score and no outcome moving either way. `synthetic:ucmp:agbcc` prices the DEVICE-READ side of the same question and belongs to it
+  // of them (`readarm` and `fieldbase`) with no score and no outcome moving either way. The
+  // candidate counts that measurement quoted are gone — both fans have grown under later axes (12
+  // and 20 today, `[ranked]`) — so re-measure before quoting a number here.
+  // `synthetic:ucmp:agbcc` prices the DEVICE-READ side of the same question and belongs to it
   // rather than here: qualifying the 0x3001048 its loop test reads costs that match 15, and
   // `/vol-store` never reaches the row at all (its stores go through a runtime address).
   //
@@ -5100,10 +5162,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // above. It is +35 last-out.
   //
   // `dmaback`'S DECLINE, ATTRIBUTED BY INSTRUMENTATION rather than by reading: a temporary
-  // `console.error` on the filter at `packages/core/src/pattern/engine.ts:478` fires
+  // `console.error` on the `isDceSafe` filter in `packages/core/src/pattern/engine.ts` fires
   // `dce DROPPED use-less load` on `dmaback` and does not fire on `dmavolsrc`, which drops the
   // same three other ops (`add`, `shl`, `undef`) and no load. The load is eligible because
-  // `isDceSafe` (packages/core/src/ir/opcodes.ts:290) admits any opcode with no `effects` flag,
+  // `isDceSafe` (packages/core/src/ir/opcodes.ts) admits any opcode with no `effects` flag,
   // and `load` has none — the flag set is exactly `astore call opaque store`. The read survives
   // the frontend (it is `%20: unk32 = load %13` in the raw IR dump) and is gone by the folded
   // one. The lever this row gates is therefore a type-directed one, not a new pass: a read of an
@@ -5176,11 +5238,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // unreached here — but it is reachable now by a synthetic row, not only by a real-tier one.
   //
   // NO ROW HERE for declaration order, because one already exists: permuting the 14 declarations
-  // of asmlift's own winning `dma_fill_uninit` candidate and recompiling gives 0 / 6 / 9 / 12 over
-  // 40 random orders — one of them a byte MATCH — and the order asmlift ships sits at the worst of
-  // the four, which is the 12 that row publishes. That 12 is twelve `[sp,#k]` operand rows and
-  // nothing else, and moving the accumulator's declaration after the three spilled locals (or
-  // permuting the four in place into the target's slot order) compiles to 0. The LAW behind it —
+  // of asmlift's own winning `dma_fill_uninit` candidate and recompiling gave 0 / 6 / 9 / 12 over
+  // 40 random orders — one of them a byte MATCH — and the order asmlift shipped sat at the worst
+  // of the four. That measurement bought the per-target declaration-rank default, which now ships:
+  // the row publishes MATCH at 0 (`unsigned/defsite/loop-entry/derived-home/indexed`), so it is a
+  // second read of a LIVE capability rather than an open gap. The LAW behind it —
   // spill slots are handed out in declaration order — and the gate that isolates it from this
   // family's DMA machinery and from the undef envelope are the `spillorder` / `spillorder_rev`
   // pair in the uninit-local block; `dma_fill_uninit` is that capability's second read, not its
@@ -5197,7 +5259,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // third, writing arrays instead of calling, gets no `coalesce-` candidate offered at all —
   // agbcc strength-reduces its three loops apart, so the shared counter never survives into the
   // recovery. Two more, adding register pressure, decline on a pre-existing frontend link (`stack
-  // pointer used as data`, frontend/thumb.ts:1492) that is not this family. Nothing under ~60
+  // pointer used as data`, in frontend/thumb.ts) that is not this family. Nothing under ~60
   // instructions needed a second merge. The gate is real-tier.
   //
   // m2c scores none of the six, on the identical `ctx` asmlift receives, and for two reasons
@@ -5267,7 +5329,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // this" tag to be about (the rule that keeps `rereadctl` untagged in `read-once`), so `dmafill`
   // and `dmaptrsrc` carried it while they were gaps and lost it when they closed.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, whose inner loop is a `DmaFill16` with no wait and
+  // Cut from LoadBGTilemapData in the kleod checkout (agbcc), whose inner loop is a `DmaFill16` with no wait and
   // whose reference source ends FIVE macro expansions in a bare read-back (`grep -c` over the
   // preprocessed reference: 5). SAID PLAINLY BECAUSE IT IS EASY TO ASSUME OTHERWISE: closing
   // these rows is not predicted to move that function. Its winner already declares the DMA base
@@ -5324,7 +5386,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' volatile s32 *d = (volatile s32 *)0x040000d4; s32 p = base + lo * 64;\n' +
       ' for (i = lo; i < 32; i++) { tmp = 0; d[0] = (s32)&tmp;\n' +
       ' d[1] = p; d[2] = 0x81000020; p = p + 64; } }',
-    features: [],
+    features: ['value-home', 'pointer'],
     toolchains: ['agbcc'],
     ctx: 'void dmastride(s32 lo, s32 base);',
     proto: { dmastride: { params: ['s32', 's32'], returnsVoid: true } },
@@ -5364,7 +5426,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // Its enumeration gate (rank.ts, `mapHasBitfields`) reads `opts.symbols`, so a MAP-LESS row is
   // structurally incapable of producing one candidate for it, and a census over a map-less tier
   // measures the CORPUS rather than the axis.
-  // What the corpus does contain is the fold's own five reach rows, all kleod:agbcc, and on all
+  // What the corpus does contain is the fold's own five reach rows, all kleod rows on agbcc, and
+  // on all
   // five the fold ON wins — so a census reads the OFF arm as dead. These two rows are the shapes
   // the axis was built for, where it is the ONLY spelling that matches.
   //
@@ -5562,17 +5625,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // 0 of 2 candidates on `arrbias` and 0 of 2 on `arrcast` carry the bare subscript, and both
   // keep the `extern u32 gTbl;` declaration of the cast spelling.
   //
-  // FAN COST IS ZERO ON SIX OF THE SEVEN AND 2 -> 4 ON `tblrank2`. The derivation REPLACES the
-  // default spelling rather than adding a candidate, so where the shape is rank-1 the fan does not
-  // move: measured with `arrayShapeFromStride` off and on, `harr`, `harridx`, `bgarr`, `arrbias`
-  // and `arrcast` enumerate `unsigned, signed` either way. A DERIVED RANK is the exception, and it
+  // FAN COST IS ZERO ON FOUR OF THE SEVEN AND 2 -> 4 ON `bgarr` AND `tblrank2`. The derivation
+  // REPLACES the default spelling rather than adding a candidate, so where the shape is rank-1 and
+  // no base home is licensed the fan does not move: `harr`, `harridx`, `arrbias` and `arrcast`
+  // enumerate `unsigned, signed`. `bgarr` is one exception — the ORDER half licenses `/orderbase`,
+  // so it enumerates `unsigned/orderbase, signed/orderbase, unsigned, signed` (0, 0, 8, 8). A
+  // DERIVED RANK is the other exception, and it
   // is a lever this branch deliberately re-opened: `dims` satisfies the enumeration gate of
   // `/flat-rank`, an axis that map-less had nothing to turn off, so `tblrank2` enumerates
   // `unsigned, unsigned/flat-rank, signed, signed/flat-rank`. The axis exists because the asm
   // underdetermines `g[r][i]` against the flat byte arithmetic, and it is pinned by
   // `packages/core/test/global-array-shape.test.ts` ("a derived rank enumerates `/flat-rank`").
-  // Corpus-wide that is +2 candidates on ONE function: `tblrank2` is the only row of the 964
-  // whose derived shape carries `dims` at all.
+  // Corpus-wide that is +2 candidates on ONE function: `tblrank2` is the only row of the 1022
+  // measured at #144, and unre-checked since, whose derived shape carries `dims` at all.
   //
   // The AUTHORING-TIME figures below are kept verbatim rather than rewritten: they are what the
   // rows were cut to measure, and the "today"s in them mean that day, not this one.
@@ -5642,9 +5707,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // So `harr` and `bgarr` DO NOT isolate the array-typed subscript: a base local reaches their
   // targets byte-for-byte, and that is the CHEAPER of two sufficient answers — a value home over a
-  // named symbol, the family asmlift already has (`value-home` above). A round that reads this
-  // block should close `harr`/`bgarr` with the base local and reach for the array fork only for
-  // the other two.
+  // named symbol, the family asmlift already has (`value-home` above). In the event `bgarr` closed
+  // on the base local (`/orderbase`) and `harr` on the array fork — both sufficient answers were
+  // real, and which one the ranker reached for differed per row.
   //
   // `harridx` and `tblrank2` are the rows where the base local is NOT sufficient, and they fail it
   // differently. On `harridx` the base local is simply wrong (6, against asmlift's 5 today) — the
@@ -5791,17 +5856,21 @@ export const SYNTHETIC: SynthSpec[] = [
   // shipped additively must be checked by enumerating the fan (every candidate's score), not by
   // reading the row's published score.
   //
-  // THE ADDITIVITY GATE — `tblrank2`, and this half is a PREDICTION, not a measurement of a
-  // shipped lever. Endpoint-scored object-vs-object, half A alone (the array-typed subscript with
+  // THE ADDITIVITY GATE — `tblrank2`, and it shipped as predicted: both halves landed together in
+  // #143 and the row matches at 0 as `gPtrTbl[a0][a1]` off a synthesized
+  // `extern s32 gPtrTbl[][2]`. What follows is the pre-ship measurement, kept because it is the
+  // reason the two halves could not be shipped separately. Endpoint-scored object-vs-object, half
+  // A alone (the array-typed subscript with
   // a flat index, in asmlift's own operand order) `extern s32 gPtrTbl[]; return gPtrTbl[j + i*2];`
   // scores 4 — WORSE than the 3 asmlift ranks today; the other operand order `gPtrTbl[i*2 + j]`
   // scores 6; both halves together, which is the row's own spelling, score 0. So the subscript and
   // the declared rank must ship TOGETHER or this row pays for the half. FALSIFYING COMMAND, and it
   // is an ENDPOINT check for the same reason the controls are: ship half A alone, then score the
   // half-A candidate against `tblrank2`'s target directly. Anything other than a score strictly
-  // worse than 3 falsifies the claim. Do NOT read this off `pnpm bench run` — `tblrank2`'s fan is
-  // 2 and both candidates score 3, so an additively-shipped half A leaves the published 3 standing
-  // and the gate would report a falsification for a lever behaving exactly as predicted.
+  // worse than 3 falsifies the claim. Do NOT read this off `pnpm bench run` — `tblrank2`'s fan WAS
+  // 2 with both candidates at 3, so an additively-shipped half A would have left the published 3
+  // standing and the gate would have reported a falsification for a lever behaving exactly as
+  // predicted.
   //
   // TWO THINGS THE ROWS FALSIFIED, said here because it is easy to assume otherwise:
   //  • `bgarr` needs NO new element-layout capability. asmlift ALREADY synthesizes a correct
@@ -5815,23 +5884,21 @@ export const SYNTHETIC: SynthSpec[] = [
   //    `*(s32 *)((a1 << 2) + (a0 << 3) + (u32)&gPtrTbl)` — the rank-preserving scaling, not the
   //    flat `(i * 2 + j) * 4`. The flat index is a symbol-side SPELLING, not an arithmetic gap.
   //
-  // `outparam` IS A DIFFERENT KIND OF ROW: it has no score, and its gate is that it keeps
-  // declining with the SAME first blocker after every rebase. It pins the out-parameter idiom
-  // `T v; callee(&v); use(v);`. On the TARGET side, agbcc's `expand_decl` refuses a register to a
-  // local whose address is taken, so the local becomes a one-word frame and its address becomes
-  // argument 0. That explains the ASM but it is NOT what asmlift refuses on: the perturbation
-  // `s32 v = 0; fill(&v); return v;` is equally address-taken and lifts CLEANLY to
-  // `s32 sp0; sp0 = 0; fill(&sp0); return sp0;`. The discriminator is the STORE-LESS slot — the
-  // frame word is never written before the call — which is what the message itself says.
-  // ATTRIBUTION, re-triggered rather than quoted, first blocker
-  // `packages/core/src/frontend/thumb.ts:3395`, message verbatim:
+  // `outparam` pins the out-parameter idiom `T v; callee(&v); use(v);`. On the TARGET side,
+  // agbcc's `expand_decl` refuses a register to a local whose address is taken, so the local
+  // becomes a one-word frame and its address becomes argument 0. That is not what asmlift used
+  // to refuse on: the perturbation `s32 v = 0; fill(&v); return v;` is equally address-taken and
+  // lifts cleanly. The discriminator is the STORE-LESS slot — the frame word is never written
+  // before the call, which is also how a hidden struct-return pointer looks.
+  // THE ROW'S GATE IS ITS `proto` ENTRY, and it is load-bearing rather than inert. Measured, one
+  // candidate, `[ranked] 1 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best
+  // unsigned: 0 (match)`; run the same command with `--proto` dropped and the whole function
+  // declines again, at the `arg0AllDeclaredVoid` guard in `packages/core/src/frontend/thumb.ts`:
   //     cannot lift 'outparam': address-taken stack local — the one-word frame is handed to a
   //     callee as argument 0 and never written here, which is how a hidden struct-return pointer
-  //     looks — the callee owning the storage is not provably an addressable local
-  // That is a whole-function decline: zero candidates, no `[ranked]` line, nothing to score. Its
-  // `proto` entry is INERT TODAY — the decline is byte-identical with and without it — so the gate
-  // is the decline message alone and cannot detect a proto regression. The entry is kept because
-  // it becomes live the moment the decline is closed.
+  //     looks — and the callee is not declared `void`, so nothing says it does not own the storage
+  // So a `returnsVoid` regression on this row is detectable, and the refusal survives narrowed:
+  // an undeclared or non-void callee still declines.
   //
   // THE m2c SIDE. All six scored rows are `declined` for m2c on its OWN self-reported gap — it
   // emits `extern ? gTbl;` and the `? placeholder` is what the classifier reads. `outparam` is
@@ -6000,14 +6067,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //    `:2240`; the interference test is `canTakeName` at `:1960`. Fan: 20 candidates, every score
   //    58–60 — capability, not ranking. **This refusal has no gate table**: it is an `if` inside a
   //    4000-line function, which is why naming it took an instrumented patch and a revert, and why
-  //    its ablation is a claim rather than a test. `docs/level-tower.md:588` prescribes the fix —
-  //    convert load-bearing refusals to a `Gate<Ctx>` table, "the ablation as a test rather than a
-  //    claim" — so that conversion belongs FIRST in a G2 build, not as a side effect of it.
+  //    its ablation is a claim rather than a test. `docs/level-tower.md:484-518` prescribes the
+  //    fix — convert load-bearing refusals to a `Gate<Ctx>` table, so that "'this gate is
+  //    load-bearing' becomes an executable claim instead of a comment" — so that conversion
+  //    belongs FIRST in a G2 build, not as a side effect of it.
   //  • `swladder` 7 — `structure/switch-recover.ts` recovers a `switch` from a comparison ladder
   //    with no gate on which the source wrote, though the target's own layout records it: a ladder
   //    interleaves test and body (`cmp #0x64; bne .L3` … body … `.L3: cmp #0x1e; bne`), a real
   //    `switch` front-loads both tests and sorts them ascending, and the two are DIFFERENT objects.
-  //    No dual exists in the fan — 2 candidates, `unsigned: 7` and `signed: 7` — and `rank.ts:2233`
+  //    No dual exists in the fan — 2 candidates, `unsigned: 7` and `signed: 7` — and `rank.ts:2261`
   //    says why in its own words: `/connective` is "NOT for the shared-arm spelling". The shipped
   //    model to copy is `StructureOptions.switchArmsFollowLayout` (`structure.ts:1024`,
   //    `target.ts:238`, set for agbcc at `:333`), which already reads exactly this evidence one
@@ -6038,8 +6106,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //    `unsigned/uns-cmp/livebase/sinkinit` on `nestacc`, and instrumenting `l3/sinkinit.ts:37`
   //    shows `sinkInitsToFirstUse` returning `moved=1` on half its invocations HERE — so the pass
   //    fires on this row and whatever it produces never reaches the scored fan. That is the first
-  //    thing a G3 build should ask, and it is cheaper than the axis-direction question this
-  //    comment used to pose. `l3/hoist.ts`'s `isBaseInit` is NOT the place to widen — level-tower
+  //    thing a G3 build should ask. `l3/hoist.ts`'s `isBaseInit` is NOT the place to widen — level-tower
   //    names that exact widening as the trap, since it is the sole definition of where the
   //    base-init run ends and `l3/basecse.ts` re-orders off it.
   //  • `mixsense` 20 — `structure/structure.ts:4235`, `preserveDivergentBranchSense`: ONE boolean
@@ -6101,22 +6168,21 @@ export const SYNTHETIC: SynthSpec[] = [
   // 4 — deleting `v6`–`v11` and nothing else scores 11 (`rows 54, none 43`), and additionally
   // replacing asmlift's recovered `switch` with the source's `if/else if` ladder scores 4
   // (`rows 52, none 48`, every differing row an `arg-mismatch`). So 7 is `swladder`'s class and
-  // 4 is register/operand noise. (An earlier revision of this paragraph said "~18" beside the
-  // same 47/7/4 split, which does not add up; 11 is the number the ablation reads.) Hoisting
-  // `sinkacc`'s init takes it to 4 across four declaration orders, the residual an r5/r6 swap. `pmarr1` can be closed from either end — at rank 1 `gBlob->unk8[i]`,
+  // 4 is register/operand noise. Hoisting `sinkacc`'s init takes it to 4 across four declaration
+  // orders, the residual an r5/r6 swap. `pmarr1` can be closed from either end — at rank 1
+  // `gBlob->unk8[i]`,
   // `p = (u8 *)gBlob + 8; p[i]` and `p = gBlob->unk8; p[i]` are ONE object — but `pmarr2` only by
   // the member spelling. PREDICTIONS, each with the command that falsifies it: a per-SITE sense
   // takes `mixsense`'s fan from 2 to 16 and its score to 0 and `joinsense` from 4 to 0, and a
   // recursive arm search in `armDefs` takes `armcb` to MATCH — all three read by
   // `ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial`
-  // on the lever branch. ZERO-FLIP WATCH for whoever builds G1 — and it has to be recomputed
-  // rather than read, because the list below is computed over the BASE artifact and these rows
-  // are not in it yet: of the fourteen rows this family adds, `armcb` also wins on `/flip-join`
+  // on the lever branch. ZERO-FLIP WATCH for whoever builds G1. Of the fourteen rows this family
+  // adds, `armcb` also wins on `/flip-join`
   // (fan of 8, the top three all `/flip-join` at 32 against 35 for the non-flip ones), so a G1
   // lever must re-check `armcb` even though it is filed under G6. No other new row is
   // flip-labelled — `joinsense`/`joinsame` win on `/unmerge` and `mixsense` on plain `unsigned`.
-  // Over the base artifact: 16 committed rows have a winner
-  // label carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 16 MATCH — TWO of
+  // Over the committed artifact: 17 rows have a winner
+  // label carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 17 MATCH — TWO of
   // those five REAL (`kleod:ProcessHBlankWait:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`), the
   // other three `synthetic:ifand_far:agbcc`, `synthetic:ifor_near:agbcc` and
   // `synthetic:ifor_near:mwcc_242_81`. Recompute the set by filtering `results.json` on
@@ -6136,7 +6202,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // spells `gFlags.unk0_0 = 4;` from the same map. The map is what makes m2c noncompile there —
   // map-LESS it compiles `bfconstn` at diff:5, and asmlift's CONTROL drops to diff:5 with it — so
   // both configurations were measured and the trade is recorded at `PROBE_FLAG_MAP` itself rather
-  // than left for a reader to discover. Everything else is `declined(1 gap(s))`.
+  // than left for a reader to discover. `pmarrfix` is a TIE — m2c matches it too, off the same
+  // rendered map. Everything else is `declined(1 gap(s))`.
   //
   // Every row's authored `features` carries JUDGEMENT tags only — `loop`, `nested-loop`,
   // `short-circuit` and `call` are DERIVED per row by the evaluator and authoring them fails
@@ -6173,13 +6240,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // It makes a one-row smoke DETERMINISTIC and independent of whatever a neighbouring worktree
   // has left in the shared store — that is the whole reason, and it is not a correctness
   // requirement: all fourteen rows were re-run on the DEFAULT cache-ON path and every score
-  // reproduced identically, with no stall. (An earlier revision priced the store at "1.1M `ns/`
-  // entries, 4.5 GB against a 4 GB cap" and called the flag NOT optional. That figure was a
-  // MACHINE STATE, not a property of these rows, and it no longer holds: `du -sh
-  // $TMPDIR/asmlift-candcache` reads 959 MB against the 4096 MB cap.) The prune it referred to is
-  // real and is now bounded at its own site — `packages/cli/src/candcache.ts` gives `pruneOnce` a
-  // wall-clock budget and prints one line before it starts, so an over-cap store can no longer be
-  // mistaken for a hang. Before a full `pnpm bench run`, check the store with `du -sh
+  // reproduced identically, with no stall. The store's own prune is bounded at its site:
+  // `packages/cli/src/candcache.ts` gives `pruneOnce` a wall-clock budget and prints one line
+  // before it starts, so an over-cap store is not mistaken for a hang. Before a full `pnpm bench run`, check the store with `du -sh
   // $TMPDIR/asmlift-candcache` rather than pre-emptively disabling the cache.
   //
   // `--only armcb` runs TWO cases: the filter is a SUBSTRING match
@@ -6235,8 +6298,10 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: PROBE_FLAG_MAP,
   },
   {
-    // The LOW nibble deliberately: the field whose KEEP mask (0xF0) is not a Thumb immediate, so
-    // agbcc materialises the complement with `mov #0x10; neg`. The HIGH nibble's twin
+    // The LOW nibble deliberately: the DECLARED store's keep mask is computed in the 32-bit
+    // domain as -16 (0xFFFFFFF0), which no Thumb `mov` encodes, so agbcc materialises it with
+    // `mov #0x10; neg` — every BYTE-domain spelling narrows the same mask to one encodable
+    // `mov #0xF0`, so no raw spelling reaches this target. The HIGH nibble's twin
     // (`gFlags.unk0_4 = 0;` vs `*(u8 *)&gFlags = 15 & *(u8 *)&gFlags;`) is BYTE-IDENTICAL, so the
     // gap is the mask materialisation and not "a named bitfield store of zero" as such.
     sym: 'bfzero',

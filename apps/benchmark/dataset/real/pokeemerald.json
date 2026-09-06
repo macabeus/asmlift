@@ -530,7 +530,7 @@
         "unsigned",
         "div-reg"
       ],
-      "note": "Signed arithmetic shifts and an unsigned divide meet in one expression. asmlift’s signedness lever is whole-function, so it cannot spell the per-site signedness this body needs — whichever way it is thrown, one of the two sites is wrong.",
+      "note": "Signed arithmetic shifts and an unsigned divide meet in one expression — the per-site signedness a whole-function lever cannot spell. Closed: asmlift now emits `(u32)(coord * a1) / a0` beside the signed shifts and matches.",
       "funcC": "static s32 GetAnchorCoord(s32 a0, s32 a1, s32 coord)\n{\n    s32 subResult, var1;\n\n    subResult = a1 - a0;\n    if (subResult < 0)\n        var1 = -(subResult) >> 9;\n    else\n        var1 = -(subResult >> 9);\n    return coord - ((u32)(coord * a1) / (u32)(a0) + var1);\n}",
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/9d96fe4bd358bb7f8e70dc58702d5c4cb545b761/src/sprite.c#L1213-L1223",
@@ -551,7 +551,7 @@
         "value-home",
         "macro"
       ],
-      "note": "A `volatile u16` VALUE local held across three calls. `volatile` on a scalar local is the only C spelling that forces agbcc to give such a value a stack home instead of a callee-saved register, and asmlift has no such qualifier: its shipped `/volatile` lever qualifies a pointer’s pointee, never a value local. Chosen after the rule that a row must also be one m2c matches was dropped — m2c’s outcome was not a selection criterion for this row.",
+      "note": "A `volatile u16` VALUE local held across three calls — the one C spelling that forces agbcc to give a value a stack home instead of a callee-saved register. Closed: asmlift’s value-local `volatile` spelling reaches the home and the row matches.",
       "prependC": "#include \"global.h\"\n#include \"malloc.h\"\n#include \"decompress.h\"\n#include \"ereader_helpers.h\"\n#include \"link.h\"\n#include \"main.h\"\n#include \"mystery_gift_menu.h\"\n#include \"mystery_gift_client.h\"\n#include \"save.h\"\n#include \"sound.h\"\n#include \"sprite.h\"\n#include \"task.h\"\n#include \"strings.h\"\n#include \"util.h\"\n#include \"constants/songs.h\"\nextern const u8 gMultiBootProgram_EReader_Start[];\nextern const u8 gMultiBootProgram_EReader_End[];",
       "funcC": "static void EReader_Reset(struct EReaderData *eReader)\n{\n    volatile u16 backupIME = REG_IME;\n    REG_IME = 0;\n    EReaderHelper_ClearSendRecvMgr();\n    EReaderHelper_RestoreRegsState();\n    RestoreSerialTimer3IntrHandlers();\n    REG_IME = backupIME;\n}",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/9d96fe4bd358bb7f8e70dc58702d5c4cb545b761/src/ereader_screen.c#L66-L74",
