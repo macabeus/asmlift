@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { assertHoistsDominate } from '../src/contracts';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { stmtLists } from '../src/l3/ast';
-import { BASECSE_GATES, hoistBaseLocals } from '../src/l3/basecse';
+import { BASECSE_GATES, ORDERBASE_GATES, admittedBases, hoistBaseLocals } from '../src/l3/basecse';
 import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 import { enumerateCandidates } from '../src/rank';
@@ -562,5 +563,41 @@ describe('`scope` descends through every construct that opens a list, not just `
     const arm = out[1];
     const loop = arm.k === 'if' ? arm.then[1] : null;
     expect(loop?.k === 'while' && loop.body.map((s) => s.k)).toEqual(['assign', 'store']);
+  });
+});
+
+describe('the descent into a LOOP body: sound here, and unreachable from every shipped table', () => {
+  // The mechanism allows it and `scopeSite`'s header argues why it is safe — a base init is a cast
+  // of an `addr`/`const` leaf, so re-running it each iteration re-assigns the same link-time
+  // constant and every mention is still dominated. That argument is only half the answer, and this
+  // is the other half: no gate table that any caller pairs with `scope` admits a base used inside a
+  // loop, so no candidate carries the spelling. `BASECSE_GATES`' `loop` rule rejects it, and
+  // `ORDERBASE_GATES` — the one roster table at this placement — inherits that rule
+  // (it ablates only `cast-base` and `single-use`).
+  const loopUse = (i: number): Stmt => ({
+    k: 'store',
+    lval: { k: 'index', base: c(0x40000d4), idx: c(i), width: 4, signed: true },
+    value: c(0),
+  });
+  const inLoop: SFn = {
+    name: 'f',
+    params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
+    locals: [],
+    retType: T.void(),
+    body: [plain(), { k: 'while', cond: c(1), body: [loopUse(0), loopUse(1), loopUse(2)] }],
+  };
+
+  test('neither table admits a base whose uses are inside a loop, at any placement', () => {
+    expect(admittedBases(inLoop, BASECSE_GATES)).toEqual([]);
+    expect(admittedBases(inLoop, ORDERBASE_GATES)).toEqual([]);
+    expect(hoistBaseLocals(inLoop, ORDERBASE_GATES, 'scope')).toBeNull();
+  });
+
+  test('and where the mechanism IS handed one, the tree it emits still dominates every use', () => {
+    // Reached only through `placeBaseLocals` directly, which is where the pinning belongs: the
+    // init re-assigns the same constant per iteration, so the read below it is reached.
+    const sfn = fn([init('p0', 0x3001100), plain(), { k: 'while', cond: c(1), body: [read('p0', 1)] }]);
+    const out = { ...sfn, body: placeBaseLocals(sfn, [], 'scope').body };
+    expect(() => assertHoistsDominate(out, new Set(['p0']))).not.toThrow();
   });
 });

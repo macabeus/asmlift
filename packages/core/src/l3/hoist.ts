@@ -151,7 +151,16 @@ function mapTo(list: Stmt[], at: number | undefined): { list: Stmt[]; at: number
  *  DOMINATION IS THE DESCENT'S OWN INVARIANT: every mention is at or after the returned index
  *  within the returned list, so the init reaches all of them — including from inside a loop body,
  *  where it simply re-assigns the same link-time constant. `hoistBaseLocals` still CHECKS it
- *  (`assertHoistsDominate`), because an argument is not a check. */
+ *  (`assertHoistsDominate`), because an argument is not a check.
+ *
+ *  A LOOP BODY IS ALSO A LIST NO SHIPPED CANDIDATE CAN REACH, which is a stronger statement than
+ *  the safety argument above and the one that keeps re-assigning a base per iteration out of
+ *  published C. Every gate table any caller pairs with `scope` keeps `BASECSE_GATES`' `loop` rule —
+ *  `ORDERBASE_GATES`, the only roster table at this placement, ablates `cast-base` and `single-use`
+ *  and nothing else — so a base with ANY use inside a loop is refused before a placement is
+ *  consulted. Both halves are pinned in test/sinkinit.test.ts: neither table admits one, and where
+ *  the mechanism is handed such a base directly the tree it emits still dominates. Loop-body bases
+ *  are `l3/scopebase.ts`'s, which plans its own local rather than moving this run. */
 function scopeSite(list: Stmt[], name: string): { list: Stmt[]; at: number } | null {
   const idxs = list.flatMap((s, i) => (mentionsStmt(s, name) ? [i] : []));
   if (idxs.length === 0) {
