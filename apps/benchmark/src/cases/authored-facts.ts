@@ -137,8 +137,8 @@ export function stripAttributeMacros(s: string): string {
   return s;
 }
 
-/** A declarator prefix reduced to its return type: cpp line markers, attributes, storage classes
- *  and attribute macros removed, whitespace collapsed, `*` spaced canonically. */
+/** A declarator prefix reduced to its return type: cpp line markers, attributes, storage classes,
+ *  linkage specifiers and attribute macros removed, whitespace collapsed, `*` spaced canonically. */
 export function returnTypeOf(head: string): string {
   return stripAttributeMacros(
     stripAttributes(
@@ -146,7 +146,11 @@ export function returnTypeOf(head: string): string {
         .split('\n')
         .filter((l) => !l.trimStart().startsWith('#'))
         .join(' '),
-    ).replace(/\b(?:static|extern|inline|__inline__|__inline|register|auto)\b/g, ' '),
+    )
+      .replace(/\b(?:static|extern|inline|__inline__|__inline|register|auto)\b/g, ' ')
+      // an `extern "C"` linkage specifier: `extern` is gone with the storage classes above, and
+      // the string literal would otherwise survive into the return type as `"C" void`
+      .replace(/"C\+\+"|"C"/g, ' '),
   )
     .replace(/\s*\*\s*/g, ' * ')
     .replace(/\s+/g, ' ')
