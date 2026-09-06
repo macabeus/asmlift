@@ -528,6 +528,18 @@ describe('`scope` descends through every construct that opens a list, not just `
     expect(placeBaseLocals(withInc, [], 'scope').body).toEqual(placeBaseLocals(withInc, [], 'first-use').body);
   });
 
+  test('a `for` whose `init` IS one of its body statements keeps the hoist above the loop', () => {
+    // Nothing in the L3 contract forbids one `Stmt` object sitting at two tree positions
+    // (l3/scopebase.ts records a producer that shares an expression node), and a `for` is the one
+    // kind whose children are not all in the lists it opens. Were the descent to subtract the
+    // opened lists by IDENTITY, the shared statement would read as opened, the mention in the
+    // `init` — which runs before the body — would go unseen, and the init would sink below it.
+    const shared = read('p0', 1);
+    const loop: Stmt = { k: 'for', init: shared, cond: c(1), inc: plain(), body: [shared] };
+    const sfn = around(loop);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'first-use').body);
+  });
+
   test('one `switch` arm holding every mention takes the init; two arms stop at the switch', () => {
     const arm = (values: number[], body: Stmt[]) => ({ values, body, fallsThrough: false });
     const one: Stmt = {

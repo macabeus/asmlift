@@ -139,6 +139,15 @@ function mapTo(list: Stmt[], at: number | undefined): { list: Stmt[]; at: number
   return at === undefined ? null : { list, at };
 }
 
+/** How many times each statement appears in `list`. */
+function tally(list: readonly Stmt[]): Map<Stmt, number> {
+  const out = new Map<Stmt, number>();
+  for (const s of list) {
+    out.set(s, (out.get(s) ?? 0) + 1);
+  }
+  return out;
+}
+
 /** The innermost statement list holding EVERY mention of `name`, and the index in it of the first
  *  statement that mentions it. This is `firstUseIn` continued downward, and it descends only on
  *  three facts: exactly one statement of this list mentions the name, that statement mentions it
@@ -176,8 +185,13 @@ function scopeSite(list: Stmt[], name: string): { list: Stmt[]; at: number } | n
   if (inner.length !== 1) {
     return here;
   }
-  const opened = new Set(lists.flat());
-  const outside = mentionsHere(s, name) || stmtChildren(s).some((c) => !opened.has(c) && mentionsStmt(c, name));
+  // A MULTISET difference, not a set one: `stmtChildren` yields a `for`'s `init` and `inc` beside
+  // its body, and one `Stmt` object may sit at two tree positions. Subtracting by identity would
+  // read a shared `init` as opened and miss the mention it makes before the body ever runs.
+  const opened = tally(lists.flat());
+  const outside =
+    mentionsHere(s, name) ||
+    [...tally(stmtChildren(s))].some(([c, n]) => n > (opened.get(c) ?? 0) && mentionsStmt(c, name));
   return outside ? here : (scopeSite(inner[0], name) ?? here);
 }
 
