@@ -11,6 +11,12 @@
 // tests pin that (b) and (c) reach that same decision through the same representation, and that
 // none of the loud refusals guarding it were traded away.
 //
+// THIS FILE IS THE ONLY GATE ON THE LAYOUT SOLVER. Spellings (b) and (c) are what send a function
+// through the byte-accurate `needsLayout` branch in frontend/thumb.ts, and no benchmark row reaches
+// it: instrumented and measured 2026-09-06 over 307 cached agbcc reference asm files, that branch
+// was entered 0 times. So a clean `bench diff` is no evidence at all about the code these tests
+// cover — if they go green for the wrong reason, nothing else notices.
+//
 // Hand-written fixtures, NOT copied from any game.
 import { describe, expect, test } from 'vitest';
 

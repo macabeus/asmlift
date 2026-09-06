@@ -194,7 +194,13 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   expect(thumb('\tmvn\tsp, r4\n')).toThrow(spAsData);
   expect(thumb('\tldr\tsp, [r0, #4]\n')).toThrow(spAsData);
   expect(thumb('\tldmia\tr0!, {sp}\n')).toThrow(spAsData);
-  // the low-register copy idiom must still fire — it is load-bearing for callee-saved liveness
+  // …and the sp whitelist must not swallow agbcc's low-register COPY idiom, which is the same two
+  // mnemonics with a low destination. `add rD, rS, #0` has to lower to the SAME SSA VALUE, not to
+  // an `x + 0` add: asmlift folds no identity add, so the structurer's pre-update loop test — which
+  // compares a back-edge argument against an exit argument by value identity — would read the two
+  // as different values and decline a loop that is perfectly ordinary. (NOT callee-saved liveness,
+  // which this line claimed for several releases; the arity machinery is keyed on the register,
+  // never on the value.) What the assertion sees of that is `return a0;`, not `return a0 + 0;`.
   expect(
     decompile('f', '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tadd\tr0, r1, #0\n\tbx\tlr\n', ARMV4T_AGBCC).source,
   ).toBe('s32 f(s32 a0) {\n    return a0;\n}\n');
