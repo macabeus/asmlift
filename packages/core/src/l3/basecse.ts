@@ -101,6 +101,7 @@
 // and the accesses stride correctly with no per-use cast. A wrong hoist (a base agbcc would actually
 // re-materialize) only changes recompiled bytes -> a LOST match under the zero-lost gate, never a
 // miscompile: the address value is identical, just held in a different place.
+import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
@@ -632,7 +633,18 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  every table, at the cost of the ablation handle below — the trade `BASEFOLD_GATES`' fused
  *  exemption already made once, and not one to make for a class with no inhabitant. rank.ts offers this row only where
  *  `compilerBehaviors.arrayShapeFromStride` — the same opt-in the licence itself carries, because
- *  the fork is agbcc's and no other compiler has been shown to make it. */
+ *  the fork is agbcc's and no other compiler has been shown to make it.
+ *
+ *  ITS REACH IS A FUNCTION OF THE SYMBOL MAP, and unevenly so — a sweep is evidence about the arm
+ *  and the subtree it ran over, so both are stated. Over every cleanly-lifting function of each
+ *  project's WHOLE `asm` tree, `asm/matchings` included:
+ *  klonoa binds 18 of 284 map-ful and ZERO map-less, sa3 30 of 1709 map-ful and 29 map-less.
+ *  The klonoa collapse is THIS GATE and not a missing base: ablating `order-licensed` admits 118
+ *  map-less klonoa functions where the full table admits none — so the bases are collected and it
+ *  is the ORDER EVIDENCE that map-less klonoa does not carry. Why the evidence depends on the map is not
+ *  attributed here; instrument `collect`'s `ordered` before assuming. What follows for a reader
+ *  either way: a klonoa row carrying no symbol map exercises nothing in this table, and its whole
+ *  family — the `scope` placement included — is carried on that project by the map-ful arm alone. */
 export const ORDERBASE_GATES: readonly Gate<BaseKey>[] = [
   ...ablateHeuristic(ablateHeuristic(BASECSE_GATES, 'cast-base'), 'single-use'),
   {
@@ -698,15 +710,36 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
   return { c, keys };
 }
 
+/** THE TWO FLAT PLACEMENTS ALWAYS ANSWER. Both put the run in the top-level statement list, so
+ *  there is always a tree to return and the caller has no decline to handle — which is why
+ *  `pipeline.ts` can commit one of them.
+ *
+ *  `scope` DECLINES, and the overload is how a caller is told: `null` means the placement had
+ *  nothing to say about this function, because no init landed inside a nested list. That tree is
+ *  byte-for-byte the `first-use` spelling (l3/hoist.ts's `nested`), and the roster withholds the
+ *  `first-use` row for this table deliberately (rank.ts, ORDERBASE_ADMISSIONS) — so returning it
+ *  ships the withheld candidate under the scoped row's name.
+ *
+ *  IT WITHDRAWS A SPELLING RATHER THAN COLLAPSING A DUPLICATE, which is what the decline costs.
+ *  `ORDERBASE_ADMISSIONS` holds exactly two rows, `head` and `scope`, so nothing is ever enumerated
+ *  at `first-use` for this table and the refused tree has no twin to fold into — its shape and
+ *  `/volatile` products go with it. Over each project's whole `asm` tree, map-ful: of the 48
+ *  functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do not, and for
+ *  29 of the 41 the refused spelling is one the `head` row does not already produce. Instrumented
+ *  on two of those, both map-ful — the `kleod:StreamCmd_SetBGScroll` row (fan 11), and
+ *  `sub_808A4EC` in the sa3 checkout, which is no row here (fan 40) — where the `head` source is
+ *  among the candidates `enumerateCandidates` returns and the withheld `first-use` source is not. */
+export function hoistBaseLocals(sfn: SFn, gates?: readonly Gate<BaseKey>[], placement?: 'head' | 'first-use'): SFn;
+export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[], placement: HoistPlacement): SFn | null;
 export function hoistBaseLocals(
   sfn: SFn,
   gates: readonly Gate<BaseKey>[] = BASECSE_GATES,
   placement: HoistPlacement = 'head',
-): SFn {
+): SFn | null {
   const { c, keys: hoisted } = admit(sfn, gates);
   const { meta } = c;
   if (hoisted.length === 0) {
-    return sfn;
+    return placement === 'scope' ? null : sfn;
   }
 
   const fresh = nameAllocator(sfn);
@@ -743,6 +776,26 @@ export function hoistBaseLocals(
   // The shell carries the minted DECLARATIONS and the REWRITTEN statements together: first-use
   // would not know the new names without the first, and would query the pre-rewrite accesses
   // without the second.
-  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
-  return { ...sfn, body, locals };
+  const { body, moved, nested } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
+  // DEGENERATE SCOPE IS A DECLINE, not a candidate: nothing reached a nested list, so this is the
+  // `first-use` tree, which this function's header prices.
+  if (placement === 'scope' && nested.length === 0) {
+    return null;
+  }
+  const out = { ...sfn, body, locals };
+  // The two FLAT placements can only put the run in the top-level list, above every use of it by
+  // construction. `scope` puts an init inside a nested list, which is where a placing lever can ship
+  // the one failure the byte differ rewards — a read of a local whose assignment does not reach it —
+  // so the tree it emits is checked rather than argued (contracts.ts).
+  //
+  // THE POPULATION IS THE MOTION, and `moved` is what the placer says it moved rather than what this
+  // function minted. The leading run this pass inherits is the DEFAULT hoist's, committed by
+  // `structureChecked` before rank's levers see the tree (pipeline.ts), and `scope` moves those
+  // inits too — so `newLocals` names less than half of what has to be judged. Real inhabitants, in the
+  // CHECKOUTS rather than in a benchmark row — `DecompressAndLoadLevel` in klonoa and `sub_8052474`
+  // in sa3, both map-ful — each sink one inherited `p0` beside the minted `p1`.
+  if (placement === 'scope') {
+    assertHoistsDominate(out, new Set([...newLocals.map((l) => l.name), ...moved]));
+  }
+  return out;
 }

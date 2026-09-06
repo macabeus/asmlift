@@ -589,22 +589,40 @@ const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *  is a plain leaf reached twice, `/livebase` already binds exactly that set at this placement and
  *  this row declines rather than restating it under a second label.
  *
- *  ONE PLACEMENT, AND IT IS A MEASURED ZERO rather than a question the admission does not raise.
- *  `synthetic:bgarr` emits the identical source at both placements (the hoist has nothing to sit
- *  above) and that one row generalizes to nothing: over the artifact's agbcc rows `head` and
- *  `first-use` emit DIFFERENT source on 3 of the 8 rows this admission binds map-less and 4 of the
- *  10 map-ful — `kleod:SetupBG3WindowOverlay`, `kleod:UpdateCameraScroll`,
- *  `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful `kleod:StreamCmd_SetBGScroll`. Run
- *  through the harness on all four, a second entry at `placement: 'first-use'` scores nothing:
- *  146 → 146, noncompile → noncompile, MATCH → MATCH, noncompile → noncompile, against +1129
- *  candidates over those rows' 15167 (+7.4%) and `kleod:UpdateCameraScroll` 224 s → 278 s. So the
- *  second row is withheld for the reason `pairings: false` is — a measured zero on the corpus. Add
- *  it when a row scores better with it, and re-run those four when one does.
+ *  TWO PLACEMENTS, and the FLAT second one is a measured zero. `synthetic:bgarr` emits the identical
+ *  source at `head` and `first-use` (the hoist has nothing to sit above) and that one row
+ *  generalizes to nothing: over the artifact's agbcc rows the two emit DIFFERENT source on 3 of the
+ *  8 rows this admission binds map-less and 4 of the 10 map-ful — `kleod:SetupBG3WindowOverlay`,
+ *  `kleod:UpdateCameraScroll`, `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful
+ *  `kleod:StreamCmd_SetBGScroll`. Run through the harness on all four, an entry at
+ *  `placement: 'first-use'` scores nothing: 146 → 146, noncompile → noncompile, MATCH → MATCH,
+ *  noncompile → noncompile, against +1129 candidates over those rows' 15167 (+7.4%) and
+ *  `kleod:UpdateCameraScroll` 224 s → 278 s. That row stays withheld.
  *
- *  `pairings: false` for the field's own reason — a product is added for a row that demands the
- *  joint spelling, and the row that earned this entry demands none. */
+ *  `scope` is a DIFFERENT question and a row demanded it. `first-use` reaches only the top-level
+ *  statement list, so on a function whose licensed base is used solely inside a guarded loop it
+ *  spells the same bytes `head` does — the pool word above the branch — while the reference loads
+ *  it after. Compiled through the benchmark's own agbcc on `synthetic:ereadctl`'s target, with
+ *  everything else held identical: the init above the `if` differs, the same init INSIDE the arm is
+ *  instruction-identical. So the two flat placements are one answer here and this is the other, the
+ *  way `/basefold`'s pair is one eligibility rule at two positions.
+ *
+ *  AND THE WITHHOLDING ABOVE IS ENFORCED BY THE PLACEMENT, not by this row's absence. `scope`
+ *  reproduces `first-use` on every function where no nested list holds all of a base's uses, so a
+ *  scoped row that answered there would ship the withheld candidate under this row's name — and it
+ *  is the COMMON case, not the corner: over each project's whole `asm` tree, map-ful, of the 48
+ *  functions this gate table admits, 41 place every init in the top-level list and only 7 reach a
+ *  nested one. `hoistBaseLocals` DECLINES at `scope` in exactly that case (l3/basecse.ts) — a
+ *  WITHDRAWAL and not a dedup, because on 29 of the 41 the flat spelling is one no other row here
+ *  produces, which that file's header prices. Measured on
+ *  `kleod:UpdateCameraScroll` map-ful, the row that priced the withheld one: 512 of its 512
+ *  `/orderbase/scoped` sources placed the init at the top level, and all 512 are gone.
+ *
+ *  `pairings: false` on both for the field's own reason — a product is added for a row that demands
+ *  the joint spelling, and neither row here demands one. */
 const ORDERBASE_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/orderbase', gates: ORDERBASE_GATES, placement: 'head', pairings: false },
+  { suffix: '/orderbase/scoped', gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
 ];
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -1592,6 +1610,16 @@ export function enumerateCandidates(
           // holds locals the lever never PLACED. Harmless and deliberate: the differential's
           // early return absorbs a name the unshaped tree already fails on, and a renamed local
           // whose def a shape moved below a read is the same wrongness as a placed one.
+          //
+          // KNOWN GAP on the other side of the same diff: a lever that RELOCATES a local it did not
+          // mint contributes no name, so the shape differential does not judge it. The `scope`
+          // placement is the one that does this — it sinks the run `structureChecked` already
+          // committed (l3/basecse.ts judges those itself, over the placer's own report of the
+          // motion) — and closing it here needs that report threaded out to this level. Not widened
+          // to every relocated local instead: judging those would drop candidates across the whole
+          // fan with nothing measured to license it. What keeps it uninhabited is `initFirstGuards`,
+          // which moves only const or pure-read assigns and so cannot lift a read of a base local
+          // above its init.
           const minted = createdLocals(sfn, alt);
           for (const subset of SHAPE_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.

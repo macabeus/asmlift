@@ -293,7 +293,15 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   "is this address a local?", and what separates them is PLACEMENT: never (`raise/gvn.ts`), a
   position in the top-level statement list — the function top, the minted inits above a run already
   there, or each init at its first use (`l3/basecse.ts`, `l3/nearbase.ts`, `l3/sinkinit.ts`) — the
-  innermost enclosing scope (`l3/scopebase.ts`), immediately before the call (`l3/argbase.ts`).
+  innermost enclosing scope (`l3/scopebase.ts`, and `l3/basecse.ts` too at `l3/hoist.ts`'s third
+  placement, which sinks the run it places INTO the block holding every use), immediately before the
+  call (`l3/argbase.ts`). The two scope-aware ones are separated by what they can SEE rather than by
+  where they put it: `scopebase` plans its own locals over `addr`/`const`/`var` leaf bases, while the
+  `scope` placement moves a run already minted, over the cast base no leaf pass can spell. A
+  placement that lands nothing in a nested list has emitted the flat spelling under a second label,
+  so `hoistBaseLocals` declines there rather than offering it. That is the roster's dedup rule for
+  base SETS read onto positions, but a WITHDRAWAL in effect rather than a collapse: the roster
+  carries no row at the spelling being refused, so the candidate has no twin to fold into.
   `l3/scopebase.ts` also answers a SECOND question the others do not have, and it is a different
   axis from placement: HOW MANY locals one address gets. Its `REGION_RULES` carry both readings —
   `'whole'` gives a key one local (`/scopebase`), `'per-region'` one per disjoint region
@@ -311,9 +319,18 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   All three that place into that run now share the body rebuild, and TWO of them share the policy
   as an argument: `l3/hoist.ts` owns name allocation for every pass that mints a local, and
   `placeBaseLocals(sfn, minted, placement)` owns the leading base-init run, the first-use query and
-  the rebuild. `head` and `first-use` are two positions for a run this file has already ordered —
-  that is `HoistPlacement`, the only thing `l3/basecse.ts` accepts and the only thing a roster
-  admission may state, so a row in `rank.ts` says WHERE its locals go beside WHICH bases it binds.
+  the rebuild. `head`, `first-use` and `scope` are three positions for a run this file has already
+  ordered — that is `HoistPlacement`, the only thing `l3/basecse.ts` accepts and the only thing a
+  roster admission may state, so a row in `rank.ts` says WHERE its locals go beside WHICH bases it
+  binds. `scope` is the first of the three that leaves the top-level statement list: it continues
+  the first-use query downward while exactly one statement mentions the local, that statement
+  mentions it nowhere outside the lists it opens, and exactly one of those lists holds it — and it
+  reproduces `first-use` exactly where no nested list holds every mention, which is what keeps it a
+  position rather than a policy. It is also the only one whose result is not above every use by
+  construction, so `hoistBaseLocals` runs `assertHoistsDominate` there and nowhere else, over every
+  init the placer reports having MOVED — the run it inherits from the committed default hoist
+  included, not only the ones it minted itself. The setter half of `stmtLists` (`mapStmtLists`, beside it in `l3/ast.ts`) is what lets the
+  rebuild reach a nested list without a second `Stmt`-kind switch.
   `l3/nearbase.ts`'s `prepend` is not a third position: it returns before the query and the sort,
   so it is `[...minted, ...body]` and shares the rebuild only. It is a separate type and not a
   third value of one — handing it to `hoistBaseLocals` spells a minted base's pool load above the

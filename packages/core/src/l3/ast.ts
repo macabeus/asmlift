@@ -711,6 +711,35 @@ export function stmtLists(s: Stmt): Stmt[][] {
   }
 }
 
+/** The SETTER half of {@link stmtLists}: `s` with each of its nested lists replaced by `f` applied
+ *  to it, in the same order `stmtLists` yields them. A caller that rebuilds a tree around one
+ *  nested list therefore writes no `Stmt`-kind switch of its own — the pair lives here so a new
+ *  kind carrying a list is a compile error in both halves rather than a silent miss in a caller's
+ *  hand-rolled recursion. Exhaustive on purpose: no `default`. */
+export function mapStmtLists(s: Stmt, f: (list: Stmt[]) => Stmt[]): Stmt {
+  switch (s.k) {
+    case 'if':
+      return { ...s, then: f(s.then), else: f(s.else) };
+    case 'while':
+    case 'dowhile':
+    case 'for':
+      return { ...s, body: f(s.body) };
+    case 'switch':
+      return {
+        ...s,
+        cases: s.cases.map((c) => ({ ...c, body: f(c.body) })),
+        ...(s.default ? { default: f(s.default) } : {}),
+      };
+    case 'assign':
+    case 'store':
+    case 'exprstmt':
+    case 'return':
+    case 'break':
+    case 'continue':
+      return s;
+  }
+}
+
 /** Every expression node in a body, statements nested and children included — the whole-tree walk
  *  the three functions above compose into, kept here so a new node kind is a compile error in one
  *  of them rather than a silent miss in each caller's own recursion.

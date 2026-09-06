@@ -2,8 +2,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { assertHoistsDominate } from '../src/contracts';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { stmtLists } from '../src/l3/ast';
+import { BASECSE_GATES, ORDERBASE_GATES, admittedBases, hoistBaseLocals } from '../src/l3/basecse';
 import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 import { enumerateCandidates } from '../src/rank';
@@ -99,13 +102,15 @@ describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)
   // nearbase.ts's abstention from the ordering, pinned separately below.
   const named = (name: string, addr: number): BaseInit => init(name, addr) as BaseInit;
 
-  test('`head` keeps the run at the top; `first-use` moves what it can, and says how much moved', () => {
+  test('`head` keeps the run at the top; `first-use` moves what it can, and NAMES what moved', () => {
     const body = [init('p0', 0x3001100), plain(), plain(), read('p0', 2)];
     const sfn = fn(body);
-    expect(placeBaseLocals(sfn, [], 'head')).toEqual({ body, moved: 0 });
+    expect(placeBaseLocals(sfn, [], 'head')).toEqual({ body, moved: [], nested: [] });
     const sunk = placeBaseLocals(sfn, [], 'first-use');
     expect(sunk.body.map((s) => s.k)).toEqual(['store', 'store', 'assign', 'store']);
-    expect(sunk.moved).toBe(1);
+    expect(sunk.moved).toEqual(['p0']);
+    // a flat placement can put nothing in a nested list, which is what `nested` is for
+    expect(sunk.nested).toEqual([]);
   });
 
   test('a MINTED init obeys the same policy — the minting caller adds no placement of its own', () => {
@@ -243,7 +248,7 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
     const body: Stmt[] = [named('q1', 'gQ1'), named('q0', 'gQ0'), touch('q0'), touch('p0'), touch('q1')];
     const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
     const minted = [named('p0', 'gP0')];
-    expect(placeBaseLocals(sfn, minted, 'prepend')).toEqual({ body: [...minted, ...body], moved: 0 });
+    expect(placeBaseLocals(sfn, minted, 'prepend')).toEqual({ body: [...minted, ...body], moved: [], nested: [] });
     // …and sinking a prepend result is NOT the same as asking for `first-use` outright, because
     // the run it hands the stable sort is in prepend's order: where first use does not separate a
     // minted init from an existing one, the minted one keeps the lead `prepend` gave it. That is
@@ -349,5 +354,262 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
 
   test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {
     expect(labels.filter((l) => l.includes('sinkinit') && !l.includes('livebase'))).toEqual([]);
+  });
+});
+
+describe('`scope` is the third placement: the init goes INSIDE the block holding every use', () => {
+  // The gap l3/scopebase.ts names in its own header — "the init still lands ABOVE the `if`, because
+  // sinking INTO the arm is what needs the domination work" — as a value of the placement argument
+  // the roster already states. `first-use` reaches only the TOP-LEVEL statement list, so a base
+  // whose every use is inside one arm stays live across everything before that arm.
+  const guarded = (uses: Stmt[]): SFn =>
+    fn([init('p0', 0x3001100), plain(), { k: 'if', cond: c(1), then: uses, else: [] }]);
+  const kinds = (sfn: SFn, placement: 'head' | 'first-use' | 'scope'): unknown =>
+    placeBaseLocals(sfn, [], placement).body.map((s) => (s.k === 'if' ? ['if', s.then.map((t) => t.k)] : s.k));
+
+  test('a use confined to one `if` arm: `first-use` stops above the `if`, `scope` goes inside it', () => {
+    const sfn = guarded([read('p0', 1), plain()]);
+    expect(kinds(sfn, 'first-use')).toEqual(['store', 'assign', ['if', ['store', 'store']]]);
+    expect(kinds(sfn, 'scope')).toEqual(['store', ['if', ['assign', 'store', 'store']]]);
+    expect(placeBaseLocals(sfn, [], 'scope').moved).toEqual(['p0']);
+  });
+
+  test('the arm is entered at the FIRST use inside it, not at its top', () => {
+    const sfn = guarded([plain(), read('p0', 1)]);
+    expect(kinds(sfn, 'scope')).toEqual(['store', ['if', ['store', 'assign', 'store']]]);
+  });
+
+  test('uses in BOTH arms have no inner list holding all of them: `scope` is `first-use`', () => {
+    const sfn = fn([
+      init('p0', 0x3001100),
+      plain(),
+      { k: 'if', cond: c(1), then: [read('p0', 1)], else: [read('p0', 2)] },
+    ]);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'first-use').body);
+  });
+
+  test('a use in the `if` CONDITION itself keeps the init above the `if`', () => {
+    const sfn = fn([
+      init('p0', 0x3001100),
+      plain(),
+      {
+        k: 'if',
+        cond: { k: 'index', base: { k: 'var', name: 'p0' }, idx: c(0), width: 1, signed: false },
+        then: [read('p0', 1)],
+        else: [],
+      },
+    ]);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'first-use').body);
+  });
+
+  test('a list at TWO tree positions is never a scope site: both positions mention it', () => {
+    // Nothing in the L3 contract forbids the sharing, and an init spliced into a shared list would
+    // be written twice. The descent cannot reach one — two mentioning statements stop it at their
+    // common list — and this is that invariant, asserted where breaking it would be silent.
+    const shared: Stmt[] = [read('p0', 1)];
+    const sfn = fn([
+      init('p0', 0x3001100),
+      { k: 'if', cond: c(1), then: shared, else: [] },
+      { k: 'if', cond: c(2), then: shared, else: [] },
+    ]);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'head').body);
+  });
+
+  test('a local the function assigns again does not sink — the move would cross that write', () => {
+    const sfn = fn([
+      init('p0', 0x3001100),
+      { k: 'if', cond: c(1), then: [init('p0', 0x3001200), read('p0', 1)], else: [] },
+    ]);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'head').body);
+  });
+});
+
+describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', () => {
+  // A `scope` run that put nothing in a nested list emits the `first-use` tree. `rank.ts` withholds
+  // the flat `first-use` row for this gate table deliberately (ORDERBASE_ADMISSIONS: measured at
+  // zero over the four rows where it differs from `head`), so returning that tree here ships the
+  // withheld candidate under the scoped one's name. Over each project's whole `asm` tree, map-ful:
+  // of the 48 functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do
+  // not — and for 29 of the 41 the withheld spelling is one no other roster row produces.
+  const held = (body: Stmt[], locals: SFn['locals'] = []): SFn => ({
+    name: 'f',
+    params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
+    locals,
+    retType: T.void(),
+    body,
+  });
+  // Three reads of one const base — the smallest shape BASECSE_GATES admits (2+ uses, no loop, no
+  // repeated constant offset).
+  const cuse = (i: number): Stmt => ({
+    k: 'store',
+    lval: { k: 'index', base: c(0x40000d4), idx: c(i), width: 4, signed: true },
+    value: c(0),
+  });
+  const uses = [0, 1, 2].map(cuse);
+
+  test('every init landed in the TOP-LEVEL list: `scope` declines, and the flat placements answer', () => {
+    const flat = held([plain(), ...uses]);
+    expect(hoistBaseLocals(flat, BASECSE_GATES, 'scope')).toBeNull();
+    // …and it is not that the shape has no hoist: the flat placements both produce one, and they
+    // produce DIFFERENT trees, so the withheld row is exactly what `scope` would have restated.
+    const head = hoistBaseLocals(flat, BASECSE_GATES, 'head');
+    const firstUse = hoistBaseLocals(flat, BASECSE_GATES, 'first-use');
+    expect(head.body.map((s) => s.k)).toEqual(['assign', 'store', 'store', 'store', 'store']);
+    expect(firstUse.body.map((s) => s.k)).toEqual(['store', 'assign', 'store', 'store', 'store']);
+  });
+
+  test('an init that reaches a nested list still answers, and the init is INSIDE it', () => {
+    const nested = held([plain(), { k: 'if', cond: c(1), then: uses, else: [] }]);
+    const out = hoistBaseLocals(nested, BASECSE_GATES, 'scope');
+    expect(out).not.toBeNull();
+    const arm = out!.body[1];
+    expect(arm.k === 'if' && arm.then.map((s) => s.k)).toEqual(['assign', 'store', 'store', 'store']);
+  });
+
+  test('no base admitted at all is a decline too, not the unhoisted tree under a scoped label', () => {
+    expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'scope')).toBeNull();
+    expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'head').body).toHaveLength(2);
+  });
+
+  test('the domination check judges what MOVED, inherited inits included — not only what was minted', () => {
+    // `hoistBaseLocals` inherits the leading run `structureChecked` already committed (pipeline.ts)
+    // and `scope` moves those inits too, so the minted names are less than half the population.
+    // `moved` is the placer's own report of the motion, which makes the check's population the
+    // motion by construction.
+    const sfn = fn(
+      [init('p0', 0x3001100), plain(), { k: 'if', cond: c(1), then: [read('p0', 1), read('p1', 2)], else: [] }],
+      [
+        { name: 'p0', type: U8P },
+        { name: 'p1', type: U8P },
+      ],
+    );
+    const r = placeBaseLocals(sfn, [init('p1', 0x4000000) as BaseInit], 'scope');
+    expect(r.moved).toEqual(['p0', 'p1']);
+    expect(r.nested).toEqual(['p0', 'p1']);
+  });
+});
+
+describe('`scope` descends through every construct that opens a list, not just `if`', () => {
+  // `stmtLists`/`mapStmtLists` are exhaustive over the five list-carrying kinds. `switch` has real
+  // inhabitants in the sa3 checkout, no benchmark row among them: `Task_809A1C4` sinks one base
+  // into its `case 0` arm and a second into its `case 90`, in both symbol-map arms.
+  const around = (s: Stmt): SFn => fn([init('p0', 0x3001100), plain(), s]);
+  const inside = (sfn: SFn): unknown => {
+    const body = placeBaseLocals(sfn, [], 'scope').body;
+    const lists = (s: Stmt): unknown => stmtLists(s).map((l) => l.map((x) => x.k));
+    return body.map((s) => (s.k === 'assign' ? s.name : stmtLists(s).length === 0 ? s.k : [s.k, lists(s)]));
+  };
+
+  test('a `while` body holding every mention takes the init', () => {
+    expect(inside(around({ k: 'while', cond: c(1), body: [read('p0', 1), plain()] }))).toEqual([
+      'store',
+      ['while', [['assign', 'store', 'store']]],
+    ]);
+  });
+
+  test('a `dowhile` body does too', () => {
+    expect(inside(around({ k: 'dowhile', cond: c(1), body: [plain(), read('p0', 1)] }))).toEqual([
+      'store',
+      ['dowhile', [['store', 'assign', 'store']]],
+    ]);
+  });
+
+  test('a `for` body does, and a mention in its `init`/`inc` — statements no list holds — stops it', () => {
+    const counted = (body: Stmt[], inc: Stmt = plain()): Stmt => ({
+      k: 'for',
+      init: plain(),
+      cond: c(1),
+      inc,
+      body,
+    });
+    expect(inside(around(counted([read('p0', 1)])))).toEqual(['store', ['for', [['assign', 'store']]]]);
+    // the `inc` mentions it and no nested list holds that mention: the init stays above the loop
+    const withInc = around(counted([read('p0', 1)], read('p0', 2)));
+    expect(placeBaseLocals(withInc, [], 'scope').body).toEqual(placeBaseLocals(withInc, [], 'first-use').body);
+  });
+
+  test('a `for` whose `init` IS one of its body statements keeps the hoist above the loop', () => {
+    // Nothing in the L3 contract forbids one `Stmt` object sitting at two tree positions
+    // (l3/scopebase.ts records a producer that shares an expression node), and a `for` is the one
+    // kind whose children are not all in the lists it opens — so the mention its `init` makes
+    // before the body runs is only seen if the opened lists are subtracted as a multiset.
+    const shared = read('p0', 1);
+    const loop: Stmt = { k: 'for', init: shared, cond: c(1), inc: plain(), body: [shared] };
+    const sfn = around(loop);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'first-use').body);
+  });
+
+  test('one `switch` arm holding every mention takes the init; two arms stop at the switch', () => {
+    const arm = (values: number[], body: Stmt[]) => ({ values, body, fallsThrough: false });
+    const one: Stmt = {
+      k: 'switch',
+      scrutinee: c(1),
+      cases: [arm([0], [plain()]), arm([1], [read('p0', 1)])],
+    };
+    expect(inside(around(one))).toEqual(['store', ['switch', [['store'], ['assign', 'store']]]]);
+    const two: Stmt = {
+      k: 'switch',
+      scrutinee: c(1),
+      cases: [arm([0], [read('p0', 1)]), arm([1], [read('p0', 2)])],
+    };
+    expect(placeBaseLocals(around(two), [], 'scope').body).toEqual(placeBaseLocals(around(two), [], 'first-use').body);
+  });
+
+  test('a `switch` DEFAULT arm is a list like any other — `mapStmtLists` rebuilds it', () => {
+    const sw: Stmt = {
+      k: 'switch',
+      scrutinee: c(1),
+      cases: [{ values: [0], body: [plain()], fallsThrough: false }],
+      default: [read('p0', 1)],
+      defaultAt: 1,
+    };
+    const out = placeBaseLocals(around(sw), [], 'scope').body[1];
+    expect(out.k === 'switch' && out.default?.map((s) => s.k)).toEqual(['assign', 'store']);
+    // the rebuild carries the fields `mapStmtLists` spreads rather than dropping them
+    expect(out.k === 'switch' && out.defaultAt).toBe(1);
+  });
+
+  test('two nesting levels: the descent continues while each level holds every mention', () => {
+    const inner: Stmt = { k: 'while', cond: c(1), body: [read('p0', 1)] };
+    const out = placeBaseLocals(around({ k: 'if', cond: c(1), then: [plain(), inner], else: [] }), [], 'scope').body;
+    const arm = out[1];
+    const loop = arm.k === 'if' ? arm.then[1] : null;
+    expect(loop?.k === 'while' && loop.body.map((s) => s.k)).toEqual(['assign', 'store']);
+  });
+});
+
+describe('the descent into a LOOP body: sound here, and unreachable from every shipped table', () => {
+  // The mechanism allows it and `scopeSite`'s header argues why it is safe — a base init is a cast
+  // of an `addr`/`const` leaf, so re-running it each iteration re-assigns the same link-time
+  // constant and every mention is still dominated. That argument is only half the answer, and this
+  // is the other half: no gate table that any caller pairs with `scope` admits a base used inside a
+  // loop, so no candidate carries the spelling. `BASECSE_GATES`' `loop` rule rejects it, and
+  // `ORDERBASE_GATES` — the one roster table at this placement — inherits that rule
+  // (it ablates only `cast-base` and `single-use`).
+  const loopUse = (i: number): Stmt => ({
+    k: 'store',
+    lval: { k: 'index', base: c(0x40000d4), idx: c(i), width: 4, signed: true },
+    value: c(0),
+  });
+  const inLoop: SFn = {
+    name: 'f',
+    params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
+    locals: [],
+    retType: T.void(),
+    body: [plain(), { k: 'while', cond: c(1), body: [loopUse(0), loopUse(1), loopUse(2)] }],
+  };
+
+  test('neither table admits a base whose uses are inside a loop, at any placement', () => {
+    expect(admittedBases(inLoop, BASECSE_GATES)).toEqual([]);
+    expect(admittedBases(inLoop, ORDERBASE_GATES)).toEqual([]);
+    expect(hoistBaseLocals(inLoop, ORDERBASE_GATES, 'scope')).toBeNull();
+  });
+
+  test('and where the mechanism IS handed one, the tree it emits still dominates every use', () => {
+    // Reached only through `placeBaseLocals` directly, which is where the pinning belongs: the
+    // init re-assigns the same constant per iteration, so the read below it is reached.
+    const sfn = fn([init('p0', 0x3001100), plain(), { k: 'while', cond: c(1), body: [read('p0', 1)] }]);
+    const out = { ...sfn, body: placeBaseLocals(sfn, [], 'scope').body };
+    expect(() => assertHoistsDominate(out, new Set(['p0']))).not.toThrow();
   });
 });

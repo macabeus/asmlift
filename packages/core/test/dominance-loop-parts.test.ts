@@ -77,3 +77,26 @@ describe('the dominance walk reads a loop as a loop', () => {
     expect(() => assertPlacementSurvives(before, after, iv)).toThrow(/assignment does not reach/);
   });
 });
+
+describe('an ADDRESS taken of a hoisted local is a use the walk must see', () => {
+  // The placing passes count `&p` as a mention (l3/hoist.ts) — an init has to precede the address
+  // being taken as surely as it must precede a read, because the address is what a callee reads
+  // through. A walk that counted only `var` would be weaker than the descent it guards, in exactly
+  // the position that descent refuses to cross.
+  const held = (body: Stmt[]): SFn => ({ ...fn(body), locals: [{ name: 'p0', type: T.ptr(T.u(8)) }] });
+  const takeAddr: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'p0' }] } };
+  const def: Stmt = { k: 'assign', name: 'p0', value: { k: 'const', value: 0x3001100 } };
+
+  test('an address taken where the assignment does not reach throws', () => {
+    expect(() => assertHoistsDominate(held([takeAddr, def]), new Set(['p0']))).toThrow(/assignment does not reach/);
+  });
+
+  test('…and the same address below the assignment does not', () => {
+    expect(() => assertHoistsDominate(held([def, takeAddr]), new Set(['p0']))).not.toThrow();
+  });
+
+  test('an address taken in an arm the assignment does not reach throws', () => {
+    const body: Stmt[] = [{ k: 'if', cond: { k: 'const', value: 1 }, then: [def], else: [] }, takeAddr];
+    expect(() => assertHoistsDominate(held(body), new Set(['p0']))).toThrow(/assignment does not reach/);
+  });
+});

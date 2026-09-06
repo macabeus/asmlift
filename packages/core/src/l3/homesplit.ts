@@ -241,7 +241,16 @@ const childrenOf = (e: Expr): Expr[] => {
  */
 export function splitHomeBases(sfn: SFn, opts: HomeSplitOpts): { homed: SFn; split: SFn } | null {
   const gates = opts.admission ?? HOMESPLIT_GATES;
+  // `null` only at `placement: 'scope'`, and for either of that placement's two refusals
+  // (l3/basecse.ts): no init reached a nested list, or `withholdingKey` left the table admitting
+  // nothing at all — which happens whenever the caller's table admits exactly one key, where the
+  // flat placements still answer with the unhoisted tree. Either way the PIPE has no intermediate
+  // and this pairing declines, the same answer it gives when either half refuses. No inhabitant
+  // yet: every roster admission at `scope` carries `pairings: false`, so no pair reaches here.
   const homed = hoistBaseLocals(sfn, withholdingKey(opts.gates, opts.key), opts.placement);
+  if (homed === null) {
+    return null;
+  }
   // The withheld key in the REGION pass's vocabulary. The two passes key on the same address but
   // spell an `addr` base's identity differently, so the translation is explicit — a string compare
   // across them would silently never match for an `addr` base. A CAST base (an array-of-struct
