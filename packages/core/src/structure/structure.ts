@@ -4,11 +4,11 @@
 //  1. SSA destruction WITH COALESCING — a merge block-argument that already carries a
 //     variable's value on one path is coalesced to that variable, so only the
 //     non-identity paths emit an assignment (reproducing agbcc's register allocation:
+//     the clamp0 diamond becomes `if (x < 0) x = 0; return x;` rather than a temp copy).
 //     NOTE the coupled INVERSE: l3/regspell.ts re-derives the UN-coalesced copy-carrying
 //     spelling as a ranked candidate — its R1 template matches THIS pass's diamond output
 //     shape, so a change to coalescing here can silently stop that lever firing (the
 //     matching-suite regspell gate is what makes the coupling loud).
-//     the clamp0 diamond becomes `if (x < 0) x = 0; return x;` rather than a temp copy).
 //     Coalescing is INTERFERENCE-CHECKED against per-block value liveness, and
 //     inline-at-use rendering carries an effect-ordering model: a call/load that cannot
 //     soundly render at its use is MATERIALIZED as a named temp at its own program
@@ -32,13 +32,15 @@
 // Scope: reducible single-latch natural loops — GUARDED self-loop `while` (the guard-fusion
 // un-rotation), UNGUARDED self-loop `do-while` (single block, header === latch), test-at-top
 // `while`, bottom-test `do-while`, PROPERLY-nested loops, in-body `break`/early-`return`,
-// comparison-tree and jump-table `switch`. Still DECLINED (loud StructureError, never wrong
-// code): multi-latch headers, irreducible/overlapping loops, conditional `continue`, a `break`
-// whose exit copies would clobber, switch fall-through, and mixed-entry self-loops (a guarded
-// header also entered by a plain br).
-import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
-import { type BitsCtx, constMask, provableBits } from '../ir/bits';
-import { Block, Fn, Op, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
+// comparison-tree and jump-table `switch`, and a switch arm that FALLS THROUGH into the next one
+// (both regimes — see `ArmExit` in switch-recover.ts). Still DECLINED (loud StructureError, never
+// wrong code): multi-latch headers, irreducible/overlapping loops, conditional `continue`, a
+// `break` whose exit copies would clobber, and mixed-entry self-loops (a guarded header also
+// entered by a plain br). Fall-through carries two REFUSALS of its own rather than a decline: a
+// target language whose `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A
+// back to if-recovery, and arms that do not linearize into one chain — two arms falling into the
+// same sibling, or a fall into the `default:` — refuse in `chainArms`, which answers null.
+import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import {
@@ -73,6 +75,7 @@ import {
   scalarCellType,
 } from '../symbols';
 import { analyze } from './analysis';
+import { makeBitfieldSpelling } from './bitfields';
 import {
   addOffset,
   addrIn,
@@ -832,10 +835,14 @@ const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, numbe
  *  (klonoa's `UpdateHUDCollectibleCount` answers false under the map and true without it, off one
  *  asm — test/corpus/agbcc-hudcount.s) and with the STAGE, because `raise/latch.ts` rewrites the
  *  record this reads (klonoa's `EntityGravityAndFloorCheck`: false after `recoverTypes`, true
- *  after `foldEmptyLatches`).
+ *  after `foldEmptyLatches` — a RECORD of a measurement, not a live check: that function is in no
+ *  corpus row and no fixture here, so the claim cannot be re-run from this repo).
  *
- *  Mirrors the sort's two comparators rather than re-deriving them — including the stability that
- *  decides ties. */
+ *  A SECOND, HAND-WRITTEN SPELLING of `edgeCopyRecords`' two comparators — including the stability
+ *  that decides ties — not a call into them, and nothing forces the two to agree. A change to that
+ *  sort has to be mirrored here BY HAND, or this gate keeps answering about an ordering the pass no
+ *  longer produces. Unified deliberately not: this is `/copy-defpos`'s variantGate, so it decides
+ *  which candidates are ENUMERATED and its predicate cannot move without moving rows. */
 export function edgeCopyOrdersDiffer(fn: Fn): boolean {
   const order = fn.writeOrder;
   if (order === undefined) {
@@ -910,7 +917,9 @@ export interface FreshMergeCarrier {
  *  `param-rooted` is a SCOPE, not a derivation. A chain rooted in an ordinary merge home is left
  *  alone, and widening to one is a different, unmeasured axis: 293 of 721 map-less corpus rows
  *  carry at least one conditional merge slot (925 slots), of which the param rooting admits 109 —
- *  `LoadBGTilemapData` is one of the other 184, which is why the axis has no reach there.
+ *  `LoadBGTilemapData` is one of the other 184, which is why the axis has no reach there — a RECORD
+ *  of a measurement, not a live check: that function is in no corpus row and no fixture here (its
+ *  attribution evidence is docs/lbg-attribution.md), so it cannot be re-run from this repo.
  *
  *  The rooting is over carrier VALUES, and two shapes carry a parameter's value past it under
  *  another name, both reach-only: a redundant phi keeps the parameter's own name (`redundant-phi`)
@@ -954,7 +963,7 @@ export function hasParamRootedMerge(fn: Fn): boolean {
 
 /** True when the merge takes its own home. The table is a parameter so a test can drop one gate and
  *  re-run the real pass (`StructureHooks.freshMergeGates`). */
-export function reHomesParamMerge(
+function reHomesParamMerge(
   c: FreshMergeCarrier,
   gates: readonly Gate<FreshMergeCarrier>[] = FRESH_MERGE_GATES,
 ): boolean {
@@ -970,6 +979,12 @@ export function reHomesParamMerge(
 //                                    destinations.
 // The last three are `compilerBehaviors` (target.ts) — this pass stays target-AGNOSTIC: it reads
 // booleans, never a compiler name.
+//
+// WHAT A FIELD DOC BELOW HOLDS, narrowly: what the option MEANS to `structure()`, and the suffix of
+// the axis that enumerates it. An AXIS's rationale, and any figure pricing its marginal value, live
+// ONCE at its `STRUCTURING_AXES` entry in rank.ts — restated here the two copies rot separately,
+// and only the rank.ts one sits next to the enumeration that could refute it. Figures pricing a
+// DEFAULT this pass owns (the edge-copy ordering, `spellDeclaredSubscripts`) do belong here.
 export interface StructureOptions {
   returnsVoid?: boolean;
   coalesceLoopInit?: boolean;
@@ -983,8 +998,8 @@ export interface StructureOptions {
   //
   // This is the ZERO POINT of rank.ts's `/flip-join` axis, not a per-compiler fact that closes
   // the question — docs/level-tower.md wants a default only where the mapping is a FUNCTION, and
-  // 19 of the benchmark's 856 rows still reach their winning spelling through the axis (4 of them
-  // matches). Read it forward only: it says which sense to emit ABSENT evidence of an inversion,
+  // benchmark rows still reach their winning spelling through the axis rather than through this
+  // default. Read it forward only: it says which sense to emit ABSENT evidence of an inversion,
   // never that the asm's layout WAS the source's sense. What agbcc contributes is the refusals —
   // its gcc Makefile SRCS compiles neither sched.c nor reorg.c and toplev.c never sets
   // flag_schedule_insns, and gcse.c runs one_code_hoisting_pass only `if (optimize_size)`, which
@@ -1169,8 +1184,7 @@ export interface StructureOptions {
   // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
   // the naming, and removing a copy is worth less than it looks — the compiler coalesces most of
   // them itself. What moves the score is which values share a register, and that splits per
-  // function. Over the whole benchmark the axis wins one row by 3 points and loses none, which is
-  // what a differ-refereed spelling looks like.
+  // function.
   coalesceMergeNames?: boolean;
   // Give a merge whose carrier is a FUNCTION PARAMETER its own local, instead of assigning back
   // into the parameter's name. Off by default; rank.ts enumerates the ON spelling as the
@@ -1292,6 +1306,86 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
   );
 }
 
+/** What {@link earlyReturnArm} reads beyond its arguments: block dominance and forward
+ *  reachability, both of them whole-function facts computed once per `structure()`. */
+interface EarlyReturnArmDeps {
+  dom: Map<Block, Set<Block>>;
+  reachFrom: (b: Block) => Set<Block>;
+}
+
+function isRet(blk: Block): boolean {
+  return blk.ops[blk.ops.length - 1]?.opcode === 'ret';
+}
+// An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
+// every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
+// return site just sets the return register and branches there, so a second body exit that lands on
+// such a chain is an early RETURN, not a break to a live merge — which is what lets two returns
+// merged through a shared `bx lr` recover as a `while` with an in-body early `return` instead of
+// declining as "multi-exit".
+//
+// The arm is structured AT the edge, so any block in it that a second path also reaches is emitted
+// twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
+// is a FIDELITY rule, not a soundness one: a store or call written twice is source no compiler
+// would have produced from this asm, and the region it drags along is unbounded. A block escapes
+// that on two counts. `from` dominates `to` and `to` dominates the block, so every path reaching it
+// runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
+// first half, since two predecessors cannot both dominate it. And the region must not be reachable
+// from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
+// post-loop join dominates itself, and claiming it would emit the epilogue on both paths. Testing
+// `to` covers the whole region — a block dominated by `to` that the exit reached would mean the
+// exit reached `to`. The shared epilogue an arm branches to still has to be pure.
+//
+// Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
+// of the update — or null when this is not an early-`return` arm.
+function earlyReturnArm(
+  { dom, reachFrom }: EarlyReturnArmDeps,
+  from: Block,
+  to: Block,
+  body: Set<Block>,
+  exit: Block,
+): Set<Block> | null {
+  const entryOwned = dom.get(to)!.has(from) && to !== exit && !reachFrom(exit).has(to);
+  const owned = new Set<Block>();
+  const seen = new Set<Block>();
+  const stack = [to];
+  while (stack.length) {
+    const bb = stack.pop()!;
+    if (seen.has(bb)) {
+      continue;
+    }
+    seen.add(bb);
+    if (body.has(bb)) {
+      return null;
+    } // re-enters the loop → not an exit
+    if (entryOwned && dom.get(bb)!.has(to)) {
+      owned.add(bb);
+    } else if (bb.ops.some((op) => EFFECTFUL_OPS.has(op.opcode))) {
+      return null;
+    }
+    const t = bb.ops[bb.ops.length - 1];
+    if (t.opcode === 'ret') {
+      continue;
+    }
+    if (t.opcode === 'br' || t.opcode === 'cond_br') {
+      for (const s of t.successors) {
+        stack.push(s.block);
+      }
+      continue;
+    }
+    return null; // switch_br / unknown terminator → decline
+  }
+  return owned;
+}
+
+/** The two facts a merge carrier's declared type contributes to `canTakeName` — see the rule's own
+ *  comment there for why the signedness half is part of the width at sub-word sizes. */
+function carrierWidth(t: IrType | undefined): number {
+  return t?.kind === 'int' ? t.width : 32;
+}
+function carrierSign(t: IrType | undefined): boolean | undefined {
+  return t?.kind === 'int' && t.width < 32 ? t.signed : undefined;
+}
+
 export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureHooks = {}): SFn {
   const {
     returnsVoid = false,
@@ -1350,6 +1444,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
   // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this
   // target's defaults, so resetting one would probe a spelling asmlift never emits here.
+  //
+  // THREE OF rank.ts's TEN `STRUCTURING_AXES` ARE DELIBERATE NON-MEMBERS, each for its own reason,
+  // and the list here is the half of the split this side owns:
+  //   - `/reread-globals` (rereadGlobals) is an ANALYSIS option, and it only ever RELAXES: it
+  //     widens a load's render positions and narrows the write set that bars it, so it removes
+  //     materializations rather than minting them. Extra materialization is what this guard is
+  //     about (see above), and this axis adds none;
+  //   - `/uns-cmp` (unsignedCompareSpelling) writes `varType` and inserts casts at compares. It
+  //     touches no name and no copy, so no edge copy changes its elision under it;
+  //   - `/copy-defpos` (preferDefPosCopyOrder) REORDERS the copies of one edge and adds or drops
+  //     none. rank.ts states the same thing from the axis side, in the terms that matter there: a
+  //     reordering cannot rescue a spelling whose OFF sibling failed the boundary contracts.
   if (
     coalesceMergeNames ||
     freshParamMerge ||
@@ -1638,61 +1744,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // targets) are allowed in-body. The shape then splits on WHERE the exit lives: the HEADER exits
   // (pure test-at-top) → `while`; the LATCH exits (body-first) → `do-while`. Anything that fails
   // declines to plain if-recovery, which re-enters the header and fails loud via `onStack`.
-  const isRet = (blk: Block) => blk.ops[blk.ops.length - 1]?.opcode === 'ret';
-  // An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
-  // every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
-  // return site just sets the return register and branches there, so a second body exit that lands on
-  // such a chain is an early RETURN, not a break to a live merge — which is what lets two returns
-  // merged through a shared `bx lr` recover as a `while` with an in-body early `return` instead of
-  // declining as "multi-exit".
-  //
-  // The arm is structured AT the edge, so any block in it that a second path also reaches is emitted
-  // twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
-  // is a FIDELITY rule, not a soundness one: a store or call written twice is source no compiler
-  // would have produced from this asm, and the region it drags along is unbounded. A block escapes
-  // that on two counts. `from` dominates `to` and `to` dominates the block, so every path reaching it
-  // runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
-  // first half, since two predecessors cannot both dominate it. And the region must not be reachable
-  // from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
-  // post-loop join dominates itself, and claiming it would emit the epilogue on both paths. Testing
-  // `to` covers the whole region — a block dominated by `to` that the exit reached would mean the
-  // exit reached `to`. The shared epilogue an arm branches to still has to be pure.
-  //
-  // Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
-  // of the update — or null when this is not an early-`return` arm.
-  const earlyReturnArm = (from: Block, to: Block, body: Set<Block>, exit: Block): Set<Block> | null => {
-    const entryOwned = dom.get(to)!.has(from) && to !== exit && !reachFrom(exit).has(to);
-    const owned = new Set<Block>();
-    const seen = new Set<Block>();
-    const stack = [to];
-    while (stack.length) {
-      const bb = stack.pop()!;
-      if (seen.has(bb)) {
-        continue;
-      }
-      seen.add(bb);
-      if (body.has(bb)) {
-        return null;
-      } // re-enters the loop → not an exit
-      if (entryOwned && dom.get(bb)!.has(to)) {
-        owned.add(bb);
-      } else if (bb.ops.some((op) => EFFECTFUL_OPS.has(op.opcode))) {
-        return null;
-      }
-      const t = bb.ops[bb.ops.length - 1];
-      if (t.opcode === 'ret') {
-        continue;
-      }
-      if (t.opcode === 'br' || t.opcode === 'cond_br') {
-        for (const s of t.successors) {
-          stack.push(s.block);
-        }
-        continue;
-      }
-      return null; // switch_br / unknown terminator → decline
-    }
-    return owned;
-  };
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
   for (const nl of forest.byHeader.values()) {
@@ -1779,7 +1830,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (e.from === exitFrom && e.to === exit) {
         continue;
       }
-      const owned = earlyReturnArm(e.from, e.to, nl.body, exit);
+      const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
       if (owned) {
         arms.push({ from: e.from, to: e.to, owned });
       } else if (!isRet(e.to)) {
@@ -1851,12 +1902,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  moves either way and the rule that decides it is pinned in test/deref-typing.test.ts instead.
    *
    *  The test is whether `&gSym`'s rendered type PROVABLY equals the destination's, not whether the
-   *  symbol looks like an aggregate. A shape enumeration got this wrong three ways, each a real
-   *  miss: `shape:'pointer'` declares a pointer cell (`void *gSym`, or `struct Tag *gSym` when the
-   *  pointee has a declarable layout), so `&gSym` is a pointer-to-pointer either way; a `shape:'scalar'`
+   *  symbol looks like an aggregate. A SHAPE ENUMERATION MISSES THREE WAYS, each real:
+   *  `shape:'pointer'` declares a pointer cell (`void *gSym`, or `struct Tag *gSym` when the pointee
+   *  has a declarable layout), so `&gSym` is a pointer-to-pointer either way; a `shape:'scalar'`
    *  whose width differs from the destination's pointee gives `s32 *` for a `u16 *` slot; and a
-   *  NAME-ONLY symbol is synthesized as `extern u32 gSym;` (declare.ts), which is `u32 *` — not the
-   *  `T *` the older comment here claimed. So the default is to CAST, and the cast is omitted only
+   *  NAME-ONLY symbol is synthesized as `extern u32 gSym;` (declare.ts), which is `u32 *`. So the
+   *  default is to CAST, and the cast is omitted only
    *  where the declared cell type is known and matches exactly. Byte-identical either way, so the
    *  cost of casting one time too many is a redundant `(T *)`, never a wrong address. */
   const intoDeclaredTemp = (name: string, value: Expr): Expr => {
@@ -1947,16 +1998,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //
   // AND AT A SUB-WORD WIDTH, THE SIGNEDNESS IS PART OF THE WIDTH. A narrow declaration is where
   // the extension went, and `u8` re-applies a DIFFERENT extension than `s8` — same bytes in the
-  // variable, different value at every read. `sa3`'s `sub_80B4654` merges a `zext8` arm with its
-  // own `u8` parameter and reads the merge through `lsls #24 / asrs #24`: the carrier is `s8`, and
+  // variable, different value at every read. `sa3`'s `sub_80B4654` (the IR is built in
+  // test/narrow-local.test.ts) merges a `zext8` arm with its own `u8` parameter and reads the merge
+  // through `lsls #24 / asrs #24`: the carrier is `s8`, and
   // letting it adopt the `u8` parameter's name emits `sub_80B4FA8(a0, a1, …)`, which passes 144
   // where the target passes -112 for every byte with bit 7 set. Width alone said 8 === 8 and
   // admitted it — a silent wrong answer, not a worse score. At 32 bits the two spellings ARE the
   // same bytes at a read, which is the mismatch `structure/namecoalesce.ts`'s header names and this
   // rule deliberately still tolerates.
-  const carrierWidth = (t: IrType | undefined): number => (t?.kind === 'int' ? t.width : 32);
-  const carrierSign = (t: IrType | undefined): boolean | undefined =>
-    t?.kind === 'int' && t.width < 32 ? t.signed : undefined;
   const canTakeName = (p: Value, B: Block, name: string, pureAlias = false): boolean => {
     if (carrierWidth(varType.get(name)) !== carrierWidth(p.type)) {
       return false;
@@ -2191,15 +2240,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         if (varName.has(p)) {
           return;
         }
-        // EVERY in-edge record, not successorTo (which returns only the FIRST record to `b` — a
-        // terminator with two edges to the same block would hide the second edge's args here).
         const incoming: { v: Value; pr: Block }[] = [];
-        for (const pr of new Set(preds.get(b) ?? [])) {
-          for (const s of pr.ops[pr.ops.length - 1].successors) {
-            if (s.block === b) {
-              incoming.push({ v: s.args[i], pr });
-            }
-          }
+        for (const { pred, succ } of inEdgeRecords(preds, b)) {
+          incoming.push({ v: succ.args[i], pr: pred });
         }
         // A redundant phi (every edge passes the SAME value) is a pure alias of it — sharing the
         // name is sound even while the value stays live (they are equal on every path). This
@@ -2463,16 +2506,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
         // every in-edge record into M, grouped by the SSA value it passes for param i
         const groups = new Map<Value, { rec: { block: Block; args: Value[] }; src: Block }[]>();
-        for (const pr of new Set(preds.get(M) ?? [])) {
-          for (const s of pr.ops[pr.ops.length - 1].successors) {
-            if (s.block === M) {
-              const g = groups.get(s.args[i]);
-              if (g) {
-                g.push({ rec: s, src: pr });
-              } else {
-                groups.set(s.args[i], [{ rec: s, src: pr }]);
-              }
-            }
+        for (const { pred, succ } of inEdgeRecords(preds, M)) {
+          const g = groups.get(succ.args[i]);
+          if (g) {
+            g.push({ rec: succ, src: pred });
+          } else {
+            groups.set(succ.args[i], [{ rec: succ, src: pred }]);
           }
         }
         const candidates: { arg: Value; def: Op; defBlock: Block; edges: { rec: object; src: Block }[] }[] = [];
@@ -2522,268 +2561,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   }
 
-  // ── BITFIELD member reads (symbol map) ──────────────────────────────────────────────────────
-  // The `(x << a) >> b` extract of a struct global's loaded bytes IS a bitfield access when the
-  // map declares a bitfield at exactly those bits: spelled `gSym.field`, the source form, whose
-  // declared `u32 field : n` then makes C's own integer promotion reproduce the signedness every
-  // downstream operator compiled with (a 7-bit unsigned field promotes to signed int — sdiv
-  // renders `/` and recompiles to __divsi3, where the raw-shift spelling stays u32).
-  //
-  // Semantically EXACT, never approximate: the window must lie inside the loaded bytes (so the
-  // load's extension bits cannot reach it), the field's position, width and signedness must all
-  // match the extract (a logical shift is an unsigned read, an arithmetic one a signed read —
-  // a signless field never matches), and the member must be nameable at all (memberQualsAllow;
-  // the map only carries bitfield facts for little-endian ELFs — see SymbolStructField). Any
-  // mismatch keeps the honest shift spelling.
-  //
-  // Precomputed over the ops (not folded during rendering) for the load's sake: a load whose
-  // EVERY use is a spelled extract chain must not also emit its materialized `v = *(u16 *)&g;`
-  // temp — the compiler CSEs the repeated member reads back to one load, but the leftover temp
-  // would be a second one. A VOLATILE container refuses the whole fold: N member reads are N
-  // volatile accesses where the asm did one load. (Byte-level residual, differ-refereed: a load
-  // only PARTIALLY absorbed — one extract spelled, another use kept — emits both the temp and
-  // the named reads, one load more than the asm; semantics hold, the score decides.)
-  //
-  // ORDERING GATE (adversarial round, CRITICAL 1 — twice): the named spelling replaces a
-  // REGISTER value — the bits captured at the load's program position — with a fresh memory
-  // read at each render position. Every other memory read in this file goes through the
-  // materialization model (analysis.ts) for exactly that hazard, so the fold clears the SAME
-  // bar with the SAME machinery: `emitPos` resolves where each extract actually renders
-  // (transitively through its inlining consumers — an unresolvable position refuses), and
-  // `memWriteBetween` walks every def-avoiding load→render path for a call, an opaque, or a
-  // store not provably to a DIFFERENT named global. Path-based on purpose: the second audit
-  // pass broke the first fix's linear-position scan with a block laid out AFTER the render in
-  // address order but executing between load and render on the taken path — fn.blocks order is
-  // address order, not topological order.
-  const bitfieldSpelling = new Map<Op, { global: string; field: string }>();
-  // …and the WRITE side: a store the mask-and-insert idiom recognized (see the block below), with
-  // the value the source assigned. THE SECOND inhabitant of "a precomputed member spelling", which
-  // is what makes the shape shared rather than anticipated.
-  const bitfieldStore = new Map<Op, { global: string; field: string; value: Value }>();
-  const absorbedLoads = new Set<Op>();
-  if (symCtx && littleEndian && spellBitfieldMembers) {
-    // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
-    // `add(gaddr, const)`; anything else (a materialized base, a variable index) declines. THE
-    // shared L2 disjointness query (ir/alias.ts), which the materialization model consults with
-    // the same rule, so the fold and the model cannot disagree about what a store can reach.
-    const loadTargets = new Map<Op, GlobalCell>();
-    const addrOf = (v: Value, off: number): GlobalCell | null => globalCellOf(defs, v, off);
-    // A write for the fold's purposes: calls and opaques always; a store/astore unless its base
-    // resolves to a global PROVABLY different from the folded one.
-    const mayWrite = (sym: string) => mayWriteGlobal(defs, sym);
-    for (const blk of fn.blocks) {
-      for (const op of blk.ops) {
-        if ((op.opcode !== 'shr_u' && op.opcode !== 'shr_s') || op.operands.length !== 1) {
-          continue;
-        }
-        const b = op.attrs.imm as number | undefined;
-        const inner = defs.get(op.operands[0]);
-        if (typeof b !== 'number' || b <= 0 || b >= 32 || inner?.opcode !== 'shl' || inner.operands.length !== 1) {
-          continue;
-        }
-        const a = inner.attrs.imm as number | undefined;
-        if (typeof a !== 'number' || a < 0 || b < a) {
-          continue;
-        }
-        const w = 32 - b; // extract width
-        const lo = b - a; // low bit within the loaded value
-        const load = defs.get(inner.operands[0]);
-        if (load?.opcode !== 'load' || lo + w > (load.attrs.width as number) * 8) {
-          continue;
-        }
-        // a materialized shl would still emit its `v = x << a` temp reading the load — the fold
-        // would then ADD member reads on top of it; rare, refuse
-        if (materialize.has(inner)) {
-          continue;
-        }
-        const gb = addrOf(load.operands[0], load.attrs.off as number);
-        const si = gb ? symCtx.info(gb.name) : undefined;
-        if (!gb || si?.shape !== 'struct' || si.volatile) {
-          continue;
-        }
-        // where does the member read RENDER? at the extract's own position when materialized,
-        // else wherever each of its consumers ultimately renders (emitPos, transitively —
-        // unresolvable refuses); every load→render path must be write-free
-        const renders = materialize.has(op)
-          ? [{ blk: opBlock.get(op)!, idx: opIndex.get(op)! }]
-          : [...new Set((useSitesOf.get(op.results[0]) ?? []).map((s) => s.op))].map((c) => emitPos(c));
-        const writes = mayWrite(gb.name);
-        if (renders.some((r) => r === null) || renders.some((r) => memWriteBetween(load, r!, writes))) {
-          continue;
-        }
-        const signedRead = op.opcode === 'shr_s';
-        const fld = declaredFields(si.layout)?.find(
-          (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === gb.byte * 8 + lo && f.signed === signedRead,
-        );
-        if (fld && memberQualsAllow(fld, si.const, false)) {
-          bitfieldSpelling.set(op, { global: gb.name, field: fld.name });
-          loadTargets.set(load, gb);
-        }
-      }
-    }
-    // a load is ABSORBED when every use is an shl whose every use is a spelled extract
-    for (const load of loadTargets.keys()) {
-      const shls = useSitesOf.get(load.results[0]) ?? [];
-      const absorbed =
-        shls.length > 0 &&
-        shls.every(
-          (u) =>
-            u.op.opcode === 'shl' && (useSitesOf.get(u.op.results[0]) ?? []).every((v) => bitfieldSpelling.has(v.op)),
-        );
-      if (absorbed) {
-        absorbedLoads.add(load);
-      }
-    }
-
-    // ── BITFIELD member WRITES: the mask-and-insert idiom ───────────────────────────────────
-    // `store(A, or(and(load(A), ~W), v << lo))` over a struct global's cell IS an assignment to
-    // the declared bitfield at bits W — `gSym.field = v;`, one statement where the recovered
-    // spelling is a read, a mask, a shift, an or and a store.
-    //
-    // EXACT, never approximate. The cleared bits must be exactly one declared field's window; the
-    // load must address the SAME cell at the same width; the insert must be that value shifted to
-    // the window's own position; and the load, the mask, the `and` and the `or` must each be
-    // single-use and unmaterialized, because the fold DELETES all of them — a second reader would
-    // keep the temp and the emitted C would do the work twice.
-    //
-    // TRUNCATION is what makes an UNMASKED insert legal, and only sometimes: C truncates the
-    // assigned value to the field width, while the asm's `or` writes every bit of `v << lo` that
-    // the STORE keeps. The two agree when the field ends the stored cell — bits above it are
-    // dropped by the store either way — or when `v` provably has no more bits than the field.
-    // Anything else keeps the honest mask spelling.
-    //
-    // ORDERING is NOT this fold's to police, and the difference from the read fold above is the
-    // reason. That fold MOVES a read: its extract renders at the consumer, so a write in between
-    // changes what the extract sees. This one moves nothing — the spelling it replaces is a single
-    // statement AT THE STORE (`*(u8 *)&gS = v | *(u8 *)&gS & ~W;`), which reads the cell in exactly
-    // the position `gS.field = v` does. What keeps that read honest is the MATERIALIZATION model,
-    // and it is byte-granular where a symbol-wide alias query is not: a call, or a store this load
-    // may alias, forces the load to its own temp at its own position, and `!materialize.has(load)`
-    // below then refuses. A store to a DISJOINT byte of the same cell's symbol materializes
-    // nothing, and refusing there bought no ordering — it only spelled the same read as arithmetic.
-
-    // THE KNOWN-BITS QUESTION IS L2 AND LIVES THERE (ir/bits.ts) — this fold only supplies the
-    // one fact that layer cannot see: a bitfield READ this pass has already recognized, whose
-    // bound comes from the DECLARATION. And it supplies it signedness-first, because a signed
-    // field's read is sign-extended and carries all 32 bits however few bits the declaration
-    // allots it — bounding one by its own `bitWidth` folds `gS.dest = gS.delta` over a value whose
-    // high bits the asm's `or` writes and C's truncation does not.
-    const bits: BitsCtx = {
-      defs,
-      materialize,
-      bound: (d) => {
-        const bf = bitfieldSpelling.get(d);
-        if (!bf) {
-          return null;
-        }
-        const f = symCtx.fieldsOf(bf.global)?.find((x) => x.name === bf.field);
-        return f?.signed === false ? (f.bitWidth ?? 32) : 32;
-      },
-    };
-    const maskConst = (v: Value): number | null => constMask(bits, v);
-    /** The other operand of a 2-operand commutative op, or null when there is none — a
-     *  1-operand op carries its constant as `attrs.imm`, which is not a Value the caller can
-     *  read a mask off, so the caller falls through to `attrs.imm` itself. */
-    const otherOperand = (d: Op, keep: Value): Value | null =>
-      d.operands.length === 2 ? (d.operands[0] === keep ? d.operands[1] : d.operands[0]) : null;
-
-    for (const blk of fn.blocks) {
-      for (const op of blk.ops) {
-        if (op.opcode !== 'store') {
-          continue;
-        }
-        const width = op.attrs.width as number;
-        const cell = globalCellOf(defs, op.operands[0], op.attrs.off as number);
-        const si = cell ? symCtx.info(cell.name) : undefined;
-        const orOp = defs.get(op.operands[1]);
-        if (
-          !cell ||
-          si?.shape !== 'struct' ||
-          si.volatile ||
-          orOp?.opcode !== 'or' ||
-          orOp.operands.length !== 2 ||
-          materialize.has(orOp) ||
-          (useSitesOf.get(orOp.results[0]) ?? []).length !== 1
-        ) {
-          continue;
-        }
-        const cellBits = width * 8;
-        const cellMask = width >= 4 ? -1 : (1 << cellBits) - 1;
-        for (const [keepV, insV] of [
-          [orOp.operands[0], orOp.operands[1]],
-          [orOp.operands[1], orOp.operands[0]],
-        ] as const) {
-          const andOp = defs.get(keepV);
-          if (
-            andOp?.opcode !== 'and' ||
-            materialize.has(andOp) ||
-            (useSitesOf.get(andOp.results[0]) ?? []).length !== 1
-          ) {
-            continue;
-          }
-          // `and` is commutative and may carry its constant as an immediate: find the operand that
-          // is the SAME cell's load, and read the mask off whatever is left.
-          const loadV = andOp.operands.find((o) => {
-            const l = defs.get(o);
-            const c = l?.opcode === 'load' ? globalCellOf(defs, l.operands[0], l.attrs.off as number) : null;
-            return c !== null && c.name === cell.name && c.byte === cell.byte && l!.attrs.width === width;
-          });
-          const load = loadV === undefined ? undefined : defs.get(loadV)!;
-          const maskV = loadV === undefined ? null : otherOperand(andOp, loadV);
-          const mask =
-            maskV !== null
-              ? maskConst(maskV)
-              : typeof andOp.attrs.imm === 'number'
-                ? (andOp.attrs.imm as number) | 0
-                : null;
-          if (
-            load === undefined ||
-            mask === null ||
-            materialize.has(load) ||
-            (useSitesOf.get(load.results[0]) ?? []).length !== 1
-          ) {
-            continue;
-          }
-          // The cleared bits must be ONE contiguous window inside the stored cell.
-          const clear = ~mask & cellMask;
-          if (clear === 0) {
-            continue;
-          }
-          const lo = 31 - Math.clz32(clear & -clear);
-          const w = 32 - Math.clz32(clear >>> lo);
-          if ((((w >= 32 ? -1 : (1 << w) - 1) << lo) & cellMask) !== clear) {
-            continue;
-          }
-          // …and the insert must be exactly that value seated at `lo`.
-          const shifted = defs.get(insV);
-          const value =
-            lo === 0
-              ? insV
-              : shifted?.opcode === 'shl' && shifted.operands.length === 1 && shifted.attrs.imm === lo
-                ? shifted.operands[0]
-                : null;
-          if (
-            value === null ||
-            (lo !== 0 && (materialize.has(shifted!) || (useSitesOf.get(insV) ?? []).length !== 1))
-          ) {
-            continue;
-          }
-          if (lo + w !== cellBits && provableBits(bits, value) > w) {
-            continue; // C would truncate bits the asm's `or` writes
-          }
-          const fld = symCtx
-            .fieldsOf(cell.name)
-            ?.find(
-              (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === cell.byte * 8 + lo && f.signed !== undefined,
-            );
-          if (fld && memberQualsAllow(fld, si.const, true)) {
-            bitfieldStore.set(op, { global: cell.name, field: fld.name, value });
-          }
-          break;
-        }
-      }
-    }
-  }
+  // ── BITFIELD member spelling (structure/bitfields.ts) ───────────────────────────────────────
+  // The read fold, the mask-and-insert WRITE fold and the absorbed-load set, precomputed over the
+  // ops before any rendering. Extracted behind an explicit-deps factory: every dependency below is
+  // READ-only, so this cannot participate in the naming pipeline this file's remainder is built
+  // around. The module header states what each fold recognizes and every refusal it carries.
+  const {
+    spelling: bitfieldSpelling,
+    stores: bitfieldStore,
+    absorbed: absorbedLoads,
+  } = makeBitfieldSpelling({
+    fn,
+    defs,
+    materialize,
+    useSitesOf,
+    opBlock,
+    opIndex,
+    emitPos,
+    memWriteBetween,
+    sym: symCtx,
+    littleEndian,
+    enabled: spellBitfieldMembers,
+    memberQualsAllow,
+  });
 
   // An unresolvable value: strict mode keeps the `"?"` sentinel AND records the reason — the
   // decline thrown below names the actual gaps ("unmodelled instruction 'adde'"), the same
@@ -2944,7 +2744,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // the type of the expression it actually sees, and the two diverge exactly like memAccess's
       // deref bases (a value recovered `s32*` can render as an int-typed tree — C then does NO
       // element scaling, so pre-dividing the constant would bake in a WRONG address that the
-      // deref cast downstream turns into silently-wrong bytes; found by the adversarial round).
+      // deref cast downstream turns into silently-wrong bytes).
       // An int-rendered walk keeps its raw byte constant and derefs through the access-width cast.
       // Fires only for a rendered pointer whose element size (>1) DIVIDES the constant exactly;
       // otherwise raw (a misaligned/struct-array stride is left as-is; a `u8*` is size 1 so
@@ -3151,8 +2951,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     if (d.opcode === 'gaddr') {
       // A promoted CODE symbol (frontend `code: true`) is a function pointer stored as an
-      // integer: spelled `(u32)Name` — the source idiom — never `&Name` (defect G of the
-      // dogfood report; the & form compiles but is a different, non-matching spelling).
+      // integer: spelled `(u32)Name` — the source idiom — never `&Name` (the & form compiles,
+      // but it is a different and non-matching spelling).
       if (d.attrs.code === true) {
         return { k: 'cast', to: T.int(32, false), e: { k: 'var', name: d.attrs.sym as string } };
       }
@@ -3209,8 +3009,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
   // The loop-emission hazard checks (readsClobbered / loopEscapeHazard / loopUpdateHazard) —
   // pure decline-or-emit predicates, extracted to hazards.ts behind the explicit-deps factory.
-  // `varName` is captured as a live reference: it is still being populated here in the naming
-  // pipeline, and each check reads the names that exist when EMISSION calls it.
+  // `varName` is captured as a live REFERENCE rather than copied, so each check reads the names
+  // EMISSION sees. The map is already FINAL at this point — every write to it sits above, in the
+  // naming walk and the coalescing that follows it, and these checks only read it — so today the
+  // two readings coincide; the reference is what keeps them coinciding if a write ever moves down
+  // here.
   const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet } = makeLoopHazards({
     defs,
     varName,
@@ -3447,7 +3250,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  `anchorConstCopies` (above) relocates an edge copy too, and states two clauses this does not;
    *  neither absence is an oversight. Its LOOP clause does not transfer: anchoring moves a write to
    *  the const's DEF site, which may sit outside the loop the edge is in (block dominance is not
-   *  per-iteration precedence — the /preinit sticky-arm class, PR #13), while the hoist moves a
+   *  per-iteration precedence — see that clause's own statement above), while the hoist moves a
    *  write from a dispatch's edges to the head of that same dispatch, same iteration every time
    *  (`switch-arms.test.ts` pins a param-carrying dispatch inside a `do`-`while`). Its NAME-COUNT
    *  clause — refuse a name several SSA values carry — cannot be adopted, because that is this
@@ -3686,6 +3489,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // back into structureRegion, and Regime B (switch_br, below) reads FOUR things from it — the
   // per-arm exit, the layout index, the chain linearization and where the `default:` label goes —
   // so neither regime states any of those four facts twice.
+  //
+  // `isNamed` reads `varName` LIVE, and by here THE NAMING WALK IS COMPLETE: every write to
+  // `varName` and `backArgName` sits above, in the walk and the coalescing that follows it, and the
+  // two places the map is handed to (`coalesceNames`, `makeLoopHazards`) only read it. So the
+  // recognizer sees one settled naming however late a case body calls back into `structureRegion`,
+  // and nothing here has to be rebuilt against a naming that moves underneath it.
   const { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos, chainArms } = makeSwitchRecovery({
     fn,
     defs,
@@ -4402,15 +4211,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         if (n === undefined) {
           return;
         }
-        // EVERY in-edge record, not successorTo — a terminator with two edges to this block would
-        // hide the second edge's args, and a hidden edge is a rebind this does not see. Only a
-        // copy that SURVIVES argAssigns' identity elision writes anything, so an edge whose arg
-        // already carries the name does not count.
-        for (const pb of new Set(preds.get(bb) ?? [])) {
-          for (const sc of pb.ops[pb.ops.length - 1].successors) {
-            if (sc.block === bb && varName.get(sc.args[i]) !== n) {
-              bodyRebinds.add(n);
-            }
+        // Only a copy that SURVIVES argAssigns' identity elision writes anything, so an edge whose
+        // arg already carries the name does not count.
+        for (const { succ } of inEdgeRecords(preds, bb)) {
+          if (varName.get(succ.args[i]) !== n) {
+            bodyRebinds.add(n);
           }
         }
       });
@@ -4520,8 +4325,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // goes with it (l3/dce.ts prunes a local nothing references) — so the copy and the value it
   // carried are gone together, which is a program the edge spelling can also produce. Only a name
   // the body still uses is a broken promise, or a GLOBAL, whose store is observed outside this
-  // function whatever this body does with it. klonoa's `MPlayContinue` is the live inhabitant:
-  // its `/defsite` spelling is correct and main enumerates it.
+  // function whatever this body does with it. klonoa's `MPlayContinue` is the live inhabitant: its
+  // `/defsite` spelling is correct and main enumerates it — a RECORD of a measurement, not a live
+  // check, since that function is in no corpus row and no fixture here.
   const owed = [...anchoredAt.values()].flat().filter((w) => !anchorsEmitted.has(w));
   if (owed.length > 0) {
     const mentioned = new Set<string>(globalNames);
@@ -4642,6 +4448,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     return { frame: { loads, stores } };
   };
+  // ONE `laddr` op per minted NAME, last one wins. Same answer as feeding every op's finished entry
+  // to `new Map` — each entry was a pure function of its own op, and the Map kept the LAST value
+  // under a key at its FIRST key's position — but stated rather than left to be read off `new Map`'s
+  // semantics, and `frameRecord` (which walks every op of the function) then runs once per name
+  // instead of once per op. NOT a measured speedup: over `packages/core/test` every one of the
+  // 1,057 structurings that reach here has ops === names, so the dedup fires zero times there. It
+  // is a bound, not a win: `laddrName` mints one name per OFFSET, and the frontend's frame-object
+  // audit can re-root several ops onto one offset (see `frameRecord`'s own note).
+  const lastLaddrOf = new Map<string, Op>();
+  for (const op of fn.blocks.flatMap((b) => b.ops).filter((op) => op.opcode === 'laddr')) {
+    lastLaddrOf.set(laddrName.get(op)!, op);
+  }
   const structs = collectStructs(fn);
   return {
     name: fn.name,
@@ -4665,29 +4483,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // no row can refute does not earn its place. THE FLIP CONDITION: the first row whose object
       // is decided by the declaration order of two `laddr` locals, or of an `laddr` against a
       // spill, is the referee — stamp them then, and `l3/slotorder.ts` needs no change to use it.
-      ...[
-        ...new Map(
-          fn.blocks
-            .flatMap((b) => b.ops)
-            .filter((op) => op.opcode === 'laddr')
-            .map((op) => [
-              laddrName.get(op)!,
-              {
-                name: laddrName.get(op)!,
-                type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
-                // the asm materialized this slot's address, and this is how many times it
-                // loaded and stored through it — both asm facts, and the gate the
-                // l3/volatileval.ts lever reads (see the SFn.locals doc)
-                ...frameRecord(op),
-                // an ESCAPED address makes every store observable (the DMA hardware reads it), and
-                // the source spells the scratch volatile for that reason — see the stamp site in
-                // frontend/thumb.ts for why it is the SPELLING that matters and not dead-store
-                // elimination, which keeps the store either way
-                ...(op.attrs.volatile === true ? { volatile: true as const } : {}),
-              },
-            ]),
-        ).values(),
-      ],
+      ...[...lastLaddrOf].map(([name, op]) => ({
+        name,
+        type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
+        // the asm materialized this slot's address, and this is how many times it
+        // loaded and stored through it — both asm facts, and the gate the
+        // l3/volatileval.ts lever reads (see the SFn.locals doc)
+        ...frameRecord(op),
+        // an ESCAPED address makes every store observable (the DMA hardware reads it), and
+        // the source spells the scratch volatile for that reason — see the stamp site in
+        // frontend/thumb.ts for why it is the SPELLING that matters and not dead-store
+        // elimination, which keeps the store either way
+        ...(op.attrs.volatile === true ? { volatile: true as const } : {}),
+      })),
       // uninitialised locals (undef): declared, never assigned, typed by whatever recovery settled
       // on for the value. NO `slots` either, on the same footing as the frame objects above.
       //
@@ -4925,6 +4733,32 @@ function predecessorBlocks(fn: Fn): Map<Block, Block[]> {
 function successorTo(pred: Block, target: Block) {
   const term = pred.ops[pred.ops.length - 1];
   return term.successors.find((s) => s.block === target);
+}
+/** EVERY in-edge record into `b` — which is what {@link successorTo} cannot give: it returns only
+ *  the FIRST record to a block, so a terminator with two edges to the same block hides the second
+ *  edge's args. Callers that ask "what does every path pass for param i" need all of them.
+ *
+ *  ORDER IS LOAD-BEARING and is `preds` insertion order, then terminator-successor order: the
+ *  naming walk takes the FIRST admissible carrier, so a different order is a different spelling.
+ *
+ *  AND IT IS GUARDED, not merely warned about — measured, not reasoned: rewriting this walk to call
+ *  `successorTo` turns 12 tests across 5 files of `packages/core/test` red. The path it would lose
+ *  is reached constantly, 326,305 times over that suite on a `cond_br` whose two arms land on one
+ *  block and 6 more on a `switch_br`.
+ *
+ *  The terminator is read UNGUARDED (`ops[ops.length - 1]`) on purpose: every block of a verified
+ *  Fn has one, and a guard would turn a malformed Fn's throw into a silent missing edge.
+ *
+ *  `hasParamRootedMerge` does not go through this, deliberately: it is a pre-structuring query over
+ *  a raw Fn and walks `fn.blocks` rather than a predecessor map it would first have to build. */
+function* inEdgeRecords(preds: Map<Block, Block[]>, b: Block): Generator<{ pred: Block; succ: Successor }> {
+  for (const pred of new Set(preds.get(b) ?? [])) {
+    for (const succ of pred.ops[pred.ops.length - 1].successors) {
+      if (succ.block === b) {
+        yield { pred, succ };
+      }
+    }
+  }
 }
 
 // Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it.
