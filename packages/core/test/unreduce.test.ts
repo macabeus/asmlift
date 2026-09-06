@@ -9,8 +9,8 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { type IrType, T } from '../src/ir/types';
 import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
-import { firstRejection, without } from '../src/l3/gates';
-import { UNREDUCE_GATES, type UnreduceResult, unreduceAccumulators } from '../src/l3/unreduce';
+import { type Gate, firstRejection, without } from '../src/l3/gates';
+import { type AccCtx, UNREDUCE_GATES, type UnreduceResult, unreduceAccumulators } from '../src/l3/unreduce';
 import { ARMV4T_AGBCC } from '../src/target';
 
 /** the GBA I/O page, as target.ts declares it */
@@ -130,31 +130,28 @@ const folded = (o: { start?: Expr; accStep?: Expr; ctrStep?: Expr; init?: Expr }
     },
   ]);
 
-/** The gate context `folded()` produces, for the ablation tests — every field but `declined` is
- *  the accepted fixture's, so a rejection is attributable to the edit. `declined` is stated rather
- *  than derived because it IS the thing under test: each of the five relation gates owns exactly
- *  one tag, and every test that states one also asserts the pass itself declines on the matching
- *  tree, so a stale tag cannot pass alone. */
-const foldedCtx = (
-  o: { declined?: Parameters<(typeof UNREDUCE_GATES)[number]['rejects']>[0]['declined'] } = {},
-): Parameters<(typeof UNREDUCE_GATES)[number]['rejects']>[0] => ({
-  assigns: 2,
-  addrTaken: false,
-  pinned: false,
-  unitsDisagree: false,
-  liveOutside: false,
-  readAtOrBelowStep: false,
-  counterAssigns: 2,
-  counterAddrTaken: false,
-  counterVolatile: false,
-  hasContinue: false,
-  declined: o.declined ?? null,
-  initLoopVar: false,
-  initNameEscapes: false,
-  movedEffect: false,
-  movedVolatile: false,
-  movedAliasable: false,
-});
+/** The context the PASS builds for a tree's accumulator, captured through the `gates` seam. The
+ *  five relation gates are keyed on WHICH reason `relate` returned, so a hand-written `declined`
+ *  would test the table against itself and a tag that stopped matching its tree would pass: every
+ *  ablation below therefore reads its context off the tree it also runs the pass on. The capture
+ *  rejects, so nothing is rewritten. */
+const ctxFor = (s: SFn): AccCtx => {
+  const seen: AccCtx[] = [];
+  const capture: Gate<AccCtx> = {
+    id: 'capture',
+    why: 'test probe: record the context and admit nothing',
+    sound: false,
+    rejects: (x) => {
+      seen.push(x);
+      return true;
+    },
+  };
+  unreduceAccumulators(s, GBA, undefined, [capture]);
+  if (seen.length !== 1) {
+    throw new Error(`expected one accumulator to reach the gates, got ${seen.length}`);
+  }
+  return seen[0];
+};
 test('an init the compiler folded the counter’s start out of relates ADDITIVELY', () => {
   // The other of the two ways a compiler's giv relates to its counter. `dmafill` starts at the
   // parameter `lo`, so the init `base + lo * 64` NAMES the start and substitution recovers it.
@@ -172,10 +169,12 @@ test('a counter-free init declines unless its start is the constant 0', () => {
   // SCOPE, and the reason it is a refusal rather than a widening: the general closed form is
   // `INIT + (ctr - start) * (K / d)`, and a non-zero start spells a bias term no corpus row asks
   // for. This is `nonzero-start`'s own population — the start IS a constant, and it is not 0.
-  expect(unreduceAccumulators(folded({ start: c(1) }), GBA)).toBeNull();
+  const tree = folded({ start: c(1) });
+  expect(unreduceAccumulators(tree, GBA)).toBeNull();
+  expect(ctxFor(tree).declined).toBe('nonzero-start');
   // …and ablating the gate is what makes the guard differential rather than decorative: with
   // `nonzero-start` gone, no other gate catches this row — each of the five owns one tag.
-  expect(firstRejection(without(UNREDUCE_GATES, 'nonzero-start'), foldedCtx({ declined: 'nonzero-start' }))).toBeNull();
+  expect(firstRejection(without(UNREDUCE_GATES, 'nonzero-start'), ctxFor(tree))).toBeNull();
 });
 
 test('an init that never names the counter declines', () => {
@@ -183,24 +182,27 @@ test('an init that never names the counter declines', () => {
   // of the counter — and the additive form is unavailable, because re-deriving `ctr - start` would
   // put a new read of the start expression at every use, which none of the five re-evaluation
   // gates asks about. `unrelated-start`'s own population, and no other gate covers it.
-  expect(unreduceAccumulators(folded({ start: v('a1'), init: v('a0') }), GBA)).toBeNull();
-  expect(
-    firstRejection(without(UNREDUCE_GATES, 'unrelated-start'), foldedCtx({ declined: 'unrelated-start' })),
-  ).toBeNull();
+  const tree = folded({ start: v('a1'), init: v('a0') });
+  expect(unreduceAccumulators(tree, GBA)).toBeNull();
+  expect(ctxFor(tree).declined).toBe('unrelated-start');
+  expect(firstRejection(without(UNREDUCE_GATES, 'unrelated-start'), ctxFor(tree))).toBeNull();
 });
 
 test('a counter-free init declines when the counter does not step by one', () => {
   // the closed form would carry the ratio `K / d`, which is not a shift when `d` is not 1
-  expect(unreduceAccumulators(folded({ ctrStep: c(2) }), GBA)).toBeNull();
-  expect(firstRejection(without(UNREDUCE_GATES, 'step-ratio'), foldedCtx({ declined: 'step-ratio' }))).toBeNull();
+  const tree = folded({ ctrStep: c(2) });
+  expect(unreduceAccumulators(tree, GBA)).toBeNull();
+  expect(ctxFor(tree).declined).toBe('step-ratio');
+  expect(firstRejection(without(UNREDUCE_GATES, 'step-ratio'), ctxFor(tree))).toBeNull();
 });
 
 test('a counter-free init declines when the accumulator’s stride is not a power of two', () => {
-  expect(unreduceAccumulators(folded({ accStep: c(48) }), GBA)).toBeNull();
+  const tree = folded({ accStep: c(48) });
+  expect(unreduceAccumulators(tree, GBA)).toBeNull();
   expect(unreduceAccumulators(folded({ accStep: v('a1') }), GBA)).toBeNull();
-  expect(
-    firstRejection(without(UNREDUCE_GATES, 'stride-not-shift'), foldedCtx({ declined: 'stride-not-shift' })),
-  ).toBeNull();
+  expect(ctxFor(tree).declined).toBe('stride-not-shift');
+  expect(ctxFor(folded({ accStep: v('a1') })).declined).toBe('stride-not-shift');
+  expect(firstRejection(without(UNREDUCE_GATES, 'stride-not-shift'), ctxFor(tree))).toBeNull();
 });
 
 test('an ABLATED relation gate declines rather than emitting a deleted local', () => {
@@ -255,9 +257,8 @@ test('a stride that does not match the init’s scale declines', () => {
     },
   ]);
   expect(unreduceAccumulators(s, GBA)).toBeNull();
-  expect(
-    firstRejection(without(UNREDUCE_GATES, 'scale-mismatch'), foldedCtx({ declined: 'scale-mismatch' })),
-  ).toBeNull();
+  expect(ctxFor(s).declined).toBe('scale-mismatch');
+  expect(firstRejection(without(UNREDUCE_GATES, 'scale-mismatch'), ctxFor(s))).toBeNull();
 });
 
 test('an init that never names a symbolic counter start declines, in a `while` too', () => {

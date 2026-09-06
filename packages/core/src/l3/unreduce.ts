@@ -212,7 +212,7 @@ type RelDecline = 'scale-mismatch' | 'unrelated-start' | 'nonzero-start' | 'step
 type Relation = { readonly ok: Expr } | { readonly declined: RelDecline };
 
 /** One (loop, accumulator) pair as the gates read it. */
-interface AccCtx {
+export interface AccCtx {
   /** the accumulator is assigned exactly twice: its init above the loop and its step inside */
   assigns: number;
   addrTaken: boolean;
