@@ -29,7 +29,11 @@
 export function stripShellComments(template: string): string {
   let out = '';
   let quote: string | undefined;
-  let prev = '';
+  // A `#` opens a comment only where a WORD could begin — which is the start of the text, or just
+  // after whitespace or a command separator. Tracking that directly rather than the previous
+  // character keeps the one thing the `#` test needs from also having to encode why every other
+  // branch set what it set.
+  let atWordStart = true;
   for (let i = 0; i < template.length; i++) {
     const c = template[i];
     // A BACKSLASH takes the next character verbatim — unquoted and inside a DOUBLE quote, but not
@@ -37,12 +41,12 @@ export function stripShellComments(template: string): string {
     // the tracker's quote EARLY, which is the under-scanning direction: a later `#` on that line
     // then read as a comment and deleted a `$( )` that `sh` really does substitute, out from under
     // a SAFETY detector. `sh -c 'CC="a \" # $(command -v true) "; echo "[$CC]"'` prints `[a " # true ]`.
-    // The escaped character is emitted (line numbers never shift) but does not become `prev`
-    // unless it is a newline: `a\ #b` is one word with a literal `#` in it, while a line
-    // continuation really does put the next line's `#` at the start of a word.
+    // The escaped character is emitted (line numbers never shift) and does not open a word unless
+    // it is a newline: `a\ #b` is one word with a literal `#` in it, while a line continuation
+    // really does put the next line's `#` at the start of a word.
     if (c === '\\' && quote !== "'" && i + 1 < template.length) {
       out += c + template[i + 1];
-      prev = template[i + 1] === '\n' ? '\n' : 'x';
+      atWordStart = template[i + 1] === '\n';
       i++;
       continue;
     }
@@ -51,25 +55,27 @@ export function stripShellComments(template: string): string {
       if (c === quote) {
         quote = undefined;
       }
-      prev = c;
+      // A quote CHARACTER is not whitespace, so the word goes on past the one that closed it —
+      // `"a"#b` is one word. While the quote is still open no `#` test is reached at all.
+      atWordStart = false;
       continue;
     }
     if (c === '"' || c === "'") {
       quote = c;
       out += c;
-      prev = c;
+      atWordStart = false;
       continue;
     }
-    if (c === '#' && (prev === '' || /[\s;&|(]/.test(prev))) {
+    if (c === '#' && atWordStart) {
       while (i < template.length && template[i] !== '\n') {
         i++;
       }
       out += '\n';
-      prev = '\n';
+      atWordStart = true;
       continue;
     }
     out += c;
-    prev = c;
+    atWordStart = /[\s;&|(]/.test(c);
   }
   return out;
 }

@@ -108,12 +108,15 @@ export function decompileRanked(
 
 /** The same ranking with the candidate COMPILES run `jobs` at a time.
  *
- *  A ranked run is mostly subprocess — on LoadBGTilemapData the compiles outweigh the scoring
- *  about 8:1, and the run's own `[phase]` line (phase.ts) is where a current figure comes from —
- *  and `rankBy`'s driver is synchronous, so today tens of thousands of
- *  candidates compile one at a time on one core. Here each worker owns a scratch slot
- *  (compile-command.ts `worker()`), takes the next unclaimed candidate, and scores its object the
- *  moment it lands; the score runs on the main thread and overlaps the other workers' subprocesses.
+ *  A ranked run is mostly subprocess, by one to two ORDERS OF MAGNITUDE: a candidate compile
+ *  forks a whole toolchain while a score is a wasm call over two objects already in memory. The
+ *  committed LoadBGTilemapData baseline (docs/lbg-attribution-evidence/baseline/run-summary.json)
+ *  charged compile 47272s against score 619s over 225792 candidates; any run's own `[phase]` line
+ *  (phase.ts) is where a current figure comes from. `rankBy`'s driver is synchronous, so on the
+ *  serial path every one of those candidates compiles one at a time on one core. Here each worker
+ *  owns a scratch slot (compile-command.ts `worker()`), takes the next unclaimed candidate, and
+ *  scores its object the moment it lands; the score runs on the main thread and overlaps the other
+ *  workers' subprocesses.
  *
  *  ONLY the compile moves. The ordering is still core's `rankBy` over the same enumeration, run
  *  afterwards against the memoized scores — so the winner, every tie-break and the `dropped` list

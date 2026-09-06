@@ -41,6 +41,13 @@ glabel func_80012340
   it('ignores a register-indirect call and a mnemonic inside a comment', () => {
     expect(calleeNames('  jalr $t9\n  @ bl NotACall\n  # jal NotACall\n', 'Fn')).toEqual([]);
   });
+
+  it('ignores a CTR-indirect PPC call, which names nothing to report an arity for', () => {
+    expect(calleeNames('  bctrl\n', 'Fn')).toEqual([]);
+    expect(calleeNames('  bcctrl 20, 0, 0\n', 'Fn')).toEqual([]);
+    // and it is still not a call when a comment follows the mnemonic on the same line
+    expect(calleeNames('  bctrl # call through r12\n', 'Fn')).toEqual([]);
+  });
 });
 
 describe('guessedArityCallees', () => {

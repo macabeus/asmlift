@@ -27,6 +27,21 @@ describe('a comment is dropped, and only a comment', () => {
   test('line numbering survives: a comment becomes the newline that ended it', () => {
     expect(stripShellComments('a\n# b\nc\n').split('\n')).toHaveLength(4);
   });
+
+  test('a `#` glued to a CLOSED quote is still inside the word, not a comment', () => {
+    // A word does not end because a quote did: `sh -c 'CC="a"#b; echo "[$CC]"'` assigns `a#b` and
+    // prints `[a#b]`. So the character after a closing quote is not a word boundary, and the `#`
+    // that follows one is ordinary text — the under-scanning direction if it were dropped, since
+    // the rest of the line would go with it.
+    const t = 'CC="a"#$(command -v true)\nexec $CC "$@"\n';
+    expect(stripShellComments(t)).toBe(t);
+    expect(COMPUTES.test(shellProgramText(t))).toBe(true);
+  });
+
+  test('…and the same for a closed SINGLE quote', () => {
+    const t = "CC='a'#$(id)\n";
+    expect(stripShellComments(t)).toBe(t);
+  });
 });
 
 describe('a BACKSLASH escape does not close a quote — the under-scanning side', () => {

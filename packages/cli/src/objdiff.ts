@@ -122,8 +122,8 @@ function targetEntry(path: string): NonNullable<typeof parsedTarget> {
 /** A ranked run compiles far more candidates than it produces distinct OBJECTS, and identical
  *  objects have one score by definition. The signedness pin alone emits a twin of every function,
  *  and wherever the pin moves no instruction the two spellings are the same object, so most of a
- *  fan's scoring calls are repeats — one LoadBGTilemapData run compiled 26880 candidates into 6000
- *  distinct objects. Recognising a repeat HERE is an observation about two files;
+ *  fan's scoring calls are repeats — one LoadBGTilemapData run compiled 26880 candidates.
+ *  Recognising a repeat HERE is an observation about two files;
  *  predicting it in the enumerator is a claim about codegen, and core's test/sign-axis.test.ts is
  *  where that claim dies.
  *
