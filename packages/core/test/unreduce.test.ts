@@ -9,7 +9,8 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
-import { type UnreduceResult, unreduceAccumulators } from '../src/l3/unreduce';
+import { firstRejection, without } from '../src/l3/gates';
+import { UNREDUCE_GATES, type UnreduceResult, unreduceAccumulators } from '../src/l3/unreduce';
 import { ARMV4T_AGBCC } from '../src/target';
 
 /** the GBA I/O page, as target.ts declares it */
@@ -110,6 +111,113 @@ test('a `for` loop reads its counter out of init and inc', () => {
     },
   ]);
   expect(emit(unreduceAccumulators(s, GBA))).toContain('*(s32 *)67109080 = (i << 6) + a1;');
+});
+
+/** synthetic:offgiv's shape: the counter starts at the LITERAL 0, so the compiler folded its
+ *  start out of the giv's init and left `acc = a1` — counter-free. `over` edits one fact. */
+const folded = (o: { start?: Expr; accStep?: Expr; ctrStep?: Expr; init?: Expr } = {}): SFn =>
+  fill({}, [
+    set('i', o.start ?? c(0)),
+    set('acc', o.init ?? v('a1')),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: v('i'), r: v('a0') },
+      body: [
+        st(cell(0x040000d8), v('acc')),
+        set('acc', plus(v('acc'), o.accStep ?? c(64))),
+        set('i', plus(v('i'), o.ctrStep ?? c(1))),
+      ],
+    },
+  ]);
+
+/** the gate context `folded()` produces, for the ablation tests — every field but the two this
+ *  family turns on is the accepted fixture's, so a rejection is attributable to the edit. */
+const foldedCtx = (
+  o: { start?: Expr; init?: Expr } = {},
+): Parameters<(typeof UNREDUCE_GATES)[number]['rejects']>[0] => ({
+  assigns: 2,
+  addrTaken: false,
+  pinned: false,
+  liveOutside: false,
+  readAtOrBelowStep: false,
+  counterAssigns: 2,
+  counterAddrTaken: false,
+  counterVolatile: false,
+  hasContinue: false,
+  related: unreduceAccumulators(folded(o), GBA) !== null,
+  foldedStart: (o.start ?? c(0)).k === 'const',
+  initLoopVar: false,
+  initNameEscapes: false,
+  movedEffect: false,
+  movedVolatile: false,
+  movedAliasable: false,
+});
+test('an init the compiler folded the counter’s start out of relates ADDITIVELY', () => {
+  // The other of the two ways a compiler's giv relates to its counter. `dmafill` starts at the
+  // parameter `lo`, so the init `base + lo * 64` NAMES the start and substitution recovers it.
+  // Start at a constant and agbcc folds `base + 0 * 64` to `base` before anything reaches the
+  // asm — nothing to substitute, and the closed form is the init PLUS the scaled counter.
+  expect(emit(unreduceAccumulators(folded(), GBA))).toContain('*(s32 *)67109080 = a1 + (i << 6);');
+  expect(emit(unreduceAccumulators(folded(), GBA))).not.toContain('acc');
+});
+
+test('a folded init whose stride is the counter’s own needs no shift', () => {
+  expect(emit(unreduceAccumulators(folded({ accStep: c(1) }), GBA))).toContain('*(s32 *)67109080 = a1 + i;');
+});
+
+test('a counter-free init declines unless its start is the constant 0', () => {
+  // SCOPE, and the reason it is a refusal rather than a widening: the general closed form is
+  // `INIT + (ctr - start) * (K / d)`, and a non-zero start spells a bias term no corpus row asks
+  // for. This is `folded-start`'s own population — the start IS a constant, and it is not 0.
+  expect(unreduceAccumulators(folded({ start: c(1) }), GBA)).toBeNull();
+  // …and ablating the gate is what makes the guard differential rather than decorative: with
+  // `folded-start` gone, `unrelated-step` does NOT catch this row, because it asks `!related` and
+  // the reason this one is refused is the start's value, not the stride.
+  expect(firstRejection(without(UNREDUCE_GATES, 'folded-start'), foldedCtx({ start: c(1) }))).toBeNull();
+});
+
+test('a counter-free init whose start is SYMBOLIC is `unrelated-step`, not `folded-start`', () => {
+  // The two halves of the refusal `unrelated-step` used to answer alone. A symbolic start cannot
+  // have folded, so an init that does not name it is simply not a function of the counter — and
+  // the additive form is unavailable, because re-deriving `ctr - start` would put a new read of
+  // the start expression at every use, which none of the five re-evaluation gates asks about.
+  const s = folded({ start: v('a1'), init: v('a0') });
+  expect(unreduceAccumulators(s, GBA)).toBeNull();
+  expect(firstRejection(UNREDUCE_GATES, foldedCtx({ start: v('a1'), init: v('a0') }))).toBe('unrelated-step');
+});
+
+test('a counter-free init declines when the counter does not step by one', () => {
+  // the closed form would carry the ratio `K / d`, which is not a shift when `d` is not 1
+  expect(unreduceAccumulators(folded({ ctrStep: c(2) }), GBA)).toBeNull();
+});
+
+test('a counter-free init declines when the accumulator’s stride is not a power of two', () => {
+  expect(unreduceAccumulators(folded({ accStep: c(48) }), GBA)).toBeNull();
+  expect(unreduceAccumulators(folded({ accStep: v('a1') }), GBA)).toBeNull();
+});
+
+test('a folded init that READS MEMORY still answers to the device-write proof gate', () => {
+  // The new branch admits a class the substitutional one could not reach — an init that is a bare
+  // memory read, which under the old rule had no counter subterm and so never related at all. The
+  // proof requirement is not weakened by getting there another way.
+  const read = { ...cell(0x03001048) };
+  const armed = fill({}, [
+    set('i', c(0)),
+    set('acc', read),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: v('i'), r: v('a0') },
+      body: [
+        st(cell(0x040000dc), c(0x81000020)),
+        st(cell(0x040000d8), v('acc')),
+        set('acc', plus(v('acc'), c(64))),
+        set('i', plus(v('i'), c(1))),
+      ],
+    },
+  ]);
+  const out = unreduceAccumulators(armed, GBA, ARMV4T_AGBCC.capabilities?.deviceMemoryWriters);
+  expect(emit(out)).toContain('*(s32 *)50335816 + (i << 6)');
+  expect(out!.needsProof).toBe(true);
 });
 
 test('a stride that does not match the init’s scale declines', () => {

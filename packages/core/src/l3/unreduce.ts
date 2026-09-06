@@ -167,6 +167,9 @@ interface AccCtx {
   hasContinue: boolean;
   /** the init relates to the counter's start by the accumulator's own stride */
   related: boolean;
+  /** the counter starts at a CONSTANT, so whatever the source scaled by it the compiler folded
+   *  away before the asm — there is no start term left in the init to substitute for */
+  foldedStart: boolean;
   /** the init reads a name something in the motion region assigns */
   initLoopVar: boolean;
   /** the init reads a name whose address the function hands out */
@@ -249,11 +252,31 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
     rejects: (c) => c.hasContinue,
   },
   {
+    // The FIRST of the two questions `unrelated-step` used to answer under one id. Where the
+    // counter starts at a CONSTANT, the source's `start * K` term folded away before the asm, so
+    // the init cannot name the start and substitution has nothing to work on. Such an init is
+    // recoverable additively (`INIT + (ctr << s)`) in one corner and not at all outside it;
+    // `relate` decides which, and this gate publishes the refusal for the rest.
+    id: 'folded-start',
+    why: 'a counter starting at a constant leaves no start term in the init, and only a zero relates',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: a counter-free init declines unless its start is the constant 0',
+    rejects: (c) => c.foldedStart && !c.related,
+  },
+  {
+    // …and the SECOND: the counter's start is symbolic, so it cannot have folded, and the init
+    // either does not name it or names it under a scale that does not carry the whole stride.
+    //
+    // The two clauses PARTITION `!related` — `foldedStart` decides which gate owns a refusal, and
+    // together they reject exactly what the single `!c.related` rule rejected before the split.
+    // The partition is what makes each guard differential: overlapping them would leave either
+    // gate ablatable with the other still catching its rows, which is a `guardedBy` that names a
+    // test the gate's removal does not break.
     id: 'unrelated-step',
-    why: 'an init this file cannot relate to the counter’s start by the stride proves nothing',
+    why: 'an init whose scale does not carry the accumulator’s whole stride proves nothing',
     sound: true,
     guardedBy: 'unreduce.test.ts: a stride that does not match the init’s scale declines',
-    rejects: (c) => !c.related,
+    rejects: (c) => !c.foldedStart && !c.related,
   },
   {
     id: 'init-loop-var',
@@ -314,9 +337,6 @@ function stepOf(s: Stmt, name: string): Expr | null {
  *  assumed: the substituted subterm must be structurally the counter's start, and the stride must
  *  come out of the scale. */
 function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr | null {
-  if ([...subterms(init)].filter((x) => exprEquals(x, start)).length !== 1) {
-    return null; // zero: the init does not depend on the counter. two: which one is the index?
-  }
   const kConst = k.k === 'const' ? k.value : null;
   const idx = (): Expr => ({ k: 'var', name: ctr });
   const holds = (e: Expr): boolean => [...subterms(e)].some((x) => exprEquals(x, start));
@@ -352,8 +372,84 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr 
     }
     return null; // anything else between the root and the counter, and the stride is not `k`
   };
-  return rec(init);
+  // THE SUBSTITUTIONAL FORM FIRST, unchanged: it is the shipped spelling every corpus inhabitant
+  // of this lever rides, and trying it first makes the branch below strictly additive — it is
+  // reached only where the old rule already declined, so it can admit candidates but never
+  // re-spell one.
+  //
+  // `!== 1` — zero: the init does not depend on the counter. two: which one is the index?
+  const substituted = startOccurrences(init, start) === 1 ? rec(init) : null;
+  if (substituted !== null) {
+    return substituted;
+  }
+  // …AND THE FOLDED FORM AS THE FALLBACK. Note that the occurrence COUNT above cannot be trusted
+  // to route this on its own: where the start is the constant 0, every unrelated literal zero in
+  // the init — an `[0]` subscript, a `+ 0` — counts as an occurrence and sends a counter-free init
+  // down the substitutional path, where it declines for the wrong reason. (`rec` never substitutes
+  // for such a literal: it verifies an all-`+` spine down to the occurrence at the accumulator's
+  // own scale, and an `index` node on that path refuses. So the misrouting costs reach, not
+  // soundness — and trying `rec` first and asking about the START's shape second fixes the reach
+  // without touching the safety argument.)
+  return start.k === 'const' ? relateFolded(init, start, ctr, k, d) : null;
 }
+
+/** THE OTHER relation, and it is the same one after CONSTANT FOLDING. `relate` above recovers the
+ *  init by substituting the counter for its own start, which needs the start to still be THERE. A
+ *  source `for (i = 0; …) use(base + (i << 6))` gives the compiler-created giv the init
+ *  `base + (0 << 6)`, and the compiler folds that to `base` long before any of it reaches the asm:
+ *  the start term is gone, the init is loop-invariant, and nothing is left to substitute. Every
+ *  shipped `/unreduce` row starts its counter at a PARAMETER (`dmafill`'s `lo`), which is exactly
+ *  why none of them needed this branch — a symbolic start cannot fold.
+ *
+ *  So the closed form is ADDITIVE rather than substitutional: `INIT + (ctr << s)`, the init kept
+ *  whole and the scaled counter added to it. The invariant it must preserve is the same one, and
+ *  it holds for the same reason: at entry `ctr == 0`, so `INIT + (0 << s) == INIT`; per iteration
+ *  `ctr` grows by 1 and the closed form by `2^s`, which is the accumulator's own stride `k`.
+ *
+ *  AND THE RE-EVALUATION GATES ARE UNCHANGED, which is why this branch adds no soundness question.
+ *  All five of them read `initStmt.value` — the ORIGINAL init — and that expression is precisely
+ *  what the additive form re-evaluates at each read. It is strictly more exact than the
+ *  substitutional case, where a subterm is replaced before the form is spelled.
+ *
+ *  SCOPE, stated as three refusals rather than left implicit, because a decline outside a gate
+ *  names nothing and a reader will attribute one anyway. The general closed form is
+ *  `INIT + ((ctr - start) * (K / d))`, and this branch takes only its degenerate corner:
+ *    • `start` must be the CONSTANT 0. A non-constant start would put a NEW read of the start
+ *      expression at every use — a question none of the five gates asks, because in the
+ *      substitutional case the start is a subterm of the init they already range over. A non-zero
+ *      constant start is sound but spells a bias term no corpus row asks for.
+ *    • `d` must be 1, or the closed form carries the ratio `K / d` and is not a shift.
+ *    • `k` must be a constant power of two. `INIT + ctr * k` is the general spelling and compiles
+ *      identically at agbcc (the shift and the product were compiled and diffed: byte-identical),
+ *      so a second spelling would double the fan and buy no score. The shift is what this class's
+ *      references spell.
+ *  Each is pinned by its own unit test; none is reached by a corpus row today. */
+function relateFolded(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr | null {
+  if (start.k !== 'const' || start.value !== 0 || d !== 1 || k.k !== 'const') {
+    return null;
+  }
+  const step = k.value;
+  if (step <= 0 || (step & (step - 1)) !== 0) {
+    return null; // not a power of two, so no shift carries the stride
+  }
+  const sh = Math.log2(step);
+  if (sh >= 31) {
+    return null;
+  }
+  const idx: Expr = { k: 'var', name: ctr };
+  // `sh === 0` is the counter standing on its own — `i << 0` is the same value spelled worse, and
+  // `rec`'s branch (c) already writes the bare counter for the substitutional case.
+  const scaled: Expr = sh === 0 ? idx : { k: 'bin', op: '<<', l: idx, r: { k: 'const', value: sh } };
+  // The INIT stays on the LEFT: it is the base the source names, and `rec` builds the same shape
+  // for the same loop where the fold did not happen. Product operand order is `/mulfirst`'s
+  // question, not this file's.
+  return { k: 'bin', op: '+', l: init, r: scaled };
+}
+
+/** how many times the counter's start stands as a subterm of the init. ONE is the substitutional
+ *  case; two is ambiguous (which occurrence is the index?); zero is the folded case. */
+const startOccurrences = (init: Expr, start: Expr): number =>
+  [...subterms(init)].filter((x) => exprEquals(x, start)).length;
 
 /** every node of an expression tree, itself included */
 function* subterms(e: Expr): Generator<Expr> {
@@ -611,6 +707,7 @@ export function unreduceAccumulators(
         counterVolatile: ctrLocal?.volatile === true || ctrLocal?.pointeeVolatile === true,
         hasContinue: hasContinueIn(loop.body),
         related: closed !== null,
+        foldedStart: startStmt.value.k === 'const',
         // `evaluated`, not `loop.body`: a `for`'s counter is stepped in `loop.inc`
         initLoopVar: [...namesUnder(initStmt.value)].some((n) => assignCount(evaluated, n) > 0),
         initNameEscapes: [...namesUnder(initStmt.value)].some((n) => addrTakenIn(sfn.body, n)),
