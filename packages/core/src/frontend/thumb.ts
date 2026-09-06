@@ -390,8 +390,8 @@ function expandRegList(tokens: string[]): string[] {
 // for one and `Number.isNaN(undefined)` is false. An empty list is a malformed list, not an empty
 // transfer.
 //
-// LOWERCASE-ONLY IS A HOLE, NOT A FREEBIE — it used to be written here as "deliberate and free",
-// and it is not. GNU as accepts `PUSH {R4, LR}`, and the frontend's three consumers do not agree
+// LOWERCASE-ONLY IS A HOLE, NOT A FREEBIE. GNU as accepts `PUSH {R4, LR}`, and the three consumers
+// of this predicate do not agree
 // about it. The ldm/stm arm degrades to a loud opaque and the frame walk poisons its depth, both of
 // which decline; `savedRegs` does neither. It `break`s out of the prologue scan on an unreadable
 // list, which yields a SMALLER save set rather than no answer, so the def-less `r4` it should have
@@ -399,8 +399,8 @@ function expandRegList(tokens: string[]): string[] {
 // `push {r4,lr}; add r0,r4,#0; pop {r4}; bx lr`: lowercase gives `s32 f(void)` with `uninit_r4`,
 // while both `push {R4, LR}` and `PUSH {r4, lr}` give `s32 f(s32 a0) { return a0; }`. Nothing in
 // the corpus reaches it — 0 uppercase register tokens across the reference asm of the benchmark's
-// agbcc rows — but folding case belongs in expandRegList, and that would also change
-// classifyXfer's `popsPc`, i.e. block splitting, so it is not a comment-round change.
+// agbcc rows — but folding case belongs in `expandRegList`, where it also changes classifyXfer's
+// `popsPc`, i.e. block splitting. That is a measured change, not a free one.
 function definiteRegList(tokens: string[]): string[] | null {
   const list = expandRegList(tokens);
   if (list.length === 0) {
@@ -460,8 +460,8 @@ function splitOperands(s: string): string[] {
 // a plain `rB + rX`. Measured 2026-09-06: `ldr r0, [r0, r1, lsl #2]` lifts to
 // `*(s32 *)(a0 + a1)`, silently wrong by a factor of four. ARMv4T Thumb has no scaled-index load
 // encoding, so nothing an agbcc-shaped input contains reaches it — but this frontend parses TEXT,
-// and the honest fix is a decline here rather than a comment. Not taken in this round: adding a
-// throw is a behaviour change.
+// and the honest fix is a decline here rather than a comment. Adding one is a behaviour change and
+// has to be measured.
 function parseAddr(operand: string): { base: string; off: number; regOff?: string } {
   const inner = operand.replace(/[[\]]/g, '').trim();
   const parts = inner.split(',').map((s) => s.trim());
@@ -469,8 +469,8 @@ function parseAddr(operand: string): { base: string; off: number; regOff?: strin
   // `[rB, rX]` — REGISTER-offset addressing, surfaced rather than swallowed, for two different
   // callers: the sp paths (argIndex, the slot arms, isFrameObjectAccess) all refuse a register
   // index outright, and the ordinary load/store path lowers it as an explicit `rB + rX` add before
-  // a load at offset 0. Reading it as a bare `[rB]` — the old behaviour — dropped the index, and
-  // `ldrsh` exists ONLY in this form in Thumb-1, so every `ldrsh` went through it.
+  // a load at offset 0. Reading it as a bare `[rB]` drops the index, and `ldrsh` exists ONLY in
+  // this form in Thumb-1, so every `ldrsh` goes through this branch.
   if (parts[1] !== undefined && !parts[1].startsWith('#')) {
     return { base, off: 0, regOff: parts[1] };
   }
@@ -479,9 +479,9 @@ function parseAddr(operand: string): { base: string; off: number; regOff?: strin
 }
 
 // ── FRAME AND REGISTER PREDICATES ────────────────────────────────────────────────────────────
-// Capture-free helpers that `lift` used to declare inside its own body. Nothing here reads lift
-// state: they are pure functions of an instruction, an operand token or an explicit dependency
-// bag, and they sit at module level so the size of `lift` reflects what it actually decides.
+// Capture-free helpers: pure functions of an instruction, an operand token or an explicit
+// dependency bag. Nothing here reads lift state, which is why they sit at module level — the size
+// of `lift` should reflect what it actually decides.
 
 const reg = (s: string) => s.replace(/[[\]]/g, '');
 
@@ -555,9 +555,12 @@ const makeFrameWalk = (deps: { argRegs: readonly string[]; entryHasPreds: boolea
       // expandRegList, NOT a comma count: `push {r4-r7, lr}` is FIVE registers, and counting it as
       // two makes the frame 12 bytes too shallow — which turns a genuine LOCAL into a fabricated
       // parameter reading uninitialised stack. Caught by a probe, not by the corpus: agbcc emits no
-      // range pushes at all — re-counted 2026-09-06, 0 of the 425 `push`/`pop` lists in the cached
-      // agbcc reference asm (269 of the benchmark's 404 agbcc rows) carries a range — but GNU as
-      // accepts them and the disassembly path can produce them.
+      // range pushes at all — re-counted 2026-09-06 over the 269 of the benchmark's 404 agbcc rows
+      // whose reference asm the local bench cache holds, where NO `push`/`pop` list carries a range
+      // — but GNU as accepts them and the disassembly path can produce them. (The population is the
+      // rows, not the cache's file count: a cache also holds entries for rows that no longer exist,
+      // so two checkouts of this commit disagree about how many files there are and agree about
+      // this.)
       // Counting comma tokens instead would undercount `{r4-lr}` as two registers, and an
       // unexpandable range must poison the depth rather than be guessed at — definiteRegList owns
       // both rules, and owns them for the ldm/stm arm too.
@@ -1171,11 +1174,10 @@ function decode(
     // NO BENCHMARK REACH BELOW THIS LINE, and it is worth knowing which side of it you are on.
     // Everything ABOVE — the pad decoding, `fillIsReachable`, `sealedFill`, the live-hazard refusal
     // — runs on every agbcc function and is bench-load-bearing. The layout solver below runs on
-    // none of them: instrumented and re-measured 2026-09-06 over the 307 cached agbcc reference asm
-    // files (269 of the benchmark's 404 agbcc rows; 291 lifted, 16 declined), this branch was
-    // entered 0 times. agbcc emits no `[pc, #N]` load and no sub-word data in `.text`, and every
-    // `.align` it writes (456 of them across those files) sits behind a dead `.L` label that the
-    // rule above seals. So a clean `bench diff` says NOTHING about any code inside this branch —
+    // none of them: instrumented and re-measured 2026-09-06 over the 269 of the benchmark's 404
+    // agbcc rows whose reference asm the local bench cache holds, this branch was entered 0 times.
+    // agbcc emits no `[pc, #N]` load and no sub-word data in `.text`, and every `.align` it writes
+    // sits behind a dead `.L` label that the rule above seals. So a clean `bench diff` says NOTHING about any code inside this branch —
     // `thumb-pad-directives.test.ts` is its only gate, and a change here has to be argued there.
     if (needsLayout) {
       // Only a hazard WITHIN this function's slice makes its layout unknowable. A fill this pass
@@ -1827,12 +1829,10 @@ function recoverJumpTable(
   //
   // The second is what agbcc emits whenever the default is out of a conditional branch's reach:
   // Thumb-1 `B<cond>` carries a signed 8-bit HALFWORD offset, so ±256 BYTES, about 128
-  // instructions. Both forms occur and both must be read; no census is given, because the one that
-  // used to be here ("five of the six benchmark functions with a table use the long form") does not
-  // reproduce — of the 307 cached agbcc reference asm files re-counted 2026-09-06, six carry a
-  // table and all six take the DIRECT form. That census covers 269 of the benchmark's 404 agbcc
-  // rows, so it is not a corpus-wide count either, and a claim about which form dominates needs a
-  // full run to make. `longDefault` is the target of the trailing `b`, read by the caller from the
+  // instructions. Both forms occur and both must be read, and no census says which DOMINATES:
+  // re-counted 2026-09-06 over the 269 of the benchmark's 404 agbcc rows whose reference asm the
+  // local bench cache holds, six carry a table and all six take the DIRECT form. That is a proper
+  // subset of the corpus, so a claim about which form dominates needs a full run to make. `longDefault` is the target of the trailing `b`, read by the caller from the
   // block after `bounds`.
   const bi = bounds.instrs;
   const guard = bi[bi.length - 1],
@@ -2842,8 +2842,7 @@ export function lift(
   //     disassembly (klonoa asm/ · sa3 asm/)           203 · 1250           0
   //
   // So this is not "one tool with two spellings" — it is the compiler's convention against the
-  // disassembler's, and asmlift reads both kinds of file. (An earlier commit message on this branch
-  // claimed agbcc emitted both; it does not, and the counts above are the check that settles it.)
+  // disassembler's, and asmlift reads both kinds of file.
   //
   // Everything else that writes sp is a
   // frame change this frontend cannot model: a register-sized adjustment (`add sp, r4`, agbcc's
@@ -2874,9 +2873,10 @@ export function lift(
   // (`isStackPtr`) and PPC (`r1`).
   //
   // sp is never WRITTEN either — but by `writeData` declining, NOT because sp-dest ops are inert.
-  // That was this file's premise until the frame-adjust whitelist landed, and it was wrong: five
-  // decode arms wrote sp and dropped it silently. The single transparent shape is `sp = sp ± imm`,
-  // whitelisted in the add/sub arms. Read and write are now guarded symmetrically.
+  // Five decode arms (`lsl`/`neg`/`mvn` with an sp destination, `ldr sp`, `ldmia` with sp in the
+  // list) reach a write with no arm-local sp check of their own, so the guard has to sit on the
+  // write itself. The single transparent shape is `sp = sp ± imm`, whitelisted in the add/sub arms.
+  // Read and write are guarded symmetrically.
   const readData = (r: string, b: number): Value => {
     if (isSpReg(r)) {
       throw spAsDataError();
@@ -3493,9 +3493,9 @@ export function lift(
     slotsOk && capturedObjectIsTheWholeFrame && isSpReg(base) && regOff === undefined && off === 0 && width === 4;
 
   // A WHOLE WORD OF THIS FUNCTION'S OWN RESERVED LOCAL AREA — the shape the ldr and str arms model
-  // as an SSA slot (`sp@<off>`) instead of memory. The two arms asked this in eight-term
-  // conjunctions written out twice, which is one edit away from disagreeing about which bytes are
-  // private.
+  // as an SSA slot (`sp@<off>`) instead of memory. The two arms spelled these seven terms out
+  // twice — the ldr arm with the reaching-def test as an eighth — which is one edit away from
+  // disagreeing about which bytes are private.
   //
   // Each term is a refusal:
   //   * `slotsOk`      — the frame must be proven private and immovable (slotModelBlocker)
@@ -3517,11 +3517,10 @@ export function lift(
     off >= 0 &&
     off + 4 <= localArea;
 
-  // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
-  // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
-  // claimed "every write to sp declines". It did not — `lsl sp, r4, #2`, `neg sp, r4`, `mvn sp, r4`,
-  // `ldr sp, [r0,#4]` and `ldmia r0!, {sp}` all still lifted, dropping the sp write silently, because
-  // an enumeration of arms can only cover the arms someone thought of. Guarding the write ITSELF
+  // The WRITE dual of readData, and it guards the WRITE rather than the arms that perform one,
+  // because an enumeration of arms can only cover the arms someone thought of. Checking sp in the
+  // mov/add/sub arms alone leaves `lsl sp, r4, #2`, `neg sp, r4`, `mvn sp, r4`, `ldr sp, [r0,#4]`
+  // and `ldmia r0!, {sp}` lifting, each dropping the sp write silently. Guarding the write ITSELF
   // cannot be incomplete.
   //
   // sp is writable in exactly one shape — the frame adjust the add/sub arms `break` on before
