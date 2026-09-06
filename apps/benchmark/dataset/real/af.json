@@ -558,7 +558,7 @@
         "pointer",
         "memory"
       ],
-      "note": "One whole-object assignment of a 16-byte struct. asmlift’s C backend has no aggregate assignment at all — a multi-word copy is only ever emitted as N independent per-word statements, and no per-word spelling reproduces IDO’s block-move temp rotation. Chosen after the rule that a row must also be one m2c matches was dropped — m2c’s outcome was not a selection criterion for this row.",
+      "note": "One whole-object assignment of a 16-byte struct. asmlift’s C backend has no aggregate assignment at all — a multi-word copy is only ever emitted as N independent per-word statements, and no per-word spelling reproduces IDO’s block-move temp rotation.",
       "prependC": "typedef signed char s8;\ntypedef long s32;\ntypedef struct Viewport {\n    /* 0x00 */ s32 topY;\n    /* 0x04 */ s32 bottomY;\n    /* 0x08 */ s32 leftX;\n    /* 0x0C */ s32 rightX;\n} Viewport; // size = 0x10\ntypedef struct View {\n    /* 0x000 */ s32 unk_000;\n    /* 0x004 */ void* gfxCtx;\n    /* 0x008 */ Viewport viewport;\n    /* 0x018 */ s8 unk_018[0x110];\n} View; // size = 0x128",
       "funcC": "void getScissorView(View* view, Viewport* viewport) {\n    *viewport = view->viewport;\n}",
       "sourceUrl": "https://github.com/macabeus/af/blob/4515c15b5848b1ec85e78cb3776e12990cafe004/src/code/m_view.c#L106-L108",
