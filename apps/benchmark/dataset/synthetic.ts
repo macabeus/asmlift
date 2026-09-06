@@ -1,7 +1,7 @@
 // Tier A — synthetic dataset. Functions I author to exercise COMMON decompilation features with
-// known ground truth, spread across the four toolchains. Deliberately breadth-first over the idioms
-// that dominate real game code (arithmetic, bitwise, compare/logic, width casts, memory, structs,
-// arrays, loops, calls) rather than exotic constructs — the anti-overfitting goal.
+// known ground truth, spread across the toolchains asmlift supports. Deliberately breadth-first over
+// the idioms that dominate real game code (arithmetic, bitwise, compare/logic, width casts, memory,
+// structs, arrays, loops, calls) rather than exotic constructs — the anti-overfitting goal.
 //
 // `toolchains` lists which toolchains to run each function on. MIPS-IDO is steered away from calls
 // (its PIC codegen makes external calls unfriendly to both decompilers).
@@ -11,6 +11,20 @@
 // there the map's declarations are rendered into `ctx` too, by `src/cases/synthetic.ts`, so the
 // two channels still carry the same facts. What a row measures is its SOURCE SPELLING, which is in
 // neither channel.
+//
+// A NAMED EXTERN DATA GLOBAL IS DECLARED IN NEITHER CHANNEL EITHER. 29 rows spell one in `src`
+// (`extern u8 gGrid[5][7];`); the 9 carrying a `symbols` map hand it to both, and on the other 20 —
+// all agbcc — `ctx` and `proto` carry neither the name nor the type. For the array and struct rows
+// among those 20 the global's SHAPE is the thing being recovered, so a channel that spelled it
+// would be spelling the answer. The two tools then differ in how they say "I do not know this
+// type": asmlift emits `(u8 *)&gGrid` and the scoring layer supplies the declaration from the
+// target's relocations, m2c emits `extern ? gGrid;`, which `eval/outcome.ts` reads as a decline.
+// 12 of the 20 are an asmlift MATCH against 20 m2c declines, and that gap is NOT an artifact of a
+// fact withheld from one side: adding the declaration to `ctx` ALONE does not dissolve it.
+// Measured on `calad` — m2c then recovers `gGrid[0][6]`, the row's own spelling, and the candidate
+// fails to compile with ``gGrid' undeclared`, because declarations reach the m2c compile only
+// through `symbols` (`m2cDeclarationsFor`, src/eval/evaluate.ts). The map is the symmetric way to
+// hand a row that fact, and it is what the other 9 do.
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
 
@@ -979,11 +993,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // `preupdate_exit` is the EXITING EDGE carrying it, and `preupdate_escape` is a body value read
   // after the loop deriving from it. Only the middle one reaches the repair that already exists
   // (`sinkablePreUpdateSlots`, the trailing-pointer sink) and is turned away there by the
-  // `arg-safe-to-reevaluate` gate (PREUPDATE_SINK_GATES, structure/hazards.ts) — the row's exit
-  // arg `*q + n` reads memory, so its def-tree cannot be rebuilt at the top of the body — which is
-  // where every real function on this link is refused.
+  // `arg-safe-to-reevaluate` gate (PREUPDATE_SINK_GATES, structure/hazards.ts): the row's exit
+  // arg `*q + n` reads memory, so its def-tree cannot be rebuilt at the top of the body. That gate
+  // is the memory-read tier alone — the PURE tier the real functions inhabit passes it, and
+  // `preupdate_exit_pure` recovers at 2 with the copy sunk into the body.
   //
-  // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions that gate is the LAST
+  // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions the SINK is the last
   // link, but they do not all need the same thing behind it: the copy is spelled from the arg's
   // NAME, so a computed arg needs an expression, and what its def-tree holds decides whether one
   // can be placed at the top of the body at all. Measured over the corpus, the tree is PURE
@@ -991,19 +1006,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`preupdate_exit`), and a CALL in one (`preupdate_exit_call`, and `_wrapup_reent`).
   //
   // So the three EXIT rows are the three tiers, not three copies: a fix for the pure tier closes
-  // the real bucket, and the other two are what say it did not overreach. The CALL tier used to
-  // stop one guard later still, on "a post-loop value inlines a 'call' from inside the loop"; it
-  // no longer does. `structure/analysis.ts` materializes any call whose value rides a branch edge
-  // — the placement that guard existed to refuse — so `preupdate_exit_call` now RECOVERS, at 2,
-  // with `cb` inside the loop where the asm calls it. What still reaches that guard is an
-  // `opaque`, the other member of `REPEATED_EFFECT`, for which no such rule exists. The pure row puts a STORE in the body AHEAD of the def, which is the
+  // the real bucket, and the other two are what say it did not overreach. The CALL tier clears the
+  // guard on "a post-loop value inlines a 'call' from inside the loop": `structure/analysis.ts`
+  // materializes any call whose value rides a branch edge — the placement that guard refuses — so
+  // `preupdate_exit_call` RECOVERS, at 2, with `cb` inside the loop where the asm calls it. What
+  // still reaches that guard is an `opaque`, the other member of `REPEATED_EFFECT`, for which no
+  // such rule exists. The pure row puts a STORE in the body AHEAD of the def, which is the
   // harder of the two shapes the corpus has — ten of the twelve have no effect in the latch block
   // at all, and `LoadBGTilemapData`, the function this link is being walked for, is the one that
   // does. A pure tree may be recomputed across it; a tree that read memory could not.
   //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
-  // rows would be four more ordinary loops on those toolchains rather than coverage.
+  // rows would be five more ordinary loops on those toolchains rather than coverage.
   {
     sym: 'preupdate_cond',
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
@@ -2016,8 +2031,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // carries the struct-array index the /addr-home axis owns. It matches today on the same
   // `/unmerge` axis as the isolate.
   // `readcall` is the one shape a "two or more sibling arms" rule would MISS: a single use,
-  // inside a short-circuit's right operand, feeding a call argument. It fails today for the same
-  // reason, and separates a placement rule keyed on strict dominance from one keyed on arm count.
+  // inside a short-circuit's right operand, feeding a call argument. It is the family's one open
+  // row — nonmatch 6, winner `unsigned`, carrying no `/unmerge` — and its residual is NOT
+  // attributed to the placement rule the other three satisfy. It separates a placement rule keyed
+  // on strict dominance from one keyed on arm count.
   //
   // agbcc only. The mechanism above is a fact about THIS compiler, established by reading its
   // pass list and confirmed by compiling both spellings. Whether ido7.1, gcc2.7.2kmc and
@@ -2829,7 +2846,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // coalesces, and agbcc emits no instruction for it. `armfall`'s residual 8 is the ZERO-TRIP
   // GUARD instead — the reference inits the counter above the test (`mov r6,#0 / cmp r6,r7 / bcs`)
   // where the candidate tests the bound against zero and then stages the second induction
-  // register in two moves. The `/initfirst` sibling is enumerated and scores 9, so the
+  // register in two moves. Compiled both ways and diffed: the reference's `movs r6,#0 / cmp r6,r7 /
+  // bcs / mov ip,r6` is four instructions to the winner's `cmp r7,#0 / beq / movs r0,#0 / mov ip,r0
+  // / movs r6,#0` — one insert, and the `ip` stage reads a different register because the guard did
+  // not leave a zero in the counter. That is the whole 8 (breakdown: insert 2, delete 2,
+  // opMismatch 1, argMismatch 3). The `/initfirst` sibling is enumerated and scores 9, so the
   // guard-placement family does not close this shape on its own.
   //
   // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. A ladder was measured off this family's own
@@ -2843,7 +2864,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // one, and no `nonArgRegs` rule can cover that, because a caller really can pass a value in r3.
   // So: no longer rung is a REGISTER fabrication this pair does not already hold, and the residue
   // above rung 3 is the argument-register fabrication `armfall` gates at 23. Nothing here reaches
-  // a fabricated stack argument.
+  // a fabricated stack argument: rung 6 spills a real entry to `[sp]` and asmlift still fabricates
+  // a REGISTER for it.
   //
   // Multiplicity is severity: NO choice of fabricated parameter
   // was free at ANY rung (at rung 1 the three spellings scored 13/12/9, at rung 3 all six
@@ -3684,8 +3706,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // structurally different (ido7.1 4/4/12, gcc2.7.2kmc 7/7/21). Those cells are coverage, not
   // evidence for the thesis.
   //
-  // THE `merge*` ROWS ASK A DIFFERENT QUESTION: not what a narrow counter is worth, but
-  // WHERE THE EVIDENCE FOR A NARROW LOCAL IS. Off a loop there is no back edge to carry the
+  // THE FOUR CELL-DEFINING `merge*` ROWS ASK A DIFFERENT QUESTION: not what a narrow counter is
+  // worth, but WHERE THE EVIDENCE FOR A NARROW LOCAL IS. Off a loop there is no back edge to carry the
   // write-back truncation, so gcc sinks it past the join and it arrives as the carrier's own
   // reader. `raise/narrowlocal.ts`'s `edge-extends` is the rule that decides that, and not one of
   // the carriers it judges over the sa3 corpus is on a real row — these are what price it:
@@ -3698,6 +3720,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //                                                                   unsigned column
   //     mergecastu   the same merge as `s32 v` + `(u16)v`       —     the HOISTED half; the row
   //                                                                   the diamond rule must not win
+  // `mergeldcast` and `mergepool` belong to the same file's ARM clause rather than to this table,
+  // and carry their own per-row comments.
+  //
   // The unsigned column was authored as UNDECIDABLE and it is not. `u16 v` and `s32 v` + `(u16)v`
   // do reach `raise/narrowlocal.ts` as the same IR — one `zext16` over raw in-edges — but they do
   // not compile to the same CFG: `gcc/jump.c:443-445` hoists the else arm above the compare for the
