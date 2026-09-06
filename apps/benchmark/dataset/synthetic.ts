@@ -5769,9 +5769,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //   --  switch recovered from a comparison LADDER   swladder 7  (m2c MATCH — a deficit row)
   //
   // THE FIRST BLOCKER OF EVERY ROW THAT DOES NOT MATCH. Each was named by INSTRUMENTING the site
-  // (a temporary `console.error` in core, reverted — the files are byte-identical to base) or by
-  // ABLATING it, never by reading and inferring, and a gap whose first blocker turned out to be a
-  // pre-existing link says so rather than crediting it to this family.
+  // (a temporary `console.error` in core, reverted — `git diff --quiet packages/core` before every
+  // commit that carries a number from it) or by ABLATING it, never by reading and inferring, and a
+  // gap whose first blocker turned out to be a pre-existing link says so rather than crediting it
+  // to this family. That revert is also a COST gate, not only an honesty one: a full `pnpm bench
+  // run` launched while core is instrumented burns one of the round's two ~1800 s runs and can
+  // never be published (`provenance.ts:78-95` sticks a `dirty` flag on it), so assert the empty
+  // `git status --short` immediately BEFORE the run, not at `bench:merge` time where the stamp
+  // catches it too late to save the wall clock.
   //
   //  • `pmarr1` 5 — `structure/structure.ts:440`, `pointeeAccess`'s `if (pg.idx !== null) return
   //    null`: a VARIABLE index declines whatever it lands on. **81 firings** on this row (41 on
@@ -5807,20 +5812,36 @@ export const SYNTHETIC: SynthSpec[] = [
   //    model to copy is `StructureOptions.switchArmsFollowLayout` (`structure.ts:1024`,
   //    `target.ts:238`, set for agbcc at `:333`), which already reads exactly this evidence one
   //    question later — which ORDER the recovered arms go in.
-  //  • `armcb` 32 — `l3/unmerge.ts:142`, `armDefs`' `if (at.size !== names.size)`, reached through
-  //    `:210-211`, because a ladder's else-arm is a single nested `if` and the recursion does not
-  //    search it. It is NOT the merge-temp count at `:201` (`m.assigns === 2`): widening that to a
-  //    strict superset left the fan byte-identical — ABLATED AND FALSIFIED. The lever exists and
-  //    the control `armcb2` MATCHes THROUGH it, so this 32 is the LADDER admission and not a
-  //    missing rewrite. L3 ranked spelling lever (`rank.ts:329`, `/unmerge`).
+  //  • `armcb` 32 — a TWO-LINK chain in `l3/unmerge.ts`, and the first link is the merge-temp
+  //    count. `unmergeAt` is entered twice on this row and returns both times at `:203-204`
+  //    (`else if (written.has(n)) return null`) on `v0`, because `v0` fails `:201`'s
+  //    `m.assigns === 2` with FIVE assignments: instrumenting every `return null` in the file
+  //    reads `AUDIT_AT_CALL armcb` ×2 and `AUDIT_WRITTEN armcb v0 assigns=5 reads=1 addrTaken=0`
+  //    ×2, against 0 firings of `armDefs`' `:142`. So `armDefs` is never called here at all, and
+  //    the SECOND link only becomes reachable once `:201` is widened: with `m.assigns >= 2` the
+  //    same instrumentation reads `AUDIT_142_ATSIZE armcb 0 1` in each arm — `armDefs` refusing
+  //    at `if (at.size !== names.size)` with `at.size` 0 against `names.size` 1, because a
+  //    ladder's else-arm is a single nested `if` and the arm scan does not search it. Widening
+  //    `:201` ALONE therefore leaves the fan byte-identical (`diff:32` unchanged, `armcb2` still
+  //    MATCH) — which is a fact about the SECOND link, not evidence that `:201` is innocent. The
+  //    lever exists and the control `armcb2` MATCHes THROUGH it, so this 32 is the LADDER
+  //    admission and not a missing rewrite. L3 ranked spelling lever (`rank.ts:329`, `/unmerge`).
+  //    The row's own winner is `unsigned/flip-join` at 32 in a fan of 8 — see the G1 watch below.
   //  • `sinkacc` 17 — no site owns it. `l3/sinkinit.ts:37` moves only the leading run of
   //    POINTER-BASE inits, and the select every candidate emits is minted by the same merge
-  //    materialisation as `nestacc`'s. Measured rather than read: `/livebase/sinkinit` IS
-  //    enumerated in the 36-candidate fan and scores WORSE than the default, so an axis that names
-  //    this placement exists and does not carry the direction the target wants. `l3/hoist.ts`'s
-  //    `isBaseInit` is NOT the place to widen — level-tower names that exact widening as the trap,
-  //    since it is the sole definition of where the base-init run ends and `l3/basecse.ts`
-  //    re-orders off it.
+  //    materialisation as `nestacc`'s. Measured by DUMPING the fan (every `ranked.candidates`
+  //    entry with its label and score): 36 candidates, 0 dropped, 0 withheld, winner
+  //    `unsigned/reread-globals/uns-cmp` at 17 — and **not one of the 36 carries `sinkinit` or
+  //    `basefold`**. `/livebase` is the only placement axis enumerated here and its cheapest
+  //    carrier scores 22 (bare `unsigned/livebase` 23) against the winner's 17. The label form is
+  //    not the problem: the same dump prints `unsigned/flip-join/basefold/sinkinit` on `armcb` and
+  //    `unsigned/uns-cmp/livebase/sinkinit` on `nestacc`, and instrumenting `l3/sinkinit.ts:37`
+  //    shows `sinkInitsToFirstUse` returning `moved=1` on half its invocations HERE — so the pass
+  //    fires on this row and whatever it produces never reaches the scored fan. That is the first
+  //    thing a G3 build should ask, and it is cheaper than the axis-direction question this
+  //    comment used to pose. `l3/hoist.ts`'s `isBaseInit` is NOT the place to widen — level-tower
+  //    names that exact widening as the trap, since it is the sole definition of where the
+  //    base-init run ends and `l3/basecse.ts` re-orders off it.
   //  • `mixsense` 20 — `structure/structure.ts:4235`, `preserveDivergentBranchSense`: ONE boolean
   //    per FUNCTION (option `:976`, default `:1299`), so the axis flips every divergent `if` at
   //    once. Fan of literally two, `unsigned: 20` and `unsigned/flip-branch: 27`; the source's own
@@ -5866,21 +5887,35 @@ export const SYNTHETIC: SynthSpec[] = [
   //    cast at each use, a function pointer stored through a struct member array, and `x &= 0x80`
   //    against `x = 128 & x` — every one REFUTED at 0 rows by compiled pairs, in the full function
   //    and standalone.
-  //  • The short-circuit fold / tail-duplication class belongs to the `llcmp` family, not here:
-  //    swapping that work's two core files into this tree leaves the real row at diff:290 exactly,
-  //    with `synthetic:llcmp:agbcc` diff:11 → MATCH on the same swap as the positive control.
+  //  • The short-circuit fold / tail-duplication class belongs to the `llcmp` family, not here.
+  //    Predicted from a file swap while that work was unmerged, and now CONFIRMED against the
+  //    merged pass: rebased onto it, `kleod:CountCollectedGems:agbcc` reads diff:290 exactly and
+  //    all fourteen rows below read their published scores unmoved, while `synthetic:llcmp:agbcc`
+  //    is the MATCH that work bought. The fold is a connected channel that pays nothing here.
   //
   // ACCEPTANCE, so a later lever is not scored against a bar these rows do not set. Measured by
-  // hand-editing asmlift's own winner, one capability at a time: closing G2 takes `nestacc` to
-  // ~18, NOT to 0 (47 of the 58; 7 are `swladder`'s class and 4 are register noise), and
-  // hoisting `sinkacc`'s init takes it to 4 across four declaration orders, the residual an r5/r6
-  // swap. `pmarr1` can be closed from either end — at rank 1 `gBlob->unk8[i]`,
+  // hand-editing asmlift's own winner, one capability at a time, and RE-TAKEN through the row's
+  // own scorer (the harness's `Toolchain.score` against the row's own target object, which
+  // reproduces the published `diff:58` exactly on asmlift's unedited winner): closing G2 takes
+  // `nestacc` to **11**, NOT to 0. G2 therefore owns 47 of the 58, and the residual 11 is 7 +
+  // 4 — deleting `v6`–`v11` and nothing else scores 11 (`rows 54, none 43`), and additionally
+  // replacing asmlift's recovered `switch` with the source's `if/else if` ladder scores 4
+  // (`rows 52, none 48`, every differing row an `arg-mismatch`). So 7 is `swladder`'s class and
+  // 4 is register/operand noise. (An earlier revision of this paragraph said "~18" beside the
+  // same 47/7/4 split, which does not add up; 11 is the number the ablation reads.) Hoisting
+  // `sinkacc`'s init takes it to 4 across four declaration orders, the residual an r5/r6 swap. `pmarr1` can be closed from either end — at rank 1 `gBlob->unk8[i]`,
   // `p = (u8 *)gBlob + 8; p[i]` and `p = gBlob->unk8; p[i]` are ONE object — but `pmarr2` only by
   // the member spelling. PREDICTIONS, each with the command that falsifies it: a per-SITE sense
   // takes `mixsense`'s fan from 2 to 16 and its score to 0 and `joinsense` from 4 to 0, and a
   // recursive arm search in `armDefs` takes `armcb` to MATCH — all three read by
   // `ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial`
-  // on the lever branch. ZERO-FLIP WATCH for whoever builds G1: 16 committed rows have a winner
+  // on the lever branch. ZERO-FLIP WATCH for whoever builds G1 — and it has to be recomputed
+  // rather than read, because the list below is computed over the BASE artifact and these rows
+  // are not in it yet: of the fourteen rows this family adds, `armcb` also wins on `/flip-join`
+  // (fan of 8, the top three all `/flip-join` at 32 against 35 for the non-flip ones), so a G1
+  // lever must re-check `armcb` even though it is filed under G6. No other new row is
+  // flip-labelled — `joinsense`/`joinsame` win on `/unmerge` and `mixsense` on plain `unsigned`.
+  // Over the base artifact: 16 committed rows have a winner
   // label carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 16 MATCH — TWO of
   // those five REAL (`kleod:ProcessHBlankWait:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`), the
   // other three `synthetic:ifand_far:agbcc`, `synthetic:ifor_near:agbcc` and
@@ -5911,19 +5946,45 @@ export const SYNTHETIC: SynthSpec[] = [
   // `swladder` carries `branch` alone for the same reason — `switch-arms`' floor is `/\bswitch\s*\(/`
   // over the BODY, which an if/else ladder fails by construction. No new `FeatureDef` was needed.
   //
-  // ALL FOURTEEN ARE agbcc-ONLY and must stay so: every target is agbcc codegen (Thumb branch
-  // reach, agbcc's bitfield RMW, agbcc's cross-jumping), and the mwcc hang hazard — a candidate
-  // compile has no timeout — is not worth paying for a row that measures nothing off agbcc.
+  // ALL FOURTEEN ARE agbcc-ONLY, and the MEASURED reason is narrower than "every target is agbcc
+  // codegen": each row was smoked on agbcc alone, and a candidate compile has no timeout, so no
+  // row gets a toolchain nobody individually smoked. Three of the six gaps are named at
+  // toolchain-GENERIC sites — `structure/structure.ts:440` (`pointeeAccess`, G4), the merge-param
+  // naming walk at `structure/structure.ts:2190-2250` (G2) and `structure/switch-recover.ts` (the
+  // ladder class) — none of them gated the way `target.ts:333/:335` gates
+  // `switchArmsFollowLayout` and `arrayShapeFromStride` for agbcc. So "agbcc-only" is a SMOKE
+  // decision on those three, not a claim that the capability is agbcc-shaped, and whether they
+  // move on another backend is an UNTESTED axis.
   //
-  // SMOKE RECIPE for one row — and the `ASMLIFT_CANDCACHE=0` is NOT optional. With the shared
-  // candidate store over its cap (measured: 1.1M `ns/` entries priced at 4.5 GB against a 4 GB
-  // cap), every process that resolves a namespace runs the eviction prune, which re-walks the whole
-  // store after every 512 deleted keys — turning a 0.6 s row into a >30-minute stall with no output:
+  // The cheapest twin was authored and smoked rather than argued about, and it DOES NOT EARN A
+  // ROW: `nestacc` on `mwcc_242_81` (the most toolchain-neutral of the six blockers) runs in
+  // 0.8 s with no hang and reads `asmlift=declined(1 gap(s)) m2c=declined(1 gap(s))`, the gap
+  // being `lift: cannot lift 'nestacc': 'lis' at 0x0 carries a data relocation ('gGrid') — the
+  // printed immediate is a link-time placeholder, not the value`. That is a PPC-frontend
+  // relocation gap and a pre-existing link, so committing the twin would credit this family with
+  // a decline it does not own and gate nothing about G2. Re-run it with
+  // `--tier synthetic --only nestacc --toolchain mwcc_242_81 --serial` on a branch that closes
+  // that frontend gap, and the twin becomes worth authoring.
+  //
+  // SMOKE RECIPE for one row, and what `ASMLIFT_CANDCACHE=0` is actually for:
   //
   //   ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial
   //
-  // All fourteen rows measure in 22.7 s of wall clock that way, and `--only armcb` runs TWO cases:
-  // the filter is a prefix match, so it takes `armcb2` with it.
+  // It makes a one-row smoke DETERMINISTIC and independent of whatever a neighbouring worktree
+  // has left in the shared store — that is the whole reason, and it is not a correctness
+  // requirement: all fourteen rows were re-run on the DEFAULT cache-ON path and every score
+  // reproduced identically, with no stall. (An earlier revision priced the store at "1.1M `ns/`
+  // entries, 4.5 GB against a 4 GB cap" and called the flag NOT optional. That figure was a
+  // MACHINE STATE, not a property of these rows, and it no longer holds: `du -sh
+  // $TMPDIR/asmlift-candcache` reads 959 MB against the 4096 MB cap.) The prune it referred to is
+  // real and is now bounded at its own site — `packages/cli/src/candcache.ts` gives `pruneOnce` a
+  // wall-clock budget and prints one line before it starts, so an over-cap store can no longer be
+  // mistaken for a hang. Before a full `pnpm bench run`, check the store with `du -sh
+  // $TMPDIR/asmlift-candcache` rather than pre-emptively disabling the cache.
+  //
+  // `--only armcb` runs TWO cases: the filter is a SUBSTRING match
+  // (`apps/benchmark/src/cases/synthetic.ts:50`, `s.sym.includes(filter.only)`), so it takes
+  // `armcb2` with it.
   {
     sym: 'pmarr1',
     src:
