@@ -6242,8 +6242,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // requirement: all fourteen rows were re-run on the DEFAULT cache-ON path and every score
   // reproduced identically, with no stall. The store's own prune is bounded at its site:
   // `packages/cli/src/candcache.ts` gives `pruneOnce` a wall-clock budget and prints one line
-  // before it starts, so an over-cap store can no longer be
-  // mistaken for a hang. Before a full `pnpm bench run`, check the store with `du -sh
+  // before it starts, so an over-cap store is not mistaken for a hang. Before a full `pnpm bench run`, check the store with `du -sh
   // $TMPDIR/asmlift-candcache` rather than pre-emptively disabling the cache.
   //
   // `--only armcb` runs TWO cases: the filter is a SUBSTRING match
