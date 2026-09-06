@@ -713,7 +713,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'sw_void',
     src: 'void sw_void(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p=2;break;default:*p=0;} }',
-    features: ['memory'],
+    features: ['store'],
     toolchains: ALL,
     ctx: 'void sw_void(int,int*);',
     proto: { sw_void: { returnsVoid: true } },
@@ -2043,7 +2043,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'void armshare(u32 a0, u32 a1){ struct Ent *e = &gEnts[(a0 << 1) + a1];' +
       ' u32 mode = e->mode; u32 kind = e->kind;' +
       ' if (*gFlag & 1){ if (mode == 2){ *gOutA = kind << 3; } else { *gOutB = kind << 4; } } }',
-    features: ['read-once', 'struct'],
+    features: ['read-once', 'struct', 'branch'],
     toolchains: ['agbcc'],
     ctx: 'void armshare(u32 a0, u32 a1);',
     proto: { armshare: { returnsVoid: true } },
@@ -2060,7 +2060,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'void readcall(u32 a0, u32 a1){ struct Ent *e = &gEnts[(a0 << 1) + a1];' +
       ' u32 mode = e->mode; u32 kind = e->kind;' +
       ' if ((*gFlag & 1) && mode == 2){ decomp(gTiles[kind].size); } }',
-    features: ['read-once', 'branch'],
+    features: ['read-once', 'struct', 'branch'],
     toolchains: ['agbcc'],
     ctx: 'u32 decomp(s32 n); void readcall(u32 a0, u32 a1);',
     proto: { decomp: { params: 1 }, readcall: { returnsVoid: true } },
@@ -2252,7 +2252,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '  gDma[0] = a; gDma[1] = b; gDma[2] = c;\n' +
       '  i++;\n' +
       ' } while (i < n); }',
-    features: ['switch-arms', 'struct'],
+    features: ['switch-arms', 'merge-chain', 'struct'],
     toolchains: ['agbcc'],
     ctx: 'void swmulti(s32 mode, s32 idx, s32 n);',
     proto: { swmulti: { returnsVoid: true } },
@@ -2619,7 +2619,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' gDma[0] = (s32)(p + (i << 6));' +
       ' gDma[2] = p[i]; } }',
-    features: ['value-home', 'pointer'],
+    features: ['pointer'],
     toolchains: ['agbcc'],
     ctx: 'void *getbuf(s32 k); void offgiv(s32 k, s32 n);',
     proto: { getbuf: { params: 1 }, offgiv: { returnsVoid: true } },
@@ -2654,7 +2654,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' gDma[0] = (s32)(p + (i << 2));' +
       ' gDma[2] = p[i]; } }',
-    features: ['value-home', 'pointer'],
+    features: ['pointer'],
     toolchains: ['agbcc'],
     ctx: 'void *getbuf(s32 k); void offgiv2(s32 k, s32 n);',
     proto: { getbuf: { params: 1 }, offgiv2: { returnsVoid: true } },
@@ -2669,7 +2669,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' gDma[0] = (s32)(p + (i << 8));' +
       ' gDma[2] = p[i]; } }',
-    features: ['value-home', 'pointer'],
+    features: ['pointer'],
     toolchains: ['agbcc'],
     ctx: 'void *getbuf(s32 k); void offgiv3(s32 k, s32 n);',
     proto: { getbuf: { params: 1 }, offgiv3: { returnsVoid: true } },
@@ -2892,7 +2892,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' case 1: w = 32; h = gBgs[i].v; break;' +
       ' case 2: w = gBgs[i].h; h = gBgs[i].v; break; }' +
       ' gOut[i] = w + h; } }',
-    features: ['uninit-local', 'merge-chain'],
+    features: ['uninit-local', 'merge-chain', 'guard-init'],
     toolchains: ['agbcc'],
     ctx: 'void armfall(u32 mode, u32 n);',
     proto: { armfall: { returnsVoid: true } },
@@ -4302,7 +4302,7 @@ export const SYNTHETIC: SynthSpec[] = [
       '  else { v = 0; if (d & 1) m = 0x800; }\n' +
       '  out[0] = v; out[1] = m;\n' +
       '}',
-    features: ['value-home', 'mask'],
+    features: ['value-home', 'mask', 'merge-chain'],
     toolchains: ['agbcc'],
     ctx: 'void maskchain(s32 d, s32 *out);',
     proto: { maskchain: { params: ['s32', 's32 *'], returnsVoid: true } },
@@ -5324,7 +5324,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' volatile s32 *d = (volatile s32 *)0x040000d4; s32 p = base + lo * 64;\n' +
       ' for (i = lo; i < 32; i++) { tmp = 0; d[0] = (s32)&tmp;\n' +
       ' d[1] = p; d[2] = 0x81000020; p = p + 64; } }',
-    features: [],
+    features: ['value-home', 'pointer'],
     toolchains: ['agbcc'],
     ctx: 'void dmastride(s32 lo, s32 base);',
     proto: { dmastride: { params: ['s32', 's32'], returnsVoid: true } },
