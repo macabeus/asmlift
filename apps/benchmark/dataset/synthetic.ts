@@ -119,6 +119,94 @@ const PACKED_MAP: SymbolMap = new Map([
   ],
 ]);
 
+// ═══ Maps for the CountCollectedGems attribution rows (attr/countgems) ══════════════════════
+// `PROBE_BLOB_MAP` is the first synthetic map to declare `shape: 'pointer'` with a `pointee`
+// layout — but symbol maps on synthetic rows are NOT new: `bfwordread`/`bfwordwrite` carry
+// `PACKED_MAP`, `ptrelem` carries `BGPTRS_MAP` and `sbscope` carries `TILEMAP_MAP`, and
+// `PROBE_FLAG_MAP` below is the same KIND of map as `PACKED_MAP`. It flattens `unk8` the way the
+// real vendored map does (`SymbolStructField` has no `dims`), which is what makes `pmarr2` a row
+// about a second INDEX TERM and not about rank.
+//
+// WHAT EACH MAP BUYS, MEASURED (re-run with `symbols:` removed, `bench run`, cache off):
+//   PROBE_BLOB_MAP  pmarr1 5→5 · pmarr2 9→9 · pmarrfix MATCH→MATCH   — INERT for asmlift: no
+//     member is ever named, so the `pointee.layout` is never read. It is kept because it is
+//     load-bearing for m2c, which goes MATCH → noncompile(1) on all three without it — and
+//     m2c-ahead on pmarr1/pmarr2 is the deficit that ranks G4. Do NOT read the pointee layout as
+//     load-bearing for asmlift; it is not, and the row pins the gap either way.
+//   PROBE_FLAG_MAP  bfconstn MATCH→diff:5 · bfzero 5→5              — LOAD-BEARING, on the
+//     CONTROL rather than on the gap row: without it `bfconstn` scores what `bfzero` scores and
+//     the pair stops being a pair. It cuts the OTHER way for m2c, and that is stated rather than
+//     hidden: map-LESS, m2c compiles `bfconstn` and scores diff:5; map-ful it noncompiles. The map
+//     is not context withheld from m2c — m2c is GIVEN the same rendered declaration asmlift spells
+//     `gFlags.unk0_0 = 4;` from, and answers with word arithmetic applied to the struct OBJECT
+//     (`gFlags = (-0x10 & gFlags) | 4;`), which no C compiler accepts. Both configurations were
+//     measured; the pair is authored map-ful because a control that scores what its gap row scores
+//     pins nothing.
+//
+// `PROBE_BLOB_MAP`'s `size` is 60, not 64: compiled with the benchmark's own agbcc invocation,
+// `sizeof(struct Blob)` is `mov r0, #0x3c` and `offsetof(unk38)` is `mov r0, #0x38`. `pad3` is a
+// SCALAR, matching the row's own `u8 pad3;` — an earlier version declared it `{ elemSize: 1,
+// length: 1 }`, an array of one. Neither is byte-load-bearing for these five rows (every access is
+// at offset <= 55), which is exactly why no gate could catch them; the map is authored data a later
+// round reads as the row's layout, so it has to be right on its own terms.
+//
+// `PROBE_FLAG_MAP` is a SEPARATE map from `PACKED_MAP` on purpose: `PACKED_MAP`'s fields are
+// `unsigned` bitfields in a word, so a named store there compiles at the DECLARATION's access
+// width (`ldrb`/`ldrh`) while the raw word spelling uses `ldr` — which is `bfwordread`'s axis.
+// A `u8` field keeps both sides at the same width, so `bfzero` isolates the mask.
+const PROBE_BLOB_MAP: SymbolMap = new Map([
+  [
+    0x03004670,
+    [
+      {
+        name: 'gBlob',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'pointer' as const,
+        pointee: {
+          structName: 'Blob',
+          size: 60,
+          layout: [
+            { name: 'unk0', offset: 0, size: 1, signed: false },
+            { name: 'unk1', offset: 1, size: 1, signed: false },
+            { name: 'unk2', offset: 2, size: 1, signed: false },
+            { name: 'unk3', offset: 3, size: 1, signed: false },
+            { name: 'unk4', offset: 4, size: 1, signed: false },
+            { name: 'unk5', offset: 5, size: 1, signed: false },
+            { name: 'unk6', offset: 6, size: 1, signed: false },
+            { name: 'unk7', offset: 7, size: 1, signed: false },
+            { name: 'unk8', offset: 8, size: 48, elemSize: 1, elemSigned: false, length: 48 },
+            { name: 'unk38', offset: 56, size: 4, signed: true },
+          ],
+        },
+      },
+    ],
+  ],
+]);
+
+const PROBE_FLAG_MAP: SymbolMap = new Map([
+  [
+    0x03004c08,
+    [
+      {
+        name: 'gFlags',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'struct' as const,
+        structName: 'Flags',
+        size: 4,
+        layout: [
+          { name: 'unk0_0', offset: 0, size: 1, signed: false, bitWidth: 4, bitOffset: 0 },
+          { name: 'unk0_4', offset: 0, size: 1, signed: false, bitWidth: 4, bitOffset: 4 },
+          { name: 'unk1', offset: 1, size: 1, signed: true },
+          { name: 'unk2', offset: 2, size: 1, signed: false },
+          { name: 'pad3', offset: 3, size: 1, signed: false },
+        ],
+      },
+    ],
+  ],
+]);
+
 export const SYNTHETIC: SynthSpec[] = [
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
@@ -5660,6 +5748,442 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void fill(s32 *p); s32 outparam(void);',
     proto: { fill: { params: 1, returnsVoid: true } },
+  },
+
+  // ═══ CountCollectedGems attribution rows (attr/countgems) ═══════════════════════════════════
+  // Fourteen agbcc-only rows pinning the six capability gaps the CountCollectedGems attribution
+  // names, plus one class that fell out of `nestacc`, each with its two-sided control where one
+  // exists. `kleod:CountCollectedGems:agbcc` is the highest-scoring non-matching kleod row —
+  // `asmlift=diff:290 m2c=noncompile(1)`, 319 target lines against an 85-line reference — and a
+  // cumulative ablation chain that walks its winner to the reference one spelling at a time reads
+  // 290 → 184 → 159 → 58 → 40 → 36 → 50 → 0, the last step byte-exact. These rows are that chain's
+  // links at minimal size. Scores are `pnpm bench run` numbers on this tree, not CLI predictions:
+  //
+  //   G4  gPtr->member[expr], VARIABLE index   pmarr1 5 · pmarr2 9   control pmarrfix MATCH
+  //   G5  a named bitfield store of ZERO       bfzero 5             control bfconstn MATCH
+  //   G2  loop accumulators as per-arm copies  nestacc 58
+  //   G3  an accumulator's cross-loop home     sinkacc 17
+  //   G6  the merged-tail store, LADDER form   armcb 32             control armcb2 MATCH
+  //   G1  branch sense per SITE, divergent     mixsense 20          control calad MATCH
+  //   G1  branch sense per SITE, JOINED        joinsense 4          control joinsame MATCH
+  //   --  switch recovered from a comparison LADDER   swladder 7  (m2c MATCH — a deficit row)
+  //
+  // THE FIRST BLOCKER OF EVERY ROW THAT DOES NOT MATCH. Each was named by INSTRUMENTING the site
+  // (a temporary `console.error` in core, reverted — the files are byte-identical to base) or by
+  // ABLATING it, never by reading and inferring, and a gap whose first blocker turned out to be a
+  // pre-existing link says so rather than crediting it to this family.
+  //
+  //  • `pmarr1` 5 — `structure/structure.ts:440`, `pointeeAccess`'s `if (pg.idx !== null) return
+  //    null`: a VARIABLE index declines whatever it lands on. **81 firings** on this row (41 on
+  //    `pmarrfix`, where the raw spelling is nevertheless the same bytes — which is what makes it
+  //    the control). This is NOT a ranked axis and a candidate cannot referee it: what is missing
+  //    is one line of REACH in the licence that already exists. `raise/globalshape.ts:679` roots
+  //    the whole access walk at `if (g.opcode !== 'gaddr' …) continue`, so a POINTER global's
+  //    pointee — whose base is a LOAD of a `gaddr` — is unreachable by construction, and the
+  //    per-symbol stride licence (#143, gated by `target.ts:191 arrayShapeFromStride`, agbcc-only
+  //    at `:335`) never sees this access. L1→L2 licence + L2 default spelling, 0 candidates.
+  //  • `pmarr2` 9 — an EARLIER site: `structure/structure.ts:197`, `ptrGlobalBase`'s
+  //    `if (idx !== null) { ok = false; }`. A second index term fails the base recognizer, so
+  //    `pointeeAccess` is never called at all. **81 firings.** Not a rank-2 row — see below.
+  //  • `bfzero` 5 — `structure/structure.ts:2703`, the named-bitfield-store recognizer's
+  //    `orOp?.opcode !== 'or'`. It is looking for `or(and(load, keepMask), insert)`; agbcc compiles
+  //    a ZERO insert to a bare `and` (`expmed.c:557-558`, `606-608` skip the `orr` when
+  //    `all_zero`), so the guard refuses before any field lookup: **89 firings on `bfzero`, 0 on
+  //    `bfconstn`.** L2→L3 recognizer.
+  //  • `nestacc` 58 — the merge-param naming walk `structure/structure.ts:2190-2250`, refusing the
+  //    carrier at `:2221` (`carriesPreUpdate(…) || !canTakeName(…)`) and minting a fresh name at
+  //    `:2240`; the interference test is `canTakeName` at `:1960`. Fan: 20 candidates, every score
+  //    58–60 — capability, not ranking. **This refusal has no gate table**: it is an `if` inside a
+  //    4000-line function, which is why naming it took an instrumented patch and a revert, and why
+  //    its ablation is a claim rather than a test. `docs/level-tower.md:588` prescribes the fix —
+  //    convert load-bearing refusals to a `Gate<Ctx>` table, "the ablation as a test rather than a
+  //    claim" — so that conversion belongs FIRST in a G2 build, not as a side effect of it.
+  //  • `swladder` 7 — `structure/switch-recover.ts` recovers a `switch` from a comparison ladder
+  //    with no gate on which the source wrote, though the target's own layout records it: a ladder
+  //    interleaves test and body (`cmp #0x64; bne .L3` … body … `.L3: cmp #0x1e; bne`), a real
+  //    `switch` front-loads both tests and sorts them ascending, and the two are DIFFERENT objects.
+  //    No dual exists in the fan — 2 candidates, `unsigned: 7` and `signed: 7` — and `rank.ts:2233`
+  //    says why in its own words: `/connective` is "NOT for the shared-arm spelling". The shipped
+  //    model to copy is `StructureOptions.switchArmsFollowLayout` (`structure.ts:1024`,
+  //    `target.ts:238`, set for agbcc at `:333`), which already reads exactly this evidence one
+  //    question later — which ORDER the recovered arms go in.
+  //  • `armcb` 32 — `l3/unmerge.ts:142`, `armDefs`' `if (at.size !== names.size)`, reached through
+  //    `:210-211`, because a ladder's else-arm is a single nested `if` and the recursion does not
+  //    search it. It is NOT the merge-temp count at `:201` (`m.assigns === 2`): widening that to a
+  //    strict superset left the fan byte-identical — ABLATED AND FALSIFIED. The lever exists and
+  //    the control `armcb2` MATCHes THROUGH it, so this 32 is the LADDER admission and not a
+  //    missing rewrite. L3 ranked spelling lever (`rank.ts:329`, `/unmerge`).
+  //  • `sinkacc` 17 — no site owns it. `l3/sinkinit.ts:37` moves only the leading run of
+  //    POINTER-BASE inits, and the select every candidate emits is minted by the same merge
+  //    materialisation as `nestacc`'s. Measured rather than read: `/livebase/sinkinit` IS
+  //    enumerated in the 36-candidate fan and scores WORSE than the default, so an axis that names
+  //    this placement exists and does not carry the direction the target wants. `l3/hoist.ts`'s
+  //    `isBaseInit` is NOT the place to widen — level-tower names that exact widening as the trap,
+  //    since it is the sole definition of where the base-init run ends and `l3/basecse.ts`
+  //    re-orders off it.
+  //  • `mixsense` 20 — `structure/structure.ts:4235`, `preserveDivergentBranchSense`: ONE boolean
+  //    per FUNCTION (option `:976`, default `:1299`), so the axis flips every divergent `if` at
+  //    once. Fan of literally two, `unsigned: 20` and `unsigned/flip-branch: 27`; the source's own
+  //    MIXED configuration, compiled against this row's own target, is **0 — byte-exact**. So no
+  //    per-function value of the boolean can reach the target.
+  //  • `joinsense` 4 — the JOINED twin, `structure/structure.ts:4246` `negateJoinedBranchSense`
+  //    (option `:1001`, default `:1300`). The boolean scores 4 at EITHER value
+  //    (`unsigned/unmerge: 4` and `unsigned/flip-join/unmerge: 4`) — right at one site whichever
+  //    way it goes — and hand-writing asmlift's own winner with only the second site dualized is
+  //    byte-exact. The real row wins on `/flip-join`, the boolean `mixsense` never enumerates, so
+  //    a family filed against `/flip-branch` alone would gate half of G1.
+  //
+  // THE FIVE CONTROLS, and what each one proves. Every one MATCHes, and every one was aggravated
+  // until the score moved, which is the only reason its partner's number means anything:
+  // `pmarrfix` (the same member at a CONSTANT index — so G4 is the variable index, not the member
+  // spelling), `bfconstn` (the same store with a NONZERO value — so G5 is the mask materialisation,
+  // not "a named bitfield store"), `armcb2` (the same store with TWO arms — so G6 is the ladder,
+  // not the rewrite), `calad` (ONE ladder — so G1 is the MIX of senses, not the ladder), and
+  // `joinsame` (the same two joined `if`s in the SAME sense).
+  //
+  // WHAT GOT NO ROW, AND WHY — as much a part of this family as the rows:
+  //  • G6's leaf-sharing half. Duplicating the fall-through leaf into the last `else` is
+  //    BYTE-IDENTICAL at every minimal size measured (agbcc cross-jumps it back together), so the
+  //    store-placement term carries the whole cost and a one-term row measures the right sign.
+  //    Falsifier: grow the arm bodies until agbcc stops cross-jumping; if the duplicated leaf ever
+  //    costs rows, that size is the row.
+  //  • G3's SECOND half — placing the synthesised `s = 0` among the other scalar inits. Worth 8 of
+  //    `sinkacc`'s 17 (four hand-written orders of the hoisted form score 4 · 12 · 4 · 6, and the
+  //    first two have IDENTICAL declarations), and it cannot have a row today: where the target HAS
+  //    instructions for its inits, asmlift already reproduces their order (three orders of three
+  //    live scalar inits → three distinct agbcc objects, asmlift emits each target's own). The
+  //    unowned question is the position of an init the target contains NO instruction for, which
+  //    only exists once G3's first half is built. A G3 lever's acceptance must NAME the order it
+  //    emits.
+  //  • Rank-2 array recovery / `SymbolStructField`'s missing `dims` (`packages/core/src/symbols.ts`
+  //    — `SymbolInfo` has `dims`, the field type does not). Real, and worth ZERO bytes:
+  //    `gBlob->unk8[j + (i * 8)]` and `gBlob->unk8[i][j]` compile to BYTE-IDENTICAL objects, which
+  //    is exactly how m2c matches `pmarr2` off the flattened map. A fidelity item for the
+  //    symbol-map family that no row here can gate. (Two things do ride on it and are not free:
+  //    `(i * 8) + j` is a DIFFERENT object, and no base-home spelling reaches the rank-2 target.)
+  //  • Register allocation (58 of the real row's 117 `arg-mismatch` rows are register-only, and the
+  //    chain reaches 0 without touching one), `/reread-globals`, a `u8` local declared `s32` with a
+  //    cast at each use, a function pointer stored through a struct member array, and `x &= 0x80`
+  //    against `x = 128 & x` — every one REFUTED at 0 rows by compiled pairs, in the full function
+  //    and standalone.
+  //  • The short-circuit fold / tail-duplication class belongs to the `llcmp` family, not here:
+  //    swapping that work's two core files into this tree leaves the real row at diff:290 exactly,
+  //    with `synthetic:llcmp:agbcc` diff:11 → MATCH on the same swap as the positive control.
+  //
+  // ACCEPTANCE, so a later lever is not scored against a bar these rows do not set. Measured by
+  // hand-editing asmlift's own winner, one capability at a time: closing G2 takes `nestacc` to
+  // ~18, NOT to 0 (47 of the 58; 7 are `swladder`'s class and 4 are register noise), and
+  // hoisting `sinkacc`'s init takes it to 4 across four declaration orders, the residual an r5/r6
+  // swap. `pmarr1` can be closed from either end — at rank 1 `gBlob->unk8[i]`,
+  // `p = (u8 *)gBlob + 8; p[i]` and `p = gBlob->unk8; p[i]` are ONE object — but `pmarr2` only by
+  // the member spelling. PREDICTIONS, each with the command that falsifies it: a per-SITE sense
+  // takes `mixsense`'s fan from 2 to 16 and its score to 0 and `joinsense` from 4 to 0, and a
+  // recursive arm search in `armDefs` takes `armcb` to MATCH — all three read by
+  // `ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial`
+  // on the lever branch. ZERO-FLIP WATCH for whoever builds G1: 16 committed rows have a winner
+  // label carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 16 MATCH — TWO of
+  // those five REAL (`kleod:ProcessHBlankWait:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`), the
+  // other three `synthetic:ifand_far:agbcc`, `synthetic:ifor_near:agbcc` and
+  // `synthetic:ifor_near:mwcc_242_81`. Recompute the set by filtering `results.json` on
+  // `asmlift.candidateLabel` matching `(^|/)(flip-join|flip-branch)(/|$)`. For G2 the exposure is
+  // the 9 MATCHing `nested-loop` rows — all synthetic, all agbcc, all the DMA/`livebase` poll
+  // family — plus `fib`, `nestedloop` and `sumto`.
+  //
+  // M2C, and the deficit stated rather than avoided. Both tools get the SAME information — `ctx`
+  // with named parameters, `proto` for `returnsVoid` and callee arities, and the same symbol map
+  // where a row has one. m2c is AHEAD on three rows: `pmarr1` and `pmarr2` (it emits
+  // `gBlob->unk8[i]` and matches) and `swladder` (it emits the ladder). Those move the headline
+  // against asmlift until G4 and the ladder class close, which is what an honest gap row does.
+  // The two `noncompile(1)`s are m2c's own and NOT context withheld from it: on the identical
+  // rendered ctx, which names every bitfield (`struct Flags { u32 unk0_0 : 4; u32 unk0_4 : 4; … }`),
+  // m2c emits `gFlags &= -0x10;` for `bfzero` and `gFlags = (-0x10 & gFlags) | 4;` for `bfconstn`
+  // — word arithmetic applied to a struct OBJECT, which no C compiler accepts — while asmlift
+  // spells `gFlags.unk0_0 = 4;` from the same map. The map is what makes m2c noncompile there —
+  // map-LESS it compiles `bfconstn` at diff:5, and asmlift's CONTROL drops to diff:5 with it — so
+  // both configurations were measured and the trade is recorded at `PROBE_FLAG_MAP` itself rather
+  // than left for a reader to discover. Everything else is `declined(1 gap(s))`.
+  //
+  // Every row's authored `features` carries JUDGEMENT tags only — `loop`, `nested-loop`,
+  // `short-circuit` and `call` are DERIVED per row by the evaluator and authoring them fails
+  // `apps/benchmark/test/features.test.ts`. `armcb` does NOT claim `fnptr`: the tag's floor
+  // (apps/benchmark/src/cases/features.ts) wants an indirect CALL in the row's assembly and this
+  // row only STORES a code address, the way `arrcast` records its dropped `variable-index`.
+  // `swladder` carries `branch` alone for the same reason — `switch-arms`' floor is `/\bswitch\s*\(/`
+  // over the BODY, which an if/else ladder fails by construction. No new `FeatureDef` was needed.
+  //
+  // ALL FOURTEEN ARE agbcc-ONLY and must stay so: every target is agbcc codegen (Thumb branch
+  // reach, agbcc's bitfield RMW, agbcc's cross-jumping), and the mwcc hang hazard — a candidate
+  // compile has no timeout — is not worth paying for a row that measures nothing off agbcc.
+  //
+  // SMOKE RECIPE for one row — and the `ASMLIFT_CANDCACHE=0` is NOT optional. With the shared
+  // candidate store over its cap (measured: 1.1M `ns/` entries priced at 4.5 GB against a 4 GB
+  // cap), every process that resolves a namespace runs the eviction prune, which re-walks the whole
+  // store after every 512 deleted keys — turning a 0.6 s row into a >30-minute stall with no output:
+  //
+  //   ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial
+  //
+  // All fourteen rows measure in 22.7 s of wall clock that way, and `--only armcb` runs TWO cases:
+  // the filter is a prefix match, so it takes `armcb2` with it.
+  {
+    sym: 'pmarr1',
+    src:
+      'struct Blob { u8 unk0; u8 unk1; u8 unk2; u8 unk3; u8 unk4; u8 unk5; u8 unk6; u8 unk7; u8 unk8[48]; s32 unk38; };\n' +
+      'extern struct Blob *gBlob;\n' +
+      'u8 pmarr1(s32 i){ return gBlob->unk8[i]; }',
+    features: ['global', 'pointer', 'array', 'struct', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'u8 pmarr1(s32 i);',
+    symbols: PROBE_BLOB_MAP,
+  },
+  {
+    // The map flattens `unk8` to `u8 unk8[48]`, so this row cannot test rank-2 RECOVERY: what it
+    // pins is a SECOND variable index term in the base decomposition. The flattened member
+    // spelling is byte-exact against this target (`gBlob->unk8[j + (i * 8)]`), which is why m2c
+    // matches it; `(i * 8) + j` is a different object, so the term ORDER is load-bearing too.
+    sym: 'pmarr2',
+    src:
+      'struct Blob2 { u8 unk0; u8 unk1; u8 unk2; u8 unk3; u8 unk4; u8 unk5; u8 unk6; u8 unk7; u8 unk8[6][8]; s32 unk38; };\n' +
+      'extern struct Blob2 *gBlob;\n' +
+      'u8 pmarr2(s32 i, s32 j){ return gBlob->unk8[i][j]; }',
+    features: ['global', 'pointer', 'array', 'struct', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'u8 pmarr2(s32 i, s32 j);',
+    symbols: PROBE_BLOB_MAP,
+  },
+  {
+    sym: 'pmarrfix',
+    src:
+      'struct Blob3 { u8 unk0; u8 unk1; u8 unk2; u8 unk3; u8 unk4; u8 unk5; u8 unk6; u8 unk7; u8 unk8[6][8]; s32 unk38; };\n' +
+      'extern struct Blob3 *gBlob;\n' +
+      'u8 pmarrfix(void){ return gBlob->unk8[5][7]; }',
+    features: ['global', 'pointer', 'array', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'u8 pmarrfix(void);',
+    symbols: PROBE_BLOB_MAP,
+  },
+  {
+    sym: 'bfconstn',
+    src:
+      'struct Flags { u8 unk0_0 : 4; u8 unk0_4 : 4; s8 unk1; u8 unk2; u8 pad3; };\n' +
+      'extern struct Flags gFlags;\n' +
+      'void bfconstn(void){ gFlags.unk0_0 = 4; }',
+    features: ['global', 'struct', 'bitfield'],
+    toolchains: ['agbcc'],
+    ctx: 'void bfconstn(void);',
+    proto: { bfconstn: { returnsVoid: true } },
+    symbols: PROBE_FLAG_MAP,
+  },
+  {
+    // The LOW nibble deliberately: the field whose KEEP mask (0xF0) is not a Thumb immediate, so
+    // agbcc materialises the complement with `mov #0x10; neg`. The HIGH nibble's twin
+    // (`gFlags.unk0_4 = 0;` vs `*(u8 *)&gFlags = 15 & *(u8 *)&gFlags;`) is BYTE-IDENTICAL, so the
+    // gap is the mask materialisation and not "a named bitfield store of zero" as such.
+    sym: 'bfzero',
+    src:
+      'struct Flags { u8 unk0_0 : 4; u8 unk0_4 : 4; s8 unk1; u8 unk2; u8 pad3; };\n' +
+      'extern struct Flags gFlags;\n' +
+      'void bfzero(void){ gFlags.unk0_0 = 0; }',
+    features: ['global', 'struct', 'bitfield'],
+    toolchains: ['agbcc'],
+    ctx: 'void bfzero(void);',
+    proto: { bfzero: { returnsVoid: true } },
+    symbols: PROBE_FLAG_MAP,
+  },
+  {
+    sym: 'nestacc',
+    src:
+      'extern u8 gGrid[5][7];\n' +
+      's32 nestacc(void){\n' +
+      '  u8 a; u8 b; u8 c; u8 i; u8 j;\n' +
+      '  a = 0; b = 0; c = 0;\n' +
+      '  for (i = 0; i < 5; i++) {\n' +
+      '    for (j = 0; j < 7; j++) {\n' +
+      '      if ((gGrid[i][j] & 0x7F) == 0x64) { a += 1; }\n' +
+      '      else if ((gGrid[i][j] & 0x7F) == 0x1E) { b += 1; }\n' +
+      '      if (gGrid[i][j] & 0x80) { c += 1; }\n' +
+      '    }\n' +
+      '  }\n' +
+      '  return a + b + c;\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'mask', 'value-home'],
+    toolchains: ['agbcc'],
+    ctx: 's32 nestacc(void);',
+  },
+  {
+    // `nestacc` does NOT isolate G2: 7 of its 58 rows are a SECOND gap, and this row is it.
+    // Re-scoring the attribution's own two hand-written ablations — identical but for the
+    // dispatch spelling — gives 11 for the `switch` and 4 for the `if`/`else if` ladder. This row
+    // is that difference alone: agbcc lays the ladder's test and body out interleaved
+    // (`cmp #0x64; bne .L3` … body … `.L3: cmp #0x1e; bne .L4`) while the same source spelled as a
+    // real `switch` front-loads both tests and sorts them ascending — so the target's own
+    // assembly records which one was written, and asmlift recovers a `switch` regardless. NO
+    // alternative spelling is enumerated: the fan is 2, and `/connective` (rank.ts) is explicitly
+    // "NOT for the shared-arm spelling", so nothing in the ranked world can referee it. The class
+    // is `structure/switch-recover.ts`; the shipped model to copy is
+    // `StructureOptions.switchArmsFollowLayout`, which already reads exactly this evidence one
+    // question later (which ORDER the arms go in) for compilers that neither reorder blocks nor
+    // schedule across them.
+    sym: 'swladder',
+    src:
+      's32 swladder(s32 x){\n' +
+      '  s32 a;\n' +
+      '  a = 0;\n' +
+      '  if (x == 100) { a = 1; }\n' +
+      '  else if (x == 30) { a = 2; }\n' +
+      '  return a;\n' +
+      '}',
+    features: ['branch'],
+    toolchains: ['agbcc'],
+    ctx: 's32 swladder(s32 x);',
+  },
+  {
+    sym: 'armcb',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'extern u8 gGrid[5][7];\n' +
+      'extern void (*gSlot[10])(void);\n' +
+      'void armcb(void){\n' +
+      '  if (gGrid[0][0] == 0x7F) { gSlot[1] = fnA; return; }\n' +
+      '  else if (gGrid[0][1] == 0x7F) { gSlot[1] = fnA; return; }\n' +
+      '  else if (gGrid[0][2] == 0x7F) { gSlot[1] = fnA; return; }\n' +
+      '  else if (gGrid[0][3] == 0x7F) { gSlot[1] = fnA; return; }\n' +
+      '  gSlot[1] = fnB;\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void armcb(void);',
+    proto: {
+      armcb: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+  },
+  {
+    // The CONTROL for `armcb`: the same per-arm store with TWO arms instead of a five-arm ladder.
+    // `l3/unmerge.ts` enumerates and MATCHes here, so `armcb`'s 32 is the LADDER admission and not
+    // a missing rewrite. agbcc cross-jumps both arms' stores into one, so each target has exactly
+    // one `str` and the per-arm evidence survives only in the literal-pool islands.
+    sym: 'armcb2',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'extern u8 gGrid[5][7];\n' +
+      'extern void (*gSlot[10])(void);\n' +
+      'void armcb2(void){\n' +
+      '  if (gGrid[0][0] == 0x7F) { gSlot[1] = fnA; return; }\n' +
+      '  gSlot[1] = fnB;\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void armcb2(void);',
+    proto: {
+      armcb2: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sinkacc',
+    src:
+      'extern u8 gGrid[5][7];\n' +
+      's32 sinkacc(void){\n' +
+      '  u8 s; u8 i; s32 t;\n' +
+      '  s = 0; t = 0;\n' +
+      '  for (i = 0; i < 20; i++) { t += gGrid[0][i & 6]; }\n' +
+      '  if ((gGrid[0][0] & 0x7F) == 0x1E) { s += 1; }\n' +
+      '  if ((gGrid[0][1] & 0x7F) == 0x1E) { s += 1; }\n' +
+      '  return s + t;\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'mask', 'value-home'],
+    toolchains: ['agbcc'],
+    ctx: 's32 sinkacc(void);',
+  },
+  {
+    sym: 'calad',
+    src:
+      'extern u8 gGrid[5][7];\n' +
+      'extern void fn0(void); extern void fn1(void); extern void fn2(void); extern void fn9(void);\n' +
+      'void calad(void){\n' +
+      '  if ((gGrid[0][6] & 0x80) != 0 && (gGrid[1][0] & 0x7F) == 0x7F) { fn0(); return; }\n' +
+      '  else if ((gGrid[1][6] & 0x80) != 0 && (gGrid[2][0] & 0x7F) == 0x7F) { fn1(); return; }\n' +
+      '  else if ((gGrid[2][6] & 0x80) != 0 && (gGrid[3][0] & 0x7F) == 0x7F) { fn2(); return; }\n' +
+      '  fn9();\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void fn0(void); void fn1(void); void fn2(void); void fn9(void); void calad(void);',
+    proto: {
+      calad: { returnsVoid: true },
+      fn0: { params: 0, returnsVoid: true },
+      fn1: { params: 0, returnsVoid: true },
+      fn2: { params: 0, returnsVoid: true },
+      fn9: { params: 0, returnsVoid: true },
+    },
+  },
+  {
+    sym: 'mixsense',
+    src:
+      'extern u8 gGrid[5][7];\n' +
+      'extern void fn0(void); extern void fn1(void); extern void fn2(void);\n' +
+      'extern void fn3(void); extern void fn9(void);\n' +
+      'void mixsense(void){\n' +
+      '  if ((gGrid[0][6] & 0x80) != 0 && (gGrid[1][0] & 0x7F) == 0x7F) { fn0(); return; }\n' +
+      '  else if ((gGrid[1][6] & 0x80) != 0 && (gGrid[2][0] & 0x7F) == 0x7F) { fn1(); return; }\n' +
+      '  if ((gGrid[2][6] & 0x80) == 0 || (gGrid[3][0] & 0x7F) != 0x7F) {\n' +
+      '    if ((gGrid[3][6] & 0x80) == 0 || (gGrid[4][0] & 0x7F) != 0x7F) { fn9(); }\n' +
+      '    else { fn3(); }\n' +
+      '  } else { fn2(); }\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void fn0(void); void fn1(void); void fn2(void); void fn3(void); void fn9(void); void mixsense(void);',
+    proto: {
+      mixsense: { returnsVoid: true },
+      fn0: { params: 0, returnsVoid: true },
+      fn1: { params: 0, returnsVoid: true },
+      fn2: { params: 0, returnsVoid: true },
+      fn3: { params: 0, returnsVoid: true },
+      fn9: { params: 0, returnsVoid: true },
+    },
+  },
+  {
+    // G1's JOINED half — `mixsense` forces the mixed sense at DIVERGENT sites (every arm returns)
+    // and the real row wins on `/flip-join`, the joined boolean, which `mixsense` never
+    // enumerates. Here both `if`s RECONVERGE and the second is spelled as its dual, so no single
+    // value of `negateJoinedBranchSense` is right at both: the fan scores 4 with the axis OFF and
+    // 4 with it ON. Hand-writing asmlift's own winner with only the second site dualized is
+    // byte-exact, so the whole residual is the sense.
+    sym: 'joinsense',
+    src:
+      'extern u8 gGrid[5][7];\n' +
+      'extern s32 gOut; extern s32 gOut2; extern s32 gOut3;\n' +
+      'void joinsense(void){\n' +
+      '  if ((gGrid[0][0] & 0x80) != 0 && (gGrid[1][0] & 0x7F) == 0x7F) { gOut = 1; } else { gOut = 2; }\n' +
+      '  if ((gGrid[2][0] & 0x80) == 0 || (gGrid[3][0] & 0x7F) != 0x7F) { gOut2 = 3; } else { gOut2 = 4; }\n' +
+      '  gOut3 = 5;\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void joinsense(void);',
+    proto: { joinsense: { returnsVoid: true } },
+  },
+  {
+    // The CONTROL for `joinsense`: the same two joined `if`s with both sites spelled in the SAME
+    // sense. MATCH — so the gap is the MIX, not the joined shape.
+    sym: 'joinsame',
+    src:
+      'extern u8 gGrid[5][7];\n' +
+      'extern s32 gOut; extern s32 gOut2; extern s32 gOut3;\n' +
+      'void joinsame(void){\n' +
+      '  if ((gGrid[0][0] & 0x80) != 0 && (gGrid[1][0] & 0x7F) == 0x7F) { gOut = 1; } else { gOut = 2; }\n' +
+      '  if ((gGrid[2][0] & 0x80) != 0 && (gGrid[3][0] & 0x7F) == 0x7F) { gOut2 = 4; } else { gOut2 = 3; }\n' +
+      '  gOut3 = 5;\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void joinsame(void);',
+    proto: { joinsame: { returnsVoid: true } },
   },
 ];
 
