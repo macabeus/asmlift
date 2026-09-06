@@ -21,8 +21,7 @@ gets its own capture directory; `cand.i`/`cand.s` worker paths are reused and ca
 candidate. The preprocessed unit, assembly and object are retained together. The source bundle
 was built in the separate attribution worktree. No source under `packages/` was edited.
 
-The completed captured run scored all 225,792 candidates and reproduced the raw winner at
-376. The best symbol candidate was 455, independently recompiled and rescored; the supplied
+The completed captured run scored all 225,792 candidates and reproduced the raw winner at 376. The best symbol candidate was 455, independently recompiled and rescored; the supplied
 462 was not reproduced. The 376/386 spill-order ablation remains prior evidence, not a new
 measurement here. See the [completed baseline census](lbg-attribution-baseline.md).
 
@@ -106,7 +105,9 @@ for smoke discovery.
 - [Adversarial ledger](lbg-attribution-review.md): findings, verdicts, remedies and remediation audit.
 
 The normalization tools retain tagged objdiff tokens and distinguish register-only substitutions
-from changed register-list arity, stack offsets, immediates, branch targets, relocations and data.
+from changed register-list arity, stack offsets, immediates, destination annotations, relocations
+and data. Objdiff uses destination annotations for both branches and PC-relative literal loads;
+the baseline census contextually separates those cases.
 Independent shape alignment strips instruction aliases and normalizes pool/branch references;
 its counts are not objdiff scores. Literal data never counts as register drift.
 
@@ -136,8 +137,12 @@ A clean scoped synthetic rerun replaced a tier whose dirty stamp correctly detec
 accidental Python bytecode file; the stamp was never edited. Merge, regression and diff
 then ran in that order. Regression found `llcmp:agbcc` MATCH→11 against the newly advanced
 `origin/main`; full cache verification reproduced 11 (6 objects verified, no disagreements).
-Upstream `5efc34cc` contains the corresponding short-circuit fix; the final rebase and
-publication gate must verify it. Final artifact provenance is still pending.
+Rebasing onto upstream `5efc34cc` brought in its short-circuit fix; a scoped rerun
+then produced `llcmp:agbcc` MATCH for both tools (exit 0). Final full-run verification
+and artifact provenance are still pending. The two existing m2c switch rows
+`sw_jtfall`/`sw_jtfalldesc` changed from failed to nonmatch:1 and reproduced in a scoped
+rerun. Both artifacts name the same m2c commit; no cause for the earlier failures was
+established, and the status changes are retained rather than hidden.
 
 The first full run took 8,288 seconds with the default cache cap. Subsequent runs use
 `ASMLIFT_CANDCACHE_MAX_MB=16384` to avoid repeated eviction scans; scoring and compiler

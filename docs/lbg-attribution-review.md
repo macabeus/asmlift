@@ -123,3 +123,46 @@ Remediation recheck for R2-1: updated four line numbers match current dataset ou
 feature assignment, score or result was changed by this documentation correction. No outstanding
 study-document defect was found in this pass. This is **not** the reserved final baseline/census,
 zero-flip, test-count, or artifact-provenance audit.
+
+## Final independent Round 2 — completed baseline remediation audit
+
+Carries the full **D1–D10, R1-1–R1-9, R2-1–R2-3 and F1–F5** ledgers, including the
+rejection reasons and limits recorded above and in the baseline report. This pass independently
+checks the newly completed baseline report, main report and retained baseline evidence. It is
+not a certification of the still-pending final benchmark, unmodified test command, or artifact
+publication gates. The post-rebase llcmp control is tracked separately by the parent validation.
+
+| ID / carried group | Independent verdict and evidence                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| F1                 | Accepted remedy verified. Recomputed the contextual partition from the original scratch residual rows: exactly the listed 20 row IDs have ldr/ldr opcodes and a changed branch-dest annotation; the remaining ten have actual branch opcodes. Both original and contextual category totals equal376. ~~All30 renderer branch-target rows describe CFG changes~~ is withdrawn. Strict register194 and score376 remain unchanged.            |
+| F2                 | Accepted correction verified. Reparsed all225792 score lines from the log whose SHA matches run-summary:179712 raw labels,46080 symbol labels, minima376/455; four symbol labels tie455. Retained symbol evidence names its unique captured object, same fresh-compile hash, and two named relocations. ~~The current symbol minimum is462~~ remains struck. No capture-label mapping or cause for the historical discrepancy is invented. |
+| F3                 | Rejected attribution upheld. Target prologue reserves0x3c bytes and captured raw candidate0x34, confirming60→52. This does not isolate declaration ordering or falsify the independently matching spill controls. No new spill-order failure or row is claimed.                                                                                                                                                                            |
+| F4                 | Rejected interpretation upheld. Independently summed per-value directives: target20 words/0 halfwords, candidate20 words/6 halfwords; contextual data residual14+5=19. Four target pads remain instruction-spelled. ~~Nineteen aligned data rows are nineteen changed words or a constant pad tax~~ is withdrawn; no subtraction is applied.                                                                                               |
+| F5                 | Rejected aggregation upheld. The194 strict register rows are51.6% of376;258 arg-mismatch rows are68.6%, a different measure. The182 other rows remain mixed, with explicit ownership boundaries and no-minimal-pair/no-new-row dispositions. No additive capability price, allocator inverse, or score-improving lever is manufactured.                                                                                                    |
+| D1–D10             | Earlier fixes and rejection reasons remain intact. Address-home evidence is distinguished from stale pseudos; interventions and FAKE conditions stay explicit; declared homes do not become an inverse allocator; the nonexistent L4/L5 and Cartesian non-reach premises remain withdrawn.                                                                                                                                                 |
+| R1-1–R1-9          | Earlier fixes and rejection reasons remain intact. Ordering-only control tagging, separated shape/order sites, unique-minimum object proof, m2c placeholder attribution, corrected sibling majority, basin boundaries and separate residual conventions are retained. No invalid sibling-majority premise is restored.                                                                                                                     |
+| R2-1–R2-3          | Earlier row-presence/control/decline audit remains the historical checked result; this baseline change adds no new dataset row or decline claim. Existing owner rows and explicit no-duplicate-row reasons remain the dispositions.                                                                                                                                                                                                        |
+
+Additional retained-artifact verification: recomputed all four retained .i/.s SHA-256 values
+against run-summary. The raw object mapping retains two normalized-body hits/one distinct object,
+score376 and the original-capture hashes. Both archival .i files use sanitized diagnostic
+filenames, as disclosed. During this audit the compiler reviewer completed fresh archival
+compilation, replacing the earlier limitation. Independently checked both resulting .s/.o hashes
+in `apps/benchmark/results/lbg-archive-check.log/confirmation.json` against the actual files and
+retained assembly: both archival units reproduce the captured assembly and original object hashes. The raw
+comparison contains582 aligned display rows. Independent shape counts remain a separate alignment
+and are not added to the376-row score.
+
+Remediation recheck: rederived F1's entire contextual category map equals the retained JSON,
+not merely its total; all20 affected IDs match in order. F2's455 supersedes462 visibly, while
+unknown historical cause and label identity remain explicit. F3–F5 preserve their rejected
+interpretations and no-new-row rationale. No additional baseline evidence defect was found.
+All writes in this audit were confined to this review document; Python ran with `-B`.
+
+Final concurrent-remediation check: the alignment ownership citation now names the observed
+`ASM_OUTPUT_ALIGN` macro at thumb.h:100, the objdiff gate and frontend boundary, without
+inventing an allocator mechanism. The archival compilation evidence directory was renamed to
+`lbg-archive-check.log` so Git actually ignores it. Its measured files were checked after the
+rename; the root must keep the baseline reproduction path synchronized with that final name.
+~~The sanitized archival units have not been compiled~~ is superseded by the verified compile
+outputs above. All prior numerical/categorical conclusions remain unchanged.
