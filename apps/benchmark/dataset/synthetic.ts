@@ -1096,8 +1096,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
   //
   // The two `near` rows run on agbcc AND mwcc, because the orientation defect is not an agbcc
-  // fact: on PowerPC the fold commits to the same `||` spelling, `ifand_near` misses by 18 and
-  // `ifor_near` matches, exactly as on Thumb. Two ISAs and two compilers agreeing is what says the
+  // fact: on PowerPC the fold commits to the same `&&` spelling, so `ifand_near` matches at the
+  // default joined sense and `ifor_near` lands on the dual, missing by 18 until `/flip-join` emits
+  // the other sense — exactly as on Thumb. Two ISAs and two compilers agreeing is what says the
   // gap is in the recogniser and the sense lever rather than in anything about ARM.
   //
   // The other two toolchains are excluded because on them THE CONSTRUCT IS NOT THERE, which is a
@@ -3952,9 +3953,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // ARMS, or a parameter's narrowing re-spelled at every use — and both are what a bit-test
   // prologue is made of.
   //
-  // Cut from sa3:sub_802DFC8:agbcc (62) and sa3:sub_803213C:agbcc (48), the two rows this family
-  // was written to explain. Both are m2c MATCHes; both were tagged `['struct','field']`, and that
-  // attribution is FALSIFIED — starting from asmlift's own winning source and changing only the
+  // Cut from sa3:sub_802DFC8:agbcc and sa3:sub_803213C:agbcc, the two rows this family was
+  // written to explain — both scored 62 and 48 when it was cut and both are MATCH today; m2c
+  // NONCOMPILEs both. The `['struct','field']` attribution they were cut under is FALSIFIED
+  // — starting from asmlift's own winning source and changing only the
   // three homes below, 802 reaches 0 (`rows=128`) and 832 reaches 0 (`rows=71`) while still
   // carrying asmlift's synthesized `struct Struct0 { s32 field_0; u8 _pad0[4]; … }`, its `field_N`
   // member names, `16 - 17` for -1 and the raw `(-(x)|x)>>31 & C` branchless idiom. asmlift's
@@ -4035,7 +4037,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   //   `basecell` MATCH — ONE access through a numeric base at a nonzero byte offset. gcc 2.9
   //   folds a constant SUBSCRIPT into the pool word, so the inline cast compiles to
-  //   `.word 0x3001103` + `ldrb r1, [r1]` where the pointer-local spelling keeps
+  //   `.word 0x3001103` + `ldrb r2, [r1]` where the pointer-local spelling keeps
   //   `.word 0x3001100` + `ldrb r1, [r1, #0x3]` (compiled pair, both dumped). `l3/basecse.ts`'s
   //   `single-use` gate rejected a base with `uses < 2` — its stated rationale, "one access
   //   re-materializes as cheaply as a named local", is false at a nonzero offset — so the offset
@@ -4098,11 +4100,13 @@ export const SYNTHETIC: SynthSpec[] = [
   //   11, `/offmember` 11, no lever at all 11 — so deleting the HEAD entry of
   //   `BASEFOLD_ADMISSIONS` costs this row its match while deleting the SUNK entry does not, which
   //   is the separation `foldsink` makes in the other direction.
-  //   WHAT SPLITS THE THREE SPELLINGS, on compiled objects rather than on a theory: agbcc emits the
-  //   pool words in the order the source materializes them and allocates the store's operands to
-  //   match. The head-assigned local puts `.word 0x8024c35` first and stores `str r1, [r0, #0x4]`;
-  //   the same local assigned at its first use, and the inline member cast, both put
-  //   `.word 0x3001100` first and store `str r0, [r1, #0x4]`. So the claim in `basecell`'s
+  //   WHAT SPLITS THE THREE SPELLINGS, on compiled objects rather than on a theory: the pool order
+  //   is IDENTICAL in all three (`.word 0x3001100` then `.word 0x8024c35`) and the head-assigned
+  //   local is the one whose live range spans the two `out[]` stores, so agbcc gives it a
+  //   call-saved register and pays the prologue: `push {r4, lr}` / `str r0, [r4, #0x4]` /
+  //   `pop {r4}` / `pop {r0}` / `bx r0`, where the same local assigned at its first use and the
+  //   inline member cast both use r1 and keep `bx lr` — and those two assemble to the SAME BYTES
+  //   (`diff` of the two `.s`: empty), which is why they tie at 11. So the claim in `basecell`'s
   //   paragraph that a member access is "byte-identical to the named base" holds only where the two
   //   spellings materialize the base at the SAME program point — move the assignment above the use
   //   and `/offmember` is a different program, which is why it rides beside this row and loses.
@@ -4227,14 +4231,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // extension already states. The rows carry the list anyway, so both decompilers hold the same
   // facts — the harness hands m2c the function's own prototype.
   //
-  // m2c, on the identical `ctx` asmlift receives, MATCHES `sxparam` and NONCOMPILES the other six
-  // — for two reasons, neither of them this family, and it REACHES the construct in every case.
-  // (1) Five of the six (`zxparam`, `armexpr`, `armkeep`, `maskchain`, `basehome`) store through a
-  // pointer PARAMETER at more than one offset and m2c renders those as `out->unk0` / `out->unk4`
-  // on an `s32 *` it has no struct for — its documented raw-pointer member rendering, not context
-  // withheld, since the `ctx` declares the full prototype, parameter names and all. (2) Two
-  // (`basecell`, `basehome`) type the address constant as `void *` and read members off it
-  // (`(void *)0x03001100->unk3`), as every raw-address row in this file already records; on
+  // m2c, on the identical `ctx` asmlift receives, MATCHES `sxparam` and NONCOMPILES the other
+  // eight — for two reasons, neither of them this family, and it REACHES the construct in every
+  // case. (1) Seven of the eight (`zxparam`, `armexpr`, `armkeep`, `maskchain`, `basehome`,
+  // `foldsink`, `foldhead`) store through a pointer PARAMETER at more than one offset and m2c
+  // renders those as `out->unk0` / `out->unk4` on an `s32 *` it has no struct for — its
+  // documented raw-pointer member rendering, not context
+  // withheld, since the `ctx` declares the full prototype, parameter names and all. (2) Four
+  // (`basecell`, `basehome`, `foldsink`, `foldhead`) type the address constant as `void *` and
+  // read members off it (`(void *)0x03001100->unk3`), as every raw-address row in this file
+  // already records; on
   // `basecell` that is the ONLY cause — its single store through the parameter renders as `*out`. What the output SHOWS is the point: on `armexpr` m2c hoists the
   // whole chain above the branch (`var_r2 = …;` then `if (a != 0)`), on `armkeep` it keeps BOTH
   // per-arm copies exactly as the reference wrote them, on `maskchain` it emits `var_r1 = 0;`
