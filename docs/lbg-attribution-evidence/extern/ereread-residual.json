@@ -1,0 +1,289 @@
+{
+  "symbol": "ereread",
+  "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+  "score": 11,
+  "diff_kinds": {
+    "replace": 2,
+    "insert": 1,
+    "arg-mismatch": 7,
+    "delete": 1
+  },
+  "row_categories": {
+    "operand-structure+register": 2,
+    "insertion/deletion": 2,
+    "pool-offset+register": 1,
+    "register-only": 6
+  },
+  "instruction_shape_alignment": {
+    "structural_regions": 4,
+    "structural_target_instructions": 3,
+    "structural_candidate_instructions": 3,
+    "equal_shape_pairs": 16,
+    "identical_pairs": 9,
+    "normalized_branch_or_pool_pairs": 1,
+    "register_only_pairs": 6
+  },
+  "pool_data_values": {
+    "target": {
+      "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"symbol\",\"gReadBgs\"]]": 1
+    },
+    "candidate": {
+      "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"symbol\",\"gReadBgs\"]]": 1
+    }
+  },
+  "pool_data_totals": {
+    "target": {
+      "rows": 2,
+      "distinct_values": 2
+    },
+    "candidate": {
+      "rows": 2,
+      "distinct_values": 2
+    }
+  },
+  "rows": [
+    {
+      "row": 0,
+      "kind": "replace",
+      "category": "operand-structure+register",
+      "target": [
+        ["opcode", "push"],
+        ["basic", "{"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "r5"],
+        ["basic", ","],
+        ["register", "lr"],
+        ["basic", "}"]
+      ],
+      "candidate": [
+        ["opcode", "push"],
+        ["basic", "{"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "lr"],
+        ["basic", "}"]
+      ]
+    },
+    {
+      "row": 5,
+      "kind": "insert",
+      "category": "insertion/deletion",
+      "target": [],
+      "candidate": [
+        ["opcode", "lsl"],
+        ["register", "r1"],
+        ["basic", ","],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "3"]
+      ]
+    },
+    {
+      "row": 6,
+      "kind": "arg-mismatch",
+      "category": "pool-offset+register",
+      "target": [
+        ["opcode", "ldr"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "pc"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "28"],
+        ["basic", "]"],
+        ["basic", "(->"],
+        ["branch-dest", "40"],
+        ["basic", ")"]
+      ],
+      "candidate": [
+        ["opcode", "ldr"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "pc"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "24"],
+        ["basic", "]"],
+        ["basic", "(->"],
+        ["branch-dest", "40"],
+        ["basic", ")"]
+      ]
+    },
+    {
+      "row": 7,
+      "kind": "delete",
+      "category": "insertion/deletion",
+      "target": [
+        ["opcode", "lsl"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "3"]
+      ],
+      "candidate": []
+    },
+    {
+      "row": 8,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "add"],
+        ["register", "r5"],
+        ["basic", ","],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r4"]
+      ],
+      "candidate": [
+        ["opcode", "add"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "r1"],
+        ["basic", ","],
+        ["register", "r0"]
+      ]
+    },
+    {
+      "row": 9,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "ldr"],
+        ["register", "r1"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "r5"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "0"],
+        ["basic", "]"]
+      ],
+      "candidate": [
+        ["opcode", "ldr"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "r4"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "0"],
+        ["basic", "]"]
+      ]
+    },
+    {
+      "row": 10,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "lsl"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r2"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "2"]
+      ],
+      "candidate": [
+        ["opcode", "lsl"],
+        ["register", "r1"],
+        ["basic", ","],
+        ["register", "r2"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "2"]
+      ]
+    },
+    {
+      "row": 11,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "add"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r1"]
+      ],
+      "candidate": [
+        ["opcode", "add"],
+        ["register", "r1"],
+        ["basic", ","],
+        ["register", "r0"]
+      ]
+    },
+    {
+      "row": 12,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "lsl"],
+        ["register", "r1"],
+        ["basic", ","],
+        ["register", "r2"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "6"]
+      ],
+      "candidate": [
+        ["opcode", "lsl"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["register", "r2"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["unsigned", "6"]
+      ]
+    },
+    {
+      "row": 13,
+      "kind": "arg-mismatch",
+      "category": "register-only",
+      "target": [
+        ["opcode", "str"],
+        ["register", "r1"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "0"],
+        ["basic", "]"]
+      ],
+      "candidate": [
+        ["opcode", "str"],
+        ["register", "r0"],
+        ["basic", ","],
+        ["basic", "["],
+        ["register", "r1"],
+        ["basic", ","],
+        ["basic", "#"],
+        ["signed", "0"],
+        ["basic", "]"]
+      ]
+    },
+    {
+      "row": 17,
+      "kind": "replace",
+      "category": "operand-structure+register",
+      "target": [
+        ["opcode", "pop"],
+        ["basic", "{"],
+        ["register", "r4"],
+        ["basic", ","],
+        ["register", "r5"],
+        ["basic", "}"]
+      ],
+      "candidate": [
+        ["opcode", "pop"],
+        ["basic", "{"],
+        ["register", "r4"],
+        ["basic", "}"]
+      ]
+    }
+  ]
+}

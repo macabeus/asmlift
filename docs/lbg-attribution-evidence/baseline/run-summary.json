@@ -1,0 +1,54 @@
+{
+  "summary": [
+    "asmlift: [phase] wall 8517.2s \u00b7 enumerate 415.6s (1 call) \u00b7 compile 47272.0s over 6 workers (225792 calls) \u00b7 score 619.2s (225792 calls) \u00b7 rank 117.5s (1 call) \u00b7 main-thread idle+other 7365.0s",
+    "asmlift: [ranked] 225792 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best unsigned/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/coalesce-v20-v14/initfirst/raw-globals: 376 [asmlift source a56952a]",
+    "asmlift: [candcache] on sample=2%/seed=7839463a3c43bcca {\"miss\":225792,\"stored\":225792}",
+    "RANKED_COMPLETE exit=1"
+  ],
+  "score_lines": 225792,
+  "raw_count": 179712,
+  "symbol_count": 46080,
+  "raw_min": 376,
+  "symbol_min": 455,
+  "best_labels": [
+    "unsigned/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/coalesce-v20-v14/initfirst/raw-globals",
+    "signed/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/coalesce-v20-v14/initfirst/raw-globals",
+    "unsigned/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/initfirst/raw-globals",
+    "signed/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/initfirst/raw-globals",
+    "unsigned/flip-branch/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/coalesce-v20-v14/initfirst/raw-globals",
+    "signed/flip-branch/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/coalesce-v20-v14/initfirst/raw-globals",
+    "unsigned/flip-branch/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/initfirst/raw-globals",
+    "signed/flip-branch/merge-names/addr-home/expr-home/uns-cmp/copy-defpos/livebase-block/volatile/initfirst/raw-globals"
+  ],
+  "inputs_sha256": {
+    "asm/nonmatchings/gfx/LoadBGTilemapData.s": "a979ee6d2c7ba2edd687efbf06e13456cc3d0c6fe31927a9ac6a4ba104c7ef87",
+    "build/src/gfx.o": "4179071f8be0a0e637a1cb769feb26bb92e8109b46f5f5ee0cf8b50867bd88c7",
+    "klonoa-eod-syms.elf": "f7f4792843f4bb243b878fbf8863916836631fa02003e4c0c7afe20d014e64e7",
+    "decomp.yaml": "9471f7ce583447aa52b73d40c5182e8b95876b35c092b331827ce9a2764a5816"
+  },
+  "matches_midrun_fingerprints": true,
+  "fingerprint_boundary": "Earlier fingerprints were captured mid-run, not at start. End recheck matches.",
+  "log_sha256": "b82c77000857162f7c271a4c4c4b2f0031932ff71d12f63e0cf2929f3192d13a",
+  "retainedArtifacts": {
+    "raw-winner.i": {
+      "capturedSha256": "072030357e94258933c7d47755933c8610583573a59ea2ac4c17e86504734010",
+      "retainedSha256": "daeb5385af080a46dbb7e62685aea99a0ba9c64431df2d91298ade8f98c3e6c6",
+      "normalization": "absolute preprocessor diagnostic filenames replaced with captured-input.c"
+    },
+    "raw-winner.s": {
+      "capturedSha256": "81cef184221e3a3268d60561574bf5308be64e65b73d778af43fec756bed5ff0",
+      "retainedSha256": "81cef184221e3a3268d60561574bf5308be64e65b73d778af43fec756bed5ff0",
+      "normalization": "none"
+    },
+    "symbol-winner.i": {
+      "capturedSha256": "43a42c9581e00b052e5eab5bfb2518286644fdab5005c4917bbfdd3956dfe8ca",
+      "retainedSha256": "1cb087b35a6339f7e9cbdda9c6c0332c774082d7b8e3e9829c948fface9dd263",
+      "normalization": "absolute preprocessor diagnostic filenames replaced with captured-input.c"
+    },
+    "symbol-winner.s": {
+      "capturedSha256": "eaf6a6735edf2a5432f2e693449c02a0aebf63ebbaf99d9bde52f53dc71cc137",
+      "retainedSha256": "eaf6a6735edf2a5432f2e693449c02a0aebf63ebbaf99d9bde52f53dc71cc137",
+      "normalization": "none"
+    }
+  }
+}

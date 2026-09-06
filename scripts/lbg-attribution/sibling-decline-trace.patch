@@ -1,0 +1,31 @@
+--- a/packages/core/src/frontend/thumb.ts
++++ b/packages/core/src/frontend/thumb.ts
+@@ -2371,7 +2371,7 @@
+         const c = ins.ops[0] ?? '';
+         const arity = protoArity(prototypes[c]) ?? protoArity(RUNTIME_HELPERS[c]);
+         if (arity !== undefined && arity > target.argRegs.length) {
+-          return `callee \`${c}\` is declared with ${arity} arguments, so this frame has an outgoing stack-argument area — consuming stack call arguments is not implemented`;
++          console.error("LBG-FIRST thumb.ts:2374 declared-arity", c, arity); return `callee \`${c}\` is declared with ${arity} arguments, so this frame has an outgoing stack-argument area — consuming stack call arguments is not implemented`;
+         }
+       }
+     }
+@@ -2520,7 +2520,7 @@
+               for (const k of pend) {
+                 if (prefixStored(k, st)) {
+                   // (b) — a plausible argument block reaches this call unread
+-                  return `the store to [sp,#${k}] reaches \`bl ${ins.ops[0] ?? '?'}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`;
++                  console.error("LBG-FIRST thumb.ts:2523 prefixStored", k); return `the store to [sp,#${k}] reaches \`bl ${ins.ops[0] ?? '?'}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`;
+                 }
+               }
+             }
+--- a/packages/core/src/raise/structs.ts
++++ b/packages/core/src/raise/structs.ts
+@@ -91,7 +91,7 @@
+       byOff.set(a.off, a);
+       continue;
+     }
+-    if (prev.width !== a.width) {
++    if (prev.width !== a.width) { console.error("LBG-FIRST structs.ts:96 overlapping", a.off, prev.width, a.width);
+       throw new RaiseUnsupportedError(
+         `cannot recover struct '${name}': overlapping fields at offset ${a.off} (widths ${prev.width} and ${a.width}) — unions not modelled`,
+       );

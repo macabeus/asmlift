@@ -1,10 +1,10 @@
 {
-  "total": 1016,
+  "total": 1022,
   "match": {
-    "asmlift": 578,
+    "asmlift": 580,
     "m2c": 407
   },
-  "commit": "6c0272e88113aa838c216c36ee6a4d25ac7398ca",
+  "commit": "cb04e0fe170fadb9739d7ed141423923b121a65d",
   "m2cCommit": "ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0",
   "dirty": false
 }

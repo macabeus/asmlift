@@ -1,0 +1,100 @@
+{
+  "symbol": "LoadBGTilemapData",
+  "convention": "aligned objdiff rows; mixed categories count once; shape counts separately align instructions only",
+  "score": 376,
+  "diff_kinds": {
+    "arg-mismatch": 258,
+    "insert": 38,
+    "delete": 54,
+    "replace": 18,
+    "op-mismatch": 8
+  },
+  "instruction_shape_alignment": {
+    "equal_shape_pairs": 437,
+    "identical_pairs": 146,
+    "structural_regions": 79,
+    "structural_target_instructions": 87,
+    "structural_candidate_instructions": 65,
+    "register_only_pairs": 207,
+    "normalized_branch_or_pool_pairs": 84
+  },
+  "pool_data_values": {
+    "target": {
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"134576844\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345120\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345008\"]]": 9,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"135830732\"]]": 2,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50351536\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345080\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"67109076\"]]": 2,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345082\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345012\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"2164260896\"]]": 1
+    },
+    "candidate": {
+      "[[\"opcode\",\".hword\"],[\"unsigned\",\"0\"]]": 6,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"67109076\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"134576845\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"134576844\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345120\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"135830732\"]]": 2,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345082\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345080\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50351536\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345068\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345008\"]]": 8,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"50345012\"]]": 1,
+      "[[\"opcode\",\".word\"],[\"unsigned\",\"2164260896\"]]": 1
+    }
+  },
+  "pool_data_totals": {
+    "target": {
+      "rows": 20,
+      "distinct_values": 10
+    },
+    "candidate": {
+      "rows": 26,
+      "distinct_values": 13
+    }
+  },
+  "original_renderer_token_categories": {
+    "stack-offset/immediate": 4,
+    "insertion/deletion": 87,
+    "register-only": 194,
+    "operand-structure+register": 5,
+    "immediate+operand-structure+register": 23,
+    "branch-target+pool-offset": 4,
+    "branch-target": 10,
+    "structure/opcode": 10,
+    "branch-target+pool-offset+register": 7,
+    "branch-target+register": 6,
+    "immediate+register": 2,
+    "branch-target+operand-structure+register+stack-offset/immediate": 3,
+    "pool/data": 14,
+    "pool/data+insertion/deletion": 5,
+    "register+stack-offset/immediate": 2
+  },
+  "contextual_row_categories": {
+    "stack-offset/immediate": 4,
+    "insertion/deletion": 87,
+    "register-only": 194,
+    "operand-structure+register": 5,
+    "immediate+operand-structure+register": 23,
+    "pool-reference-address+pool-offset": 4,
+    "branch-target": 10,
+    "structure/opcode": 10,
+    "pool-reference-address+pool-offset+register": 7,
+    "pool-reference-address+register": 6,
+    "immediate+register": 2,
+    "pool-reference-address+operand-structure+register+stack-offset/immediate": 3,
+    "pool/data": 14,
+    "pool/data+insertion/deletion": 5,
+    "register+stack-offset/immediate": 2
+  },
+  "annotation_correction": {
+    "poolLoadRows": [20, 40, 74, 75, 91, 98, 101, 121, 126, 233, 254, 323, 346, 365, 376, 445, 487, 504, 539, 540],
+    "poolLoadCount": 20,
+    "actualBranchRows": 10,
+    "method": "Only ldr/ldr rows with branch-dest renderer annotations relabeled pool-reference-address; no changed counts or register normalization."
+  }
+}

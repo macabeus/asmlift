@@ -1,0 +1,29 @@
+{
+  "score": {
+    "symbol": "LoadBGTilemapData",
+    "rows": 607,
+    "matching": 152,
+    "score": 455,
+    "match": false,
+    "breakdown": {
+      "insert": 63,
+      "delete": 65,
+      "replace": 24,
+      "opMismatch": 8,
+      "argMismatch": 295
+    }
+  },
+  "sha256": {
+    "symbol-winner.i": "43a42c9581e00b052e5eab5bfb2518286644fdab5005c4917bbfdd3956dfe8ca",
+    "symbol-winner.s": "eaf6a6735edf2a5432f2e693449c02a0aebf63ebbaf99d9bde52f53dc71cc137",
+    "symbol-winner.o": "43110c6795cd60086a758bcc1d70f8b6af6b263ca4aa414d93a50440dc73aec1",
+    "symbol-winner-recompiled.s": "eaf6a6735edf2a5432f2e693449c02a0aebf63ebbaf99d9bde52f53dc71cc137",
+    "symbol-winner-recompiled.o": "43110c6795cd60086a758bcc1d70f8b6af6b263ca4aa414d93a50440dc73aec1"
+  },
+  "targetSha256": "4179071f8be0a0e637a1cb769feb26bb92e8109b46f5f5ee0cf8b50867bd88c7",
+  "compilerFlags": "-mthumb-interwork -Wimplicit -Wparentheses -O2 -fhex-asm -fprologue-bugfix",
+  "asmTail": ".text\n\t.align\t2, 0\n",
+  "assemblerFlags": "-mcpu=arm7tdmi -mthumb-interwork",
+  "assemblyAndObjectCmp": "identical",
+  "limitation": "Confirmed captured named-symbol455 and exact fresh compile. No capture-label map: four non-raw455 labels are independently present in completed rank log. Historical462 is superseded by current455; cause not established."
+}
