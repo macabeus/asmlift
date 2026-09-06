@@ -290,8 +290,8 @@ export function assertLocalsWritten(sfn: SFn): void {
   }
 }
 
-/** Post-lever: every read of a MINTED local must sit where that local's assignment has already
- *  run.
+/** Post-lever: every read of a MINTED local — its ADDRESS being taken included — must sit where
+ *  that local's assignment has already run.
  *
  *  THE failure a placing lever can ship, and the only one the byte differ rewards: a base local whose
  *  assignment does not reach a use is a DIFFERENT VARIABLE — C that compiles, scores, and can win
@@ -319,7 +319,10 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
     return;
   }
   const readUndominated = (e: Expr, live: ReadonlySet<string>): string | null => {
-    if (e.k === 'var' && minted.has(e.name) && !live.has(e.name)) {
+    // `&p` COUNTS, the same mention the placing passes query on (l3/hoist.ts): the address is what
+    // a callee reads the cell through, so an init has to precede it as surely as it must precede a
+    // read. Counting only `var` here made this walk strictly weaker than the descent it guards.
+    if ((e.k === 'var' || e.k === 'addr') && minted.has(e.name) && !live.has(e.name)) {
       return e.name;
     }
     let bad: string | null = null;
