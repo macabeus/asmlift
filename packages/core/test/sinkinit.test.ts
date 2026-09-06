@@ -351,3 +351,57 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
     expect(labels.filter((l) => l.includes('sinkinit') && !l.includes('livebase'))).toEqual([]);
   });
 });
+
+describe('`scope` is the third placement: the init goes INSIDE the block holding every use', () => {
+  // The gap l3/scopebase.ts names in its own header — "the init still lands ABOVE the `if`, because
+  // sinking INTO the arm is what needs the domination work" — as a value of the placement argument
+  // the roster already states. `first-use` reaches only the TOP-LEVEL statement list, so a base
+  // whose every use is inside one arm stays live across everything before that arm.
+  const guarded = (uses: Stmt[]): SFn =>
+    fn([init('p0', 0x3001100), plain(), { k: 'if', cond: c(1), then: uses, else: [] }]);
+  const kinds = (sfn: SFn, placement: 'head' | 'first-use' | 'scope'): unknown =>
+    placeBaseLocals(sfn, [], placement).body.map((s) => (s.k === 'if' ? ['if', s.then.map((t) => t.k)] : s.k));
+
+  test('a use confined to one `if` arm: `first-use` stops above the `if`, `scope` goes inside it', () => {
+    const sfn = guarded([read('p0', 1), plain()]);
+    expect(kinds(sfn, 'first-use')).toEqual(['store', 'assign', ['if', ['store', 'store']]]);
+    expect(kinds(sfn, 'scope')).toEqual(['store', ['if', ['assign', 'store', 'store']]]);
+    expect(placeBaseLocals(sfn, [], 'scope').moved).toBe(1);
+  });
+
+  test('the arm is entered at the FIRST use inside it, not at its top', () => {
+    const sfn = guarded([plain(), read('p0', 1)]);
+    expect(kinds(sfn, 'scope')).toEqual(['store', ['if', ['store', 'assign', 'store']]]);
+  });
+
+  test('uses in BOTH arms have no inner list holding all of them: `scope` is `first-use`', () => {
+    const sfn = fn([
+      init('p0', 0x3001100),
+      plain(),
+      { k: 'if', cond: c(1), then: [read('p0', 1)], else: [read('p0', 2)] },
+    ]);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'first-use').body);
+  });
+
+  test('a use in the `if` CONDITION itself keeps the init above the `if`', () => {
+    const sfn = fn([
+      init('p0', 0x3001100),
+      plain(),
+      {
+        k: 'if',
+        cond: { k: 'index', base: { k: 'var', name: 'p0' }, idx: c(0), width: 1, signed: false },
+        then: [read('p0', 1)],
+        else: [],
+      },
+    ]);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'first-use').body);
+  });
+
+  test('a local the function assigns again does not sink — the move would cross that write', () => {
+    const sfn = fn([
+      init('p0', 0x3001100),
+      { k: 'if', cond: c(1), then: [init('p0', 0x3001200), read('p0', 1)], else: [] },
+    ]);
+    expect(placeBaseLocals(sfn, [], 'scope').body).toEqual(placeBaseLocals(sfn, [], 'head').body);
+  });
+});

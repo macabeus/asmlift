@@ -101,6 +101,7 @@
 // and the accesses stride correctly with no per-use cast. A wrong hoist (a base agbcc would actually
 // re-materialize) only changes recompiled bytes -> a LOST match under the zero-lost gate, never a
 // miscompile: the address value is identical, just held in a different place.
+import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
@@ -744,5 +745,13 @@ export function hoistBaseLocals(
   // would not know the new names without the first, and would query the pre-rewrite accesses
   // without the second.
   const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
-  return { ...sfn, body, locals };
+  const out = { ...sfn, body, locals };
+  // The two FLAT placements can only put the run in the top-level list, above every use of it by
+  // construction. `scope` puts an init inside a nested list, which is where a placing lever can ship
+  // the one failure the byte differ rewards — a read of a local whose assignment does not reach it —
+  // so the tree it emits is checked rather than argued (contracts.ts).
+  if (placement === 'scope') {
+    assertHoistsDominate(out, new Set(newLocals.map((l) => l.name)));
+  }
+  return out;
 }
