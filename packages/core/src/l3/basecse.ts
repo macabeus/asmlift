@@ -783,9 +783,9 @@ export function hoistBaseLocals(
   // THE POPULATION IS THE MOTION, and `moved` is what the placer says it moved rather than what this
   // function minted. The leading run this pass inherits is the DEFAULT hoist's, committed by
   // `structureChecked` before rank's levers see the tree (pipeline.ts) — `scope` moves those inits
-  // too, and judging only `newLocals` left every one of them argued. Real inhabitants:
-  // `kleod:DecompressAndLoadLevel` and `sa3:sub_8052474` each sink one inherited `p0` beside the
-  // minted `p1`.
+  // too, and judging only `newLocals` left every one of them argued. Real inhabitants, in the
+  // CHECKOUTS rather than in a benchmark row — `DecompressAndLoadLevel` in klonoa and `sub_8052474`
+  // in sa3, both map-ful — each sink one inherited `p0` beside the minted `p1`.
   if (placement === 'scope') {
     assertHoistsDominate(out, new Set([...newLocals.map((l) => l.name), ...moved]));
   }

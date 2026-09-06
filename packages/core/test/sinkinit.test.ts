@@ -491,7 +491,8 @@ describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', 
 
 describe('`scope` descends through every construct that opens a list, not just `if`', () => {
   // `stmtLists`/`mapStmtLists` are exhaustive over the five list-carrying kinds; only `if` had a
-  // test. `switch` has real inhabitants — `sa3:Task_809A1C4` sinks two bases into a case arm.
+  // test. `switch` has real inhabitants in the sa3 checkout, no benchmark row among them:
+  // `Task_809A1C4` sinks two bases into a case arm, in both symbol-map arms.
   const around = (s: Stmt): SFn => fn([init('p0', 0x3001100), plain(), s]);
   const inside = (sfn: SFn): unknown => {
     const body = placeBaseLocals(sfn, [], 'scope').body;
