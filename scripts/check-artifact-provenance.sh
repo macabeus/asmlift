@@ -64,10 +64,12 @@ paths='packages/core/src packages/cli/src packages/toolchains/src apps/benchmark
 # exit 0 on a base commit to the ranker — the exact false pass verdict 3 exists to prevent.
 #
 # The remainder is `apps/benchmark/src`, where a BASE change is reported rather than failed. Not
-# because it is provably row-neutral — it is not — but because of what lands there: in this
-# repo's whole history exactly two commits touched it without also touching one of the paths
-# below, and both came from a meta round whose own gate is a full `bench run` diffed per row
-# against the base. The note is how a reviewer sees one anyway.
+# because it is provably row-neutral — it is not — but because of what lands there: every commit
+# that has ever touched it WITHOUT also touching one of the paths below came from a meta round
+# whose own gate is a full `bench run` diffed per row against the base (#79, #84, #87 so far).
+# The note is how a reviewer sees one anyway. Recount with:
+#   git rev-list HEAD -- apps/benchmark/src | while read c; do git show --name-only --format= "$c" \
+#     | grep -qE "^(packages/(core|cli|toolchains)/src|apps/benchmark/dataset)/" || echo "$c"; done
 measures='packages/core/src packages/cli/src packages/toolchains/src apps/benchmark/dataset'
 
 [ -f "$artifact" ] || { echo "provenance: no $artifact — nothing to check"; exit 0; }

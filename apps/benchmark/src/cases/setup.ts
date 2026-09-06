@@ -95,7 +95,7 @@ export function setupProject(
     const prov = provenanceCommit(man.project);
     if (prov) {
       try {
-        git(dir, `cat-file -e ${prov}^{commit}`);
+        git(dir, ['cat-file', '-e', `${prov}^{commit}`]);
       } catch {
         notes.push(`VERIFY: provenance base ${prov.slice(0, 7)} not within --depth 50`);
       }

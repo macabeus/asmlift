@@ -4,6 +4,10 @@ These are gap measurements, not a plan to move the score. They do not establish 
 mechanism and they do not price the large target by subtraction. All prices below are in this
 family's symbol basin, against each probe's own compiled object.
 
+**Every score in this study was measured at asmlift source `a56952a`.** `ereadctl` has since
+MATCHed — see the ledger row for the order licence — so the `2` recorded throughout is what this
+family measured, not a current delta.
+
 The family's two points are a **conjunction**, priced from both sides. `ereadctl` declares
 `extern struct Bg gReadBgs[];` and subscripts it inside a loop, and scores 2. Drop the array shape
 and keep the loop (`ername`, the same named symbol reached as `&gReadBgsObj` through a pointer
@@ -84,28 +88,28 @@ These are not a second objdiff score. Repeated instruction shapes can align diff
 The two-row extern control residual belongs to global-address evaluation order, not register
 allocation. The established compiler fork is `gcc/c-typeck.c:1383`, with array-base expansion
 at `:1449` and pointer-base expansion at `:1469`; the prospective asmlift knowledge site is
-`packages/core/src/raise/globalshape.ts:890` (`inferGlobalArrays`), called for declaration shapes
-at `packages/core/src/rank.ts:1177`.
+`raise/globalshape.ts`'s `inferGlobalArrays`, called for declaration shapes at its probe site in
+`rank.ts`.
 
 **The order licence was nominated without instrumenting anything, and the one-fact controls turn
-that nomination into a sharper question rather than settling it.** `globalshape.ts:924`
-(`orderLicensedGlobals`), reaching the `order-licensed` gate at
-`packages/core/src/l3/basecse.ts:639`, was named from the candidate cast spelling and the observed
-load/shift order alone; no guard was watched fire, so it is a hypothesis.
+that nomination into a sharper question rather than settling it.** `globalshape.ts`'s
+`orderLicensedGlobals`, reaching `l3/basecse.ts`'s `order-licensed` gate, was named from the
+candidate cast spelling and the observed load/shift order alone; no guard was watched fire, so it
+was a hypothesis at the time this study was measured.
 
-What the controls now add is that the axis **is** admitted in this basin. `erflat` — the array shape
-without the loop — MATCHes, and its winning label is `unsigned/orderbase`. Only four winners in the
-whole published artifact carry `/orderbase` (`bgarr`, `erflat`, `CalculatePPWithBonus`,
-`GetGenderFromSpeciesAndPersonality`), and one of them is this family's own loop-free arm. The loop
-arm's winner is `unsigned/fresh-merge/initfirst` and scores 2. So the open question is not whether
-the licence can reach this shape — it does — but why the ordered base stops winning once the
-subscript is inside a loop. That is a cheap, well-posed ablation and it is this family's next
-target.
+What the controls add is that the axis **is** admitted in this basin. `erflat` — the array shape
+without the loop — MATCHes carrying `unsigned/orderbase`, while at the time of measurement the loop
+arm's winner was `unsigned/fresh-merge/initfirst` and scored 2. The question that left open — why
+the ordered base stopped winning once the subscript is inside a loop — **has since been answered,
+and the answer was not reach.** The licence reached the loop arm all along; the hoist had only one
+position to offer, the function head, and above the `if` the init is not instruction-identical to
+the target while inside the guard it is. The gap was `HoistPlacement`, which could not leave the
+top-level statement list. `/orderbase/scoped` closes the row (#159), so `ereadctl` MATCHes today.
 
-None of it carries to LoadBGTilemapData as things stand: the instrumented note at
-`packages/core/src/rank.ts:1899` records that licence measured **empty on every lift variant of both
-symbol-map arms of the target**. What is measured here is a price and its two sides. The site that
-would pay it is still not identified, and this study does not claim one.
+None of that carries to LoadBGTilemapData: the `/livebase` roster note in `rank.ts`'s
+`enumerateCandidates` records the licence measured **empty on every lift variant of both symbol-map
+arms of the target**. What is measured here is a price and its two sides. The site that would pay
+it on the large function is still not identified, and this study does not claim one.
 
 The dominant register-only component of `erback` is evidence for the general allocator residual.
 Its established compiler ownership is `gcc/global.c:605`/`:926` and reload at
@@ -142,13 +146,12 @@ are real compiled probes, not predictions or tuned sources.
 
 Durable evidence is in [extern captures](lbg-attribution-evidence/extern/): selected minimum
 preprocessed units and assembly, categorized rendered-token rows, and SHA-256/score records for
-every captured function object. The row-existence command produced:
+every captured function object. All four rows exist in the dataset; re-check with
 
-```text
-2811:    sym: 'ereread',
-2819:    sym: 'ereadctl',
-2827:    sym: 'erback',
-2834:    sym: 'erbctl',
+```sh
+rg -n "sym: '(ereread|ereadctl|erback|erbctl)'" apps/benchmark/dataset/synthetic.ts
 ```
 
-Command: `rg -n "sym: '(ereread|ereadctl|erback|erbctl)'" apps/benchmark/dataset/synthetic.ts`.
+The line numbers that command printed are not reproduced here: the dataset is appended to every
+round, so a pasted line number rots within days while the four row ids in
+`apps/benchmark/results/results.json` (`synthetic:<sym>:agbcc`) do not renumber.

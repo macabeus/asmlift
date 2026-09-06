@@ -13,7 +13,7 @@
 //     to a warning (the same WIP-machine escape hatch; CI and fresh setups stay strict)
 //   - offline (remote unreachable) fallback: accept a HEAD that DESCENDS from the vendored
 //     PROVENANCE commit, warning that remote verification was skipped.
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -37,14 +37,20 @@ export interface CheckoutStatus {
 
 const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
 
-export function git(dir: string, args: string): string {
-  return execSync(`git -C ${JSON.stringify(dir)} ${args}`, { encoding: 'utf8', env: GIT_ENV }).trim();
+/** Every `git` this harness runs, in ONE spelling: an ARGV array through `execFileSync`, never a
+ *  string through a shell. One discipline per area beats per-call-site judgement about which
+ *  arguments happen to need `JSON.stringify` — the inputs here are in-repo manifests and
+ *  `ASMLIFT_PROJ_*` paths, and a path with a space in it is the failure that actually happens.
+ *  Throws (like `execSync`) when git exits nonzero, which is how the `--is-ancestor` and
+ *  `cat-file -e` callers read their answer. */
+export function git(dir: string, args: readonly string[]): string {
+  return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', env: GIT_ENV }).trim();
 }
 
 /** The fork's branch head via `git ls-remote`, or null when the remote is unreachable. */
 export function remoteBranchHead(repo: string, branch: string): string | null {
   try {
-    const out = execSync(`git ls-remote https://github.com/${repo}.git refs/heads/${branch}`, {
+    const out = execFileSync('git', ['ls-remote', `https://github.com/${repo}.git`, `refs/heads/${branch}`], {
       encoding: 'utf8',
       env: GIT_ENV,
       timeout: 30_000,
@@ -79,15 +85,15 @@ export function checkoutStatus(man: RealManifest, lookupRemote: RemoteLookup = r
   if (!existsSync(join(dir, '.git'))) {
     return { project: man.project, dir, present: true }; // present but not a git checkout
   }
-  const head = git(dir, 'rev-parse HEAD');
-  const dirty = git(dir, 'status --porcelain') !== '';
+  const head = git(dir, ['rev-parse', 'HEAD']);
+  const dirty = git(dir, ['status', '--porcelain']) !== '';
   const remoteHead = lookupRemote(man.repo, man.branch);
   const st: CheckoutStatus = { project: man.project, dir, present: true, head, dirty, remoteHead };
   if (remoteHead === null) {
     const prov = provenanceCommit(man.project);
     if (prov) {
       try {
-        execSync(`git -C ${JSON.stringify(dir)} merge-base --is-ancestor ${prov} HEAD`, { env: GIT_ENV });
+        git(dir, ['merge-base', '--is-ancestor', prov, 'HEAD']);
         st.descendsFromProvenance = true;
       } catch {
         st.descendsFromProvenance = false;

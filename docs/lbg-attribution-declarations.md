@@ -18,6 +18,12 @@ Columns remain within their own basin. No alignment-pad subtraction is applied.
 | merge-pointers     |       108 |       116 |       205 |       210 |
 | address-sp4        |       277 |       265 |       291 |       291 |
 
+Every cell above is a line in `scripts/lbg-declarations/scores.jsonl`, keyed
+`<variant>-<basin>-<plus|minus>.o` by its `path` field, and the Observed-homes table below is
+`scripts/lbg-declarations/homes.json` keyed the same way. Both are committed outputs of the driver
+in that directory, so either table can be rechecked against its own evidence without a compiler
+and without rerunning the study.
+
 `add-unused` inserts an unused s32 before sp4. `move-pointer-block` moves temp_r8 into its branch (the reverse operation is the baseline). `reverse-stack` reverses only the six stack local declarations. `split-var-r3` separates the initial table index from the later loop induction variable. `merge-pointers` removes temp_r8 and gives both mutually exclusive branches one u8* sp8. `address-sp4` adds a volatile pointer initialized to &sp4; this is explicitly an address-escape intervention, not a declaration-only edit. Split and merge likewise rewrite the affected uses.
 
 Adding an unused declaration and changing pointer scope leave all four scores unchanged. Reversing spilled declarations loses 33 symbol rows and 21 raw rows in each FAKE condition. Splitting is neutral with FAKE but loses 185 symbol / 120 raw rows without FAKE. These interventions do not yield a new improving lever. The split without FAKE moves the loop’s var_r3 from r3 to r4 (both basins); this changes value identity and optimized live ranges, so it does not falsify the earlier declaration-permutation null. Reversing the six spills preserves all six register-named homes. Compiled-assembly comparison finds exactly 34 changed lines in each symbol condition and 35 in each raw condition, all exclusively `[sp, #offset]` operands; line counts, register tokens and literal-pool lines are identical. These are source-assembly line counts, not objdiff rows.
@@ -69,16 +75,17 @@ Address-taking also introduces an observable volatile pointer store, so its scor
 
 The companion `scripts/lbg-declarations/` directory preserves the author reference, variant generator, compile driver, raw score JSONL and parsed home JSON. Run `generate.py` then `compile.py` from the benchmark checkout. The compile driver requires `LBG_TRACE_COMPILER` to name the separately instrumented compiler copy; it never writes the real toolchain. Score using `node --import tsx scripts/lbg-declarations/score.mts <benchmark>/build/src/gfx.o <scratch>/*.o` from the asmlift worktree. All generated files live under `LBG_STUDY_DIR`. The compiler agent separately records instrumentation neutrality and the real-toolchain checksum manifest.
 
-Reproduction asset check: generating into a fresh scratch directory produced 29 C variants byte-identical to the measured sources. The additional measured `plain.c` is the same source as `baseline-sym-plus.c`.
+Reproduction asset check: generating into a fresh scratch directory produced 29 C variants byte-identical to the measured sources. The additional measured `plain.c` is the same source as `baseline-sym-plus.c`. That check was made before `reference.c` grew its provenance header; because `generate.py` copies the reference's text verbatim, a variant generated today differs from the measured source by exactly those comment lines and by nothing else — verified by generating both sets and diffing them, and the header cannot reach the preprocessed unit a compile reads.
 
-Existing row presence (not a new outcome claim):
+Existing row presence (not a new outcome claim) — all three rows are in the dataset; re-check with
 
-```text
-$ rg -n "sym: '(spillorder|spillorder_rev|outparam)'" apps/benchmark/dataset/synthetic.ts
-853:    sym: 'spillorder',
-864:    sym: 'spillorder_rev',
-5657:    sym: 'outparam',
+```sh
+rg -n "sym: '(spillorder|spillorder_rev|outparam)'" apps/benchmark/dataset/synthetic.ts
 ```
+
+The line numbers that command printed are not reproduced here: the dataset is appended to every
+round, so a pasted line number rots within days while the row ids in
+`apps/benchmark/results/results.json` (`synthetic:<sym>:agbcc`) do not renumber.
 
 Every one of the 30 measured variants was recompiled with the real compiler, instrumented copy with tracing off, and tracing on. All 30 assembly comparisons passed (the compile driver’s appended `.text/.align` footer was accounted for).
 

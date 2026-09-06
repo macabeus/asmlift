@@ -404,7 +404,9 @@ packages/core/            @asmlift/core — the pipeline
   src/pattern/            rewrite-patterns-as-data + the greedy driver
   src/raise/              L1→L2: recognizers (magicdiv, divpow2, softdiv, arrays, struct-arrays,
                           memberarrays, structs, shortcircuit, narrow, narrowlocal, paramwidth,
-                          retsink, latch, gvn)
+                          retsink, latch, gvn, globalshape — the one whose subject is a
+                          DECLARATION rather than an instruction shape: it reads base-vs-index
+                          order to decide whether a map-less global was declared an array)
                           + type recovery (recover.ts) — paramwidth decides a parameter's declared
                           WIDTH, so parameter types are not recover.ts's alone
   src/structure/          L2→L3: loop discovery, switch recovery, SSA destruction, emission

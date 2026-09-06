@@ -24,7 +24,7 @@ import { sha } from '../cache';
 import { makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
-import { enforceCheckoutPin } from './checkout';
+import { enforceCheckoutPin, git } from './checkout';
 import { REAL_DIR, type RealManifest, loadManifestsForVendor, resolveProjectRoot } from './manifests';
 import { resolveProjectElf } from './project-elf';
 
@@ -96,11 +96,10 @@ export async function vendor(filterProject?: string): Promise<void> {
       index[f.sym] = { tu: tuName, ctx: ctxName };
       done++;
     }
-    const git = (args: string) => execSync(`git -C ${JSON.stringify(root)} ${args}`, { encoding: 'utf8' }).trim();
     const provenance = {
       project: man.project,
-      commit: git('rev-parse HEAD'),
-      dirty: git('status --porcelain') !== '',
+      commit: git(root, ['rev-parse', 'HEAD']),
+      dirty: git(root, ['status', '--porcelain']) !== '',
       cpp: execSync(`${CPP} --version`, { encoding: 'utf8' }).split('\n')[0],
       generatedAt: new Date().toISOString(),
     };

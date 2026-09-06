@@ -120,6 +120,16 @@ export function emptySelectionError(
   );
 }
 
+/** What `stitch` did: whether `${tier}.json` was rewritten, how many rows it stitched, and — when
+ *  it declined to write — which of the two refusals fired. The caller renders both the tick and
+ *  the ` → results/<tier>.json` claim from this, so a claim about a write cannot be re-derived
+ *  into disagreeing with the write. */
+interface StitchResult {
+  wrote: boolean;
+  rows: number;
+  why?: 'no-parts' | 'no-row-selected';
+}
+
 /** Stitch `${tier}.part{0..n-1}.json` back into the canonical `${tier}.json`, delete the parts.
  *  `filtered` says a filter could have selected rows here, which makes an empty result a typo.
  *
@@ -129,7 +139,7 @@ export function emptySelectionError(
  *  them — measured, an untracked file in `packages/core` removed 40s into a 129s fanned run left
  *  the tier reading `dirty: false` while the part file it was stitched from said `dirty: true`.
  *  See ../provenance.ts for what combining does with them. */
-function stitch(tier: Tier, n: number, filtered: boolean): number {
+function stitch(tier: Tier, n: number, filtered: boolean): StitchResult {
   const results: FunctionResult[] = [];
   const stamps: ({ commit: string; dirty: boolean } | undefined)[] = [];
   let parts = 0;
@@ -147,20 +157,21 @@ function stitch(tier: Tier, n: number, filtered: boolean): number {
   if (parts === 0) {
     // every shard died before writing anything (e.g. a dataset guard threw at enumeration);
     // keep the last good canonical file instead of clobbering it with an empty set
-    return 0;
+    return { wrote: false, rows: 0, why: 'no-parts' };
   }
   if (filtered && results.length === 0) {
     // Same reason, one step earlier: a filter that selects nothing still has every shard write
     // its own (empty) part file, so this is reached with parts > 0 and the write would replace a
-    // good 240-row `real.json` with `results: []` — which is what `bench merge` reads next.
-    return 0;
+    // good, fully-measured `real.json` with `results: []` — which is what `bench merge` reads
+    // next.
+    return { wrote: false, rows: 0, why: 'no-row-selected' };
   }
   const out: BenchOutput = {
     meta: { ...benchMeta(results), asmlift: combineProvenance(stamps, asmliftProvenance()) },
     results,
   };
   writeFileSync(join(RESULTS_DIR, `${tier}.json`), JSON.stringify(out, null, 2));
-  return results.length;
+  return { wrote: true, rows: results.length };
 }
 
 /** Tiers are enqueued in this order (any tier not named keeps its `--tier` order, after these).
@@ -254,23 +265,31 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
     failedShards += failed;
     const skips = mine.reduce((sum, o) => sum + o.skips, 0);
     const filtered = tierIsFiltered(tier, opts);
-    const n = stitch(tier, opts.jobs, filtered);
+    const stitched = stitch(tier, opts.jobs, filtered);
+    const n = stitched.rows;
     if (filtered) {
       selected = (selected ?? 0) + n;
     }
     const s = span.get(tier);
     const secs = (((s?.t1 ?? 0) - (s?.t0 ?? 0)) / 1000).toFixed(1);
     // A skip total belongs on the tier line, not only in the scrollback: an absent toolchain
-    // costs whole projects (marioparty3's 40 rows) and `bench regression` reads them as MISSING.
+    // costs whole projects and `bench regression` reads them as MISSING.
     const skipNote = skips ? ` — ⚠ ${skips} row(s) SKIPPED, toolchain unavailable` : '';
-    // `→ results/<tier>.json` is a claim about a write, so it goes only where one happened.
-    const empty = filtered && n === 0;
-    if (empty) {
+    // `→ results/<tier>.json` is a claim about a WRITE, and it is now the same value the write
+    // path returned rather than a second derivation of it — the two disagreed for a tier whose
+    // shards all died, which reported the file rewritten when `stitch` had deliberately left the
+    // last good one in place.
+    // Only a FILTER that selected nothing makes a tier `untouched`: a tier whose shards wrote no
+    // part file was not left alone because `--only` matched nothing, and `emptySelectionError`
+    // must not name it as evidence that it did.
+    if (stitched.why === 'no-row-selected') {
       untouched.push(tier);
     }
-    const wrote = empty ? ` — no row selected, results/${tier}.json left unchanged` : ` → results/${tier}.json`;
+    const wrote = stitched.wrote
+      ? ` → results/${tier}.json`
+      : ` — ${stitched.why === 'no-row-selected' ? 'no row selected' : 'no shard wrote a part file'}, results/${tier}.json left unchanged`;
     console.log(
-      `${failed ? '✗' : empty ? '–' : '✓'} ${tier}: ${n} results in ${secs}s${failed ? ` (${failed} shard(s) exited nonzero)` : ''}${wrote}${skipNote}`,
+      `${failed ? '✗' : stitched.wrote ? '✓' : '–'} ${tier}: ${n} results in ${secs}s${failed ? ` (${failed} shard(s) exited nonzero)` : ''}${wrote}${skipNote}`,
     );
   }
   if (failedShards > 0) {

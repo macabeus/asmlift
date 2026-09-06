@@ -24,21 +24,23 @@ export const JUDGEMENT = idsOf('judgement');
 
 export { KNOWN_FEATURES };
 
-/** A NECESSARY condition for a JUDGEMENT tag: failing it makes the tag indefensible.
- *
- *  "Is this *bulk* memory movement?" cannot be decided by a regex, so the sufficient condition
- *  stays with the reviewer — but most tags have a floor that can be, and checking it catches
- *  fabrications without pretending the judgement is mechanical.
- *
- *  `global`, `memory`, `union`, `bitfield`, `pointer` and the type-ish tags have NO reliable floor
- *  and are absent on purpose: kleod spells several globals as address macros
- *  (`#define gStreamPtr (*(u8**)0x03004D84)`), which emit a raw `.word` rather than a symbol, and
- *  `union`/`bitfield` need the project's headers to resolve. */
 /** A `struct`/`union` DEFINITION's members are not locals. The body a floor is handed starts at
  *  the first `{` in `src`, which for a row opening with an aggregate definition is the
  *  aggregate's brace — so the members would otherwise be counted as declaration statements. */
 const withoutAggregates = (b: string): string => b.replace(/\b(?:struct|union)\b[^{;]*\{[^{}]*\}/g, ' ');
 
+/** A NECESSARY condition for a JUDGEMENT tag: failing it makes the tag indefensible.
+ *
+ *  "Is this *bulk* memory movement?" cannot be decided by a regex, so the sufficient condition
+ *  stays with the reviewer — but a tag with a floor that can be checked is checked, which catches
+ *  fabrications without pretending the judgement is mechanical.
+ *
+ *  A judgement tag is listed here only when a floor would REFUSE something; the rest are absent on
+ *  purpose, and which those are is `JUDGEMENT` minus `Object.keys(JUDGEMENT_FLOOR)` rather than a
+ *  list restated in prose. Two of the reasons, so the shape of the absence is on the record:
+ *  kleod spells several globals as address macros (`#define gStreamPtr (*(u8**)0x03004D84)`),
+ *  which emit a raw `.word` rather than a symbol, and `union`/`bitfield` need the project's
+ *  headers to resolve. */
 export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: string) => boolean> = {
   arithmetic: (b) => /[+%]|(?<!-)-(?!>)|(?<!\/)\/(?![/*])|\*/.test(b),
   array: (b) => /\[/.test(b),
