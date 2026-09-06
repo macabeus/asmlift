@@ -634,7 +634,16 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  exemption already made once, and not one to make for a class with no inhabitant. rank.ts offers this row only where
  *  `compilerBehaviors.arrayShapeFromStride` — the same opt-in the licence itself carries, because
  *  the fork is agbcc's and no other compiler has been shown to make it.
- */
+ *
+ *  ITS REACH IS A FUNCTION OF THE SYMBOL MAP, and unevenly so — a sweep that runs one arm is
+ *  evidence about that arm only. Over every cleanly-lifting function of the two agbcc corpora:
+ *  klonoa binds 9 of 69 map-ful and ZERO map-less, sa3 29 of 1709 map-less and 30 map-ful.
+ *  The klonoa collapse is THIS GATE and not a missing base: ablating `order-licensed` admits 35
+ *  map-less klonoa functions where the full table admits none — so the bases are collected and it
+ *  is the ORDER EVIDENCE that map-less klonoa does not carry. Why the evidence depends on the map is not
+ *  attributed here; instrument `collect`'s `ordered` before assuming. What follows for a reader
+ *  either way: a klonoa row carrying no symbol map exercises nothing in this table, and its whole
+ *  family — the `scope` placement included — is carried on that project by the map-ful arm alone. */
 export const ORDERBASE_GATES: readonly Gate<BaseKey>[] = [
   ...ablateHeuristic(ablateHeuristic(BASECSE_GATES, 'cast-base'), 'single-use'),
   {

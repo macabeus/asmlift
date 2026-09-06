@@ -17,22 +17,25 @@
 // The lever earns its place: returning `null` from `hoistScopedBases` costs
 // kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.
 //
-// `l3/basecse.ts` already hoists a reused leaf base — but only into the TOP-LEVEL statement list
-// (the function top, or an init's first use where a roster row asks `l3/hoist.ts` for that), never
-// into a nested scope, and only for an `addr`/`const` base. Both limits are load-bearing here, and
-// each costs a real row:
+// `l3/basecse.ts` already hoists a reused leaf base — at three positions now, of which two are in
+// the TOP-LEVEL statement list (the function top, or an init's first use where a roster row asks
+// `l3/hoist.ts` for that) — and only for an `addr`/`const` base. What is left to this file is one
+// half of the placement question and the whole of eligibility:
 //
-//   PLACEMENT. A base used only inside one `if` arm is live across everything before that arm
-//   under either of basecse's positions — a live range the original never had, which is the
-//   register-pressure failure basecse's own loop gate exists for. First-use placement narrows that
-//   range and does not close it: the init still lands ABOVE the `if`, because sinking INTO the arm
-//   is what needs the domination work this pass does. That argument is why the lever is
+//   PLACEMENT — NARROWED, NOT OWNED. A base used only inside one `if` arm is live across everything
+//   before that arm under either of basecse's FLAT positions — a live range the original never had,
+//   which is the register-pressure failure basecse's own loop gate exists for. First-use placement
+//   narrows that range and does not close it: the init still lands ABOVE the `if`. `l3/hoist.ts`'s
+//   third placement, `scope`, now does close it for the run basecse places, so "into a nested list"
+//   is no longer this file's alone; what stays here is the base this file can SEE (below) and the
+//   COUNT question (`REGION_RULES`), which no placement answers. That argument is why the lever is
 //   scope-aware; it is NOT a claim about what the lever achieves, and no committed measurement
-//   separates the two placements (the one that did edited a reference source by hand and cannot
-//   be re-run). On kleod:UpdateHUDCounterDisplay the primary path declines outright (a later pass
-//   retired the phi it keyed on, so the base's uses span the function body), and the cluster
-//   fallback below is what recovers it. basecse's header already names the gap — "a loop-body
-//   base is left inline for a future scope-aware hoist" — and this is that hoist.
+//   separates basecse's two flat placements (the one that did edited a reference source by hand and
+//   cannot be re-run). On kleod:UpdateHUDCounterDisplay the primary path declines outright (a later
+//   pass retired the phi it keyed on, so the base's uses span the function body), and the cluster
+//   fallback below is what recovers it. basecse's header names a LOOP-BODY base as left inline for
+//   a future scope-aware hoist, and this is that hoist: `scope` cannot serve one, because every
+//   gate table paired with it keeps the `loop` rule that refuses the base outright.
 //
 //   ELIGIBILITY. With a symbol map that states an array's RANK, the access renders as the bare
 //   `gSym[0][i]`, whose base node is a `var` naming the global, not an `addr`. basecse's
@@ -247,7 +250,20 @@ function collect(
  *  Null is NOT a decline any more: the caller falls through to `deepestCluster`. Kept as a distinct
  *  answer because "one scope holds everything" is the better shape when it exists — every use is
  *  named, not just a cluster. The consolidation this file still owes would make both of these one
- *  selector parameter over a single collected index. */
+ *  selector parameter over a single collected index.
+ *
+ *  A THIRD ANSWER TO THE SAME QUESTION now exists and is booked here rather than left for a reader
+ *  to collide with: `l3/hoist.ts`'s `scopeSite` finds the innermost list holding every MENTION of a
+ *  minted local, top-down, with no cluster fallback. The two are not merged, and the reason is the
+ *  domain rather than the algorithm — this one partitions the ACCESSES of a base key it is about to
+ *  repoint, that one places a statement whose local already exists, so a shared implementation
+ *  would take the collected index this file owes anyway. THE ONE DIVERGENCE TO CARRY INTO THAT
+ *  EXTRACTION is the `for` reading recorded in `collect`: a `for`'s `init` counts at the enclosing
+ *  cadence here and in-loop there (`stmtChildren`), and only the older pair's two readings are
+ *  pinned (test/addr-placement.test.ts). The new one is pinned only for the answer it gives —
+ *  `init`/`inc` are statements no list holds, so a mention in either stops the descent
+ *  (test/sinkinit.test.ts) — which is the same conclusion by a different route and not a check that
+ *  the two agree. */
 function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
   const first = uses[0].path;
   let depth = 0;

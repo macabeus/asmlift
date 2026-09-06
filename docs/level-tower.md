@@ -293,7 +293,14 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   "is this address a local?", and what separates them is PLACEMENT: never (`raise/gvn.ts`), a
   position in the top-level statement list — the function top, the minted inits above a run already
   there, or each init at its first use (`l3/basecse.ts`, `l3/nearbase.ts`, `l3/sinkinit.ts`) — the
-  innermost enclosing scope (`l3/scopebase.ts`), immediately before the call (`l3/argbase.ts`).
+  innermost enclosing scope (`l3/scopebase.ts`, and `l3/basecse.ts` too at `l3/hoist.ts`'s third
+  placement, which sinks the run it places INTO the block holding every use), immediately before the
+  call (`l3/argbase.ts`). The two scope-aware ones are separated by what they can SEE rather than by
+  where they put it: `scopebase` plans its own locals over `addr`/`const`/`var` leaf bases, while the
+  `scope` placement moves a run already minted, over the cast base no leaf pass can spell. A
+  placement that lands nothing in a nested list has emitted the flat spelling under a second label,
+  so `hoistBaseLocals` declines there rather than offering it — the roster's dedup rule for base
+  SETS, applied to positions.
   `l3/scopebase.ts` also answers a SECOND question the others do not have, and it is a different
   axis from placement: HOW MANY locals one address gets. Its `REGION_RULES` carry both readings —
   `'whole'` gives a key one local (`/scopebase`), `'per-region'` one per disjoint region
