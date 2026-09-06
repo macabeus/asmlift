@@ -24,7 +24,8 @@
 // only `/livebase` ⊇ `/livebase-block` are ordered by inclusion. A table
 // whose predicate cuts across the others therefore carves out a PARTIAL answer, which is what
 // `UNFOLDED_GATES` does. Measured at ONE stated scope, `decompile()`'s default structuring,
-// map-less, one tree per row over the artifact's 363 agbcc rows (23 unstructurable):
+// map-less, one tree per row over the 363 agbcc rows the artifact carried when the census ran
+// (23 unstructurable):
 // `admittedBases(sfn, UNFOLDED_GATES)` is a PROPER NONEMPTY SUBSET of
 // `admittedBases(sfn, LIVEBASE_GATES)` on THIRTEEN of them — `kleod:ConfigureEntityBehavior` 3→2,
 // `kleod:ProcessInputAndUpdateEntities` 7→5, `kleod:UpdateCameraScroll` 5→2,
@@ -307,7 +308,8 @@ export interface BaseKey {
    *      the addend baked in — but not through THIS field, and no field carries it.
    *
    *      HOW BIG THE INVERTED CLASS IS, at ONE stated scope — `decompile()`'s default structuring,
-   *      map-less, one tree per row over the artifact's 363 agbcc rows (23 unstructurable):
+   *      map-less, one tree per row over the 363 agbcc rows the artifact carried when the census
+   *      ran (23 unstructurable):
    *      `folded-offset` ADMITS 43 keys and ZERO of them have every nonzero displacement past the
    *      range for their width, so the inverted class has no corpus inhabitant at this scope; it
    *      REJECTS 40, of which 36 have no nonzero constant displacement at all (the two documented
@@ -542,8 +544,8 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
  *  `LIVEBASE_BLOCK_GATES` are lattice-INCOMPARABLE: a block walk with no constant displacement
  *  (`varIndexed`, so not `singleCell`; offset 0, so no `unfoldedOffset`) is bound by that table
  *  and refused by this one, and a scalar cell at a surviving offset is the reverse. Censused at
- *  `decompile()`'s default structuring, map-less, over the artifact's 363 agbcc rows (23
- *  unstructurable): 8 keys on 7 functions go to `/livebase-block` alone and 5 keys on 5 functions
+ *  `decompile()`'s default structuring, map-less, over the 363 agbcc rows the artifact carried
+ *  when the census ran (23 unstructurable): 8 keys on 7 functions go to `/livebase-block` alone and 5 keys on 5 functions
  *  to this table alone, and `kleod:ProcessInputAndUpdateEntities` crosses BOTH ways on one tree.
  *  That is why `sameBases` compares sets and never subsets (see COVERAGE in the header).
  *

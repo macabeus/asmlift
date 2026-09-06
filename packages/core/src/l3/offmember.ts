@@ -111,7 +111,8 @@
 // folded one and kept the other in the operand has no reachable spelling — the coverage hole
 // `l3/ptrfield.ts` measures for its fields. `l3/basecse.ts` is NOT a second witness to it but the
 // counterexample: its `UNFOLDED_GATES` cuts across `LIVEBASE_BLOCK_GATES` rather than refining it,
-// so a partial answer IS reachable there — a proper nonempty subset on 13 of its 363 agbcc rows,
+// so a partial answer IS reachable there — a proper nonempty subset on 13 of the agbcc rows the
+// artifact carried when that census ran,
 // one of three bases on `synthetic:dmascope` — and that is the way out of this hole too: not a
 // per-base fork, but a SECOND PREDICATE separating the bases the differ has to choose between.
 // The per-base fork is 2^n and the family's standing price for forking ten refusal sites per site
