@@ -188,3 +188,20 @@ and failed 49 tests (7 RPC errors); affected-file retries reduced this to the is
 `nearbase rides at BOTH orderings` 5-second timeout, which still failed alone. No test
 deadline or assertion was changed. These failures prevent claiming the required unmodified
 root gate is green, despite the earlier complete 3,370-test supplemental pass.
+
+After rebase onto `5efc34cc`, the required unmodified `npx vitest run` completed with
+**201 files: 184 passed / 17 failed; 3,388 tests: 3,355 passed / 33 failed; seven
+`onTaskUpdate` RPC errors; exit 1**, in 632.24 seconds. Reported failures were test or
+hook timeouts. A subsequent full root-config rerun using the earlier one-worker workaround
+was **stopped at the user’s request to skip the complete suite and document it**. Its partial
+passes are not a completed gate. No further complete-suite retry is planned, and the required
+unmodified root suite is explicitly not reported as passing. Logs remain in the worktree’s
+ignored `apps/benchmark/results/root-rebased.log` and `root-serial-rebased.log`.
+
+The post-rebase `pnpm test:matching` attempt was also **stopped at the user’s explicit
+request to skip matching tests and document it**. No post-rebase matching pass is claimed.
+The earlier 354-test pass above belongs to the pre-rebase tree. The interrupted log is
+`apps/benchmark/results/matching-rebased.log`; no further matching run is planned.
+
+Post-rebase `pnpm typecheck`, `pnpm lint` (zero errors, 109 existing warnings), and
+`pnpm format` completed successfully.
