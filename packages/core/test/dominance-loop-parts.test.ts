@@ -81,9 +81,8 @@ describe('the dominance walk reads a loop as a loop', () => {
 describe('an ADDRESS taken of a hoisted local is a use the walk must see', () => {
   // The placing passes count `&p` as a mention (l3/hoist.ts) — an init has to precede the address
   // being taken as surely as it must precede a read, because the address is what a callee reads
-  // through. A dominance walk that counted only `var` was strictly weaker than the descent it
-  // guards, so the one placement whose result is not above every use by construction had a net
-  // with a hole in exactly the position the descent refuses to cross.
+  // through. A walk that counted only `var` would be weaker than the descent it guards, in exactly
+  // the position that descent refuses to cross.
   const held = (body: Stmt[]): SFn => ({ ...fn(body), locals: [{ name: 'p0', type: T.ptr(T.u(8)) }] });
   const takeAddr: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'p0' }] } };
   const def: Stmt = { k: 'assign', name: 'p0', value: { k: 'const', value: 0x3001100 } };

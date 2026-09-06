@@ -473,9 +473,9 @@ describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', 
 
   test('the domination check judges what MOVED, inherited inits included — not only what was minted', () => {
     // `hoistBaseLocals` inherits the leading run `structureChecked` already committed (pipeline.ts)
-    // and `scope` moves those inits too. Judging only the minted names left every inherited one
-    // argued rather than checked; `moved` is the placer's own report of the motion, so the check's
-    // population is the motion by construction.
+    // and `scope` moves those inits too, so the minted names are less than half the population.
+    // `moved` is the placer's own report of the motion, which makes the check's population the
+    // motion by construction.
     const sfn = fn(
       [init('p0', 0x3001100), plain(), { k: 'if', cond: c(1), then: [read('p0', 1), read('p1', 2)], else: [] }],
       [
@@ -531,9 +531,8 @@ describe('`scope` descends through every construct that opens a list, not just `
   test('a `for` whose `init` IS one of its body statements keeps the hoist above the loop', () => {
     // Nothing in the L3 contract forbids one `Stmt` object sitting at two tree positions
     // (l3/scopebase.ts records a producer that shares an expression node), and a `for` is the one
-    // kind whose children are not all in the lists it opens. Were the descent to subtract the
-    // opened lists by IDENTITY, the shared statement would read as opened, the mention in the
-    // `init` — which runs before the body — would go unseen, and the init would sink below it.
+    // kind whose children are not all in the lists it opens — so the mention its `init` makes
+    // before the body runs is only seen if the opened lists are subtracted as a multiset.
     const shared = read('p0', 1);
     const loop: Stmt = { k: 'for', init: shared, cond: c(1), inc: plain(), body: [shared] };
     const sfn = around(loop);

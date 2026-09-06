@@ -321,7 +321,7 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
   const readUndominated = (e: Expr, live: ReadonlySet<string>): string | null => {
     // `&p` COUNTS, the same mention the placing passes query on (l3/hoist.ts): the address is what
     // a callee reads the cell through, so an init has to precede it as surely as it must precede a
-    // read. Counting only `var` here made this walk strictly weaker than the descent it guards.
+    // read.
     if ((e.k === 'var' || e.k === 'addr') && minted.has(e.name) && !live.has(e.name)) {
       return e.name;
     }

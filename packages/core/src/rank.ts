@@ -612,10 +612,9 @@ const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *  scoped row that answered there would ship the withheld candidate under this row's name — and it
  *  is the COMMON case, not the corner: over each project's whole `asm` tree, map-ful, of the 48
  *  functions this gate table admits, 41 place every init in the top-level list and only 7 reach a
- *  nested one. `hoistBaseLocals` DECLINES at `scope` in exactly that case (l3/basecse.ts). That is
- *  the roster's dedup rule read onto a POSITION rather than a base set, but only in its intent: on
- *  29 of the 41 the flat spelling is one no other row here produces, so the decline WITHDRAWS a
- *  candidate rather than collapsing a duplicate, and l3/basecse.ts's header prices it. Measured on
+ *  nested one. `hoistBaseLocals` DECLINES at `scope` in exactly that case (l3/basecse.ts) — a
+ *  WITHDRAWAL and not a dedup, because on 29 of the 41 the flat spelling is one no other row here
+ *  produces, which that file's header prices. Measured on
  *  `kleod:UpdateCameraScroll` map-ful, the row that priced the withheld one: 512 of its 512
  *  `/orderbase/scoped` sources placed the init at the top level, and all 512 are gone.
  *
@@ -1616,11 +1615,11 @@ export function enumerateCandidates(
           // mint contributes no name, so the shape differential does not judge it. The `scope`
           // placement is the one that does this — it sinks the run `structureChecked` already
           // committed (l3/basecse.ts judges those itself, over the placer's own report of the
-          // motion) — and closing it here needs that report threaded out to this level. Left open
-          // rather than widened to every relocated local: judging those absolutely would drop
-          // candidates across the whole fan with nothing measured to license it. What keeps it
-          // uninhabited today is `initFirstGuards`, which moves only const or pure-read assigns and
-          // so cannot lift a read of a base local above its init.
+          // motion) — and closing it here needs that report threaded out to this level. Not widened
+          // to every relocated local instead: judging those would drop candidates across the whole
+          // fan with nothing measured to license it. What keeps it uninhabited is `initFirstGuards`,
+          // which moves only const or pure-read assigns and so cannot lift a read of a base local
+          // above its init.
           const minted = createdLocals(sfn, alt);
           for (const subset of SHAPE_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.

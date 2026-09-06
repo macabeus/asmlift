@@ -635,9 +635,9 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  `compilerBehaviors.arrayShapeFromStride` — the same opt-in the licence itself carries, because
  *  the fork is agbcc's and no other compiler has been shown to make it.
  *
- *  ITS REACH IS A FUNCTION OF THE SYMBOL MAP, and unevenly so — a sweep that runs one arm is
- *  evidence about that arm only, and one that runs a subtree is evidence about the subtree. Over
- *  every cleanly-lifting function of each project's WHOLE `asm` tree, `asm/matchings` included:
+ *  ITS REACH IS A FUNCTION OF THE SYMBOL MAP, and unevenly so — a sweep is evidence about the arm
+ *  and the subtree it ran over, so both are stated. Over every cleanly-lifting function of each
+ *  project's WHOLE `asm` tree, `asm/matchings` included:
  *  klonoa binds 18 of 284 map-ful and ZERO map-less, sa3 30 of 1709 map-ful and 29 map-less.
  *  The klonoa collapse is THIS GATE and not a missing base: ablating `order-licensed` admits 118
  *  map-less klonoa functions where the full table admits none — so the bases are collected and it
@@ -720,18 +720,15 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
  *  `first-use` row for this table deliberately (rank.ts, ORDERBASE_ADMISSIONS) — so returning it
  *  ships the withheld candidate under the scoped row's name.
  *
- *  IT WITHDRAWS A SPELLING, it does not collapse a duplicate, and a reader pricing this decline has
- *  to read it that way. `ORDERBASE_ADMISSIONS` holds exactly two rows, `head` and `scope`, so
- *  nothing on the roster is ever enumerated at `first-use` for this table and the refused tree has
- *  no twin to be deduplicated against — its shape and `/volatile` products go with it. Checked
- *  rather than argued: on `kleod:StreamCmd_SetBGScroll` (fan 11) and `sa3:sub_808A4EC` (fan 40),
- *  both map-ful and both degenerate here, the `head` source is among the candidates
- *  `enumerateCandidates` returns and the withheld `first-use` source is not.
- *
- *  Over each project's whole `asm` tree, map-ful: 41 of the 48 functions `ORDERBASE_GATES` admits
- *  emit a flat spelling under `scope` and only 7 place an init inside a nested list. For 29 of the
- *  41 that flat spelling differs from the `head` row's, so those are the withdrawals; the other 12
- *  spell what `head` already ships. */
+ *  IT WITHDRAWS A SPELLING RATHER THAN COLLAPSING A DUPLICATE, which is what the decline costs.
+ *  `ORDERBASE_ADMISSIONS` holds exactly two rows, `head` and `scope`, so nothing is ever enumerated
+ *  at `first-use` for this table and the refused tree has no twin to fold into — its shape and
+ *  `/volatile` products go with it. Over each project's whole `asm` tree, map-ful: of the 48
+ *  functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do not, and for
+ *  29 of the 41 the refused spelling is one the `head` row does not already produce. Instrumented
+ *  on two of those — `kleod:StreamCmd_SetBGScroll` (fan 11) and `sa3:sub_808A4EC` (fan 40), both
+ *  map-ful — where the `head` source is among the candidates `enumerateCandidates` returns and the
+ *  withheld `first-use` source is not. */
 export function hoistBaseLocals(sfn: SFn, gates?: readonly Gate<BaseKey>[], placement?: 'head' | 'first-use'): SFn;
 export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[], placement: HoistPlacement): SFn | null;
 export function hoistBaseLocals(
@@ -781,7 +778,7 @@ export function hoistBaseLocals(
   // without the second.
   const { body, moved, nested } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
   // DEGENERATE SCOPE IS A DECLINE, not a candidate: nothing reached a nested list, so this is the
-  // `first-use` tree and the header above says why offering it is wrong.
+  // `first-use` tree, which this function's header prices.
   if (placement === 'scope' && nested.length === 0) {
     return null;
   }
@@ -793,8 +790,8 @@ export function hoistBaseLocals(
   //
   // THE POPULATION IS THE MOTION, and `moved` is what the placer says it moved rather than what this
   // function minted. The leading run this pass inherits is the DEFAULT hoist's, committed by
-  // `structureChecked` before rank's levers see the tree (pipeline.ts) — `scope` moves those inits
-  // too, and judging only `newLocals` left every one of them argued. Real inhabitants, in the
+  // `structureChecked` before rank's levers see the tree (pipeline.ts), and `scope` moves those
+  // inits too — so `newLocals` names less than half of what has to be judged. Real inhabitants, in the
   // CHECKOUTS rather than in a benchmark row — `DecompressAndLoadLevel` in klonoa and `sub_8052474`
   // in sa3, both map-ful — each sink one inherited `p0` beside the minted `p1`.
   if (placement === 'scope') {

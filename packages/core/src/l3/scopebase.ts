@@ -258,12 +258,12 @@ function collect(
  *  domain rather than the algorithm — this one partitions the ACCESSES of a base key it is about to
  *  repoint, that one places a statement whose local already exists, so a shared implementation
  *  would take the collected index this file owes anyway. THE ONE DIVERGENCE TO CARRY INTO THAT
- *  EXTRACTION is the `for` reading recorded in `collect`: a `for`'s `init` counts at the enclosing
- *  cadence here and in-loop there (`stmtChildren`), and only the older pair's two readings are
- *  pinned (test/addr-placement.test.ts). The new one is pinned only for the answer it gives —
- *  `init`/`inc` are statements no list holds, so a mention in either stops the descent
- *  (test/sinkinit.test.ts) — which is the same conclusion by a different route and not a check that
- *  the two agree. */
+ *  EXTRACTION is the `for` reading `collect` records above: this pass counts a `for`'s `init` at
+ *  the enclosing cadence, `l3/basecse.ts`'s own census counts it in-loop, and only those two
+ *  readings are pinned (test/addr-placement.test.ts). `scopeSite` is a THIRD reader of the same
+ *  position and agrees with this pass — `init`/`inc` are statements no list holds, so a mention in
+ *  either stops the descent (test/sinkinit.test.ts) — but by its own route, and nothing checks that
+ *  the two keep agreeing. */
 function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
   const first = uses[0].path;
   let depth = 0;
