@@ -726,9 +726,9 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
  *  `/volatile` products go with it. Over each project's whole `asm` tree, map-ful: of the 48
  *  functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do not, and for
  *  29 of the 41 the refused spelling is one the `head` row does not already produce. Instrumented
- *  on two of those — `kleod:StreamCmd_SetBGScroll` (fan 11) and `sa3:sub_808A4EC` (fan 40), both
- *  map-ful — where the `head` source is among the candidates `enumerateCandidates` returns and the
- *  withheld `first-use` source is not. */
+ *  on two of those, both map-ful — the `kleod:StreamCmd_SetBGScroll` row (fan 11), and
+ *  `sub_808A4EC` in the sa3 checkout, which is no row here (fan 40) — where the `head` source is
+ *  among the candidates `enumerateCandidates` returns and the withheld `first-use` source is not. */
 export function hoistBaseLocals(sfn: SFn, gates?: readonly Gate<BaseKey>[], placement?: 'head' | 'first-use'): SFn;
 export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[], placement: HoistPlacement): SFn | null;
 export function hoistBaseLocals(
