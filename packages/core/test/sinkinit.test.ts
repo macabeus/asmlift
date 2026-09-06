@@ -100,13 +100,13 @@ describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)
   // nearbase.ts's abstention from the ordering, pinned separately below.
   const named = (name: string, addr: number): BaseInit => init(name, addr) as BaseInit;
 
-  test('`head` keeps the run at the top; `first-use` moves what it can, and says how much moved', () => {
+  test('`head` keeps the run at the top; `first-use` moves what it can, and NAMES what moved', () => {
     const body = [init('p0', 0x3001100), plain(), plain(), read('p0', 2)];
     const sfn = fn(body);
-    expect(placeBaseLocals(sfn, [], 'head')).toEqual({ body, moved: 0, nested: [] });
+    expect(placeBaseLocals(sfn, [], 'head')).toEqual({ body, moved: [], nested: [] });
     const sunk = placeBaseLocals(sfn, [], 'first-use');
     expect(sunk.body.map((s) => s.k)).toEqual(['store', 'store', 'assign', 'store']);
-    expect(sunk.moved).toBe(1);
+    expect(sunk.moved).toEqual(['p0']);
     // a flat placement can put nothing in a nested list, which is what `nested` is for
     expect(sunk.nested).toEqual([]);
   });
@@ -246,7 +246,7 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
     const body: Stmt[] = [named('q1', 'gQ1'), named('q0', 'gQ0'), touch('q0'), touch('p0'), touch('q1')];
     const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
     const minted = [named('p0', 'gP0')];
-    expect(placeBaseLocals(sfn, minted, 'prepend')).toEqual({ body: [...minted, ...body], moved: 0, nested: [] });
+    expect(placeBaseLocals(sfn, minted, 'prepend')).toEqual({ body: [...minted, ...body], moved: [], nested: [] });
     // …and sinking a prepend result is NOT the same as asking for `first-use` outright, because
     // the run it hands the stable sort is in prepend's order: where first use does not separate a
     // minted init from an existing one, the minted one keeps the lead `prepend` gave it. That is
@@ -369,7 +369,7 @@ describe('`scope` is the third placement: the init goes INSIDE the block holding
     const sfn = guarded([read('p0', 1), plain()]);
     expect(kinds(sfn, 'first-use')).toEqual(['store', 'assign', ['if', ['store', 'store']]]);
     expect(kinds(sfn, 'scope')).toEqual(['store', ['if', ['assign', 'store', 'store']]]);
-    expect(placeBaseLocals(sfn, [], 'scope').moved).toBe(1);
+    expect(placeBaseLocals(sfn, [], 'scope').moved).toEqual(['p0']);
   });
 
   test('the arm is entered at the FIRST use inside it, not at its top', () => {
@@ -467,5 +467,22 @@ describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', 
   test('no base admitted at all is a decline too, not the unhoisted tree under a scoped label', () => {
     expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'scope')).toBeNull();
     expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'head').body).toHaveLength(2);
+  });
+
+  test('the domination check judges what MOVED, inherited inits included — not only what was minted', () => {
+    // `hoistBaseLocals` inherits the leading run `structureChecked` already committed (pipeline.ts)
+    // and `scope` moves those inits too. Judging only the minted names left every inherited one
+    // argued rather than checked; `moved` is the placer's own report of the motion, so the check's
+    // population is the motion by construction.
+    const sfn = fn(
+      [init('p0', 0x3001100), plain(), { k: 'if', cond: c(1), then: [read('p0', 1), read('p1', 2)], else: [] }],
+      [
+        { name: 'p0', type: U8P },
+        { name: 'p1', type: U8P },
+      ],
+    );
+    const r = placeBaseLocals(sfn, [init('p1', 0x4000000) as BaseInit], 'scope');
+    expect(r.moved).toEqual(['p0', 'p1']);
+    expect(r.nested).toEqual(['p0', 'p1']);
   });
 });

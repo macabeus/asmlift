@@ -759,7 +759,7 @@ export function hoistBaseLocals(
   // The shell carries the minted DECLARATIONS and the REWRITTEN statements together: first-use
   // would not know the new names without the first, and would query the pre-rewrite accesses
   // without the second.
-  const { body, nested } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
+  const { body, moved, nested } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
   // DEGENERATE SCOPE IS A DECLINE, not a candidate: nothing reached a nested list, so this is the
   // `first-use` tree and the header above says why offering it is wrong.
   if (placement === 'scope' && nested.length === 0) {
@@ -770,8 +770,15 @@ export function hoistBaseLocals(
   // construction. `scope` puts an init inside a nested list, which is where a placing lever can ship
   // the one failure the byte differ rewards — a read of a local whose assignment does not reach it —
   // so the tree it emits is checked rather than argued (contracts.ts).
+  //
+  // THE POPULATION IS THE MOTION, and `moved` is what the placer says it moved rather than what this
+  // function minted. The leading run this pass inherits is the DEFAULT hoist's, committed by
+  // `structureChecked` before rank's levers see the tree (pipeline.ts) — `scope` moves those inits
+  // too, and judging only `newLocals` left every one of them argued. Real inhabitants:
+  // `kleod:DecompressAndLoadLevel` and `sa3:sub_8052474` each sink one inherited `p0` beside the
+  // minted `p1`.
   if (placement === 'scope') {
-    assertHoistsDominate(out, new Set(newLocals.map((l) => l.name)));
+    assertHoistsDominate(out, new Set([...newLocals.map((l) => l.name), ...moved]));
   }
   return out;
 }

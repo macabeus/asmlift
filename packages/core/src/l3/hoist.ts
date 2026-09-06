@@ -226,8 +226,9 @@ export type BaseInitPlacement = HoistPlacement | 'prepend';
  *  move would otherwise cross that other write), something in the remaining body mentions it, and
  *  it is not already sitting at the first such statement.
  *
- *  IT REPORTS WHERE THE MOTION LANDED, not just its size: `nested` names the inits that ended up in
- *  a list OTHER than the top-level one, which only `scope` can produce.
+ *  IT REPORTS THE MOTION rather than its size, and its callers judge those lists instead of arguing
+ *  about them. `moved` names every init that left the leading run; `nested` is the subset that
+ *  landed in a list OTHER than the top-level one, which only `scope` can produce.
  *
  *  `nested` empty under `scope` means the placement DEGENERATED — every init went exactly where
  *  `first-use` would have put it, so the emitted tree is that placement's spelling under a second
@@ -238,8 +239,8 @@ export function placeBaseLocals(
   sfn: SFn,
   minted: readonly BaseInit[],
   placement: BaseInitPlacement,
-): { body: Stmt[]; moved: number; nested: readonly string[] } {
-  const still = { moved: 0, nested: [] };
+): { body: Stmt[]; moved: readonly string[]; nested: readonly string[] } {
+  const still = { moved: [], nested: [] };
   const body = sfn.body;
   const { inits: head, rest } = splitLeadingBaseInits(sfn, body);
   if (head.length + minted.length === 0) {
@@ -317,7 +318,7 @@ export function placeBaseLocals(
   // computed on, and the top-level one is `rest` by identity.
   return {
     body: [...stay, ...rebuild(rest)],
-    moved: sunk.length,
+    moved: sunk.map((s) => s.init.name),
     nested: sunk.filter((s) => s.site !== rest).map((s) => s.init.name),
   };
 }
