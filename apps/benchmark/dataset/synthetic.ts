@@ -2477,9 +2477,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // that reading. Measured by compiling asmlift's own emitted C with this agbcc: moving the
   // induction variable's init copy below the guard by hand still scores 3, while deleting the
   // variable outright is byte-exact WITH the guard and WITHOUT it, both — the guard is irrelevant
-  // in either direction. `/initfirst`, the shipped guard-placement lever, has NO REACH here (64
-  // calls, 64 declines: the recovered tree carries no `if` at all), against `armfall`, where the
-  // same probe shows it firing and LOSING at 9 to the winner's 8. Two different arms of the
+  // in either direction. `/initfirst`, the shipped guard-placement lever, has NO REACH here — it
+  // declines on every call because the recovered tree carries no `if` at all (the call count is
+  // the candidate fan and moves whenever the fan does, so it is not quoted) — against `armfall`,
+  // where the same probe shows it firing and LOSING at 9 to the winner's 8. Two different arms of the
   // no-reach/loses/does-not-compose distinction, and neither is this row's residual.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by

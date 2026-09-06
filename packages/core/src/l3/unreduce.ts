@@ -152,8 +152,9 @@
 // the candidate is correct and survives (`50335396 + (v15 << 6)`, 64 bytes an iteration, which is
 // the ROM's own `adds r1, #0x40`). Same assembly, same loop, same stride — a raw-address sweep is
 // BLIND to the defect and reports the lever as correct. The checkout sweep behind that datum
-// covered klonoa's 467 functions in both configurations and sa3's 2,288 in the RAW one only, so
-// sa3 map-ful — 83% of it, and the blind arm — is unmeasured.
+// covered klonoa's 467 functions in BOTH configurations; a second checkout was swept raw-only and
+// found nothing, and since raw-only is the blind arm that null result carries no weight. Only the
+// klonoa half of the sweep is evidence, and it is quoted here without the other.
 //
 // SCOPE, stated because a decline outside it names no gate and so looks exactly like a gate that
 // refused. This pass walks TOP-LEVEL loops only: the counter's start and the accumulator's init are
@@ -556,8 +557,10 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
  *      spelling and compiles identically at agbcc (both were compiled and diffed: byte-identical),
  *      so a second spelling would double the fan and buy no score; the shift is what this class's
  *      references spell.
- *  The first is pinned by a unit test and reached by no corpus row; the other two by unit tests
- *  and by `offgiv3`'s neighbours. */
+ *  All three first-reject on NO row in either tier — the census above lists the four gates that
+ *  decide anything, and none of these is one of them — so all three are held by their unit tests
+ *  alone, on the shipped precedent of `moved-volatile`. `offgiv3` is not backing for them: it
+ *  MATCHes, so it rejects at no gate at all. */
 function relateFolded(init: Expr, start: number, ctr: string, k: Expr, d: number): Relation {
   if (start !== 0) {
     return { declined: 'nonzero-start' };
