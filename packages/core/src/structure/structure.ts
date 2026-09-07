@@ -989,9 +989,9 @@ export interface CarrierName {
   readonly siblingHolds: boolean;
   /** a value under the name is still live where the parameter's in-edge copies land */
   readonly carrierLive: boolean;
-  /** the name is written somewhere the parameter is still live — at the block another parameter
-   *  under it is written at, at a materialized definition under it, or at any block a loop
-   *  emitter could move one of those copies to */
+  /** the name is written somewhere the parameter is still live — at a materialized definition
+   *  under it, or at any block a predecessor of another parameter's block reaches, which is that
+   *  block itself plus wherever a loop emitter could move the copy to */
   readonly carrierWritten: boolean;
   /** a value with no name of its own re-derives the name at a use past the copy */
   readonly reDerivesName: boolean;
@@ -2086,12 +2086,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // AND THE CONVERSE: the name must not be WRITTEN anywhere `p` itself is live. Every other
   // block param under the name is such a write — its in-edge copies execute at each
   // predecessor's end, and a LOOP header's update copy is emitted inside the loop body, where it
-  // also runs on the final (exiting) iteration — so the test is `p` live into the writer's block
-  // OR live out of any of its predecessors (the conservative union covers that placement). A
-  // materialized def under the name writes at its own block. This applies even to a
-  // redundant-phi alias (`pureAlias` waives only the value-at-B check: aliasing is sound at B's
-  // entry, but a later write to the shared name still splits them — e.g. a saved pre-increment
-  // `i` read post-loop).
+  // also runs on the final (exiting) iteration — so the test is `p` live out of any of the writing
+  // block's predecessors, the conservative union that covers that placement. A materialized def
+  // under the name writes at its own block. This applies even to a redundant-phi alias
+  // (`pureAlias` waives only the value-at-B check: aliasing is sound at B's entry, but a later
+  // write to the shared name still splits them — e.g. a saved pre-increment `i` read post-loop).
+  //
+  // EXCEPT WHERE THE WRITE STORES `p`. A predecessor all of whose edges hand that slot `p` itself
+  // writes `name = name` once the two share the name, so it stores nothing to clobber and
+  // relocating it reaches nowhere. That predecessor is a loop's own accumulator update, and
+  // without the exception the rule calls a value a clobber of itself.
   const paramBlock = new Map<Value, Block>();
   for (const blk of fn.blocks) {
     for (const pv of blk.params) {
@@ -2135,10 +2139,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       carrierLive ||= lin.has(v); // v still live at B → p's copies clobber it
       const wblk = paramBlock.get(v);
       if (wblk && wblk !== entry) {
-        // v is a param → `name` written at wblk's in-edges, and wherever a loop emitter may move
-        // one of those copies to
-        carrierWritten ||= liveIn.get(wblk)!.has(p);
-        for (const pr of preds.get(wblk) ?? []) {
+        // v is a param → `name` is written by the in-edge copies into wblk, and by any relocation
+        // of one of them. AN EDGE THAT HANDS THIS SLOT `p` ITSELF IS NOT A WRITE: once the two
+        // share the name the copy reads `name = name`, so it stores nothing to clobber and
+        // relocating it reaches nowhere. Per PREDECESSOR rather than per edge, because the
+        // relocation is a property of the predecessor's placement — a terminator with two edges
+        // into wblk is exempt only if BOTH hand it `p`.
+        const slot = wblk.params.indexOf(v);
+        const storesOther = new Map<Block, boolean>();
+        for (const { pred, succ } of inEdgeRecords(preds, wblk)) {
+          storesOther.set(pred, (storesOther.get(pred) ?? false) || succ.args[slot] !== p);
+        }
+        for (const [pr, other] of storesOther) {
+          if (!other) {
+            continue;
+          }
           for (const s of successorsOf(pr)) {
             carrierWritten ||= liveIn.get(s)!.has(p);
           }
@@ -2156,7 +2171,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const lin = liveIn.get(B)!;
     let scan: ReturnType<typeof carrierScan> | undefined;
     const scanned = (): ReturnType<typeof carrierScan> => (scan ??= carrierScan(p, B, name));
-    // AND A VALUE NOBODY NAMED IS STILL A READER OF THIS NAME. The loop above asks which NAMED
+    // AND A VALUE NOBODY NAMED IS STILL A READER OF THIS NAME. `carrier-live` asks which NAMED
     // values are live at `B`; an unnamed one is not stored anywhere, it is RE-DERIVED at its use
     // from whatever its operands are called then — so a value live into `B` whose inlined
     // expression mentions `name` reads the merge's assignment instead of what it was defined from.
@@ -2194,8 +2209,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         },
         get reDerivesName() {
           // NAMED live values are `carrier-live`'s, so the two rules stay disjoint and each one's
-          // ablation is its own claim; the recursion below still crosses into a named operand,
-          // which is the whole point of the walk.
+          // ablation is its own claim. The walk itself still crosses into a named OPERAND, which
+          // is the whole point of it.
           return [...lin].some((w) => !varName.has(w) && reDerives(w, new Set()));
         },
       }) === null

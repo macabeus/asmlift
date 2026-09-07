@@ -2,11 +2,12 @@
 // `structure/structure.ts`). Whether a block parameter may be SPELLED with a name that already
 // exists is what decides whether its in-edge copies survive into the C.
 //
-// The whole-program check is `carrier-name-fuzz.test.ts`. These pin the two rules that sweep
+// The whole-program check is `carrier-name-fuzz.test.ts`. Two of these pin the rules that sweep
 // cannot reach, each by ablating it and asserting BOTH sides — the gated spelling and what the
 // ablated table does instead. Neither is reachable by the fuzz for a stated reason: its generator
 // makes every value `s32`, so no pair of declarations can disagree about a sub-word signedness,
-// and it emits no loop whose body holds a merge that outlives it.
+// and no shape it emits holds a loop whose body carries a merge that outlives it. The last test is
+// that shape with the sign of the answer flipped: the merge the rule must NOT refuse.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -92,4 +93,22 @@ test('ablating carrier-write reads a loop variable past its sunk update', () => 
   // hazard sees it and declines LOUDLY — which is what a refusal downstream of a lost gate is
   // supposed to look like, and is the reason this shape has no wrong-answer twin to assert.
   expect(() => emit(SUNK_UPDATE, 'carrier-write')).toThrow(/pre-update loop variable/);
+});
+
+// ── the edge that hands the parameter back ────────────────────────────────────────────────────
+// The same loop, with ONE difference: the back edge hands `%3`'s slot the merge itself, so the
+// loop variable's update IS the merge. `carrier-write`'s relocation clause is edge-blind without
+// the exemption and refuses on the exit path, minting a second variable and a copy at the bottom
+// of the body — but a copy of a value into its own name is not a write, and there is nothing on
+// that path for it to clobber.
+const ACC_MERGE = SUNK_UPDATE.replace(
+  '%7: s32 = add %4, %0\n  %8: u32 = icmp_slt %7, %1',
+  '%8: u32 = icmp_slt %6, %1',
+).replace('cond_br %8, ^bb1(%7), ^bb3()', 'cond_br %8, ^bb1(%6), ^bb3()');
+
+test('a merge that feeds its own loop variable takes that variable name', () => {
+  const out = emit(ACC_MERGE);
+  expect(out).toMatch(/if \(v0 >= a1\) v1 = v0;/);
+  // ONE assignment, in the arm — not an arm copy plus an update copy at the bottom of the body
+  expect(out.split('v1 = v0;').length - 1).toBe(1);
 });
