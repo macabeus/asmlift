@@ -271,6 +271,18 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *  re-guard at the new point — actually holds at your call site. */
 export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
 
+/** The ops whose `operands[0]` is a memory-access BASE: `load base`, `store base, value`,
+ *  `aload base, index`, `astore base, index, value` (the operand roles are in the registry above).
+ *  Authored rather than derived — no registry field records the operand ROLE, and the only other
+ *  memory-touching opcode is `call`, whose variadic operands are arguments and not a base.
+ *
+ *  Two consumers ask two different questions of it and both need the same answer, which is why it
+ *  is here and not next to either: `structure/analysis.ts` uses it for the address-home axis's slot
+ *  model, and `raise/const.ts` to recognise a folded literal that IS an address. Before this it was
+ *  written out verbatim in both files, so the next memory opcode would have updated one of them.
+ *  Complete as of this writing: checked against the registry above, no fifth opcode takes a base. */
+export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aload', 'astore']);
+
 /** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
  *  observable) or a memory read (it answers whichever stores ran before it). The question a pass
  *  asks before moving a computation to another point on the SAME path. */

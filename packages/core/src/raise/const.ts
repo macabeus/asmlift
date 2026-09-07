@@ -29,6 +29,7 @@
 // (SSA guarantees each const is defined before the op that consumes it, and a folded result feeds
 // forward for any chained materialisation).
 import { Fn, Op, Value, defOpMap, mkOp } from '../ir/core';
+import { MEM_BASE_OPS } from '../ir/opcodes';
 
 // The binary opcodes whose const/const form is a constant. `>> 0` normalises to a signed 32-bit result
 // (hardware wraparound): `|` already yields int32, `+` may exceed it and is truncated to match `addu`/`add`.
@@ -49,10 +50,6 @@ const isHighHalf = (v: number): boolean => (v & 0xffff) === 0 && v !== 0;
  *  `addis` with a NEGATIVE `addi` whenever bit 15 of the low half is set (`0x12350000 + -25924` is
  *  `0x12345ABC`), and refusing that spelling was this rule's own first regression. */
 const isLowHalf = (v: number): boolean => v >= -0x8000 && v <= 0xffff;
-
-/** The opcodes whose FIRST operand is a memory BASE (`opcodes.ts`: `load base`, `store base, value`,
- *  `aload base, index`, `astore base, index, value`). Used only to recognise an address literal. */
-const MEM_BASE_OPS = new Set(['load', 'store', 'aload', 'astore']);
 
 /** Fold each const/const `or`/`add` into one `const`, in place. Returns whether anything changed. The
  *  now-dead source consts are left for DCE (they may still have other uses; liveness is not our concern). */
@@ -118,6 +115,15 @@ export function recognizeConsts(fn: Fn): boolean {
       //     folded literal. The literal is then no longer ONE value for `recognizeMagicDivision`, type
       //     recovery or the symbol map — the same never-enumerated failure this refusal exists to fix,
       //     one level down. `const 0` cannot pass `isHighHalf`, so the accumulator shape is untouched.
+      //
+      // A REFUSAL IS ALSO A SCHEDULING DECISION, and that coupling is invisible at this site:
+      // `pre-recovery.ts` registers this pass `dce: true` and runs `dce(fn)` only when the pass
+      // returns TRUTHY, so a function whose ONLY const/const pair is refused gets no DCE here at
+      // all — and `addrnum` above is `dce: false`, so this is the first pass that can schedule one.
+      // Measured inert: forcing the cancelled `dce(fn)` removes 0 ops on every invocation of every
+      // reachable row (`sinkacc`, 3 invocations) and `sinkacc` still scores diff:4. Worth knowing
+      // before this refusal is widened.
+      //
       //   - `memBases` — an address literal, `0x03001C00 + 1206` reached through one arm's base
       //     register. It decides 0 folds over the corpus's 806 lifted rows and is here as a statement
       //     of scope, pinned by `const-fold.test.ts`; `hiLoPair` is the clause that carries real

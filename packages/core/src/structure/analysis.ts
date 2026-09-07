@@ -23,16 +23,13 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import { EFFECTFUL_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 
 export interface UseSite {
   blk: Block;
   idx: number;
   op: Op;
 }
-
-/** the ops whose operands[0] is a memory-access BASE — the address-home axis's slot model */
-const MEM_BASE_OPS = new Set(['load', 'store', 'aload', 'astore']);
 
 /** Is the op's own value an ADDRESS — a pointer or array whose standalone rendering must carry a
  *  cast? Homed, `add(p, 8)` renders `(u16 *)(gPtr + 8)`: the cast lands outside the sum, so a byte
