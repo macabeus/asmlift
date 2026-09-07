@@ -531,6 +531,24 @@ read. That is a fact about the BOARD, not about C and not about the compiler, wh
 capability rather than a rule inside either file — and it keeps alias.ts's asymmetry, since every
 address the range cannot place still bars.
 
+**A GATE CAN ALSO BE STARVED FROM ABOVE — right scope, right rule, no input.** Everything above is
+about a gate's own predicate. But a gate reads a program, and the passes upstream of it decide what
+that program contains. `raise/const.ts` — the L1 recognizer that folds the two-instruction 32-bit
+literal a RISC target builds (`lui;ori`, `lis;ori`) into one `const`, and the pass the `idiom fold`
+box above stands for alongside the pattern engine — used to fold ANY const/const `or`/`add`. On
+Thumb, where no such instruction pair exists, that reached agbcc's `s = 0; if (c) s += 1;` and
+rewrote the arm's `add(%s = const 0, const 1)` to `const 1`, deleting the accumulator. The
+`/merge-home` axis that would have hoisted the init has a correct scope and a correct
+`variantGate` — and the gate read FALSE on both owned rows, because the merge feed it looks for had
+been deleted two levels below it. Nothing reported anything: a candidate that was never enumerated
+is not a candidate that lost. **So a pass whose refusals are load-bearing states its CLIENTELE, not
+only its rule** (`raise/const.ts` now refuses an operand a successor edge carries — a register held
+across a branch is not a literal being materialised), **and the test that proves a gate's reach runs
+the real upstream pipeline rather than parsing IR straight into the gate**
+([`test/merge-home.test.ts`](../packages/core/test/merge-home.test.ts), "the accumulator's init
+survives pre-recovery"). Otherwise the next widening of an unrelated fold takes the axis off the fan
+again, silently.
+
 **A SOUND GATE CAN BE SOUND ABOUT THE WRONG REGION, and nothing in this file's machinery notices.**
 `sound: true` costs a `guardedBy` test, and a table where every entry has one still answers the
 wrong question if the ctx it reads was built over the wrong span. Every gate above asked about the

@@ -16,9 +16,11 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { runPreRecovery } from '../src/raise/pre-recovery';
 import { recoverTypes } from '../src/raise/recover';
 import { hasMergeFeedHome } from '../src/structure/analysis';
 import { structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
 import { count } from './helpers';
 
 const emit = (ir: string, on: boolean, returnsVoid = true): string => {
@@ -606,4 +608,48 @@ test('a short-circuit-guarded value whose cone holds a divide is refused', () =>
   expect(off).toMatch(/if \(\(a0 != 0 && \(a2 \/ a0 \| 1\) > 0\) != 0\)/);
   expect(emit(SCDIV, true)).toBe(off);
   expect(hasMergeFeedHome(parse(SCDIV))).toBe(false);
+});
+
+// ── the gate can be starved from ABOVE: an L1 fold that deletes the merge feed ────────────────
+// Everything above pins the SCOPE. This pins its REACH, which is a different failure and the one
+// that actually happened: the scope was right, the axis was shipped, and it never enumerated on
+// `sinkacc` or `kleod:CountCollectedGems` because `raise/const.ts` folded the accumulator's
+// `add(%s = const 0, const 1)` down to `const 1` before anything asked. The feed the scope looks
+// for was gone, so `hasMergeFeedHome` read false and `/merge-home` was never forked — a candidate
+// nothing reports, because it was never enumerated.
+//
+// So this runs the REAL pre-recovery pipeline, not `parse` alone: it is a claim about what the
+// passes upstream of the gate leave behind. Re-widen that fold and this goes red.
+const ACCFEED = `fn accfeed {
+^bb0(%0: s32, %1: s32, %2: s32*):
+  %3: s32 = const {value=0}
+  %4: s32 = const {value=0}
+  %5: u32 = icmp_eq %0, %4
+  cond_br %5, ^bb2(%3), ^bb1()
+^bb1():
+  %6: s32 = const {value=1}
+  %7: s32 = add %3, %6
+  br ^bb2(%7)
+^bb2(%8: s32):
+  %9: s32 = const {value=0}
+  %10: u32 = icmp_eq %1, %9
+  cond_br %10, ^bb4(%8), ^bb3()
+^bb3():
+  %11: s32 = const {value=1}
+  %12: s32 = add %8, %11
+  br ^bb4(%12)
+^bb4(%13: s32):
+  store %2, %13 {off=0, width=4}
+  ret
+}
+`;
+
+test('the accumulator’s init survives pre-recovery, so the gate can see the merge feed', () => {
+  const fn = parse(ACCFEED);
+  verify(fn);
+  runPreRecovery(fn, ARMV4T_AGBCC);
+  verify(fn);
+  // the init is still a value some edge carries — the fold did not rewrite the arm's `add` to a literal
+  expect(fn.blocks.flatMap((b) => b.ops).filter((o) => o.opcode === 'add')).toHaveLength(2);
+  expect(hasMergeFeedHome(fn)).toBe(true);
 });
