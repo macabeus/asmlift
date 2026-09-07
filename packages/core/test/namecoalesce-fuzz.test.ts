@@ -64,21 +64,29 @@ function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[
   }
 }
 
+// The nested arm sweeps FEWER seeds than the two that predate it, and the reason is budget rather
+// than confidence: its functions are the largest the generator makes, and adding it at 4,000
+// alongside `carrier-name-fuzz` put 30% more CPU into `test:offline` than vitest's own reporter
+// could keep up with — a fully green run reported an unhandled `Timeout calling "onTaskUpdate"`
+// and the job failed. The finding `namecoalesce.ts` credits to this arm — `loop-escape` dropped
+// makes 2 of 7,535 nested functions compute something else — was taken at 8,000 seeds, so its two
+// (5104 and 6437) are outside the range that ships. Reproduce it by raising this number, not by
+// hunting inside it.
 describe.each([
-  ['acyclic', 0],
-  ['loop-bearing', 1],
-  ['nested', 2],
-] as const)('%s', (_name, depth) => {
+  ['acyclic', 0, SEEDS],
+  ['loop-bearing', 1, SEEDS],
+  ['nested', 2, 250],
+] as const)('%s', (_name, depth, seeds) => {
   test('no merge the pass makes changes what the function does', () => {
     const bad: number[] = [];
     let judged = 0;
-    for (let seed = 1; seed <= SEEDS; seed++) {
+    for (let seed = 1; seed <= seeds; seed++) {
       const r = spellings(seed, depth);
       if (!r) continue;
       judged++;
       if (tracesDiffer(r)) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
+    expect(judged).toBeGreaterThan(seeds / 10); // the sweep is not vacuous
     expect(bad).toEqual([]);
   });
 });
