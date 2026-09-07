@@ -11,20 +11,20 @@
 // nothing" looks like. Arm B is written over the table, so a rule added later is held to the same
 // bar without anyone remembering to.
 //
-// The generator emits LOOPS by default. Every defect this has caught has been a loop or a
-// mid-block shape, and a fuzz that cannot reach them would be a green test for the thing it exists
-// to check.
+// The generator, the interpreter and the trace comparison live in `helpers.ts` — `carrier-name-fuzz`
+// asks the same oracle a different question. The generator emits LOOPS by default: every defect
+// this has caught has been a loop or a mid-block shape, and a fuzz that cannot reach them would be
+// a green test for the thing it exists to check.
 import { describe, expect, test, vi } from 'vitest';
 
-import { Block, Fn, Value, mkOp, mkValue } from '../src/ir/core';
-import { T } from '../src/ir/types';
+import type { Fn } from '../src/ir/core';
 import { verify } from '../src/ir/verify';
-import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
+import type { SFn } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { structure } from '../src/structure/structure';
-import { mulberry32 } from './helpers';
+import { type Event, generateSsaFn, traceOf, tracesDiffer } from './helpers';
 
 // CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
 // budget. Solo these tests run in 0.9-1.7 s; inside a full `pnpm test:offline` at loadavg ~26 this
@@ -34,201 +34,13 @@ import { mulberry32 } from './helpers';
 // packages/core imports it, and the test fence's positive control passed in the same red run.)
 vi.setConfig({ testTimeout: 60_000 });
 
-/** A random SSA function. Every value comes from the entry block or from the block using it, so
- *  definitions dominate uses by construction and `verify` passes without a repair pass. */
-export function generate(seed: number, withLoop: boolean): Fn {
-  const rnd = mulberry32(seed);
-  const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
-  const nBlocks = 4 + Math.floor(rnd() * 3);
-  const a0 = mkValue(T.s(32));
-  const a1 = mkValue(T.s(32));
-  const blocks: Block[] = [{ params: [a0, a1], ops: [] }];
-  for (let i = 1; i < nBlocks; i++) {
-    const nParams = Math.floor(rnd() * 3);
-    blocks.push({ params: Array.from({ length: nParams }, () => mkValue(T.s(32))), ops: [] });
-  }
-  const entryVals: Value[] = [a0, a1];
-  // A few entry-block definitions every block may read — the source of the cross-block live ranges
-  // the interference rule is about.
-  for (let i = 0; i < 2; i++) {
-    const r = mkValue(T.s(32));
-    blocks[0].ops.push(
-      rnd() < 0.5
-        ? mkOp('call', { operands: [pick(entryVals)], results: [r], attrs: { target: `f${i}` } })
-        : mkOp('sub', { operands: [pick(entryVals), pick(entryVals)], results: [r] }),
-    );
-    entryVals.push(r);
-  }
-  const loopHeader = withLoop ? 1 + Math.floor(rnd() * (nBlocks - 2)) : -1;
-  for (let i = 0; i < nBlocks; i++) {
-    const b = blocks[i];
-    const avail = [...entryVals, ...b.params];
-    for (let k = 0; k < 1 + Math.floor(rnd() * 3); k++) {
-      const r = mkValue(T.s(32));
-      b.ops.push(
-        rnd() < 0.35
-          ? mkOp('call', { operands: [pick(avail)], results: [r], attrs: { target: `f${k % 3}` } })
-          : mkOp(pick(['add', 'sub']), { operands: [pick(avail), pick(avail)], results: [r] }),
-      );
-      avail.push(r);
-    }
-    const argsFor = (t: Block): Value[] => t.params.map(() => pick(avail));
-    if (i === nBlocks - 1) {
-      b.ops.push(mkOp('ret', { operands: [pick(avail)] }));
-      continue;
-    }
-    // a back edge to `loopHeader` needs a guard, or the loop never exits
-    const isLatch = withLoop && i > loopHeader && rnd() < 0.6;
-    const c = mkValue(T.u(32));
-    b.ops.push(mkOp('icmp_slt', { operands: [pick(avail), pick(avail)], results: [c] }));
-    const fwd = blocks[i + 1];
-    const other = blocks[Math.min(nBlocks - 1, i + 1 + Math.floor(rnd() * 2))];
-    b.ops.push(
-      mkOp('cond_br', {
-        operands: [c],
-        successors: isLatch
-          ? [
-              { block: blocks[loopHeader], args: argsFor(blocks[loopHeader]) },
-              { block: fwd, args: argsFor(fwd) },
-            ]
-          : [
-              { block: fwd, args: argsFor(fwd) },
-              { block: other, args: argsFor(other) },
-            ],
-      }),
-    );
-  }
-  return { name: `fz${seed}`, blocks, writeOrder: undefined, slotHomes: undefined };
-}
-
-/** A local that no path assigned. It POISONS: an expression over one is as indeterminate as it is,
- *  so it must not re-enter the defined world as a number and over-report a difference. */
-const UNDEF = null;
-type Val = number | typeof UNDEF;
-
-/** One observable: a call with the values it received, or the function's result. */
-interface Event {
-  fn: string;
-  args: Val[];
-}
-
-/** Every observable the emitted tree produces, in execution order. Conditions are evaluated for
- *  REAL — a naming defect that changes one changes the PATH, which is a difference worth catching
- *  (it changed a loop's trip count once). Parameters are seeded, or every value is UNDEF and the
- *  comparison below has nothing to compare. */
-export function run(sfn: SFn, seed: number): Event[] {
-  const trace: Event[] = [];
-  const env = new Map<string, Val>();
-  sfn.params.forEach((p, i) => env.set(p.name, ((seed >> (i * 3)) % 11) - 5));
-  let calls = 0;
-  let steps = 0;
-  const evalExpr = (e: Expr): Val => {
-    switch (e.k) {
-      case 'var':
-        return env.get(e.name) ?? UNDEF;
-      case 'const':
-        return e.value;
-      case 'bin': {
-        const l = evalExpr(e.l);
-        const r = evalExpr(e.r);
-        if (l === UNDEF || r === UNDEF) return UNDEF;
-        switch (e.op) {
-          case '+':
-            return (l + r) | 0;
-          case '-':
-            return (l - r) | 0;
-          case '<':
-            return l < r ? 1 : 0;
-          case '>':
-            return l > r ? 1 : 0;
-          case '<=':
-            return l <= r ? 1 : 0;
-          case '>=':
-            return l >= r ? 1 : 0;
-          case '==':
-            return l === r ? 1 : 0;
-          case '!=':
-            return l !== r ? 1 : 0;
-          default:
-            throw new Error(`unmodelled operator ${e.op}`);
-        }
-      }
-      case 'call': {
-        const args = e.args.map(evalExpr);
-        trace.push({ fn: e.fn, args });
-        // a DETERMINISTIC result that depends on the arguments, so a wrong argument propagates
-        // into everything downstream instead of being absorbed
-        calls++;
-        return args.some((a) => a === UNDEF) ? UNDEF : args.reduce((x: number, y) => x + (y as number), calls) | 0;
-      }
-      case 'un':
-        return evalExpr(e.e) === UNDEF ? UNDEF : -(evalExpr(e.e) as number) | 0;
-      case 'cast':
-        return evalExpr(e.e);
-      default:
-        throw new Error(`the generator does not emit ${e.k}`);
-    }
-  };
-  const truthy = (e: Expr): boolean => {
-    const v = evalExpr(e);
-    return v !== UNDEF && v !== 0;
-  };
-  const exec = (list: Stmt[]): void => {
-    for (const s of list) {
-      if (++steps > 4000) throw new Error('step cap');
-      switch (s.k) {
-        case 'assign':
-          env.set(s.name, evalExpr(s.value));
-          break;
-        case 'exprstmt':
-          evalExpr(s.value);
-          break;
-        case 'if':
-          if (truthy(s.cond)) exec(s.then);
-          else exec(s.else ?? []);
-          break;
-        case 'while':
-          while (truthy(s.cond)) {
-            if (++steps > 4000) throw new Error('step cap');
-            exec(s.body);
-          }
-          break;
-        case 'dowhile':
-          do {
-            if (++steps > 4000) throw new Error('step cap');
-            exec(s.body);
-          } while (truthy(s.cond));
-          break;
-        case 'for':
-          exec([s.init]);
-          while (truthy(s.cond)) {
-            if (++steps > 4000) throw new Error('step cap');
-            exec(s.body);
-            exec([s.inc]);
-          }
-          break;
-        case 'return':
-          trace.push({ fn: 'ret', args: s.value === undefined ? [] : [evalExpr(s.value)] });
-          return;
-        case 'break':
-        case 'continue':
-          return;
-        default:
-          throw new Error(`the generator does not emit ${s.k}`);
-      }
-    }
-  };
-  exec(sfn.body);
-  return trace;
-}
-
 const SEEDS = 4000;
 
 /** Both spellings of one seed, or null when the shape is not one this can judge. */
 function spellings(seed: number, withLoop: boolean, drop?: string): { off: Event[]; on: Event[] } | null {
   let fn: Fn;
   try {
-    fn = generate(seed, withLoop);
+    fn = generateSsaFn(seed, withLoop);
     verify(fn);
     recoverTypes(fn);
   } catch {
@@ -246,28 +58,11 @@ function spellings(seed: number, withLoop: boolean, drop?: string): { off: Event
     return null;
   }
   try {
-    return { off: run(off, seed), on: run(on, seed) };
+    return { off: traceOf(off, seed), on: traceOf(on, seed) };
   } catch {
     return null; // step cap, or a construct the interpreter does not model
   }
 }
-
-// A position where EITHER side is UNDEF constrains nothing: the original read a local no path had
-// assigned, so both spellings are ill-defined there rather than one being wrong. Everything else —
-// a different callee, a different argument, a different trace LENGTH (which is what a changed trip
-// count looks like) — is a clobber.
-const differs = (r: { off: Event[]; on: Event[] }): boolean => {
-  if (r.off.length !== r.on.length) {
-    return true;
-  }
-  return r.off.some((e, i) => {
-    const f = r.on[i];
-    if (e.fn !== f.fn || e.args.length !== f.args.length) {
-      return true;
-    }
-    return e.args.some((a, k) => a !== UNDEF && f.args[k] !== UNDEF && a !== f.args[k]);
-  });
-};
 
 describe.each([
   ['acyclic', false],
@@ -280,7 +75,7 @@ describe.each([
       const r = spellings(seed, withLoop);
       if (!r) continue;
       judged++;
-      if (differs(r)) bad.push(seed);
+      if (tracesDiffer(r)) bad.push(seed);
     }
     expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
     expect(bad).toEqual([]);
@@ -305,7 +100,7 @@ test('every SOUND gate is load-bearing: dropping it changes what some function d
     for (const withLoop of [false, true]) {
       for (let seed = 1; seed <= SEEDS && !found; seed++) {
         const r = spellings(seed, withLoop, g.id);
-        if (r && differs(r)) found = true;
+        if (r && tracesDiffer(r)) found = true;
       }
       if (found) break;
     }
