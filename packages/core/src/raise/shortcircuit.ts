@@ -601,7 +601,20 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // ^g's body moves ahead of ^h's terminator; ^h keeps the successor SLOT that did not change
         // (taken=shared for `||`, taken=other for `&&`), so the frontend's branch sense survives.
         h.ops.splice(h.ops.length - 1, 1, ...body, ...negated, connective, {
-          ...mkOp('cond_br', { operands: [res] }),
+          // THE ORIENTATION EVIDENCE, kept because only this pass can see it. `scSharedOnFall`
+          // says the SHARED block — the arm both tests reach — was reached from ^g by
+          // FALL-THROUGH rather than by ^g's branch. gcc lays a condition's arms out in source
+          // order, so an `&&` sends every failing test AWAY to the shared block (the source's
+          // `else`) while an `||` lets the last test FALL INTO it (the source's `then`) — which is
+          // the one thing that separates `if (a && b) X else Y` from its dual `if (!a || !b) Y
+          // else X`, two different objects that fold to the same connective and the same successor
+          // slots. Consumed at L3 by `StructureOptions.senseFromFoldEvidence`.
+          //
+          // NOT `gIsFall`, which is beside it in this loop and reads the branch RANGE: measured
+          // over `synthetic:joinsense` (two sites, opposite source connectives) and
+          // `synthetic:mixsense` (four sites, two inverted) it is TRUE at every site of both, and
+          // this flag separates them.
+          ...mkOp('cond_br', { operands: [res], attrs: { scSharedOnFall: sharedEdge === gFall } }),
           successors: gIsFall
             ? [
                 { block: sharedEdge.block, args: [...sharedEdge.args] },
