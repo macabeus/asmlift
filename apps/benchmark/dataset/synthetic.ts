@@ -6033,8 +6033,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //   G2  loop accumulators as per-arm copies  nestacc 58
   //   G3  an accumulator's cross-loop home     sinkacc 17
   //   G6  the merged-tail store, LADDER form   armcb 32             control armcb2 MATCH
-  //   G1  branch sense per SITE, divergent     mixsense 20          control calad MATCH
-  //   G1  branch sense per SITE, JOINED        joinsense 4          control joinsame MATCH
+  //   G1  branch sense per SITE, divergent     mixsense 20 → 10     control calad MATCH
+  //   G1  branch sense per SITE, JOINED        joinsense 4 → MATCH  control joinsame MATCH
   //   --  switch recovered from a comparison LADDER   swladder 7  (m2c MATCH — a deficit row)
   //
   // THE FIRST BLOCKER OF EVERY ROW THAT DOES NOT MATCH. Each was named by INSTRUMENTING the site
@@ -6111,17 +6111,25 @@ export const SYNTHETIC: SynthSpec[] = [
   //    thing a G3 build should ask. `l3/hoist.ts`'s `isBaseInit` is NOT the place to widen — level-tower
   //    names that exact widening as the trap, since it is the sole definition of where the
   //    base-init run ends and `l3/basecse.ts` re-orders off it.
-  //  • `mixsense` 20 — `structure/structure.ts:4235`, `preserveDivergentBranchSense`: ONE boolean
-  //    per FUNCTION (option `:976`, default `:1299`), so the axis flips every divergent `if` at
-  //    once. Fan of literally two, `unsigned: 20` and `unsigned/flip-branch: 27`; the source's own
-  //    MIXED configuration, compiled against this row's own target, is **0 — byte-exact**. So no
-  //    per-function value of the boolean can reach the target.
-  //  • `joinsense` 4 — the JOINED twin, `structure/structure.ts:4246` `negateJoinedBranchSense`
-  //    (option `:1001`, default `:1300`). The boolean scores 4 at EITHER value
-  //    (`unsigned/unmerge: 4` and `unsigned/flip-join/unmerge: 4`) — right at one site whichever
-  //    way it goes — and hand-writing asmlift's own winner with only the second site dualized is
-  //    byte-exact. The real row wins on `/flip-join`, the boolean `mixsense` never enumerates, so
-  //    a family filed against `/flip-branch` alone would gate half of G1.
+  //  • `mixsense` 20 — `preserveDivergentBranchSense`: ONE boolean per FUNCTION, so the axis flips
+  //    every divergent `if` at once. Fan of literally two, `unsigned: 20` and
+  //    `unsigned/flip-branch: 27`; the row's REFERENCE SOURCE, compiled against this row's own
+  //    target, is 0 — byte-exact, as a reference must be. So no per-function value of the boolean
+  //    can reach the target.
+  //    CLOSED, and the residual re-attributed: `/site-sense` takes it to **10**, and 10 is the
+  //    floor of the whole 2^4 per-site enumeration (`ASMLIFT_PERSITE_SENSE=4`, whose 16 candidates
+  //    run 10 · 14 · 16 · 18 · 19 · 20 · 22 · 23 · 23 · 24 · 27 · 27 · 28 · 29 · 31 · 33). So the
+  //    sense is spent here. The 10 is the BASE SPELLING: asmlift's winner hoists
+  //    `p0 = (u8 *)&gGrid; p0[6]` where the reference writes `gGrid[0][6]`, and the same control
+  //    structure hand-written with the subscripts scores 0 — a `basecse`/`hoistBaseLocals`
+  //    question, and note that `calad` MATCHES with the identical hoist, so it is not the hoist
+  //    itself.
+  //  • `joinsense` 4 — the JOINED twin, `negateJoinedBranchSense`. The boolean scores 4 at EITHER
+  //    value (`unsigned/unmerge: 4` and `unsigned/flip-join/unmerge: 4`) — right at one site
+  //    whichever way it goes — and hand-writing asmlift's own winner with only the second site
+  //    dualized is byte-exact. The real row wins on `/flip-join`, the boolean `mixsense` never
+  //    enumerates, so a family filed against `/flip-branch` alone would gate half of G1.
+  //    CLOSED: **MATCH** on `unsigned/site-sense/unmerge`.
   //
   // THE FIVE CONTROLS, and what each one proves. Every one MATCHes, and every one was aggravated
   // until the score moved, which is the only reason its partner's number means anything:
@@ -6174,14 +6182,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // orders, the residual an r5/r6 swap. `pmarr1` can be closed from either end — at rank 1
   // `gBlob->unk8[i]`,
   // `p = (u8 *)gBlob + 8; p[i]` and `p = gBlob->unk8; p[i]` are ONE object — but `pmarr2` only by
-  // the member spelling. PREDICTIONS, each with the command that falsifies it: a per-SITE sense
-  // takes `mixsense`'s fan from 2 to 16 and its score to 0 and `joinsense` from 4 to 0, and a
-  // recursive arm search in `armDefs` takes `armcb` to MATCH — all three read by
+  // the member spelling. PREDICTIONS, each with the command that falsifies it, and the G1 pair was
+  // RUN: a per-SITE sense takes `mixsense`'s fan from 2 to 16 (`ASMLIFT_PERSITE_SENSE=4`) and
+  // `joinsense` to 0 — both held — while `mixsense`'s score prediction of 0 was WRONG at 10, the
+  // whole enumeration's floor, and the 10 is the base spelling (see the row above). A recursive arm
+  // search in `armDefs` taking `armcb` to MATCH is still unrun. Read by
   // `ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial`
   // on the lever branch. ZERO-FLIP WATCH for whoever builds G1. Of the fourteen rows this family
   // adds, `armcb` also wins on `/flip-join`
   // (fan of 8, the top three all `/flip-join` at 32 against 35 for the non-flip ones), so a G1
-  // lever must re-check `armcb` even though it is filed under G6. No other new row is
+  // lever must re-check `armcb` even though it is filed under G6 — re-checked when `/site-sense`
+  // shipped, and it holds at 32 on `unsigned/flip-join`. No other new row is
   // flip-labelled — `joinsense`/`joinsame` win on `/unmerge` and `mixsense` on plain `unsigned`.
   // Over the committed artifact: 17 rows have a winner
   // label carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 17 MATCH — TWO of
@@ -6481,7 +6492,8 @@ export const SYNTHETIC: SynthSpec[] = [
     // enumerates. Here both `if`s RECONVERGE and the second is spelled as its dual, so no single
     // value of `negateJoinedBranchSense` is right at both: the fan scores 4 with the axis OFF and
     // 4 with it ON. Hand-writing asmlift's own winner with only the second site dualized is
-    // byte-exact, so the whole residual is the sense.
+    // byte-exact, so the whole residual is the sense — and `/site-sense` (rank-axes.ts) now spells
+    // exactly that mix and MATCHES.
     sym: 'joinsense',
     src:
       'extern u8 gGrid[5][7];\n' +

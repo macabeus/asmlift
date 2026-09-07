@@ -392,7 +392,10 @@ export function enumerateCandidates(
   // all three things that invert the polarity are per-SITE where this lever is per-function, so no
   // per-function predicate decides it: a short-circuit fold choosing the orientation, a
   // conditional branch relayed past Thumb's ±256-byte reach, and a rotated loop's zero-trip guard,
-  // where the `if` is the compiler's own and no source sense exists to be faithful to. The third
+  // where the `if` is the compiler's own and no source sense exists to be faithful to. The FIRST
+  // of the three is now decided per site rather than enumerated — `/site-sense` (rank-axes.ts)
+  // reads the orientation the fold records — and this axis stays because the other two are not.
+  // The third
   // is what keeps the residue on targets that have neither: rows still win on the axis under
   // gcc2.7.2 / gcc2.7.2kmc / mwcc, with no `short-circuit` tag and no Thumb branch range to
   // explain them, and most of those carry `loop`. A function with no two-armed joined if emits identical
@@ -411,9 +414,12 @@ export function enumerateCandidates(
   const baseSense = senseMasks.flatMap((m) =>
     senseOnly.map((s) => ({
       ...s,
-      ...(m === 0 ? {} : { suffix: `${s.suffix}/sense-${m}`, flipSites: maskSites(m) }),
+      ...(m === 0 ? {} : { suffix: `${s.suffix}/sense-${m}` }),
+      // Always present, `undefined` at mask 0: an optional key added on one arm of a ternary would
+      // make the two arms different object TYPES, and the list is what the whole fan spreads from.
+      flipSites: m === 0 ? undefined : maskSites(m),
     })),
-  ) as (((typeof senseOnly)[number] & { flipSites?: ReadonlySet<number> }) & { suffix: string })[];
+  );
   // `/no-bitfield` — keep the honest shift spelling where the map would name a bitfield member.
   // The named read recompiles at the DECLARATION's access width; where that diverges from the
   // asm's load width, the shifts are the spelling that matches — so both are emitted and the

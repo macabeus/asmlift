@@ -1012,7 +1012,8 @@ export interface StructureOptions {
   // branch RANGE decides (raise/shortcircuit.ts); a relay past a branch's reach inverts to jump
   // around the long form; and a rotated loop's zero-trip guard is an `if` no source wrote at all
   // (`synthetic:fib`, `for(i=0;i<n;i++)`, emits `if (0 >= a0) … else do{…}while`), so there no
-  // spelling is the faithful one and only the differ can choose.
+  // spelling is the faithful one and only the differ can choose. `senseFromFoldEvidence` below
+  // answers the FIRST of the three per site, off the fold's own record.
   negateJoinedBranchSense?: boolean;
   /** Spell a branch-sense site from the SHORT-CIRCUIT FOLD'S own orientation evidence, where the
    *  fold left some, instead of from the two booleans above. `raise/shortcircuit.ts` stamps the
