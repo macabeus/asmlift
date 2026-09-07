@@ -8,10 +8,20 @@
 // `lui;ori` / `lis;ori` pair. Without it a magic-division reciprocal or an address literal is never a
 // single value the later passes can reason about.
 //
-// IT REFUSES A SHAPE THAT IS NOT THAT PAIR, and the refusal is the pass's clientele written down: the
-// pair is two consts materialised inside ONE block, so an operand a terminator also hands to a
-// successor's block-parameter is a REGISTER the compiler held live across a branch, not a literal
-// being built. See the refusal at its site below for what folding one costs.
+// THE CLIENTELE IS "A VALUE THE TARGET MATERIALISES IN TWO INSTRUCTIONS", and it is wider than the
+// RISC pair above in both directions — a mis-statement here is expensive, so both halves are measured:
+//   - It is NOT ARM-free. On Thumb a literal is a pool word plus an immediate `add`, which is exactly a
+//     two-instruction materialisation and lifts as the same const/const pair. Ablating the whole pass
+//     costs three agbcc BYTE-MATCHES — `synthetic:dmafield` MATCH -> diff:29, `synthetic:fieldbase`
+//     MATCH -> diff:22, `synthetic:bgfixed` MATCH -> diff:2 (measured, whole pass off). Do not gate
+//     this pass on a RISC target.
+//   - The pair is NOT confined to ONE block. `synthetic:mergepool:gcc2.7.2kmc` lifts a genuine
+//     `lui;ori` as `or(const 65536, const 9029)` whose two halves are defined in DIFFERENT blocks
+//     (instrumented: `b0=0 b1=1`), because gcc hoisted the high half above the branch. A guard
+//     tightened to a literal same-block test loses folds the corpus depends on.
+// What the refusal below actually excludes is narrower than either: an operand a terminator hands to a
+// successor's block-parameter — a REGISTER the compiler held live across a branch — where the pair is
+// ALSO not recognisable as a hi/lo pair and the result is not an address. See its site for the cost.
 //
 // This cannot be a data-`RewritePattern`: the fold's result is COMPUTED from the two operands' values,
 // which the pattern engine's numeric-exact `attrEquals` cannot express. So it lives here as an always-on
@@ -26,6 +36,19 @@ const FOLD: Record<string, (a: number, b: number) => number> = {
   or: (a, b) => (a | b) >> 0,
   add: (a, b) => (a + b) >> 0,
 };
+
+/** Is `v` a RISC HIGH HALF — what one `lui`/`lis`/`addis` puts in a register? `hi << 16`, for a
+ *  NON-ZERO `hi`. Zero is excluded deliberately and is the whole reason this test can be trusted as a
+ *  positive: `lui rD, 0` is a no-op no compiler emits, so a `const 0` is never a half being
+ *  materialised — it is an initialised register, which is exactly the shape the refusal below exists
+ *  to protect. */
+const isHighHalf = (v: number): boolean => (v & 0xffff) === 0 && v !== 0;
+
+/** Is `v` a LOW HALF — what one `ori`/`addi`/`addiu` can supply? `ori` takes an UNSIGNED 16-bit
+ *  immediate and `addi`/`addiu` a SIGNED one, so the admissible range is the union: mwcc completes an
+ *  `addis` with a NEGATIVE `addi` whenever bit 15 of the low half is set (`0x12350000 + -25924` is
+ *  `0x12345ABC`), and refusing that spelling was this rule's own first regression. */
+const isLowHalf = (v: number): boolean => v >= -0x8000 && v <= 0xffff;
 
 /** The opcodes whose FIRST operand is a memory BASE (`opcodes.ts`: `load base`, `store base, value`,
  *  `aload base, index`, `astore base, index, value`). Used only to recognise an address literal. */
@@ -70,10 +93,8 @@ export function recognizeConsts(fn: Fn): boolean {
         continue;
       }
       // ── THE REFUSAL: this shape is not a literal being materialised ───────────────────────────
-      // The pass's clientele (see the header) is a literal a RISC target builds in two instructions,
-      // both of them inside ONE block, out of two consts neither of which existed before. An operand
-      // that is ALSO carried on a successor edge is a different thing entirely: a register the
-      // compiler held across a branch, whose value on this path happens to be a constant. agbcc's
+      // An operand a terminator ALSO hands to a successor's block-parameter is a register the compiler
+      // held live across the branch, whose value on this path happens to be a constant. agbcc's
       // `s = 0; ... if (c) s += 1;` lifts as `add(%s = const 0, const 1)` in the taken arm, where
       // `%s` is also the value bb0 hands the join. Folding it to `const 1` deletes the accumulator's
       // last reference, so every later level sees an arm that materialises a literal and spells it
@@ -84,12 +105,31 @@ export function recognizeConsts(fn: Fn): boolean {
       // The mapping is a FUNCTION, not a choice, so this is a default and not an axis: a register
       // carried across a branch is not a literal being materialised, whichever compiler produced it.
       //
-      // EXCEPT when the result is a memory BASE. `0x03001C00 + 1206` is an address literal even when
-      // one arm carries the base register, and an address literal is precisely what the pass exists
-      // for. Measured over the whole corpus this carve-out changes nothing (806 lifted rows, 0 folds
-      // decided by it) — it is here as a statement of the pass's scope, pinned by `const-fold.test.ts`,
-      // not as a fix for an observed row.
-      if ((edgeCarried.has(op.operands[0]) || edgeCarried.has(op.operands[1])) && !memBases.has(op.results[0])) {
+      // IT IS A PROXY, and the two carve-outs are where it is bought back. Edge-carrying is evidence
+      // of a register, not proof, and the same `add(const 0, const K)` still folds wherever nothing
+      // carries the zero (6 sites on 5 marioparty3/snowboardkids2 rows) — defensible, since with no
+      // merge there is no home to hoist and the incident cannot occur, but the rule is narrower than
+      // "never fold a const/const pair over a branch".
+      //   - `hiLoPair` — the pass's OWN clientele beats the proxy. mwcc materialises `0x12345678` as
+      //     `lis; addi` and shares the `lis` across a branch whenever the high half is live at the
+      //     join, so the genuine pair IS edge-carried and the proxy refuses it: measured, a
+      //     `base = 0x12340000; if (c) q[0] = base|0x5678; else q[1] = base|0x9ABC; *p = base;` row
+      //     emitted `*a2 = 305397760 + 22136;` on mwcc_242_81 where every other toolchain emitted the
+      //     folded literal. The literal is then no longer ONE value for `recognizeMagicDivision`, type
+      //     recovery or the symbol map — the same never-enumerated failure this refusal exists to fix,
+      //     one level down. `const 0` cannot pass `isHighHalf`, so the accumulator shape is untouched.
+      //   - `memBases` — an address literal, `0x03001C00 + 1206` reached through one arm's base
+      //     register. It decides 0 folds over the corpus's 806 lifted rows and is here as a statement
+      //     of scope, pinned by `const-fold.test.ts`; `hiLoPair` is the clause that carries real
+      //     traffic. Deliberately NOT transitive and NOT extended to call arguments: an address
+      //     literal escaping as a call argument is a shape the refusal HELPS (a probe row scored
+      //     diff:7 -> MATCH with it firing), so widening this test would give that back.
+      const hiLoPair = (isHighHalf(a) && isLowHalf(c)) || (isHighHalf(c) && isLowHalf(a));
+      if (
+        (edgeCarried.has(op.operands[0]) || edgeCarried.has(op.operands[1])) &&
+        !hiLoPair &&
+        !memBases.has(op.results[0])
+      ) {
         continue;
       }
       // Reuse the SAME result Value → every existing use already points at it (no RAUW needed).
