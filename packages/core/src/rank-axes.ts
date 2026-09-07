@@ -180,10 +180,19 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // `pokeemerald:MathUtil_Mul16` their matches. On the roster that is unreachable — `compareScored`
   // orders by score and the un-homed sibling rides beside it.
   //
-  // Its fan is essentially one row's: over the 16 corpus rows the gate admits, 2790 → 5841
+  // Its fan is essentially one row's: over the corpus rows the gate admits, 2790 → 5841
   // candidates map-less and 2538 → 5363 with a map, of which `kleod:UpdateCameraScroll` (outcome
   // `noncompile`, so they buy nothing) is +2944 and +2752, three rows add none at all where
   // `/defsite` already spells the same tree, and the rest pay 107 and 73 between them.
+  //
+  // THAT CENSUS IS A STATEMENT ABOUT `hasMergeFeedHome`'s ADMITTED SET, and the admitted set is not
+  // a property of this file: it moves whenever an upstream pass changes whether a merge feed still
+  // EXISTS in the IR. It said "16 rows" and now reads **20** of the 804 that lift (mine, both tiers,
+  // measured on this tree and on the tree before the change: 17 → 20). The three it gained —
+  // `synthetic:sinkacc:agbcc`, `kleod:CountCollectedGems:agbcc`, `kleod:CheckWorldCompletion:agbcc` —
+  // came from `raise/const.ts` REFUSING to fold an accumulator's `add(const 0, const 1)`, which is
+  // what keeps the feed alive for this gate to see; and the 17 the count read before this branch
+  // already disagreed with the recorded 16. Re-measure the counts above before tuning off them.
   {
     flag: 'mergeHome',
     suffix: '/merge-home',
