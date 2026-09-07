@@ -970,6 +970,87 @@ function reHomesParamMerge(
   return firstRejection(gates, c) === null;
 }
 
+/** One name offered to one block parameter, as `CARRIER_NAME_GATES` judges it.
+ *
+ *  THE FIELDS ARE LAZY, and that is a cost decision rather than a style one. `canTakeName` runs per
+ *  merge slot per carrier over every named value in the function, and `NAME_COALESCE_GATES`' eager
+ *  record is affordable only because its pass is an opt-in axis. Laziness changes nothing about
+ *  BLAME: `firstRejection` reports the first gate in TABLE order that rejects, whichever fields
+ *  were computed to get there. What it does mean is that the table's order also decides what runs,
+ *  so the two whole-function walks sit at the bottom. */
+export interface CarrierName {
+  /** the merge is a pure alias — every in-edge hands it the same value */
+  readonly pureAlias: boolean;
+  /** the name's declaration and the parameter disagree about carrier width */
+  readonly widthDiffers: boolean;
+  /** …or, at a sub-word width, about signedness — which at that width is part of the width */
+  readonly signDiffers: boolean;
+  /** another parameter of the SAME block already holds the name */
+  readonly siblingHolds: boolean;
+  /** a value under the name is still live where the parameter's in-edge copies land */
+  readonly carrierLive: boolean;
+  /** the name is written somewhere the parameter is still live — at a materialized definition
+   *  under it, or at any block a predecessor of another parameter's block reaches, which is that
+   *  block itself plus wherever a loop emitter could move the copy to */
+  readonly carrierWritten: boolean;
+  /** a value with no name of its own re-derives the name at a use past the copy */
+  readonly reDerivesName: boolean;
+}
+
+/** `canTakeName`'s admission: may this block parameter be SPELLED with a name that already exists,
+ *  so the in-edge copies into it disappear? EVERY rule here is sound — a refusal costs one copy in
+ *  the emitted C, and an admission this table gets wrong is a program that computes something else.
+ *  The argument for each is in the block comment above `canTakeName`, which has room for it.
+ *
+ *  `carrier-write` carries the one approximation in the table. A loop emitter rotates the header's
+ *  update copy to the BOTTOM of the body, where it also runs on the exiting iteration, so a write
+ *  nominally on a back edge lands on the exit path too. Liveness cannot see a placement, so the
+ *  rule takes the conservative union over every block the writing edge's predecessor reaches. */
+export const CARRIER_NAME_GATES: readonly Gate<CarrierName>[] = [
+  {
+    id: 'carrier-width',
+    why: 'the copies into the name are assignments through its declaration, which would truncate',
+    sound: true,
+    guardedBy: 'fresh-merge.test.ts: a merge WIDER than its parameter carrier takes a fresh home',
+    rejects: (c) => c.widthDiffers,
+  },
+  {
+    id: 'carrier-sign',
+    why: 'a narrow declaration IS the extension it replaced, and u8 re-applies a different one',
+    sound: true,
+    guardedBy: 'carrier-name.test.ts: ablating carrier-sign reads an s8 carrier through a u8 name',
+    rejects: (c) => c.signDiffers,
+  },
+  {
+    id: 'sibling-param',
+    why: 'two parameters of one block share every in-edge, so one edge would write the name twice',
+    sound: true,
+    guardedBy: 'carrier-name-fuzz.test.ts: every SOUND gate of CARRIER_NAME_GATES is load-bearing',
+    rejects: (c) => c.siblingHolds,
+  },
+  {
+    id: 'carrier-live',
+    why: 'a value under the name still live here is what the in-edge copies would overwrite',
+    sound: true,
+    guardedBy: 'carrier-name-fuzz.test.ts: every SOUND gate of CARRIER_NAME_GATES is load-bearing',
+    rejects: (c) => !c.pureAlias && c.carrierLive,
+  },
+  {
+    id: 'carrier-write',
+    why: 'the converse — the name must not be written anywhere the parameter is still live',
+    sound: true,
+    guardedBy: 'carrier-name.test.ts: ablating carrier-write reads a loop variable past its sunk update',
+    rejects: (c) => c.carrierWritten,
+  },
+  {
+    id: 're-derives',
+    why: 'an unnamed live value is re-rendered at its use, and would read the name written here',
+    sound: true,
+    guardedBy: 'name-clobber.test.ts: the inlined difference keeps reading the value the asm computed it from',
+    rejects: (c) => !c.pureAlias && c.reDerivesName,
+  },
+];
+
 // Structuring levers, threaded as DATA so a new one is a field here + its consumer, not a new
 // positional boolean widened across every call site:
 //   returnsVoid                    — from the function's own prototype (suppress phantom r0 return);
@@ -1295,6 +1376,10 @@ export interface StructureHooks {
   nameCoalesceGates?: readonly Gate<NameMerge>[];
   /** `freshParamMerge`'s admission rules, ablatable the same way. */
   freshMergeGates?: readonly Gate<FreshMergeCarrier>[];
+  /** `canTakeName`'s admission rules — which name a block parameter may be spelled with. Every
+   *  entry is sound, so this exists for the differential test that drops one and watches the
+   *  emitted program change, never for a shipped ablation. */
+  carrierNameGates?: readonly Gate<CarrierName>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
@@ -2001,12 +2086,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // AND THE CONVERSE: the name must not be WRITTEN anywhere `p` itself is live. Every other
   // block param under the name is such a write — its in-edge copies execute at each
   // predecessor's end, and a LOOP header's update copy is emitted inside the loop body, where it
-  // also runs on the final (exiting) iteration — so the test is `p` live into the writer's block
-  // OR live out of any of its predecessors (the conservative union covers that placement). A
-  // materialized def under the name writes at its own block. This applies even to a
-  // redundant-phi alias (`pureAlias` waives only the value-at-B check: aliasing is sound at B's
-  // entry, but a later write to the shared name still splits them — e.g. a saved pre-increment
-  // `i` read post-loop).
+  // also runs on the final (exiting) iteration — so the test is `p` live out of any of the writing
+  // block's predecessors, the conservative union that covers that placement. A materialized def
+  // under the name writes at its own block. This applies even to a redundant-phi alias
+  // (`pureAlias` waives only the value-at-B check: aliasing is sound at B's entry, but a later
+  // write to the shared name still splits them — e.g. a saved pre-increment `i` read post-loop).
+  //
+  // EXCEPT WHERE THE WRITE STORES `p`. A predecessor all of whose edges hand that slot `p` itself
+  // writes `name = name` once the two share the name, so it stores nothing to clobber and
+  // relocating it reaches nowhere. That predecessor is a loop's own accumulator update, and
+  // without the exception the rule calls a value a clobber of itself.
   const paramBlock = new Map<Value, Block>();
   for (const blk of fn.blocks) {
     for (const pv of blk.params) {
@@ -2035,44 +2124,54 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // admitted it — a silent wrong answer, not a worse score. At 32 bits the two spellings ARE the
   // same bytes at a read, which is the mismatch `structure/namecoalesce.ts`'s header names and this
   // rule deliberately still tolerates.
-  const canTakeName = (p: Value, B: Block, name: string, pureAlias = false): boolean => {
-    if (carrierWidth(varType.get(name)) !== carrierWidth(p.type)) {
-      return false;
-    }
-    if (carrierSign(varType.get(name)) !== carrierSign(p.type)) {
-      return false;
-    }
-    if (B.params.some((q) => q !== p && varName.get(q) === name)) {
-      return false;
-    }
+  //
+  // THE RULES ARE A TABLE (`CARRIER_NAME_GATES`), so each one can be dropped and the pass re-run on
+  // real input — see docs/level-tower.md. What is computed here is the EVIDENCE; which evidence
+  // refuses is the table's to say.
+  const carrierScan = (p: Value, B: Block, name: string): { carrierLive: boolean; carrierWritten: boolean } => {
     const lin = liveIn.get(B)!;
+    let carrierLive = false;
+    let carrierWritten = false;
     for (const [v, n] of varName) {
       if (n !== name || v === p) {
         continue;
       }
-      if (!pureAlias && lin.has(v)) {
-        return false;
-      } // v still live at B → p's copies clobber it
+      carrierLive ||= lin.has(v); // v still live at B → p's copies clobber it
       const wblk = paramBlock.get(v);
       if (wblk && wblk !== entry) {
-        // v is a param → `name` written at wblk's edges
-        if (liveIn.get(wblk)!.has(p)) {
-          return false;
+        // v is a param → `name` is written by the in-edge copies into wblk, and by any relocation
+        // of one of them. AN EDGE THAT HANDS THIS SLOT `p` ITSELF IS NOT A WRITE: once the two
+        // share the name the copy reads `name = name`, so it stores nothing to clobber and
+        // relocating it reaches nowhere. Per PREDECESSOR rather than per edge, because the
+        // relocation is a property of the predecessor's placement — a terminator with two edges
+        // into wblk is exempt only if BOTH hand it `p`.
+        const slot = wblk.params.indexOf(v);
+        const storesOther = new Map<Block, boolean>();
+        for (const { pred, succ } of inEdgeRecords(preds, wblk)) {
+          storesOther.set(pred, (storesOther.get(pred) ?? false) || succ.args[slot] !== p);
         }
-        for (const pr of preds.get(wblk) ?? []) {
+        for (const [pr, other] of storesOther) {
+          if (!other) {
+            continue;
+          }
           for (const s of successorsOf(pr)) {
-            if (liveIn.get(s)!.has(p)) {
-              return false;
-            }
+            carrierWritten ||= liveIn.get(s)!.has(p);
           }
         }
       }
       const d = defs.get(v);
-      if (d && materialize.has(d) && liveIn.get(opBlock.get(d)!)!.has(p)) {
-        return false;
+      carrierWritten ||= !!d && materialize.has(d) && liveIn.get(opBlock.get(d)!)!.has(p);
+      if (carrierLive && carrierWritten) {
+        break;
       }
     }
-    // AND A VALUE NOBODY NAMED IS STILL A READER OF THIS NAME. The loop above asks which NAMED
+    return { carrierLive, carrierWritten };
+  };
+  const canTakeName = (p: Value, B: Block, name: string, pureAlias = false): boolean => {
+    const lin = liveIn.get(B)!;
+    let scan: ReturnType<typeof carrierScan> | undefined;
+    const scanned = (): ReturnType<typeof carrierScan> => (scan ??= carrierScan(p, B, name));
+    // AND A VALUE NOBODY NAMED IS STILL A READER OF THIS NAME. `carrier-live` asks which NAMED
     // values are live at `B`; an unnamed one is not stored anywhere, it is RE-DERIVED at its use
     // from whatever its operands are called then — so a value live into `B` whose inlined
     // expression mentions `name` reads the merge's assignment instead of what it was defined from.
@@ -2081,29 +2180,41 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // computes 10 — agbcc emits exactly that asm, so this is not a generated-IR curiosity. The
     // walk stops at any value with a name of its own (it reads THAT name) and at a materialized
     // def (it is assigned at its own position, which the clause above already judges).
-    if (!pureAlias) {
-      const reDerives = (w: Value, seen: Set<Value>): boolean => {
-        if (w === p || seen.has(w)) {
-          return false;
-        }
-        seen.add(w);
-        const nm = varName.get(w);
-        if (nm !== undefined) {
-          return nm === name;
-        }
-        const d = defs.get(w);
-        if (!d || materialize.has(d)) {
-          return false;
-        }
-        return d.operands.some((o) => reDerives(o, seen));
-      };
-      for (const w of lin) {
-        if (reDerives(w, new Set())) {
-          return false;
-        }
+    const reDerives = (w: Value, seen: Set<Value>): boolean => {
+      if (w === p || seen.has(w)) {
+        return false;
       }
-    }
-    return true;
+      seen.add(w);
+      const nm = varName.get(w);
+      if (nm !== undefined) {
+        return nm === name;
+      }
+      const d = defs.get(w);
+      if (!d || materialize.has(d)) {
+        return false;
+      }
+      return d.operands.some((o) => reDerives(o, seen));
+    };
+    return (
+      firstRejection(hooks.carrierNameGates ?? CARRIER_NAME_GATES, {
+        pureAlias,
+        widthDiffers: carrierWidth(varType.get(name)) !== carrierWidth(p.type),
+        signDiffers: carrierSign(varType.get(name)) !== carrierSign(p.type),
+        siblingHolds: B.params.some((q) => q !== p && varName.get(q) === name),
+        get carrierLive() {
+          return scanned().carrierLive;
+        },
+        get carrierWritten() {
+          return scanned().carrierWritten;
+        },
+        get reDerivesName() {
+          // NAMED live values are `carrier-live`'s, so the two rules stay disjoint and each one's
+          // ablation is its own claim. The walk itself still crosses into a named OPERAND, which
+          // is the whole point of it.
+          return [...lin].some((w) => !varName.has(w) && reDerives(w, new Set()));
+        },
+      }) === null
+    );
   };
   // Does the edge `pr -> b` hand `c` over as a loop variable's PRE-update value? True when `c` is a
   // loop header's own param and the edge leaves the loop from a latch of an emitter that places

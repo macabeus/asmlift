@@ -6030,7 +6030,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   //   G4  gPtr->member[expr], VARIABLE index   pmarr1 5 · pmarr2 9   control pmarrfix MATCH
   //   G5  a named bitfield store of ZERO       bfzero 5             control bfconstn MATCH
-  //   G2  loop accumulators as per-arm copies  nestacc 58
+  //   G2  loop accumulators as per-arm copies  nestacc 58 → 40 (per-arm half closed)
   //   G3  an accumulator's cross-loop home     sinkacc 17
   //   G6  the merged-tail store, LADDER form   armcb 32             control armcb2 MATCH
   //   G1  branch sense per SITE, divergent     mixsense 20 → 10     control calad MATCH
@@ -6064,15 +6064,25 @@ export const SYNTHETIC: SynthSpec[] = [
   //    a ZERO insert to a bare `and` (`expmed.c:557-558`, `606-608` skip the `orr` when
   //    `all_zero`), so the guard refuses before any field lookup: **89 firings on `bfzero`, 0 on
   //    `bfconstn`.** L2→L3 recognizer.
-  //  • `nestacc` 58 — the merge-param naming walk `structure/structure.ts:2190-2250`, refusing the
-  //    carrier at `:2221` (`carriesPreUpdate(…) || !canTakeName(…)`) and minting a fresh name at
-  //    `:2240`; the interference test is `canTakeName` at `:1960`. Fan: 20 candidates, every score
-  //    58–60 — capability, not ranking. **This refusal has no gate table**: it is an `if` inside a
-  //    4000-line function, which is why naming it took an instrumented patch and a revert, and why
-  //    its ablation is a claim rather than a test. `docs/level-tower.md:484-518` prescribes the
-  //    fix — convert load-bearing refusals to a `Gate<Ctx>` table, so that "'this gate is
-  //    load-bearing' becomes an executable claim instead of a comment" — so that conversion
-  //    belongs FIRST in a G2 build, not as a side effect of it.
+  //  • `nestacc` 58 → **40**, and the residual is a SECOND gap this row holds. G2 is two halves and
+  //    the first is closed: the merge-param naming walk refused every carrier on the deciding
+  //    liveness clause (`PARAMNAME REFUSE carrier=v6/v7/v8 preUpdate=false canTake=false
+  //    why=write-pred`, 754·754·377 firings), and that clause was edge-blind — the edge it fired
+  //    on hands the slot the merge itself, which under a shared name is `name = name`. The
+  //    refusals are now `CARRIER_NAME_GATES` (`structure/structure.ts`), per
+  //    `docs/level-tower.md:484-518`, so the ablation is a test and not a claim, and the exempted
+  //    clause is `carrier-write`. Fan 20 → 10 (`/flip-join` stops producing a distinct tree).
+  //    The 18 are the PER-ARM copies. The remaining 29 are the LOOP-CARRIED ones — `v6 = v2` at
+  //    the outer-loop head and `v2 = v6` at its tail, three accumulators — and the source spelling
+  //    that scores 11 is asmlift's own winner with `v6`/`v7`/`v8` deleted. Its first blocker is
+  //    NOT this walk: with the interference rule made edge-aware the same way, `/merge-names`
+  //    refuses one gate later on `loop-escape` (`structure/namecoalesce.ts`), which that file
+  //    called blunter than the hazard it restates and which is in fact LOAD-BEARING — dropping it
+  //    makes 2 of 7,535 nested generated functions compute something else
+  //    (`namecoalesce-fuzz.test.ts`, `depth: 2`, seeds 5104 and 6437). Taking the second half
+  //    needs `carriesPreUpdate` lifted to name classes, which that file already names as the work.
+  //    The other door — waiving `enclosingNames` in the loop-header seeding — reaches 11 under a
+  //    probe and would be a new ranked axis with the same soundness question.
   //  • `swladder` 7 — `structure/switch-recover.ts` recovers a `switch` from a comparison ladder
   //    with no gate on which the source wrote, though the target's own layout records it: a ladder
   //    interleaves test and body (`cmp #0x64; bne .L3` … body … `.L3: cmp #0x1e; bne`), a real
