@@ -175,6 +175,64 @@ test('a zero init is not a high half, so a large increment of it is still refuse
   expect(ops(fn).find((o) => o.opcode === 'add')).toBeDefined();
 });
 
+// ── (f) the buy-back's own two conditions ────────────────────────────────────────────────────
+// Case (d)'s rule is a positive recognizer, and read on its own it swallows case (c) again: an
+// accumulator's `const 0` init passes `isLowHalf`, so `s = 0; if (c) s += 0x10000;` — one 16.16
+// fixed-point step — IS a hi/lo pair by the letter of the test. Measured before the conditions
+// existed, a two-arm version of this row scored diff:1 on mwcc_242_81 with `hasMergeFeedHome`
+// FALSE, and MATCH with the pair refused. What saves it is WHICH operand the edge carries: in a
+// genuine pair the low half is an immediate no register ever holds, so an edge-carried operand must
+// be the HIGH half.
+const ACCHI = `fn acchi {
+^bb0(%0: s32, %1: s32*):
+  %2: s32 = const {value=0}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %0, %3
+  cond_br %4, ^bb2(%2), ^bb1()
+^bb1():
+  %5: s32 = const {value=65536}
+  %6: s32 = add %2, %5
+  br ^bb2(%6)
+^bb2(%7: s32):
+  store %1, %7 {off=0, width=4}
+  ret
+}
+`;
+
+test('an accumulator stepped by a whole high half is still an accumulator', () => {
+  const { fn, changed } = run(ACCHI);
+  expect(changed).toBe(false);
+  expect(ops(fn).find((o) => o.opcode === 'add')).toBeDefined();
+});
+
+// The MIRROR, where the init IS a high half and the clause above cannot separate the two shapes.
+// `s = 0x10000; if (c) s += 1;` and mwcc's shared `lis` are the same const/const pair with the same
+// edge-carried high half; what separates them is where the values GO. An accumulator's init and its
+// updated copy are two arms' feeds of ONE block parameter — exactly the merge `/merge-home` exists
+// to home — whereas a shared high half reaches the join while the COMPLETED literal is stored (case
+// (d)), never merged with the half it was built from.
+const ACCHI_INIT = `fn acchiinit {
+^bb0(%0: s32, %1: s32*):
+  %2: s32 = const {value=65536}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %0, %3
+  cond_br %4, ^bb2(%2), ^bb1()
+^bb1():
+  %5: s32 = const {value=1}
+  %6: s32 = add %2, %5
+  br ^bb2(%6)
+^bb2(%7: s32):
+  store %1, %7 {off=0, width=4}
+  ret
+}
+`;
+
+test('an init and its updated copy feeding one merge is an accumulator, high half or not', () => {
+  const { fn, changed } = run(ACCHI_INIT);
+  expect(changed).toBe(false);
+  expect(ops(fn).find((o) => o.opcode === 'add')).toBeDefined();
+});
+
 // ── (e) the residue's SPELLING: a refused pair must still print as the literal it is ──────────
 // Case (c) leaves `add(const 0, const 1)` in the IR on purpose, so that `/merge-home` can enumerate
 // `v = 0; if (c) v = v + 1;`. Every candidate that does NOT take that axis inlines both operands,
@@ -190,4 +248,37 @@ test('a refused pair still prints as its literal in a candidate that does not ho
   const out = cBackend.emit(structure(fn, { homeMergeFeeds: false, returnsVoid: true }));
   expect(out).not.toMatch(/0 \+ 1/);
   expect(out).toMatch(/= 1;/);
+});
+
+// …and the repair must be CLOSED UNDER ITSELF. A second increment in the same arm leaves the outer
+// `add` with an operand whose IR def is an `add`, so a rule that only looks at its immediate
+// operands folds the inner pair to `1` and then ships `1 + 2` — the same defect one chain link out,
+// which case (e) above cannot see. NO REACH in the corpus (a compiler folds such a chain before
+// asmlift ever sees the asm), so this pins the rule rather than a row.
+const ACC_CHAIN = `fn accchain {
+^bb0(%0: s32, %1: s32*):
+  %2: s32 = const {value=0}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %0, %3
+  cond_br %4, ^bb2(%2), ^bb1()
+^bb1():
+  %5: s32 = const {value=1}
+  %6: s32 = add %2, %5
+  %8: s32 = const {value=2}
+  %9: s32 = add %6, %8
+  br ^bb2(%9)
+^bb2(%7: s32):
+  store %1, %7 {off=0, width=4}
+  ret
+}
+`;
+
+test('a CHAIN of refused pairs prints as one literal, not as a shorter sum', () => {
+  const fn = parse(ACC_CHAIN);
+  verify(fn);
+  recognizeConsts(fn);
+  recoverTypes(fn);
+  const out = cBackend.emit(structure(fn, { homeMergeFeeds: false, returnsVoid: true }));
+  expect(out).not.toMatch(/1 \+ 2/);
+  expect(out).toMatch(/= 3;/);
 });

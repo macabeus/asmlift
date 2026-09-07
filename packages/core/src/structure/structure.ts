@@ -60,6 +60,7 @@ import {
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
+import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -3035,18 +3036,42 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // pre-recovery so the enumeration gate can see the merge feed, and only at rendering is it
       // settled that this candidate named neither half.
       //
-      // `bothIrConsts` is what keeps the reach honest, and it is not redundant with `l`/`r` being
-      // `const` Exprs: an operand that is a BLOCK PARAMETER resolved to a constant on this arm also
-      // renders as a literal, and folding those is a different and unmeasured decision. Instrumented
-      // over the real pipeline, this branch fires on `synthetic:sinkacc:agbcc` and on ZERO of the
-      // five MATCH rows whose emitted source carries a literal pair today (`dmaflat`, `dmapoll`,
-      // `bgshare`, `bgswitch`, `armhomes` — theirs are address trees whose IR defs are not consts).
-      // Same two opcodes and the same int32 normalisation as `raise/const.ts`'s own FOLD table, so
-      // this prints exactly what an unrefused fold would have.
-      const bothIrConsts = defs.get(d.operands[0])?.opcode === 'const' && defs.get(d.operands[1])?.opcode === 'const';
-      if (bothIrConsts && l.k === 'const' && r.k === 'const' && (op === '+' || op === '|')) {
-        const folded: Expr = { k: 'const', value: op === '+' ? (l.value + r.value) >> 0 : (l.value | r.value) >> 0 };
-        return restoreTo ? { k: 'cast', to: restoreTo, e: folded } : folded;
+      // `foldsFromIrConsts` is what keeps the reach honest, and it is not redundant with `l`/`r`
+      // being `const` Exprs: an operand that is a BLOCK PARAMETER resolved to a constant on this arm
+      // also renders as a literal, and folding those is a different and unmeasured decision.
+      // Instrumented over the real pipeline, this branch fires on `synthetic:sinkacc:agbcc` and on
+      // ZERO renders of the 16 MATCH rows whose emitted source carries a literal pair today (every
+      // row in `results.json` whose source carries one was re-run and diffed byte-for-byte) —
+      // theirs are address trees whose IR defs are not consts.
+      //
+      // The test is RECURSIVE because the residue is not: `add(add(const 0, const 1), const 2)`
+      // leaves the outer `add` with an operand whose def is an `add`, so an immediate-operands test
+      // folds the inner pair to `1` and then ships `1 + 2` — the same defect one chain link out.
+      // Reading through the fold's own opcodes closes it by construction. It cannot widen the reach
+      // past the refusal's residue: any const/const `add`/`or` `raise/const.ts` did not refuse it
+      // already folded, and nothing outside `frontend/` constructs one afterwards.
+      //
+      // The fold itself is `raise/const.ts`'s (`foldConstPair`), not a copy of it: which opcodes
+      // fold and how the result is normalised to int32 is ONE decision, and a third `FOLD` entry
+      // must not silently leave its residue unrepaired here.
+      const foldsFromIrConsts = (v: Value): boolean => {
+        const dv = defs.get(v);
+        if (!dv) {
+          return false; // a block parameter: not this refusal's residue
+        }
+        if (dv.opcode === 'const') {
+          return true;
+        }
+        return (
+          isConstFoldOpcode(dv.opcode) && dv.operands.length === 2 && dv.operands.every((o) => foldsFromIrConsts(o))
+        );
+      };
+      if (l.k === 'const' && r.k === 'const' && d.operands.every((o) => foldsFromIrConsts(o))) {
+        const value = foldConstPair(d.opcode, l.value, r.value);
+        if (value !== null) {
+          const folded: Expr = { k: 'const', value };
+          return restoreTo ? { k: 'cast', to: restoreTo, e: folded } : folded;
+        }
       }
       const sum: Expr = { k: 'bin', op, l, r };
       return restoreTo ? { k: 'cast', to: restoreTo, e: sum } : sum;
