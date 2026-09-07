@@ -61,6 +61,15 @@ because #148 shipped `/copy-defpos` (`rank.ts`), the edge-copy-order axis, as a 
 That was disclosed in its own PR and still invalidated every carried LBG number, because nobody
 re-stated the baseline against it.
 
+`/site-sense` (the per-site branch sense, `rank-axes.ts`) is the same shape and is **GATED**, which
+is the part to carry forward: it is enumerated only on a function whose raised IR holds a branch
+`raise/shortcircuit.ts` folded, so it multiplies the fan on those functions and on no others. Over
+the synthetic tier a lift-only census finds **34 rows carrying such a branch** (of 770; 130 rows the
+census's own bare lift could not raise are outside that count), and `LoadBGTilemapData` is one of
+them — one folded branch. **So the LBG numbers above are again stale by up to 2x, and this round did
+not re-measure them**: the ranked run costs 1500–8000 s and no gap in this chain needs it, so what
+is recorded here is the GATE firing, not a fan.
+
 Two consequences, and they are cheap:
 
 - **A fan size that changed is a fact to explain, not noise.** Factor it: the counts above are all

@@ -1027,8 +1027,9 @@ export interface StructureOptions {
    *  not a default because the reading is derived for the SHORT-branch layout and only measured
    *  for the long-branch one — the differ referees it per row. */
   senseFromFoldEvidence?: boolean;
-  /** PER-SITE override of the two booleans above: the ORDINALS of the branch-sense sites whose
-   *  sense is the opposite of what the function-wide boolean says. A site's ordinal is its
+  /** PER-SITE override of whatever decided a site's sense — the boolean, or `senseFromFoldEvidence`
+   *  where that is on: the ORDINALS of the branch-sense sites to spell the OTHER way round. A
+   *  site's ordinal is its
    *  position among the distinct blocks that turn out to BE sense sites, in first-visit order —
    *  a numbering only this pass can hand out, since a site exists only once structuring has
    *  decided both of its arms are real. Absent ⇒ the booleans alone decide, which is every caller

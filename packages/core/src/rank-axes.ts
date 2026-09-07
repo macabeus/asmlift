@@ -291,6 +291,12 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // change which sites fold, and a gate asked on a different lift would govern a fan it did not
   // measure. A function with no fold structures the identical tree on both arms and the tree dedup
   // collapses the pair before any compile.
+  //
+  // NOT in the strip closure, like the two per-function sense levers it refines — which are not in
+  // this table at all. `negateCond` is total (l3/ast.ts: a relational opcode swaps, a connective
+  // distributes, anything else takes a `!`), so re-spelling a sense can neither throw nor let a
+  // candidate structure a function the primary declines; there is no failing OFF sibling for an ON
+  // one to ride past.
   {
     flag: 'siteSense',
     suffix: '/site-sense',
