@@ -68,7 +68,8 @@ export interface StructuringAxis {
     | 'mergeHome'
     | 'unsCmp'
     | 'freshMerge'
-    | 'copyDefPos';
+    | 'copyDefPos'
+    | 'siteSense';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -270,6 +271,32 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     options: (on) => ({ preferDefPosCopyOrder: on }),
     variantGate: edgeCopyOrdersDiffer,
     strip: true,
+  },
+  // `/site-sense` — spell a folded short-circuit `if` from the FOLD'S own orientation evidence
+  // rather than from the per-function branch-sense boolean (structure.ts senseFromFoldEvidence,
+  // raise/shortcircuit.ts `scSharedOnFall`). The two sense booleans are per FUNCTION, so a
+  // function whose `if`s were written in opposite senses reaches neither spelling: over
+  // `synthetic:mixsense`'s four divergent ladder sites the whole 2^4 per-site enumeration scores
+  // 10 at the source's own mixed configuration against 20 and 27 for the two the booleans reach,
+  // and `synthetic:joinsense` MATCHES at a mix the booleans cannot spell.
+  //
+  // WHY IT IS AN AXIS AND NOT THE DEFAULT. The reading — a shared block the last test FELL INTO is
+  // the source's `then` — is derived from gcc laying a condition's arms out in source order, which
+  // holds for the SHORT-branch layout; the long-branch form inverts the last test and is only
+  // MEASURED here (`synthetic:ifand_far`, which scores the same either way). An axis costs a
+  // candidate where it is wrong; a default would cost the row.
+  //
+  // Gated on this variant's own fully-raised fn carrying a stamped branch at all, for
+  // `/copy-defpos`'s reason one entry up: the `/connective` lift axis and the symbol variants each
+  // change which sites fold, and a gate asked on a different lift would govern a fan it did not
+  // measure. A function with no fold structures the identical tree on both arms and the tree dedup
+  // collapses the pair before any compile.
+  {
+    flag: 'siteSense',
+    suffix: '/site-sense',
+    options: (on) => ({ senseFromFoldEvidence: on }),
+    variantGate: (fn) => fn.blocks.some((b) => b.ops.some((op) => typeof op.attrs.scSharedOnFall === 'boolean')),
+    strip: false,
   },
 ];
 

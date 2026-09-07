@@ -1014,6 +1014,19 @@ export interface StructureOptions {
   // (`synthetic:fib`, `for(i=0;i<n;i++)`, emits `if (0 >= a0) … else do{…}while`), so there no
   // spelling is the faithful one and only the differ can choose.
   negateJoinedBranchSense?: boolean;
+  /** Spell a branch-sense site from the SHORT-CIRCUIT FOLD'S own orientation evidence, where the
+   *  fold left some, instead of from the two booleans above. `raise/shortcircuit.ts` stamps the
+   *  fused branch with `scSharedOnFall` — whether the arm both tests reach was FALLEN INTO rather
+   *  than branched to — and gcc lays a condition's arms out in source order, so a fallen-into
+   *  shared block is the source's `then` and the site takes the positive spelling. Per SITE, which
+   *  is the point: the booleans are per function, and a function whose `if`s were written in
+   *  opposite senses has no right value for either.
+   *
+   *  A site the fold did not touch has no evidence and keeps its boolean, so this changes nothing
+   *  on a function with no short-circuit chain. rank.ts's `/site-sense` axis; it is an AXIS and
+   *  not a default because the reading is derived for the SHORT-branch layout and only measured
+   *  for the long-branch one — the differ referees it per row. */
+  senseFromFoldEvidence?: boolean;
   /** PER-SITE override of the two booleans above: the ORDINALS of the branch-sense sites whose
    *  sense is the opposite of what the function-wide boolean says. A site's ordinal is its
    *  position among the distinct blocks that turn out to BE sense sites, in first-visit order —
@@ -1405,6 +1418,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     preserveDivergentBranchSense = true,
     negateJoinedBranchSense = preserveDivergentBranchSense,
     branchSenseFlipSites,
+    senseFromFoldEvidence = false,
     orderArgCopiesByWriteOrder = true,
     preferDefPosCopyOrder = false,
     switchAllowsNeqCase = true,
@@ -4068,7 +4082,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // on IDO/MIPS; agbcc/GCC canonicalise either way, so it is safe there too. A compiler that
     // inverts branch canonicalization sets the boolean false and gets the positive form.
     const senseSite = thenS.length > 0 && elseS.length > 0;
-    const siteDefault = ipd === null ? preserveDivergentBranchSense : negateJoinedBranchSense;
+    // The fold's evidence where there is any, the function-wide boolean where there is not
+    // (`senseFromFoldEvidence`). `scSharedOnFall` true = the last test fell INTO the arm both
+    // tests reach, so that arm is the source's `then` and it is already this branch's TAKEN
+    // successor — the positive spelling, no negation.
+    const foldEvidence = term.attrs.scSharedOnFall;
+    const siteDefault =
+      senseFromFoldEvidence && typeof foldEvidence === 'boolean'
+        ? !foldEvidence
+        : ipd === null
+          ? preserveDivergentBranchSense
+          : negateJoinedBranchSense;
     let negateHere = false;
     if (senseSite) {
       // Keyed by BLOCK, numbered by first visit. Both halves matter: a region the structurer
