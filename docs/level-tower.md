@@ -535,9 +535,14 @@ address the range cannot place still bars.
 about a gate's own predicate. But a gate reads a program, and the passes upstream of it decide what
 that program contains. `raise/const.ts` — the L1 recognizer that folds the two-instruction 32-bit
 literal a RISC target builds (`lui;ori`, `lis;ori`) into one `const`, and the pass the `idiom fold`
-box above stands for alongside the pattern engine — used to fold ANY const/const `or`/`add`. On
-Thumb, where no such instruction pair exists, that reached agbcc's `s = 0; if (c) s += 1;` and
-rewrote the arm's `add(%s = const 0, const 1)` to `const 1`, deleting the accumulator. The
+box above stands for alongside the pattern engine — used to fold ANY const/const `or`/`add`. That
+reached agbcc's `s = 0; if (c) s += 1;` and rewrote the arm's `add(%s = const 0, const 1)` to
+`const 1`, deleting the accumulator. (Not because the pass has no business on ARM: on Thumb the
+same two-instruction materialisation is a pool word plus an immediate `add`, and ablating the whole
+pass costs three agbcc byte-matches — `dmafield` MATCH -> diff:29, `fieldbase` MATCH -> diff:22,
+`bgfixed` MATCH -> diff:2. A clientele is a SHAPE, not a target; the first draft of this paragraph
+said "Thumb, where no such instruction pair exists" and would have led the next reader to gate the
+pass off ARM and lose those three.) The
 `/merge-home` axis that would have hoisted the init has a correct scope and a correct
 `variantGate` — and the gate read FALSE on both owned rows, because the merge feed it looks for had
 been deleted two levels below it. Nothing reported anything: a candidate that was never enumerated
@@ -548,6 +553,16 @@ the real upstream pipeline rather than parsing IR straight into the gate**
 ([`test/merge-home.test.ts`](../packages/core/test/merge-home.test.ts), "the accumulator's init
 survives pre-recovery"). Otherwise the next widening of an unrelated fold takes the axis off the fan
 again, silently.
+
+**AND UN-STARVING A GATE COSTS THE FAN ITS FORK.** The same paragraph read as a pure win for two
+weeks, because the reach census it rests on counts OUTCOMES: 4 rows of the 806 that lift can move,
+3 better and 1 neutral. What that census does not say is that those same 4 rows now enumerate three
+axes they could not before (`/merge-home`, `/defsite`, `/loop-entry`) and pay for them:
+`synthetic:sinkacc:agbcc` enumerates 36 -> 54 candidates and `kleod:CheckWorldCompletion:agbcc`
+2.69x as many, which is roughly 2x the wall clock on each real row. Bounded today,
+but the triggering shape is `s = 0; ... if (c) s += 1;`, which is ordinary C, and candidate compiles
+have no timeout. When a change unblocks an axis, report the fan beside the score: a reach census
+answers "which rows can move" and says nothing about what they cost.
 
 **A SOUND GATE CAN BE SOUND ABOUT THE WRONG REGION, and nothing in this file's machinery notices.**
 `sound: true` costs a `guardedBy` test, and a table where every entry has one still answers the

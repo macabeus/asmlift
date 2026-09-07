@@ -6125,9 +6125,24 @@ export const SYNTHETIC: SynthSpec[] = [
   //    Two-sided control, and it is not an agbcc row: `synthetic:fib:gcc2.7.2kmc` fires the same
   //    refusal and reads `diff:12` either way, so the rule is compiler-neutral rather than an
   //    agbcc special case. Corpus reach, censused before any row was measured: 4 rows of the 806
-  //    that lift. `l3/hoist.ts`'s `isBaseInit` is still NOT the place to widen — level-tower names
+  //    that lift.
+  //    WHAT THE REACH CENSUS DOES NOT SAY IS THE COST. Those 4 rows now enumerate three axes they
+  //    could not before, and pay for them: `sinkacc` enumerates 36 → 54 candidates and
+  //    `kleod:CheckWorldCompletion:agbcc` 2.69x as many (312 → 840 through a bare
+  //    `enumerateCandidates`, which sees fewer options than the runner and so counts lower than the
+  //    624 → 1680 review measured through it — the RATIO is what reproduced, exactly), which is
+  //    roughly 2x the wall clock on each real row. Bounded to 4
+  //    rows today, but the triggering shape is `s = 0; ... if (c) s += 1;`, which is ordinary C, so
+  //    a dogfooded project function is likely to hit it — and candidate compiles have no timeout.
+  //    `l3/hoist.ts`'s `isBaseInit` is still NOT the place to widen — level-tower names
   //    that exact widening as the trap, since it is the sole definition of where the base-init run
   //    ends and `l3/basecse.ts` re-orders off it.
+  //    Two review corrections that outlived the round and belong with the row. (1) The refusal
+  //    misses the pass's OWN clientele in one shape: mwcc shares a `lis` across a branch, so a
+  //    genuine hi/lo pair arrives edge-carried; `raise/const.ts` now recognises the pair positively
+  //    and folds it anyway. (2) A refused pair used to PRINT as `v = 0 + 1;` in every candidate
+  //    that did not take `/merge-home` — score-neutral, so no gate saw it — and is re-folded at the
+  //    structurer's rendering site.
   //  • `mixsense` 20 — `preserveDivergentBranchSense`: ONE boolean per FUNCTION, so the axis flips
   //    every divergent `if` at once. Fan of literally two, `unsigned: 20` and
   //    `unsigned/flip-branch: 27`; the row's REFERENCE SOURCE, compiled against this row's own
