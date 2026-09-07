@@ -15,11 +15,14 @@ import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
-function emit(ir: string, opts: Parameters<typeof structure>[1]): string {
+function emitWith(ir: string, opts: Parameters<typeof structure>[1], hooks: Parameters<typeof structure>[2]): string {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, opts));
+  return cBackend.emit(structure(fn, opts, hooks));
+}
+function emit(ir: string, opts: Parameters<typeof structure>[1]): string {
+  return emitWith(ir, opts, {});
 }
 
 // A divergent if: both arms terminate (return), no reconvergence → ipdom null.
@@ -106,6 +109,26 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     // and a one-armed if never flips: the DIVERGE fixture is joined-flip-invariant. Both values
     // stated explicitly — against `{}` this would compare the default against itself.
     expect(emit(DIVERGE, { negateJoinedBranchSense: true })).toBe(emit(DIVERGE, { negateJoinedBranchSense: false }));
+  });
+
+  test('branchSenseFlipSites overrides ONE site, leaving its neighbour on the boolean', () => {
+    // The per-SITE seam: a function-wide boolean cannot spell a function whose two `if`s were
+    // written in opposite senses, and BOTHIFS holds one of each class. Flipping site 0 alone
+    // must reproduce site 1's boolean spelling exactly and nothing else.
+    const sites: { ordinal: number; joined: boolean; negated: boolean }[] = [];
+    const both = emitWith(BOTHIFS, {}, { onBranchSenseSite: (x) => sites.push(x) });
+    // The INNER (joined) if is site 0: both arms are structured before the outer if's own sense
+    // is decided, so the walk reaches the nested site first. That is the numbering the masks mean.
+    expect(sites.map((x) => `${x.ordinal}${x.joined ? 'J' : 'D'}`)).toEqual(['0J', '1D']);
+    expect(emit(BOTHIFS, { branchSenseFlipSites: new Set([0]) })).toBe(
+      emit(BOTHIFS, { negateJoinedBranchSense: false }),
+    );
+    expect(emit(BOTHIFS, { branchSenseFlipSites: new Set([1]) })).toBe(
+      emit(BOTHIFS, { preserveDivergentBranchSense: false, negateJoinedBranchSense: true }),
+    );
+    // An ordinal past the last site is inert rather than an error — the enumeration hands the
+    // same mask to every function, and a function with fewer sites simply re-spells the default.
+    expect(emit(BOTHIFS, { branchSenseFlipSites: new Set([9]) })).toBe(both);
   });
 
   test('the joined sense DEFAULTS to the divergent one', () => {

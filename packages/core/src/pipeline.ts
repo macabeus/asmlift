@@ -341,8 +341,12 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
 }
 
 /** Stage 4 — structure + its boundary contracts, always as a pair. */
-export function structureChecked(fn: Fn, opts: Parameters<typeof structure>[1]): SFn {
-  const raw = attributeOpaques(fn, () => structure(fn, opts));
+export function structureChecked(
+  fn: Fn,
+  opts: Parameters<typeof structure>[1],
+  hooks?: Parameters<typeof structure>[2],
+): SFn {
+  const raw = attributeOpaques(fn, () => structure(fn, opts, hooks));
   // The boundary contracts run on the pre-DCE tree: the readability pass must never be able to
   // hide a structuring defect by dropping the dead statement that carries it. assertResolved
   // catches an unresolved `?` value; assertDerefsTyped catches an ill-typed deref (e.g. a pointer

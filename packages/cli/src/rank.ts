@@ -70,7 +70,16 @@ const enumerate = (name: string, asm: string, target: TargetDescription, opts: R
     asmData: opts.asmData,
     symbols: opts.symbols,
     ...(opts.onLeverError ? { onLeverError: opts.onLeverError } : {}),
+    ...perSiteSenseProbe(),
   });
+
+/** `ASMLIFT_PERSITE_SENSE=<n>` — the G1 decidability probe: fork the two per-function branch-sense
+ *  booleans into one bit per site over the first `n` sites, multiplying the whole fan by 2^n. Read
+ *  here rather than in core, which is browser-pure. Off (and free) unless the variable is set. */
+const perSiteSenseProbe = (): { perSiteSenseBits?: number } => {
+  const n = Number(process.env.ASMLIFT_PERSITE_SENSE ?? '');
+  return Number.isInteger(n) && n > 0 ? { perSiteSenseBits: n } : {};
+};
 
 /** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score. */
 export function decompileRanked(
