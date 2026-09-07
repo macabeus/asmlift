@@ -40,7 +40,18 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
   },
 ];
 
-const SEEDS = 4000;
+// SIZED, not maximal, and the size is a CI budget rather than a confidence statement. Arm A is the
+// expensive half — it structures every generated function TWICE — and `test:offline` shares a
+// two-core runner with `narrowlocal-fuzz`, which alone takes a minute there. At 4,000 this file
+// plus the nested arm next door put 30% more CPU into that suite than vitest's own reporter could
+// keep up with: two of three runs ended `2696 passed` and an unhandled
+// `[vitest-worker]: Timeout calling "onTaskUpdate"`, which fails the job.
+//
+// 250 still judges an order of magnitude more functions than the vacuity guard below asks for, and
+// arm B is unaffected — it stops at the first seed that proves a gate load-bearing, which every
+// reachable one does within the first handful. RAISE IT LOCALLY when hunting: that is how the
+// `loop-escape` finding next door was taken, at 8,000.
+const SEEDS = 250;
 
 /** Both spellings of one seed, or null when the shape is not one this can judge. */
 function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[]; on: Event[] } | null {
