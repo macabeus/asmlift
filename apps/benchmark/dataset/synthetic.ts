@@ -6126,12 +6126,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //    refusal and reads `diff:12` either way, so the rule is compiler-neutral rather than an
   //    agbcc special case. Corpus reach, censused before any row was measured: 4 rows of the 806
   //    that lift.
-  //    WHAT THE REACH CENSUS DOES NOT SAY IS THE COST. Those 4 rows now enumerate three axes they
+  //    WHAT THE REACH CENSUS DOES NOT SAY IS THE COST. THREE of those rows now enumerate axes they
   //    could not before, and pay for them: `sinkacc` enumerates 36 → 54 candidates and
   //    `kleod:CheckWorldCompletion:agbcc` 2.69x as many (312 → 840 through a bare
   //    `enumerateCandidates`, which sees fewer options than the runner and so counts lower than the
   //    624 → 1680 review measured through it — the RATIO is what reproduced, exactly), which is
-  //    roughly 2x the wall clock on each real row. Bounded to 4
+  //    roughly 2x the wall clock on each real row. The fourth reached row, the `fib` control above,
+  //    pays NOTHING — 8 → 8 candidates, the same eight labels, winner already
+  //    `signed/defsite/loop-entry` at 12 on main (measured on both trees) — so it is a reached row
+  //    and not a paying one. Bounded to 4
   //    rows today, but the triggering shape is `s = 0; ... if (c) s += 1;`, which is ordinary C, so
   //    a dogfooded project function is likely to hit it — and candidate compiles have no timeout.
   //    `l3/hoist.ts`'s `isBaseInit` is still NOT the place to widen — level-tower names

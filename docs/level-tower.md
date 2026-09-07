@@ -556,13 +556,26 @@ again, silently.
 
 **AND UN-STARVING A GATE COSTS THE FAN ITS FORK.** The same paragraph read as a pure win for two
 weeks, because the reach census it rests on counts OUTCOMES: 4 rows of the 806 that lift can move,
-3 better and 1 neutral. What that census does not say is that those same 4 rows now enumerate three
-axes they could not before (`/merge-home`, `/defsite`, `/loop-entry`) and pay for them:
+3 better and 1 neutral. What that census does not say is that THREE of those rows now enumerate axes
+they could not before (`/merge-home`, `/defsite`, `/loop-entry`) and pay for them:
 `synthetic:sinkacc:agbcc` enumerates 36 -> 54 candidates and `kleod:CheckWorldCompletion:agbcc`
-2.69x as many, which is roughly 2x the wall clock on each real row. Bounded today,
+2.69x as many, which is roughly 2x the wall clock on each real row. The fourth,
+`synthetic:fib:gcc2.7.2kmc`, is the two-sided control and gains NOTHING — 8 -> 8 candidates, the same
+eight labels, and its winner was already `signed/defsite/loop-entry` at 12 on main — so counting it
+among the payers was this paragraph's own version of the mistake it warns about. Bounded today,
 but the triggering shape is `s = 0; ... if (c) s += 1;`, which is ordinary C, and candidate compiles
 have no timeout. When a change unblocks an axis, report the fan beside the score: a reach census
 answers "which rows can move" and says nothing about what they cost.
+
+**A refusal at one level can owe a repair at another, and the tower is where that debt is written
+down.** The L1 refusal above deliberately leaves `add(const 0, const 1)` standing so the enumeration
+gate can see the merge feed — but a candidate that does NOT home the register inlines both operands,
+and the winning source then ships `v = 0 + 1;`. So the pair is folded back at an L2 RENDERING site
+(`structure.ts`, `lowerDef`'s arithmetic case) instead of in the IR: only at rendering is it settled
+that this candidate named neither half. The fold there is `raise/const.ts`'s own `foldConstPair`, so
+the two levels cannot disagree about which opcodes fold or how the result is normalised, and it
+reads through its own opcodes so a CHAIN of refused pairs collapses rather than printing `1 + 2`.
+A cross-level coupling like this is invisible at either site alone, which is why it belongs here.
 
 **A SOUND GATE CAN BE SOUND ABOUT THE WRONG REGION, and nothing in this file's machinery notices.**
 `sound: true` costs a `guardedBy` test, and a table where every entry has one still answers the
