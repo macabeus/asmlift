@@ -3019,6 +3019,35 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
       // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
       // today, so closing it would churn spellings for a signedness case no row exercises.
+      // A `+`/`|` over two IR `const`s that both RENDER as literals is the literal it is. After
+      // pre-recovery there is only one way such an op still exists: `raise/const.ts` folds every
+      // const/const `or`/`add` it recognises and deliberately REFUSES one shape — a register the
+      // compiler held live across a branch, whose value on this path is a constant. That refusal is
+      // what lets `/merge-home` enumerate the hoisted init (`v = 0; if (c) v = v + 1;`), but a
+      // candidate that does NOT home the register inlines both operands, and without this it ships
+      // `v = 0 + 1;` in the winning source — measured on `synthetic:fib:gcc2.7.2kmc`, whose emitted
+      // body regressed from `v1 = 1;` to `v1 = 0 + 1;` and stayed diff:12 throughout, because the
+      // target compiler folds the constant expression and no score gate can see the difference. The
+      // artifact a decomp author pastes into a repo is what is at stake, so `const-fold.test.ts` pins
+      // this one on the emitted STRING rather than on the IR.
+      //
+      // Re-folding HERE and not back in the IR is the point: the pair must stay two ops through
+      // pre-recovery so the enumeration gate can see the merge feed, and only at rendering is it
+      // settled that this candidate named neither half.
+      //
+      // `bothIrConsts` is what keeps the reach honest, and it is not redundant with `l`/`r` being
+      // `const` Exprs: an operand that is a BLOCK PARAMETER resolved to a constant on this arm also
+      // renders as a literal, and folding those is a different and unmeasured decision. Instrumented
+      // over the real pipeline, this branch fires on `synthetic:sinkacc:agbcc` and on ZERO of the
+      // five MATCH rows whose emitted source carries a literal pair today (`dmaflat`, `dmapoll`,
+      // `bgshare`, `bgswitch`, `armhomes` — theirs are address trees whose IR defs are not consts).
+      // Same two opcodes and the same int32 normalisation as `raise/const.ts`'s own FOLD table, so
+      // this prints exactly what an unrefused fold would have.
+      const bothIrConsts = defs.get(d.operands[0])?.opcode === 'const' && defs.get(d.operands[1])?.opcode === 'const';
+      if (bothIrConsts && l.k === 'const' && r.k === 'const' && (op === '+' || op === '|')) {
+        const folded: Expr = { k: 'const', value: op === '+' ? (l.value + r.value) >> 0 : (l.value | r.value) >> 0 };
+        return restoreTo ? { k: 'cast', to: restoreTo, e: folded } : folded;
+      }
       const sum: Expr = { k: 'bin', op, l, r };
       return restoreTo ? { k: 'cast', to: restoreTo, e: sum } : sum;
     }

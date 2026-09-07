@@ -9,13 +9,18 @@
 // header for both measurements), so the refusal is bought back by two carve-outs, one per case below:
 // case (b) an address literal an arm carries, case (d) a recognisable hi/lo pair an arm carries.
 //
-// Asserted on the IR, never on an emitted string: what is at stake is whether a value still exists.
+// Asserted on the IR wherever what is at stake is whether a value still exists. The ONE exception is
+// the last case, which asserts the emitted C: an IR-only suite is exactly what let the refusal ship a
+// candidate spelling `v = 0 + 1;`, so the residue's SPELLING needs a pin of its own.
 import { expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import { Fn, Op } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recognizeConsts } from '../src/raise/const';
+import { recoverTypes } from '../src/raise/recover';
+import { structure } from '../src/structure/structure';
 
 const ops = (fn: Fn): Op[] => fn.blocks.flatMap((b) => b.ops);
 const run = (ir: string): { fn: Fn; changed: boolean } => {
@@ -168,4 +173,21 @@ test('a zero init is not a high half, so a large increment of it is still refuse
   const { fn, changed } = run(ACCLIKE_HI);
   expect(changed).toBe(false);
   expect(ops(fn).find((o) => o.opcode === 'add')).toBeDefined();
+});
+
+// ── (e) the residue's SPELLING: a refused pair must still print as the literal it is ──────────
+// Case (c) leaves `add(const 0, const 1)` in the IR on purpose, so that `/merge-home` can enumerate
+// `v = 0; if (c) v = v + 1;`. Every candidate that does NOT take that axis inlines both operands,
+// and without a print-time fold the winning source ships `v = 0 + 1;` — measured on
+// `synthetic:fib:gcc2.7.2kmc`, which regressed from `v1 = 1;` to `v1 = 0 + 1;` and stayed diff:12
+// throughout, because the target compiler folds the constant expression and no score gate can see
+// the difference. What is at stake is the artifact, so this one is asserted on the string.
+test('a refused pair still prints as its literal in a candidate that does not home the register', () => {
+  const fn = parse(ACC);
+  verify(fn);
+  recognizeConsts(fn);
+  recoverTypes(fn);
+  const out = cBackend.emit(structure(fn, { homeMergeFeeds: false, returnsVoid: true }));
+  expect(out).not.toMatch(/0 \+ 1/);
+  expect(out).toMatch(/= 1;/);
 });
