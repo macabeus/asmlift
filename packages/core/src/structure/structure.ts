@@ -1012,8 +1012,30 @@ export interface StructureOptions {
   // branch RANGE decides (raise/shortcircuit.ts); a relay past a branch's reach inverts to jump
   // around the long form; and a rotated loop's zero-trip guard is an `if` no source wrote at all
   // (`synthetic:fib`, `for(i=0;i<n;i++)`, emits `if (0 >= a0) … else do{…}while`), so there no
-  // spelling is the faithful one and only the differ can choose.
+  // spelling is the faithful one and only the differ can choose. `senseFromFoldEvidence` below
+  // answers the FIRST of the three per site, off the fold's own record.
   negateJoinedBranchSense?: boolean;
+  /** Spell a branch-sense site from the SHORT-CIRCUIT FOLD'S own orientation evidence, where the
+   *  fold left some, instead of from the two booleans above. `raise/shortcircuit.ts` stamps the
+   *  fused branch with `scSharedOnFall` — whether the arm both tests reach was FALLEN INTO rather
+   *  than branched to — and gcc lays a condition's arms out in source order, so a fallen-into
+   *  shared block is the source's `then` and the site takes the positive spelling. Per SITE, which
+   *  is the point: the booleans are per function, and a function whose `if`s were written in
+   *  opposite senses has no right value for either.
+   *
+   *  A site the fold did not touch has no evidence and keeps its boolean, so this changes nothing
+   *  on a function with no short-circuit chain. rank.ts's `/site-sense` axis; it is an AXIS and
+   *  not a default because the reading is derived for the SHORT-branch layout and only measured
+   *  for the long-branch one — the differ referees it per row. */
+  senseFromFoldEvidence?: boolean;
+  /** PER-SITE override of whatever decided a site's sense — the boolean, or `senseFromFoldEvidence`
+   *  where that is on: the ORDINALS of the branch-sense sites to spell the OTHER way round. A
+   *  site's ordinal is its
+   *  position among the distinct blocks that turn out to BE sense sites, in first-visit order —
+   *  a numbering only this pass can hand out, since a site exists only once structuring has
+   *  decided both of its arms are real. Absent ⇒ the booleans alone decide, which is every caller
+   *  but the enumerating one; an ordinal past the last site is inert. */
+  branchSenseFlipSites?: ReadonlySet<number>;
   orderArgCopiesByWriteOrder?: boolean;
   /** Order a measured edge's ACYCLIC copy set by the def-position proxy instead — the
    *  `/copy-defpos` ranked sibling of the write-order spelling (rank.ts). A CYCLIC set keeps the
@@ -1273,6 +1295,11 @@ export interface StructureHooks {
   nameCoalesceGates?: readonly Gate<NameMerge>[];
   /** `freshParamMerge`'s admission rules, ablatable the same way. */
   freshMergeGates?: readonly Gate<FreshMergeCarrier>[];
+  /** Every branch-sense site this structuring reached, in emission order: the block index
+   *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
+   *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
+   *  has decided both arms are real, so it cannot be computed ahead of the pass. */
+  onBranchSenseSite?: (site: { block: number; ordinal: number; joined: boolean; negated: boolean }) => void;
 }
 
 /** A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
@@ -1392,6 +1419,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     coalesceLoopInit = false,
     preserveDivergentBranchSense = true,
     negateJoinedBranchSense = preserveDivergentBranchSense,
+    branchSenseFlipSites,
+    senseFromFoldEvidence = false,
     orderArgCopiesByWriteOrder = true,
     preferDefPosCopyOrder = false,
     switchAllowsNeqCase = true,
@@ -3466,6 +3495,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   };
 
+  // Branch-sense sites, numbered as the walk below first reaches them (`branchSenseFlipSites`).
+  const senseOrdinal = new Map<number, number>();
+
   const structureRegion = (b: Block, stop: Block | null): Stmt[] => {
     if (b === stop) {
       return [];
@@ -4041,29 +4073,45 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // block with different args would otherwise give both arms the first edge's copies.
     const thenS = [...argAssignsFor(b, term.successors[0]), ...structureRegion(takenB, merge)];
     const elseS = [...argAssignsFor(b, term.successors[1]), ...structureRegion(fallB, merge)];
-    if (ipd === null && thenS.length && elseS.length && preserveDivergentBranchSense) {
-      // Divergent arms (both terminate — no reconvergence). The asm branched forward to the
-      // `taken` block and fell through to `fall`; a compiler that PRESERVES source branch direction
-      // re-emits that as a forward branch on the NEGATED condition to the else-arm, so putting the
-      // taken arm as `else` (and negating) reproduces the original branch sense. Byte-exact on
-      // IDO/MIPS; agbcc/GCC canonicalise either way, so it is safe there too. A compiler that
-      // inverts branch canonicalization sets preserveDivergentBranchSense false and falls through
-      // to the positive form below.
-      out.push({ k: 'if', cond: negateCond(cond), then: elseS, else: thenS });
-      return out;
-    }
-    if (negateJoinedBranchSense && ipd !== null && thenS.length && elseS.length) {
-      // JOINED arms only (`ipd !== null` — a divergent if belongs to preserveDivergentBranchSense
-      // above, and without the check a /flip-branch variant would fall through here and get
-      // flipped BACK, collapsing the {divergent flipped × joined flipped} combination), and both
-      // arms real: the flipped spelling is a genuine sibling, not noise on a one-armed if
-      out.push({ k: 'if', cond: negateCond(cond), then: elseS, else: thenS });
-      if (merge && merge !== stop) {
-        out.push(...structureRegion(merge, stop));
+    // A BRANCH-SENSE SITE: both arms real, so the swapped-and-negated spelling is a genuine
+    // sibling rather than noise on a one-armed if. Which boolean owns it is `ipd`: divergent arms
+    // (both terminate, no reconvergence) belong to preserveDivergentBranchSense, a reconverging
+    // pair to negateJoinedBranchSense — and the split has to stay, or a /flip-branch variant would
+    // fall into the joined case and get flipped BACK, collapsing the {divergent × joined}
+    // combination. Sense TRUE = the asm branched forward to the `taken` block and fell through to
+    // `fall`, so a compiler that PRESERVES source branch direction saw the FALL-THROUGH arm as
+    // `then`: putting the taken arm as `else` (and negating) reproduces the original. Byte-exact
+    // on IDO/MIPS; agbcc/GCC canonicalise either way, so it is safe there too. A compiler that
+    // inverts branch canonicalization sets the boolean false and gets the positive form.
+    const senseSite = thenS.length > 0 && elseS.length > 0;
+    // The fold's evidence where there is any, the function-wide boolean where there is not
+    // (`senseFromFoldEvidence`). `scSharedOnFall` true = the last test fell INTO the arm both
+    // tests reach, so that arm is the source's `then` and it is already this branch's TAKEN
+    // successor — the positive spelling, no negation.
+    const foldEvidence = term.attrs.scSharedOnFall;
+    const siteDefault =
+      senseFromFoldEvidence && typeof foldEvidence === 'boolean'
+        ? !foldEvidence
+        : ipd === null
+          ? preserveDivergentBranchSense
+          : negateJoinedBranchSense;
+    let negateHere = false;
+    if (senseSite) {
+      // Keyed by BLOCK, numbered by first visit. Both halves matter: a region the structurer
+      // emits twice (a tail duplicated into two arms) reaches the same block twice and must get
+      // the SAME sense both times, and the ordinal has to mean the same site under every mask —
+      // which it does because both arms are structured ABOVE, before any sense is chosen, so the
+      // visit order does not depend on the choice.
+      const bi = fn.blocks.indexOf(b);
+      let ord = senseOrdinal.get(bi);
+      if (ord === undefined) {
+        ord = senseOrdinal.size;
+        senseOrdinal.set(bi, ord);
       }
-      return out;
+      negateHere = branchSenseFlipSites?.has(ord) ? !siteDefault : siteDefault;
+      hooks.onBranchSenseSite?.({ block: bi, ordinal: ord, joined: ipd !== null, negated: negateHere });
     }
-    out.push(mkIf(cond, thenS, elseS));
+    out.push(negateHere ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS } : mkIf(cond, thenS, elseS));
     if (merge && merge !== stop) {
       out.push(...structureRegion(merge, stop));
     }

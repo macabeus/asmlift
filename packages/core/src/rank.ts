@@ -145,6 +145,11 @@ export interface EnumerateOptions {
    *  dedup, which is where most of the cross's factors of two go. See `onAxisGated` for why both
    *  are here rather than on the result. */
   onTreeDeduped?: () => void;
+  /** PROBE (`ASMLIFT_PERSITE_SENSE`, wired in the cli): fork the two per-FUNCTION branch-sense
+   *  booleans into one bit per SITE, crossing every sense point with all 2^n masks over the first
+   *  `n` sense sites. Costs a factor of 2^n on the whole fan, which is the measurement — see the
+   *  `perSiteSense` block below. 0/absent = the shipped two-point axis. */
+  perSiteSenseBits?: number;
 }
 
 /** One distinct candidate spelling — a point in the axis cross (signedness × branch sense ×
@@ -387,15 +392,34 @@ export function enumerateCandidates(
   // all three things that invert the polarity are per-SITE where this lever is per-function, so no
   // per-function predicate decides it: a short-circuit fold choosing the orientation, a
   // conditional branch relayed past Thumb's ±256-byte reach, and a rotated loop's zero-trip guard,
-  // where the `if` is the compiler's own and no source sense exists to be faithful to. The third
+  // where the `if` is the compiler's own and no source sense exists to be faithful to. The FIRST
+  // of the three is now decided per site rather than enumerated — `/site-sense` (rank-axes.ts)
+  // reads the orientation the fold records — and this axis stays because the other two are not.
+  // The third
   // is what keeps the residue on targets that have neither: rows still win on the axis under
   // gcc2.7.2 / gcc2.7.2kmc / mwcc, with no `short-circuit` tag and no Thumb branch range to
   // explain them, and most of those carry `loop`. A function with no two-armed joined if emits identical
   // source and the dedup collapses it before any compile.
-  const baseSense = [
+  const senseOnly = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
     ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
   ];
+  // THE PER-SITE PROBE, and it is a probe rather than a lever: every mask over the sense sites,
+  // crossed with the whole fan. It exists to price the fork the two booleans above cannot express
+  // — 2^n on a function with n sites, which is the number a decidable predicate would replace —
+  // and to say whether the target's configuration is REACHABLE at all. Not enumerated unless the
+  // caller asks; `structure()`'s own `branchSenseFlipSites` is the seam it drives.
+  const maskSites = (m: number): ReadonlySet<number> => new Set([...Array(32).keys()].filter((i) => (m >> i) & 1));
+  const senseMasks = Array.from({ length: 1 << (opts.perSiteSenseBits ?? 0) }, (_, m) => m);
+  const baseSense = senseMasks.flatMap((m) =>
+    senseOnly.map((s) => ({
+      ...s,
+      ...(m === 0 ? {} : { suffix: `${s.suffix}/sense-${m}` }),
+      // Always present, `undefined` at mask 0: an optional key added on one arm of a ternary would
+      // make the two arms different object TYPES, and the list is what the whole fan spreads from.
+      flipSites: m === 0 ? undefined : maskSites(m),
+    })),
+  );
   // `/no-bitfield` — keep the honest shift spelling where the map would name a bitfield member.
   // The named read recompiles at the DECLARATION's access width; where that diverges from the
   // asm's load width, the shifts are the spelling that matches — so both are emitted and the
@@ -1663,6 +1687,7 @@ export function enumerateCandidates(
               ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
               preserveDivergentBranchSense: s.sense,
               negateJoinedBranchSense: s.join ? !defSense : defSense,
+              ...(s.flipSites ? { branchSenseFlipSites: s.flipSites } : {}),
               anchorConstCopies: s.anchor,
               anchorLoopEntryConsts: s.entry,
               spellBitfieldMembers: s.bitfields,

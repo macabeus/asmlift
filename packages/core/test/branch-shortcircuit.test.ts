@@ -262,6 +262,26 @@ describe('the four orientations', () => {
     verify(fn);
   });
 
+  test('the fused branch records WHICH of ^g’s edges was the shared one', () => {
+    // `scSharedOnFall` is the orientation evidence the structurer's per-site branch sense reads.
+    // It is the half of the truth table the CONNECTIVE cannot carry: `logic_or` covers both of the
+    // first two orientations, and it is the shared edge — not the connective — that says whether
+    // the source's `then` arm is this branch's TAKEN successor. Read `sharedOnGTaken: false` as
+    // "the last test FELL INTO the shared block", gcc's `||` layout.
+    for (const gOnTaken of [false, true]) {
+      for (const sharedOnGTaken of [false, true]) {
+        const fn = chain({ gOnTaken, sharedOnGTaken });
+        expect(recognizeBranchShortCircuit(fn)).toBe(true);
+        expect(fn.blocks[0].ops.at(-1)!.attrs.scSharedOnFall).toBe(!sharedOnGTaken);
+      }
+    }
+    // …and it survives the relay resolution, which is where the fold's own successor-identity
+    // test cannot see the shared block directly.
+    const relayed = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: true });
+    expect(recognizeBranchShortCircuit(relayed)).toBe(true);
+    expect(relayed.blocks[0].ops.at(-1)!.attrs.scSharedOnFall).toBe(true);
+  });
+
   test('the surviving cond_br keeps the head’s unchanged successor slot', () => {
     // `||`: the head branched TAKEN to the shared block and still does, so the branch sense the
     // frontend read out of the asm survives the fold.

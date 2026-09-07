@@ -70,7 +70,31 @@ const enumerate = (name: string, asm: string, target: TargetDescription, opts: R
     asmData: opts.asmData,
     symbols: opts.symbols,
     ...(opts.onLeverError ? { onLeverError: opts.onLeverError } : {}),
+    ...perSiteSenseProbe(),
   });
+
+/** `ASMLIFT_PERSITE_SENSE=<n>` — the branch-sense decidability probe: fork the two per-function
+ *  branch-sense booleans into one bit per site over the first `n` sites, multiplying the whole fan
+ *  by 2^n. Read here rather than in core, which is browser-pure. Off (and free) unless set.
+ *
+ *  BOUNDED, and LOUDLY: 2^n is the whole point of the probe, so a value that would enumerate
+ *  millions of points is a typo rather than a request, and an unbounded one dies in the allocator
+ *  with nothing said. `kleod:CountCollectedGems` has 16 sense sites and the full fork there is
+ *  65536× — already unaffordable, which is a finding the probe is meant to REPORT. */
+const PERSITE_SENSE_MAX_BITS = 12;
+const perSiteSenseProbe = (): { perSiteSenseBits?: number } => {
+  const raw = process.env.ASMLIFT_PERSITE_SENSE;
+  if (raw === undefined || raw === '') {
+    return {};
+  }
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > PERSITE_SENSE_MAX_BITS) {
+    throw new Error(
+      `ASMLIFT_PERSITE_SENSE must be an integer 1..${PERSITE_SENSE_MAX_BITS} (2^n candidate points per fan point), got '${raw}'`,
+    );
+  }
+  return { perSiteSenseBits: n };
+};
 
 /** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score. */
 export function decompileRanked(
