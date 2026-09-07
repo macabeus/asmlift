@@ -59,11 +59,15 @@
 //
 // It is NOT marked sound, because it has not been shown to be, and it is BLUNTER than the rule it
 // restates: `carriesPreUpdate` branches on which emitter owns the latch and names four shapes that
-// are not the hazard, none of which this has. Dropping it over 773 benchmark rows improves 12 and
-// regresses none, measured at #55 — `nestedloop` is `int s = 0; … s += i*j`, one accumulator the
-// pass currently emits as two. Lifting `carriesPreUpdate` itself to name classes is the work that would take those
-// 12 rows; it needs the class-level closure, since a merge can reach a loop variable's name through
-// an edge that carried no loop variable at all.
+// are not the hazard, none of which this has. It IS load-bearing, and the measurement that says so
+// is not a benchmark one: dropping it over 773 rows improves 12 and regresses none (#55), and
+// `nestedloop` is `int s = 0; … s += i*j`, one accumulator the pass emits as two — but with it
+// dropped, `namecoalesce-fuzz`'s NESTED arm finds two generated functions in 7,535 that compute
+// something else, and it finds them with the interference rule at either strength. A byte score
+// cannot see that failure, which is the whole reason that fuzz exists. So the 12 rows are real and
+// so is the hazard, and taking them still needs `carriesPreUpdate` lifted to name classes: the
+// class-level closure, since a merge can reach a loop variable's name through an edge that carried
+// no loop variable at all.
 //
 // TWO KNOWN GAPS, both on the READ side of a relocated write:
 //

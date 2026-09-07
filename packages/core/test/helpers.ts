@@ -47,11 +47,18 @@ export function mulberry32(seed: number): () => number {
 }
 
 /** A random SSA function. Every value comes from the entry block or from the block using it, so
- *  definitions dominate uses by construction and `verify` passes without a repair pass. */
-export function generateSsaFn(seed: number, withLoop: boolean): Fn {
+ *  definitions dominate uses by construction and `verify` passes without a repair pass.
+ *
+ *  `depth` is how many loops deep it goes. 0 and 1 randomize the CFG itself — the forward chain
+ *  plus a skip edge, and any block past the header may be a latch. 2 fixes the SHAPE (entry, outer
+ *  header, inner header, inner latch, outer latch, tail) and randomizes only the ops and the edge
+ *  arguments: a skip edge that lands inside a loop body from outside makes the region irreducible,
+ *  and what depth 2 exists to reach is the value that is carried by BOTH loops — the accumulator a
+ *  nested `for` writes, whose home is outside the inner loop it is nevertheless updated in. */
+export function generateSsaFn(seed: number, depth: 0 | 1 | 2): Fn {
   const rnd = mulberry32(seed);
   const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
-  const nBlocks = 4 + Math.floor(rnd() * 3);
+  const nBlocks = depth === 2 ? 6 + Math.floor(rnd() * 2) : 4 + Math.floor(rnd() * 3);
   const a0 = mkValue(T.s(32));
   const a1 = mkValue(T.s(32));
   const blocks: Block[] = [{ params: [a0, a1], ops: [] }];
@@ -71,7 +78,9 @@ export function generateSsaFn(seed: number, withLoop: boolean): Fn {
     );
     entryVals.push(r);
   }
-  const loopHeader = withLoop ? 1 + Math.floor(rnd() * (nBlocks - 2)) : -1;
+  const loopHeader = depth === 1 ? 1 + Math.floor(rnd() * (nBlocks - 2)) : -1;
+  // depth 2: ^bb1 outer header, ^bb2 inner header, ^bb3 inner latch, ^bb4 outer latch
+  const innerHeader = depth === 2 ? 2 : -1;
   for (let i = 0; i < nBlocks; i++) {
     const b = blocks[i];
     const avail = [...entryVals, ...b.params];
@@ -89,11 +98,31 @@ export function generateSsaFn(seed: number, withLoop: boolean): Fn {
       b.ops.push(mkOp('ret', { operands: [pick(avail)] }));
       continue;
     }
+    const fwd = blocks[i + 1];
+    if (depth === 2) {
+      // the fixed nested skeleton: a straight chain, with a guarded back edge at each latch
+      const back = i === innerHeader + 1 ? blocks[innerHeader] : i === innerHeader + 2 ? blocks[1] : undefined;
+      if (back === undefined) {
+        b.ops.push(mkOp('br', { successors: [{ block: fwd, args: argsFor(fwd) }] }));
+        continue;
+      }
+      const cc = mkValue(T.u(32));
+      b.ops.push(mkOp('icmp_slt', { operands: [pick(avail), pick(avail)], results: [cc] }));
+      b.ops.push(
+        mkOp('cond_br', {
+          operands: [cc],
+          successors: [
+            { block: back, args: argsFor(back) },
+            { block: fwd, args: argsFor(fwd) },
+          ],
+        }),
+      );
+      continue;
+    }
     // a back edge to `loopHeader` needs a guard, or the loop never exits
-    const isLatch = withLoop && i > loopHeader && rnd() < 0.6;
+    const isLatch = depth === 1 && i > loopHeader && rnd() < 0.6;
     const c = mkValue(T.u(32));
     b.ops.push(mkOp('icmp_slt', { operands: [pick(avail), pick(avail)], results: [c] }));
-    const fwd = blocks[i + 1];
     const other = blocks[Math.min(nBlocks - 1, i + 1 + Math.floor(rnd() * 2))];
     b.ops.push(
       mkOp('cond_br', {

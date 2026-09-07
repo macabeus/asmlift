@@ -43,10 +43,10 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
 const SEEDS = 4000;
 
 /** Both spellings of one seed, or null when the shape is not one this can judge. */
-function spellings(seed: number, withLoop: boolean, drop?: string): { off: Event[]; on: Event[] } | null {
+function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[]; on: Event[] } | null {
   let fn: Fn;
   try {
-    fn = generateSsaFn(seed, withLoop);
+    fn = generateSsaFn(seed, depth);
     verify(fn);
     recoverTypes(fn);
   } catch {
@@ -68,14 +68,15 @@ function spellings(seed: number, withLoop: boolean, drop?: string): { off: Event
 }
 
 describe.each([
-  ['acyclic', false],
-  ['loop-bearing', true],
-])('%s', (_name, withLoop) => {
+  ['acyclic', 0],
+  ['loop-bearing', 1],
+  ['nested', 2],
+] as const)('%s', (_name, depth) => {
   test('no name the walk adopts changes what the function does', () => {
     const bad: number[] = [];
     let judged = 0;
     for (let seed = 1; seed <= SEEDS; seed++) {
-      const r = spellings(seed, withLoop);
+      const r = spellings(seed, depth);
       if (!r) continue;
       judged++;
       if (tracesDiffer(r)) bad.push(seed);
@@ -98,9 +99,9 @@ test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it cha
   const inert: string[] = [];
   for (const g of CARRIER_NAME_GATES.filter((x) => x.sound && !OUT_OF_REACH.has(x.id))) {
     let found = false;
-    for (const withLoop of [false, true]) {
+    for (const depth of [0, 1, 2] as const) {
       for (let seed = 1; seed <= SEEDS && !found; seed++) {
-        const r = spellings(seed, withLoop, g.id);
+        const r = spellings(seed, depth, g.id);
         if (r && tracesDiffer(r)) found = true;
       }
       if (found) break;
