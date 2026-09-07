@@ -6129,23 +6129,20 @@ export const SYNTHETIC: SynthSpec[] = [
   //    WHAT THE REACH CENSUS DOES NOT SAY IS THE COST. THREE of those rows now enumerate axes they
   //    could not before, and pay for them: `sinkacc` enumerates 36 → 54 candidates and
   //    `kleod:CheckWorldCompletion:agbcc` 2.69x as many (312 → 840 through a bare
-  //    `enumerateCandidates`, which sees fewer options than the runner and so counts lower than the
-  //    624 → 1680 review measured through it — the RATIO is what reproduced, exactly), which is
-  //    roughly 2x the wall clock on each real row. The fourth reached row, the `fib` control above,
-  //    pays NOTHING — 8 → 8 candidates, the same eight labels, winner already
+  //    `enumerateCandidates`, 624 → 1680 through the runner, which sees more options — the RATIO is
+  //    what reproduces), roughly 2x the wall clock on each real row. The fourth reached row, the
+  //    `fib` control above, pays NOTHING — 8 → 8 candidates, the same eight labels, winner already
   //    `signed/defsite/loop-entry` at 12 on main (measured on both trees) — so it is a reached row
-  //    and not a paying one. Bounded to 4
-  //    rows today, but the triggering shape is `s = 0; ... if (c) s += 1;`, which is ordinary C, so
-  //    a dogfooded project function is likely to hit it — and candidate compiles have no timeout.
-  //    `l3/hoist.ts`'s `isBaseInit` is still NOT the place to widen — level-tower names
-  //    that exact widening as the trap, since it is the sole definition of where the base-init run
-  //    ends and `l3/basecse.ts` re-orders off it.
-  //    Two review corrections that outlived the round and belong with the row. (1) The refusal
-  //    misses the pass's OWN clientele in one shape: mwcc shares a `lis` across a branch, so a
-  //    genuine hi/lo pair arrives edge-carried; `raise/const.ts` now recognises the pair positively
-  //    and folds it anyway. (2) A refused pair used to PRINT as `v = 0 + 1;` in every candidate
-  //    that did not take `/merge-home` — score-neutral, so no gate saw it — and is re-folded at the
-  //    structurer's rendering site.
+  //    and not a paying one. Bounded to 4 rows today, but the triggering shape is
+  //    `s = 0; ... if (c) s += 1;`, which is ordinary C, so a dogfooded project function is likely
+  //    to hit it — and candidate compiles have no timeout. `l3/hoist.ts`'s `isBaseInit` is still NOT
+  //    the place to widen — level-tower names that exact widening as the trap, since it is the sole
+  //    definition of where the base-init run ends and `l3/basecse.ts` re-orders off it.
+  //    Two things the refusal cannot be read without. (1) It carves out the pass's OWN clientele:
+  //    mwcc shares a `lis` across a branch, so a genuine hi/lo pair arrives edge-carried and
+  //    `raise/const.ts` recognises the pair positively and folds it anyway. (2) A refused pair
+  //    would otherwise PRINT as `v = 0 + 1;` in every candidate that did not take `/merge-home` —
+  //    score-neutral, so no gate sees it — and is re-folded at the structurer's rendering site.
   //  • `mixsense` 20 — `preserveDivergentBranchSense`: ONE boolean per FUNCTION, so the axis flips
   //    every divergent `if` at once. Fan of literally two, `unsigned: 20` and
   //    `unsigned/flip-branch: 27`; the row's REFERENCE SOURCE, compiled against this row's own

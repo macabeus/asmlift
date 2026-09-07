@@ -278,9 +278,7 @@ export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
  *
  *  Two consumers ask two different questions of it and both need the same answer, which is why it
  *  is here and not next to either: `structure/analysis.ts` uses it for the address-home axis's slot
- *  model, and `raise/const.ts` to recognise a folded literal that IS an address. Before this it was
- *  written out verbatim in both files, so the next memory opcode would have updated one of them.
- *  Complete as of this writing: checked against the registry above, no fifth opcode takes a base. */
+ *  model, and `raise/const.ts` to recognise a folded literal that IS an address. */
 export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aload', 'astore']);
 
 /** Ops whose answer depends on WHERE they run: an effect (its order against other effects is

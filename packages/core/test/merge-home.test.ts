@@ -649,7 +649,7 @@ test('the accumulator’s init survives pre-recovery, so the gate can see the me
   verify(fn);
   runPreRecovery(fn, ARMV4T_AGBCC);
   verify(fn);
-  // the init is still a value some edge carries — the fold did not rewrite the arm's `add` to a literal
+  // both arms' updates survive: neither `add` was rewritten to the literal it evaluates to
   expect(fn.blocks.flatMap((b) => b.ops).filter((o) => o.opcode === 'add')).toHaveLength(2);
   expect(hasMergeFeedHome(fn)).toBe(true);
 });

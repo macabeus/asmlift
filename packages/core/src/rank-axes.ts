@@ -187,12 +187,12 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   //
   // THAT CENSUS IS A STATEMENT ABOUT `hasMergeFeedHome`'s ADMITTED SET, and the admitted set is not
   // a property of this file: it moves whenever an upstream pass changes whether a merge feed still
-  // EXISTS in the IR. It said "16 rows" and now reads **20** of the 804 that lift (mine, both tiers,
-  // measured on this tree and on the tree before the change: 17 → 20). The three it gained —
-  // `synthetic:sinkacc:agbcc`, `kleod:CountCollectedGems:agbcc`, `kleod:CheckWorldCompletion:agbcc` —
-  // came from `raise/const.ts` REFUSING to fold an accumulator's `add(const 0, const 1)`, which is
-  // what keeps the feed alive for this gate to see; and the 17 the count read before this branch
-  // already disagreed with the recorded 16. Re-measure the counts above before tuning off them.
+  // EXISTS in the IR. It now reads **20** of the 804 rows that lift (mine, both tiers), three more
+  // than the same census over the tree before this branch: `synthetic:sinkacc:agbcc`,
+  // `kleod:CountCollectedGems:agbcc` and `kleod:CheckWorldCompletion:agbcc`, which `raise/const.ts`
+  // gained by REFUSING to fold an accumulator's `add(const 0, const 1)` and so keeping the feed
+  // alive for this gate to see. Re-measure the counts above before tuning off them — the number
+  // recorded here has gone stale once already.
   {
     flag: 'mergeHome',
     suffix: '/merge-home',

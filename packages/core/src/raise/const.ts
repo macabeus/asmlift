@@ -9,7 +9,7 @@
 // single value the later passes can reason about.
 //
 // THE CLIENTELE IS "A VALUE THE TARGET MATERIALISES IN TWO INSTRUCTIONS", and it is wider than the
-// RISC pair above in both directions — a mis-statement here is expensive, so both halves are measured:
+// RISC pair above in both directions, and both halves are measured:
 //   - It is NOT ARM-free. On Thumb a literal is a pool word plus an immediate `add`, which is exactly a
 //     two-instruction materialisation and lifts as the same const/const pair. Ablating the whole pass
 //     costs three agbcc BYTE-MATCHES — `synthetic:dmafield` MATCH -> diff:29, `synthetic:fieldbase`
@@ -39,32 +39,28 @@ const FOLD: Record<string, (a: number, b: number) => number> = {
 };
 
 /** Is `v` a RISC HIGH HALF — what one `lui`/`lis`/`addis` puts in a register? `hi << 16`, for a
- *  NON-ZERO `hi`. Zero is excluded deliberately and is the whole reason this test can be trusted as a
- *  positive: `lui rD, 0` is a no-op no compiler emits, so a `const 0` is never a half being
- *  materialised — it is an initialised register, which is exactly the shape the refusal below exists
- *  to protect.
+ *  NON-ZERO `hi`. Zero is excluded deliberately, and that exclusion is what makes this test
+ *  trustworthy as a positive: `lui rD, 0` is a no-op no compiler emits, so a `const 0` is never a
+ *  half being materialised — it is an initialised register, exactly the shape the refusal below
+ *  exists to protect.
  *
- *  THIS RECOGNIZER COVERS THE RISC HALF OF THE CLIENTELE ONLY, and the 16/16 split is the ISA fact
- *  that makes it so — censused over the corpus's 40 const/const fold sites, all 19 RISC ones
- *  (gcc2.7.2kmc / mwcc_242_81 / ido7.1) are recognisable to it and 0 of the 20 agbcc ones are,
- *  because an ARM pool word is an arbitrary 32-bit value (`0x03001C00`, low half `0x1C00`) and can
- *  never pass. The module header's point stands — the clientele is a SHAPE and the pass must not be
- *  gated on a RISC target — but the ARM half of it is protected by `memBases` and by simply not
- *  being edge-carried, not by this test. Four agbcc sites on three rows (`dmascope` ×2, `dmascope2`,
- *  `dmafield`'s `add(…,112)`) sit behind neither carve-out. If a future row needs the buy-back on
- *  ARM, the half-width belongs on the target description — `PreRecoveryPass` already threads
- *  `target` (`pre-recovery.ts:155`, and `softdiv` gates on `capabilities.hwDivide`) — rather than as
- *  a second constant here. */
+ *  IT COVERS THE RISC HALF OF THE CLIENTELE ONLY, because the 16/16 split is an ISA fact: censused
+ *  over the corpus's const/const fold sites, all 19 RISC ones (gcc2.7.2kmc / mwcc_242_81 / ido7.1)
+ *  are recognisable to it and 0 of the 20 agbcc ones are — an ARM pool word is an arbitrary 32-bit
+ *  value (`0x03001C00`, low half `0x1C00`) and can never pass. The ARM half of the clientele is
+ *  protected by `memBases` and by simply not being edge-carried; four agbcc sites on three rows
+ *  (`dmascope` ×2, `dmascope2`, `dmafield`'s `add(…,112)`) sit behind neither carve-out. If a row
+ *  ever needs the buy-back on ARM, the half-width belongs on the target description —
+ *  `PreRecoveryPass` already threads `target`, and `softdiv` gates on `capabilities.hwDivide` —
+ *  rather than as a second constant here. */
 const isHighHalf = (v: number): boolean => (v & 0xffff) === 0 && v !== 0;
 
 /** Is `v` a LOW HALF — what one `ori`/`addi`/`addiu` can supply? `ori` takes an UNSIGNED 16-bit
  *  immediate and `addi`/`addiu` a SIGNED one, so the admissible range is the union: mwcc completes an
  *  `addis` with a NEGATIVE `addi` whenever bit 15 of the low half is set (`0x12350000 + -25924` is
- *  `0x12345ABC`), and refusing that spelling was this rule's own first regression. Deliberately NOT
- *  split per-opcode (`or` unsigned, `add` signed): that narrowing is true of the ISA, reaches 0 rows
- *  of the corpus, and no fixture reddens when it is removed — an unpinned clause is what this file's
- *  own review flagged as a defect, and the half-width belongs on the target description if a row
- *  ever needs it. */
+ *  `0x12345ABC`). Deliberately NOT split per-opcode (`or` unsigned, `add` signed): that narrowing is
+ *  true of the ISA, reaches 0 rows of the corpus, and no fixture reddens when it is removed, so it
+ *  would be an unpinned clause. The half-width belongs on the target description if a row needs it. */
 const isLowHalf = (v: number): boolean => v >= -0x8000 && v <= 0xffff;
 
 /** The constant a foldable const/const pair denotes, or `null` when `opcode` is not one this pass
@@ -89,10 +85,7 @@ export function recognizeConsts(fn: Fn): boolean {
   //   `edgeSlots` — for every value a terminator hands to a successor, WHICH block-parameters it
   //     feeds. Being in the map at all is "a register the compiler held live across a branch": in
   //     functional-form SSA the machine had this value in a register at the branch and the join
-  //     reads it back. WHICH parameter is the second question, and the buy-back below needs it —
-  //     two values that feed the SAME parameter are two arms of one merge, which is how an
-  //     accumulator's init and its updated copy differ from a high half shared with a completed
-  //     literal.
+  //     reads it back. WHICH parameter is the second question, and the buy-back below needs it.
   //   `memBases`  — every value used as a memory base, i.e. the values that ARE addresses.
   const edgeSlots = new Map<Value, Set<Value>>();
   const memBases = new Set<Value>();
@@ -165,41 +158,32 @@ export function recognizeConsts(fn: Fn): boolean {
       //     recovery or the symbol map — the same never-enumerated failure this refusal exists to fix,
       //     one level down.
       //
-      //     THE BUY-BACK CARRIES A CONDITION OF ITS OWN, because read as a bare "is this a hi/lo
-      //     pair" it re-opens the very incident this refusal exists for. An accumulator's `const 0`
-      //     init passes `isLowHalf`, so `s = 0; if (c) s += 0x10000;` — one 16.16 fixed-point step —
-      //     is a hi/lo pair by the letter of the test: the refusal is skipped and the accumulator is
-      //     folded away again. Measured before the condition existed, a two-arm `s += 0x10000` row
-      //     scored **diff:1** on mwcc_242_81 with `hasMergeFeedHome` FALSE, and **MATCH** with the
-      //     pair refused and the gate TRUE. Its MIRROR — `s = 0x10000; if (c) s += 1;`, where the
-      //     init IS a high half — folds too, and no test of WHICH operand is which separates it from
-      //     the shared `lis`: both are a carried high half completed by a small immediate.
-      //
-      //     `feedsSameMerge` is what separates them, and it separates them by WHERE THE VALUES GO
-      //     rather than by their bit patterns. An accumulator's init and its updated copy are two
-      //     arms' feeds of ONE block parameter — exactly the merge `/merge-home` exists to home —
-      //     whereas a shared high half reaches the join while the COMPLETED literal is stored or
-      //     returned, never merged with the half it was built from. Measured FREE: with it in, 770
-      //     synthetic + 252 real rows are byte-identical in post-recovery IR, in emitted source and
-      //     in gap list to the branch without it.
+      //     `feedsSameMerge` IS A CONDITION ON THAT BUY-BACK: read as a bare "is this a hi/lo pair"
+      //     it re-opens the very incident this refusal exists for. An accumulator's `const 0` init
+      //     passes `isLowHalf`, so `s = 0; if (c) s += 0x10000;` — one 16.16 fixed-point step — is a
+      //     hi/lo pair by the letter of the test, and its MIRROR `s = 0x10000; if (c) s += 1;` is
+      //     one whichever operand is read as the half. Folded, a two-arm `s += 0x10000` row scores
+      //     **diff:1** on mwcc_242_81 with `hasMergeFeedHome` FALSE; refused, **MATCH** with the
+      //     gate TRUE. What separates the two shapes is WHERE THE VALUES GO rather than their bit
+      //     patterns: an accumulator's init and its updated copy are two arms' feeds of ONE block
+      //     parameter — exactly the merge `/merge-home` exists to home — whereas a shared high half
+      //     reaches the join while the COMPLETED literal is stored or returned, never merged with
+      //     the half it was built from. Measured FREE: with it in, 770 synthetic + 252 real rows are
+      //     byte-identical in post-recovery IR, in emitted source and in gap list to the branch
+      //     without it.
+      //   - `memBases` — an address literal, `0x03001C00 + 1206` reached through one arm's base
+      //     register. It decides 0 folds over the corpus's 806 lifted rows and is here as a
+      //     statement of scope; `hiLoPair` is the clause that carries real traffic. Deliberately NOT
+      //     transitive and NOT extended to call arguments: an address literal escaping as a call
+      //     argument is a shape the refusal HELPS (a probe row scored diff:7 -> MATCH with it
+      //     firing), so widening this test would give that back.
       //
       // A REFUSAL IS ALSO A SCHEDULING DECISION, and that coupling is invisible at this site:
       // `pre-recovery.ts` registers this pass `dce: true` and runs `dce(fn)` only when the pass
       // returns TRUTHY, so a function whose ONLY const/const pair is refused gets no DCE here at
       // all — and `addrnum` above is `dce: false`, so this is the first pass that can schedule one.
       // Measured inert: forcing the cancelled `dce(fn)` removes 0 ops on every invocation of every
-      // reachable row (`sinkacc`, 3 invocations) and `sinkacc` still scores diff:4. Worth knowing
-      // before this refusal is widened.
-      //
-      //   - `memBases` — an address literal, `0x03001C00 + 1206` reached through one arm's base
-      //     register. It decides 0 folds over the corpus's 806 lifted rows and is here as a statement
-      //     of scope; `hiLoPair` is the clause that carries real traffic. Its only pin is
-      //     `const-fold.test.ts` case (b), which is its pin BY CONSTRUCTION — `0x03000C00` is not a
-      //     high half, so nothing but `memBases` can save that case — so this is now the one clause
-      //     of the two with neither corpus traffic nor a shape `hiLoPair` does not already admit.
-      //     Recorded rather than removed: it is a true statement about what this pass is for. Deliberately NOT transitive and NOT extended to call arguments: an address
-      //     literal escaping as a call argument is a shape the refusal HELPS (a probe row scored
-      //     diff:7 -> MATCH with it firing), so widening this test would give that back.
+      // reachable row (`sinkacc`, 3 invocations). Worth knowing before this refusal is widened.
       const edgeCarried = edgeSlots.has(op.operands[0]) || edgeSlots.has(op.operands[1]);
       const feedsSameMerge =
         meetAtSameParam(op.results[0], op.operands[0]) || meetAtSameParam(op.results[0], op.operands[1]);

@@ -6,12 +6,13 @@
 // terminator also hands to a successor's block-parameter is a register the compiler held live across a
 // branch, whose value on this path happens to be constant, and folding it deletes the register. The pair
 // the pass exists for is NOT confined to one block and NOT confined to a RISC target (see the module
-// header for both measurements), so the refusal is bought back by two carve-outs, one per case below:
-// case (b) an address literal an arm carries, case (d) a recognisable hi/lo pair an arm carries.
+// header for both measurements), so the refusal is bought back by two carve-outs — case (b) an address
+// literal an arm carries, case (d) a recognisable hi/lo pair an arm carries — and the hi/lo carve-out
+// carries a condition of its own, which case (e) pins from both sides.
 //
-// Asserted on the IR wherever what is at stake is whether a value still exists. The ONE exception is
-// the last case, which asserts the emitted C: an IR-only suite is exactly what let the refusal ship a
-// candidate spelling `v = 0 + 1;`, so the residue's SPELLING needs a pin of its own.
+// Asserted on the IR wherever what is at stake is whether a value still exists. Case (f) and its chain
+// assert the emitted C instead: an IR-only suite is exactly what let the refusal ship a candidate
+// spelling `v = 0 + 1;`, so the residue's SPELLING needs a pin of its own.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -115,12 +116,12 @@ test('an increment of a register carried across a branch is left unfolded', () =
   );
 });
 
-// ── (d) the carve-out: a genuine hi/lo pair the compiler SHARED across a branch ───────────────
+// ── (d) the carve-out: a genuine hi/lo pair the compiler SHARED across a branch ──────────────
 // mwcc builds `0x12349ABC` as `lis r,0x1235 ; addi r,r,-25924` and hoists the `lis` above a branch
 // whenever the high half is live at the join, so the pass's OWN clientele arrives edge-carried and
 // case (c)'s proxy would refuse it. The result here is a store's VALUE, not a base, so the address
-// carve-out cannot save it — the hi/lo shape must. Measured on the real toolchain before this case
-// existed: mwcc_242_81 emitted `*a2 = 305397760 + 22136;` where every other toolchain emitted the
+// carve-out cannot save it — the hi/lo shape must. Measured on the real toolchain with the pair
+// refused: mwcc_242_81 emitted `*a2 = 305397760 + 22136;` where every other toolchain emitted the
 // folded literal, and a literal split in two is no longer one value for magic-division recovery,
 // type recovery or the symbol map.
 //
@@ -175,14 +176,11 @@ test('a zero init is not a high half, so a large increment of it is still refuse
   expect(ops(fn).find((o) => o.opcode === 'add')).toBeDefined();
 });
 
-// ── (f) the buy-back's own two conditions ────────────────────────────────────────────────────
+// ── (e) the buy-back's own condition, from both sides ────────────────────────────────────────
 // Case (d)'s rule is a positive recognizer, and read on its own it swallows case (c) again: an
 // accumulator's `const 0` init passes `isLowHalf`, so `s = 0; if (c) s += 0x10000;` — one 16.16
-// fixed-point step — IS a hi/lo pair by the letter of the test. Measured before the conditions
-// existed, a two-arm version of this row scored diff:1 on mwcc_242_81 with `hasMergeFeedHome`
-// FALSE, and MATCH with the pair refused. What saves it is WHICH operand the edge carries: in a
-// genuine pair the low half is an immediate no register ever holds, so an edge-carried operand must
-// be the HIGH half.
+// fixed-point step — IS a hi/lo pair by the letter of the test. Folded, a two-arm version of this
+// row scores diff:1 on mwcc_242_81 with `hasMergeFeedHome` FALSE; refused, MATCH.
 const ACCHI = `fn acchi {
 ^bb0(%0: s32, %1: s32*):
   %2: s32 = const {value=0}
@@ -205,12 +203,11 @@ test('an accumulator stepped by a whole high half is still an accumulator', () =
   expect(ops(fn).find((o) => o.opcode === 'add')).toBeDefined();
 });
 
-// The MIRROR, where the init IS a high half and the clause above cannot separate the two shapes.
-// `s = 0x10000; if (c) s += 1;` and mwcc's shared `lis` are the same const/const pair with the same
-// edge-carried high half; what separates them is where the values GO. An accumulator's init and its
-// updated copy are two arms' feeds of ONE block parameter — exactly the merge `/merge-home` exists
-// to home — whereas a shared high half reaches the join while the COMPLETED literal is stored (case
-// (d)), never merged with the half it was built from.
+// The MIRROR, where the init IS a high half, so no test of WHICH operand is which separates the two
+// shapes: `s = 0x10000; if (c) s += 1;` and mwcc's shared `lis` are the same const/const pair with
+// the same edge-carried high half. What separates them is where the values GO — here the init and
+// its updated copy are two arms' feeds of ONE block parameter, whereas in case (d) the completed
+// literal is stored, never merged with the half it was built from.
 const ACCHI_INIT = `fn acchiinit {
 ^bb0(%0: s32, %1: s32*):
   %2: s32 = const {value=65536}
@@ -233,13 +230,13 @@ test('an init and its updated copy feeding one merge is an accumulator, high hal
   expect(ops(fn).find((o) => o.opcode === 'add')).toBeDefined();
 });
 
-// ── (e) the residue's SPELLING: a refused pair must still print as the literal it is ──────────
+// ── (f) the residue's SPELLING: a refused pair must still print as the literal it is ─────────
 // Case (c) leaves `add(const 0, const 1)` in the IR on purpose, so that `/merge-home` can enumerate
 // `v = 0; if (c) v = v + 1;`. Every candidate that does NOT take that axis inlines both operands,
-// and without a print-time fold the winning source ships `v = 0 + 1;` — measured on
-// `synthetic:fib:gcc2.7.2kmc`, which regressed from `v1 = 1;` to `v1 = 0 + 1;` and stayed diff:12
-// throughout, because the target compiler folds the constant expression and no score gate can see
-// the difference. What is at stake is the artifact, so this one is asserted on the string.
+// and without a print-time fold the winning source ships `v = 0 + 1;` — `synthetic:fib:gcc2.7.2kmc`
+// emits exactly that, and stays diff:12 either way, because the target compiler folds the constant
+// expression and no score gate can see the difference. What is at stake is the artifact a decomp
+// author pastes into a repo, so this one is asserted on the string.
 test('a refused pair still prints as its literal in a candidate that does not home the register', () => {
   const fn = parse(ACC);
   verify(fn);
@@ -253,7 +250,7 @@ test('a refused pair still prints as its literal in a candidate that does not ho
 // …and the repair must be CLOSED UNDER ITSELF. A second increment in the same arm leaves the outer
 // `add` with an operand whose IR def is an `add`, so a rule that only looks at its immediate
 // operands folds the inner pair to `1` and then ships `1 + 2` — the same defect one chain link out,
-// which case (e) above cannot see. NO REACH in the corpus (a compiler folds such a chain before
+// which case (f) above cannot see. NO REACH in the corpus (a compiler folds such a chain before
 // asmlift ever sees the asm), so this pins the rule rather than a row.
 const ACC_CHAIN = `fn accchain {
 ^bb0(%0: s32, %1: s32*):
