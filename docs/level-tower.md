@@ -531,6 +531,52 @@ read. That is a fact about the BOARD, not about C and not about the compiler, wh
 capability rather than a rule inside either file — and it keeps alias.ts's asymmetry, since every
 address the range cannot place still bars.
 
+**A GATE CAN ALSO BE STARVED FROM ABOVE — right scope, right rule, no input.** Everything above is
+about a gate's own predicate. But a gate reads a program, and the passes upstream of it decide what
+that program contains. `raise/const.ts` — the L1 recognizer that folds the two-instruction 32-bit
+literal a RISC target builds (`lui;ori`, `lis;ori`) into one `const`, and the pass the `idiom fold`
+box above stands for alongside the pattern engine — folded ANY const/const `or`/`add`. That reached
+agbcc's `s = 0; if (c) s += 1;` and rewrote the arm's `add(%s = const 0, const 1)` to `const 1`,
+deleting the accumulator. (Not because the pass has no business on ARM: on Thumb the same
+two-instruction materialisation is a pool word plus an immediate `add`, and ablating the whole pass
+costs three agbcc byte-matches — `dmafield` MATCH -> diff:29, `fieldbase` MATCH -> diff:22,
+`bgfixed` MATCH -> diff:2. A clientele is a SHAPE, not a target, and reading this one as "Thumb has
+no such instruction pair" is what would lead the next reader to gate the pass off ARM and lose those
+three.) The `/merge-home` axis that would have hoisted the init has a correct scope and a correct
+`variantGate` — and the gate read FALSE on both owned rows, because the merge feed it looks for had
+been deleted two levels below it. Nothing reported anything: a candidate that was never enumerated
+is not a candidate that lost. **So a pass whose refusals are load-bearing states its CLIENTELE, not
+only its rule** (`raise/const.ts` now refuses an operand a successor edge carries — a register held
+across a branch is not a literal being materialised — unless the pair is a recognisable hi/lo
+literal or its result is an address), **and the test that proves a gate's reach runs
+the real upstream pipeline rather than parsing IR straight into the gate**
+([`test/merge-home.test.ts`](../packages/core/test/merge-home.test.ts), "the accumulator's init
+survives pre-recovery"). Otherwise the next widening of an unrelated fold takes the axis off the fan
+again, silently.
+
+**AND UN-STARVING A GATE COSTS THE FAN ITS FORK.** The paragraph above reads as a pure win, because
+the reach census it rests on counts OUTCOMES: 4 rows of the 806 that lift can move, 3 better and 1
+neutral. What that census does not say is that THREE of those rows now enumerate axes
+they could not before (`/merge-home`, `/defsite`, `/loop-entry`) and pay for them:
+`synthetic:sinkacc:agbcc` enumerates 36 -> 54 candidates and `kleod:CheckWorldCompletion:agbcc`
+2.69x as many, which is roughly 2x the wall clock on each real row. The fourth,
+`synthetic:fib:gcc2.7.2kmc`, is the two-sided control and gains NOTHING — 8 -> 8 candidates, the same
+eight labels, and its winner was already `signed/defsite/loop-entry` at 12 on main — so it is a
+reached row and not a paying one, and a census of either kind must say which it counts. Bounded today,
+but the triggering shape is `s = 0; ... if (c) s += 1;`, which is ordinary C, and candidate compiles
+have no timeout. When a change unblocks an axis, report the fan beside the score: a reach census
+answers "which rows can move" and says nothing about what they cost.
+
+**A refusal at one level can owe a repair at another, and the tower is where that debt is written
+down.** The L1 refusal above deliberately leaves `add(const 0, const 1)` standing so the enumeration
+gate can see the merge feed — but a candidate that does NOT home the register inlines both operands,
+and the winning source then ships `v = 0 + 1;`. So the pair is folded back at an L2 RENDERING site
+(`structure.ts`, `lowerDef`'s arithmetic case) instead of in the IR: only at rendering is it settled
+that this candidate named neither half. The fold there is `raise/const.ts`'s own `foldConstPair`, so
+the two levels cannot disagree about which opcodes fold or how the result is normalised, and it
+reads through its own opcodes so a CHAIN of refused pairs collapses rather than printing `1 + 2`.
+A cross-level coupling like this is invisible at either site alone, which is why it belongs here.
+
 **A SOUND GATE CAN BE SOUND ABOUT THE WRONG REGION, and nothing in this file's machinery notices.**
 `sound: true` costs a `guardedBy` test, and a table where every entry has one still answers the
 wrong question if the ctx it reads was built over the wrong span. Every gate above asked about the

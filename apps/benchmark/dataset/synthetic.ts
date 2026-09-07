@@ -6031,7 +6031,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //   G4  gPtr->member[expr], VARIABLE index   pmarr1 5 · pmarr2 9   control pmarrfix MATCH
   //   G5  a named bitfield store of ZERO       bfzero 5             control bfconstn MATCH
   //   G2  loop accumulators as per-arm copies  nestacc 58 → 40 (per-arm half closed)
-  //   G3  an accumulator's cross-loop home     sinkacc 17
+  //   G3  an accumulator's cross-loop home     sinkacc 17 → 4 (CLOSED; residual is width, not home)
   //   G6  the merged-tail store, LADDER form   armcb 32             control armcb2 MATCH
   //   G1  branch sense per SITE, divergent     mixsense 20 → 10     control calad MATCH
   //   G1  branch sense per SITE, JOINED        joinsense 4 → MATCH  control joinsame MATCH
@@ -6107,20 +6107,42 @@ export const SYNTHETIC: SynthSpec[] = [
   //    lever exists and the control `armcb2` MATCHes THROUGH it, so this 32 is the LADDER
   //    admission and not a missing rewrite. L3 ranked spelling lever (`rank.ts:329`, `/unmerge`).
   //    The row's own winner is `unsigned/flip-join` at 32 in a fan of 8 — see the G1 watch below.
-  //  • `sinkacc` 17 — no site owns it. `l3/sinkinit.ts:37` moves only the leading run of
-  //    POINTER-BASE inits, and the select every candidate emits is minted by the same merge
-  //    materialisation as `nestacc`'s. Measured by DUMPING the fan (every `ranked.candidates`
-  //    entry with its label and score): 36 candidates, 0 dropped, 0 withheld, winner
-  //    `unsigned/reread-globals/uns-cmp` at 17 — and **not one of the 36 carries `sinkinit` or
-  //    `basefold`**. `/livebase` is the only placement axis enumerated here and its cheapest
-  //    carrier scores 22 (bare `unsigned/livebase` 23) against the winner's 17. The label form is
-  //    not the problem: the same dump prints `unsigned/flip-join/basefold/sinkinit` on `armcb` and
-  //    `unsigned/uns-cmp/livebase/sinkinit` on `nestacc`, and instrumenting `l3/sinkinit.ts:37`
-  //    shows `sinkInitsToFirstUse` returning `moved=1` on half its invocations HERE — so the pass
-  //    fires on this row and whatever it produces never reaches the scored fan. That is the first
-  //    thing a G3 build should ask. `l3/hoist.ts`'s `isBaseInit` is NOT the place to widen — level-tower
-  //    names that exact widening as the trap, since it is the sole definition of where the
-  //    base-init run ends and `l3/basecse.ts` re-orders off it.
+  //  • `sinkacc` 17 → **4, CLOSED**, and the L3 attribution above it was a true observation with a
+  //    false conclusion attached. The fan dump was right — 36 candidates, winner
+  //    `unsigned/reread-globals/uns-cmp` at 17, not one of the 36 carrying `sinkinit` or
+  //    `basefold` — and `l3/sinkinit.ts:37` does report `moved=1` here. But that pass moves only
+  //    POINTER-BASE inits and emits no candidate on this row either way, so it never owned the
+  //    gap. The site is two levels up: `raise/const.ts` `recognizeConsts`, the always-on L1 fold
+  //    for a RISC two-instruction 32-bit literal, folding `add(%s = const 0, const 1)` to
+  //    `const 1` and deleting the accumulator. The machinery to spell the hoisted init was already
+  //    SHIPPED — the `/merge-home` axis — and simply never enumerated: `hasMergeFeedHome` reads
+  //    false at baseline and true the moment the fold is refused, so the whole sub-fan was absent
+  //    (NO REACH, not LOSES). Refusing it: fan 36 → 54 with the top six all `/merge-home`, and the
+  //    winner becomes the reference spelling. `/defsite` and `/loop-entry` ride along on the real
+  //    row, unreachable for the same upstream reason and never attributed to it.
+  //    The residual 4 is the DECLARATION, not the home: the reference declares `u8 s` where the
+  //    winner declares `s32` and casts at each update — the `#154` width/rank family.
+  //    Two-sided control, and it is not an agbcc row: `synthetic:fib:gcc2.7.2kmc` fires the same
+  //    refusal and reads `diff:12` either way, so the rule is compiler-neutral rather than an
+  //    agbcc special case. Corpus reach, censused before any row was measured: 4 rows of the 806
+  //    that lift.
+  //    WHAT THE REACH CENSUS DOES NOT SAY IS THE COST. THREE of those rows now enumerate axes they
+  //    could not before, and pay for them: `sinkacc` enumerates 36 → 54 candidates and
+  //    `kleod:CheckWorldCompletion:agbcc` 2.69x as many (312 → 840 through a bare
+  //    `enumerateCandidates`, 624 → 1680 through the runner, which sees more options — the RATIO is
+  //    what reproduces), roughly 2x the wall clock on each real row. The fourth reached row, the
+  //    `fib` control above, pays NOTHING — 8 → 8 candidates, the same eight labels, winner already
+  //    `signed/defsite/loop-entry` at 12 on main (measured on both trees) — so it is a reached row
+  //    and not a paying one. Bounded to 4 rows today, but the triggering shape is
+  //    `s = 0; ... if (c) s += 1;`, which is ordinary C, so a dogfooded project function is likely
+  //    to hit it — and candidate compiles have no timeout. `l3/hoist.ts`'s `isBaseInit` is still NOT
+  //    the place to widen — level-tower names that exact widening as the trap, since it is the sole
+  //    definition of where the base-init run ends and `l3/basecse.ts` re-orders off it.
+  //    Two things the refusal cannot be read without. (1) It carves out the pass's OWN clientele:
+  //    mwcc shares a `lis` across a branch, so a genuine hi/lo pair arrives edge-carried and
+  //    `raise/const.ts` recognises the pair positively and folds it anyway. (2) A refused pair
+  //    would otherwise PRINT as `v = 0 + 1;` in every candidate that did not take `/merge-home` —
+  //    score-neutral, so no gate sees it — and is re-folded at the structurer's rendering site.
   //  • `mixsense` 20 — `preserveDivergentBranchSense`: ONE boolean per FUNCTION, so the axis flips
   //    every divergent `if` at once. Fan of literally two, `unsigned: 20` and
   //    `unsigned/flip-branch: 27`; the row's REFERENCE SOURCE, compiled against this row's own
@@ -6162,7 +6184,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //    live scalar inits → three distinct agbcc objects, asmlift emits each target's own). The
   //    unowned question is the position of an init the target contains NO instruction for, which
   //    only exists once G3's first half is built. A G3 lever's acceptance must NAME the order it
-  //    emits.
+  //    emits. NAMED, now that the first half is built: the winner emits `v0 = 0; v2 = 0; v1 = 0;`
+  //    — the accumulator, then the sum, then the loop counter, which is the reference's own
+  //    `s = 0; t = 0;` with the `for`'s `i = 0` last. So the position of the synthesised init is
+  //    already right and no second lever is owed; the whole residual 4 is the width family.
   //  • Rank-2 array recovery / `SymbolStructField`'s missing `dims` (`packages/core/src/symbols.ts`
   //    — `SymbolInfo` has `dims`, the field type does not). Real, and worth ZERO bytes:
   //    `gBlob->unk8[j + (i * 8)]` and `gBlob->unk8[i][j]` compile to BYTE-IDENTICAL objects, which

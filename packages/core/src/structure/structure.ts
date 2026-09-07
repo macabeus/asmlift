@@ -60,6 +60,7 @@ import {
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
+import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -3019,6 +3020,50 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
       // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
       // today, so closing it would churn spellings for a signedness case no row exercises.
+      //
+      // A `+`/`|` over two IR `const`s that both RENDER as literals is the literal it is. After
+      // pre-recovery there is only one way such an op still exists: `raise/const.ts` refuses to fold
+      // one shape — a register the compiler held live across a branch, whose value on this path is a
+      // constant — so that `/merge-home` can enumerate the hoisted init (`v = 0; if (c) v = v + 1;`).
+      // A candidate that does NOT home the register inlines both operands and would ship
+      // `v = 0 + 1;`: `synthetic:fib:gcc2.7.2kmc` emits exactly that without this fold and scores
+      // diff:12 either way, because the target compiler folds the constant expression and no score
+      // gate can see the difference. The artifact a decomp author pastes into a repo is what is at
+      // stake, so `const-fold.test.ts` pins this on the emitted STRING. Re-folding HERE rather than
+      // back in the IR is the point: the pair must survive pre-recovery for the enumeration gate to
+      // see the merge feed, and only at rendering is it settled that this candidate named neither
+      // half.
+      //
+      // `foldsFromIrConsts` keeps the reach honest and is not redundant with `l`/`r` being `const`
+      // Exprs: a BLOCK PARAMETER resolved to a constant on this arm also renders as a literal, and
+      // folding those is a different and unmeasured decision. Instrumented over the real pipeline it
+      // fires on `synthetic:sinkacc:agbcc` and on ZERO renders of the 16 MATCH rows whose emitted
+      // source carries a literal pair today — theirs are address trees whose IR defs are not consts.
+      // It reads through the fold's OWN opcodes, and recursively, because the residue is not flat:
+      // `add(add(const 0, const 1), const 2)` would otherwise ship `1 + 2`. That cannot widen the
+      // reach past the refusal's residue — any other const/const `add`/`or` `raise/const.ts` already
+      // folded, and nothing outside `frontend/` constructs one afterwards. The fold itself is
+      // `foldConstPair`, not a copy: which opcodes fold and how the result is normalised to int32 is
+      // ONE decision, and a third `FOLD` entry must not silently leave its residue unrepaired here.
+      const foldsFromIrConsts = (v: Value): boolean => {
+        const dv = defs.get(v);
+        if (!dv) {
+          return false; // a block parameter: not this refusal's residue
+        }
+        if (dv.opcode === 'const') {
+          return true;
+        }
+        return (
+          isConstFoldOpcode(dv.opcode) && dv.operands.length === 2 && dv.operands.every((o) => foldsFromIrConsts(o))
+        );
+      };
+      if (l.k === 'const' && r.k === 'const' && d.operands.every((o) => foldsFromIrConsts(o))) {
+        const value = foldConstPair(d.opcode, l.value, r.value);
+        if (value !== null) {
+          const folded: Expr = { k: 'const', value };
+          return restoreTo ? { k: 'cast', to: restoreTo, e: folded } : folded;
+        }
+      }
       const sum: Expr = { k: 'bin', op, l, r };
       return restoreTo ? { k: 'cast', to: restoreTo, e: sum } : sum;
     }
