@@ -251,6 +251,11 @@ const RMW = (pre: string, keep: string, byte = 0) =>
   `\tstrb\tr0, [r1, #${byte}]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n`;
 const NARROW = '\tlsl\tr0, r0, #30\n\tlsr\tr0, r0, #30\n'; // a provably 2-bit value
 const CLEAR_LOW2 = '\tmov\tr3, #0x3\n\tbic\tr2, r3\n';
+/** the SAME keep (`~3` = -4), materialised the way agbcc actually emits it. Compiled with the
+ *  pinned agbcc, `gF.a = 1;` on a `u8 a : 2` container is `mov r0,#0x4; neg r0,r0; and; orr` —
+ *  it never emits `bic` for this idiom. The `bic` spellings above reach the fold through the ARM
+ *  frontend's `and(Rd, ~Rm)` lowering, which is legal input but not this compiler's. */
+const CLEAR_LOW2_NEG = '\tmov\tr3, #0x4\n\tneg\tr3, r3\n\tand\tr2, r3\n';
 const CLEAR_LOW4 = '\tmov\tr3, #0xf\n\tbic\tr2, r3\n';
 /** the read fold's own 4-bit extract of the field at `byte`, signed (`asr`) or not (`lsr`). */
 const READ4 = (shr: 'lsr' | 'asr', byte: number) =>
@@ -261,6 +266,15 @@ describe('the mask-and-insert idiom spells the member assignment', () => {
     const src = runW(RMW(NARROW, CLEAR_LOW2));
     expect(src).toContain('gState.hearts = (u32)(a0 << 30) >> 30;');
     expect(src).not.toContain('|'); // the read, the mask and the or are all gone
+  });
+
+  test('the mask materialisation agbcc ACTUALLY emits folds too — `mov;neg`, not `bic`', () => {
+    // The rest of this suite builds its clears with `bic`, which agbcc does not emit here. This
+    // row pins the measured lowering, and with it that the zero form's 32-bit-complement rule did
+    // not leak into the `or` form — `-4` satisfies that rule, but the `gState.top` rows below do
+    // not, and they are what fail if it ever leaks.
+    const src = runW(RMW(NARROW, CLEAR_LOW2_NEG));
+    expect(src).toContain('gState.hearts = (u32)(a0 << 30) >> 30;');
   });
 
   test('a field that ENDS the stored cell takes an unbounded value — the store truncates either way', () => {

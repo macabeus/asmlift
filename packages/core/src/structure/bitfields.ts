@@ -227,6 +227,16 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
     // idiom (compiled: the or-form clear is `mov #0x4; neg`), and `/no-bitfield` co-enumerates the
     // raw spelling, so the price is one candidate the differ referees — not a lost one.
     //
+    // WHY NONE OF THIS IS A `Gate` TABLE (`l3/gates.ts`), asked and declined rather than skipped.
+    // The evidence rule is a POLICY gate in a chain of legality gates — remove it and the emitted
+    // C is still correct, only named on a guess — which is exactly the `sound: false` case the
+    // table exists to price. But this recognizer is a chain of some fifteen refusals, and tabling
+    // ONE of them makes "does every sound gate have a test that fails without it?" a MISLEADING
+    // query over a file that is 1/15 tabled: a reader would read the table as the file's rules.
+    // Tabling the whole chain is a refactor, not a remediation. What the table would have bought
+    // here — a differential test per rule — is written by hand instead, and every rule stated
+    // above has one that fails when that rule alone is ablated.
+    //
     // TARGET COUPLING, stated because the code cannot: every argument above is a THUMB encoding
     // argument, and the fold's only target guard is `littleEndian`. That is sound today only
     // because armv4t+agbcc is the one little-endian target in `target.ts`. A second little-endian
