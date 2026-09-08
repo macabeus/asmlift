@@ -16,6 +16,7 @@ import {
   stmtLists,
   walkExprs,
 } from './l3/ast';
+import { mentionedLocals } from './l3/mentions';
 import { declaredTypes, exprCType } from './l3/typing';
 
 export class ContractError extends Error {
@@ -273,6 +274,54 @@ export function assertLocalsWritten(sfn: SFn): void {
     throw new ContractError(
       `structuring emitted local(s) ${orphans.map((n) => `'${n}'`).join(', ')} in '${sfn.name}' read but ` +
         `never assigned — a def whose assignment no render position emitted`,
+    );
+  }
+}
+
+/** Post-lever: a local a pass DELETED from the declaration list is named nowhere in the tree it
+ *  produced.
+ *
+ *  THE FAILURE THIS CATCHES is the mirror of `assertLocalsWritten` above, and the three contracts
+ *  beside it do not see it. A pass that consumes a local — l3/unmerge.ts substituting a merge temp
+ *  into the arms, l3/coalesce.ts folding two names into one, l3/inlinebase.ts deleting a
+ *  const-address pointer — drops the name from `sfn.locals` on the strength of an in-lever count
+ *  that it is no longer mentioned. If that count is ever wrong the result is not a loud lever
+ *  error: it is a candidate handed to the compiler with an undeclared identifier. Normally that is
+ *  a dropped candidate, but in the REAL tier the candidate is compiled inside the project's
+ *  vendored translation unit, where an orphaned name that collides with a context symbol compiles
+ *  and scores. Measured on the shape that inhabits it — `locals = [p]`, body `p = 0; v16 = 1;
+ *  *p = v16;` — `assertResolved`, `assertDerefsTyped` and `assertLocalsWritten` all pass: the name
+ *  is neither `?` nor `undefined`, it is well-typed, and the question the third one asks is the
+ *  OPPOSITE one (read but never written).
+ *
+ *  A DIFFERENTIAL, and that is what makes it safe to run on every lever tree. "Every name the tree
+ *  mentions is declared" is NOT the invariant and would refuse correct output everywhere:
+ *  structure.ts spells a write to a scalar global as a bare `assign` whose name is declared in the
+ *  project's headers and nowhere in the tree (`gBlendValue = v;` — 71 such occurrences across 22
+ *  winning sources, per l3/unmerge.ts's own note), and `SFn.globals` is the symbol-map-shaped
+ *  subset, not that population. So the check speaks only about names the tree ITSELF declared a
+ *  moment ago and the pass then removed — a set with no legitimate inhabitant, because a pass that
+ *  drops a declaration is asserting exactly this.
+ *
+ *  `addr` counts, like everywhere else: `&v` names the object as surely as a read does. */
+export function assertNoOrphanedLocals(before: SFn, after: SFn): void {
+  const kept = new Set(after.locals.map((l) => l.name));
+  const dropped = new Set(before.locals.map((l) => l.name).filter((n) => !kept.has(n)));
+  if (!dropped.size) {
+    return;
+  }
+  // `l3/mentions.ts`'s walk, not a third copy of the node vocabulary — this is the LOUD BACKSTOP
+  // for the mistake that predicate guards, so it is the last place that should own its own.
+  // Locals only, deliberately: no L3 lever drops `SFn.params` (`pruneDeadParams` is L1 block
+  // params, ir/simplify.ts), so a params arm here would be a refusal with no inhabitant.
+  const found = mentionedLocals(after.body, dropped);
+  if (found.size) {
+    throw new ContractError(
+      `a lever deleted the declaration of ${[...found]
+        .sort()
+        .map((n) => `'${n}'`)
+        .join(', ')} in '${after.name}' ` +
+        `while the tree still names ${found.size > 1 ? 'them' : 'it'} — an undeclared identifier in the candidate`,
     );
   }
 }

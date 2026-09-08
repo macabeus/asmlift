@@ -12,9 +12,25 @@
 // `*(u16 *)A2 = B2;` inside the other — two whole statements, no temps. Substituting each arm's
 // own definitions into the join statement and duplicating it back recovers that spelling.
 //
-// A LEVER, NOT A DEFAULT, and the reason is the tower's: the asm UNDERDETERMINES this. A source
-// that really did write the temps and one store compiles to the same bytes, because the merge is
-// the compiler's own. Both spellings are emitted and the differ referees.
+// A LEVER, NOT A DEFAULT, and the reason is the tower's: the LIFTED TREE underdetermines the
+// source. This is a compiler claim, so it was compiled — agbcc `gcc 2.9-arm-000512` at
+// `TOOLCHAIN.agbccFlags`, both spellings, `diff` on the `.s`:
+//
+//   - the example above (an ADDRESS temp and a VALUE temp, against `*gA1 = gB1;` in one arm and
+//     `*gA2 = gB2;` in the other, `v17` typed as the store's own type) is BYTE-IDENTICAL. There
+//     the merge really is the compiler's own, and the lever costs one candidate to say so.
+//   - `synthetic:armcb2`'s shape is NOT. Only the VALUE merges there — the store's address,
+//     `gSlot[1]`, is common to both arms — and the per-arm spelling keeps TWO literal-pool
+//     islands and a `b` to the join where the merged one has a single island and no `b`.
+//
+// So the mapping from this tree back to a source is not a function, and it is not uniformly
+// many-to-one either: which way it goes is a property of the SHAPE, which no gate here can read
+// off the tree. That is exactly the tower's test for an axis rather than a default. Both
+// spellings are emitted and the differ referees.
+//
+// Re-compile before restating either half: the VALUE TEMP'S TYPE alone changes the answer. Give
+// `v17` a type wider than the store and the byte-identical case above grows an `ldr`/`ldrh`
+// divergence that has nothing to do with the merge.
 //
 // SOUND BY ITS DUAL'S ARGUMENT, READ BACKWARDS. The join runs on every path out of the `if`,
 // immediately after that arm's own tail, with nothing between; a copy at the end of each arm runs
@@ -27,10 +43,10 @@
 //     (tailmerge's scope, for its reason: control flow duplicated into an arm changes what the arm
 //     still reaches);
 //   - the join statement reads no local the arms define — there is no merge to undo;
-//   - a local it reads is neither a merge temp (assigned EXACTLY ONCE IN EACH ARM, read only by
-//     the join statement, never address-taken — the counts are function-wide, so a second reader
-//     anywhere refuses) nor untouched by both arms (a name the arms DO write and this cannot
-//     substitute would read a different value at the arm's end);
+//   - a local it reads is neither a merge temp (assigned EXACTLY ONCE IN EACH TERMINAL ARM and
+//     nowhere else, read only by the join statement, never address-taken — the counts are
+//     function-wide, so a second reader anywhere refuses) nor untouched by both arms (a name the
+//     arms DO write and this cannot substitute would read a different value at the arm's end);
 //   - anything but an EFFECT-FREE assignment TO A DECLARED LOCAL stands between the first
 //     definition and the arm's end: the substituted values are evaluated where the copy lands, so
 //     an intervening store or call could answer a load inside one of them differently. All three
@@ -56,7 +72,34 @@
 //   - a definition's value performs a VOLATILE access. `exprHasEffect` above answers "a call, or a
 //     marker" and says nothing about a qualifier, so it is not the test for this: the refusal is
 //     asked of the qualifier's own model (`exprReadsVolatile`), which knows all three spellings —
-//     the cast, the pointee-volatile pointer local, and the volatile local object.
+//     the cast, the pointee-volatile pointer local, and the volatile local object;
+//   - an arm is neither TERMINAL (a run of assignments defining the names) nor a RUNG (its last
+//     statement is an `if`, whose arms are asked the same question one level down — any nested
+//     `if` TREE qualifies, not only a right-nested else-if chain);
+//   - the terminal arms are not ALL of the name's definitions, or a merge name is still mentioned
+//     in the rewritten statement — the two halves of totality, below.
+//
+// THESE REFUSALS ARE NOT AN `l3/gates.ts` TABLE, and the reason is cost, not shape: that file
+// would carry them (three tables at three recursion depths — the site context, `armDefs`'s,
+// `pushJoin`'s — is a shape it supports, and `raise/globalshape.ts` already has two consumers
+// owning their own rule objects over a shared predicate). What the decline buys is the ergonomics
+// of an ablation query, against the behaviour risk of converting nine per-site early returns.
+// Whoever revisits this weighs those two, and gets a `guardedBy` on each rule for free.
+//
+// THE ARMS ARE THE PATHS, WHICH IS WHY THE LADDER IS THE SAME REWRITE. agbcc cross-jumps the shared
+// tail of an else-if CHAIN exactly as it cross-jumps a two-armed `if`'s, and the lifted tree then
+// hands this pass an outer `if` whose `else` is another `if`. Every path out of that ladder leaves
+// through exactly one TERMINAL arm, so a copy at the end of each runs exactly once per path — the
+// two-arm argument above, read inductively. `pushJoin`'s own note carries which shapes that admits
+// (any nested `if` tree, not only a chain) and why it needs no cap.
+//
+// TOTALITY, NOT AN ARM COUNT, is what pins "and nowhere else" — a ladder assigns its merge name
+// once per arm, so no number belongs in the gate. Two checks say it without one: every assignment
+// in the function is one of the terminal arms this rewrite consumed, AND no merge name is still
+// mentioned in the result. The second is not redundant — `localMentions` is read once, before any
+// rewriting, and this pass duplicates statements, so an earlier site can leave the map short by
+// exactly the number the ladder consumes and make the first check agree by coincidence. Only
+// re-reading the result catches that, and `test/unmerge.test.ts` builds the tree where it must.
 //
 // AND THE SCOPE OF THE VOLATILE ONE IS WHAT MOVES, which is exactly one thing. A kept statement
 // holds its position, and the join runs where it already ran (immediately after that arm), so the
@@ -89,7 +132,7 @@ import {
   stmtChildren,
   walkExprs,
 } from './ast';
-import { localMentions, readsOf } from './mentions';
+import { localMentions, mentionsAnyLocal, readsOf } from './mentions';
 
 /** every statement under `body`, itself included */
 function* walkStmts(body: Stmt[]): Generator<Stmt> {
@@ -145,13 +188,10 @@ function armDefs(
   const first = Math.min(...at.values());
   // From the first definition on, nothing but EFFECT-FREE assignments TO A DECLARED LOCAL: a store
   // or a call there would run BEFORE a value this moves to the arm's end, and could answer a load
-  // inside it differently. Neither the KIND nor the VALUE alone says that. Not the kind — an
-  // `assign` whose value is a call is an intervening call — so the effect test is applied to the
-  // kept statements too, not only to the definition values below. And not the value either: an
-  // `assign` names a VARIABLE, and structure.ts spells a write to a scalar global as one, so
-  // `gBlendValue = v;` passes both tests and writes memory. `declared` is the tree's own locals
-  // and params, so the target has to be an object no moved read can reach except by the name the
-  // refusal below already keys on.
+  // inside it differently. All three halves are load-bearing — see the header's third refusal for
+  // why the statement KIND and the assignment's TARGET each fail to say it alone. `declared` is
+  // the tree's own locals and params, so the target has to be an object no moved read can reach
+  // except by the name the refusal below already keys on.
   if (arm.slice(first).some((s) => s.k !== 'assign' || !declared.has(s.name) || exprHasEffect(s.value))) {
     return null;
   }
@@ -176,6 +216,68 @@ function substitute(s: Stmt, defs: ReadonlyMap<string, Expr>): Stmt {
   return mapStmtExprs(s, rec);
 }
 
+/** One arm with `join` pushed into it, and how many COPIES of the join that took — the count the
+ *  caller needs to prove every definition of every merge name was consumed. One arm, one copy.
+ *
+ *  The value guard lives here rather than at the call site because the values it judges are the
+ *  ones THIS arm moves: an effectful or volatile value, or one reading another merge name, is a
+ *  value the substitution may not relocate to the arm's end. Same set of values as before, asked
+ *  one arm earlier. */
+function pushJoin(
+  arm: Stmt[],
+  names: ReadonlySet<string>,
+  declared: ReadonlySet<string>,
+  join: Joinable,
+  sfn: SFn,
+): { arm: Stmt[]; used: number } | null {
+  const here = armDefs(arm, names, declared);
+  if (here !== null) {
+    for (const v of here.defs.values()) {
+      if (exprHasEffect(v) || exprReadsVolatile(v, sfn) || [...readsIn(v)].some((n) => names.has(n))) {
+        return null;
+      }
+    }
+    return { arm: [...here.keep, substitute(join, here.defs)], used: 1 };
+  }
+  // NOT a terminal arm. It is a RUNG when its LAST statement is an `if` — then the copy belongs
+  // one level down, in that `if`'s own arms, and the statements before it are untouched: they run
+  // before the rung is entered, so no value this moves crosses them.
+  //
+  // THE SHAPE ADMITTED IS ANY NESTED `if` TREE, not only a right-nested else-if chain. Nothing
+  // here restricts the recursion to one side, and nothing should: the soundness argument is "every
+  // path out leaves through exactly one terminal arm", which a BALANCED tree satisfies as fully as
+  // a chain — `if (c) { if (d) A else B } else { if (e) C else D }` fires and takes four copies.
+  // Call it a ladder because that is what the corpus holds, not because the code tests for one.
+  //
+  // NO CAP, and none is wanted: the copy count is exactly the number of TERMINAL ARMS, so the work
+  // and the emitted source are LINEAR in the subtree the recursion walks — a depth-6 balanced tree
+  // is 64 leaves and 64 copies, the same one-copy-per-path the two-arm case makes. The corpus
+  // maximum is 5 (`synthetic:armcb`). A refusal above some arm count would be a gate with no
+  // inhabitant, which this file's own standard rejects.
+  //
+  // REFUSES when the tail is anything else, and THIS REFUSAL HAS INHABITANTS — do not read the
+  // success count as evidence about it. Instrumented at the return below and re-run over the
+  // synthetic agbcc tier (281 rows, exit 0): 56 firings in 2 functions — 40 on an `assign` tail
+  // (32 in `maskchain`, 8 in `dmascope2`) and 16 on an EMPTY arm (`maskchain`). `dmascope2` is not
+  // one of the four rows that reach the ladder SUCCESSFULLY, so it appears in no success count at
+  // all. Only `while` and `switch` tails are unwitnessed; a plain statement is not.
+  //
+  // An EMPTY arm is delivered its refusal HERE, not by `armDefs`: `armDefs` declines it first
+  // (`names` is never empty, so no run of statements in an empty arm can supply it) and the tail
+  // check is what turns that decline into the site's. Same for an arm whose statements simply do
+  // not define the names.
+  const last = arm[arm.length - 1];
+  if (last === undefined || last.k !== 'if') {
+    return null;
+  }
+  const t = pushJoin(last.then, names, declared, join, sfn);
+  const e = pushJoin(last.else, names, declared, join, sfn);
+  if (t === null || e === null) {
+    return null;
+  }
+  return { arm: [...arm.slice(0, -1), { ...last, then: t.arm, else: e.arm }], used: t.used + e.used };
+}
+
 /** The tree with every eligible join statement pushed back into its arms, or null when no site
  *  qualified — the lever declines rather than re-emitting the primary spelling. */
 export function unmergeJoins(sfn: SFn): SFn | null {
@@ -198,7 +300,20 @@ export function unmergeJoins(sfn: SFn): SFn | null {
     const merge = new Set<string>();
     for (const n of read) {
       const m = mentions.get(n);
-      if (m && m.assigns === 2 && readsOf(m) === 1 && m.addrTaken === 0) {
+      // `written.has(n)` is a CANDIDATE condition, not only the bystander test below, and it
+      // ADMITS sites an arity gate alone declines. A candidate the arms cannot define refuses the
+      // WHOLE SITE (`armDefs` returns null) instead of being ignored, and `m.assigns` is
+      // `localMentions`'s FUNCTION-WIDE count, never arm-scoped — so without this conjunct a name
+      // assigned only OUTSIDE the arms reaches the candidate set and sinks the site. Measured,
+      // against the same pass with the conjunct removed:
+      //
+      //   n = 1; n = 2;  if (c) x = 1; else x = 2;  n[0] = x;   without: NULL · here: FIRES
+      //   y = 1; y = 2;  if (c) p = a; else p = b;  *p = y;     without: NULL · here: FIRES
+      //
+      // (`y` is a bystander read carried into both copies, `p` is the merge; nothing `y` reads
+      // moves, because the copy is always LAST in its arm.) Both admissions are pinned as RULE
+      // tests in unmerge.test.ts.
+      if (m && written.has(n) && m.assigns >= 2 && readsOf(m) === 1 && m.addrTaken === 0) {
         merge.add(n);
       } else if (written.has(n)) {
         return null; // the arms write it and this cannot substitute it
@@ -207,22 +322,35 @@ export function unmergeJoins(sfn: SFn): SFn | null {
     if (merge.size === 0) {
       return null;
     }
-    const then = armDefs(iff.then, merge, declaredNames);
-    const els = armDefs(iff.else, merge, declaredNames);
+    const then = pushJoin(iff.then, merge, declaredNames, join, sfn);
+    const els = pushJoin(iff.else, merge, declaredNames, join, sfn);
     if (then === null || els === null) {
       return null;
     }
-    for (const v of [...then.defs.values(), ...els.defs.values()]) {
-      if (exprHasEffect(v) || exprReadsVolatile(v, sfn) || [...readsIn(v)].some((n) => merge.has(n))) {
-        return null;
-      }
+    // TOTALITY: every assignment to a merge name ANYWHERE in the function has to be one of the
+    // terminal arms just rewritten. A definition the rewrite did not consume survives with nothing
+    // left to read it, and the local it names is about to be deleted.
+    const used = then.used + els.used;
+    if ([...merge].some((n) => mentions.get(n)?.assigns !== used)) {
+      return null;
+    }
+    const out: Stmt = { ...iff, then: then.arm, else: els.arm };
+    // AND THE COUNTS ARE STALE, so totality is checked against the RESULT as well: an earlier site
+    // inside this same tree can turn one assignment into two, leaving `mentions` short by exactly
+    // the number of arms the ladder then consumes, and the two counts agree by coincidence. A
+    // merge name still mentioned in the rewritten statement means the rewrite did not consume it
+    // and the declaration may not go. `test/unmerge.test.ts` builds the tree where totality alone
+    // admits it.
+    //
+    // What this does NOT cover, stated rather than implied: a mention OUTSIDE `out`, which
+    // `readsOf(m) === 1` answers from the same stale map. A sibling site duplicating a read is the
+    // shape that would reach it; no inhabitant is known. That is the pass's standing model, not
+    // this gate's job.
+    if (mentionsAnyLocal([out], merge)) {
+      return null;
     }
     merge.forEach((n) => consumed.add(n));
-    return {
-      ...iff,
-      then: [...then.keep, substitute(join, then.defs)],
-      else: [...els.keep, substitute(join, els.defs)],
-    };
+    return out;
   };
 
   const list = (xs: Stmt[]): Stmt[] => {

@@ -93,7 +93,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
     `decompileRanked` path only. Two populations of them: SPELLING re-writes of one structured
     tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/unfolded`, `/volatile`, `/vol-store`,
-    `/unreduce`, `/ptr-field`, `/offmember`, `/mulfirst`, `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
+    `/unreduce`, `/ptr-field`, `/offmember`, `/mulfirst`, `/regcopy`, `/coalesce`, `/unmerge`) and STRUCTURING axes, which re-run `structure()` under a different
     lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
     `/merge-names`, `/fresh-merge`) — plus `/raw-globals`, the signedness pin, `/setup-args` and
     `/connective`, which re-run the lift itself.
