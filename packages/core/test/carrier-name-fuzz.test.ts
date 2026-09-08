@@ -22,7 +22,7 @@ import type { SFn } from '../src/l3/ast';
 import { type Gate, without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, type CarrierName, structure } from '../src/structure/structure';
-import { type Event, generateSsaFn, traceOf, tracesDiffer } from './helpers';
+import { BREATHE_EVERY, type Event, breathe, generateSsaFn, traceOf, tracesDiffer } from './helpers';
 
 // Same load sensitivity as the sibling fuzz: solo these run in a couple of seconds, and under a
 // full parallel suite the 5 s default times out on machine load rather than on a defect.
@@ -83,10 +83,11 @@ describe.each([
   ['loop-bearing', 1],
   ['nested', 2],
 ] as const)('%s', (_name, depth) => {
-  test('no name the walk adopts changes what the function does', () => {
+  test('no name the walk adopts changes what the function does', async () => {
     const bad: number[] = [];
     let judged = 0;
     for (let seed = 1; seed <= SEEDS; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
       const r = spellings(seed, depth);
       if (!r) continue;
       judged++;
@@ -106,12 +107,13 @@ describe.each([
 // is the point: exempting a gate is a visible act with a reason attached.
 const OUT_OF_REACH = new Set(['carrier-width', 'carrier-sign', 'carrier-write']);
 
-test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it changes what some function does', () => {
+test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it changes what some function does', async () => {
   const inert: string[] = [];
   for (const g of CARRIER_NAME_GATES.filter((x) => x.sound && !OUT_OF_REACH.has(x.id))) {
     let found = false;
     for (const depth of [0, 1, 2] as const) {
       for (let seed = 1; seed <= SEEDS && !found; seed++) {
+        if (seed % BREATHE_EVERY === 0) await breathe();
         const r = spellings(seed, depth, g.id);
         if (r && tracesDiffer(r)) found = true;
       }

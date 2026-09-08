@@ -27,7 +27,7 @@ import { without } from '../src/l3/gates';
 import { NARROW_LOCAL_GATES, narrowBlockLocals } from '../src/raise/narrowlocal';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
-import { mulberry32 } from './helpers';
+import { BREATHE_EVERY, breathe, mulberry32 } from './helpers';
 
 /** A random SSA function whose block parameters are often EXTENDED at their reads — the shape this
  *  pass judges. Definitions dominate uses by construction (entry values plus the reading block's
@@ -348,10 +348,11 @@ describe.each([
   ['acyclic', false],
   ['loop-bearing', true],
 ])('%s', (_name, withLoop) => {
-  test('no narrowing the pass makes changes what the function does', () => {
+  test('no narrowing the pass makes changes what the function does', async () => {
     const bad: number[] = [];
     let judged = 0;
     for (let seed = 1; seed <= SEEDS; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
       const r = spellings(seed, withLoop);
       if (!r) continue;
       judged++;
@@ -391,11 +392,12 @@ describe.each([
   // shapes is outside it and owes its own evidence — which is why the arm clause's REFUSALS are
   // priced by the `mergeldcast`/`mergepool` rows: both are memory or pool shapes this generator
   // cannot make, and their arms are exactly what it never emits.
-  test('…and neither does the population `edge-extends` masks', () => {
+  test('…and neither does the population `edge-extends` masks', async () => {
     const bad: number[] = [];
     let judged = 0;
     const ablated = without(NARROW_LOCAL_GATES, 'edge-extends');
     for (let seed = 1; seed <= SEEDS; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
       const r = spellings(seed, withLoop, ablated as never);
       if (!r) continue;
       judged++;
@@ -431,12 +433,13 @@ describe.each([
 //   for `type`. Its guard is the fixture of the same name.
 const OUT_OF_REACH = new Set(['reader-is-extension', 'cast-width', 'entry-param', 'param-typed']);
 
-test('every SOUND gate is load-bearing: dropping it changes what some function does', () => {
+test('every SOUND gate is load-bearing: dropping it changes what some function does', async () => {
   const inert: string[] = [];
   for (const g of NARROW_LOCAL_GATES.filter((x) => x.sound && !OUT_OF_REACH.has(x.id))) {
     let found = false;
     for (const withLoop of [false, true]) {
       for (let seed = 1; seed <= SEEDS && !found; seed++) {
+        if (seed % BREATHE_EVERY === 0) await breathe();
         const r = spellings(seed, withLoop, without(NARROW_LOCAL_GATES, g.id) as never);
         if (r && differs(r)) found = true;
       }

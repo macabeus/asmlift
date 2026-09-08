@@ -24,7 +24,7 @@ import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { structure } from '../src/structure/structure';
-import { type Event, generateSsaFn, traceOf, tracesDiffer } from './helpers';
+import { BREATHE_EVERY, type Event, breathe, generateSsaFn, traceOf, tracesDiffer } from './helpers';
 
 // CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
 // budget. Solo these tests run in 0.9-1.7 s; inside a full `pnpm test:offline` at loadavg ~26 this
@@ -77,10 +77,11 @@ describe.each([
   ['loop-bearing', 1, SEEDS],
   ['nested', 2, 250],
 ] as const)('%s', (_name, depth, seeds) => {
-  test('no merge the pass makes changes what the function does', () => {
+  test('no merge the pass makes changes what the function does', async () => {
     const bad: number[] = [];
     let judged = 0;
     for (let seed = 1; seed <= seeds; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
       const r = spellings(seed, depth);
       if (!r) continue;
       judged++;
@@ -99,7 +100,7 @@ describe.each([
 // attached, so a rule added later is still held to the bar unless someone argues it out.
 const OUT_OF_REACH = new Set(['type']);
 
-test('every SOUND gate is load-bearing: dropping it changes what some function does', () => {
+test('every SOUND gate is load-bearing: dropping it changes what some function does', async () => {
   // Written over the TABLE, not over named gates: a rule added later is held to this without
   // anyone remembering to. A gate whose ablation changes nothing is either subsumed or decorative,
   // and either way it must not claim `sound`.
@@ -108,6 +109,7 @@ test('every SOUND gate is load-bearing: dropping it changes what some function d
     let found = false;
     for (const depth of [0, 1, 2] as const) {
       for (let seed = 1; seed <= SEEDS && !found; seed++) {
+        if (seed % BREATHE_EVERY === 0) await breathe();
         const r = spellings(seed, depth, g.id);
         if (r && tracesDiffer(r)) found = true;
       }

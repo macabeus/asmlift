@@ -293,3 +293,23 @@ export const tracesDiffer = (r: { off: Event[]; on: Event[] }): boolean => {
     return e.args.some((a, k) => a !== UNDEF && f.args[k] !== UNDEF && a !== f.args[k]);
   });
 };
+
+/** Hand the worker's event loop a turn, mid-sweep.
+ *
+ *  A fuzz arm here is tens of thousands of seeds of straight-line synchronous work — the
+ *  `narrowlocal` file alone runs ~23 s of it solo, and its own sweeps measured 3.4x that under
+ *  this suite's parallel forks. vitest's worker talks to the runner over birpc with a FIXED 60 s
+ *  timeout (`DEFAULT_TIMEOUT` in vitest's rpc chunk; no config exposes it), so a file that never
+ *  yields lets `onTaskUpdate`'s reply sit unread in the poll queue while the timer that gives up
+ *  on it matures. Node runs the timers phase BEFORE the poll phase, so the timeout then fires
+ *  even though the reply had already arrived — the run dies on
+ *  `[vitest-worker]: Timeout calling "onTaskUpdate"` with every test passing.
+ *
+ *  `setImmediate` rather than a zero `setTimeout`: the check phase runs after poll, so the reply
+ *  is read on the way in. */
+export const breathe = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+/** How many seeds a sweep may run between breaths. Small enough that no stretch approaches the
+ *  60 s RPC timeout even at the 3.4x fork-contention factor these sweeps measured; large enough
+ *  that the yields themselves cost nothing measurable. */
+export const BREATHE_EVERY = 512;
