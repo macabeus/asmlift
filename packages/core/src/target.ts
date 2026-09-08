@@ -427,6 +427,24 @@ export const MIPS_GCC: TargetDescription = {
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
+    // DECLARED ON THIS COMPILER'S OWN PAIR, never inherited from agbcc's. The two spellings of one
+    // two-case body are committed beside the declaration-rank probes —
+    // `corpus/gcc272kmc-swfrontload.asm` and `corpus/gcc272kmc-swladder.asm`, both produced by
+    // GCC_KMC_TOOLCHAIN at its shipped flags — and they are different objects of different sizes:
+    // the `switch` emits both `beq`s before the first `sw`; the ladder emits each `bne` directly
+    // above the store it guards. (A THREE-case body says the same and more loudly, the balanced
+    // tree's `slti` bound test landing ahead of the bodies with the rest, but it is not what is
+    // committed here: at three cases neither spelling reaches Regime A on this compiler, so the
+    // pair could not also serve as the recovery test below.) A test lifts both fixtures and asserts
+    // the structurer reads them that way, so the compiler claim is executable rather than a
+    // comment here.
+    //
+    // WHAT IS WEAKER HERE THAN AT agbcc, stated rather than glossed: this compiler HAS a scheduler
+    // and fills delay slots, and both fixtures show it — the ladder's `bne` carries the NEXT test's
+    // `li` in its slot. What the pair shows is that it moves no BODY above a test, which is the
+    // only claim the gate rests on, and the gate's failure direction (switch-recover.ts PRE5) is a
+    // lost `switch` spelling, never a wrong answer.
+    switchRequiresFrontLoadedTests: true,
     // MEASURED `ascending` on both toolchains this description serves — 7 of 7 spills each, and
     // rank → offset unchanged under a reversed declaration list — and NOT SHIPPED, for the same
     // reason as ido7.1: no row on either tier lifts with two or more spilled user locals. Both

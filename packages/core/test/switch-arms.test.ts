@@ -3,6 +3,7 @@
 // dispatch with `balance_case_nodes`/`emit_case_nodes` (a comparison TREE, not a jump table, for
 // a dense 0..3 switch) and gives every subtree that runs out of case values its OWN jump to the
 // default — so a four-case tree reaches the default through two `b .Ldefault` blocks.
+import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -1259,12 +1260,57 @@ test('the reading is PER SITE: one function keeps its ladder AND its switch', ()
 });
 
 test('a compiler that has not declared the front-loading keeps recovering the switch', () => {
-  // The premise is `switchArmsFollowLayout`'s, entire: no block reordering, no scheduling across
-  // blocks, and a frontend whose block list is the assembly's order. None of the other three has
-  // been put through its own compiled pair, and CodeWarrior fails the frontend half outright —
-  // ppc.ts appends synthetic return blocks out of stream order.
-  for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+  // Two compilers declare this, each on its OWN compiled pair (agbcc's in target.ts, KMC-GCC's in
+  // the committed fixtures below). IDO has never been put through one, and CodeWarrior fails the
+  // premise's frontend half outright — ppc.ts appends synthetic return blocks out of stream order,
+  // so `fn.blocks` there is not the assembly's layout and the reading has nothing to read.
+  for (const t of [MIPS_IDO, PPC_MWCC]) {
     expect(t.compilerBehaviors.switchRequiresFrontLoadedTests).toBeUndefined();
   }
   expect(src(ladderFn, notDeclared)).toContain('switch (a0)');
+});
+
+// ── THE COMPILE-BOTH GATE, AS A TEST (docs/level-tower.md) ───────────────────────────────────────
+// An underdetermination claim about two SOURCE spellings is a COMPILER claim, so the two objects
+// are committed rather than described. `corpus/gcc272kmc-sw{frontload,ladder}.asm` are GCC_KMC's
+// own output at its shipped flags for one two-case body written each way — the pair MIPS_GCC's
+// `switchRequiresFrontLoadedTests` is declared on. Read here off the disassembly itself, so the
+// claim survives a change to how asmlift lifts either one.
+const kmcDump = (f: string) =>
+  readFileSync(new URL(`corpus/${f}.asm`, import.meta.url), 'utf8')
+    .split('\n')
+    .map((l) => /^\s+[0-9a-f]+:\t(.*)$/.exec(l)?.[1]?.trim())
+    .filter((l): l is string => !!l);
+
+test('the two kmc spellings of ONE body are different objects, and the layouts say which is which', () => {
+  const at = (ls: string[], re: RegExp) => ls.flatMap((l, i) => (re.test(l) ? [i] : []));
+  const tests = (ls: string[]) => at(ls, /^(beq|bne)\b/);
+  const bodies = (ls: string[]) => at(ls, /^sw\b/); // the arm bodies: the stores through the pointer
+  const sw = kmcDump('gcc272kmc-swfrontload');
+  const lad = kmcDump('gcc272kmc-swladder');
+  expect(sw.join('\n')).not.toEqual(lad.join('\n')); // different objects, not one object two ways
+  // the `switch`: EVERY test ahead of EVERY body. That is the whole premise the gate reads back.
+  expect(Math.max(...tests(sw))).toBeLessThan(Math.min(...bodies(sw)));
+  // the ladder: a test sits AFTER a body — each `bne` directly above the store it guards.
+  expect(Math.max(...tests(lad))).toBeGreaterThan(Math.min(...bodies(lad)));
+});
+
+test('a front-loaded kmc dispatch keeps its switch once MIPS_GCC declares the reading', () => {
+  // The direction a wrong declaration would cost rows in, on this compiler's own output.
+  //
+  // ONLY THIS HALF OF THE PAIR IS LIFTED, and saying so is the point: the ladder fixture never
+  // reaches Regime A on this compiler at all (its `bne` carries the next test's `li` in the delay
+  // slot, and the recovery declines before PRE5 ever runs), so it is the COMPILED EVIDENCE and not
+  // a demonstration of the decline. What referees the decline on KMC GCC is the real row
+  // `snowboardkids2:func_80038000_38C00`, whose two-case tree does reach it — diff:9 to MATCH.
+  const out = decompile(
+    'swpick',
+    readFileSync(new URL('corpus/gcc272kmc-swfrontload.asm', import.meta.url), 'utf8'),
+    MIPS_GCC,
+    {
+      prototypes: { swpick: { returnsVoid: true } },
+    },
+  ).source;
+  expect(out).toContain('switch (a0)');
+  expect(MIPS_GCC.compilerBehaviors.switchRequiresFrontLoadedTests).toBe(true);
 });
