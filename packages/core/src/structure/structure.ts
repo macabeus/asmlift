@@ -1295,6 +1295,23 @@ export interface StructureOptions {
   // basic blocks nor schedules across them, so the layout it produced IS the order the source
   // wrote. Default false: absent, the arms keep the ascending spelling.
   switchArmsFollowLayout?: boolean;
+  // Comparison-tree switch recovery: DECLINE a tree whose own layout interleaves a test block with
+  // a case body, on the reading that the source wrote an if/else-if LADDER there and not a
+  // `switch`. Regime A otherwise recovers a `switch` from any comparison tree it can, so a ladder
+  // and a `switch` over the same values produce the SAME candidate and the differ never sees the
+  // ladder — there is nothing in the fan for it to prefer.
+  //
+  // The two spellings are different objects. Compiled at TOOLCHAIN.agbccFlags the same two-case
+  // body is 79 bytes either way and disagrees instruction for instruction: the `switch` emits
+  // `cmp #0x1e; beq` then `cmp #0x64; bne` — both tests ahead of both bodies, and sorted ASCENDING,
+  // which is the reverse of the order the source writes them in — while the ladder emits
+  // `cmp #0x64; bne` directly above its own body and reaches `cmp #0x1e` only after it.
+  //
+  // Read PER SITE off the recovery's own blocks — a function may hold one of each — and it
+  // inherits `layoutIndex`'s frontend premise (see switch-recover.ts PRE5, which also states what
+  // the gate costs when the premise fails: the `switch` spelling, never correctness).
+  // Default false: absent, every recoverable tree is still spelled as a `switch`.
+  switchRequiresFrontLoadedTests?: boolean;
   // Does the TARGET LANGUAGE spell a `switch` arm that runs on into the next one? Set from the
   // caller's LanguageBackend (`spellsSwitchFallthrough`), not from the compiler target: it is a
   // property of what the emitted source may say, and the only reason the structurer needs it is
@@ -1666,6 +1683,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchAllowsNeqCase = true,
     switchAllowsBoundCase = false,
     switchArmsFollowLayout = false,
+    switchRequiresFrontLoadedTests = false,
     spellSwitchFallthrough = true,
     spillSlotOrder,
     defOrderLoadPairs = true,
@@ -3850,6 +3868,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchAllowsNeqCase,
     switchAllowsBoundCase,
     switchArmsFollowLayout,
+    switchRequiresFrontLoadedTests,
     spellSwitchFallthrough,
     emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
     blockOf,

@@ -1167,6 +1167,7 @@ test('every withholding on the `default:` position, one call each', () => {
     switchAllowsNeqCase: false,
     switchAllowsBoundCase: false,
     switchArmsFollowLayout: true,
+    switchRequiresFrontLoadedTests: false,
     spellSwitchFallthrough: true,
     emitsOwnStatement: () => false,
     blockOf: () => undefined,
@@ -1191,4 +1192,79 @@ test('every withholding on the `default:` position, one call each', () => {
   expect(rec.defaultLayoutPos(dflt, [...arms(-1), { entry: dflt, fallsThrough: false }], intact)).toBeUndefined(); // W3
   expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, orderIntact: false })).toBeUndefined(); // W5
   expect(rec.defaultLayoutPos(dflt, arms(1), intact)).toBeUndefined(); // W7, the label would land after a1
+});
+
+// ── WHICH SPELLING THE SOURCE WROTE (switch-recover.ts PRE5) ─────────────────────────────────────
+// Regime A recovers a `switch` from any comparison tree it can, so an if/else-if LADDER and a
+// `switch` over the same values collapse to ONE candidate and the differ never sees the ladder.
+// They are not one object: compiled at TOOLCHAIN.agbccFlags the two spellings of the body below
+// are 79 bytes each and disagree instruction for instruction — the `switch` front-loads both tests
+// and sorts them ascending (0x1e before 0x64, the reverse of source order), the ladder emits each
+// test directly above its own body. `switchRequiresFrontLoadedTests` reads that back off the
+// layout, PER SITE.
+
+/** the agbcc LADDER spelling of `if (x == 100) r = 1; else if (x == 30) r = 2;` — each test
+ *  directly above the body it guards, in source order. Blocks: 0 test, 1 body, 2 test, 3 body. */
+const ladder = (x: string, out: string) =>
+  `\tcmp\t${x}, #0x64\n\tbne\t.Lt2\t@cond_branch\n` +
+  `\tmov\tr2, #0x1\n\tb\t${out}\n` +
+  `.Lt2:\n\tcmp\t${x}, #0x1e\n\tbne\t${out}\t@cond_branch\n` +
+  '\tmov\tr2, #0x2\n';
+const epilogue = '\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+const ladderFn = 'f:\n\tmov\tr2, #0x0\n' + ladder('r0', '.Lend') + '.Lend:\n' + epilogue;
+/** ONE function holding both spellings: a front-loaded 2-case `switch` on a1 (tests in blocks
+ *  0 and 1, bodies in 2 and 3) followed by the ladder on a0 (tests 4 and 6, bodies 5 and 7). */
+const mixedFn =
+  'f:\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr1, #0x1\n\tbeq\t.Ls1\t@cond_branch\n' +
+  '\tcmp\tr1, #0x2\n\tbne\t.Lsend\t@cond_branch\n' +
+  '\tmov\tr2, #0x14\n\tb\t.Lsend\n' +
+  '.Ls1:\n\tmov\tr2, #0xa\n' +
+  '.Lsend:\n' +
+  ladder('r0', '.Lend') +
+  '.Lend:\n' +
+  epilogue;
+/** agbcc with the reading declared, which is how it ships; the control is agbcc WITHOUT it. */
+const notDeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+delete notDeclared.compilerBehaviors.switchRequiresFrontLoadedTests;
+const src = (asm: string, t = ARMV4T_AGBCC) =>
+  decompile('f', asm, t, { prototypes: { f: { returnsVoid: true } } }).source;
+
+test('a tree whose tests INTERLEAVE with its bodies is spelled as the ladder the source wrote', () => {
+  // The whole gap: without the reading this is a `switch`, and no ladder exists anywhere in the
+  // fan for a differ to prefer. `synthetic:swladder` is this shape and m2c matches it.
+  expect(src(ladderFn, notDeclared)).toContain('switch (a0)');
+  const out = src(ladderFn);
+  expect(out).not.toContain('switch');
+  expect(out).toContain('a0 == 100');
+  expect(out).toContain('a0 == 30');
+});
+
+test('…while a FRONT-LOADED dispatch is still a switch — the gate reads layout, not case count', () => {
+  // The control the decline owes: a gate that declined every tree would close the row above and
+  // silently take the whole `sw_*` family with it.
+  expect(src(dispatch([0, 1, 2, 3]))).toContain('switch (a0)');
+  expect(armOrder(src(dispatch([2, 0, 3, 1])))).toEqual([2, 0, 3, 1]);
+});
+
+test('the reading is PER SITE: one function keeps its ladder AND its switch', () => {
+  // PR #120's price, refused. A per-FUNCTION predicate cannot decide a per-SITE question: a
+  // function-wide OR would spell both sites the same way and be wrong on one by construction.
+  const out = src(mixedFn);
+  expect(count(out, 'switch (a1)')).toBe(1);
+  expect(out).not.toContain('switch (a0)');
+  expect(out).toContain('a0 == 100');
+  // and with the reading withdrawn, BOTH sites are switches — so the test above is the gate firing
+  expect(count(src(mixedFn, notDeclared), 'switch (')).toBe(2);
+});
+
+test('a compiler that has not declared the front-loading keeps recovering the switch', () => {
+  // The premise is `switchArmsFollowLayout`'s, entire: no block reordering, no scheduling across
+  // blocks, and a frontend whose block list is the assembly's order. None of the other three has
+  // been put through its own compiled pair, and CodeWarrior fails the frontend half outright —
+  // ppc.ts appends synthetic return blocks out of stream order.
+  for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+    expect(t.compilerBehaviors.switchRequiresFrontLoadedTests).toBeUndefined();
+  }
+  expect(src(ladderFn, notDeclared)).toContain('switch (a0)');
 });

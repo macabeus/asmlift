@@ -6589,13 +6589,14 @@ export const SYNTHETIC: SynthSpec[] = [
     // is that difference alone: agbcc lays the ladder's test and body out interleaved
     // (`cmp #0x64; bne .L3` … body … `.L3: cmp #0x1e; bne .L4`) while the same source spelled as a
     // real `switch` front-loads both tests and sorts them ascending — so the target's own
-    // assembly records which one was written, and asmlift recovers a `switch` regardless. NO
-    // alternative spelling is enumerated: the fan is 2, and `/connective` (rank.ts) is explicitly
-    // "NOT for the shared-arm spelling", so nothing in the ranked world can referee it. The class
-    // is `structure/switch-recover.ts`; the shipped model to copy is
-    // `StructureOptions.switchArmsFollowLayout`, which already reads exactly this evidence one
-    // question later (which ORDER the arms go in) for compilers that neither reorder blocks nor
-    // schedule across them.
+    // assembly records which one was written.
+    //
+    // CLOSED, and not by a ranked candidate: no alternative spelling was ever enumerated here (the
+    // fan was 2, both the `switch`, and `/connective` in rank.ts is explicitly "NOT for the
+    // shared-arm spelling"), so there was nothing for the differ to referee. What closed it is
+    // `switch-recover.ts`'s PRE5 / `TargetDescription.switchRequiresFrontLoadedTests`, reading the
+    // layout back per SITE — the model this comment already named, `switchArmsFollowLayout`, one
+    // question earlier. `nestacc` above collects the 6 of its own that this row isolates.
     sym: 'swladder',
     src:
       's32 swladder(s32 x){\n' +

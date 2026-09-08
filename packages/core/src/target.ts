@@ -232,6 +232,25 @@ export interface TargetDescription {
     // Absent ⇒ ascending case value, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
     // been put through that evidence. A compiler opts in on its own, never by inheriting.
     switchArmsFollowLayout?: boolean;
+    // Switch recovery: DECLINE a comparison tree whose own layout INTERLEAVES a test block with a
+    // case body, on the reading that the source wrote an if/else-if LADDER there. True claims the
+    // compiler emits a source `switch`'s whole dispatch AHEAD of every arm body — the same
+    // `expand_end_case` closing `reorder_insns` `switchArmsFollowLayout` is read off, used for the
+    // other half of what it does — while a ladder's tests stay above their own bodies. So it
+    // carries `switchArmsFollowLayout`'s premise ENTIRE (no block reordering, no scheduling, and a
+    // frontend whose block list is address order) and adds nothing to it; a compiler that declares
+    // one has already said what the other needs.
+    //
+    // agbcc declares it, and its own pair of objects says the reading is not vacuous: at
+    // TOOLCHAIN.agbccFlags the same two-case body is 79 bytes written either way and is a DIFFERENT
+    // object — the `switch` emits `cmp #0x1e; beq` then `cmp #0x64; bne` before either body, sorted
+    // ascending and so in the reverse of the written order; the ladder emits `cmp #0x64; bne`
+    // directly above its own body and reaches `cmp #0x1e` only after it.
+    //
+    // Absent ⇒ every recoverable tree is still spelled `switch`, which is where ido/mwcc sit: each
+    // has a scheduler that may move a body above a test, and neither has been put through the pair.
+    // A compiler opts in on its own compiled evidence, never by inheriting.
+    switchRequiresFrontLoadedTests?: boolean;
     // Commutative load pairs re-spell in def (evaluation) order (structure.ts lowerDef). Absent
     // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown
     // re-ordering independent loads opts OUT here.
@@ -327,6 +346,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     readsStayWhereWritten: true,
     switchAllowsBoundCase: true,
     switchArmsFollowLayout: true,
+    switchRequiresFrontLoadedTests: true,
     hoistsSingleSetArm: true,
     arrayShapeFromStride: true,
     // agbcc: reload walks pseudos ascending handing each global-alloc loser a fresh slot, a user

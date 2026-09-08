@@ -23,6 +23,12 @@ export interface SwitchRecoverDeps {
   switchAllowsBoundCase: boolean;
   /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
   switchArmsFollowLayout: boolean;
+  /** DECLINE a recovered tree whose own layout INTERLEAVES a test with a case body. A source
+   *  `switch` front-loads its whole dispatch ahead of every arm body; an if/else-if LADDER emits
+   *  each test directly above its own body. See StructureOptions for the compiled evidence, for
+   *  the frontend premise this shares with `switchArmsFollowLayout`, and for what the decline
+   *  costs when it is wrong. */
+  switchRequiresFrontLoadedTests: boolean;
   /** may the emitted SOURCE say "this arm runs on into the next one"? False for a language whose
    *  `case` cannot fall through (Pascal), and then Regime A declines a falling arm to if-recovery
    *  — the behaviourally identical recovery that backend CAN print. See StructureOptions. */
@@ -247,6 +253,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     switchAllowsNeqCase,
     switchAllowsBoundCase,
     switchArmsFollowLayout,
+    switchRequiresFrontLoadedTests,
     spellSwitchFallthrough,
     emitsOwnStatement,
     blockOf,
@@ -768,6 +775,46 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // and misroute x==20. Simulating the tree per case value catches exactly this — decline on any mismatch.
     for (const [k, blk] of cases) {
       if (simulateTree(k) !== blk) {
+        return null;
+      }
+    }
+
+    // PRE5 (WHICH SPELLING THE SOURCE WROTE), per SITE, and only where the caller has declared
+    // that the layout answers it. Everything above establishes that this tree CAN be spelled as a
+    // `switch`; this asks whether it WAS. The two spellings are different objects, not one object
+    // two ways: a source `switch` front-loads its whole dispatch ahead of every arm body (agbcc's
+    // `expand_end_case` closes with a `reorder_insns` that moves the dispatch in front of the
+    // bodies expanded before it — the same sources `switchArmsFollowLayout` is read off), while an
+    // if/else-if ladder emits each test directly above the body it guards. So a test block laid
+    // out AFTER a case body cannot have come from a source `switch`, and recovering one here spells
+    // a ladder as a `switch` with no dual anywhere in the fan for a differ to prefer.
+    //
+    // READ PER SITE, off THIS recovery's own blocks, never off the function. A function holding a
+    // ladder and a real `switch` must keep both readings, and a function-wide OR would collapse
+    // them into one boolean and be wrong on one site by construction.
+    //
+    // WHAT IT REFUSES TO DO, and the premise that can make it wrong. The reading runs BACKWARDS —
+    // from emission to spelling — so it inherits `layoutIndex`'s premise in full: `fn.blocks` is
+    // the ASSEMBLY's order (true of the thumb and mips frontends, FALSE of ppc.ts, which appends
+    // synthetic return blocks out of stream order) and nothing between the source and the asm moved
+    // a block (agbcc compiles neither sched.c nor reorg.c). A frontend or compiler that breaks
+    // either can hand this a front-loaded layout for a ladder — and then the gate simply does not
+    // fire, which is today's behaviour. The converse error, a real `switch` whose layout
+    // interleaves, costs only the `switch` SPELLING: the recovery declines to if-recovery, which is
+    // behaviourally identical (the file header) and which the differ then scores. This gate can
+    // therefore lose a match; it can never produce a wrong answer, and it is never a silent one —
+    // the emitted source says `if`/`else if` where the target said `switch`.
+    //
+    // AND THE READING REFUSES ITSELF where it has nothing to read. `layoutIndex` answers `-1` for a
+    // block absent from `fn.blocks`, which is not a position — taken as one it would sort below
+    // every real body and decline EVERY tree in the function, turning one unplaced block into a
+    // silent loss of the whole `switch` regime. The sort one section down can absorb a `-1` (it
+    // misorders two arms); this cannot, so it asks rather than assumes and stands down.
+    if (switchRequiresFrontLoadedTests) {
+      const testPos = [...seen].map(layoutIndex);
+      const bodyPos = [...caseBlocks].map(layoutIndex);
+      const placed = [...testPos, ...bodyPos].every((i) => i >= 0);
+      if (placed && Math.max(...testPos) > Math.min(...bodyPos)) {
         return null;
       }
     }
