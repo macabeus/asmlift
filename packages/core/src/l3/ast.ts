@@ -109,10 +109,15 @@ export type Expr =
        *  it the C backend legalizes the base through a reinterpret cast (`((u8 *)gPtr->arr)[i]`),
        *  which is the CAST form's object again and defeats the whole point of naming the member.
        *
-       *  IT IS A PRODUCER INVARIANT, and the consumer's re-check is defence in depth rather than a
-       *  guard with a reachable failing input — the earlier wording ("evidence the backend
-       *  re-checks, not an assertion it trusts") overstated it, and a future producer could read
-       *  that as licence to state a type the backend will vet. The one producer,
+       *  IT IS A PRODUCER INVARIANT, and the width re-check beside the consumer is defence in
+       *  depth rather than a guard with a reachable failing input — the earlier wording ("evidence
+       *  the backend re-checks, not an assertion it trusts") overstated it, and a future producer
+       *  could read that as licence to state a type the backend will vet. It cannot vet one: it
+       *  tests the STATED type against the access width, never against the base, so it is true by
+       *  construction for anything a producer could state AND for a statement gone stale. What the
+       *  consumer does guard is PRECEDENCE — this field is consulted only where `exprCType`
+       *  answers nothing (cfamily.ts `legalizedIndexBase`), so wherever the walk can read the base
+       *  it corrects a stale statement instead of being overridden by it. The one producer,
        *  structure/structure.ts `pointeeElement`, sets it from the same `elemSize`/`elemSigned` it
        *  has just passed `spellsAccessType` on — and that predicate IS
        *  `typeEquals(T.int(width*8, elemSigned), scalarTypeForAccess(width, signed))`, so

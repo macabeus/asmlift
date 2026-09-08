@@ -510,8 +510,18 @@ function spellablePointee(
  *  same file, and the reason is the shape rather than the effort: those refusals are predicates
  *  over ONE prepared context, while these are interleaved with the computations that produce the
  *  values the later ones test — the member `find`, `structFieldInnerExtents`,
- *  `subscriptsFromExtents`. Hoisting them into a Ctx would reorder that work and change WHICH
- *  refusal fires first, which is the attribution a gate table exists to give. */
+ *  `declaredArrayShape`, `subscriptsFromExtents`. Building that Ctx would run all of it on inputs
+ *  the earlier gates reject. (An earlier wording added "…and change WHICH refusal fires first".
+ *  That half is FALSE and is dropped: `firstRejection` reports in the AUTHORED gate order, not the
+ *  computation order, so a Ctx with optional fields would attribute identically. The cost is the
+ *  whole reason.)
+ *
+ *  A THIRD ROUTE TO THE SAME LEGALIZATION, recorded so the next round does not re-derive it.
+ *  `baseElem` and the global path's env lie (`noteGlobal(name, T.ptr(elem))`) both exist because
+ *  `derefStrideOk` asks a SINGLE-subscript question of a node carrying `lead.length + 1`
+ *  subscripts. The third answer is to peel `lead.length` array levels off the WALKED base type
+ *  before the stride check — no AST field and no env lie at all. Not built: it needs `gPtr` typed
+ *  in the print env, which is a bigger change than this gap should carry. */
 function pointeeElement(
   pg: PtrGlobalBase,
   off: number,
