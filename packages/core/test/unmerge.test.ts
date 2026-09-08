@@ -106,7 +106,12 @@ describe('what un-merges', () => {
   // adds rather than reach it preserves. Ablate `written.has(n)` from the candidate condition and
   // this goes null.
   test('a bystander with exactly TWO assignments no longer sinks the site', () => {
-    const body: Stmt[] = [asg('n', c(1)), asg('n', c(2)), iff([asg('x', c(1))], [asg('x', c(2))]), store(v('n'), v('x'))];
+    const body: Stmt[] = [
+      asg('n', c(1)),
+      asg('n', c(2)),
+      iff([asg('x', c(1))], [asg('x', c(2))]),
+      store(v('n'), v('x')),
+    ];
     const out = unmergeJoins(fn(body, ['n', 'x']));
     expect(out).not.toBeNull();
     expect(out!.locals.map((l) => l.name)).toEqual(['n']);
@@ -119,7 +124,12 @@ describe('what un-merges', () => {
   // seen from the other side: the arms define `p`, the join also reads `y`, and `y` is carried
   // into both copies unchanged. The copy is always LAST in its arm, so nothing `y` reads moves.
   test('a bystander the join READS is carried into both copies, and its local is kept', () => {
-    const body: Stmt[] = [asg('y', c(1)), asg('y', c(2)), iff([asg('p', v('a'))], [asg('p', v('b'))]), store(v('p'), v('y'))];
+    const body: Stmt[] = [
+      asg('y', c(1)),
+      asg('y', c(2)),
+      iff([asg('p', v('a'))], [asg('p', v('b'))]),
+      store(v('p'), v('y')),
+    ];
     const out = unmergeJoins(fn(body, ['p', 'y']));
     expect(out).not.toBeNull();
     expect(out!.locals.map((l) => l.name)).toEqual(['y']);

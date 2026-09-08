@@ -112,40 +112,65 @@ export function localMentions(sfn: SFn): Map<string, Mentions> {
   return t;
 }
 
-/** true when anything under `stmts` still NAMES one of `names` — as an assignment TARGET (which
- *  carries no expression, so no walk over values can see it), as a read, or as an address.
+/** THE ONE WALK behind `mentionsAnyLocal` and `mentionedLocals` below: which of `names` anything
+ *  under `stmts` still NAMES — as an assignment TARGET (which carries no expression, so no walk
+ *  over values can see it), as a read, or as an address. `first` stops at the earliest hit, which
+ *  is all the boolean caller needs.
  *
- *  The predicate a pass that DELETES a declaration has to answer, and it lives here rather than in
+ *  The question a pass that DELETES a declaration has to answer, and it lives here rather than in
  *  the deleting pass for the reason this file's header states about its own walk: a second walk
  *  over the node vocabulary is how a new node kind becomes a silent undercount, and beside
- *  `localMentions` a divergence is at least visible. This one is answered over a SUBTREE and asks
- *  only "any", so it cannot be derived from the counts above — `localMentions` is keyed to
- *  `sfn.locals` across the whole body, and l3/unmerge.ts's whole point is that those counts are
- *  sampled before any rewriting and go stale.
+ *  `localMentions` a divergence is at least visible. This one is answered over a SUBTREE, so it
+ *  cannot be derived from the counts above — `localMentions` is keyed to `sfn.locals` across the
+ *  whole body, and l3/unmerge.ts's whole point is that those counts are sampled before any
+ *  rewriting and go stale.
  *
  *  TOTAL over the vocabulary by construction: `assign` is the only `Stmt` carrying a bare name and
  *  `var`/`addr` the only `Expr`s, and both walks are derived from `stmtChildren`/`stmtExprs` — so a
  *  `for`'s init and inc, a `switch`'s scrutinee, its cases and its default are all covered. */
-export function mentionsAnyLocal(stmts: readonly Stmt[], names: ReadonlySet<string>): boolean {
+function scanMentions(stmts: readonly Stmt[], names: ReadonlySet<string>, first: boolean): Set<string> {
   // TWO FLAT SWEEPS, not one expression walk per nesting level. `walkExprs` already descends
   // `stmtChildren` (ast.ts), so calling it per statement from inside a recursion that ALSO
   // descends re-walks every nested expression once per enclosing level — d^2/2 `has` calls on a
   // chain of depth d, measured at 301 for depth 24 where one pass needs 25. It is small at
-  // today's only call site (one rewritten subtree per un-merge site), but this is a SHARED helper
-  // now and its cost belongs in its contract.
+  // today's call sites (one rewritten subtree per un-merge site; one dropped-locals set per lever
+  // tree), but this is a SHARED helper and its cost belongs in its contract.
+  const found = new Set<string>();
   const body = [...stmts] as Stmt[];
   const stack: Stmt[] = [...body];
   while (stack.length > 0) {
     const s = stack.pop()!;
     if (s.k === 'assign' && names.has(s.name)) {
-      return true;
+      found.add(s.name);
+      if (first) {
+        return found;
+      }
     }
     stack.push(...stmtChildren(s));
   }
   for (const e of walkExprs(body)) {
     if ((e.k === 'var' || e.k === 'addr') && names.has(e.name)) {
-      return true;
+      found.add(e.name);
+      if (first) {
+        return found;
+      }
     }
   }
-  return false;
+  return found;
+}
+
+/** true when anything under `stmts` still names one of `names`. See `scanMentions` above. */
+export function mentionsAnyLocal(stmts: readonly Stmt[], names: ReadonlySet<string>): boolean {
+  return scanMentions(stmts, names, true).size > 0;
+}
+
+/** WHICH of `names` the tree still mentions — the same walk `mentionsAnyLocal` answers "any" over,
+ *  without short-circuiting, for the caller that has to NAME the survivors.
+ *
+ *  It exists so that contracts.ts's `assertNoOrphanedLocals` — the loud backstop for exactly the
+ *  mistake this predicate guards — does not carry a THIRD hand-rolled copy of the node vocabulary.
+ *  The boolean cannot serve it (the diagnostic needs the set) and one call per dropped name would
+ *  be a walk per name; this is the same sweep, told to keep going. */
+export function mentionedLocals(stmts: readonly Stmt[], names: ReadonlySet<string>): Set<string> {
+  return scanMentions(stmts, names, false);
 }
