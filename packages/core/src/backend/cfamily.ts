@@ -145,9 +145,11 @@ export type LeafHook = (e: Expr, rec: (e: Expr, p: number) => string) => string 
  *  undefined behaviour (C99 6.7.3p5). */
 function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Expr {
   // `baseElem` states the element type the base's own DECLARATION gives it, where the type walk
-  // cannot reconstruct one (a map-declared array MEMBER — see l3/ast.ts). It is CHECKED here by
-  // the same predicate an inferred type would face, so a stated type that does not stride the
-  // access width takes the honest cast exactly as an unknown one does.
+  // cannot reconstruct one (a map-declared array MEMBER — see l3/ast.ts). It faces the same
+  // predicate an inferred type would, so a stated type that does not stride the access width takes
+  // the honest cast exactly as an unknown one does — but that is defence in depth against a FUTURE
+  // producer, not a live guard: today's one producer states the type only after asserting the very
+  // equality this re-tests, so no input reaching here can fail it.
   const declared = ix.baseElem !== undefined ? T.ptr(ix.baseElem) : undefined;
   return derefStrideOk(declared ?? exprCType(ix.base, vt.type), ix.width, ix.signed)
     ? ix.base

@@ -437,15 +437,28 @@ function spellablePointee(
 
 /** `gPtr->arr[i]` — a VARIABLE-index access into an ARRAY member of a pointer global's pointee.
  *
- *  Unlike the constant-offset member spelling below, this one is NOT byte-neutral, and the ASM
- *  SAYS WHICH SOURCE PRODUCED IT. The member form materialises the member's own base
- *  (`add r1, r1, #0x8` then `ldrb r0, [r1]`) where the cast form folds the constant into the load
- *  (`add r0, r0, r1` then `ldrb r0, [r0, #0x8]`), and the constant therefore reaches this rule
- *  down two distinguishable channels: the base tree (`pg.byte`, a separate add) or the
- *  instruction's own displacement (`off`). So the gate is `off === 0` — the constant was
- *  materialised, therefore the source named the member — and where the displacement carries it the
- *  cast spelling stands. That makes this a per-site DEFAULT and not a ranked axis: the question is
- *  decided rather than underdetermined (docs/level-tower.md).
+ *  Unlike the constant-offset member spelling below, this one is NOT byte-neutral. The member form
+ *  materialises the member's own base (`add r1, r1, #0x8` then `ldrb r0, [r1]`) where the cast form
+ *  folds the constant into the load (`add r0, r0, r1` then `ldrb r0, [r0, #0x8]`), so the constant
+ *  reaches this rule down two distinguishable channels: the base tree (`pg.byte`, a separate add)
+ *  or the instruction's own displacement (`off`). The gate is `off === 0` — the constant was
+ *  materialised — and where the displacement carries it the cast spelling stands.
+ *
+ *  WHAT THAT CHANNEL DOES NOT DECIDE, because it was claimed here and is false. It does NOT say
+ *  the source named the member: a HOISTED BASE LOCAL materialises the same constant. Compiled at
+ *  `TOOLCHAIN.agbccFlags` against `u8 unk8[6][8]`, all three of `gBlob->unk8[0][i]`,
+ *  `u8 *p = (u8 *)gBlob->unk8; p[i]` and `u8 *p = (u8 *)gBlob + 8; p[i]` emit the identical
+ *  `add r1, #0x8` · `add r1, r1, r0` · `ldrb r0, [r1]`, while `*((u8 *)gBlob + 8 + i)` and
+ *  `((u8 *)gBlob + i)[8]` take the displacement. So `off === 0` separates {member form, base-local
+ *  form} from {the displacement forms} — and the base-local form is a spelling three shipped passes
+ *  exist to emit (basecse/nearbase/scopebase).
+ *
+ *  This is still a per-site DEFAULT and not a ranked axis, but for the OTHER reason of the two
+ *  docs/level-tower.md gives: the member form and the base-local form TIE in bytes, so an axis
+ *  would enumerate a candidate that can never win. Contrast the GLOBAL rank recovery one
+ *  indirection up (`cli/test/matching/array-rank-axis.test.ts`, `/flat-rank`), which IS an axis
+ *  because its two spellings do not tie. Do not read this gate as "the asm decided" and carry that
+ *  reading to a case where the alternatives differ in bytes.
  *
  *  THE RANK IS PART OF THE SPELLING, not a later fidelity polish. The declaration this access has
  *  to type-check against belongs to the PROJECT, not to asmlift, and `->x[k]` on a `u8 x[6][8]`
@@ -454,6 +467,16 @@ function spellablePointee(
  *  (absence means "the map could not say" — see SymbolStructField.dims), and a stated rank is
  *  spelled out in full (`->x[i][j]`, or `->x[0][i]` where the asm merged the row into one flat
  *  counter, which is the same address).
+ *
+ *  `->x[0][i]` TYPE-CHECKS AND IS OUT OF BOUNDS, and both halves of that are meant. Where agbcc
+ *  merged a rank-2 walk into one flat counter, `i` runs the member's whole element count through a
+ *  declared row of `8` — defined behaviour nowhere, byte-identical everywhere (verified: the
+ *  spelling is the rank-1 object). There is no in-bounds alternative: the flat `->x[i]` is a
+ *  different program (above) and the cast form is what this rule replaces. It is the only spelling
+ *  that both type-checks and keeps the bytes, which is a narrower claim than "the only spelling
+ *  that type-checks" — the `pmarrrow` synthetic row referees it (ablate the `needRecovered = false`
+ *  below and it takes the cast form: MATCH → diff:5), and `kleod:CheckWorldCompletion:agbcc` is its
+ *  real-tier inhabitant.
  *
  *  REFUSES, and each one keeps the honest cast form rather than guessing: any load/store
  *  displacement at all (`off !== 0`); no variable residual; a pointee nothing may be named

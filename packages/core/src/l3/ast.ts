@@ -109,12 +109,23 @@ export type Expr =
        *  it the C backend legalizes the base through a reinterpret cast (`((u8 *)gPtr->arr)[i]`),
        *  which is the CAST form's object again and defeats the whole point of naming the member.
        *
-       *  It is EVIDENCE the backend re-checks, not an assertion it trusts: `legalizedIndexBase`
-       *  runs the same `derefStrideOk` over it that it runs over an inferred type, so a producer
-       *  that ever states a type not striding the access width gets the honest cast back rather
-       *  than a base subscripted at the wrong stride. Set only by structure/structure.ts
-       *  `pointeeElement`, from the map's own `elemSize`/`elemSigned` for the member it just
-       *  named. */
+       *  IT IS A PRODUCER INVARIANT, and the consumer's re-check is defence in depth rather than a
+       *  guard with a reachable failing input — the earlier wording ("evidence the backend
+       *  re-checks, not an assertion it trusts") overstated it, and a future producer could read
+       *  that as licence to state a type the backend will vet. The one producer,
+       *  structure/structure.ts `pointeeElement`, sets it from the same `elemSize`/`elemSigned` it
+       *  has just passed `spellsAccessType` on — and that predicate IS
+       *  `typeEquals(T.int(width*8, elemSigned), scalarTypeForAccess(width, signed))`, so
+       *  `derefStrideOk` over the stated pointer is true by construction at every width (4 by
+       *  `width === 4`, 1 and 2 by `to.signed === signed`). The obligation is on the PRODUCER:
+       *  state the type the access's own width and signedness agree with.
+       *
+       *  THE ALTERNATIVE REJECTED, recorded so the next round does not re-derive it: teach
+       *  `exprCType` the pointee layout, the way `sym.noteGlobal` types the bare-array spelling —
+       *  the printer already renders `u8 grid[6][8]` for this member from this same layout. It was
+       *  rejected because `SFn.globals` is also the ADDRESSABLE-BASE list, so typing the symbol
+       *  there admits it as a `/livebase` base (measured on the probe: 8 extra base locals). Typing
+       *  the one node costs no candidates. */
       baseElem?: IrType;
       operandOff?: number;
       baseOrdered?: true;
