@@ -73,12 +73,18 @@ export interface BitfieldDeps {
   memberQualsAllow: (f: SymbolStructField, containerConst: boolean | undefined, isStore: boolean) => boolean;
 }
 
+/** What a recognized bitfield store assigns: an inserted value, or the literal 0 the asm does not
+ *  carry (the ALL-ZERO form — see the note in `makeBitfieldSpelling`). */
+export type BitfieldAssigned = { k: 'zero' } | { k: 'value'; v: Value };
+
 export interface BitfieldSpellings {
   /** extract op → the `gSym.field` read it spells */
   spelling: Map<Op, { global: string; field: string }>;
-  /** store op → the `gSym.field = value` write it spells. `value` is `null` for the ALL-ZERO
-   *  form, where the asm carries no insert at all and the source assigned a literal 0. */
-  stores: Map<Op, { global: string; field: string; value: Value | null }>;
+  /** store op → the `gSym.field = …` write it spells. The assigned value is a DISCRIMINATED
+   *  union rather than a nullable `Value`: the ALL-ZERO form carries no insert at all (agbcc emits
+   *  only the clearing `and`), and spelling that as `null` puts a third meaning on a value this
+   *  module already reads as "no such entry" and, one screen down, as "refuse this candidate". */
+  stores: Map<Op, { global: string; field: string; value: BitfieldAssigned }>;
   /** loads whose EVERY use is a spelled extract: the fold emits no temp for these */
   absorbed: Set<Op>;
 }
@@ -104,7 +110,7 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
   // …and the WRITE side: a store the mask-and-insert idiom recognized (see the block below), with
   // the value the source assigned. THE SECOND inhabitant of "a precomputed member spelling", which
   // is what makes the shape shared rather than anticipated.
-  const bitfieldStore = new Map<Op, { global: string; field: string; value: Value | null }>();
+  const bitfieldStore = new Map<Op, { global: string; field: string; value: BitfieldAssigned }>();
   const absorbedLoads = new Set<Op>();
   if (symCtx && littleEndian && spellBitfieldMembers) {
     // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
@@ -372,26 +378,27 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
           }
           // …and the insert must be exactly that value seated at `lo`.
           // The zero form skips all of it: there is no insert to seat, and nothing the asm's
-          // (absent) `or` writes that C's truncation could disagree with. `value` stays `null`,
-          // which is what the render site reads as the literal 0.
-          let value: Value | null = null;
+          // (absent) `or` writes that C's truncation could disagree with, so it assigns `zero` —
+          // the literal the render site emits.
+          let assigned: BitfieldAssigned = { k: 'zero' };
           if (insV !== null) {
             const shifted = defs.get(insV);
-            value =
+            const inserted =
               lo === 0
                 ? insV
                 : shifted?.opcode === 'shl' && shifted.operands.length === 1 && shifted.attrs.imm === lo
                   ? shifted.operands[0]
                   : null;
             if (
-              value === null ||
+              inserted === null ||
               (lo !== 0 && (materialize.has(shifted!) || (useSitesOf.get(insV) ?? []).length !== 1))
             ) {
               continue;
             }
-            if (lo + w !== cellBits && provableBits(bits, value) > w) {
+            if (lo + w !== cellBits && provableBits(bits, inserted) > w) {
               continue; // C would truncate bits the asm's `or` writes
             }
+            assigned = { k: 'value', v: inserted };
           }
           // …and the store's WIDTH must be one the declared field can be reached by. `size` is the
           // byte span the field's bits touch (symbols.ts) — the read width the compiler uses — so
@@ -409,7 +416,7 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
                 width <= f.size,
             );
           if (fld && memberQualsAllow(fld, si.const, true)) {
-            bitfieldStore.set(op, { global: cell.name, field: fld.name, value });
+            bitfieldStore.set(op, { global: cell.name, field: fld.name, value: assigned });
           }
           break;
         }

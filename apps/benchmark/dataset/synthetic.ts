@@ -6115,7 +6115,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //    against it is not a fidelity nicety but a different program — agbcc strides the row a
   //    second time and truncates the resulting pointer to u8. That is why `SymbolStructField`
   //    gained `dims` inside this gap rather than in the symbol-map family; see below.
-  //  • `bfzero` 5 — `structure/structure.ts:2703`, the named-bitfield-store recognizer's
+  //  • `bfzero` 5 — `structure/bitfields.ts`, the named-bitfield-store recognizer's
   //    `orOp?.opcode !== 'or'`. It is looking for `or(and(load, keepMask), insert)`; agbcc compiles
   //    a ZERO insert to a bare `and` (`expmed.c:557-558`, `606-608` skip the `orr` when
   //    `all_zero`), so the guard refuses before any field lookup: **89 firings on `bfzero`, 0 on

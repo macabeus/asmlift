@@ -393,7 +393,11 @@ describe('the all-zero bitfield store', () => {
   test('a keep mask with bits OUTSIDE the cell spells the assignment of 0', () => {
     const src = runW(ZERO(KEEP_NEG16));
     expect(src).toContain('gState.low = 0;');
-    expect(src).not.toContain('&'); // the load and the mask are both gone
+    // the RULE, not a proxy: the mask constant and the cast-spelled load are both gone. `&` alone
+    // would also be absent from an empty function, and present in any `&gState` this row happens
+    // not to have.
+    expect(src).not.toContain('-16');
+    expect(src).not.toContain('(u8 *)');
   });
 
   test('REFUSES a keep mask that fits the stored cell — the raw spelling is the same object', () => {

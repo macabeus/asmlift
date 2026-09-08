@@ -3709,9 +3709,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           out.push({
             k: 'store',
             lval: { k: 'field', base: { k: 'var', name: bfs.global }, name: bfs.field, dot: true },
-            // a null insert is the ALL-ZERO form: the asm carries no value at all, because agbcc
-            // emits only the clearing `and` when the assigned value is 0 (structure/bitfields.ts).
-            value: bfs.value === null ? { k: 'const', value: 0 } : expr(bfs.value),
+            // `zero` is the ALL-ZERO form: the asm carries no value at all, because agbcc emits
+            // only the clearing `and` when the assigned value is 0 (structure/bitfields.ts).
+            value: bfs.value.k === 'zero' ? { k: 'const', value: 0 } : expr(bfs.value.v),
           });
           continue;
         }
