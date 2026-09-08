@@ -301,6 +301,10 @@ describe('the detectors themselves', () => {
     expect(JUDGEMENT_FLOOR.table('{ return gSineDegreeTable[angleMod]; }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR.cast('{ return (uintptr_t)(tgt - 1); }', '', '')).toBe(true);
     expect(JUDGEMENT_FLOOR.fnptr('{ f(); }', '  28:\tjalr\tv0', '')).toBe(true);
+    // a variable subscript ANYWHERE in the chain: the `k` here follows a `]`, not a name, which
+    // the first form of this floor could not see (synthetic:pmarrrow)
+    expect(JUDGEMENT_FLOOR['variable-index']('{ return gBlob->unk8[0][k]; }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['variable-index']('{ return gBlob->unk8[0][7]; }', '', '')).toBe(false);
     // merge-chain wants MORE THAN ONE local for the arms to decide, initialised or not
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x; if (a) x = 1; else x = 2; return x; }', '', '')).toBe(false);
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; return f(x, y); }', '', '')).toBe(false);

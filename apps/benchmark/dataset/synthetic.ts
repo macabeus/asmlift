@@ -148,14 +148,22 @@ const PACKED_MAP: SymbolMap = new Map([
 // rank back on the axis the rows are supposed to measure.
 //
 // WHAT EACH MAP BUYS, MEASURED (re-run with `symbols:` removed, `bench run`, cache off):
+// `PROBE_GRID_MAP` now carries THREE rows, and they partition the subscript split rather than
+// repeating it: `pmarr2`'s residual holds a term at the row stride and the split RECOVERS a row;
+// `pmarrrow`'s holds none and the leading subscript comes out the literal `0`; `pmarrfix`'s index
+// is constant and never reaches the split at all.
+//
 //   PROBE_BLOB_MAP  pmarr1 MATCH→5                                  — LOAD-BEARING since the
 //     indexed member spelling shipped: `gBlob->unk8[i]` is the winner, and it needs both the
 //     pointee layout and the member's stated rank (`dims: [48]` — absence means "the map could not
 //     say", which structure.ts refuses rather than reading as rank 1). Before that it was inert
 //     for asmlift and kept only for m2c, which goes MATCH → noncompile(1) without it.
-//   PROBE_GRID_MAP  pmarr2 MATCH→9 · pmarrfix MATCH→MATCH           — LOAD-BEARING on `pmarr2`
-//     (`gBlob->unk8[i][j]`, which only a stated `dims: [6, 8]` can spell) and inert on the
-//     control, whose constant index needs no member spelling at all.
+//   PROBE_GRID_MAP  pmarr2 MATCH→9 · pmarrrow MATCH→5 · pmarrfix MATCH→MATCH
+//                                                                   — LOAD-BEARING on `pmarr2`
+//     (`gBlob->unk8[i][j]`, which only a stated `dims: [6, 8]` can spell) and on `pmarrrow`
+//     (`gBlob->unk8[0][k]`, the same rank reached by ONE flat counter — map-less it is diff:5 and
+//     m2c goes MATCH → noncompile(1)), inert on the control, whose constant index needs no member
+//     spelling at all.
 //   PROBE_FLAG_MAP  bfconstn MATCH→diff:5 · bfzero 5→5              — LOAD-BEARING, on the
 //     CONTROL rather than on the gap row: without it `bfconstn` scores what `bfzero` scores and
 //     the pair stops being a pair. It cuts the OTHER way for m2c, and that is stated rather than
@@ -6073,6 +6081,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // links at minimal size. Scores are `pnpm bench run` numbers on this tree, not CLI predictions:
   //
   //   G4  gPtr->member[expr], VARIABLE index   pmarr1 5 → MATCH · pmarr2 9 → MATCH (CLOSED)
+  //                                            pmarrrow MATCH   control pmarrfix MATCH
   //   G5  a named bitfield store of ZERO       bfzero 5             control bfconstn MATCH
   //   G2  loop accumulators as per-arm copies  nestacc 58 → 40 (per-arm half closed)
   //   G3  an accumulator's cross-loop home     sinkacc 17 → 4 (CLOSED; residual is width, not home)
@@ -6396,6 +6405,39 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['global', 'pointer', 'array', 'struct'],
     toolchains: ['agbcc'],
     ctx: 'u8 pmarrfix(void);',
+    symbols: PROBE_GRID_MAP,
+  },
+  {
+    // The rank-2 member reached by ONE flat counter — the arm `pmarr1` and `pmarr2` between them
+    // do not enter. `pmarr1`'s member is rank 1, so its residual never meets the subscript split
+    // at all; `pmarr2`'s residual carries a term at the row stride, so the split RECOVERS a row.
+    // Here nothing rides the 8-byte stride and the leading subscript comes out the literal `0`
+    // (`subscriptsFromExtents`, `needRecovered = false`) — the one behaviour where the member path
+    // and the global path deliberately differ, and until this row it was pinned only by a unit
+    // assertion. A global with no term to recover already spells the same address flat and refuses
+    // the split; a MEMBER of a rank its project's header declares has no flat form to fall back
+    // to, so `->unk8[0][k]` is spelled or the honest cast form stands.
+    //
+    // The differ is what makes it a referee: the two spellings are NOT one object. `->unk8[0][k]`
+    // materialises the member's base (`add r1, r1, #0x8` · `add r1, r1, r0` · `ldrb r0, [r1]`)
+    // where the cast form `*((u8 *)gBlob + 8 + k)` folds the constant into the load's displacement
+    // (`add r0, r0, r1` · `ldrb r0, [r0, #0x8]`). Ablate the `needRecovered = false` and the row
+    // takes the cast form and scores diff:5 — measured, by making the member path refuse exactly
+    // as the global path does and re-running.
+    //
+    // Its real-tier inhabitant is `kleod:CheckWorldCompletion:agbcc`, whose reference spells a
+    // nested `gUnk_03004670->unk8[var_r0][var_r2]` that agbcc collapsed into one flat counter
+    // before the add. `k` there runs 0..47 through a declared row of 8, which is out of bounds and
+    // byte-identical — the same object, as this row's own MATCH shows, and the only spelling that
+    // type-checks against the project's `u8 unk8[6][8]`.
+    sym: 'pmarrrow',
+    src:
+      'struct Blob2 { u8 unk0; u8 unk1; u8 unk2; u8 unk3; u8 unk4; u8 unk5; u8 unk6; u8 unk7; u8 unk8[6][8]; s32 unk38; };\n' +
+      'extern struct Blob2 *gBlob;\n' +
+      'u8 pmarrrow(s32 k){ return gBlob->unk8[0][k]; }',
+    features: ['global', 'pointer', 'array', 'struct', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'u8 pmarrrow(s32 k);',
     symbols: PROBE_GRID_MAP,
   },
   {
