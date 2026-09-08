@@ -690,6 +690,74 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     }
   });
 
+  test('a member `dims` DECLARES the rank — `u8 x[6][8]`, not the flat `u8 x[48]`', () => {
+    // `length` is the PRODUCT of the extents, so it cannot say how many subscripts reach an
+    // element. The declaration side has to spell the rank the map states, or an access spelled
+    // `->grid[i][j]` names something the very declaration beside it does not have.
+    const withDims = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 48,
+        layout: [{ name: 'grid', offset: 0, size: 48, elemSize: 1, elemSigned: false, length: 48, dims: [6, 8] }],
+      },
+    };
+    expect(declOf(withDims)).toContain('struct Save { u8 grid[6][8]; };');
+
+    // …and an ABSENT `dims` keeps the flat member, which is what every map written before the
+    // provider read a member's rank says. No corpus row moves on this commit.
+    const flat = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 48,
+        layout: [{ name: 'grid', offset: 0, size: 48, elemSize: 1, elemSigned: false, length: 48 }],
+      },
+    };
+    expect(declOf(flat)).toContain('struct Save { u8 grid[48]; };');
+  });
+
+  test('an UNSPELLABLE or CONTRADICTORY member rank falls back — never a guessed extent', () => {
+    // `dims: [2, null]` states a rank whose inner extent no declaration can spell; the flat member
+    // is the honest fallback, exactly as `SymbolInfo.dims`' null answer is for a global.
+    const ragged = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 48,
+        layout: [{ name: 'grid', offset: 0, size: 48, elemSize: 1, elemSigned: false, length: 48, dims: [null, null] }],
+      },
+    };
+    expect(declOf(ragged)).toContain('struct Save { u8 grid[48]; };');
+
+    // A rank whose product contradicts `length` is three facts that cannot all be trusted, so the
+    // whole layout declines the way any other malformed member does — `void *`, not a guess.
+    const contradictory = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 48,
+        layout: [{ name: 'grid', offset: 0, size: 48, elemSize: 1, elemSigned: false, length: 48, dims: [6, 9] }],
+      },
+    };
+    expect(declOf(contradictory)).toBe('extern void *gPtr;\n');
+    // …and a rank on a member that is not an array at all is malformed for the same reason.
+    const notAnArray = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 4,
+        layout: [{ name: 'n', offset: 0, size: 4, signed: true, dims: [2, 2] }],
+      },
+    };
+    expect(declOf(notAnArray)).toBe('extern void *gPtr;\n');
+  });
+
   test('a VOLATILE member is never named — the cast form it replaces carries no qualifier', () => {
     // `gPtr->vreg` is a volatile access; `((u8 *)gPtr)[78]` is a plain one. Same address, DIFFERENT
     // instruction sequence, so the member is not nameable and the arithmetic spelling stands.

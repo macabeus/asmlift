@@ -80,10 +80,18 @@ export function cType(t: IrType): string {
 
 /** Declare a name of a given type, C declarator rules: an array puts its length AFTER the name
  *  (`u8 _pad[4]`), a pointer binds its `*` to the declarator (`void *p`), everything else is
- *  the prefix `cType name`. */
+ *  the prefix `cType name`. A NESTED array spells every extent after the name in declaration
+ *  order (`u8 unk8[6][8]`) — one declarator, not an element type that is itself an array, which
+ *  C has no syntax for and `cType` marks ill-formed as a prefix. */
 function cDeclare(t: IrType, name: string): string {
   if (t.kind === 'array') {
-    return `${cType(t.elem)} ${name}[${t.count}]`;
+    const extents: number[] = [];
+    let e: IrType = t;
+    while (e.kind === 'array') {
+      extents.push(e.count);
+      e = e.elem;
+    }
+    return `${cType(e)} ${name}${extents.map((n) => `[${n}]`).join('')}`;
   }
   if (t.kind === 'ptr') {
     return `${cType(t.to)} *${name}`;
