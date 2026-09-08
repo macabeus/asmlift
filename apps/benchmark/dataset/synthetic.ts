@@ -299,6 +299,99 @@ const PROBE_SPAN_MAP: SymbolMap = new Map([
   ],
 ]);
 
+// ═══ Maps for the SECOND CountCollectedGems attribution round (attr2/ladder) ════════════════
+// The real function reads its flags through a POINTER global into a byte array (`gP->f[k]`) and
+// writes a callback slot in a second struct (`gQ.cur`), and the three rows below keep that
+// spelling rather than the flat `extern u8 gGrid[5][7]` the earlier attribution rows use. That is
+// not decoration: MEASURED map-less, `nestacc1` does not score at all — it declines with
+// `cannot structure 'nestacc1': do-while condition or a post-loop value reads a pre-update loop
+// variable`, because the loop bound's type then comes out of struct SYNTHESIS instead of the map,
+// and `ladder4`'s twin scored 27 map-less against 0 map-ful for the same reason (a synthesized
+// `struct Off0 { u8 _pad0[4]; s32 m4; }` for `gQ` plus a hoisted `p0 = (u8 *)&gC` base local).
+// Both are pre-existing links that belong to struct synthesis, not to this family, so the map is
+// what keeps these rows measuring the LADDER and the LOOP.
+const PROBE_SLOT_MAP: SymbolMap = new Map([
+  [
+    0x03001000,
+    [
+      {
+        name: 'gP',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'pointer' as const,
+        pointee: {
+          structName: 'Slots',
+          size: 64,
+          layout: [{ name: 'f', offset: 0, size: 64, elemSize: 1, elemSigned: false, length: 64, dims: [64] }],
+        },
+      },
+    ],
+  ],
+  [0x08001000, [{ name: 'fnA', kind: 'code' as const, declared: true }]],
+  [0x08001100, [{ name: 'fnB', kind: 'code' as const, declared: true }]],
+  [
+    0x03001040,
+    [
+      {
+        name: 'gQ',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'struct' as const,
+        structName: 'Q',
+        size: 8,
+        layout: [
+          { name: 'prev', offset: 0, size: 4, pointer: true },
+          { name: 'cur', offset: 4, size: 4, pointer: true },
+        ],
+      },
+    ],
+  ],
+]);
+
+// The SAME two globals plus the per-arm counter `ladder5`/`ladder4` write and `ladidx2` does not.
+// A row's map states what its own header declares, so the pair that has no `gC` does not carry it.
+const PROBE_SLOTC_MAP: SymbolMap = new Map([
+  ...PROBE_SLOT_MAP,
+  [
+    0x03001050,
+    [
+      {
+        name: 'gC',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'struct' as const,
+        structName: 'C',
+        size: 2,
+        layout: [
+          { name: 'a', offset: 0, size: 1, signed: false },
+          { name: 'b', offset: 1, size: 1, signed: false },
+        ],
+      },
+    ],
+  ],
+]);
+
+// The nest pair's global: the same pointer-to-struct shape at the RANK the two loops index it by
+// (`gP->f[i][j]`), which is what `dims: [8, 8]` states and `length: 64` alone cannot.
+const PROBE_NEST_MAP: SymbolMap = new Map([
+  [
+    0x03001000,
+    [
+      {
+        name: 'gP',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'pointer' as const,
+        pointee: {
+          structName: 'Grid',
+          size: 64,
+          layout: [{ name: 'f', offset: 0, size: 64, elemSize: 1, elemSigned: false, length: 64, dims: [8, 8] }],
+        },
+      },
+    ],
+  ],
+]);
+
 export const SYNTHETIC: SynthSpec[] = [
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
@@ -6787,6 +6880,268 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void joinsame(void);',
     proto: { joinsame: { returnsVoid: true } },
+  },
+
+  // ── THE ELSE-LADDER ARM CLIFF, and the nested-loop accumulator copy (attr2/CountCollectedGems) ─
+  // The SECOND attribution round on `kleod:CountCollectedGems:agbcc`. The first one (#156)
+  // partitioned that row's 290 into seven gaps by a byte-exact ablation, all seven shipped
+  // (#163-#170), every row they owned closed — `pmarr1`, `pmarr2`, `bfzero`, `armcb`, `swladder`
+  // all MATCH above — and the real row went 290 -> 171 rather than to 0. These six rows are what
+  // the 171 turned out to be, re-decomposed from the differ's own rows and verified against agbcc
+  // instead of inferred: an ELSE-LADDER that recovers flat up to four arms and duplicates the
+  // fifth (68 of the 171), and a LOOP-CARRIED ACCUMULATOR that asmlift copies in and out of a
+  // local the target never spills (28 of the 171). The remaining 75 get no row here, and why is
+  // at the end.
+  //
+  // WHY THE CORPUS COULD NOT SEE EITHER, MEASURED RATHER THAN ASSUMED. The dataset already has
+  // five else-if ladders and every one of them MATCHes on agbcc today: `calad` (3 arms, each
+  // guarded by a conjunction, arms that CALL), `armcb` (4 arms, bodies byte-identical), `armcb2`
+  // (1 arm), `swladder` and `swmixed` (2 arms, no conjunction), `joinsense`/`joinsame` (joined,
+  // not chained). A capability whose every inhabitant is green cannot be regressed OR advanced by
+  // a row — the measure of coverage is whether a ROW MOVES when the capability moves, and none of
+  // those can. The corpus's one open accumulator row, `nestacc` (34), is not a substitute either:
+  // it carries three accumulators AND an if/else ladder inside the inner loop, so its 34 is a sum
+  // over at least two classes. `sinkacc` (4) has no nest at all.
+  //
+  // THE CLIFF. `ladder4` and `ladder5` differ by ONE LINE — a sixth `else if` arm — and the fan
+  // is the same size on both sides of it:
+  //
+  //   ladder4   93 candidate(s) scored, 0 dropped, 0 withheld   best unsigned/reread-globals/unmerge: 0 (match)
+  //   ladder5   93 candidate(s) scored, 0 dropped, 0 withheld   best unsigned/reread-globals/unmerge: 41
+  //
+  // so this is SELECTION AND COMPOSITION INSIDE A FIXED FAN, not a fan that shrank and not a
+  // missing axis — the distinction the round exists to make, and the reason the row is worth
+  // committing rather than a lever worth guessing. What the winner actually emits at five arms
+  // (`--score-against` the row's own cached target): arms 1-3 stay flat, arm 4's conjunction
+  // splits into a nested `if`, and ARM 5'S WHOLE BODY IS DUPLICATED INTO BOTH NEGATIVE BRANCHES
+  // of that split. The real function's ladder has exactly five arms and fails exactly there.
+  // A second consequence rides along and is NOT the class: past the split the member spelling
+  // degrades from `((u8 *)gP)[32]` to `*((u8 *)gP + 32)`.
+  //
+  // `ladidx1`/`ladidx2` are the same cliff at ONE TENTH the size, and they move it from arm 5 to
+  // arm 2 by deleting the per-arm counter store: with the arms then identical UP TO THE MEMBER
+  // INDEX, the second arm is already duplicated. Fan 38 on both, 0 dropped, 0 withheld.
+  // `ladidx2` is five lines of C and is the row a lever should be developed against; `ladder5` is
+  // the row that proves the real function needs it. `armcb` is the neighbouring control that keeps
+  // the two apart: its four arms are byte-IDENTICAL, agbcc cross-jumps them into one store, and
+  // `l3/unmerge.ts` MATCHes it. One index of difference per arm is what defeats that.
+  //
+  // `flatacc`/`nestacc1` isolate the accumulator copies from everything `nestacc` bundles with
+  // them. `flatacc` is ONE loop with THREE accumulators and MATCHes; `nestacc1` is a two-deep nest
+  // with ONE accumulator and scores 15. So the aggravating factor is the OUTER LOOP, not the
+  // number of accumulators — which is the opposite of what a reader of `nestacc` would guess.
+  // The emitted C introduces a copy pair the target does not contain:
+  // `v3 = v1; do { ... } while (v2 <= 6); v1 = v3;` around the outer loop, with the inner loop
+  // accumulating into `v3`. Its fan is FOUR candidates against `flatacc`'s sixteen, all four
+  // carrying the copies.
+  //
+  // ATTRIBUTION — the first blocker for each row, and none of them is a decline. All six lift,
+  // structure and rank; there is no gap marker on any of them:
+  //   • `ladder5` (41) and `ladidx2` (36) — no candidate in the fan spells the flat ladder past
+  //     the duplicating arm. The 93/38 candidates differ by rank AXES (`/unmerge`,
+  //     `/reread-globals`, `/offmember`, `/raw-globals`), which vary the SPELLING of a fixed
+  //     structure; the structure itself comes from one structuring decision upstream of the fan.
+  //     Naming the site that makes it is the LEVER THIS ROW GATES and is deliberately NOT claimed
+  //     here — #156's own G3 attribution named a file two levels up from the real one, and the
+  //     rule this project keeps is to instrument or ablate, never to read and infer.
+  //   • `nestacc1` (15) — same shape of answer with a much smaller fan: 4 candidates, every one
+  //     carrying the copy pair, best `unsigned/uns-cmp`.
+  //   • `ladder4`, `ladidx1`, `flatacc` — controls, MATCH, nothing to attribute.
+  //
+  // WHAT `/unmerge` DOES HERE, because the round was sent to test it. On the REAL row, adding
+  // `/unmerge` to the winning label COSTS +24 (#169). On these rows it is in the winning label and
+  // PAYS: `ladder5` is 41 with it and 76 without, `ladder4` 0 with it and 25 without. On
+  // `ladidx2` it is exactly INERT — 36 both ways. So `/unmerge` is neither missing nor
+  // mis-ranked; where the ladder duplicates an arm, the duplicated copies must re-materialise
+  // their own pool operands and the merged spelling wins on price. It is downstream of the ladder
+  // and cannot be attributed on its own, which is why no row here carries it as its subject.
+  //
+  // WHAT EACH MAP BUYS, MEASURED (`symbols:` deleted, re-run, cache off):
+  //   PROBE_SLOTC_MAP  ladder4 MATCH->27 · ladder5 41->77   — LOAD-BEARING, and on the CONTROL
+  //     first: map-less `ladder4` scores 27 and a control that scores 27 pins nothing. The 27 is
+  //     struct SYNTHESIS, not this family — a `struct Off0 { u8 _pad0[4]; s32 m4; }` for `gQ` plus
+  //     a hoisted `p0 = (u8 *)&gC` base local.
+  //   PROBE_SLOT_MAP   ladidx1 MATCH->MATCH · ladidx2 36->36 — INERT for asmlift, LOAD-BEARING
+  //     for m2c: map-less it emits `extern ? gQ;` and the row publishes a DECLINE.
+  //   PROBE_NEST_MAP   flatacc MATCH->MATCH · nestacc1 15->15 — INERT for asmlift, LOAD-BEARING
+  //     for m2c, which goes noncompile -> MATCH and 18 on the pair.
+  //   `fnA`/`fnB` are in PROBE_SLOT_MAP as `kind: 'code'` for a reason worth stating, since it is
+  //     a trap for the next author: the m2c candidate is compiled against the declarations
+  //     rendered from `symbols` ALONE (`m2cDeclarationsFor`, src/eval/evaluate.ts) — `ctx` does
+  //     not reach that compile. With the two names only in `ctx`, all four ladder rows published
+  //     `m2c=noncompile(1)` reading ``fnA' undeclared`, which is a harness artifact wearing the
+  //     costume of a decompiler failure. In the map they render as `void fnA(void);` and m2c
+  //     scores. They are inert for asmlift (MATCH/41/MATCH/36 either way).
+  //
+  // M2C, and the deficit stated rather than avoided: `ladder5` is m2c 38 against asmlift 41 and
+  // `ladidx2` is m2c 19 against asmlift 36 — m2c is AHEAD on both gap rows, and its `ladder5`
+  // output is the flat five-arm ladder this family says asmlift cannot select, sunk into one
+  // merged tail through a `void (*var_r0)()` local. asmlift is ahead on the three controls
+  // (MATCH against 25, 12, and a `flatacc` tie) and on `nestacc1` (15 against 18). These are the
+  // first rows in this dataset where m2c wins on the class being attributed, and that is the
+  // measurement, not a framing.
+  //
+  // WHAT GOT NO ROW, and why — from Phase 2's partition of the 171 (68 + 33 + 28 + 15 + 11 + 16):
+  //   • the 33-row register-pressure class is FALLOUT of the ladder duplication (the frame slot,
+  //     the `sl` global base, pool remat), so it has no independent lever and a row would
+  //     double-count the 68.
+  //   • the 15-row connective-polarity class is CONFOUNDED: its loop-free control MATCHes, and
+  //     its in-loop residual is emitted WITH the accumulator copies above. Re-measure it after
+  //     `nestacc1` moves; opening a row now would credit one class with the other's cause.
+  //   • the 11-row `u8`-locals/`for`-form class was REFUTED at byte identity (both spellings
+  //     compile to the same 0x58 bytes), so there is nothing to gate.
+  //   • the 16-row per-arm-store class is G6's and `armcb`/`armcb2` already own it.
+  //
+  // ALL SIX ARE agbcc-ONLY, on the same terms as the family above: each was smoked alone
+  // (`ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc
+  // --serial`), a candidate compile has no timeout, and no row gets a toolchain nobody
+  // individually smoked. `--only lad` takes all four ladder rows AND `swladder` (the filter is a
+  // substring match); `--only nestacc` takes `nestacc1` with `nestacc`.
+  {
+    sym: 'ladder4',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'struct Q { void (*prev)(void); void (*cur)(void); };\n' +
+      'extern struct Q gQ;\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'struct C { u8 a; u8 b; };\n' +
+      'extern struct C gC;\n' +
+      'void ladder4(void){\n' +
+      '  if ((gP->f[7] & 0x80) != 0 && (gP->f[8] & 0x7F) == 0x7F) { gC.a = 0; gC.b = 0; gP->f[8] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  else if ((gP->f[15] & 0x80) != 0 && (gP->f[16] & 0x7F) == 0x7F) { gC.a = 1; gC.b = 0; gP->f[16] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  else if ((gP->f[23] & 0x80) != 0 && (gP->f[24] & 0x7F) == 0x7F) { gC.a = 2; gC.b = 0; gP->f[24] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  else if ((gP->f[31] & 0x80) != 0 && (gP->f[32] & 0x7F) == 0x7F) { gC.a = 3; gC.b = 0; gP->f[32] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  gQ.cur = fnB;\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'mask', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void ladder4(void);',
+    proto: {
+      ladder4: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_SLOTC_MAP,
+  },
+  {
+    sym: 'ladder5',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'struct Q { void (*prev)(void); void (*cur)(void); };\n' +
+      'extern struct Q gQ;\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'struct C { u8 a; u8 b; };\n' +
+      'extern struct C gC;\n' +
+      'void ladder5(void){\n' +
+      '  if ((gP->f[7] & 0x80) != 0 && (gP->f[8] & 0x7F) == 0x7F) { gC.a = 0; gC.b = 0; gP->f[8] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  else if ((gP->f[15] & 0x80) != 0 && (gP->f[16] & 0x7F) == 0x7F) { gC.a = 1; gC.b = 0; gP->f[16] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  else if ((gP->f[23] & 0x80) != 0 && (gP->f[24] & 0x7F) == 0x7F) { gC.a = 2; gC.b = 0; gP->f[24] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  else if ((gP->f[31] & 0x80) != 0 && (gP->f[32] & 0x7F) == 0x7F) { gC.a = 3; gC.b = 0; gP->f[32] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  else if ((gP->f[39] & 0x80) != 0 && (gP->f[40] & 0x7F) == 0x7F) { gC.a = 4; gC.b = 0; gP->f[40] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  gQ.cur = fnB;\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'mask', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void ladder5(void);',
+    proto: {
+      ladder5: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_SLOTC_MAP,
+  },
+  {
+    sym: 'ladidx1',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'struct Q { void (*prev)(void); void (*cur)(void); };\n' +
+      'extern struct Q gQ;\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'void ladidx1(void){\n' +
+      '  if ((gP->f[7] & 0x80) != 0 && (gP->f[8] & 0x7F) == 0x7F) { gP->f[8] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  gQ.cur = fnB;\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'mask', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void ladidx1(void);',
+    proto: {
+      ladidx1: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_SLOT_MAP,
+  },
+  {
+    sym: 'ladidx2',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'struct Q { void (*prev)(void); void (*cur)(void); };\n' +
+      'extern struct Q gQ;\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'void ladidx2(void){\n' +
+      '  if ((gP->f[7] & 0x80) != 0 && (gP->f[8] & 0x7F) == 0x7F) { gP->f[8] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  else if ((gP->f[15] & 0x80) != 0 && (gP->f[16] & 0x7F) == 0x7F) { gP->f[16] &= 0x80; gQ.cur = fnA; return; }\n' +
+      '  gQ.cur = fnB;\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'mask', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void ladidx2(void);',
+    proto: {
+      ladidx2: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_SLOT_MAP,
+  },
+  {
+    sym: 'flatacc',
+    src:
+      'struct Grid { u8 f[8][8]; };\n' +
+      'extern struct Grid *gP;\n' +
+      'extern void sink(int, int, int);\n' +
+      'void flatacc(void){\n' +
+      '  u8 a = 0, b = 0, c = 0, j;\n' +
+      '  for (j = 0; j < 7; j++) {\n' +
+      '    if ((gP->f[0][j] & 0x7F) == 0x64) a += 1;\n' +
+      '    else if ((gP->f[0][j] & 0x7F) == 0x1E) b += 1;\n' +
+      '    if (gP->f[0][j] & 0x80) c += 1;\n' +
+      '  }\n' +
+      '  sink(a, b, c);\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'mask', 'value-home'],
+    toolchains: ['agbcc'],
+    ctx: 'void sink(int a, int b, int c); void flatacc(void);',
+    proto: { flatacc: { returnsVoid: true }, sink: { params: 3, returnsVoid: true } },
+    symbols: PROBE_NEST_MAP,
+  },
+  {
+    sym: 'nestacc1',
+    src:
+      'struct Grid { u8 f[8][8]; };\n' +
+      'extern struct Grid *gP;\n' +
+      'extern void sink(int, int, int);\n' +
+      'void nestacc1(void){\n' +
+      '  u8 a = 0, i, j;\n' +
+      '  for (i = 0; i < 5; i++) {\n' +
+      '    for (j = 0; j < 7; j++) {\n' +
+      '      if ((gP->f[i][j] & 0x7F) == 0x64) a += 1;\n' +
+      '    }\n' +
+      '  }\n' +
+      '  sink(a, 0, 0);\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'mask', 'value-home'],
+    toolchains: ['agbcc'],
+    ctx: 'void sink(int a, int b, int c); void nestacc1(void);',
+    proto: { nestacc1: { returnsVoid: true }, sink: { params: 3, returnsVoid: true } },
+    symbols: PROBE_NEST_MAP,
   },
 ];
 
