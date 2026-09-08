@@ -6589,13 +6589,15 @@ export const SYNTHETIC: SynthSpec[] = [
     // is that difference alone: agbcc lays the ladder's test and body out interleaved
     // (`cmp #0x64; bne .L3` … body … `.L3: cmp #0x1e; bne .L4`) while the same source spelled as a
     // real `switch` front-loads both tests and sorts them ascending — so the target's own
-    // assembly records which one was written, and asmlift recovers a `switch` regardless. NO
-    // alternative spelling is enumerated: the fan is 2, and `/connective` (rank.ts) is explicitly
-    // "NOT for the shared-arm spelling", so nothing in the ranked world can referee it. The class
-    // is `structure/switch-recover.ts`; the shipped model to copy is
-    // `StructureOptions.switchArmsFollowLayout`, which already reads exactly this evidence one
-    // question later (which ORDER the arms go in) for compilers that neither reorder blocks nor
-    // schedule across them.
+    // assembly records which one was written.
+    //
+    // CLOSED, and not by a ranked candidate: no alternative spelling was ever enumerated here (the
+    // fan was 2, both the `switch`, and `/connective` in rank.ts is explicitly "NOT for the
+    // shared-arm spelling"), so there was nothing for the differ to referee. What closed it is
+    // `switch-recover.ts`'s PRE5 / `TargetDescription.switchRequiresFrontLoadedTests`, reading the
+    // layout back per SITE — the model this comment already named, `switchArmsFollowLayout`, one
+    // question earlier. `swmixed` below is the per-site guard, and `nestacc` above collects the 6
+    // of its own that this row isolates.
     sym: 'swladder',
     src:
       's32 swladder(s32 x){\n' +
@@ -6608,6 +6610,33 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['branch'],
     toolchains: ['agbcc'],
     ctx: 's32 swladder(s32 x);',
+  },
+  {
+    // ONE FUNCTION, BOTH SPELLINGS — the row that pins the reading as PER SITE. PR #120 paid for
+    // the general form of this: a per-FUNCTION predicate cannot decide a per-SITE question, and a
+    // function-wide OR would spell both dispatches the same way and be wrong on one of them by
+    // construction. Here the `switch` on `y` is front-loaded and the ladder on `x` is interleaved,
+    // so the two sites must come back differently spelled from one lift.
+    //
+    // IT IS ALSO THE OVER-FIRING CONTROL. A gate that declined every comparison tree would
+    // close `swladder` and take this row's `switch (y)` with it, so the row stops matching the
+    // moment the reading widens past the sites whose layout earns it. (A row whose whole body
+    // is one front-loaded `switch` cannot serve: with two or three arms this small agbcc folds
+    // `case k: a = 1` into `a = x == k` and Regime A never runs — both spellings then score 8,
+    // measured, and the row would be a control over nothing.)
+    sym: 'swmixed',
+    src:
+      's32 swmixed(s32 x, s32 y){\n' +
+      '  s32 a;\n' +
+      '  a = 0;\n' +
+      '  switch (y) { case 1: a = 10; break; case 2: a = 20; break; case 3: a = 30; break; }\n' +
+      '  if (x == 100) { a = 1; }\n' +
+      '  else if (x == 30) { a = 2; }\n' +
+      '  return a;\n' +
+      '}',
+    features: ['branch'],
+    toolchains: ['agbcc'],
+    ctx: 's32 swmixed(s32 x, s32 y);',
   },
   {
     sym: 'armcb',

@@ -3,6 +3,7 @@
 // dispatch with `balance_case_nodes`/`emit_case_nodes` (a comparison TREE, not a jump table, for
 // a dense 0..3 switch) and gives every subtree that runs out of case values its OWN jump to the
 // default — so a four-case tree reaches the default through two `b .Ldefault` blocks.
+import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -1167,6 +1168,7 @@ test('every withholding on the `default:` position, one call each', () => {
     switchAllowsNeqCase: false,
     switchAllowsBoundCase: false,
     switchArmsFollowLayout: true,
+    switchRequiresFrontLoadedTests: false,
     spellSwitchFallthrough: true,
     emitsOwnStatement: () => false,
     blockOf: () => undefined,
@@ -1191,4 +1193,284 @@ test('every withholding on the `default:` position, one call each', () => {
   expect(rec.defaultLayoutPos(dflt, [...arms(-1), { entry: dflt, fallsThrough: false }], intact)).toBeUndefined(); // W3
   expect(rec.defaultLayoutPos(dflt, arms(-1), { ...intact, orderIntact: false })).toBeUndefined(); // W5
   expect(rec.defaultLayoutPos(dflt, arms(1), intact)).toBeUndefined(); // W7, the label would land after a1
+});
+
+// ── WHICH SPELLING THE SOURCE WROTE (switch-recover.ts PRE5) ─────────────────────────────────────
+// Regime A recovers a `switch` from any comparison tree it can, so an if/else-if LADDER and a
+// `switch` over the same values collapse to ONE candidate and the differ never sees the ladder.
+// They are not one object: compiled at TOOLCHAIN.agbccFlags the two spellings of the body below
+// are 20 bytes each (0x14, ten Thumb instructions) and disagree instruction for instruction — the
+// `switch` front-loads both tests and sorts them ascending (0x1e before 0x64, the reverse of source
+// order), the ladder emits each test directly above its own body. `switchRequiresFrontLoadedTests`
+// reads that back off the layout, PER SITE. The pair is committed as
+// `corpus/agbcc-sw{frontload,ladder}.s` and asserted against below, so the hand-written `ladderFn`
+// here is a convenience for the recovery tests and never the evidence.
+
+/** the agbcc LADDER spelling of `if (x == 100) r = 1; else if (x == 30) r = 2;` — each test
+ *  directly above the body it guards, in source order. Blocks: 0 test, 1 body, 2 test, 3 body. */
+const ladder = (x: string, out: string) =>
+  `\tcmp\t${x}, #0x64\n\tbne\t.Lt2\t@cond_branch\n` +
+  `\tmov\tr2, #0x1\n\tb\t${out}\n` +
+  `.Lt2:\n\tcmp\t${x}, #0x1e\n\tbne\t${out}\t@cond_branch\n` +
+  '\tmov\tr2, #0x2\n';
+const epilogue = '\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+const ladderFn = 'f:\n\tmov\tr2, #0x0\n' + ladder('r0', '.Lend') + '.Lend:\n' + epilogue;
+/** ONE function holding both spellings: a front-loaded 2-case `switch` on a1 (tests in blocks
+ *  0 and 1, bodies in 2 and 3) followed by the ladder on a0 (tests 4 and 6, bodies 5 and 7). */
+const mixedFn =
+  'f:\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr1, #0x1\n\tbeq\t.Ls1\t@cond_branch\n' +
+  '\tcmp\tr1, #0x2\n\tbne\t.Lsend\t@cond_branch\n' +
+  '\tmov\tr2, #0x14\n\tb\t.Lsend\n' +
+  '.Ls1:\n\tmov\tr2, #0xa\n' +
+  '.Lsend:\n' +
+  ladder('r0', '.Lend') +
+  '.Lend:\n' +
+  epilogue;
+/** agbcc with the reading declared, which is how it ships; the control is agbcc WITHOUT it. */
+const notDeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+delete notDeclared.compilerBehaviors.switchRequiresFrontLoadedTests;
+const src = (asm: string, t = ARMV4T_AGBCC) =>
+  decompile('f', asm, t, { prototypes: { f: { returnsVoid: true } } }).source;
+
+test('a tree whose tests INTERLEAVE with its bodies is spelled as the ladder the source wrote', () => {
+  // The whole gap: without the reading this is a `switch`, and no ladder exists anywhere in the
+  // fan for a differ to prefer. `synthetic:swladder` is this shape and m2c matches it.
+  expect(src(ladderFn, notDeclared)).toContain('switch (a0)');
+  const out = src(ladderFn);
+  expect(out).not.toContain('switch');
+  expect(out).toContain('a0 == 100');
+  expect(out).toContain('a0 == 30');
+});
+
+test('…while a FRONT-LOADED dispatch is still a switch — the gate reads layout, not case count', () => {
+  // The control the decline owes: a gate that declined every tree would close the row above and
+  // silently take the whole `sw_*` family with it.
+  expect(src(dispatch([0, 1, 2, 3]))).toContain('switch (a0)');
+  expect(armOrder(src(dispatch([2, 0, 3, 1])))).toEqual([2, 0, 3, 1]);
+});
+
+test('the reading is PER SITE: one function keeps its ladder AND its switch', () => {
+  // A per-FUNCTION predicate cannot decide a per-SITE question (PR #120 paid that price): a
+  // function-wide OR would spell both sites the same way and be wrong on one by construction.
+  const out = src(mixedFn);
+  expect(count(out, 'switch (a1)')).toBe(1);
+  expect(out).not.toContain('switch (a0)');
+  expect(out).toContain('a0 == 100');
+  // and with the reading withdrawn, BOTH sites are switches — so the test above is the gate firing
+  expect(count(src(mixedFn, notDeclared), 'switch (')).toBe(2);
+});
+
+test('a compiler that has not declared the front-loading keeps recovering the switch', () => {
+  // Two descriptions declare this, on three committed pairs — agbcc's, and one from each toolchain
+  // `MIPS_GCC` serves — all asserted below. IDO has never been put through one, and CodeWarrior fails the
+  // premise's frontend half outright — ppc.ts appends synthetic return blocks out of stream order,
+  // so `fn.blocks` there is not the assembly's layout and the reading has nothing to read.
+  for (const t of [MIPS_IDO, PPC_MWCC]) {
+    expect(t.compilerBehaviors.switchRequiresFrontLoadedTests).toBeUndefined();
+  }
+  expect(src(ladderFn, notDeclared)).toContain('switch (a0)');
+});
+
+// ── THE COMPILE-BOTH GATE, AS A TEST (docs/level-tower.md) ───────────────────────────────────────
+// An underdetermination claim about two SOURCE spellings is a COMPILER claim, so the two objects
+// are committed rather than described. `corpus/gcc272kmc-sw{frontload,ladder}.asm` are GCC_KMC's
+// own output at its shipped flags for one two-case body written each way — the pair MIPS_GCC's
+// `switchRequiresFrontLoadedTests` is declared on. Read here off the disassembly itself, so the
+// claim survives a change to how asmlift lifts either one.
+//
+// RE-READABLE IS NOT RE-MEASURABLE, and every fixture below is both. The C bodies are committed
+// beside them (`corpus/probe-{,agbcc-}sw*.c`) and `scripts/regen-switch-spelling-probes.ts`
+// rebuilds all seven from those bodies, each with a provenance header naming the compiler as an
+// `ASMLIFT_*` env var, its flags and the objdump command — the standard
+// `scripts/regen-declrank-probes.ts` already sets. Without a regen path nothing committed could
+// tell "compiled by this toolchain and it agreed" from "copied from the sibling", which matters
+// here because the two MIPS fixtures ARE byte-identical files.
+const dumpOf = (f: string) =>
+  readFileSync(new URL(`corpus/${f}.asm`, import.meta.url), 'utf8')
+    .split('\n')
+    .map((l) => /^\s+[0-9a-f]+:\t(.*)$/.exec(l)?.[1]?.trim())
+    .filter((l): l is string => !!l);
+
+test('the two kmc spellings of ONE body are different objects, and the layouts say which is which', () => {
+  const at = (ls: string[], re: RegExp) => ls.flatMap((l, i) => (re.test(l) ? [i] : []));
+  const tests = (ls: string[]) => at(ls, /^(beq|bne)\b/);
+  const bodies = (ls: string[]) => at(ls, /^sw\b/); // the arm bodies: the stores through the pointer
+  const sw = dumpOf('gcc272kmc-swfrontload');
+  const lad = dumpOf('gcc272kmc-swladder');
+  expect(sw.join('\n')).not.toEqual(lad.join('\n')); // different objects, not one object two ways
+  // the `switch`: EVERY test ahead of EVERY body. That is the whole premise the gate reads back.
+  expect(Math.max(...tests(sw))).toBeLessThan(Math.min(...bodies(sw)));
+  // the ladder: a test sits AFTER a body — the first arm's `sw` is above the second `bne`.
+  expect(Math.max(...tests(lad))).toBeGreaterThan(Math.min(...bodies(lad)));
+});
+
+test('a front-loaded kmc dispatch keeps its switch once MIPS_GCC declares the reading', () => {
+  // The direction a wrong declaration would cost rows in, on this compiler's own output.
+  //
+  // ONLY THIS HALF OF THE PAIR IS LIFTED, and saying so is the point: the ladder fixture never
+  // reaches Regime A on this compiler at all (its `bne` carries the next test's `li` in the delay
+  // slot, and the recovery declines before PRE5 ever runs), so it is the COMPILED EVIDENCE and not
+  // a demonstration of the decline. What referees the decline on KMC GCC is the real row
+  // `snowboardkids2:func_80038000_38C00`, whose two-case tree does reach it — diff:9 to MATCH.
+  const out = decompile(
+    'swpick',
+    readFileSync(new URL('corpus/gcc272kmc-swfrontload.asm', import.meta.url), 'utf8'),
+    MIPS_GCC,
+    {
+      prototypes: { swpick: { returnsVoid: true } },
+    },
+  ).source;
+  expect(out).toContain('switch (a0)');
+  expect(MIPS_GCC.compilerBehaviors.switchRequiresFrontLoadedTests).toBe(true);
+});
+
+// ONE DESCRIPTION, TWO TOOLCHAINS, TWO PAIRS. `MIPS_GCC` serves `gcc2.7.2kmc` (Snowboard Kids 2, -O2)
+// AND `gcc2.7.2` (Mario Party 3, -O1), and target.ts's own KEYED BY DESCRIPTION note says a behavior
+// that can differ between them is mis-keyed by construction. The kmc pair above cannot speak for the
+// -O1 toolchain, so `corpus/gcc272-sw{frontload,ladder}.asm` are the SAME two-case body compiled by
+// `compileMipsGcc272Target` at its own shipped flags. They come out byte-identical to kmc's here —
+// which is a MEASUREMENT, not a formality: `corpus/gcc272-declrank.txt` and its kmc twin differ, so
+// these two toolchains do diverge on other facts, and this test is what catches a divergence on
+// this one the next time `scripts/regen-switch-spelling-probes.ts` runs.
+
+test('gcc2.7.2 at -O1 splits the two spellings the same way its kmc sibling does', () => {
+  const at = (ls: string[], re: RegExp) => ls.flatMap((l, i) => (re.test(l) ? [i] : []));
+  const tests = (ls: string[]) => at(ls, /^(beq|bne)\b/);
+  const bodies = (ls: string[]) => at(ls, /^sw\b/);
+  const sw = dumpOf('gcc272-swfrontload');
+  const lad = dumpOf('gcc272-swladder');
+  expect(sw.join('\n')).not.toEqual(lad.join('\n'));
+  expect(Math.max(...tests(sw))).toBeLessThan(Math.min(...bodies(sw)));
+  expect(Math.max(...tests(lad))).toBeGreaterThan(Math.min(...bodies(lad)));
+  // the two toolchains behind this ONE description agree on this body, instruction for instruction.
+  expect(sw).toEqual(dumpOf('gcc272kmc-swfrontload'));
+  expect(lad).toEqual(dumpOf('gcc272kmc-swladder'));
+});
+
+test('a front-loaded gcc2.7.2 -O1 dispatch keeps its switch under the same declaration', () => {
+  const out = decompile(
+    'swpick',
+    readFileSync(new URL('corpus/gcc272-swfrontload.asm', import.meta.url), 'utf8'),
+    MIPS_GCC,
+    {
+      prototypes: { swpick: { returnsVoid: true } },
+    },
+  ).source;
+  expect(out).toContain('switch (a0)');
+});
+
+// agbcc's OWN PAIR, on the compiler that owns four of the five rows the reading moves.
+// `corpus/agbcc-sw{frontload,ladder}.s` are agbcc's own text at TOOLCHAIN.agbccFlags for
+// `corpus/probe-agbcc-sw{frontload,ladder}.c`. agbcc emits assembly rather than an object, so what
+// is committed is the compiler's output itself and the split is read straight off it.
+const armDumpOf = (f: string) =>
+  readFileSync(new URL(`corpus/${f}.s`, import.meta.url), 'utf8')
+    .split('\n')
+    .filter((l) => /^\t(?![.@])/.test(l))
+    .map((l) => l.trim().replace(/\s*@.*$/, ''));
+
+test('the two agbcc spellings of ONE body are different objects, and the layouts say which is which', () => {
+  const at = (ls: string[], re: RegExp) => ls.flatMap((l, i) => (re.test(l) ? [i] : []));
+  const tests = (ls: string[]) => at(ls, /^(beq|bne)\b/);
+  const bodies = (ls: string[]) => at(ls, /^mov\tr1, #0x[12]$/); // `a = 1` and `a = 2`
+  const sw = armDumpOf('agbcc-swfrontload');
+  const lad = armDumpOf('agbcc-swladder');
+  expect(sw.join('\n')).not.toEqual(lad.join('\n')); // different objects, not one object two ways
+  // BOTH ARE TEN INSTRUCTIONS — the same 20 bytes (0x14) of .text either way, which is why the
+  // differ cannot separate them on size and why the LAYOUT is the only thing that says which was
+  // written.
+  expect(sw.length).toBe(10);
+  expect(lad.length).toBe(10);
+  // the `switch`: both tests ahead of both bodies, and SORTED ASCENDING — 0x1e before 0x64, the
+  // reverse of the order `probe-agbcc-swfrontload.c` writes them in.
+  expect(Math.max(...tests(sw))).toBeLessThan(Math.min(...bodies(sw)));
+  expect(sw.filter((l) => l.startsWith('cmp'))).toEqual(['cmp\tr0, #0x1e', 'cmp\tr0, #0x64']);
+  // the ladder: a test sits AFTER a body, and the tests keep SOURCE order.
+  expect(Math.max(...tests(lad))).toBeGreaterThan(Math.min(...bodies(lad)));
+  expect(lad.filter((l) => l.startsWith('cmp'))).toEqual(['cmp\tr0, #0x64', 'cmp\tr0, #0x1e']);
+});
+
+test("the gap and the fix, on agbcc's own output rather than on a hand-written string", () => {
+  // `ladderFn` above is a hand-written approximation of this fixture and the recovery tests use it
+  // for convenience; THIS is the evidence. `corpus/agbcc-swladder.s` is what agbcc actually emits
+  // for `probe-agbcc-swladder.c`, and it reproduces both sides of the round in one A/B: without
+  // the reading the ladder is recovered as a `switch` that no differ can tell from the real one,
+  // with it the ladder survives as a ladder.
+  const lift = (f: string, t = ARMV4T_AGBCC) =>
+    decompile('f', readFileSync(new URL(`corpus/${f}.s`, import.meta.url), 'utf8'), t, {}).source;
+  expect(lift('agbcc-swladder', notDeclared)).toContain('switch (a0)');
+  const lad = lift('agbcc-swladder');
+  expect(lad).not.toContain('switch');
+  expect(lad).toContain('a0 == 100');
+  expect(lad).toContain('a0 == 30');
+
+  // ONLY THIS HALF OF THE PAIR IS LIFTED, as with the kmc pair above but with the halves swapped.
+  // `agbcc-swfrontload.s` never reaches Regime A at all: two
+  // cases selecting a VALUE fold to a boolean select (`v0 = a0 == 100`) upstream of recovery, so
+  // it is byte-identical with the field and without it and demonstrates nothing about the gate.
+  // It is the LAYOUT evidence — asserted off the asm in the test above — and not a lift.
+  expect(lift('agbcc-swfrontload')).toBe(lift('agbcc-swfrontload', notDeclared));
+  expect(lift('agbcc-swfrontload')).not.toContain('switch');
+  // what carries the front-loaded direction on agbcc is the hand-written 4-case `dispatch`, above.
+});
+
+test('PRE5 declines a tree RECURSIVELY, so a nested dispatch comes back as an if nest around a switch', () => {
+  // WHAT THE DECLINE ACTUALLY PRODUCES. "If-recovery — the emitted source says `if`/`else if`
+  // where the target said `switch`" is true of the tree that was declined and is NOT the whole
+  // story, because `recognizeSwitch` runs again on the sub-trees the decline leaves behind.
+  // `corpus/agbcc-swnested.s` is agbcc's output for a
+  // source `switch` nested inside an if/else-if ladder: PRE5 declines the OUTER tree (the ladder's
+  // `x == 98` body sits between the tests, which is the ladder signature and the correct reading),
+  // recovery re-runs on the sub-tree, and what comes out is an `if` nest holding a `switch` over a
+  // STRICT SUBSET of the source's four case labels.
+  //
+  // Behaviourally identical, and this is not a regression — with the reading WITHDRAWN the same
+  // function comes back as one `switch` that merges `case 6:` into `case 99:`, which the source
+  // did not write either. It is pinned because the LABEL is what outlives the row (PR #156): a
+  // future round reading "the decline is a clean ladder" would be reading a property that holds
+  // only at the outermost tree.
+  const asm = readFileSync(new URL('corpus/agbcc-swnested.s', import.meta.url), 'utf8');
+  const at = (t: typeof ARMV4T_AGBCC) => decompile('f', asm, t, { prototypes: { f: { returnsVoid: true } } }).source;
+  const shipped = at(ARMV4T_AGBCC);
+  expect(count(shipped, 'switch (')).toBe(1);
+  expect([...shipped.matchAll(/case (-?\d+):/g)].map((m) => m[1])).toEqual(['8', '9']);
+  expect(shipped).toContain('a0 != 99'); // …and 99, 98, 6 and 7 are spelled as tests
+  expect(shipped).toContain('a0 == 98');
+  expect(shipped).toContain('a0 != 6');
+  // the control: the field is what puts the fragment there, and its absence is no better.
+  const withdrawn = at(notDeclared);
+  expect(count(withdrawn, 'switch (')).toBe(1);
+  expect([...withdrawn.matchAll(/case (-?\d+):/g)].map((m) => m[1])).toEqual(['98', '6', '99', '7', '8', '9']);
+});
+
+test('the UNPLACED block PRE5 stands down for is a state the IR verifier already rejects', () => {
+  // PRE5's `placed` half asks whether every test and body block has a position at all, because
+  // `layoutIndex` answers -1 for a block missing from `fn.blocks` and -1 taken as a position sorts
+  // below every real body — an absent body would satisfy `max(tests) > min(bodies)` and cost that
+  // tree its `switch` silently.
+  //
+  // The guard is kept, and this pins WHY it has no inhabitant: not "unobserved on the corpus" but
+  // rejected upstream. `verify()` requires every successor to be a block of the fn, and the tower
+  // runs it after the lift and after every raising pass; `structure()` then rebuilds the predecessor
+  // map over `fn.blocks` and throws, by name, on a successor it does not hold. So the state is a
+  // VERIFIER BUG, not a shape to expect. If a future pass inserts or reorders blocks, these two
+  // fail first.
+  //
+  // WHAT THIS PINS IS THE UNREACHABILITY, NOT THE GUARD. PRE5's `placed` branch stays 100%
+  // unexecuted here by construction — the assertions below are that `structure()` never gets far
+  // enough to run it. Both throws are matched on their MESSAGE, because a bare `toThrow()` would
+  // pass on any crash from anywhere in `structure()`'s ~3300 lines and pin a symptom.
+  const asm = dispatch([0, 1, 2, 3]);
+  const fn = frontendFor(ARMV4T_AGBCC).lift('f', asm, ARMV4T_AGBCC, { f: { returnsVoid: true } });
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, { returnsVoid: true });
+  const bodies = fn.blocks.filter((b) => b.ops.some((o) => o.opcode === 'add'));
+  expect(bodies.length).toBeGreaterThan(0);
+  const kept = { ...fn, blocks: fn.blocks.filter((b) => b !== bodies[bodies.length - 1]) };
+  expect(() => verify(kept)).toThrow(/successor of .* is not a block of this fn/);
+  const opts = { ...structureOptionsFor(ARMV4T_AGBCC, true), spellSwitchFallthrough: true };
+  expect(opts.switchRequiresFrontLoadedTests).toBe(true);
+  expect(() => structure(kept, opts)).toThrow(/is not a block of this fn.*predecessorBlocks/);
+  // …and the tree itself, with its layout intact, is one PRE5 lets through.
+  expect(cBackend.emit(structure(fn, opts))).toContain('switch (a0)');
 });

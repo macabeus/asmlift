@@ -142,6 +142,56 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   doubles every enumeration to referee a question with one answer, and a default where an axis
   belongs quietly degrades every function the differ would have rescued.
 
+  **A default may read the map BACKWARDS when the backwards mapping is ITSELF a function, the
+  reach is measured, and being wrong then costs a SPELLING and not an answer — in that order.**
+  `switchRequiresFrontLoadedTests` (`structure/switch-recover.ts`, PRE5) is the worked case, and it
+  is the exception the paragraph above would otherwise forbid. It clears the section's PRIMARY
+  criterion first, and the failure direction is the belt on top of that, never the argument by
+  itself.
+
+  1. THE MAPPING IS A FUNCTION, and three compiled pairs say so rather than a claim. Compiled at
+     `TOOLCHAIN.agbccFlags` the two spellings of the same two-case body are 20 bytes each (0x14,
+     ten Thumb instructions) and are DIFFERENT objects — the `switch` front-loads both tests and
+     sorts them ascending (`expand_end_case` closes with the `reorder_insns` that moves the dispatch
+     in front of the bodies), the ladder emits each test directly above its own body in source
+     order. Both toolchains behind `MIPS_GCC` say the same on their own two-case pair. All three
+     pairs are COMMITTED — `corpus/agbcc-sw{frontload,ladder}.s`,
+     `corpus/gcc272kmc-sw{frontload,ladder}.asm`, `corpus/gcc272-sw{frontload,ladder}.asm` — with
+     their C bodies beside them, a provenance header naming toolchain and flags, and a regen script
+     (`scripts/regen-switch-spelling-probes.ts`), and a test asserts the split off each. Layout
+     distinguishes the two spellings; that is the evidence, and the direction-of-failure argument
+     below is not a substitute for it. (RE-READABLE IS NOT RE-MEASURABLE: the two MIPS pairs are
+     byte-identical FILES, so without a regen path nothing committed could tell "compiled by this
+     toolchain and it agreed" from "copied from the sibling".)
+  2. THE REACH IS MEASURED, which settles the COST of the axis here — item 1 is what decides
+     default-vs-axis, and no reach number rescues a mapping that is not a function. An axis was
+     POSSIBLE (`StructuringAxis.options` is `(on: boolean) => StructureOptions` and this flag is one
+     more entry), so the absent dual is a fact about what Regime A enumerates today rather than an
+     impossibility. What rules the axis out is the term the fork below already prices: lifting every
+     synthetic and real row twice, once with the field and once with it deleted, moves the emitted
+     source of **5 rows out of 1026**. An axis inert on 99.5% of the corpus buys a dual only where
+     the default is already right, and pays a second `structure()` everywhere.
+  3. ONLY THEN the failure direction. The gate exclusively DECLINES, and Regime A's decline is
+     if-recovery — behaviourally identical. A premise that breaks (a scheduler that hoists a body
+     above a test, a frontend whose block list is not address order) costs the `switch` spelling on
+     that row and cannot cost a wrong answer. **Say what the decline PRODUCES, not just that it is
+     behaviour-preserving**, because recovery is recursive: declining a tree hands it to
+     if-recovery, which recovers again on each sub-tree. On a flat tree that is a clean ladder; on a
+     NESTED one (`corpus/agbcc-swnested.s`) it is an `if` nest holding a `switch` over a STRICT
+     SUBSET of the source's case labels — a third spelling neither reading would give, and nothing
+     in the output says a dispatch was half-declined. So the decline is not "loud in the source" in
+     general, and a licence built on that word would be built on the flat case only. Contrast `readsStayWhereWritten`, which PLACES something: read
+     backwards it emits a read in a block the source never read in, and no amount of measurement
+     makes that recoverable.
+
+  READ 3 WITHOUT 1 AND 2 AND IT LICENSES THE WRONG THING. A silent refusal that loses a spelling is
+  this project's own failure mode, not a free action — this repo has shipped and reverted a prune
+  measured at ZERO regressions that still cost six rows, and the paragraph above says a default
+  where an axis belongs "quietly degrades every function the differ would have rescued". So
+  "it only refuses" is what makes a MEASURED, FUNCTIONAL backwards mapping safe to ship as a
+  default. It is not what makes an unmeasured one admissible, and a future round citing this
+  paragraph owes its own compiled pair and its own reach number.
+
   A **third fork sits inside the ranked population**, and the underdetermination criterion does not
   decide it: a question the asm underdetermines can be answered by RE-RUNNING `structure()` under a
   different lever (a structuring axis) or by RE-SPELLING the tree `structure()` already produced.
