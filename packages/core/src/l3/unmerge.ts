@@ -113,7 +113,7 @@ import {
   stmtChildren,
   walkExprs,
 } from './ast';
-import { localMentions, readsOf } from './mentions';
+import { localMentions, mentionsAnyLocal, readsOf } from './mentions';
 
 /** every statement under `body`, itself included */
 function* walkStmts(body: Stmt[]): Generator<Stmt> {
@@ -262,22 +262,6 @@ function pushJoin(
   return { arm: [...arm.slice(0, -1), { ...last, then: t.arm, else: e.arm }], used: t.used + e.used };
 }
 
-/** true when `s`, or anything under it, still names one of `names` — as an assignment TARGET (which
- *  carries no expression and so no walk over values can see) or as a read. */
-function mentionsAny(s: Stmt, names: ReadonlySet<string>): boolean {
-  for (const x of walkStmts([s])) {
-    if (x.k === 'assign' && names.has(x.name)) {
-      return true;
-    }
-  }
-  for (const e of walkExprs([s])) {
-    if ((e.k === 'var' || e.k === 'addr') && names.has(e.name)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** The tree with every eligible join statement pushed back into its arms, or null when no site
  *  qualified — the lever declines rather than re-emitting the primary spelling. */
 export function unmergeJoins(sfn: SFn): SFn | null {
@@ -343,7 +327,7 @@ export function unmergeJoins(sfn: SFn): SFn | null {
     // arity gate was the reason that could not bite before, and a sibling site duplicating a read
     // is the shape that would. No inhabitant is known; it is the pass's standing model, not this
     // gate's job.
-    if (mentionsAny(out, merge)) {
+    if (mentionsAnyLocal([out], merge)) {
       return null;
     }
     merge.forEach((n) => consumed.add(n));

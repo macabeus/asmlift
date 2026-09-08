@@ -14,7 +14,7 @@
 // oversight: a POSITION added to `index` reaches the generic vocabulary for free and this walk not
 // at all. Every position is enumerated below and pinned by
 // test/array-rank-guards.test.ts, beside the generic helpers it cannot speak for.
-import { type Expr, type SFn, type Stmt, exprChildren, stmtChildren, stmtExprs } from './ast';
+import { type Expr, type SFn, type Stmt, exprChildren, stmtChildren, stmtExprs, walkExprs } from './ast';
 
 export interface Mentions {
   /** assignments to the name, at any nesting */
@@ -110,4 +110,29 @@ export function localMentions(sfn: SFn): Map<string, Mentions> {
   };
   sfn.body.forEach((s, i) => stmt(s, i, true));
   return t;
+}
+
+/** true when anything under `stmts` still NAMES one of `names` — as an assignment TARGET (which
+ *  carries no expression, so no walk over values can see it), as a read, or as an address.
+ *
+ *  The predicate a pass that DELETES a declaration has to answer, and it lives here rather than in
+ *  the deleting pass for the reason this file's header states about its own walk: a second walk
+ *  over the node vocabulary is how a new node kind becomes a silent undercount, and beside
+ *  `localMentions` a divergence is at least visible. This one is answered over a SUBTREE and asks
+ *  only "any", so it cannot be derived from the counts above — `localMentions` is keyed to
+ *  `sfn.locals` across the whole body, and l3/unmerge.ts's whole point is that those counts are
+ *  sampled before any rewriting and go stale.
+ *
+ *  TOTAL over the vocabulary by construction: `assign` is the only `Stmt` carrying a bare name and
+ *  `var`/`addr` the only `Expr`s, and both walks are derived from `stmtChildren`/`stmtExprs` — so a
+ *  `for`'s init and inc, a `switch`'s scrutinee, its cases and its default are all covered. */
+export function mentionsAnyLocal(stmts: readonly Stmt[], names: ReadonlySet<string>): boolean {
+  const walk = (list: readonly Stmt[]): boolean =>
+    list.some(
+      (s) =>
+        (s.k === 'assign' && names.has(s.name)) ||
+        [...walkExprs([s])].some((e) => (e.k === 'var' || e.k === 'addr') && names.has(e.name)) ||
+        walk(stmtChildren(s)),
+    );
+  return walk(stmts);
 }
