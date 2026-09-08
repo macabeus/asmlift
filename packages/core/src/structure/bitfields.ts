@@ -360,6 +360,38 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
           if ((((w >= 32 ? -1 : (1 << w) - 1) << lo) & cellMask) !== clear) {
             continue;
           }
+          // …AND THE STORE'S WIDTH MUST BE THE ACCESS AN ASSIGNMENT TO THOSE BITS COMPILES TO:
+          // the NARROWEST aligned 1/2/4-byte cell that contains the whole window. agbcc picks the
+          // access from the field's own BITS, not from its container's declared type — measured,
+          // pinned agbcc, one compile per row:
+          //
+          //    u16 a : 2   at bit 0     → `ldrb`/`strb`   (narrower than the `u16` container)
+          //    u32 a : 12  at bit 0     → `ldrh`/`strh`   (narrower than the `u32` container)
+          //    u32 x : 8   at bit 12    → `ldr`/`str`     (WIDER: bits 12-19 straddle bytes 1-2)
+          //    u32 a : 17  / a : 20     → `ldr`/`str`     (WIDER: no 3-byte access exists)
+          //
+          // Both directions matter and only one of them is intuitive. Without the narrowing half a
+          // `strh` over `gState.hearts` (two bits inside byte 0) spells a member from bytes that
+          // spelling cannot reproduce. Without the WIDENING half every field whose bits straddle
+          // an aligned pair — the common packed-header shape — is refused, because the compiler
+          // had no choice but a word.
+          //
+          // The window is what decides this, so the test is on the window and NOT on the map's
+          // `size`. `size` is documented (symbols.ts) and produced (@gba-kit/debug-info
+          // `types.js:494`, `ceil((bitsIntoByte + bitWidth) / 8)`) as the field's byte SPAN, which
+          // for the two widening rows is 2 and 3 — neither of them an access the machine has, and
+          // 3 not an access any machine has. A predicate reading `size` is therefore wrong for a
+          // whole band of real fields no matter how it rounds, and it would also make this fold's
+          // correctness depend on a map convention it cannot check. `bitOffset`/`bitWidth` are the
+          // same fact stated exactly, and the `fld` lookup below already requires them to agree
+          // with `lo`/`w`.
+          const loBit = cell.byte * 8 + lo;
+          const cellWidth = [1, 2, 4].find(
+            (n) => Math.floor(loBit / (n * 8)) === Math.floor((loBit + w - 1) / (n * 8)),
+          );
+          if (width !== cellWidth) {
+            continue;
+          }
           // THE ZERO FORM'S EVIDENCE RULE (header note above), in three clauses. Each one is a way
           // the accepted materialisation differs from every raw byte-domain spelling of the same
           // clear, and each was measured with the pinned agbcc rather than argued:
@@ -410,21 +442,11 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
             }
             assigned = { k: 'value', v: inserted };
           }
-          // …and the store's WIDTH must be one the declared field can be reached by. `size` is the
-          // byte span the field's bits touch (symbols.ts) — the read width the compiler uses — so
-          // a store WIDER than it is reaching bytes the member does not name: measured, agbcc
-          // narrows a `u16` container's 2-bit field to `ldrb`/`strb`, and never widens the other
-          // way. Without this a `strh` over a 1-byte-span field spells `gState.hearts = 0;` from
-          // bytes that spelling cannot reproduce.
+          // …and a DECLARED field must occupy exactly the window. The store width was already
+          // checked against the window above, so nothing here reads `size`.
           const fld = symCtx
             .fieldsOf(cell.name)
-            ?.find(
-              (f) =>
-                f.bitWidth === w &&
-                f.offset * 8 + f.bitOffset! === cell.byte * 8 + lo &&
-                f.signed !== undefined &&
-                width <= f.size,
-            );
+            ?.find((f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === loBit && f.signed !== undefined);
           if (fld && memberQualsAllow(fld, si.const, true)) {
             bitfieldStore.set(op, { global: cell.name, field: fld.name, value: assigned });
           }

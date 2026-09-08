@@ -483,14 +483,79 @@ describe('the all-zero bitfield store', () => {
     expect(runW(whole, writeInfo({ layout }))).not.toContain('gState.byte4');
   });
 
-  test("REFUSES a store WIDER than the field's byte span — those are not the member's bytes", () => {
-    // `hearts` spans one byte (`size: 1`); this is a HALFWORD read-modify-write of the same low
-    // two bits. agbcc narrows the other way — a 2-bit field in a `u16` container compiles to
-    // `ldrb`/`strb` — and never widens, so a `strh` here names bytes the member does not.
+  test("REFUSES a store WIDER than the window needs — those are not the member's bytes", () => {
+    // `hearts` is two bits inside byte 0, so the narrowest aligned cell holding it is a BYTE;
+    // this is a HALFWORD read-modify-write of the same two bits. Compiled, a 2-bit field in a
+    // `u16` container is `ldrb`/`strb` — agbcc picks the access from the field's BITS — so a
+    // `strh` here names bytes the member does not. The rule reads the window, never the map's
+    // `size`, and the second assertion is that independence: `size: 4` is what a DWARF producer
+    // that reported the storage unit instead of the byte span would author, and it must not
+    // re-admit this store.
     const wide =
       'f:\n\tldr\tr1, .L1\n\tldrh\tr2, [r1]\n\tmov\tr3, #0x4\n\tneg\tr3, r3\n\tand\tr2, r3\n' +
       '\tstrh\tr2, [r1]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
     expect(runW(wide)).not.toContain('gState.hearts');
+    const storageUnit = WRITE_LAYOUT.map((f) => (f.name === 'hearts' ? { ...f, size: 4 } : f));
+    expect(runW(wide, writeInfo({ layout: storageUnit }))).not.toContain('gState.hearts');
+  });
+
+  // THE OR FORM'S HALF OF THE SAME RULE. The width test binds both forms, and every other write
+  // row in this file runs at `width === 1`, so without these three the or-form arm has no
+  // inhabitant at all — which is how the first spelling of the rule (`width <= f.size`) shipped
+  // refusing two shapes the pinned agbcc really emits.
+  describe('the store width is the narrowest ALIGNED cell holding the window, in the `or` form too', () => {
+    /** a word read-modify-write at byte 4: `and` the insert, `and` the pool keep, `orr`, `str`. */
+    const WORD_RMW = (insMask: number, shift: string, keep: number) =>
+      `f:\n\tldr\tr3, .L1\n\tldr\tr2, .L3\n\tand\tr2, r0\n${shift}\tldr\tr0, [r3, #0x4]\n` +
+      `\tldr\tr1, .L2\n\tand\tr0, r1\n\torr\tr0, r2\n\tstr\tr0, [r3, #0x4]\n\tmov\tr0, #0x0\n\tbx\tlr\n` +
+      `.L1:\n\t.word\t0x03005220\n.L2:\n\t.word\t${keep}\n.L3:\n\t.word\t${insMask}\n`;
+
+    test('ACCEPTS a WORD store over a field that STRADDLES a byte pair — agbcc has no other access', () => {
+      // Compiled, pinned agbcc: `struct M { u32 p:12; u32 x:8; u32 q:12; }; gM.x = v;` is
+      //   `mov #0xff; and; lsl #0xc; ldr [r3]; ldr .word -0xff001; and; orr; str [r3]`
+      // — a WORD read-modify-write over a field whose bits (12-19) touch two bytes and whose byte
+      // SPAN is 2. No halfword access holds bits 12-19, so the compiler widened; a rule bounded by
+      // the span refuses this and loses the only spelling that reproduces these bytes.
+      const layout: SymbolStructField[] = [
+        ...WRITE_LAYOUT.filter((f) => f.offset !== 4),
+        { name: 'p', offset: 4, size: 2, signed: false, bitWidth: 12, bitOffset: 0 },
+        { name: 'x', offset: 5, size: 2, signed: false, bitWidth: 8, bitOffset: 4 },
+        { name: 'q', offset: 6, size: 2, signed: false, bitWidth: 12, bitOffset: 4 },
+      ];
+      const src = runW(WORD_RMW(255, '\tlsl\tr2, r2, #0xc\n', -0xff001), writeInfo({ layout }));
+      expect(src).toContain('gState.x = 255 & a0;');
+      expect(src).not.toContain('(s32 *)');
+      // and again with `size` authored as the DWARF storage unit — the rule reads neither
+      const unit = layout.map((f) => (f.bitWidth === undefined ? f : { ...f, size: 4 }));
+      expect(runW(WORD_RMW(255, '\tlsl\tr2, r2, #0xc\n', -0xff001), writeInfo({ layout: unit }))).toContain(
+        'gState.x = 255 & a0;',
+      );
+    });
+
+    test('ACCEPTS a WORD store over a 3-byte-span field — no machine has a 3-byte access', () => {
+      // Compiled, pinned agbcc: `struct S { u32 pad0; u32 a:20; u32 b:12; }; gS.a = v;` is
+      //   `ldr .word 0xfffff; and; ldr [r3,#4]; ldr .word -0x100000; and; orr; str [r3,#4]`
+      // `u32 a : 17` is the same. The span is 3, so ANY bound expressed in the span refuses a
+      // whole band of fields — 17 to 24 bits wide — that the compiler can only reach by word.
+      const layout: SymbolStructField[] = [
+        ...WRITE_LAYOUT.filter((f) => f.offset !== 4),
+        { name: 'a', offset: 4, size: 3, signed: false, bitWidth: 20, bitOffset: 0 },
+        { name: 'b', offset: 6, size: 2, signed: false, bitWidth: 12, bitOffset: 4 },
+      ];
+      const src = runW(WORD_RMW(0xfffff, '', -0x100000), writeInfo({ layout }));
+      expect(src).toContain('gState.a = 1048575 & a0;');
+      expect(src).not.toContain('(s32 *)');
+    });
+
+    test('REFUSES a HALFWORD store over a one-byte window in the `or` form too', () => {
+      // the twin of the `hearts` refusal above, with an insert: the narrowest cell holding bits
+      // 0-1 is a byte, and this stores a halfword, so it is not the assignment's own access.
+      const wide =
+        'f:\n\tldr\tr1, .L1\n\tmov\tr3, #0x3\n\tand\tr0, r3\n\tldrh\tr2, [r1]\n' +
+        '\tmov\tr3, #0x4\n\tneg\tr3, r3\n\tand\tr2, r3\n\torr\tr0, r2\n\tstrh\tr0, [r1]\n' +
+        '\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+      expect(runW(wide)).not.toContain('gState.hearts');
+    });
   });
 
   test('the clearing `and` must be consumed HERE — a second reader keeps the honest spelling', () => {

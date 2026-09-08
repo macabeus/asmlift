@@ -272,6 +272,34 @@ const PROBE_FLAG_MAP: SymbolMap = new Map([
   ],
 ]);
 
+// The STRADDLING-field map, added by the G5 wave-2 remediation. `unk0_c`'s bits are 12-19: they
+// touch bytes 1 and 2, so no aligned halfword holds them and agbcc reaches the field with a WORD
+// read-modify-write (compiled, pinned agbcc: `mov #0xff; and; lsl #0xc; ldr [r3]; ldr .word
+// -0xff001; and; orr; str [r3]`). Every other bitfield map in this corpus — `PACKED_MAP`,
+// `PROBE_FLAG_MAP` — declares fields whose bits sit inside ONE byte, so before this map no row
+// could tell a store-width rule expressed in the field's byte SPAN from one expressed in its bit
+// WINDOW. The first spelling of that rule shipped as `width <= f.size` and refused this shape.
+const PROBE_SPAN_MAP: SymbolMap = new Map([
+  [
+    0x03004c10,
+    [
+      {
+        name: 'gSpan',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'struct' as const,
+        structName: 'Span',
+        size: 4,
+        layout: [
+          { name: 'unk0_0', offset: 0, size: 2, signed: false, bitWidth: 12, bitOffset: 0 },
+          { name: 'unk0_c', offset: 1, size: 2, signed: false, bitWidth: 8, bitOffset: 4 },
+          { name: 'unk0_14', offset: 2, size: 2, signed: false, bitWidth: 12, bitOffset: 4 },
+        ],
+      },
+    ],
+  ],
+]);
+
 export const SYNTHETIC: SynthSpec[] = [
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
@@ -6492,6 +6520,27 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void bfzerohi(void);',
     proto: { bfzerohi: { returnsVoid: true } },
     symbols: PROBE_FLAG_MAP,
+  },
+  {
+    // THE STRADDLING FIELD, and it is a WIDTH row rather than a mask row. `unk0_c` occupies bits
+    // 12-19 of the word: no aligned halfword contains them, so agbcc has to reach the field with a
+    // WORD read-modify-write even though the field's byte SPAN is 2. The recognizer's store-width
+    // rule therefore has to be expressed in the field's bit WINDOW — "the narrowest aligned cell
+    // that holds it" — and not in the map's `size`, which for this field names an access the
+    // machine does not have. The corpus had no inhabitant of this shape at all (every other
+    // bitfield map here declares fields inside one byte), which is how a `size`-bounded spelling
+    // of the rule shipped and refused a store the pinned agbcc really emits. Its twin is
+    // `bfzerohi`: that row pins what the fold must REFUSE, this one pins the width it must ADMIT.
+    sym: 'bfstraddle',
+    src:
+      'struct Span { u32 unk0_0 : 12; u32 unk0_c : 8; u32 unk0_14 : 12; };\n' +
+      'extern struct Span gSpan;\n' +
+      'void bfstraddle(u32 v){ gSpan.unk0_c = v; }',
+    features: ['global', 'struct', 'bitfield'],
+    toolchains: ['agbcc'],
+    ctx: 'void bfstraddle(u32 v);',
+    proto: { bfstraddle: { returnsVoid: true } },
+    symbols: PROBE_SPAN_MAP,
   },
   {
     sym: 'nestacc',
