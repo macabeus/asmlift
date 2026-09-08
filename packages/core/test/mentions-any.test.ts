@@ -27,7 +27,12 @@ describe('every position a name can hide in', () => {
   test("a `for`'s INC", () => finds({ k: 'for', init: asg('q', c(0)), cond: c(1), inc: asg('t', c(0)), body: [] }));
   test("a `switch`'s SCRUTINEE", () => finds({ k: 'switch', scrutinee: v('t'), cases: [], default: [] }));
   test("a `switch`'s CASE body", () =>
-    finds({ k: 'switch', scrutinee: c(0), cases: [{ values: [1], body: [asg('q', v('t'))] }], default: [] }));
+    finds({
+      k: 'switch',
+      scrutinee: c(0),
+      cases: [{ values: [1], fallsThrough: false, body: [asg('q', v('t'))] }],
+      default: [],
+    }));
   test("a `switch`'s DEFAULT arm", () =>
     finds({ k: 'switch', scrutinee: c(0), cases: [], default: [asg('q', v('t'))] }));
   test('a LEADING subscript of a multidimensional global index', () =>
