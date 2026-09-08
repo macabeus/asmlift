@@ -221,7 +221,12 @@ describe('unmerge differential fuzz — the oracle this lever shipped without', 
     // drifted into producing only-declined trees would go green while judging nothing.
     expect(fired).toBeGreaterThan(1000);
     expect(bad.slice(0, 6)).toEqual([]);
-  });
+    // 60000 seeds is ~0.9s alone, and this suite forks 161 files in parallel, where the sibling
+    // measured the same shape of loop at 3.4x its solo cost — past vitest's 5s default, which
+    // fails as a TIMEOUT rather than as a divergence. narrowlocal-fuzz.test.ts carries the same
+    // budget for the same reason. The seed count itself is NOT the lever to turn down: at the
+    // sibling's 15000 this arm fires 845 times, under its own 1000 floor (measured).
+  }, 90_000);
 });
 
 // ARM 2 — the shape the FRESH RE-READ exists for: an INNER join site whose own join is an
@@ -303,5 +308,6 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
     }
     expect(fired).toBeGreaterThan(1000);
     expect(bad.slice(0, 4)).toEqual([]);
-  });
+    // ~1.7s alone, the slower of the two arms — see the budget note above.
+  }, 90_000);
 });
