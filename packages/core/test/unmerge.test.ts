@@ -407,6 +407,30 @@ describe('an else-if LADDER un-merges into every terminal arm', () => {
     ]);
   });
 
+  // THE ADMITTED SHAPE IS NOT AN ELSE-IF CHAIN, and calling it a ladder should not hide that. The
+  // soundness argument is "every path out leaves through exactly one terminal arm", which a
+  // BALANCED tree satisfies as fully as a chain. Pinned so the file's comment is a claim about the
+  // code and not about the corpus: one copy per TERMINAL ARM, so the emitted source is linear in
+  // the subtree walked, which is why the recursion needs no cap.
+  test('a BALANCED nested `if` tree fires too — one copy per terminal arm, not one per rung', () => {
+    const leaf = (p: string, x: number): Stmt[] => [asg('p', v(p)), asg('x', c(x))];
+    const body = [iff([iff(leaf('a', 1), leaf('b', 2))], [iff(leaf('d', 3), leaf('e', 4))]), store(v('p'), v('x'))];
+    const out = unmergeJoins(fn(body));
+    expect(out).not.toBeNull();
+    expect(out!.body).toHaveLength(1);
+    expect(out!.locals).toEqual([]);
+    const stores: Stmt[] = [];
+    const walk = (st: Stmt): void => {
+      if (st.k === 'if') {
+        [...st.then, ...st.else].forEach(walk);
+      } else {
+        stores.push(st);
+      }
+    };
+    walk(out!.body[0]);
+    expect(stores).toEqual([store(v('a'), c(1)), store(v('b'), c(2)), store(v('d'), c(3)), store(v('e'), c(4))]);
+  });
+
   test('a statement before the trailing `if` is kept where it is — no moved value crosses it', () => {
     const body = [
       iff(defs('a', 1), [store(v('g'), c(9)), ladder([defs('b', 2), defs('d', 3)])]),

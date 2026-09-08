@@ -57,8 +57,9 @@
 //     marker" and says nothing about a qualifier, so it is not the test for this: the refusal is
 //     asked of the qualifier's own model (`exprReadsVolatile`), which knows all three spellings —
 //     the cast, the pointee-volatile pointer local, and the volatile local object;
-//   - an arm is neither TERMINAL (a run of assignments defining the names) nor a LADDER RUNG (its
-//     last statement is a two-armed `if`, whose arms are asked the same question one level down);
+//   - an arm is neither TERMINAL (a run of assignments defining the names) nor a RUNG (its last
+//     statement is an `if`, whose arms are asked the same question one level down — any nested
+//     `if` TREE qualifies, not only a right-nested else-if chain);
 //   - the terminal arms are not ALL of the name's definitions, or a merge name is still mentioned
 //     in the rewritten statement — the two halves of totality, below.
 //
@@ -67,7 +68,10 @@
 // hands this pass an outer `if` whose `else` is another `if`. Every path out of that ladder leaves
 // through exactly one TERMINAL arm, so a copy at the end of each terminal arm runs exactly once per
 // path — the two-arm argument above, read inductively. Statements before a rung's trailing `if` are
-// untouched and no moved value crosses them: they run before the rung is entered.
+// untouched and no moved value crosses them: they run before the rung is entered. The chain is what
+// the corpus holds, and the argument never used it: ANY nested `if` tree bottoming out in terminal
+// arms satisfies "every path leaves through exactly one", and any such tree fires. `pushJoin`'s own
+// note carries that and the reason it needs no cap.
 //
 // TOTALITY IS WHAT REPLACES THE ARITY. "Assigned exactly once in each arm" was a count of TWO, and
 // a five-arm ladder assigns five times; the gate is now "assigned at least twice", carried by two
@@ -219,15 +223,33 @@ function pushJoin(
     }
     return { arm: [...here.keep, substitute(join, here.defs)], used: 1 };
   }
-  // NOT a terminal arm. It is a LADDER rung when its LAST statement is an `if` — then the copy
-  // belongs one level down, in that `if`'s own arms, and the statements before it are untouched:
-  // they run before the rung is entered, so no value this moves crosses them.
+  // NOT a terminal arm. It is a RUNG when its LAST statement is an `if` — then the copy belongs
+  // one level down, in that `if`'s own arms, and the statements before it are untouched: they run
+  // before the rung is entered, so no value this moves crosses them.
   //
-  // REFUSES when the tail is anything else. A `while`, a `switch` or a plain statement is not a
-  // shape whose arms are the paths out of this one, and the corpus holds no inhabitant of either
-  // (measured: 4 rows in 1022 reach the ladder at all, every one of them an if/else chain).
-  // An arm that is EMPTY, or whose statements do not define the names, is refused one level down
-  // by `armDefs` — `names` is never empty here, so an empty arm cannot supply it.
+  // THE SHAPE ADMITTED IS ANY NESTED `if` TREE, not only a right-nested else-if chain. Nothing
+  // here restricts the recursion to one side, and nothing should: the soundness argument is "every
+  // path out leaves through exactly one terminal arm", which a BALANCED tree satisfies as fully as
+  // a chain — `if (c) { if (d) A else B } else { if (e) C else D }` fires and takes four copies.
+  // Call it a ladder because that is what the corpus holds, not because the code tests for one.
+  //
+  // NO CAP, and none is wanted: the copy count is exactly the number of TERMINAL ARMS, so the work
+  // and the emitted source are LINEAR in the subtree the recursion walks — a depth-6 balanced tree
+  // is 64 leaves and 64 copies, the same one-copy-per-path the two-arm case makes. The corpus
+  // maximum is 5 (`synthetic:armcb`). A refusal above some arm count would be a gate with no
+  // inhabitant, which this file's own standard rejects.
+  //
+  // REFUSES when the tail is anything else, and THIS REFUSAL HAS INHABITANTS — do not read the
+  // success count as evidence about it. Instrumented at the return below and re-run over the
+  // synthetic agbcc tier (281 rows, exit 0): 56 firings in 2 functions — 40 on an `assign` tail
+  // (32 in `maskchain`, 8 in `dmascope2`) and 16 on an EMPTY arm (`maskchain`). `dmascope2` is not
+  // one of the four rows that reach the ladder SUCCESSFULLY, so it appears in no success count at
+  // all. Only `while` and `switch` tails are unwitnessed; a plain statement is not.
+  //
+  // An EMPTY arm is delivered its refusal HERE, not by `armDefs`: `armDefs` declines it first
+  // (`names` is never empty, so no run of statements in an empty arm can supply it) and the tail
+  // check is what turns that decline into the site's. Same for an arm whose statements simply do
+  // not define the names.
   const last = arm[arm.length - 1];
   if (last === undefined || last.k !== 'if') {
     return null;
