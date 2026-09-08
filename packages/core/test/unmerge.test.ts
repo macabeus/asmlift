@@ -332,3 +332,136 @@ describe('a merge temp read from a position the mention count must see', () => {
     expect(unmergeJoins(fn([...merged(), asg('q', idxIx)], ['p', 'x', 'q']))).toBeNull();
   });
 });
+
+// THE LADDER. agbcc cross-jumps the shared tail of an else-if CHAIN the same way it cross-jumps a
+// two-armed `if`'s: every arm stored the same slot, and one `str` came out. The lifted tree then
+// carries the join after the OUTERMOST `if`, whose `else` is another `if` rather than a run of
+// assignments — so the arm the copy belongs in is not the arm the pass is handed. Pushing the join
+// down to every TERMINAL arm is the same rewrite, applied where the ladder bottoms out, and the
+// soundness argument is the two-arm one read inductively: every path out of the ladder leaves
+// through exactly one terminal arm, so one copy at the end of each runs exactly once per path.
+//
+// The arity assumption goes with it: "assigned exactly once in each arm" is a count of TWO, and a
+// five-arm ladder assigns five times. TOTALITY replaces it — every definition in the whole function
+// must be one of the terminal arms just rewritten — and because that count is read from a map built
+// before the pass started rewriting, a FRESH re-read of the result is what actually carries it.
+describe('an else-if LADDER un-merges into every terminal arm', () => {
+  /** `if (cond) {a} else if (cond) {b} else …` — one terminal arm per entry, nested to the right. */
+  const ladder = (arms: Stmt[][]): Stmt =>
+    arms.length === 2 ? iff(arms[0], arms[1]) : iff(arms[0], [ladder(arms.slice(1))]);
+
+  const defs = (p: string, x: number): Stmt[] => [asg('p', v(p)), asg('x', c(x))];
+
+  test('a THREE-arm ladder puts the join in all three, with each arm`s own definitions', () => {
+    const out = unmergeJoins(fn([ladder([defs('a', 1), defs('b', 2), defs('d', 3)]), store(v('p'), v('x'))]));
+    expect(out).not.toBeNull();
+    expect(out!.body).toHaveLength(1); // the join is gone from the outer list
+    expect(out!.locals).toEqual([]); // both merge temps consumed
+    const top = out!.body[0] as Extract<Stmt, { k: 'if' }>;
+    expect(top.then).toEqual([store(v('a'), c(1))]);
+    const inner = top.else[0] as Extract<Stmt, { k: 'if' }>;
+    expect(inner.then).toEqual([store(v('b'), c(2))]);
+    expect(inner.else).toEqual([store(v('d'), c(3))]);
+  });
+
+  test('a FIVE-arm ladder — `synthetic:armcb`s own shape — reaches the last arm too', () => {
+    const arms = [defs('a', 1), defs('b', 2), defs('d', 3), defs('e', 4), defs('h', 5)];
+    const out = unmergeJoins(fn([ladder(arms), store(v('p'), v('x'))]));
+    expect(out).not.toBeNull();
+    const stores: Stmt[] = [];
+    const walk = (s: Stmt): void => {
+      if (s.k === 'if') {
+        [...s.then, ...s.else].forEach(walk);
+      } else {
+        stores.push(s);
+      }
+    };
+    walk(out!.body[0]);
+    expect(stores).toEqual([
+      store(v('a'), c(1)),
+      store(v('b'), c(2)),
+      store(v('d'), c(3)),
+      store(v('e'), c(4)),
+      store(v('h'), c(5)),
+    ]);
+  });
+
+  test('a statement before the trailing `if` is kept where it is — no moved value crosses it', () => {
+    const body = [
+      iff(defs('a', 1), [store(v('g'), c(9)), ladder([defs('b', 2), defs('d', 3)])]),
+      store(v('p'), v('x')),
+    ];
+    const out = unmergeJoins(fn(body));
+    expect(out).not.toBeNull();
+    const [, els] = armsOf(out!);
+    expect(els[0]).toEqual(store(v('g'), c(9)));
+  });
+});
+
+// The ladder's refusals. Each is a place the merged spelling has to survive, and the first two are
+// the ones that replace `assigns === 2`: without them this pass deletes a local the emitted tree
+// still names, which compiles to nothing at all.
+describe('what the ladder refuses', () => {
+  const ladder = (arms: Stmt[][]): Stmt =>
+    arms.length === 2 ? iff(arms[0], arms[1]) : iff(arms[0], [ladder(arms.slice(1))]);
+  const declines = (body: Stmt[], names?: string[]) => expect(unmergeJoins(fn(body, names))).toBeNull();
+
+  test('a definition OUTSIDE the terminal arms refuses — totality, not arity', () => {
+    // `x = 0` before the `if` is a third definition with nothing left to read it once the temp is
+    // deleted. The count that catches it is "every assignment in the function is one of the arms
+    // we rewrote", which is what a widened arity gate no longer says on its own.
+    declines([asg('x', c(0)), iff([asg('x', c(1))], [asg('x', c(2))]), store(v('g'), v('x'))], ['x']);
+  });
+
+  test('the tail of an arm is not a two-armed `if` — the ladder does not bottom out', () => {
+    declines(
+      [ladder([[asg('x', c(1))], [asg('x', c(2))], [asg('x', c(3)), store(v('g'), c(0))]]), store(v('h'), v('x'))],
+      ['x'],
+    );
+  });
+
+  test('an EMPTY terminal arm refuses — that path would get no copy of the join', () => {
+    declines([iff([asg('x', c(1))], [iff([asg('x', c(2))], [])]), store(v('g'), v('x'))], ['x']);
+  });
+
+  test('a repeated definition inside ONE terminal arm refuses', () => {
+    declines(
+      [ladder([[asg('x', c(1))], [asg('x', c(2))], [asg('x', c(3)), asg('x', c(4))]]), store(v('g'), v('x'))],
+      ['x'],
+    );
+  });
+});
+
+// THE COUNTS ARE STALE AND THE RECURSION IS WHAT MAKES THAT REACHABLE. `localMentions` is read once,
+// before the pass rewrites anything, and this pass DUPLICATES statements — so an earlier site inside
+// the same tree can turn one definition of a name into two while the map still says one. The arity
+// gate hid that: three definitions could never be `=== 2`. Totality alone does not, because the
+// stale count and the fresh arm count can agree by coincidence — which is exactly the tree below.
+// The gate that holds is a FRESH re-read of the rewritten statement: if a merge name is still
+// mentioned anywhere in it, the rewrite did not consume it and the local may not be deleted.
+describe('a stale mention count is caught by re-reading the result', () => {
+  test('a definition an earlier rewrite duplicated leaves the count agreeing, and the tree still names `y`', () => {
+    // Inner site: `if (c) p = a; else p = d;  y = *p;` un-merges to `if (c) y = *a; else y = *d;`,
+    // turning ONE assignment to `y` into two. The map still says four; the ladder consumes four
+    // terminal arms; the counts agree — and `y = 7` is still sitting there.
+    const body: Stmt[] = [
+      iff(
+        [asg('y', c(7)), iff([iff([asg('p', v('a'))], [asg('p', v('d'))]), asg('y', deref(v('p')))], [asg('y', c(2))])],
+        [asg('y', c(3))],
+      ),
+      store(v('g'), v('y')),
+    ];
+    const out = unmergeJoins(fn(body, ['p', 'y']));
+    expect(out).not.toBeNull(); // the INNER site fired and consumed `p`
+    expect(out!.locals.map((l) => l.name)).toEqual(['y']); // `y` survives — the outer site refused
+    expect(out!.body).toHaveLength(2); // the outer join is still a join
+
+    // and the invariant the refusal exists for: nothing the tree assigns is undeclared
+    const declared = new Set([...out!.locals.map((l) => l.name), ...out!.params.map((p) => p.name)]);
+    const walk = (s: Stmt): string[] => [
+      ...(s.k === 'assign' && !declared.has(s.name) && !s.name.startsWith('g') ? [s.name] : []),
+      ...(s.k === 'if' ? [...s.then, ...s.else].flatMap(walk) : []),
+    ];
+    expect(out!.body.flatMap(walk)).toEqual([]);
+  });
+});
