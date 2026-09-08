@@ -142,6 +142,28 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   doubles every enumeration to referee a question with one answer, and a default where an axis
   belongs quietly degrades every function the differ would have rescued.
 
+  **A default may read the map BACKWARDS when being wrong costs a SPELLING and not an answer.**
+  `switchRequiresFrontLoadedTests` (`structure/switch-recover.ts`, PRE5) is the worked case, and it
+  is the exception the paragraph above would otherwise forbid. Regime-A switch recovery rebuilds a
+  `switch` from any comparison tree it can, so an if/else-if LADDER and a `switch` over the same
+  values collapse onto ONE candidate — there is no dual anywhere in the fan for a differ to prefer,
+  which is why an axis was never the shape of this fix. The layout settles it: compiled at
+  `TOOLCHAIN.agbccFlags` the two spellings of the same two-case body are 79 bytes each and are
+  DIFFERENT objects — the `switch` front-loads both tests and sorts them ascending (`expand_end_case`
+  closes with the `reorder_insns` that moves the dispatch in front of the bodies), the ladder emits
+  each test directly above its own body in source order — and gcc 2.7.2/KMC's own pair says the same
+  at three cases. So the gate reads emission and concludes spelling, the direction this section
+  names as "how a compiler fact turns into a wrong answer".
+  What makes it safe here is the DIRECTION OF THE FAILURE, not the strength of the premise. The gate
+  only ever DECLINES, and Regime A's decline is if-recovery — behaviourally identical, and loud in
+  the source, which says `if`/`else if` where the target said `switch`. A premise that breaks
+  (a scheduler that hoists a body above a test, a frontend whose block list is not address order)
+  therefore costs the `switch` spelling on that row and can never cost a wrong answer. Contrast
+  `readsStayWhereWritten`, which PLACES something: read backwards it emits a read in a block the
+  source never read in, and no amount of measurement makes that recoverable. So the test for a
+  backwards default is not "is the premise airtight" but "what does the pass DO when it fires" —
+  and a refusal is the only answer that passes it.
+
   A **third fork sits inside the ranked population**, and the underdetermination criterion does not
   decide it: a question the asm underdetermines can be answered by RE-RUNNING `structure()` under a
   different lever (a structuring axis) or by RE-SPELLING the tree `structure()` already produced.
