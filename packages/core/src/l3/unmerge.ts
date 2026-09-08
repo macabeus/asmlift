@@ -80,6 +80,17 @@
 //   - the terminal arms are not ALL of the name's definitions, or a merge name is still mentioned
 //     in the rewritten statement — the two halves of totality, below.
 //
+// THESE REFUSALS ARE NOT AN `l3/gates.ts` TABLE, and the reason is cost, not shape. An earlier
+// note gave the shape as the reason — "`Gate<Ctx>` is one context per candidate" — and that is
+// false about the file: `Ctx` is a free type parameter, `firstRejection` is an ordinary call with
+// no notion of a candidate, and `raise/globalshape.ts` already has two consumers owning their own
+// rule objects over a shared predicate. Three tables at three recursion depths (the site context,
+// `armDefs`'s, `pushJoin`'s) is a shape that file supports. What the decline actually buys is the
+// behaviour risk of converting nine per-site early returns, against the ergonomics of an ablation
+// query — and the round that declined it then hand-patched two ablations that the table would have
+// automated, and shipped one silently weakened `sound` rule (`assigns === 2` → `>= 2`) that a
+// `guardedBy` would have caught. Whoever revisits this should weigh THAT, not the shape claim.
+//
 // THE ARMS ARE THE PATHS, WHICH IS WHY THE LADDER IS THE SAME REWRITE. agbcc cross-jumps the shared
 // tail of an else-if CHAIN exactly as it cross-jumps a two-armed `if`'s, and the lifted tree then
 // hands this pass an outer `if` whose `else` is another `if`. Every path out of that ladder leaves
