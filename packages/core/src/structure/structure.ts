@@ -5097,14 +5097,31 @@ function mkIf(cond: Expr, thenS: Stmt[], elseS: Stmt[]): Stmt {
 }
 
 // --- CFG utilities ---
+/** Every block's in-edges. THROWS on a successor that is not a block of `fn` — the one state that
+ *  makes this map lie, and the one the whole structurer reads positions and dominance out of.
+ *
+ *  IT SAYS SO RATHER THAN CRASHING. This was `m.get(s)!.push(b)`, which on that state dereferenced
+ *  `undefined` and raised a bare `TypeError: Cannot read properties of undefined (reading 'push')`
+ *  from a CFG utility 3000 lines from anything the reader recognises. `ir/verify.ts` already
+ *  rejects the state with a name (`successor of 'X' is not a block of this fn`) and the tower runs
+ *  it after the lift and after every raising pass, so reaching HERE means a pass built the state
+ *  after the last verify — which is exactly when a named error is worth having. Two comments
+ *  elsewhere (switch-recover.ts PRE5, and its test) cite this line as a loud invariant; a
+ *  `TypeError` is not one, and in a repo whose discipline is loud-decline-over-silent-wrong the
+ *  category matters more than the crash. Behaviour is otherwise unchanged: the same input threw
+ *  before and throws now. */
 function predecessorBlocks(fn: Fn): Map<Block, Block[]> {
   const m = new Map<Block, Block[]>();
   for (const b of fn.blocks) {
     m.set(b, []);
   }
-  for (const b of fn.blocks) {
+  for (const [i, b] of fn.blocks.entries()) {
     for (const s of successorsOf(b)) {
-      m.get(s)!.push(b);
+      const preds = m.get(s);
+      if (!preds) {
+        throw new Error(`successor of block ${i} is not a block of this fn (fn '${fn.name}', predecessorBlocks)`);
+      }
+      preds.push(b);
     }
   }
   return m;

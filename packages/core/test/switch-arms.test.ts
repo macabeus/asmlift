@@ -1364,9 +1364,16 @@ test('the UNPLACED block PRE5 stands down for is a state the IR verifier already
   // The guard is kept, and this pins WHY it has no inhabitant: not "unobserved on the corpus" but
   // rejected upstream. `verify()` requires every successor to be a block of the fn, and the tower
   // runs it after the lift and after every raising pass; `structure()` then rebuilds the predecessor
-  // map over `fn.blocks` and throws on a successor it does not hold. So the state is a VERIFIER BUG,
-  // not a shape to expect, and the reason the architecture review could not construct the test it
-  // asked for. If a future pass inserts or reorders blocks, these two are what fail first, loudly.
+  // map over `fn.blocks` and throws, by name, on a successor it does not hold. So the state is a
+  // VERIFIER BUG, not a shape to expect, and the reason the architecture review could not construct
+  // the test it asked for. If a future pass inserts or reorders blocks, these two fail first.
+  //
+  // WHAT THIS PINS IS THE UNREACHABILITY, NOT THE GUARD. PRE5's `placed` branch stays 100%
+  // unexecuted here by construction — the assertions below are that `structure()` never gets far
+  // enough to run it. Both throws are matched on their MESSAGE: an unmatched `toThrow()` would pass
+  // on any crash from anywhere in `structure()`'s ~3300 lines, which is a test on a symptom, and
+  // the second one used to be exactly that (an unchecked `!` raising a bare `TypeError` — wave 2
+  // made `predecessorBlocks` say what it means instead).
   const asm = dispatch([0, 1, 2, 3]);
   const fn = frontendFor(ARMV4T_AGBCC).lift('f', asm, ARMV4T_AGBCC, { f: { returnsVoid: true } });
   raiseRecovered(fn, ARMV4T_AGBCC, {}, { returnsVoid: true });
@@ -1376,7 +1383,7 @@ test('the UNPLACED block PRE5 stands down for is a state the IR verifier already
   expect(() => verify(kept)).toThrow(/successor of .* is not a block of this fn/);
   const opts = { ...structureOptionsFor(ARMV4T_AGBCC, true), spellSwitchFallthrough: true };
   expect(opts.switchRequiresFrontLoadedTests).toBe(true);
-  expect(() => structure(kept, opts)).toThrow();
+  expect(() => structure(kept, opts)).toThrow(/is not a block of this fn.*predecessorBlocks/);
   // …and the tree itself, with its layout intact, is one PRE5 lets through.
   expect(cBackend.emit(structure(fn, opts))).toContain('switch (a0)');
 });
