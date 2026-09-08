@@ -6196,21 +6196,25 @@ export const SYNTHETIC: SynthSpec[] = [
   //    re-read of the result — because `localMentions` is sampled before any rewriting and this
   //    pass duplicates statements, so a stale count and the arm count can agree by coincidence.
   //    Corpus REACH is four rows and only four — `armcb`, `maskchain`, `sxparam` and
-  //    `kleod:CountCollectedGems:agbcc`; `kleod:ProcessInputAndUpdateEntities:agbcc`, the
-  //    benchmark's long pole, enumerates 51840 either way. THE PRICE IS PER-ROW, and it is not a
-  //    corpus percentage, because an offline enumeration over the artifact does not reproduce the
-  //    REAL tier's fan: that row runs with the project symbol map and the vendored TU, and
-  //    rank.ts already warns that a standalone `enumerateCandidates` call is not the harness's
-  //    enumeration. Measured instead at the CLI's own `enumerate` wrapper, both sides, with
-  //    `origin/main`'s `unmerge.ts` swapped in for the before:
+  //    `kleod:CountCollectedGems:agbcc`. THE PRICE IS PER-ROW. Measured at the CLI's own
+  //    `enumerate` wrapper, both sides, with `origin/main`'s `unmerge.ts` swapped in for the
+  //    before:
   //      armcb 8 → 14 · armcb2 (the control) 14 → 14 · maskchain 24 → 32 · sxparam 2 → 4
   //      kleod:CountCollectedGems:agbcc 3072 → 5952 (+2880, +94 %), 58.3 s → 81.5 s wall (+40 %)
-  //    The three SYNTHETIC numbers reproduce an offline census over the artifact exactly and the
-  //    real row's does not, which is what makes that one diagnostic rather than noise: offline it
-  //    reads 1152 → 2304, 2.6× low, and its true delta alone (+2880) is larger than the entire
-  //    offline corpus delta (+1168). So there is no "+1.43 % total" to quote here or in the next
-  //    round — the corpus's second-heaviest agbcc row pays +94 % candidates for a candidate that
-  //    correctly loses, and that is the honest statement of the price.
+  //    AN OFFLINE CENSUS DOES REPRODUCE THE REAL TIER — an earlier version of this note said it
+  //    cannot, off a rig that read 1152 → 2304 (2.6× low) and then froze that discrepancy into a
+  //    standing prohibition instead of re-running it. The missing input was the row's own
+  //    provisioning, not something the harness alone can see: hand `enumerateCandidates` the
+  //    case's `symbols` (the vendored map, `asIfUndecompiled`), its `proto`, and the `asmData`
+  //    side table off the built target's object, exactly as `eval/asmlift.ts` does, and it returns
+  //    **3072 → 5952** on this row — the harness number, to the candidate. Re-measured, both
+  //    sides, at wave 2.
+  //    The pole, same rig, enumeration only (no candidate compiles, so this is NOT the 1549 s
+  //    benchmark row): `kleod:ProcessInputAndUpdateEntities:agbcc` enumerates **77760 either
+  //    way** — unmoved by the lever, which is the claim that matters, but the number is 77760 and
+  //    an earlier version of this note said 51840, from the same under-provisioned rig.
+  //    So the honest price is still per-row and still this: the corpus's second-heaviest agbcc
+  //    row pays +94 % candidates for a candidate that correctly loses.
   //    AND THE REAL ROW DOES NOT MOVE, which is this gap's pass: G6 alone makes the source WORSE
   //    (the winning spelling plus `/unmerge` costs more than the winner), so its candidate is
   //    enumerated and correctly loses. `kleod:CountCollectedGems:agbcc` 171 → 171, same winning
