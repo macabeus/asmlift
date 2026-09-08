@@ -65,6 +65,39 @@ describe('what un-merges', () => {
     expect(body).toHaveLength(1);
   });
 
+  // `rewrite` descends into `while`, `for` and BOTH lists of a `switch` as well as `dowhile`, and
+  // only `dowhile` was covered. The descent is where a nesting kind gets forgotten — a `switch`'s
+  // `default` is a second list, and a `for`'s body is not its init or inc — so each arm of that
+  // switch statement gets a firing, not an argument.
+  test('it fires inside a `while` body', () => {
+    const out = unmergeJoins(fn([{ k: 'while', cond: v('cond'), body: merged() }]));
+    expect(out).not.toBeNull();
+    expect((out!.body[0] as Extract<Stmt, { k: 'while' }>).body).toHaveLength(1);
+  });
+
+  test('it fires inside a `for` body', () => {
+    const out = unmergeJoins(
+      fn([{ k: 'for', init: asg('i', c(0)), cond: v('cond'), inc: asg('i', c(1)), body: merged() }], ['p', 'x', 'i']),
+    );
+    expect(out).not.toBeNull();
+    expect((out!.body[0] as Extract<Stmt, { k: 'for' }>).body).toHaveLength(1);
+  });
+
+  test('it fires inside a `switch` CASE body and inside its DEFAULT', () => {
+    const sw = (body: Stmt[], dflt: Stmt[]): Stmt => ({
+      k: 'switch',
+      scrutinee: v('cond'),
+      cases: [{ values: [1], fallsThrough: false, body }],
+      default: dflt,
+    });
+    const inCase = unmergeJoins(fn([sw(merged(), [])]));
+    expect(inCase).not.toBeNull();
+    expect((inCase!.body[0] as Extract<Stmt, { k: 'switch' }>).cases[0].body).toHaveLength(1);
+    const inDefault = unmergeJoins(fn([sw([], merged())]));
+    expect(inDefault).not.toBeNull();
+    expect((inDefault!.body[0] as Extract<Stmt, { k: 'switch' }>).default).toHaveLength(1);
+  });
+
   test('an unrelated assignment BETWEEN the definitions is kept, and the copy lands after it', () => {
     // the shape the corpus actually has: the structurer interleaves another merge variable's
     // write between the address and the value
