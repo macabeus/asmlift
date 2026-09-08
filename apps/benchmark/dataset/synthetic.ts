@@ -6195,14 +6195,26 @@ export const SYNTHETIC: SynthSpec[] = [
   //    totality (every assignment in the function is one of the arms just rewritten) plus a fresh
   //    re-read of the result — because `localMentions` is sampled before any rewriting and this
   //    pass duplicates statements, so a stale count and the arm count can agree by coincidence.
-  //    Corpus reach, measured by offline enumeration over the 1025-row artifact: FOUR rows, and
-  //    they carry the whole price — `kleod:CountCollectedGems:agbcc` 1152 → 2304, `maskchain`
-  //    24 → 32, `armcb` 8 → 14, `sxparam` 2 → 4, total fan 81588 → 82756 (+1.43 %).
-  //    `kleod:ProcessInputAndUpdateEntities:agbcc` enumerates 51840 either way — the benchmark's
-  //    long pole is untouched. AND THE REAL ROW DOES NOT MOVE, which is this gap's pass: G6 alone
-  //    makes the source WORSE (the winning spelling plus `/unmerge` costs more than the winner),
-  //    so its candidate is enumerated and correctly loses. `kleod:CountCollectedGems:agbcc`
-  //    171 → 171.
+  //    Corpus REACH is four rows and only four — `armcb`, `maskchain`, `sxparam` and
+  //    `kleod:CountCollectedGems:agbcc`; `kleod:ProcessInputAndUpdateEntities:agbcc`, the
+  //    benchmark's long pole, enumerates 51840 either way. THE PRICE IS PER-ROW, and it is not a
+  //    corpus percentage, because an offline enumeration over the artifact does not reproduce the
+  //    REAL tier's fan: that row runs with the project symbol map and the vendored TU, and
+  //    rank.ts already warns that a standalone `enumerateCandidates` call is not the harness's
+  //    enumeration. Measured instead at the CLI's own `enumerate` wrapper, both sides, with
+  //    `origin/main`'s `unmerge.ts` swapped in for the before:
+  //      armcb 8 → 14 · armcb2 (the control) 14 → 14 · maskchain 24 → 32 · sxparam 2 → 4
+  //      kleod:CountCollectedGems:agbcc 3072 → 5952 (+2880, +94 %), 58.3 s → 81.5 s wall (+40 %)
+  //    The three SYNTHETIC numbers reproduce an offline census over the artifact exactly and the
+  //    real row's does not, which is what makes that one diagnostic rather than noise: offline it
+  //    reads 1152 → 2304, 2.6× low, and its true delta alone (+2880) is larger than the entire
+  //    offline corpus delta (+1168). So there is no "+1.43 % total" to quote here or in the next
+  //    round — the corpus's second-heaviest agbcc row pays +94 % candidates for a candidate that
+  //    correctly loses, and that is the honest statement of the price.
+  //    AND THE REAL ROW DOES NOT MOVE, which is this gap's pass: G6 alone makes the source WORSE
+  //    (the winning spelling plus `/unmerge` costs more than the winner), so its candidate is
+  //    enumerated and correctly loses. `kleod:CountCollectedGems:agbcc` 171 → 171, same winning
+  //    label.
   //  • `sinkacc` 17 → **4, CLOSED**, and the L3 attribution above it was a true observation with a
   //    false conclusion attached. The fan dump was right — 36 candidates, winner
   //    `unsigned/reread-globals/uns-cmp` at 17, not one of the 36 carrying `sinkinit` or
