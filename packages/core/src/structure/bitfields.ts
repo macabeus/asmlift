@@ -76,8 +76,9 @@ export interface BitfieldDeps {
 export interface BitfieldSpellings {
   /** extract op → the `gSym.field` read it spells */
   spelling: Map<Op, { global: string; field: string }>;
-  /** store op → the `gSym.field = value` write it spells */
-  stores: Map<Op, { global: string; field: string; value: Value }>;
+  /** store op → the `gSym.field = value` write it spells. `value` is `null` for the ALL-ZERO
+   *  form, where the asm carries no insert at all and the source assigned a literal 0. */
+  stores: Map<Op, { global: string; field: string; value: Value | null }>;
   /** loads whose EVERY use is a spelled extract: the fold emits no temp for these */
   absorbed: Set<Op>;
 }
@@ -103,7 +104,7 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
   // …and the WRITE side: a store the mask-and-insert idiom recognized (see the block below), with
   // the value the source assigned. THE SECOND inhabitant of "a precomputed member spelling", which
   // is what makes the shape shared rather than anticipated.
-  const bitfieldStore = new Map<Op, { global: string; field: string; value: Value }>();
+  const bitfieldStore = new Map<Op, { global: string; field: string; value: Value | null }>();
   const absorbedLoads = new Set<Op>();
   if (symCtx && littleEndian && spellBitfieldMembers) {
     // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
@@ -190,6 +191,26 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
     // single-use and unmaterialized, because the fold DELETES all of them — a second reader would
     // keep the temp and the emitted C would do the work twice.
     //
+    // THE ALL-ZERO FORM HAS NO `or`, and that is a fact about the COMPILER, not about this pass.
+    // agbcc's `expmed.c` skips the insert entirely when the assigned value is all-zero
+    // (`:557-558`, `:606-608`), so `gSym.field = 0;` lowers to `store(A, and(load(A), ~W))` — the
+    // store's value operand IS the keep. Recognizing only the `or` left that shape with no
+    // candidate spelling the member at all.
+    //
+    // ITS EVIDENCE GATE, and why the axis is the MASK and not the value. `= 0` is also spellable
+    // raw, as `*(u8 *)&gSym = KEEP & *(u8 *)&gSym`, so a recognizer keyed on "the inserted value
+    // is 0" would name a member wherever the two spellings are the SAME OBJECT — an evidence-free
+    // default. Measured with the pinned agbcc on a `u8 a:4; u8 b:4` container: the HIGH nibble's
+    // two spellings (`gFlags.unk0_4 = 0;` and `15 & *(u8 *)&gFlags`) are byte-identical, both
+    // `mov r0,#0xf`. The LOW nibble's are not. The difference is where the complement is computed:
+    // the DECLARED store takes `~0xF` in the 32-bit domain, `-16` = 0xFFFFFFF0, which no Thumb
+    // `mov #imm8` encodes, so agbcc materialises it `mov #0x10; neg` — where a byte-domain
+    // spelling narrows the same keep to one encodable `mov #0xF0`. So the fold REFUSES the zero
+    // form unless the keep mask carries bits OUTSIDE the stored cell: that materialisation is the
+    // byte evidence, and without it the member name is a guess. (Not that NO raw spelling can emit
+    // `mov; neg` — a `s32` temp holding `-16` does — but none emits it in this order and
+    // allocation, so the distinguisher holds for this byte sequence.)
+    //
     // TRUNCATION is what makes an UNMASKED insert legal, and only sometimes: C truncates the
     // assigned value to the field width, while the asm's `or` writes every bit of `v << lo` that
     // the STORE keeps. The two agree when the field ends the stored cell — bits above it are
@@ -239,24 +260,34 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
         const width = op.attrs.width as number;
         const cell = globalCellOf(defs, op.operands[0], op.attrs.off as number);
         const si = cell ? symCtx.info(cell.name) : undefined;
-        const orOp = defs.get(op.operands[1]);
+        const valOp = defs.get(op.operands[1]);
+        // the ALL-ZERO form: no `or`, the keep `and` IS the store's value (see the note above).
+        // Single-use and unmaterialized are not tested here because they are the SAME op the
+        // shared `andOp` gate below tests — stating them twice would be a rule with no reader.
+        const zeroForm = valOp?.opcode === 'and';
         if (
           !cell ||
           si?.shape !== 'struct' ||
           si.volatile ||
-          orOp?.opcode !== 'or' ||
-          orOp.operands.length !== 2 ||
-          materialize.has(orOp) ||
-          (useSitesOf.get(orOp.results[0]) ?? []).length !== 1
+          (!zeroForm &&
+            (valOp?.opcode !== 'or' ||
+              valOp.operands.length !== 2 ||
+              materialize.has(valOp) ||
+              (useSitesOf.get(valOp.results[0]) ?? []).length !== 1))
         ) {
           continue;
         }
         const cellBits = width * 8;
         const cellMask = width >= 4 ? -1 : (1 << cellBits) - 1;
-        for (const [keepV, insV] of [
-          [orOp.operands[0], orOp.operands[1]],
-          [orOp.operands[1], orOp.operands[0]],
-        ] as const) {
+        // The `or` form's two pairs are the commutativity of `|`; the zero form contributes one,
+        // with `null` for an insert that the asm does not contain.
+        const pairs: readonly (readonly [Value, Value | null])[] = zeroForm
+          ? [[op.operands[1], null]]
+          : [
+              [valOp!.operands[0], valOp!.operands[1]],
+              [valOp!.operands[1], valOp!.operands[0]],
+            ];
+        for (const [keepV, insV] of pairs) {
           const andOp = defs.get(keepV);
           if (
             andOp?.opcode !== 'and' ||
@@ -298,22 +329,36 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
           if ((((w >= 32 ? -1 : (1 << w) - 1) << lo) & cellMask) !== clear) {
             continue;
           }
-          // …and the insert must be exactly that value seated at `lo`.
-          const shifted = defs.get(insV);
-          const value =
-            lo === 0
-              ? insV
-              : shifted?.opcode === 'shl' && shifted.operands.length === 1 && shifted.attrs.imm === lo
-                ? shifted.operands[0]
-                : null;
-          if (
-            value === null ||
-            (lo !== 0 && (materialize.has(shifted!) || (useSitesOf.get(insV) ?? []).length !== 1))
-          ) {
+          // REFUSES the zero form whenever the keep mask fits inside the stored cell: there the
+          // declared store and the raw byte-domain spelling are the same object, so naming the
+          // member would be a default with no byte evidence behind it (header note above). A
+          // 4-byte cell has `cellMask === -1` and so is refused unconditionally — a word-wide keep
+          // has no bits outside its own cell, and there is never evidence there.
+          if (insV === null && (mask & cellMask) === mask) {
             continue;
           }
-          if (lo + w !== cellBits && provableBits(bits, value) > w) {
-            continue; // C would truncate bits the asm's `or` writes
+          // …and the insert must be exactly that value seated at `lo`.
+          // The zero form skips all of it: there is no insert to seat, and nothing the asm's
+          // (absent) `or` writes that C's truncation could disagree with. `value` stays `null`,
+          // which is what the render site reads as the literal 0.
+          let value: Value | null = null;
+          if (insV !== null) {
+            const shifted = defs.get(insV);
+            value =
+              lo === 0
+                ? insV
+                : shifted?.opcode === 'shl' && shifted.operands.length === 1 && shifted.attrs.imm === lo
+                  ? shifted.operands[0]
+                  : null;
+            if (
+              value === null ||
+              (lo !== 0 && (materialize.has(shifted!) || (useSitesOf.get(insV) ?? []).length !== 1))
+            ) {
+              continue;
+            }
+            if (lo + w !== cellBits && provableBits(bits, value) > w) {
+              continue; // C would truncate bits the asm's `or` writes
+            }
           }
           const fld = symCtx
             .fieldsOf(cell.name)

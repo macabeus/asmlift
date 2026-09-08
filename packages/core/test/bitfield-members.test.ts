@@ -372,3 +372,62 @@ describe('what this fold does NOT police', () => {
     expect(src).toContain('((u8 *)&gState)[5] = 7;');
   });
 });
+
+// ── the ALL-ZERO form: agbcc emits no `or` at all ────────────────────────────────────────────
+// `expmed.c` skips the insert when the assigned value is 0 (`:557-558`, `:606-608`), so
+// `gState.low = 0;` lowers to `store(A, and(load(A), ~W))` — no `or` for the idiom above to key
+// on. What decides whether that shape may be NAMED is the keep mask's MATERIALISATION, not the
+// value: the declared store complements in the 32-bit domain (`~0xF` = -16, which no Thumb `mov`
+// encodes, hence `mov #0x10; neg`), where every raw byte-domain spelling of the same clear narrows
+// to one encodable `mov #0xF0`. Where the two spellings are the same object there is no evidence,
+// and the fold refuses.
+
+/** `gState.<window> = 0` as agbcc lowers it: clear the window, store the cleared load back. */
+const ZERO = (keep: string, byte = 8) =>
+  `f:\n\tldr\tr1, .L1\n\tldrb\tr2, [r1, #${byte}]\n${keep}\tstrb\tr2, [r1, #${byte}]\n` +
+  `\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n`;
+/** ~0xF built in the 32-bit domain — the materialisation only a DECLARED store produces. */
+const KEEP_NEG16 = '\tmov\tr3, #0x10\n\tneg\tr3, r3\n\tand\tr2, r3\n';
+
+describe('the all-zero bitfield store', () => {
+  test('a keep mask with bits OUTSIDE the cell spells the assignment of 0', () => {
+    const src = runW(ZERO(KEEP_NEG16));
+    expect(src).toContain('gState.low = 0;');
+    expect(src).not.toContain('&'); // the load and the mask are both gone
+  });
+
+  test('REFUSES a keep mask that fits the stored cell — the raw spelling is the same object', () => {
+    // `mov #0xF0` clears the same window and is what a byte-domain source spelling compiles to,
+    // so naming the member here would be a default with no byte evidence behind it.
+    const src = runW(ZERO('\tmov\tr3, #0xf0\n\tand\tr2, r3\n'));
+    expect(src).not.toContain('gState.low');
+    expect(src).toContain('240');
+  });
+
+  test('REFUSES the HIGH nibble, whose two spellings agbcc compiles identically', () => {
+    // `gState.top = 0;` and `0xF & *(u8 *)&gState[8]` are one object (`mov r0,#0xf` on both
+    // sides): the complement fits a byte, so no materialisation distinguishes them.
+    const src = runW(ZERO('\tmov\tr3, #0xf\n\tand\tr2, r3\n'));
+    expect(src).not.toContain('gState.top');
+  });
+
+  test('REFUSES a WORD cell — a word-wide keep can never carry bits outside its own cell', () => {
+    const word =
+      'f:\n\tldr\tr1, .L1\n\tldr\tr2, [r1, #0x4]\n\tmov\tr3, #0x10\n\tneg\tr3, r3\n\tand\tr2, r3\n' +
+      '\tstr\tr2, [r1, #0x4]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const layout: SymbolStructField[] = [
+      ...WRITE_LAYOUT.filter((f) => f.offset !== 4),
+      { name: 'wlow', offset: 4, size: 4, signed: false, bitWidth: 4, bitOffset: 0 },
+    ];
+    expect(runW(word, writeInfo({ layout }))).not.toContain('wlow = 0');
+  });
+
+  test('the clearing `and` must be consumed HERE — a second reader keeps the honest spelling', () => {
+    // the fold deletes the load and the `and`; a second use would make the emitted C do the work
+    // twice, so the store keeps the raw mask instead
+    const twoReaders =
+      'f:\n\tldr\tr1, .L1\n\tldrb\tr2, [r1, #0x8]\n\tmov\tr3, #0x10\n\tneg\tr3, r3\n\tand\tr2, r3\n' +
+      '\tstrb\tr2, [r1, #0x8]\n\tstrb\tr2, [r1, #0x9]\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    expect(runW(twoReaders)).not.toContain('gState.low = 0');
+  });
+});
