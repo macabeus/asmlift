@@ -1,7 +1,7 @@
 // asmlift L3 — the language-NEUTRAL structured AST. A LanguageBackend lowers this to a
 // concrete language (C / Pascal / C++) and prints it. "Return a value" and binary ops
 // are neutral nodes here; each backend owns its own spelling.
-import type { IrType } from '../ir/types';
+import { type IrType, typeEquals } from '../ir/types';
 
 export type Expr =
   | { k: 'var'; name: string }
@@ -103,6 +103,19 @@ export type Expr =
       width: number;
       signed: boolean;
       lead?: Expr[];
+      /** The ELEMENT type the base's own DECLARATION gives it, for the one base whose stride the
+       *  C type walk cannot reconstruct: a map-declared array MEMBER (`gPtr->arr`), which
+       *  `exprCType` types `undefined` because the `field` node hangs off an untyped `var`. Without
+       *  it the C backend legalizes the base through a reinterpret cast (`((u8 *)gPtr->arr)[i]`),
+       *  which is the CAST form's object again and defeats the whole point of naming the member.
+       *
+       *  It is EVIDENCE the backend re-checks, not an assertion it trusts: `legalizedIndexBase`
+       *  runs the same `derefStrideOk` over it that it runs over an inferred type, so a producer
+       *  that ever states a type not striding the access width gets the honest cast back rather
+       *  than a base subscripted at the wrong stride. Set only by structure/structure.ts
+       *  `pointeeElement`, from the map's own `elemSize`/`elemSigned` for the member it just
+       *  named. */
+      baseElem?: IrType;
       operandOff?: number;
       baseOrdered?: true;
     }
@@ -421,6 +434,13 @@ export function exprEquals(a: Expr, b: Expr): boolean {
         a.signed === bb.signed &&
         lead.length === bLead.length &&
         lead.every((v, i) => exprEquals(v, bLead[i])) &&
+        // `baseElem` is part of the SPELLING for the same reason `lead` is: it decides whether the
+        // base takes the reinterpret cast, so two otherwise-equal nodes disagreeing about it print
+        // two different expressions. (Its one producer derives it from the base and the width, so
+        // nodes that agree on those agree here too — this cannot reject a real CSE.)
+        (a.baseElem === undefined
+          ? bb.baseElem === undefined
+          : bb.baseElem !== undefined && typeEquals(a.baseElem, bb.baseElem)) &&
         exprEquals(a.base, bb.base) &&
         exprEquals(a.idx, bb.idx)
       );

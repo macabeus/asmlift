@@ -144,7 +144,12 @@ export type LeafHook = (e: Expr, rec: (e: Expr, p: number) => string) => string 
  *  -fprologue-bugfix`), and referring to a volatile object through a non-volatile lvalue is
  *  undefined behaviour (C99 6.7.3p5). */
 function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Expr {
-  return derefStrideOk(exprCType(ix.base, vt.type), ix.width, ix.signed)
+  // `baseElem` states the element type the base's own DECLARATION gives it, where the type walk
+  // cannot reconstruct one (a map-declared array MEMBER — see l3/ast.ts). It is CHECKED here by
+  // the same predicate an inferred type would face, so a stated type that does not stride the
+  // access width takes the honest cast exactly as an unknown one does.
+  const declared = ix.baseElem !== undefined ? T.ptr(ix.baseElem) : undefined;
+  return derefStrideOk(declared ?? exprCType(ix.base, vt.type), ix.width, ix.signed)
     ? ix.base
     : {
         k: 'cast',

@@ -553,14 +553,106 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     { name: 'flag', offset: 78, size: 1, signed: false },
   ];
 
-  test('an indexed ARRAY member is NEVER named — at offset 0 or anywhere else', () => {
-    const atZero = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, pointee(AT_ZERO)]]));
-    expect(atZero).not.toContain('->slots');
-    expect(atZero).toContain('(u8 *)gPtr'); // the arithmetic spelling the bytes were matched against
+  // …and the SAME member with the rank stated. `dims` is the fact that was missing: it says how
+  // many subscripts reach an element, which is what makes the emitted spelling type-check against
+  // the project's own header rather than against a declaration asmlift wrote for itself.
+  const ranked = (dims: (number | null)[], extra: object = {}) => [
+    { name: 'grid', offset: 0, size: 48, elemSize: 1, elemSigned: false, length: 48, dims, ...extra },
+  ];
+  test('an indexed ARRAY member is named only where the member BASE was materialised', () => {
+    // `gPtr->arr[i]` and `((u8 *)gPtr + i)[K]` were MEASURED against agbcc and are NOT the same
+    // bytes: at every nonzero K the arrow form materialises `base + K` instead of folding it into
+    // the load (+2 code bytes at width 1, +4 at widths 2 and 4). The asm therefore SAYS which
+    // source it came from — the constant reaches the rule either through the base tree or through
+    // the instruction's own displacement — so this is a decided per-site default, not a guess.
+    const atZero = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, pointee(ranked([16, 3]))]]));
+    expect(atZero).toContain('gPtr->grid[0][a0]');
 
+    // The displacement channel: the constant stayed in the load, so the cast form is what compiled
+    // and the member is not named. (`SLOTS`' `slots` sits at offset 16 with no rank stated, which
+    // is a second reason — the offset-16 case below states one and still declines.)
     const atSixteen = run('f', derefAt('ldrb\tr0, [r1, #0x10]', INDEXED), mapOf([[0x03001234, pointee(SLOTS)]]));
     expect(atSixteen).not.toContain('->slots');
     expect(atSixteen).toContain('((u8 *)gPtr + a0)[16]');
+
+    const rankedAtSixteen = run(
+      'f',
+      derefAt('ldrb\tr0, [r1, #0x10]', INDEXED),
+      mapOf([
+        [
+          0x03001234,
+          pointee([
+            { name: 'pre', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16, dims: [16] },
+            ...ranked([48]).map((f) => ({ ...f, offset: 16 })),
+          ]),
+        ],
+      ]),
+    );
+    expect(rankedAtSixteen).not.toContain('->grid');
+    expect(rankedAtSixteen).toContain('((u8 *)gPtr + a0)[16]');
+  });
+
+  test('a member with NO stated rank declines — absence is not read as rank 1', () => {
+    // Every vendored map predates the provider reading a member's rank, and each one flattens a
+    // member its project's header declares multidimensional. Reading absence as rank 1 spells
+    // `->grid[k]` against a `u8 grid[6][8]` header, which agbcc compiles as a ROW: it strides the
+    // row a second time and truncates the resulting pointer to u8 — a different program that
+    // happens to compile, which is exactly the class no gate downstream can catch.
+    const atZero = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, pointee(AT_ZERO)]]));
+    expect(atZero).not.toContain('->slots');
+    expect(atZero).toContain('(u8 *)gPtr'); // the arithmetic spelling the bytes were matched against
+  });
+
+  test('a stated RANK-2 member spells BOTH subscripts, splitting them out of one residual', () => {
+    // agbcc computes a rank-2 member's index as one value before adding it to the base
+    // (`lsl r2,#3; add r0,r0,r2; add r1,r1,r0` — synthetic:pmarr2's own target). The row stride is
+    // the declaration's, so the term riding it is the ROW and what is left is the column.
+    const twoTerms = '\tlsls\tr2, r2, #0x3\n\tadds\tr0, r0, r2\n\tadds\tr1, r1, r0\n';
+    const src = run('f', derefAt('ldrb\tr0, [r1]', twoTerms), mapOf([[0x03001234, pointee(ranked([6, 8]))]]));
+    expect(src).toContain('gPtr->grid[a1][a0]');
+
+    // …and the SAME asm against a map stating rank 1 spells the one subscript that declaration
+    // has. The rank is not decoration: these are two different declarations of one object, and
+    // each spelling type-checks against exactly one of them.
+    const flat = run('f', derefAt('ldrb\tr0, [r1]', twoTerms), mapOf([[0x03001234, pointee(ranked([48]))]]));
+    expect(flat).toContain('gPtr->grid[a0 + (a1 << 3)]');
+  });
+
+  test('a rank the residual cannot be split along still spells every subscript, never a row', () => {
+    // One flat counter walking the whole member: no term rides the declared row stride, so the row
+    // subscript comes out the literal 0. `->grid[0][i]` is the SAME address the byte arithmetic
+    // reached, and it is the only spelling that type-checks — a rank-2 member has no flat form to
+    // fall back to.
+    const src = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, pointee(ranked([6, 8]))]]));
+    expect(src).toContain('gPtr->grid[0][a0]');
+    // An UNSPELLABLE rank (an unknown inner extent) declines instead — no subscript can be split
+    // along a stride nothing states.
+    const ragged = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, pointee(ranked([6, null]))]]));
+    expect(ragged).not.toContain('->grid');
+  });
+
+  test('the rank-aware member spelling honours every gate the constant-offset one does', () => {
+    // element SIGNEDNESS: an s8 read is ldrb+lsl+asr where u8 is ldrb alone
+    const signedRead = run(
+      'f',
+      derefAt('ldrsb\tr0, [r1, r2]', '\tmovs\tr2, #0x0\n\tadds\tr1, r1, r0\n'),
+      mapOf([[0x03001234, pointee(ranked([48]))]]),
+    );
+    expect(signedRead).not.toContain('->grid');
+    // VOLATILE: the named access would be observable where the cast form it replaces is plain
+    const vol = run(
+      'f',
+      derefAt('ldrb\tr0, [r1]', INDEXED),
+      mapOf([[0x03001234, pointee(ranked([48], { volatile: true }))]]),
+    );
+    expect(vol).not.toContain('->grid');
+    // WIDTH: a member of a different element size is not this access's member
+    const wide = run(
+      'f',
+      derefAt('ldrh\tr0, [r1]', '\tlsls\tr0, r0, #0x1\n' + INDEXED),
+      mapOf([[0x03001234, pointee(ranked([48]))]]),
+    );
+    expect(wide).not.toContain('->grid');
   });
 
   test('a WIDER indexed member is not named either — the width-2/4 case differs even at offset 0', () => {
@@ -837,10 +929,18 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     expect(src).toContain('(u16 *)((u8 *)gPtr + a0)');
   });
 
-  test('TWO variable terms decline — only a single residual can be one member index', () => {
-    const layout = [{ name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16 }];
+  test('TWO variable terms re-associate in VISIT ORDER — a rank-2 index is two of them', () => {
+    // They used to fail the base recognizer outright, which made a rank-2 member's own index
+    // (`->x[i][j]` computes `j + i*8`) unreachable. They now re-associate into one residual, in
+    // the `+` tree's own left-to-right order and never sorted — `j + (i * 8)` and `(i * 8) + j`
+    // are different agbcc objects, so the order is part of the answer.
     const body = derefAt('ldrb\tr0, [r1]', '\tadds\tr1, r1, r0\n\tadds\tr1, r1, r2\n');
-    expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).not.toContain('->slots');
+    const layout = [{ name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16, dims: [16] }];
+    expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).toContain('gPtr->slots[a0 + a1]');
+    // …and a member the map states no rank for still declines, on the rank gate rather than on the
+    // base decomposition — the consumer decides, the recognizer no longer decides for it.
+    const noRank = [{ name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16 }];
+    expect(run('f', body, mapOf([[0x03001234, pointee(noRank)]]))).not.toContain('->slots');
   });
 
   test('a MALFORMED layout is declined, never a crash (SymbolMap is public API)', () => {
