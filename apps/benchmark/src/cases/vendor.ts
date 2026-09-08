@@ -52,13 +52,27 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
   console.log(`${project}: vendored symbol map (${map.size} addresses)`);
 }
 
-export async function vendor(filterProject?: string): Promise<void> {
+/** `symbolsOnly`: rewrite ONLY the ELF-derived symbol map, leaving the preprocessed TUs,
+ *  index.json and PROVENANCE.json byte-for-byte as committed. The two halves of the vendored
+ *  dataset have DIFFERENT sources — the TUs come from cpp over the checkout's headers, the map
+ *  from the checkout's ELF through this repo's own provider — so a change to the PROVIDER
+ *  invalidates the map alone. Re-preprocessing 252 TUs to fix that would churn the dataset for
+ *  reasons the change does not own, and would restamp `generatedAt` (and a `dirty` flag) on
+ *  provenance that did not change. The fidelity drift gate (run/symbol-drift.ts) compares the
+ *  map, and only the map, against a fresh derivation. */
+export async function vendor(filterProject?: string, opts: { symbolsOnly?: boolean } = {}): Promise<void> {
   const manifests = loadManifestsForVendor().filter((m) => !filterProject || m.project === filterProject);
   for (const man of manifests) {
     // the vendored dataset must be reproducible from the pinned branch — a drifted checkout
     // fails loud here (ASMLIFT_ALLOW_DIRTY_CHECKOUT=1 downgrades to a warning for WIP machines)
     enforceCheckoutPin(man, 'vendor');
     const root = resolveProjectRoot(man);
+    if (opts.symbolsOnly) {
+      const outDir = join(REAL_DIR, 'tu', man.project);
+      mkdirSync(outDir, { recursive: true });
+      await vendorSymbols(man, root, outDir);
+      continue;
+    }
     const cfg: RealProjectCfg = {
       project: man.project,
       toolchain: man.toolchain,

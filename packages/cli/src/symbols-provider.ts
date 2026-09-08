@@ -86,6 +86,7 @@ interface DwarfMember {
   elemSize?: number;
   elemSigned?: boolean;
   length?: number;
+  dims?: (number | null)[];
 }
 
 /** `sub_08xxxxxx` / `_08xxxxxx`-style placeholder names — real symbols, but names no header
@@ -239,6 +240,19 @@ export function layoutOf(
         ...(typeof m.bitWidth === 'number' ? { bitWidth: m.bitWidth } : {}),
         ...(typeof m.bitOffset === 'number' ? { bitOffset: m.bitOffset } : {}),
         ...(typeof m.length === 'number' ? { length: m.length } : {}),
+        // The member's RANK. `length` above is the PRODUCT of the extents, so it cannot say how
+        // many subscripts reach an ELEMENT — and unlike a global's, a member's array is declared
+        // by the PROJECT'S OWN header, which an emitted access has to type-check against.
+        //
+        // NO CAPABILITY GATE, unlike `assertArrayDimsPresent` one screen up, and the asymmetry is
+        // forced by the package rather than chosen: a global's array shape reports `dims: null`
+        // for an array whose DWARF carries no subranges, so key presence separates "no subranges"
+        // from "package too old". A MEMBER simply omits the key in both cases, so a
+        // presence probe would refuse whole projects over a legitimate flexible array member.
+        // Absence is safe without one because core reads it as "the map could not say" and
+        // DECLINES the indexed member spelling (SymbolStructField.dims) — the silent-wrong answer
+        // a gate would exist to prevent is already unreachable.
+        ...(Array.isArray(m.dims) ? { dims: m.dims } : {}),
       };
     });
 }

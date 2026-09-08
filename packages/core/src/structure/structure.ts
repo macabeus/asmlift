@@ -67,6 +67,7 @@ import {
   type DeclaredField,
   type SymbolInfo,
   type SymbolStructField,
+  declaredArrayShape,
   declaredFields,
   isArrayField,
   isBitfieldField,
@@ -74,6 +75,7 @@ import {
   isScalarCellSize,
   pointeeFields,
   scalarCellType,
+  structFieldInnerExtents,
 } from '../symbols';
 import { analyze } from './analysis';
 import { makeBitfieldSpelling } from './bitfields';
@@ -85,6 +87,7 @@ import {
   elementIndex,
   globalByteBase,
   globalOf,
+  subscriptsFromExtents,
 } from './globalaccess';
 import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
 import { type NaturalLoop, analyzeLoops } from './loops';
@@ -163,7 +166,7 @@ function ptrGlobalValueName(x: Expr): string | null {
   return null;
 }
 
-/** A pointer global's value, the constant bytes added to it, and the at-most-one variable term. */
+/** A pointer global's value, the constant bytes added to it, and the variable byte residual. */
 interface PtrGlobalBase {
   name: string;
   byte: number;
@@ -171,18 +174,23 @@ interface PtrGlobalBase {
 }
 
 /** Decompose an access base into "the VALUE of a map-declared POINTER global + a constant byte
- *  offset + at most ONE variable term": `gPtr`, `gPtr + K`, `(u8 *)gPtr + i`, `(u8 *)gPtr + (i <<
- *  2) + K`. Null for anything else — two variable terms, no such global, a non-`+` operator —
- *  because only a single residual can be read as one member's index. */
+ *  offset + the variable residual": `gPtr`, `gPtr + K`, `(u8 *)gPtr + i`, `(u8 *)gPtr + (i << 2)
+ *  + K`, `(u8 *)gPtr + K + j + (i << 3)`. Null for anything else — no such global, a non-`+`
+ *  operator.
+ *
+ *  SEVERAL variable terms re-associate into ONE residual rather than refusing the decomposition,
+ *  because a rank-2 member's index is two of them (`->x[i][j]` computes `j + i*8`) and the caller
+ *  that splits them back apart ({@link pointeeElement}) needs to see both. The `+` tree's own
+ *  LEFT-TO-RIGHT visit order is preserved and never sorted: `j + (i * 8)` and `(i * 8) + j` are
+ *  different agbcc objects, so the order is part of the answer.
+ *
+ *  Every consumer still decides for itself what a residual it cannot explain means: the
+ *  constant-offset member spelling ({@link pointeeAccess}) refuses any residual at all. */
 function ptrGlobalBase(e: Expr, isPtrGlobal: (n: string) => boolean): PtrGlobalBase | null {
   let name: string | null = null;
   let byte = 0;
-  let idx: Expr | null = null;
-  let ok = true;
+  const terms: Expr[] = [];
   const visit = (x: Expr): void => {
-    if (!ok) {
-      return;
-    }
     if (x.k === 'bin' && x.op === '+') {
       visit(x.l);
       visit(x.r);
@@ -197,14 +205,11 @@ function ptrGlobalBase(e: Expr, isPtrGlobal: (n: string) => boolean): PtrGlobalB
       byte += x.value;
       return;
     }
-    if (idx !== null) {
-      ok = false;
-      return;
-    }
-    idx = x;
+    terms.push(x);
   };
   visit(e);
-  return ok && name !== null ? { name, byte, idx } : null;
+  const idx = terms.length === 0 ? null : terms.reduce((l, r): Expr => ({ k: 'bin', op: '+', l, r }));
+  return name !== null ? { name, byte, idx } : null;
 }
 
 /** Does a member declared at signedness `declared` read as EXACTLY the type the cast spelling this
@@ -430,9 +435,158 @@ function spellablePointee(
   return { fields, const: pointee!.const };
 }
 
+/** `gPtr->arr[i]` — a VARIABLE-index access into an ARRAY member of a pointer global's pointee.
+ *
+ *  Unlike the constant-offset member spelling below, this one is NOT byte-neutral. The member form
+ *  materialises the member's own base (`add r1, r1, #0x8` then `ldrb r0, [r1]`) where the cast form
+ *  folds the constant into the load (`add r0, r0, r1` then `ldrb r0, [r0, #0x8]`), so the constant
+ *  reaches this rule down two distinguishable channels: the base tree (`pg.byte`, a separate add)
+ *  or the instruction's own displacement (`off`). The gate is `off === 0` — the constant was
+ *  materialised — and where the displacement carries it the cast spelling stands.
+ *
+ *  THAT CHANNEL DOES NOT SAY THE SOURCE NAMED THE MEMBER: a HOISTED BASE LOCAL materialises the
+ *  same constant. Compiled at `TOOLCHAIN.agbccFlags` against `u8 unk8[6][8]`, all three of
+ *  `gBlob->unk8[0][i]`, `u8 *p = (u8 *)gBlob->unk8; p[i]` and `u8 *p = (u8 *)gBlob + 8; p[i]` emit
+ *  the identical `add r1, #0x8` · `add r1, r1, r0` · `ldrb r0, [r1]`, while `*((u8 *)gBlob + 8 + i)`
+ *  and `((u8 *)gBlob + i)[8]` take the displacement — and the base-local form is a spelling three
+ *  shipped passes exist to emit (basecse/nearbase/scopebase). It is a per-site DEFAULT and not a
+ *  ranked axis for the OTHER reason of the two docs/level-tower.md gives: those two forms TIE in
+ *  bytes, so an axis would enumerate a candidate that can never win. Contrast the GLOBAL rank
+ *  recovery one indirection up (`cli/test/matching/array-rank-axis.test.ts`, `/flat-rank`), which
+ *  IS an axis because its two spellings do not tie. Do not read this gate as "the asm decided" and
+ *  carry that reading to a case where the alternatives differ in bytes.
+ *
+ *  THE RANK IS PART OF THE SPELLING, not a later fidelity polish. The declaration this access has
+ *  to type-check against belongs to the PROJECT, not to asmlift, and `->x[k]` on a `u8 x[6][8]`
+ *  is a ROW: agbcc strides it a second time and truncates the resulting pointer to `u8`, which is
+ *  a different program that happens to compile. So a member whose map states no rank is REFUSED
+ *  (absence means "the map could not say" — see SymbolStructField.dims), and a stated rank is
+ *  spelled out in full (`->x[i][j]`, or `->x[0][i]` where the asm merged the row into one flat
+ *  counter, which is the same address).
+ *
+ *  `->x[0][i]` TYPE-CHECKS AND IS OUT OF BOUNDS, and both halves of that are meant: `i` runs the
+ *  member's whole element count through a declared row of `8`. There is no in-bounds alternative —
+ *  the flat `->x[i]` is a different program (above) and the cast form is what this rule replaces —
+ *  so it is the only spelling that both type-checks and keeps the bytes, which is a narrower claim
+ *  than "the only spelling that type-checks". The `pmarrrow` synthetic row referees it (pass
+ *  `subscriptsFromExtents` a `needRecovered` of true, as the global path does, and the row takes
+ *  the cast form: MATCH → diff:5); `kleod:CheckWorldCompletion:agbcc` is its real-tier inhabitant;
+ *  at rank 3 the same merge spells `->x[0][0][k]`.
+ *
+ *  A VARIABLE SUBSCRIPT IS NEVER BOUNDED, here or anywhere. The member lookup bounds only the
+ *  CONSTANT part (`pg.byte` inside `[offset, offset+size)`), so `->grid[i]` can address the member
+ *  after `grid` exactly as `->x[0][i]` can run past a row. Not this rule's defect to fix: the cast
+ *  form it replaces is unbounded in the same way, the asm supplies no bound, and refusing every
+ *  unbounded index would refuse the capability whole (`pmarr1`'s `gBlob->unk8[i]` included). It is
+ *  recorded so the constant-side check is not mistaken for a bounds check on the access.
+ *
+ *  REFUSES, and each one keeps the honest cast form rather than guessing. Named with the test that
+ *  fails when it is removed (`packages/core/test/symbols.test.ts`), because a refusal nothing
+ *  ablates is a claim rather than a rule:
+ *    • any load/store displacement at all (`off !== 0`)   — "named only where the member BASE was
+ *      materialised"
+ *    • a pointee nothing may be named through, a qualifier the name would reintroduce, a width
+ *      mismatch, an element signedness the access contradicts (an s8 read is ldrb+lsl+asr where u8
+ *      is ldrb alone)   — "honours every gate the constant-offset one does", "a WIDER indexed
+ *      member is not named either", "a WIDTH mismatch falls back to the cast spelling"
+ *    • no array member of exactly this element width covering the accessed byte   — same three
+ *    • a member with NO stated rank   — "absence is not read as rank 1"
+ *    • a rank the DECLARATION does not spell: `dims` and `length` are independent map facts, and
+ *      symbolFieldType declares the flat byte array whenever the bound is missing   — "a rank with
+ *      NO `length` DECLARES flat, so the access may not subscript it — as a pair"
+ *    • a rank whose subscripts cannot be split out of the residual   — "a rank the residual cannot
+ *      be split along still spells every subscript, never a row"
+ *    • a byte offset into the member that does not land on an element boundary
+ *
+ *  NOT a `Gate` table (l3/gates.ts), unlike `FRESH_MERGE_GATES` and `CARRIER_NAME_GATES` in this
+ *  same file: those refusals are predicates over ONE prepared context, while these interleave with
+ *  the computations that produce the values the later ones test (the member `find`,
+ *  `structFieldInnerExtents`, `declaredArrayShape`, `subscriptsFromExtents`), so building that Ctx
+ *  would run all of it on inputs the earlier gates reject.
+ *
+ *  A THIRD ROUTE TO THE SAME LEGALIZATION, deliberately not taken: peel `lead.length` array levels
+ *  off the WALKED base type before the stride check, needing neither `baseElem` nor the global
+ *  path's env lie (`noteGlobal(name, T.ptr(elem))`) — both of which exist only because
+ *  `derefStrideOk` asks a SINGLE-subscript question of a node carrying `lead.length + 1`
+ *  subscripts. It needs `gPtr` typed in the print env, a bigger change than this gap should
+ *  carry. */
+function pointeeElement(
+  pg: PtrGlobalBase,
+  off: number,
+  width: number,
+  signed: boolean,
+  isStore: boolean,
+  sym: SymRenderCtx,
+): Expr | null {
+  // `pg.idx === null` narrows the type; the sole caller reaches here only for a variable index.
+  if (off !== 0 || pg.idx === null) {
+    return null;
+  }
+  const p = spellablePointee(pg.name, sym);
+  const f = p?.fields.find(
+    (m) => isArrayField(m) && m.elemSize === width && m.offset <= pg.byte && pg.byte < m.offset + m.size,
+  );
+  if (!p || !f || !spellsAccessType(f.elemSigned, width, signed) || !memberQualsAllow(f, p.const, isStore)) {
+    return null;
+  }
+  // The map must have STATED the rank. Absence is not rank 1 here: every vendored map predates the
+  // provider reading a member's rank, and each one flattens a member its project's header declares
+  // multidimensional (SymbolStructField.dims).
+  if (f.dims === undefined) {
+    return null;
+  }
+  const inner = structFieldInnerExtents(f);
+  const rel = pg.byte - f.offset;
+  if (inner === null || rel % width !== 0) {
+    return null;
+  }
+  // …AND THE DECLARATION HAS TO SPELL THAT SAME RANK. `dims` is not the declaration: symbolFieldType
+  // needs facts `dims` does not supply (a `length`, a base-type `elemSigned`) and declares the FLAT
+  // byte array without them, while `dims` and `length` are independent — a member whose outermost
+  // subrange is unbounded (`u8 data[][8]`, legal C; @gba-kit/debug-info reports `length` absent and
+  // `dims` regardless) carries `dims: [null, 8]` and no `length`. Reading the rank off `dims` alone
+  // therefore emitted `gPtr->grid[0][a0];` against `struct Save { u8 grid[48]; };` — the exact
+  // decl-vs-access divergence declaredFields' header calls non-compiling C. Asked of
+  // declaredArrayShape, which reads the answer back OUT of the declaration, so no gate that
+  // function grows later can reopen it. The element test is the one `baseElem` below asserts: the
+  // declaration must really give this base the element type the node is about to state for it.
+  const decl = declaredArrayShape(f);
+  if (decl.extents.length !== inner.length + 1 || !typeEquals(decl.elem, T.int(width * 8, f.elemSigned!))) {
+    return null;
+  }
+  // The residual is BYTES from the member's start — the accessed byte's own offset into it plus
+  // whatever the asm computed. `subscriptsFromExtents` splits the declared rows back out of it,
+  // and answers zero leading subscripts for a rank-1 member.
+  const residual: Expr = rel === 0 ? pg.idx : { k: 'bin', op: '+', l: pg.idx, r: { k: 'const', value: rel } };
+  const split =
+    inner.length === 0
+      ? (() => {
+          const i = elementIndex(residual, width);
+          return i === null ? null : { lead: [] as Expr[], idx: i };
+        })()
+      : subscriptsFromExtents(inner, residual, width, false);
+  if (split === null) {
+    return null;
+  }
+  return {
+    k: 'index',
+    base: { k: 'field', base: { k: 'var', name: pg.name }, name: f.name },
+    idx: split.idx,
+    width,
+    signed,
+    ...(split.lead.length ? { lead: split.lead } : {}),
+    // The element type the MAP declares for this member — the base is a `field` node off an
+    // untyped `var`, which the C type walk types `undefined`, and without this the backend would
+    // legalize the base through `((u8 *)gPtr->arr)[i]`, which is the cast form's object again.
+    // Stated from the same two facts the member gate above just checked (see l3/ast.ts baseElem).
+    baseElem: T.int(width * 8, f.elemSigned!),
+  };
+}
+
 /** `gPtr->member` for an access through a pointer global's value, or null when the offset is not
- *  provably ONE member's (see the block comment above). A VARIABLE index declines whatever it
- *  lands on — the indexed form is not byte-neutral and has no spelling here. */
+ *  provably ONE member's (see the block comment above). A VARIABLE index is not this rule's
+ *  constant-offset question at all and is handed to {@link pointeeElement}, which decides it on
+ *  its own terms. */
 function pointeeAccess(
   pg: PtrGlobalBase,
   off: number,
@@ -442,7 +596,7 @@ function pointeeAccess(
   sym: SymRenderCtx,
 ): Expr | null {
   if (pg.idx !== null) {
-    return null;
+    return pointeeElement(pg, off, width, signed, isStore, sym);
   }
   const total = pg.byte + off;
   // Constant offset: the member must match EXACTLY — offset, read width, and the SPELLED type

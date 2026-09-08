@@ -1,7 +1,7 @@
 // asmlift L3 — the language-NEUTRAL structured AST. A LanguageBackend lowers this to a
 // concrete language (C / Pascal / C++) and prints it. "Return a value" and binary ops
 // are neutral nodes here; each backend owns its own spelling.
-import type { IrType } from '../ir/types';
+import { type IrType, typeEquals } from '../ir/types';
 
 export type Expr =
   | { k: 'var'; name: string }
@@ -103,6 +103,32 @@ export type Expr =
       width: number;
       signed: boolean;
       lead?: Expr[];
+      /** The ELEMENT type the base's own DECLARATION gives it, for the one base whose stride the
+       *  C type walk cannot reconstruct: a map-declared array MEMBER (`gPtr->arr`), which
+       *  `exprCType` types `undefined` because the `field` node hangs off an untyped `var`. Without
+       *  it the C backend legalizes the base through a reinterpret cast (`((u8 *)gPtr->arr)[i]`),
+       *  which is the CAST form's object again and defeats the whole point of naming the member.
+       *
+       *  IT IS A PRODUCER INVARIANT: the backend cannot vet a stated type. `derefStrideOk` tests
+       *  the STATED type against the access width, never against the base, so it is true by
+       *  construction for anything a producer could state AND for a statement gone stale. What
+       *  the consumer does guard is PRECEDENCE — this field is consulted only where `exprCType`
+       *  answers nothing (cfamily.ts `legalizedIndexBase`), so wherever the walk can read the base
+       *  it corrects a stale statement instead of being overridden by it. The one producer,
+       *  structure/structure.ts `pointeeElement`, sets it from the same `elemSize`/`elemSigned` it
+       *  has just passed `spellsAccessType` on — and that predicate IS
+       *  `typeEquals(T.int(width*8, elemSigned), scalarTypeForAccess(width, signed))`, so
+       *  `derefStrideOk` over the stated pointer is true by construction at every width (4 by
+       *  `width === 4`, 1 and 2 by `to.signed === signed`). The obligation is on the PRODUCER:
+       *  state the type the access's own width and signedness agree with.
+       *
+       *  THE ALTERNATIVE REJECTED: teach `exprCType` the pointee layout, the way
+       *  `sym.noteGlobal` types the bare-array spelling —
+       *  the printer already renders `u8 grid[6][8]` for this member from this same layout. It was
+       *  rejected because `SFn.globals` is also the ADDRESSABLE-BASE list, so typing the symbol
+       *  there admits it as a `/livebase` base (measured on the probe: 8 extra base locals). Typing
+       *  the one node costs no candidates. */
+      baseElem?: IrType;
       operandOff?: number;
       baseOrdered?: true;
     }
@@ -421,6 +447,13 @@ export function exprEquals(a: Expr, b: Expr): boolean {
         a.signed === bb.signed &&
         lead.length === bLead.length &&
         lead.every((v, i) => exprEquals(v, bLead[i])) &&
+        // `baseElem` is part of the SPELLING for the same reason `lead` is: it decides whether the
+        // base takes the reinterpret cast, so two otherwise-equal nodes disagreeing about it print
+        // two different expressions. (Its one producer derives it from the base and the width, so
+        // nodes that agree on those agree here too — this cannot reject a real CSE.)
+        (a.baseElem === undefined
+          ? bb.baseElem === undefined
+          : bb.baseElem !== undefined && typeEquals(a.baseElem, bb.baseElem)) &&
         exprEquals(a.base, bb.base) &&
         exprEquals(a.idx, bb.idx)
       );

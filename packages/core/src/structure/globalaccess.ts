@@ -195,6 +195,32 @@ export function declaredSubscripts(
   if (inner === null || inner.length === 0) {
     return null;
   }
+  return subscriptsFromExtents(inner, residual, width, true);
+}
+
+/** THE split of a BYTE residual into a multidimensional array's subscripts, shared by the two
+ *  declarations that can state a rank: a GLOBAL's ({@link declaredSubscripts}) and an array
+ *  MEMBER's (structure.ts `pointeeElement`). One copy, because the two must not come to disagree
+ *  about which term is a row.
+ *
+ *  `needRecovered` is the one place they legitimately differ, and it is a fact about the
+ *  FALLBACK rather than about the arithmetic. For a global, a residual holding no term at a
+ *  leading stride means there is nothing to recover, and today's flat `gSym[i]` already spells
+ *  the very same address — so the split is refused and nothing is lost. An array MEMBER of a rank
+ *  the project's own header declares has NO such fallback: `->x[i]` on a `u8 x[6][8]` is a ROW,
+ *  which does not type-check, so the leading subscripts have to be spelled even when every one of
+ *  them comes out the literal 0 (`->x[0][i]`, the same address the byte arithmetic reached).
+ *
+ *  REFUSES (null) when: any leading stride is not strictly larger than the one below it (an
+ *  extent of 1 makes two positions indistinguishable, so the split would be a guess); a stride is
+ *  not a safe integer; `needRecovered` and no term is a non-constant multiple of a leading stride;
+ *  or what remains does not divide into whole elements. */
+export function subscriptsFromExtents(
+  inner: number[],
+  residual: Expr,
+  width: number,
+  needRecovered: boolean,
+): { lead: Expr[]; idx: Expr } | null {
   const strides: number[] = [];
   for (let p = 0; p < inner.length; p++) {
     strides.push(inner.slice(p).reduce((a, b) => a * b, width));
@@ -217,7 +243,7 @@ export function declaredSubscripts(
     }
     return { k: 'const', value: 0 };
   });
-  if (taken.size === 0) {
+  if (needRecovered && taken.size === 0) {
     return null;
   }
   let sum: Expr = { k: 'const', value: 0 };

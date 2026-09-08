@@ -20,7 +20,9 @@
 //                                        #   exit 2 = nothing compared (no run behind it)
 //   pnpm bench smoke                     # one trivial fn through every available toolchain
 //   pnpm bench verify <manifest.json>    # compile-check loop for authoring real manifests
-//   pnpm bench vendor [--project p]      # freeze the real tier's preprocessed TUs (needs checkouts)
+//   pnpm bench vendor [--project p] [--symbols-only]   # freeze the real tier's preprocessed TUs
+//                                        # (needs checkouts); --symbols-only rewrites just the
+//                                        # ELF-derived symbol maps
 //
 // `run` fans shard child processes by default (see run/orchestrate.ts); `--serial` runs
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
@@ -73,6 +75,9 @@ const { values: opts, positionals } = parseArgs({
     // already committed its own results.json must name its branch point (origin/main), or it
     // compares itself against itself and every gate passes vacuously.
     base: { type: 'string' },
+    // vendor only: rewrite just the derived symbol maps, leaving the preprocessed TUs, index.json
+    // and PROVENANCE.json exactly as committed (see cases/vendor.ts).
+    'symbols-only': { type: 'boolean', default: false },
   },
 });
 
@@ -346,7 +351,7 @@ switch (command) {
     break;
   case 'vendor': {
     const { vendor } = await import('./cases/vendor');
-    await vendor(opts.project);
+    await vendor(opts.project, { symbolsOnly: opts['symbols-only'] });
     break;
   }
   case 'verify': {

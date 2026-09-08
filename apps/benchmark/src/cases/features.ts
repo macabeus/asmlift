@@ -45,7 +45,10 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   arithmetic: (b) => /[+%]|(?<!-)-(?!>)|(?<!\/)\/(?![/*])|\*/.test(b),
   array: (b) => /\[/.test(b),
   table: (b) => /\w+\s*\[\s*[^\]\d\s]/.test(b), // indexed by something that is not a literal
-  'variable-index': (b) => /\w+\s*\[\s*[^\]\d\s]/.test(b),
+  // ANY subscript in the chain, not only the first: `x[0][k]` is a variable index, and the `k`
+  // there follows a `]` rather than a name. `table` deliberately keeps the tighter form — it is a
+  // claim about the OBJECT being a constant lookup table, which its own first subscript shows.
+  'variable-index': (b) => /[\w\]]\s*\[\s*[^\]\d\s]/.test(b),
   cast: (b) =>
     /\(\s*\w+\s*\*+\s*\)/.test(b) ||
     /\(\s*(?:struct|union|enum|const|unsigned|signed|void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)[\w\s]*\**\s*\)/.test(

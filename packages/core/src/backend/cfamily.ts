@@ -80,10 +80,18 @@ export function cType(t: IrType): string {
 
 /** Declare a name of a given type, C declarator rules: an array puts its length AFTER the name
  *  (`u8 _pad[4]`), a pointer binds its `*` to the declarator (`void *p`), everything else is
- *  the prefix `cType name`. */
+ *  the prefix `cType name`. A NESTED array spells every extent after the name in declaration
+ *  order (`u8 unk8[6][8]`) — one declarator, not an element type that is itself an array, which
+ *  C has no syntax for and `cType` marks ill-formed as a prefix. */
 function cDeclare(t: IrType, name: string): string {
   if (t.kind === 'array') {
-    return `${cType(t.elem)} ${name}[${t.count}]`;
+    const extents: number[] = [];
+    let e: IrType = t;
+    while (e.kind === 'array') {
+      extents.push(e.count);
+      e = e.elem;
+    }
+    return `${cType(e)} ${name}${extents.map((n) => `[${n}]`).join('')}`;
   }
   if (t.kind === 'ptr') {
     return `${cType(t.to)} *${name}`;
@@ -136,7 +144,19 @@ export type LeafHook = (e: Expr, rec: (e: Expr, p: number) => string) => string 
  *  -fprologue-bugfix`), and referring to a volatile object through a non-volatile lvalue is
  *  undefined behaviour (C99 6.7.3p5). */
 function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Expr {
-  return derefStrideOk(exprCType(ix.base, vt.type), ix.width, ix.signed)
+  // `baseElem` states the element type the base's own DECLARATION gives it, where the type walk
+  // cannot reconstruct one (a map-declared array MEMBER — see l3/ast.ts). It is a FALLBACK, not an
+  // override, and the order is the whole guard: the walk reads the tree in front of it, so
+  // wherever it answers at all it is the better answer and the stated one is not consulted.
+  // Inverted (`declared ?? walked`), a stale statement would stand — `derefStrideOk` cannot catch
+  // one, because it tests the STATED type against the access width and never against the base.
+  // No pass carries a statement onto a foreign base today (each refuses a `field` base by its own
+  // predicate: basecse `isHoistableBase`, scopebase/argbase `eligible`, nearbase's untouched
+  // `field` subtree, reindex's `base.k === 'var'`), but `mapExprChildren` spreads the field across
+  // an arbitrary base substitution, so that is five accidents rather than a check. This ordering
+  // is the check. Measured: zero test moves either way.
+  const declared = ix.baseElem !== undefined ? T.ptr(ix.baseElem) : undefined;
+  return derefStrideOk(exprCType(ix.base, vt.type) ?? declared, ix.width, ix.signed)
     ? ix.base
     : {
         k: 'cast',
@@ -226,11 +246,19 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       // Leading constant subscripts (a multidimensional array global's bare spelling) keep the
       // postfix form whatever `idx` is: `g[0][0]` is the element, `*g[0]` would be its ROW.
       //
-      // `lead` implies the base already strides the access width — its only producers register a
-      // matching element type for the global (structure/globalaccess.ts `bareArrayLead` and
-      // `declaredSubscripts`, both through structure.ts's `noteGlobal`). Nothing
-      // else enforced that, and the failure would be quiet-ish: legalization would wrap the base,
-      // spelling `((u16 *)g)[0][i]`, which subscripts a `u16` twice. Check it rather than assume.
+      // `lead` implies the base already strides the access width, and its producers reach that by
+      // TWO different mechanisms. The two GLOBAL ones register a matching element type for the
+      // global (structure/globalaccess.ts `bareArrayLead` and `declaredSubscripts`, both through
+      // structure.ts's `noteGlobal`, so the type walk finds it); the MEMBER one
+      // (structure.ts `pointeeElement`, `gPtr->grid[0][i]`) has no global to register and states
+      // the element type on the node instead (`baseElem`). Nothing else enforced either, and the
+      // failure would be quiet-ish: legalization would wrap the base, spelling `((u16 *)g)[0][i]`,
+      // which subscripts a `u16` twice. Check it rather than assume.
+      //
+      // This throw covers rank >= 2 ONLY, because only a rank >= 2 access carries `lead`. A rank-1
+      // member (the large majority of the corpus's dims-carrying members) has no guard here: a
+      // missing or stale `baseElem` there degrades silently to the cast form the rule replaces,
+      // which is a lost spelling rather than a wrong address.
       if (e.lead && e.lead.length > 0) {
         if (base !== e.base) {
           throw new Error(
