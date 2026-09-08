@@ -444,15 +444,19 @@ export const MIPS_GCC: TargetDescription = {
     // fact is per TOOLCHAIN (the note at `spillSlotOrder`), and `MIPS_GCC` serves two, so both owe a
     // pair: `corpus/gcc272kmc-sw{frontload,ladder}.asm` from GCC_KMC_TOOLCHAIN at -O2 and
     // `corpus/gcc272-sw{frontload,ladder}.asm` from the Mario Party 3 toolchain at -O1, one two-case
-    // body written each way, committed beside the declaration-rank probes. Each pair is two
+    // body written each way, committed beside the declaration-rank probes and regenerated from
+    // their committed C bodies by `scripts/regen-switch-spelling-probes.ts`, each fixture carrying
+    // a provenance header (source, toolchain env var, flags, objdump). Each pair is two
     // different objects: the `switch` emits both `beq`s before the first `sw`; the ladder emits each
     // `bne` directly above the store it guards. The two toolchains come out byte-identical on this
     // body, which is measured and asserted rather than assumed — their declaration-rank probes do
     // NOT agree, so the sibling pairs are not a formality.
     //
-    // -O1 ALSO EMITS BRANCH-LIKELY, and the reading survives it. `s32 m1(s32 x, s32 *p){ switch (x)
+    // BOTH TOOLCHAINS EMIT BRANCH-LIKELY on some bodies, and the reading survives it — this is a
+    // property of the pair, not a way the two diverge. `s32 m1(s32 x, s32 *p){ switch (x)
     // { case 6: *p = 1; break; case 7: *p = 2; break; } return 0; }` cross-jumps the two stores into
-    // one and compiles at -O1 to `beq` / `beql` with the shared `sw` after both; the same body as an
+    // one and compiles, instruction for instruction identically at -O1 and at -O2, to `beq` / `beql`
+    // with the shared `sw` after both; the same body as an
     // if/else-if ladder puts the first arm's `li v0,1` BETWEEN the two tests. Same split, and it is
     // not committed as a fixture only because `beql` is an unmodelled control transfer today, so the
     // row declines before PRE5 and the pair's cross-jumped arms leave no store to read the split off.
@@ -467,7 +471,9 @@ export const MIPS_GCC: TargetDescription = {
     // and fills delay slots, and both fixtures show it — the ladder's `bne` carries the NEXT test's
     // `li` in its slot. What the pair shows is that it moves no BODY above a test, which is the
     // only claim the gate rests on, and the gate's failure direction (switch-recover.ts PRE5) is a
-    // lost `switch` spelling, never a wrong answer.
+    // lost `switch` spelling, never a wrong answer. What a lost spelling LOOKS like is stated at
+    // PRE5 and is not always a clean ladder: recovery re-runs on the sub-trees a decline leaves, so
+    // a NESTED dispatch comes back as an `if` nest around a `switch` over some of its arms.
     switchRequiresFrontLoadedTests: true,
     // MEASURED `ascending` on both toolchains this description serves — 7 of 7 spills each, and
     // rank → offset unchanged under a reversed declaration list — and NOT SHIPPED, for the same

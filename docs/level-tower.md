@@ -173,10 +173,15 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
      99.5% of the corpus buys a dual only where the default is already right, and pays a second
      `structure()` everywhere.
   3. ONLY THEN the failure direction. The gate exclusively DECLINES, and Regime A's decline is
-     if-recovery — behaviourally identical, and loud in the source, which says `if`/`else if` where
-     the target said `switch`. A premise that breaks (a scheduler that hoists a body above a test, a
-     frontend whose block list is not address order) costs the `switch` spelling on that row and
-     cannot cost a wrong answer. Contrast `readsStayWhereWritten`, which PLACES something: read
+     if-recovery — behaviourally identical. A premise that breaks (a scheduler that hoists a body
+     above a test, a frontend whose block list is not address order) costs the `switch` spelling on
+     that row and cannot cost a wrong answer. **Say what the decline PRODUCES, not just that it is
+     behaviour-preserving**, because recovery is recursive: declining a tree hands it to
+     if-recovery, which recovers again on each sub-tree. On a flat tree that is a clean ladder; on a
+     NESTED one (`corpus/agbcc-swnested.s`) it is an `if` nest holding a `switch` over a STRICT
+     SUBSET of the source's case labels — a third spelling neither reading would give, and nothing
+     in the output says a dispatch was half-declined. So the decline is not "loud in the source" in
+     general, and a licence built on that word would be built on the flat case only. Contrast `readsStayWhereWritten`, which PLACES something: read
      backwards it emits a read in a block the source never read in, and no amount of measurement
      makes that recoverable.
 

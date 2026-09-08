@@ -1302,14 +1302,17 @@ export interface StructureOptions {
   // ladder — there is nothing in the fan for it to prefer.
   //
   // The two spellings are different objects. Compiled at TOOLCHAIN.agbccFlags the same two-case
-  // body is 79 bytes either way and disagrees instruction for instruction: the `switch` emits
+  // body is 20 bytes either way (0x14, ten Thumb instructions — the pair is committed as
+  // `corpus/agbcc-sw{frontload,ladder}.s`) and disagrees instruction for instruction: the `switch` emits
   // `cmp #0x1e; beq` then `cmp #0x64; bne` — both tests ahead of both bodies, and sorted ASCENDING,
   // which is the reverse of the order the source writes them in — while the ladder emits
   // `cmp #0x64; bne` directly above its own body and reaches `cmp #0x1e` only after it.
   //
   // Read PER SITE off the recovery's own blocks — a function may hold one of each — and it
   // inherits `layoutIndex`'s frontend premise (see switch-recover.ts PRE5, which also states what
-  // the gate costs when the premise fails: the `switch` spelling, never correctness).
+  // the gate costs when the premise fails: the `switch` spelling, never correctness — and what a
+  // lost spelling actually looks like, which on a NESTED tree is an `if` nest around a `switch`
+  // over some of the arms, not a clean ladder).
   // Default false: absent, every recoverable tree is still spelled as a `switch`.
   switchRequiresFrontLoadedTests?: boolean;
   // Does the TARGET LANGUAGE spell a `switch` arm that runs on into the next one? Set from the

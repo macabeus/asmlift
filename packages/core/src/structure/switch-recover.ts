@@ -275,7 +275,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     at all — because it PLACES the arms from the layout;
   //   - `switchRequiresFrontLoadedTests` (PRE5, whether to recover at all) needs only that no case
   //     BODY was moved above a dispatch test, which a compiler with a scheduler can still satisfy;
-  //     `MIPS_GCC` declares that one and not this one for exactly that reason (target.ts).
+  //     `MIPS_GCC` declares `switchRequiresFrontLoadedTests` and NOT `switchArmsFollowLayout` for
+  //     exactly that reason — it has a scheduler and fills delay slots (target.ts).
   // Both are therefore claims about a target's FRONTEND as much as about its compiler, and a target
   // opts in on both halves — which is why PPC_MWCC, whose frontend fails the frontend half outright,
   // declares neither. Anything added below that reads `layoutIndex` inherits the frontend half and
@@ -809,16 +810,43 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // fire, which is today's behaviour. The converse error, a real `switch` whose layout
     // interleaves, costs only the `switch` SPELLING: the recovery declines to if-recovery, which is
     // behaviourally identical (the file header) and which the differ then scores. This gate can
-    // therefore lose a match; it can never produce a wrong answer, and it is never a silent one —
-    // the emitted source says `if`/`else if` where the target said `switch`.
+    // therefore lose a match; it can never produce a wrong answer.
+    //
+    // WHAT THE DECLINE PRODUCES, AND IT IS NOT ALWAYS A CLEAN LADDER. Recovery is RECURSIVE:
+    // declining a tree here hands the tree back to if-recovery, which then runs recovery AGAIN on
+    // each sub-tree it structures. On a flat tree that is a ladder over every case value, which is
+    // what the shipped rows are and what the one-line description used to promise for all of them.
+    // On a NESTED tree it is not: `corpus/agbcc-swnested.s` (a source `switch` nested inside an
+    // if/else-if ladder) declines HERE on the outer tree — correctly, the ladder arm's body really
+    // does sit between the tests — and the sub-tree then re-recovers, so the emitted C is an `if`
+    // nest holding a `switch` over a STRICT SUBSET of the source's case labels. Still behaviourally
+    // identical, and no worse than the alternative (with the reading withdrawn that same function
+    // comes back as one `switch` merging two arms the source wrote apart), but it is a THIRD
+    // spelling that neither reading would give, and nothing in the output says a dispatch was
+    // half-declined. Do not read "the decline is if-recovery" as "the decline is a clean ladder":
+    // that holds at the OUTERMOST tree only. Pinned by a test on the committed fixture
+    // (packages/core/test/switch-arms.test.ts, "PRE5 declines a tree RECURSIVELY").
     //
     // WHAT THE POSITIONS ARE READ THROUGH, which is the premise that lives inside asmlift rather
     // than in the compiler. `caseBlocks` holds `forwardingTarget` results (`asCase` is called on the
     // resolved block), so an arm whose body is a bare jump contributes ITS TARGET's position, not
-    // its own. On a target that reorders no blocks — the only kind that declares this — a target
-    // laid out above the dispatch can only be reached by a BACK edge, and loop recovery declines
-    // those before recovery runs; that is why no corpus row inhabits the shape. Whoever relaxes
-    // loop recovery inherits this reader. `bodyPos` also covers the CASE bodies only: `defaultBlk`
+    // its own. A forwarding target laid out ABOVE the dispatch would then read as a body above a
+    // test and decline a real `switch`.
+    //
+    // WHY THAT HAS NO INHABITANT, stated as what was measured rather than as a theorem. It is
+    // TEMPTING to argue that such a block can only be reached by a back edge and that loop recovery
+    // declines those first — and that argument is unsound twice over. A block laid out before the
+    // dispatch is reached by a back edge only if it DOMINATES the dispatch; an `if` arm ahead of
+    // the `switch` does not, and cross-jumping an arm's tail onto it is an ordinary forward edge.
+    // And "a target that reorders no blocks" is not who declares this flag: `MIPS_GCC` declares it
+    // WITH a scheduler, on the half-premise stated at `layoutIndex` above. What is true is
+    // measured: across 28 compiled probes on agbcc, gcc2.7.2 -O1 and gcc2.7.2kmc -O2 — arms
+    // cross-jumped onto a shared tail ahead of the dispatch, `goto`s out of an arm to a label
+    // above it, shared early returns, `continue`/`break` out of a switch inside a loop — no
+    // toolchain placed an arm's forwarding target above its own dispatch: every firing came back
+    // with zero bodies above the first test. The reader is safe because no compiler in the corpus
+    // emits that shape, not because none can. Whoever makes one — a new frontend, a relaxed loop
+    // recovery, a scheduler that hoists a merged tail — inherits this reader. `bodyPos` also covers the CASE bodies only: `defaultBlk`
     // is left out deliberately, because it can be the dispatch's own fall-out block rather than an
     // arm the source wrote (the W2/W4 withholdings above), and including it would read a position
     // the source never chose. Both omissions can only make the gate UNDER-fire, i.e. keep a
@@ -829,9 +857,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // every real body and decline EVERY tree in the function. It has no inhabitant and cannot get
     // one without a bug upstream: `ir/verify.ts` rejects a successor that is not a block of the fn
     // and the tower runs it after the lift and after every raising pass, and `predecessorBlocks`
-    // throws on the same state at the top of `structure()`. So this is belt-and-braces over a
-    // VERIFIER BUG, not over an expected shape — kept because standing down costs nothing, and
-    // pinned by a test that asserts those two reject it first.
+    // throws by name on the same state at the top of `structure()` (it raised a bare `TypeError`
+    // off an unchecked `!` until wave 2 — cite it as an invariant only because it is now one). So
+    // this is belt-and-braces over a VERIFIER BUG, not over an expected shape — kept because
+    // standing down costs nothing. The test pinning it asserts that those two reject the state
+    // FIRST, which pins the UNREACHABILITY; the `placed` branch itself stays unexecuted, and no
+    // test covers it because none can without breaking one of the two invariants above.
     if (switchRequiresFrontLoadedTests) {
       const testPos = [...seen].map(layoutIndex);
       const bodyPos = [...caseBlocks].map(layoutIndex);
