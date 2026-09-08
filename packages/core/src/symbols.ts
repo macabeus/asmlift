@@ -71,8 +71,11 @@ export interface SymbolStructField {
    *  answers `[]` for absence and the refusal lives at the access site instead. */
   dims?: (number | null)[];
   /** BITFIELD field only: the field's width in BITS. Its PRESENCE is what marks a field a
-   *  bitfield — `size` above stays the byte span its bits touch (the read width the compiler
-   *  uses), which is why the exact (offset,size) scalar-field rules must exclude it. The
+   *  bitfield — `size` above stays the byte SPAN its bits touch, which is why the exact
+   *  (offset,size) scalar-field rules must exclude it. The span is NOT the access the compiler
+   *  uses: measured with the pinned agbcc, `u32 x : 8` at bit 12 spans 2 bytes and is reached by
+   *  a WORD, `u32 a : 20` spans 3, and `u16 a : 2` spans 1 in a 2-byte container. A consumer
+   *  needing the access width computes it from `bitOffset`/`bitWidth` (structure/bitfields.ts). The
    *  provider only emits these for LITTLE-ENDIAN ELFs: both the extract equation the access
    *  recognizer solves and the `u32 name : n` layout model the synthesis verifies are LE-GCC
    *  semantics, so a big-endian map carries no bitfield members at all (today's behavior). */
