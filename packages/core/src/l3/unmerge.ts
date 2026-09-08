@@ -301,14 +301,26 @@ export function unmergeJoins(sfn: SFn): SFn | null {
     const merge = new Set<string>();
     for (const n of read) {
       const m = mentions.get(n);
-      // `written.has(n)` is a CANDIDATE condition, not only the bystander test below. Under the
-      // old `assigns === 2` a name the arms never write could not reach two assignments inside
-      // them and so was a bystander by arithmetic; under `assigns >= 2` it can, and a candidate
+      // `written.has(n)` is a CANDIDATE condition, not only the bystander test below. A candidate
       // the arms cannot define refuses the WHOLE SITE (`armDefs` returns null) instead of being
-      // ignored. Measured on the shape `n = 1; n = 2; n = 3; if (c) x = 1; else x = 2; n[0] = x;`
-      // — `origin/main` un-merges `x`, and the widening alone declined the site outright. The
-      // conjunct costs nothing: a name the arms do not write can never satisfy `armDefs`, so this
-      // prunes only candidates that were guaranteed to refuse.
+      // ignored, and `m.assigns` is `localMentions`'s FUNCTION-WIDE count — it was never
+      // arm-scoped, under either gate — so a name assigned only OUTSIDE the arms could reach the
+      // candidate set and sink the site. Measured, both versions in one process:
+      //
+      //   n = 1; n = 2; n = 3;  if (c) x = 1; else x = 2;  n[0] = x;   main FIRES · here FIRES
+      //   n = 1; n = 2;         if (c) x = 1; else x = 2;  n[0] = x;   main NULL  · here FIRES
+      //
+      // So this conjunct is NOT a pure prune of candidates guaranteed to refuse, in either
+      // direction: `assigns >= 2` would have widened the hole (the three-assignment row), and the
+      // conjunct closes it for the two-assignment row that `assigns === 2` mishandled on main
+      // too. It ADMITS sites main declined. Also measured, and also correct output:
+      //
+      //   y = 1; y = 2;  if (c) p = a; else p = b;  *p = y;            main NULL  · here FIRES
+      //
+      // (`y` is a bystander read carried into both copies, `p` is the merge; nothing `y` reads
+      // moves, because the copy is always LAST in its arm.) Both admissions are pinned as RULE
+      // tests in unmerge.test.ts, because "we only pruned" is what the first version of this
+      // comment claimed and neither shape was covered.
       if (m && written.has(n) && m.assigns >= 2 && readsOf(m) === 1 && m.addrTaken === 0) {
         merge.add(n);
       } else if (written.has(n)) {

@@ -80,9 +80,11 @@ describe('what un-merges', () => {
 
   // THE WIDENED CANDIDATE GATE IS A TWO-SIDED CHANGE. `assigns === 2` → `assigns >= 2` admits a
   // ladder's merge temp, and it would also admit a name the arms NEVER WRITE — which `armDefs`
-  // then cannot define, so the whole site declines instead of un-merging its real temps. Under the
-  // arity gate that name could not reach two assignments inside two arms and was a bystander by
-  // arithmetic; the conjunct now says it outright.
+  // then cannot define, so the whole site declines instead of un-merging its real temps.
+  //
+  // `assigns` is a FUNCTION-WIDE count and always was, so the arity gate did not make that name a
+  // bystander "by arithmetic": at exactly two assignments it admitted it too, and declined. The
+  // conjunct therefore does not only prune — the next test is a site `assigns === 2` REFUSED.
   test('a local the join reads but the arms never write stays a BYSTANDER, not a candidate', () => {
     const body: Stmt[] = [
       asg('n', c(1)),
@@ -97,6 +99,33 @@ describe('what un-merges', () => {
     const site = out!.body[3] as Extract<Stmt, { k: 'if' }>;
     expect(site.then).toEqual([store(v('n'), c(1))]);
     expect(site.else).toEqual([store(v('n'), c(2))]);
+  });
+
+  // The same shape at exactly TWO outside assignments, which is the count `assigns === 2` also
+  // admitted: the site was declined outright before the conjunct, so this is REACH the conjunct
+  // adds rather than reach it preserves. Ablate `written.has(n)` from the candidate condition and
+  // this goes null.
+  test('a bystander with exactly TWO assignments no longer sinks the site', () => {
+    const body: Stmt[] = [asg('n', c(1)), asg('n', c(2)), iff([asg('x', c(1))], [asg('x', c(2))]), store(v('n'), v('x'))];
+    const out = unmergeJoins(fn(body, ['n', 'x']));
+    expect(out).not.toBeNull();
+    expect(out!.locals.map((l) => l.name)).toEqual(['n']);
+    const site = out!.body[2] as Extract<Stmt, { k: 'if' }>;
+    expect(site.then).toEqual([store(v('n'), c(1))]);
+    expect(site.else).toEqual([store(v('n'), c(2))]);
+  });
+
+  // And the bystander in the VALUE position rather than the address, which is the same admission
+  // seen from the other side: the arms define `p`, the join also reads `y`, and `y` is carried
+  // into both copies unchanged. The copy is always LAST in its arm, so nothing `y` reads moves.
+  test('a bystander the join READS is carried into both copies, and its local is kept', () => {
+    const body: Stmt[] = [asg('y', c(1)), asg('y', c(2)), iff([asg('p', v('a'))], [asg('p', v('b'))]), store(v('p'), v('y'))];
+    const out = unmergeJoins(fn(body, ['p', 'y']));
+    expect(out).not.toBeNull();
+    expect(out!.locals.map((l) => l.name)).toEqual(['y']);
+    const site = out!.body[2] as Extract<Stmt, { k: 'if' }>;
+    expect(site.then).toEqual([store(v('a'), v('y'))]);
+    expect(site.else).toEqual([store(v('b'), v('y'))]);
   });
 
   test('a join reading ONE merge temp un-merges too — the rule is not about pairs', () => {
