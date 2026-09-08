@@ -67,6 +67,7 @@ import {
   type DeclaredField,
   type SymbolInfo,
   type SymbolStructField,
+  declaredArrayShape,
   declaredFields,
   isArrayField,
   isBitfieldField,
@@ -498,6 +499,9 @@ function spellablePointee(
  *      member is not named either", "a WIDTH mismatch falls back to the cast spelling"
  *    • no array member of exactly this element width covering the accessed byte   — same three
  *    • a member with NO stated rank   — "absence is not read as rank 1"
+ *    • a rank the DECLARATION does not spell: `dims` and `length` are independent map facts, and
+ *      symbolFieldType declares the flat byte array whenever the bound is missing   — "a rank with
+ *      NO `length` DECLARES flat, so the access may not subscript it — as a pair"
  *    • a rank whose subscripts cannot be split out of the residual   — "a rank the residual cannot
  *      be split along still spells every subscript, never a row"
  *    • a byte offset into the member that does not land on an element boundary
@@ -535,6 +539,20 @@ function pointeeElement(
   const inner = structFieldInnerExtents(f);
   const rel = pg.byte - f.offset;
   if (inner === null || rel % width !== 0) {
+    return null;
+  }
+  // …AND THE DECLARATION HAS TO SPELL THAT SAME RANK. `dims` is not the declaration: symbolFieldType
+  // needs facts `dims` does not supply (a `length`, a base-type `elemSigned`) and declares the FLAT
+  // byte array without them, while `dims` and `length` are independent — a member whose outermost
+  // subrange is unbounded (`u8 data[][8]`, legal C; @gba-kit/debug-info reports `length` absent and
+  // `dims` regardless) carries `dims: [null, 8]` and no `length`. Reading the rank off `dims` alone
+  // therefore emitted `gPtr->grid[0][a0];` against `struct Save { u8 grid[48]; };` — the exact
+  // decl-vs-access divergence declaredFields' header calls non-compiling C. Asked of
+  // declaredArrayShape, which reads the answer back OUT of the declaration, so no gate that
+  // function grows later can reopen it. The element test is the one `baseElem` below asserts: the
+  // declaration must really give this base the element type the node is about to state for it.
+  const decl = declaredArrayShape(f);
+  if (decl.extents.length !== inner.length + 1 || !typeEquals(decl.elem, T.int(width * 8, f.elemSigned!))) {
     return null;
   }
   // The residual is BYTES from the member's start — the accessed byte's own offset into it plus

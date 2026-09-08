@@ -881,6 +881,23 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     expect(declOf(recovered)).toContain('struct Save { u8 grid[6][8]; };');
   });
 
+  test('a rank with NO `length` DECLARES flat, so the access may not subscript it — as a pair', () => {
+    // `dims` and `length` are INDEPENDENT map facts. A member whose OUTERMOST subrange is
+    // unbounded — `u8 data[][8]`, legal C — is reported with a rank and no bound at all
+    // (@gba-kit/debug-info's `DwarfMember.length`: "Absent when no dimension bounds it"). The
+    // declaration side needs the bound and spells the flat byte array without it, so a rank read
+    // straight off `dims` at the access site emitted `gPtr->grid[0][a0];` against
+    // `struct Save { u8 grid[48]; };` — clang and gcc both refuse it, "subscripted value is not an
+    // array, pointer, or vector". The access asks the DECLARATION for its rank now, so the pair
+    // agrees whichever fact is missing.
+    const noLength = ranked([6, 8]).map(({ length: _bound, ...rest }) => rest);
+    const info = { kind: 'data', shape: 'pointer', pointee: { structName: 'Save', size: 48, layout: noLength } };
+    expect(declOf(info)).toContain('struct Save { u8 grid[48]; };');
+    const src = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, { name: 'gPtr', ...info }]]));
+    expect(src).not.toContain('->grid');
+    expect(src).toContain('(u8 *)gPtr'); // the honest cast form, which that declaration DOES accept
+  });
+
   test('a VOLATILE member is never named — the cast form it replaces carries no qualifier', () => {
     // `gPtr->vreg` is a volatile access; `((u8 *)gPtr)[78]` is a plain one. Same address, DIFFERENT
     // instruction sequence, so the member is not nameable and the arithmetic spelling stands.

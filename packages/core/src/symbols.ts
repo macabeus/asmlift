@@ -452,6 +452,30 @@ export function symbolFieldType(f: DeclaredField): IrType {
   }
   return T.array(T.u(8), f.size);
 }
+
+/** The array shape the DECLARATION actually spells for a member — the extents outermost first and
+ *  the element type left at the bottom — read back out of {@link symbolFieldType} rather than
+ *  re-derived from the map's own facts. A NON-array member answers `{ extents: [], … }`.
+ *
+ *  Exists because "how many subscripts does this member take, and of what" was being answered
+ *  twice: once here (which needs `length` and a base-type `elemSigned`, and declares the flat byte
+ *  array without either) and once straight off `dims` at the access site. `dims` and `length` are
+ *  INDEPENDENT facts — a flexible array member states a stride and no bound (see
+ *  SymbolStructField.length), and a member whose OUTERMOST subrange is unbounded (`u8 data[][8]`,
+ *  legal C) reaches a map as `dims: [null, 8]` with no `length` at all. The declaration then spells
+ *  `u8 grid[48];` while the access spelled `gPtr->grid[0][a0];`, which is not C
+ *  (`subscripted value is not an array, pointer, or vector`). An access side that asks THIS
+ *  question cannot diverge from the declaration whatever gate symbolFieldType grows next. */
+export function declaredArrayShape(f: DeclaredField): { extents: number[]; elem: IrType } {
+  let t = symbolFieldType(f);
+  const extents: number[] = [];
+  while (t.kind === 'array') {
+    extents.push(t.count);
+    t = t.elem;
+  }
+  return { extents, elem: t };
+}
+
 /** A 4-byte member/scalar with NO base-type signedness is the enum idiom — C89 says int. */
 export const ENUM_IS_SIGNED = true;
 
