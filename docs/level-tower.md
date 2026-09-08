@@ -142,27 +142,45 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   doubles every enumeration to referee a question with one answer, and a default where an axis
   belongs quietly degrades every function the differ would have rescued.
 
-  **A default may read the map BACKWARDS when being wrong costs a SPELLING and not an answer.**
+  **A default may read the map BACKWARDS when the backwards mapping is ITSELF a function, the
+  reach is measured, and being wrong then costs a SPELLING and not an answer — in that order.**
   `switchRequiresFrontLoadedTests` (`structure/switch-recover.ts`, PRE5) is the worked case, and it
-  is the exception the paragraph above would otherwise forbid. Regime-A switch recovery rebuilds a
-  `switch` from any comparison tree it can, so an if/else-if LADDER and a `switch` over the same
-  values collapse onto ONE candidate — there is no dual anywhere in the fan for a differ to prefer,
-  which is why an axis was never the shape of this fix. The layout settles it: compiled at
-  `TOOLCHAIN.agbccFlags` the two spellings of the same two-case body are 79 bytes each and are
-  DIFFERENT objects — the `switch` front-loads both tests and sorts them ascending (`expand_end_case`
-  closes with the `reorder_insns` that moves the dispatch in front of the bodies), the ladder emits
-  each test directly above its own body in source order — and gcc 2.7.2/KMC's own pair says the same
-  at three cases. So the gate reads emission and concludes spelling, the direction this section
-  names as "how a compiler fact turns into a wrong answer".
-  What makes it safe here is the DIRECTION OF THE FAILURE, not the strength of the premise. The gate
-  only ever DECLINES, and Regime A's decline is if-recovery — behaviourally identical, and loud in
-  the source, which says `if`/`else if` where the target said `switch`. A premise that breaks
-  (a scheduler that hoists a body above a test, a frontend whose block list is not address order)
-  therefore costs the `switch` spelling on that row and can never cost a wrong answer. Contrast
-  `readsStayWhereWritten`, which PLACES something: read backwards it emits a read in a block the
-  source never read in, and no amount of measurement makes that recoverable. So the test for a
-  backwards default is not "is the premise airtight" but "what does the pass DO when it fires" —
-  and a refusal is the only answer that passes it.
+  is the exception the paragraph above would otherwise forbid. It clears the section's PRIMARY
+  criterion first, and the failure direction is the belt on top of that, never the argument by
+  itself.
+
+  1. THE MAPPING IS A FUNCTION, and three compiled pairs say so rather than a claim. Compiled at
+     `TOOLCHAIN.agbccFlags` the two spellings of the same two-case body are 79 bytes each and are
+     DIFFERENT objects — the `switch` front-loads both tests and sorts them ascending
+     (`expand_end_case` closes with the `reorder_insns` that moves the dispatch in front of the
+     bodies), the ladder emits each test directly above its own body in source order. Both
+     toolchains behind `MIPS_GCC` say the same on their own two-case pair, committed as
+     `corpus/gcc272kmc-sw{frontload,ladder}.asm` and `corpus/gcc272-sw{frontload,ladder}.asm` and
+     asserted off the disassembly by a test. Layout distinguishes the two spellings; that is the
+     evidence, and the direction-of-failure argument below is not a substitute for it.
+  2. THE REACH IS MEASURED, which is what actually decides default-vs-axis here. An axis was
+     POSSIBLE — `StructuringAxis.options` is `(on: boolean) => StructureOptions` and this flag is
+     one more entry — so the absent dual is a fact about what Regime A enumerates today, not an
+     impossibility, and citing it as one would be circular. What rules the axis out is the term
+     the fork below already prices: lifting every synthetic and real row twice, once with the field
+     and once with it deleted, moves the emitted source of **5 rows out of 1026**. An axis inert on
+     99.5% of the corpus buys a dual only where the default is already right, and pays a second
+     `structure()` everywhere.
+  3. ONLY THEN the failure direction. The gate exclusively DECLINES, and Regime A's decline is
+     if-recovery — behaviourally identical, and loud in the source, which says `if`/`else if` where
+     the target said `switch`. A premise that breaks (a scheduler that hoists a body above a test, a
+     frontend whose block list is not address order) costs the `switch` spelling on that row and
+     cannot cost a wrong answer. Contrast `readsStayWhereWritten`, which PLACES something: read
+     backwards it emits a read in a block the source never read in, and no amount of measurement
+     makes that recoverable.
+
+  READ 3 WITHOUT 1 AND 2 AND IT LICENSES THE WRONG THING. A silent refusal that loses a spelling is
+  this project's own failure mode, not a free action — this repo has shipped and reverted a prune
+  measured at ZERO regressions that still cost six rows, and the paragraph above says a default
+  where an axis belongs "quietly degrades every function the differ would have rescued". So
+  "it only refuses" is what makes a MEASURED, FUNCTIONAL backwards mapping safe to ship as a
+  default. It is not what makes an unmeasured one admissible, and a future round citing this
+  paragraph owes its own compiled pair and its own reach number.
 
   A **third fork sits inside the ranked population**, and the underdetermination criterion does not
   decide it: a question the asm underdetermines can be answered by RE-RUNNING `structure()` under a
