@@ -176,6 +176,32 @@ function substitute(s: Stmt, defs: ReadonlyMap<string, Expr>): Stmt {
   return mapStmtExprs(s, rec);
 }
 
+/** One arm with `join` pushed into it, and how many COPIES of the join that took — the count the
+ *  caller needs to prove every definition of every merge name was consumed. One arm, one copy.
+ *
+ *  The value guard lives here rather than at the call site because the values it judges are the
+ *  ones THIS arm moves: an effectful or volatile value, or one reading another merge name, is a
+ *  value the substitution may not relocate to the arm's end. Same set of values as before, asked
+ *  one arm earlier. */
+function pushJoin(
+  arm: Stmt[],
+  names: ReadonlySet<string>,
+  declared: ReadonlySet<string>,
+  join: Joinable,
+  sfn: SFn,
+): { arm: Stmt[]; used: number } | null {
+  const here = armDefs(arm, names, declared);
+  if (here === null) {
+    return null;
+  }
+  for (const v of here.defs.values()) {
+    if (exprHasEffect(v) || exprReadsVolatile(v, sfn) || [...readsIn(v)].some((n) => names.has(n))) {
+      return null;
+    }
+  }
+  return { arm: [...here.keep, substitute(join, here.defs)], used: 1 };
+}
+
 /** The tree with every eligible join statement pushed back into its arms, or null when no site
  *  qualified — the lever declines rather than re-emitting the primary spelling. */
 export function unmergeJoins(sfn: SFn): SFn | null {
@@ -207,22 +233,13 @@ export function unmergeJoins(sfn: SFn): SFn | null {
     if (merge.size === 0) {
       return null;
     }
-    const then = armDefs(iff.then, merge, declaredNames);
-    const els = armDefs(iff.else, merge, declaredNames);
+    const then = pushJoin(iff.then, merge, declaredNames, join, sfn);
+    const els = pushJoin(iff.else, merge, declaredNames, join, sfn);
     if (then === null || els === null) {
       return null;
     }
-    for (const v of [...then.defs.values(), ...els.defs.values()]) {
-      if (exprHasEffect(v) || exprReadsVolatile(v, sfn) || [...readsIn(v)].some((n) => merge.has(n))) {
-        return null;
-      }
-    }
     merge.forEach((n) => consumed.add(n));
-    return {
-      ...iff,
-      then: [...then.keep, substitute(join, then.defs)],
-      else: [...els.keep, substitute(join, els.defs)],
-    };
+    return { ...iff, then: then.arm, else: els.arm };
   };
 
   const list = (xs: Stmt[]): Stmt[] => {
