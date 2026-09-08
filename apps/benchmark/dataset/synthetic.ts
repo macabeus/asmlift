@@ -6470,6 +6470,30 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: PROBE_FLAG_MAP,
   },
   {
+    // THE HIGH NIBBLE, and its VALUE IS THE GATE, NOT THE SCORE — it MATCHes either way. Its twin
+    // above is the row the all-zero bitfield-store fold closed; this one is the population that
+    // fold must REFUSE, and the only executable statement in the corpus of why it refuses. Here
+    // the declared store's complement is `~0xF0` narrowed to the byte, one encodable `mov r0,#0xf`
+    // — exactly what the raw `*(u8 *)&gFlags = 15 & *(u8 *)&gFlags;` compiles to, so the two
+    // spellings are ONE OBJECT and asmlift's raw spelling matches. A recognizer keyed on "the
+    // assigned value is 0" rather than on the keep mask's materialisation would name the member
+    // here with no byte evidence at all — a default over half the population of 4/4-split cells —
+    // and would still show MATCH, which is why the refusal is pinned by a unit test
+    // (`bitfield-members.test.ts`, 'REFUSES the HIGH nibble') and this row is what makes the two
+    // sides of the gate measurable against a real compile rather than argued.
+    // (`--only bfzero` matches this row too, by substring: expect [1/2].)
+    sym: 'bfzerohi',
+    src:
+      'struct Flags { u8 unk0_0 : 4; u8 unk0_4 : 4; s8 unk1; u8 unk2; u8 pad3; };\n' +
+      'extern struct Flags gFlags;\n' +
+      'void bfzerohi(void){ gFlags.unk0_4 = 0; }',
+    features: ['global', 'struct', 'bitfield'],
+    toolchains: ['agbcc'],
+    ctx: 'void bfzerohi(void);',
+    proto: { bfzerohi: { returnsVoid: true } },
+    symbols: PROBE_FLAG_MAP,
+  },
+  {
     sym: 'nestacc',
     src:
       'extern u8 gGrid[5][7];\n' +
