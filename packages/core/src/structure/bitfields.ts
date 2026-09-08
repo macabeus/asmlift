@@ -80,10 +80,7 @@ export type BitfieldAssigned = { k: 'zero' } | { k: 'value'; v: Value };
 export interface BitfieldSpellings {
   /** extract op → the `gSym.field` read it spells */
   spelling: Map<Op, { global: string; field: string }>;
-  /** store op → the `gSym.field = …` write it spells. The assigned value is a DISCRIMINATED
-   *  union rather than a nullable `Value`: the ALL-ZERO form carries no insert at all (agbcc emits
-   *  only the clearing `and`), and spelling that as `null` puts a third meaning on a value this
-   *  module already reads as "no such entry" and, one screen down, as "refuse this candidate". */
+  /** store op → the `gSym.field = …` write it spells */
   stores: Map<Op, { global: string; field: string; value: BitfieldAssigned }>;
   /** loads whose EVERY use is a spelled extract: the fold emits no temp for these */
   absorbed: Set<Op>;
@@ -197,54 +194,33 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
     // single-use and unmaterialized, because the fold DELETES all of them — a second reader would
     // keep the temp and the emitted C would do the work twice.
     //
-    // THE ALL-ZERO FORM HAS NO `or`, and that is a fact about the COMPILER, not about this pass.
-    // agbcc's `expmed.c` skips the insert entirely when the assigned value is all-zero
-    // (`:557-558`, `:606-608`), so `gSym.field = 0;` lowers to `store(A, and(load(A), ~W))` — the
-    // store's value operand IS the keep. Recognizing only the `or` left that shape with no
-    // candidate spelling the member at all.
+    // THE ALL-ZERO FORM HAS NO `or`: agbcc's `expmed.c` skips the insert when the assigned value
+    // is all-zero (`:557-558`, `:606-608`), so `gSym.field = 0;` lowers to
+    // `store(A, and(load(A), ~W))` and the store's value operand IS the keep.
     //
-    // ITS EVIDENCE GATE, and why the axis is the MASK and not the value. `= 0` is also spellable
-    // raw, as `*(u8 *)&gSym = KEEP & *(u8 *)&gSym`, so a recognizer keyed on "the inserted value
-    // is 0" would name a member wherever the two spellings are the SAME OBJECT — an evidence-free
-    // default. Measured with the pinned agbcc on a `u8 a:4; u8 b:4` container: the HIGH nibble's
-    // two spellings (`gFlags.unk0_4 = 0;` and `15 & *(u8 *)&gFlags`) are byte-identical, both
-    // `mov r0,#0xf`. The LOW nibble's are not. The difference is where the complement is computed:
-    // the DECLARED store takes `~0xF` in the 32-bit domain, `-16` = 0xFFFFFFF0, which no Thumb
-    // `mov #imm8` encodes, so agbcc materialises it `mov #0x10; neg` — where a byte-domain
-    // spelling narrows the same keep to one encodable `mov #0xF0`. So the fold REFUSES the zero
-    // form unless the keep mask LOOKS LIKE that 32-bit complement — the three clauses are stated
-    // at the gate itself, which is the only place that can say what each one kills. (Not that NO
-    // raw spelling can emit `mov; neg` — a `s32` temp holding `-16` does — but none emits it in
-    // this order and allocation, so the distinguisher holds for this byte sequence.)
+    // ITS EVIDENCE IS THE MASK, NOT THE VALUE. `= 0` is also spellable raw, as
+    // `*(u8 *)&gSym = KEEP & *(u8 *)&gSym`, so keying on "the inserted value is 0" would name a
+    // member wherever the two spellings are the SAME OBJECT. Measured, pinned agbcc, `u8 a:4;
+    // u8 b:4`: the DECLARED store of the LOW nibble complements in the 32-bit domain — `~0xF` =
+    // -16, which no Thumb `mov #imm8` encodes, so `mov #0x10; neg` — where the byte-domain raw
+    // spelling narrows the same keep to one encodable `mov #0xF0`. The HIGH nibble's two
+    // spellings are byte-identical (`mov #0xf` on both sides). So the fold admits the zero form
+    // only where the keep mask is that 32-bit complement; the gate below says what each clause
+    // kills.
     //
-    // AND THE MASK'S ENCODING IS NOT ITS DEFINING OP, which is the near-miss to avoid: the
-    // materialisation is `mov;neg` only where the complement misses `mov #imm8`, and agbcc spells
-    // the SAME complement for `u16 a : 12` as a pool `ldr` of `-0x1000` (compiled, not read). A
-    // rule keyed on "the mask is defined by a `neg`" would refuse that real inhabitant, so the
-    // gate reads the mask's VALUE. The residual cost is stated too: after the ARM frontend lowers
-    // `bic Rd,Rm` to `and(Rd, ~Rm)`, a hand-written `mov #0xf; bic` reaches this gate as the same
-    // IR as the accepted `mov #0x10; neg` and is admitted. agbcc does not emit `bic` for this
-    // idiom (compiled: the or-form clear is `mov #0x4; neg`), and `/no-bitfield` co-enumerates the
-    // raw spelling, so the price is one candidate the differ referees — not a lost one.
+    // THE MASK'S ENCODING IS NOT ITS DEFINING OP. `mov;neg` is only how the complement is built
+    // where it misses `mov #imm8`; agbcc spells the same complement for `u16 a : 12` as a pool
+    // `ldr` of `-0x1000` (compiled). A rule keyed on "defined by a `neg`" would refuse that real
+    // inhabitant, so the gate reads the mask's VALUE. The price: the Thumb frontend lowers
+    // `bic Rd,Rm` to `and(Rd, ~Rm)`, so a hand-written `mov #0xf; bic` arrives as the same IR as
+    // the accepted `mov #0x10; neg` and is admitted. agbcc emits no `bic` for this idiom
+    // (compiled: the or-form clear is `mov #0x4; neg`), and `/no-bitfield` co-enumerates the raw
+    // spelling, so that is one extra candidate for the differ, not a lost one.
     //
-    // WHY NONE OF THIS IS A `Gate` TABLE (`l3/gates.ts`) YET, asked and deferred rather than
-    // skipped. The evidence rule is a POLICY gate in a chain of legality gates — remove it and the
-    // emitted C is still correct, only named on a guess — which is exactly the `sound: false` case
-    // the table exists to price, and it is evaluated per `(keep, insert)` candidate. By this
-    // repo's convention that makes it table material: `hazards.ts:374` states the split out loud
-    // ("`PREUPDATE_SINK_GATES` holds the per-candidate refusals … two rules are properties of the
-    // EDGE rather than of a candidate and stay here"), and neither that file nor `namecoalesce.ts`
-    // tables its whole chain — five tabled gates apiece, the rest inline. So the reason this one
-    // is not tabled is SCOPE and nothing else: introducing the file's first table is a refactor,
-    // and this fold arrived as a remediation. Until it happens, what the table would have bought —
-    // one differential test per rule, naming which rule AND WHICH FORM — is written by hand, and
-    // the width rule below is what that costs: it binds both forms, one failing test looked like a
-    // guarded rule, and the form with no inhabitant in the suite was where the rule was wrong.
-    //
-    // TARGET COUPLING, stated because the code cannot: every argument above is a THUMB encoding
-    // argument, and the fold's only target guard is `littleEndian`. That is sound today only
-    // because armv4t+agbcc is the one little-endian target in `target.ts`. A second little-endian
-    // target — MIPS bitfields, say — inherits none of this reasoning and must re-argue it.
+    // TARGET COUPLING, stated because the code cannot: every argument here is a THUMB encoding
+    // argument, and the fold's only target guard is `littleEndian`. That is sound only because
+    // armv4t+agbcc is the one little-endian target in `target.ts`; a second one inherits none of
+    // this reasoning.
     //
     // TRUNCATION is what makes an UNMASKED insert legal, and only sometimes: C truncates the
     // assigned value to the field width, while the asm's `or` writes every bit of `v << lo` that
@@ -296,9 +272,8 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
         const cell = globalCellOf(defs, op.operands[0], op.attrs.off as number);
         const si = cell ? symCtx.info(cell.name) : undefined;
         const valOp = defs.get(op.operands[1]);
-        // the ALL-ZERO form: no `or`, the keep `and` IS the store's value (see the note above).
-        // Single-use and unmaterialized are not tested here because they are the SAME op the
-        // shared `andOp` gate below tests — stating them twice would be a rule with no reader.
+        // the ALL-ZERO form: no `or`, the keep `and` IS the store's value. Single-use and
+        // unmaterialized go untested here because the shared `andOp` gate tests the same op.
         const zeroForm = valOp?.opcode === 'and';
         if (
           !cell ||
@@ -315,7 +290,7 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
         const cellBits = width * 8;
         const cellMask = width >= 4 ? -1 : (1 << cellBits) - 1;
         // The `or` form's two pairs are the commutativity of `|`; the zero form contributes one,
-        // with `null` for an insert that the asm does not contain.
+        // with `null` for the insert the asm does not contain.
         const pairs: readonly (readonly [Value, Value | null])[] = zeroForm
           ? [[op.operands[1], null]]
           : [
@@ -380,15 +355,11 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
           // an aligned pair — the common packed-header shape — is refused, because the compiler
           // had no choice but a word.
           //
-          // The window is what decides this, so the test is on the window and NOT on the map's
-          // `size`. `size` is documented (symbols.ts) and produced (@gba-kit/debug-info
-          // `types.js:494`, `ceil((bitsIntoByte + bitWidth) / 8)`) as the field's byte SPAN, which
-          // for the two widening rows is 2 and 3 — neither of them an access the machine has, and
-          // 3 not an access any machine has. A predicate reading `size` is therefore wrong for a
-          // whole band of real fields no matter how it rounds, and it would also make this fold's
-          // correctness depend on a map convention it cannot check. `bitOffset`/`bitWidth` are the
-          // same fact stated exactly, and the `fld` lookup below already requires them to agree
-          // with `lo`/`w`.
+          // So the test reads the WINDOW and never the map's `size`. `size` is the field's byte
+          // SPAN (@gba-kit/debug-info emits `ceil((bitsIntoByte + bitWidth) / 8)`), which for the
+          // two widening rows is 2 and 3 — neither an access this machine has, and 3 an access no
+          // machine has. Any bound expressed in `size` is therefore wrong for a whole band of real
+          // fields however it rounds. `bitOffset`/`bitWidth` state the same fact exactly.
           const loBit = cell.byte * 8 + lo;
           const cellWidth = [1, 2, 4].find(
             (n) => Math.floor(loBit / (n * 8)) === Math.floor((loBit + w - 1) / (n * 8)),
@@ -396,47 +367,35 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
           if (width !== cellWidth) {
             continue;
           }
-          // THE ZERO FORM'S EVIDENCE RULE (header note above). It is ONE rule — "accept only a
-          // keep mask no RAW spelling of the same clear can produce" — plus one refusal that is
-          // about the cell rather than the mask. Each was measured with the pinned agbcc:
+          // THE ZERO FORM'S EVIDENCE RULE: accept only a keep mask no RAW spelling of the same
+          // clear can produce. Three clauses, each measured with the pinned agbcc:
           //
-          //  1. THE MASK RULE, in two halves that must both hold. The mask is the 32-BIT
-          //     COMPLEMENT of the window (`mask === ~clear`), and it therefore carries bits
-          //     OUTSIDE the stored cell (`(mask & cellMask) !== mask`) and still keeps at least
-          //     one bit OF it (`(mask & cellMask) !== 0`). What the halves buy:
-          //       · `~0xF` = -16 for a low nibble, `-0x1000` (a POOL word, not a `neg`) for
-          //         `u16 a : 12`: neither is encodable in the byte domain, so a raw spelling of
-          //         the same clear narrows to a different object. That is the evidence.
-          //       · a pool word like `0xFFFF00F0` clears the same nibble but has a ZERO above the
-          //         cell, so it is some other function of the cell and the window it happens to
-          //         clear is a coincidence of the arithmetic.
-          //       · a mask that keeps NO bit of the cell is not a read-modify-write: agbcc
-          //         compiles `g.f8 = 0;`, for a field filling its own byte, to `mov #0x0; strb`
-          //         — no load, no `and` — so the candidate cannot reproduce its own input.
-          //     The rule REFUSES a real population as collateral and that is deliberate: agbcc
-          //     spells the HIGH nibble's clear as the narrowed in-cell `mov #0xf` (compiled:
-          //     `u8 lo:4; u8 hi:4`, `gN.lo = 0;` is `mov #0x10; neg` but `gN.hi = 0;` is
-          //     `mov #0xf`), which is byte-identical to the raw spelling. So it is NOT true that
-          //     a declared store always complements in 32 bits; it is true that when it does, no
-          //     raw spelling matches — and that is the only direction the rule needs.
-          //  2. A WORD CELL IS REFUSED OUTRIGHT, which is what `(mask & cellMask) === mask` does
-          //     once clause 1 stands: `clear` is inside the cell and `cellMask` has bit 31 clear
-          //     at widths 1-2, so `mask === ~clear` already forces a bit outside the cell there,
-          //     and the test can only bite at width 4 where `cellMask === -1`. Refusing costs
-          //     nothing — compiled, `gS.a = 0;` for `u32 a : 20` and `*(s32 *)&gS &= -1048576;`
-          //     are byte-identical — and there is no 33rd bit for a word's complement to differ in.
+          //  · `mask === ~clear` — the 32-bit complement of the window. `~0xF` = -16 for a low
+          //    nibble, `-0x1000` for `u16 a : 12`: neither is encodable in the byte domain, so a
+          //    raw spelling narrows to a different object. A pool word like `0xFFFF00F0` clears
+          //    the same nibble but zeroes bits ABOVE the cell, so it is some other function whose
+          //    clear is a coincidence.
+          //  · `(mask & cellMask) !== mask` — a WORD cell is refused outright. `cellMask` has bit
+          //    31 clear at widths 1-2, so `mask === ~clear` already forces an outside bit there
+          //    and this can only bite at width 4. It costs nothing: compiled, `gS.a = 0;` for
+          //    `u32 a : 20` and `*(s32 *)&gS &= -1048576;` are byte-identical.
+          //  · `(mask & cellMask) !== 0` — a mask keeping NO bit of the cell is not a
+          //    read-modify-write. agbcc compiles `g.f8 = 0;`, a field filling its own byte, to
+          //    `mov #0x0; strb`, so the candidate could not reproduce its own input.
           //
-          // NONE of it extends to the `or` form, and must not: there the insert seated at `lo` is
-          // the evidence, and agbcc really does spell an end-of-cell clear with the narrow in-cell
-          // constant (`mov #0xf`, the `gState.top = a0;` row below). The discriminant is
-          // `zeroForm`, the same one that built `pairs`.
+          // The rule refuses a real population as collateral: agbcc narrows the HIGH nibble's
+          // clear to the in-cell `mov #0xf`, byte-identical to the raw spelling, so a declared
+          // store does NOT always complement in 32 bits. Only the converse is needed.
+          //
+          // NONE of this may extend to the `or` form, where the insert seated at `lo` is the
+          // evidence and agbcc does spell an end-of-cell clear with the narrow in-cell constant.
+          // `zeroForm`, the discriminant that built `pairs`, is what keeps the two apart.
           if (zeroForm && (mask !== ~clear || (mask & cellMask) === mask || (mask & cellMask) === 0)) {
             continue;
           }
-          // …and the insert must be exactly that value seated at `lo`.
-          // The zero form skips all of it: there is no insert to seat, and nothing the asm's
-          // (absent) `or` writes that C's truncation could disagree with, so it assigns `zero` —
-          // the literal the render site emits.
+          // …and the insert must be exactly that value seated at `lo`. The zero form skips it:
+          // no insert to seat, and no bit the (absent) `or` writes for C's truncation to disagree
+          // with.
           let assigned: BitfieldAssigned = { k: 'zero' };
           if (insV !== null) {
             const shifted = defs.get(insV);
@@ -457,8 +416,7 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
             }
             assigned = { k: 'value', v: inserted };
           }
-          // …and a DECLARED field must occupy exactly the window. The store width was already
-          // checked against the window above, so nothing here reads `size`.
+          // …and a DECLARED field must occupy exactly the window.
           const fld = symCtx
             .fieldsOf(cell.name)
             ?.find((f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === loBit && f.signed !== undefined);

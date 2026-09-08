@@ -251,10 +251,10 @@ const RMW = (pre: string, keep: string, byte = 0) =>
   `\tstrb\tr0, [r1, #${byte}]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n`;
 const NARROW = '\tlsl\tr0, r0, #30\n\tlsr\tr0, r0, #30\n'; // a provably 2-bit value
 const CLEAR_LOW2 = '\tmov\tr3, #0x3\n\tbic\tr2, r3\n';
-/** the SAME keep (`~3` = -4), materialised the way agbcc actually emits it. Compiled with the
- *  pinned agbcc, `gF.a = 1;` on a `u8 a : 2` container is `mov r0,#0x4; neg r0,r0; and; orr` —
- *  it never emits `bic` for this idiom. The `bic` spellings above reach the fold through the ARM
- *  frontend's `and(Rd, ~Rm)` lowering, which is legal input but not this compiler's. */
+/** the SAME keep (`~3` = -4), materialised the way agbcc actually emits it: compiled with the
+ *  pinned agbcc, `gF.a = 1;` on a `u8 a : 2` container is `mov r0,#0x4; neg r0,r0; and; orr`.
+ *  agbcc emits no `bic` for this idiom; the `bic` clears in this file reach the fold through the
+ *  Thumb frontend's `and(Rd, ~Rm)` lowering, legal input but not this compiler's. */
 const CLEAR_LOW2_NEG = '\tmov\tr3, #0x4\n\tneg\tr3, r3\n\tand\tr2, r3\n';
 const CLEAR_LOW4 = '\tmov\tr3, #0xf\n\tbic\tr2, r3\n';
 /** the read fold's own 4-bit extract of the field at `byte`, signed (`asr`) or not (`lsr`). */
@@ -269,10 +269,9 @@ describe('the mask-and-insert idiom spells the member assignment', () => {
   });
 
   test('the mask materialisation agbcc ACTUALLY emits folds too — `mov;neg`, not `bic`', () => {
-    // The rest of this suite builds its clears with `bic`, which agbcc does not emit here. This
-    // row pins the measured lowering, and with it that the zero form's 32-bit-complement rule did
-    // not leak into the `or` form — `-4` satisfies that rule, but the `gState.top` rows below do
-    // not, and they are what fail if it ever leaks.
+    // This suite builds its clears with `bic`, which agbcc does not emit here, so this row pins
+    // the measured lowering. It also pins that the zero form's 32-bit-complement rule has not
+    // leaked into the `or` form: `-4` satisfies that rule, and the `gState.top` rows do not.
     const src = runW(RMW(NARROW, CLEAR_LOW2_NEG));
     expect(src).toContain('gState.hearts = (u32)(a0 << 30) >> 30;');
   });
@@ -389,12 +388,11 @@ describe('what this fold does NOT police', () => {
 
 // ── the ALL-ZERO form: agbcc emits no `or` at all ────────────────────────────────────────────
 // `expmed.c` skips the insert when the assigned value is 0 (`:557-558`, `:606-608`), so
-// `gState.low = 0;` lowers to `store(A, and(load(A), ~W))` — no `or` for the idiom above to key
-// on. What decides whether that shape may be NAMED is the keep mask's MATERIALISATION, not the
-// value: the declared store complements in the 32-bit domain (`~0xF` = -16, which no Thumb `mov`
-// encodes, hence `mov #0x10; neg`), where every raw byte-domain spelling of the same clear narrows
-// to one encodable `mov #0xF0`. Where the two spellings are the same object there is no evidence,
-// and the fold refuses.
+// `gState.low = 0;` lowers to `store(A, and(load(A), ~W))`. What decides whether that shape may be
+// NAMED is the keep mask's MATERIALISATION, not the value: a declared store complements in the
+// 32-bit domain (`~0xF` = -16, which no Thumb `mov` encodes, hence `mov #0x10; neg`), where a raw
+// byte-domain spelling of the same clear narrows to one encodable `mov #0xF0`. Where the two
+// spellings are the same object there is no evidence, and the fold refuses.
 
 /** `gState.<window> = 0` as agbcc lowers it: clear the window, store the cleared load back. */
 const ZERO = (keep: string, byte = 8) =>
@@ -407,9 +405,7 @@ describe('the all-zero bitfield store', () => {
   test('a keep mask with bits OUTSIDE the cell spells the assignment of 0', () => {
     const src = runW(ZERO(KEEP_NEG16));
     expect(src).toContain('gState.low = 0;');
-    // the RULE, not a proxy: the mask constant and the cast-spelled load are both gone. `&` alone
-    // would also be absent from an empty function, and present in any `&gState` this row happens
-    // not to have.
+    // the mask constant and the cast-spelled load are both gone
     expect(src).not.toContain('-16');
     expect(src).not.toContain('(u8 *)');
   });
@@ -487,10 +483,9 @@ describe('the all-zero bitfield store', () => {
     // `hearts` is two bits inside byte 0, so the narrowest aligned cell holding it is a BYTE;
     // this is a HALFWORD read-modify-write of the same two bits. Compiled, a 2-bit field in a
     // `u16` container is `ldrb`/`strb` — agbcc picks the access from the field's BITS — so a
-    // `strh` here names bytes the member does not. The rule reads the window, never the map's
-    // `size`, and the second assertion is that independence: `size: 4` is what a DWARF producer
-    // that reported the storage unit instead of the byte span would author, and it must not
-    // re-admit this store.
+    // `strh` here names bytes the member does not. The second assertion pins that the rule reads
+    // the window and not `size`: `size: 4` is what a producer reporting the storage unit rather
+    // than the byte span would author, and it must not re-admit this store.
     const wide =
       'f:\n\tldr\tr1, .L1\n\tldrh\tr2, [r1]\n\tmov\tr3, #0x4\n\tneg\tr3, r3\n\tand\tr2, r3\n' +
       '\tstrh\tr2, [r1]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
@@ -501,8 +496,7 @@ describe('the all-zero bitfield store', () => {
 
   // THE OR FORM'S HALF OF THE SAME RULE. The width test binds both forms, and every other write
   // row in this file runs at `width === 1`, so without these three the or-form arm has no
-  // inhabitant at all — which is how the first spelling of the rule (`width <= f.size`) shipped
-  // refusing two shapes the pinned agbcc really emits.
+  // inhabitant at all.
   describe('the store width is the narrowest ALIGNED cell holding the window, in the `or` form too', () => {
     /** a word read-modify-write at byte 4: `and` the insert, `and` the pool keep, `orr`, `str`. */
     const WORD_RMW = (insMask: number, shift: string, keep: number) =>
@@ -514,8 +508,8 @@ describe('the all-zero bitfield store', () => {
       // Compiled, pinned agbcc: `struct M { u32 p:12; u32 x:8; u32 q:12; }; gM.x = v;` is
       //   `mov #0xff; and; lsl #0xc; ldr [r3]; ldr .word -0xff001; and; orr; str [r3]`
       // — a WORD read-modify-write over a field whose bits (12-19) touch two bytes and whose byte
-      // SPAN is 2. No halfword access holds bits 12-19, so the compiler widened; a rule bounded by
-      // the span refuses this and loses the only spelling that reproduces these bytes.
+      // SPAN is 2. No halfword access holds bits 12-19, so the compiler had to widen; a rule
+      // bounded by the span refuses the only spelling that reproduces these bytes.
       const layout: SymbolStructField[] = [
         ...WRITE_LAYOUT.filter((f) => f.offset !== 4),
         { name: 'p', offset: 4, size: 2, signed: false, bitWidth: 12, bitOffset: 0 },
@@ -525,7 +519,7 @@ describe('the all-zero bitfield store', () => {
       const src = runW(WORD_RMW(255, '\tlsl\tr2, r2, #0xc\n', -0xff001), writeInfo({ layout }));
       expect(src).toContain('gState.x = 255 & a0;');
       expect(src).not.toContain('(s32 *)');
-      // and again with `size` authored as the DWARF storage unit — the rule reads neither
+      // and again with `size` authored as the storage unit — the rule reads neither
       const unit = layout.map((f) => (f.bitWidth === undefined ? f : { ...f, size: 4 }));
       expect(runW(WORD_RMW(255, '\tlsl\tr2, r2, #0xc\n', -0xff001), writeInfo({ layout: unit }))).toContain(
         'gState.x = 255 & a0;',
@@ -536,7 +530,7 @@ describe('the all-zero bitfield store', () => {
       // Compiled, pinned agbcc: `struct S { u32 pad0; u32 a:20; u32 b:12; }; gS.a = v;` is
       //   `ldr .word 0xfffff; and; ldr [r3,#4]; ldr .word -0x100000; and; orr; str [r3,#4]`
       // `u32 a : 17` is the same. The span is 3, so ANY bound expressed in the span refuses a
-      // whole band of fields — 17 to 24 bits wide — that the compiler can only reach by word.
+      // whole band of fields — 17 to 24 bits wide — the compiler can only reach by word.
       const layout: SymbolStructField[] = [
         ...WRITE_LAYOUT.filter((f) => f.offset !== 4),
         { name: 'a', offset: 4, size: 3, signed: false, bitWidth: 20, bitOffset: 0 },
@@ -548,8 +542,8 @@ describe('the all-zero bitfield store', () => {
     });
 
     test('REFUSES a HALFWORD store over a one-byte window in the `or` form too', () => {
-      // the twin of the `hearts` refusal above, with an insert: the narrowest cell holding bits
-      // 0-1 is a byte, and this stores a halfword, so it is not the assignment's own access.
+      // the twin of the `hearts` zero-form refusal, with an insert: the narrowest cell holding
+      // bits 0-1 is a byte, and this stores a halfword.
       const wide =
         'f:\n\tldr\tr1, .L1\n\tmov\tr3, #0x3\n\tand\tr0, r3\n\tldrh\tr2, [r1]\n' +
         '\tmov\tr3, #0x4\n\tneg\tr3, r3\n\tand\tr2, r3\n\torr\tr0, r2\n\tstrh\tr0, [r1]\n' +

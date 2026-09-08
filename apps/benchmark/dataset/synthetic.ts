@@ -272,13 +272,12 @@ const PROBE_FLAG_MAP: SymbolMap = new Map([
   ],
 ]);
 
-// The STRADDLING-field map, added by the G5 wave-2 remediation. `unk0_c`'s bits are 12-19: they
-// touch bytes 1 and 2, so no aligned halfword holds them and agbcc reaches the field with a WORD
-// read-modify-write (compiled, pinned agbcc: `mov #0xff; and; lsl #0xc; ldr [r3]; ldr .word
-// -0xff001; and; orr; str [r3]`). Every other bitfield map in this corpus — `PACKED_MAP`,
-// `PROBE_FLAG_MAP` — declares fields whose bits sit inside ONE byte, so before this map no row
-// could tell a store-width rule expressed in the field's byte SPAN from one expressed in its bit
-// WINDOW. The first spelling of that rule shipped as `width <= f.size` and refused this shape.
+// The STRADDLING-field map. `unk0_c`'s bits are 12-19: they touch bytes 1 and 2, so no aligned
+// halfword holds them and agbcc reaches the field with a WORD read-modify-write (compiled, pinned
+// agbcc: `mov #0xff; and; lsl #0xc; ldr [r3]; ldr .word -0xff001; and; orr; str [r3]`). Every
+// other bitfield map here — `PACKED_MAP`, `PROBE_FLAG_MAP` — declares fields whose bits sit inside
+// ONE byte, so this is the corpus's only row that can tell a store-width rule expressed in the
+// field's byte SPAN from one expressed in its bit WINDOW.
 const PROBE_SPAN_MAP: SymbolMap = new Map([
   [
     0x03004c10,
@@ -6143,11 +6142,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //    against it is not a fidelity nicety but a different program — agbcc strides the row a
   //    second time and truncates the resulting pointer to u8. That is why `SymbolStructField`
   //    gained `dims` inside this gap rather than in the symbol-map family; see below.
-  //  • `bfzero` 5 — `structure/bitfields.ts`, the named-bitfield-store recognizer's
-  //    `orOp?.opcode !== 'or'`. It is looking for `or(and(load, keepMask), insert)`; agbcc compiles
-  //    a ZERO insert to a bare `and` (`expmed.c:557-558`, `606-608` skip the `orr` when
-  //    `all_zero`), so the guard refuses before any field lookup: **89 firings on `bfzero`, 0 on
-  //    `bfconstn`.** L2→L3 recognizer.
+  //  • `bfzero` 5 — `structure/bitfields.ts`, the named-bitfield-store recognizer's `or`-only
+  //    guard. It was looking for `or(and(load, keepMask), insert)`; agbcc compiles a ZERO insert to
+  //    a bare `and` (`expmed.c:557-558`, `606-608` skip the `orr` when `all_zero`), so the guard
+  //    refused before any field lookup: **89 firings on `bfzero`, 0 on `bfconstn`.** L2→L3
+  //    recognizer. The all-zero form now folds, under the mask-evidence rule `bfzerohi` pins.
   //  • `nestacc` 58 → **40**, and the residual is a SECOND gap this row holds. G2 is two halves and
   //    the first is closed: the merge-param naming walk refused every carrier on the deciding
   //    liveness clause (`PARAMNAME REFUSE carrier=v6/v7/v8 preUpdate=false canTake=false
@@ -6498,17 +6497,15 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: PROBE_FLAG_MAP,
   },
   {
-    // THE HIGH NIBBLE, and its VALUE IS THE GATE, NOT THE SCORE — it MATCHes either way. Its twin
-    // above is the row the all-zero bitfield-store fold closed; this one is the population that
-    // fold must REFUSE, and the only executable statement in the corpus of why it refuses. Here
-    // the declared store's complement is `~0xF0` narrowed to the byte, one encodable `mov r0,#0xf`
-    // — exactly what the raw `*(u8 *)&gFlags = 15 & *(u8 *)&gFlags;` compiles to, so the two
-    // spellings are ONE OBJECT and asmlift's raw spelling matches. A recognizer keyed on "the
+    // THE HIGH NIBBLE, and its VALUE IS THE GATE, NOT THE SCORE — it MATCHes either way. `bfzero`
+    // is the row the all-zero bitfield-store fold closed; this is the population that fold must
+    // REFUSE. Here the declared store's complement is `~0xF0` narrowed to the byte, one encodable
+    // `mov r0,#0xf` — exactly what the raw `*(u8 *)&gFlags = 15 & *(u8 *)&gFlags;` compiles to, so
+    // the two spellings are ONE OBJECT and the raw spelling matches. A recognizer keyed on "the
     // assigned value is 0" rather than on the keep mask's materialisation would name the member
-    // here with no byte evidence at all — a default over half the population of 4/4-split cells —
-    // and would still show MATCH, which is why the refusal is pinned by a unit test
-    // (`bitfield-members.test.ts`, 'REFUSES the HIGH nibble') and this row is what makes the two
-    // sides of the gate measurable against a real compile rather than argued.
+    // here with no byte evidence, over half the population of 4/4-split cells, and would still
+    // show MATCH; the refusal itself is pinned by `bitfield-members.test.ts` ('REFUSES the HIGH
+    // nibble') and this row is what holds it against a real compile.
     // (`--only bfzero` matches this row too, by substring: expect [1/2].)
     sym: 'bfzerohi',
     src:
@@ -6522,15 +6519,12 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: PROBE_FLAG_MAP,
   },
   {
-    // THE STRADDLING FIELD, and it is a WIDTH row rather than a mask row. `unk0_c` occupies bits
-    // 12-19 of the word: no aligned halfword contains them, so agbcc has to reach the field with a
-    // WORD read-modify-write even though the field's byte SPAN is 2. The recognizer's store-width
-    // rule therefore has to be expressed in the field's bit WINDOW — "the narrowest aligned cell
-    // that holds it" — and not in the map's `size`, which for this field names an access the
-    // machine does not have. The corpus had no inhabitant of this shape at all (every other
-    // bitfield map here declares fields inside one byte), which is how a `size`-bounded spelling
-    // of the rule shipped and refused a store the pinned agbcc really emits. Its twin is
-    // `bfzerohi`: that row pins what the fold must REFUSE, this one pins the width it must ADMIT.
+    // THE STRADDLING FIELD, a WIDTH row rather than a mask row. `unk0_c` occupies bits 12-19 of
+    // the word: no aligned halfword contains them, so agbcc reaches the field with a WORD
+    // read-modify-write even though the field's byte SPAN is 2. The recognizer's store-width rule
+    // is therefore expressed in the field's bit WINDOW — "the narrowest aligned cell that holds
+    // it" — and not in the map's `size`, which for this field names an access the machine does not
+    // have. `bfzerohi` pins what the fold must REFUSE; this one pins the width it must ADMIT.
     sym: 'bfstraddle',
     src:
       'struct Span { u32 unk0_0 : 12; u32 unk0_c : 8; u32 unk0_14 : 12; };\n' +
