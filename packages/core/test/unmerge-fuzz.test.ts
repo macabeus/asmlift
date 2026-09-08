@@ -37,14 +37,18 @@ interface World {
 const run = (fn: SFn, seedMem: number[]): World => {
   const w: World = { m: [...seedMem], trace: [] };
   const env = new Map<string, number>();
-  for (const l of fn.locals) env.set(l.name, 0);
+  for (const l of fn.locals) {
+    env.set(l.name, 0);
+  }
   let calls = 0;
   const ev = (e: Expr): number => {
     switch (e.k) {
       case 'const':
         return e.value | 0;
       case 'var': {
-        if (!env.has(e.name)) throw new Error(`READS UNDECLARED ${e.name}`);
+        if (!env.has(e.name)) {
+          throw new Error(`READS UNDECLARED ${e.name}`);
+        }
         return env.get(e.name)!;
       }
       case 'index': {
@@ -65,7 +69,9 @@ const run = (fn: SFn, seedMem: number[]): World => {
   const exec = (s: Stmt): void => {
     switch (s.k) {
       case 'assign': {
-        if (!env.has(s.name)) throw new Error(`ASSIGNS UNDECLARED ${s.name}`);
+        if (!env.has(s.name)) {
+          throw new Error(`ASSIGNS UNDECLARED ${s.name}`);
+        }
         env.set(s.name, ev(s.value));
         return;
       }
@@ -102,10 +108,18 @@ function gen(seed: number): SFn {
   const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
   const val = (d = 0): Expr => {
     const r = rnd();
-    if (d > 1 || r < 0.35) return c(Math.floor(rnd() * 8));
-    if (r < 0.55) return v(pick(NAMES));
-    if (r < 0.75) return mem(val(d + 1));
-    if (r < 0.97) return { k: 'bin', op: '+', l: val(d + 1), r: val(d + 1) };
+    if (d > 1 || r < 0.35) {
+      return c(Math.floor(rnd() * 8));
+    }
+    if (r < 0.55) {
+      return v(pick(NAMES));
+    }
+    if (r < 0.75) {
+      return mem(val(d + 1));
+    }
+    if (r < 0.97) {
+      return { k: 'bin', op: '+', l: val(d + 1), r: val(d + 1) };
+    }
     return call(`F${Math.floor(rnd() * 3)}`);
   };
   const noise = (): Stmt[] => {
@@ -113,21 +127,31 @@ function gen(seed: number): SFn {
     const n = rnd() < 0.55 ? 0 : 1;
     for (let i = 0; i < n; i++) {
       const r = rnd();
-      if (r < 0.4) out.push(asg(pick(NAMES), val()));
-      else if (r < 0.7) out.push(st(val(), val()));
-      else out.push({ k: 'exprstmt', value: call(`F${Math.floor(rnd() * 3)}`) });
+      if (r < 0.4) {
+        out.push(asg(pick(NAMES), val()));
+      } else if (r < 0.7) {
+        out.push(st(val(), val()));
+      } else {
+        out.push({ k: 'exprstmt', value: call(`F${Math.floor(rnd() * 3)}`) });
+      }
     }
     return out;
   };
   const terminal = (): Stmt[] => {
     const defs: Stmt[] = [asg('t0', val()), asg('t1', val())];
-    if (rnd() < 0.5) defs.reverse();
-    if (rnd() < 0.3) defs.splice(1, 0, asg('q', val()));
+    if (rnd() < 0.5) {
+      defs.reverse();
+    }
+    if (rnd() < 0.3) {
+      defs.splice(1, 0, asg('q', val()));
+    }
     return [...noise(), ...defs];
   };
   const ladder = (n: number): Stmt => {
     const cond = v(pick(CONDS));
-    if (n <= 2) return { k: 'if', cond, then: terminal(), else: terminal() };
+    if (n <= 2) {
+      return { k: 'if', cond, then: terminal(), else: terminal() };
+    }
     const rest = rnd() < 0.25 ? [...noise(), ladder(n - 1)] : [ladder(n - 1)];
     return rnd() < 0.5
       ? { k: 'if', cond, then: terminal(), else: rest }
@@ -158,7 +182,9 @@ describe('unmerge differential fuzz — the oracle this lever shipped without', 
         bad.push(`seed ${seed}: THREW ${(e as Error).message}`);
         continue;
       }
-      if (after === null) continue;
+      if (after === null) {
+        continue;
+      }
       fired++;
       for (let world = 0; world < 3; world++) {
         const seedMem = Array.from({ length: 16 }, (_, i) => (i * 31 + seed * 7 + world * 5) % 13);
@@ -206,9 +232,15 @@ function gen2(seed: number): SFn {
   const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
   const val = (d = 0): Expr => {
     const r = rnd();
-    if (d > 1 || r < 0.45) return c(Math.floor(rnd() * 8));
-    if (r < 0.6) return v(pick(['s0', 't0']));
-    if (r < 0.85) return mem(val(d + 1));
+    if (d > 1 || r < 0.45) {
+      return c(Math.floor(rnd() * 8));
+    }
+    if (r < 0.6) {
+      return v(pick(['s0', 't0']));
+    }
+    if (r < 0.85) {
+      return mem(val(d + 1));
+    }
     return { k: 'bin', op: '+', l: val(d + 1), r: val(d + 1) };
   };
   // a terminal arm is either a plain definition of `t0`, or an INNER un-merge site whose join
@@ -222,7 +254,9 @@ function gen2(seed: number): SFn {
         ];
   const ladder = (n: number): Stmt => {
     const cond = v(pick(CONDS));
-    if (n <= 2) return { k: 'if', cond, then: terminal(), else: terminal() };
+    if (n <= 2) {
+      return { k: 'if', cond, then: terminal(), else: terminal() };
+    }
     const rest = [ladder(n - 1)];
     return rnd() < 0.5
       ? { k: 'if', cond, then: terminal(), else: rest }
@@ -246,7 +280,9 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
     for (let seed = 1; seed <= 60000; seed++) {
       const before = gen2(seed);
       const after = unmergeJoins(before);
-      if (after === null) continue;
+      if (after === null) {
+        continue;
+      }
       fired++;
       for (let world = 0; world < 4; world++) {
         const seedMem = Array.from({ length: 16 }, (_, i) => (i * 31 + seed * 7 + world * 5) % 13);
@@ -256,8 +292,9 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
         try {
           const ra = run(a, seedMem);
           const rb = run(b, seedMem);
-          if (JSON.stringify(ra) !== JSON.stringify(rb))
+          if (JSON.stringify(ra) !== JSON.stringify(rb)) {
             bad.push(`seed ${seed}/${world}: DIVERGED ${JSON.stringify(ra)} vs ${JSON.stringify(rb)}`);
+          }
         } catch (e) {
           bad.push(`seed ${seed}/${world}: ${(e as Error).message}`);
           break;
