@@ -150,15 +150,21 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   itself.
 
   1. THE MAPPING IS A FUNCTION, and three compiled pairs say so rather than a claim. Compiled at
-     `TOOLCHAIN.agbccFlags` the two spellings of the same two-case body are 79 bytes each and are
-     DIFFERENT objects — the `switch` front-loads both tests and sorts them ascending
-     (`expand_end_case` closes with the `reorder_insns` that moves the dispatch in front of the
-     bodies), the ladder emits each test directly above its own body in source order. Both
-     toolchains behind `MIPS_GCC` say the same on their own two-case pair, committed as
-     `corpus/gcc272kmc-sw{frontload,ladder}.asm` and `corpus/gcc272-sw{frontload,ladder}.asm` and
-     asserted off the disassembly by a test. Layout distinguishes the two spellings; that is the
-     evidence, and the direction-of-failure argument below is not a substitute for it.
-  2. THE REACH IS MEASURED, which is what actually decides default-vs-axis here. An axis was
+     `TOOLCHAIN.agbccFlags` the two spellings of the same two-case body are 20 bytes each (0x14,
+     ten Thumb instructions) and are DIFFERENT objects — the `switch` front-loads both tests and
+     sorts them ascending (`expand_end_case` closes with the `reorder_insns` that moves the dispatch
+     in front of the bodies), the ladder emits each test directly above its own body in source
+     order. Both toolchains behind `MIPS_GCC` say the same on their own two-case pair. All three
+     pairs are COMMITTED — `corpus/agbcc-sw{frontload,ladder}.s`,
+     `corpus/gcc272kmc-sw{frontload,ladder}.asm`, `corpus/gcc272-sw{frontload,ladder}.asm` — with
+     their C bodies beside them, a provenance header naming toolchain and flags, and a regen script
+     (`scripts/regen-switch-spelling-probes.ts`), and a test asserts the split off each. Layout
+     distinguishes the two spellings; that is the evidence, and the direction-of-failure argument
+     below is not a substitute for it. (RE-READABLE IS NOT RE-MEASURABLE: the two MIPS pairs are
+     byte-identical FILES, so without a regen path nothing committed could tell "compiled by this
+     toolchain and it agreed" from "copied from the sibling".)
+  2. THE REACH IS MEASURED, which is what settles the COST of the axis here — item 1 is what
+     decides default-vs-axis, and no reach number rescues a mapping that is not a function. An axis was
      POSSIBLE — `StructuringAxis.options` is `(on: boolean) => StructureOptions` and this flag is
      one more entry — so the absent dual is a fact about what Regime A enumerates today, not an
      impossibility, and citing it as one would be circular. What rules the axis out is the term
