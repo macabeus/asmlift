@@ -236,10 +236,16 @@ export interface TargetDescription {
     // case body, on the reading that the source wrote an if/else-if LADDER there. True claims the
     // compiler emits a source `switch`'s whole dispatch AHEAD of every arm body — the same
     // `expand_end_case` closing `reorder_insns` `switchArmsFollowLayout` is read off, used for the
-    // other half of what it does — while a ladder's tests stay above their own bodies. So it
-    // carries `switchArmsFollowLayout`'s premise ENTIRE (no block reordering, no scheduling, and a
-    // frontend whose block list is address order) and adds nothing to it; a compiler that declares
-    // one has already said what the other needs.
+    // other half of what it does — while a ladder's tests stay above their own bodies.
+    //
+    // IT NEEDS HALF OF `switchArmsFollowLayout`'s PREMISE, AND THE IMPLICATION RUNS ONE WAY ONLY.
+    // That flag PLACES the arms and so needs the whole no-reordering claim (nothing moved a block
+    // at all); this one only asks whether any BODY sits above a test, so a compiler that moves
+    // instructions, fills delay slots, or reorders within a block can still declare it. A compiler
+    // that declares the PLACING one has therefore already said what this one needs — never the
+    // converse. `MIPS_GCC` is the standing counterexample to the converse: it declares this flag on
+    // its own pairs (below) and deliberately does NOT declare `switchArmsFollowLayout`, because it
+    // has a scheduler. Declaring this one is not evidence for that one.
     //
     // agbcc declares it, and its own pair of objects says the reading is not vacuous: at
     // TOOLCHAIN.agbccFlags the same two-case body is 79 bytes written either way and is a DIFFERENT
@@ -249,7 +255,9 @@ export interface TargetDescription {
     //
     // Absent ⇒ every recoverable tree is still spelled `switch`, which is where ido/mwcc sit: each
     // has a scheduler that may move a body above a test, and neither has been put through the pair.
-    // A compiler opts in on its own compiled evidence, never by inheriting.
+    // A compiler opts in on its own compiled evidence, never by inheriting — and where one
+    // description serves two toolchains (`MIPS_GCC`), each toolchain owes its own pair, because the
+    // field cannot distinguish them (the KEYED BY DESCRIPTION note at `spillSlotOrder`).
     switchRequiresFrontLoadedTests?: boolean;
     // Commutative load pairs re-spell in def (evaluation) order (structure.ts lowerDef). Absent
     // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown

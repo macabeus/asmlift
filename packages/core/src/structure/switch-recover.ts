@@ -262,17 +262,24 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     structureRegion,
   } = deps;
 
-  // A block's index in `fn.blocks` as its position in the ASSEMBLY — the sole warrant for reading a
-  // source's arm order off block indices below, and true PER FRONTEND rather than of the IR:
+  // A block's index in `fn.blocks` as its position in the ASSEMBLY — the warrant for every reading
+  // of layout below, and true PER FRONTEND rather than of the IR:
   //   - thumb.ts and mips.ts build the list by scanning the instruction stream in address order;
   //   - ppc.ts does not. It APPENDS a synthetic return block (`synthReturn`) at the end of the list
   //     for every conditional-return branch, wherever in the stream that branch sits, so its list
   //     is not address order at all;
   //   - raising only ever REMOVES blocks from the list (raise/{divpow2,latch,retsink,shortcircuit}
   //     .ts all `filter`), never inserts or reorders, so the frontend's order is what survives.
-  // `switchArmsFollowLayout` is therefore a claim about a target's FRONTEND as much as about its
-  // compiler, and a target opts in on both — which is why PPC_MWCC, whose frontend fails the first
-  // half, does not.
+  // TWO READERS, both target-gated, and they need DIFFERENT strengths of the compiler half:
+  //   - `switchArmsFollowLayout` (arm ORDER, the sort below) needs the full claim — no block moved
+  //     at all — because it PLACES the arms from the layout;
+  //   - `switchRequiresFrontLoadedTests` (PRE5, whether to recover at all) needs only that no case
+  //     BODY was moved above a dispatch test, which a compiler with a scheduler can still satisfy;
+  //     `MIPS_GCC` declares that one and not this one for exactly that reason (target.ts).
+  // Both are therefore claims about a target's FRONTEND as much as about its compiler, and a target
+  // opts in on both halves — which is why PPC_MWCC, whose frontend fails the frontend half outright,
+  // declares neither. Anything added below that reads `layoutIndex` inherits the frontend half and
+  // owes a statement of which strength of the compiler half it needs.
   const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));
   const layoutIndex = (blk: Block): number => blockIndex.get(blk) ?? -1;
 
