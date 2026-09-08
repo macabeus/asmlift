@@ -127,12 +127,25 @@ export function localMentions(sfn: SFn): Map<string, Mentions> {
  *  `var`/`addr` the only `Expr`s, and both walks are derived from `stmtChildren`/`stmtExprs` — so a
  *  `for`'s init and inc, a `switch`'s scrutinee, its cases and its default are all covered. */
 export function mentionsAnyLocal(stmts: readonly Stmt[], names: ReadonlySet<string>): boolean {
-  const walk = (list: readonly Stmt[]): boolean =>
-    list.some(
-      (s) =>
-        (s.k === 'assign' && names.has(s.name)) ||
-        [...walkExprs([s])].some((e) => (e.k === 'var' || e.k === 'addr') && names.has(e.name)) ||
-        walk(stmtChildren(s)),
-    );
-  return walk(stmts);
+  // TWO FLAT SWEEPS, not one expression walk per nesting level. `walkExprs` already descends
+  // `stmtChildren` (ast.ts), so calling it per statement from inside a recursion that ALSO
+  // descends re-walks every nested expression once per enclosing level — d^2/2 `has` calls on a
+  // chain of depth d, measured at 301 for depth 24 where one pass needs 25. It is small at
+  // today's only call site (one rewritten subtree per un-merge site), but this is a SHARED helper
+  // now and its cost belongs in its contract.
+  const body = [...stmts] as Stmt[];
+  const stack: Stmt[] = [...body];
+  while (stack.length > 0) {
+    const s = stack.pop()!;
+    if (s.k === 'assign' && names.has(s.name)) {
+      return true;
+    }
+    stack.push(...stmtChildren(s));
+  }
+  for (const e of walkExprs(body)) {
+    if ((e.k === 'var' || e.k === 'addr') && names.has(e.name)) {
+      return true;
+    }
+  }
+  return false;
 }

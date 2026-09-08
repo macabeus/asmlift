@@ -46,3 +46,31 @@ describe('and what it must not claim', () => {
   test('an empty statement list', () => expect(mentionsAnyLocal([], names)).toBe(false));
   test('an empty name set', () => expect(mentionsAnyLocal([asg('t', c(0))], new Set())).toBe(false));
 });
+
+// And ONE PASS over the tree, which is a contract and not a micro-optimisation: `walkExprs` itself
+// descends `stmtChildren`, so a per-statement expression walk nested inside a recursion that also
+// descends costs d^2/2 on a chain of depth d. This helper is shared, and the reader of a shared
+// predicate cannot see that from the call site. Before the flattening these read 11 / 37 / 79 /
+// 137 / 301; the nesting exponent is what is pinned, not the constant.
+describe('and it visits each position once', () => {
+  const nest = (d: number): Stmt[] => {
+    let inner: Stmt[] = [asg('z', c(1))];
+    for (let i = 0; i < d; i++) {
+      inner = [{ k: 'if', cond: v('c' + i), then: inner, else: [] }];
+    }
+    return inner;
+  };
+  const probes = (d: number): number => {
+    let n = 0;
+    const counting = {
+      has: () => {
+        n++;
+        return false;
+      },
+    } as unknown as ReadonlySet<string>;
+    mentionsAnyLocal(nest(d), counting);
+    return n;
+  };
+  test('a right-nested `if` chain costs one name test per position, at every depth', () =>
+    expect([4, 8, 12, 16, 24].map(probes)).toEqual([5, 9, 13, 17, 25]));
+});
