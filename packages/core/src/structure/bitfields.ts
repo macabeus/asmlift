@@ -206,10 +206,25 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
     // the DECLARED store takes `~0xF` in the 32-bit domain, `-16` = 0xFFFFFFF0, which no Thumb
     // `mov #imm8` encodes, so agbcc materialises it `mov #0x10; neg` — where a byte-domain
     // spelling narrows the same keep to one encodable `mov #0xF0`. So the fold REFUSES the zero
-    // form unless the keep mask carries bits OUTSIDE the stored cell: that materialisation is the
-    // byte evidence, and without it the member name is a guess. (Not that NO raw spelling can emit
-    // `mov; neg` — a `s32` temp holding `-16` does — but none emits it in this order and
-    // allocation, so the distinguisher holds for this byte sequence.)
+    // form unless the keep mask LOOKS LIKE that 32-bit complement — the three clauses are stated
+    // at the gate itself, which is the only place that can say what each one kills. (Not that NO
+    // raw spelling can emit `mov; neg` — a `s32` temp holding `-16` does — but none emits it in
+    // this order and allocation, so the distinguisher holds for this byte sequence.)
+    //
+    // AND THE MASK'S ENCODING IS NOT ITS DEFINING OP, which is the near-miss to avoid: the
+    // materialisation is `mov;neg` only where the complement misses `mov #imm8`, and agbcc spells
+    // the SAME complement for `u16 a : 12` as a pool `ldr` of `-0x1000` (compiled, not read). A
+    // rule keyed on "the mask is defined by a `neg`" would refuse that real inhabitant, so the
+    // gate reads the mask's VALUE. The residual cost is stated too: after the ARM frontend lowers
+    // `bic Rd,Rm` to `and(Rd, ~Rm)`, a hand-written `mov #0xf; bic` reaches this gate as the same
+    // IR as the accepted `mov #0x10; neg` and is admitted. agbcc does not emit `bic` for this
+    // idiom (compiled: the or-form clear is `mov #0x4; neg`), and `/no-bitfield` co-enumerates the
+    // raw spelling, so the price is one candidate the differ referees — not a lost one.
+    //
+    // TARGET COUPLING, stated because the code cannot: every argument above is a THUMB encoding
+    // argument, and the fold's only target guard is `littleEndian`. That is sound today only
+    // because armv4t+agbcc is the one little-endian target in `target.ts`. A second little-endian
+    // target — MIPS bitfields, say — inherits none of this reasoning and must re-argue it.
     //
     // TRUNCATION is what makes an UNMASKED insert legal, and only sometimes: C truncates the
     // assigned value to the field width, while the asm's `or` writes every bit of `v << lo` that
@@ -329,12 +344,30 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
           if ((((w >= 32 ? -1 : (1 << w) - 1) << lo) & cellMask) !== clear) {
             continue;
           }
-          // REFUSES the zero form whenever the keep mask fits inside the stored cell: there the
-          // declared store and the raw byte-domain spelling are the same object, so naming the
-          // member would be a default with no byte evidence behind it (header note above). A
-          // 4-byte cell has `cellMask === -1` and so is refused unconditionally — a word-wide keep
-          // has no bits outside its own cell, and there is never evidence there.
-          if (insV === null && (mask & cellMask) === mask) {
+          // THE ZERO FORM'S EVIDENCE RULE (header note above), in three clauses. Each one is a way
+          // the accepted materialisation differs from every raw byte-domain spelling of the same
+          // clear, and each was measured with the pinned agbcc rather than argued:
+          //
+          //  1. the keep mask is the 32-BIT COMPLEMENT of the cleared window. A declared store
+          //     complements in `int`, so every bit above the stored cell is SET — `~0xF` = -16 for
+          //     a byte cell, `-0x1000` (a pool word, NOT a `neg`) for `u16 a : 12`. A mask with a
+          //     zero up there — a pool word like `0xFFFF00F0` — is some other function of the
+          //     cell, and the window it happens to clear is a coincidence of the arithmetic.
+          //  2. it carries bits OUTSIDE the stored cell: without them the raw byte-domain spelling
+          //     narrows to the same encodable constant (`*(u8 *)&g &= ~3` is `mov #0xfc`), the two
+          //     spellings are one object, and naming the member is a default with no byte evidence
+          //     behind it. A 4-byte cell has `cellMask === -1` and can never carry them, so it is
+          //     refused unconditionally.
+          //  3. it keeps at least one bit OF the stored cell. A clear of the WHOLE cell is not a
+          //     read-modify-write at all, so the load this fold would delete has no reason to
+          //     exist: agbcc compiles `g.f8 = 0;`, for a field filling its own byte, to
+          //     `mov #0x0; strb` — no load and no `and`. The candidate could never reproduce the
+          //     bytes it was recognized from.
+          //
+          // Clause 1 does NOT extend to the `or` form, and must not: there the insert seated at
+          // `lo` is the evidence, and agbcc really does spell an end-of-cell clear with the narrow
+          // in-cell constant (`mov #0xf`, the `gState.top = a0;` row below).
+          if (insV === null && (mask !== ~clear || (mask & cellMask) === mask || (mask & cellMask) === 0)) {
             continue;
           }
           // …and the insert must be exactly that value seated at `lo`.
@@ -360,10 +393,20 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
               continue; // C would truncate bits the asm's `or` writes
             }
           }
+          // …and the store's WIDTH must be one the declared field can be reached by. `size` is the
+          // byte span the field's bits touch (symbols.ts) — the read width the compiler uses — so
+          // a store WIDER than it is reaching bytes the member does not name: measured, agbcc
+          // narrows a `u16` container's 2-bit field to `ldrb`/`strb`, and never widens the other
+          // way. Without this a `strh` over a 1-byte-span field spells `gState.hearts = 0;` from
+          // bytes that spelling cannot reproduce.
           const fld = symCtx
             .fieldsOf(cell.name)
             ?.find(
-              (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === cell.byte * 8 + lo && f.signed !== undefined,
+              (f) =>
+                f.bitWidth === w &&
+                f.offset * 8 + f.bitOffset! === cell.byte * 8 + lo &&
+                f.signed !== undefined &&
+                width <= f.size,
             );
           if (fld && memberQualsAllow(fld, si.const, true)) {
             bitfieldStore.set(op, { global: cell.name, field: fld.name, value });

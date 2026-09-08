@@ -422,6 +422,59 @@ describe('the all-zero bitfield store', () => {
     expect(runW(word, writeInfo({ layout }))).not.toContain('wlow = 0');
   });
 
+  test('ACCEPTS a keep mask agbcc built from the POOL — the evidence is the value, not the `neg`', () => {
+    // The near-miss this row exists to refuse: "the mask must be defined by a `neg`". Compiled
+    // with the pinned agbcc, `gA.a = 0;` for `u16 a : 12` is `ldrh; ldr r0, .L3+4; and; strh`
+    // with the pool word `-0x1000` — the SAME 32-bit complement, materialised without a `neg`.
+    // A rule keyed on the defining op would refuse this; the mask-value rule admits it.
+    const pool =
+      'f:\n\tldr\tr1, .L1\n\tldrh\tr2, [r1, #0x4]\n\tldr\tr3, .L2\n\tand\tr2, r3\n' +
+      '\tstrh\tr2, [r1, #0x4]\n\tmov\tr0, #0x0\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x03005220\n.L2:\n\t.word\t-0x1000\n';
+    const layout: SymbolStructField[] = [
+      ...WRITE_LAYOUT.filter((f) => f.offset !== 4),
+      { name: 'wide', offset: 4, size: 2, signed: false, bitWidth: 12, bitOffset: 0 },
+    ];
+    expect(runW(pool, writeInfo({ layout }))).toContain('gState.wide = 0;');
+  });
+
+  test("REFUSES a mask that is not the window's 32-bit complement — the clear is a coincidence", () => {
+    // `0xFFFF00F0` clears the same low nibble of byte 8 and carries bits outside the cell, so the
+    // outside-bits test alone admits it. But a declared store complements in `int`: every bit
+    // above the cell is SET. This word zeroes bits 8-15, so it is some other function of the
+    // cell, and nothing says its low nibble came from a member assignment.
+    const odd =
+      'f:\n\tldr\tr1, .L1\n\tldrb\tr2, [r1, #0x8]\n\tldr\tr3, .L2\n\tand\tr2, r3\n' +
+      '\tstrb\tr2, [r1, #0x8]\n\tmov\tr0, #0x0\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x03005220\n.L2:\n\t.word\t0xFFFF00F0\n';
+    expect(runW(odd)).not.toContain('gState.low');
+  });
+
+  test('REFUSES a clear of the WHOLE cell — agbcc emits no load there, so there is nothing to fold', () => {
+    // A field filling its own byte: the keep mask keeps NONE of the stored cell, so this is not a
+    // read-modify-write. Compiled, `gE.f8 = 0;` is `mov #0x0; strb` — no load, no `and` — so the
+    // candidate could never reproduce the bytes it was recognized from.
+    const whole =
+      'f:\n\tldr\tr1, .L1\n\tldrb\tr2, [r1, #0x4]\n\tldr\tr3, .L2\n\tand\tr2, r3\n' +
+      '\tstrb\tr2, [r1, #0x4]\n\tmov\tr0, #0x0\n\tbx\tlr\n' +
+      '.L1:\n\t.word\t0x03005220\n.L2:\n\t.word\t0xFFFFFF00\n';
+    const layout: SymbolStructField[] = [
+      ...WRITE_LAYOUT.filter((f) => f.offset !== 4),
+      { name: 'byte4', offset: 4, size: 1, signed: false, bitWidth: 8, bitOffset: 0 },
+    ];
+    expect(runW(whole, writeInfo({ layout }))).not.toContain('gState.byte4');
+  });
+
+  test("REFUSES a store WIDER than the field's byte span — those are not the member's bytes", () => {
+    // `hearts` spans one byte (`size: 1`); this is a HALFWORD read-modify-write of the same low
+    // two bits. agbcc narrows the other way — a 2-bit field in a `u16` container compiles to
+    // `ldrb`/`strb` — and never widens, so a `strh` here names bytes the member does not.
+    const wide =
+      'f:\n\tldr\tr1, .L1\n\tldrh\tr2, [r1]\n\tmov\tr3, #0x4\n\tneg\tr3, r3\n\tand\tr2, r3\n' +
+      '\tstrh\tr2, [r1]\n\tmov\tr0, #0x0\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    expect(runW(wide)).not.toContain('gState.hearts');
+  });
+
   test('the clearing `and` must be consumed HERE — a second reader keeps the honest spelling', () => {
     // the fold deletes the load and the `and`; a second use would make the emitted C do the work
     // twice, so the store keeps the raw mask instead
