@@ -298,10 +298,16 @@ function wellFormedField(f: unknown): f is SymbolStructField {
     ) {
       return false;
     }
-    const stated = m.dims.every((d) => typeof d === 'number')
-      ? (m.dims as number[]).reduce((a, b) => a * b, 1)
-      : undefined;
-    if (stated !== undefined && m.length !== undefined && stated !== m.length) {
+    // The product test has to hold over the NUMERIC extents alone, not only when every extent is
+    // numeric. A partly-null rank still constrains `length`: `[null, 5]` says the member's
+    // elements come in rows of five, so a `length` of 48 contradicts it exactly as `[6, 9]` and 48
+    // do. Testing only the all-numeric case let that pair through — and symbolFieldType then
+    // recovers the missing outer extent as `length / prod(inner)`, which printed
+    // `u8 grid[9.6][5];`. A non-integral quotient is not a spelling defect to patch downstream: it
+    // is the same three-facts-disagree malformation, so it declines the layout here.
+    const numeric = (m.dims as (number | null)[]).filter((d): d is number => typeof d === 'number');
+    const stated = numeric.reduce((a, b) => a * b, 1);
+    if (m.length !== undefined && (numeric.length === m.dims.length ? stated !== m.length : m.length % stated !== 0)) {
       return false;
     }
   }
@@ -409,11 +415,22 @@ export function symbolFieldType(f: DeclaredField): IrType {
     // object and same size either way — but a foreign header declares the member ONE of those two
     // ways, and an access spelled against the other does not type-check (see
     // SymbolStructField.dims). An unspellable rank (null) keeps the flat member.
+    //
+    // The outer extent is RECOVERED as `length / prod(inner)` — the map may leave the outermost
+    // subrange null where it knows the total. wellFormedField already declines a `length` the
+    // inner extents do not divide, so the quotient is a whole number for any layout that reached
+    // here; it is re-checked rather than assumed because this function is exported and a
+    // fractional extent prints `u8 grid[9.6][5];`, which is not C. The flat member is the honest
+    // fallback, the same one an unspellable inner extent takes.
     const inner = structFieldInnerExtents(f);
     const elem = T.int(f.elemSize! * 8, f.elemSigned!);
-    return inner === null || inner.length === 0
-      ? T.array(elem, f.length)
-      : [f.length / inner.reduce((a, b) => a * b, 1), ...inner].reverse().reduce<IrType>((t, n) => T.array(t, n), elem);
+    if (inner === null || inner.length === 0) {
+      return T.array(elem, f.length);
+    }
+    const outer = f.length / inner.reduce((a, b) => a * b, 1);
+    return Number.isInteger(outer) && outer > 0
+      ? [outer, ...inner].reverse().reduce<IrType>((t, n) => T.array(t, n), elem)
+      : T.array(elem, f.length);
   }
   if (f.pointer && f.size === 4) {
     // The pointee width is byte-load-bearing: arithmetic on the loaded pointer scales by it, so

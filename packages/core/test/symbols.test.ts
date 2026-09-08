@@ -850,6 +850,37 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     expect(declOf(notAnArray)).toBe('extern void *gPtr;\n');
   });
 
+  test('a PARTLY-null rank is held to the same product test — no fractional extent is printed', () => {
+    // The contradiction test above only ran when EVERY extent was numeric, so a rank stating only
+    // its inner extents escaped it: `[null, 5]` says the elements come in rows of five, which a
+    // `length` of 48 contradicts as plainly as `[6, 9]` does. Unchecked, the declaration recovered
+    // the outer extent as `48 / 5` and printed `u8 grid[9.6][5];` — not C, and the ACCESS beside it
+    // spelled `->grid[0][i]` against it. Malformed layouts decline whole, so both answers agree.
+    const fractional = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 48,
+        layout: [{ name: 'grid', offset: 0, size: 48, elemSize: 1, elemSigned: false, length: 48, dims: [null, 5] }],
+      },
+    };
+    expect(declOf(fractional)).toBe('extern void *gPtr;\n');
+
+    // …and a partly-null rank whose inner extents DO divide the length is spellable: the outermost
+    // is the quotient, which is arithmetic on the map's own two facts rather than a guessed bound.
+    const recovered = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 48,
+        layout: [{ name: 'grid', offset: 0, size: 48, elemSize: 1, elemSigned: false, length: 48, dims: [null, 8] }],
+      },
+    };
+    expect(declOf(recovered)).toContain('struct Save { u8 grid[6][8]; };');
+  });
+
   test('a VOLATILE member is never named — the cast form it replaces carries no qualifier', () => {
     // `gPtr->vreg` is a volatile access; `((u8 *)gPtr)[78]` is a plain one. Same address, DIFFERENT
     // instruction sequence, so the member is not nameable and the arithmetic spelling stands.
