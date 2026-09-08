@@ -476,15 +476,38 @@ function spellablePointee(
  *  that both type-checks and keeps the bytes, which is a narrower claim than "the only spelling
  *  that type-checks" — the `pmarrrow` synthetic row referees it (ablate the `needRecovered = false`
  *  below and it takes the cast form: MATCH → diff:5), and `kleod:CheckWorldCompletion:agbcc` is its
- *  real-tier inhabitant.
+ *  real-tier inhabitant. It generalises: at rank 3 the same merge spells `->x[0][0][k]`.
  *
- *  REFUSES, and each one keeps the honest cast form rather than guessing: any load/store
- *  displacement at all (`off !== 0`); no variable residual; a pointee nothing may be named
- *  through; no array member of exactly this element width covering the accessed byte; an element
- *  signedness the access contradicts (an s8 read is ldrb+lsl+asr where u8 is ldrb alone); a
- *  qualifier the name would reintroduce; a member with no stated rank; a rank whose subscripts
- *  cannot be split out of the residual; and a byte offset into the member that does not land on an
- *  element boundary. */
+ *  A VARIABLE SUBSCRIPT IS NEVER BOUNDED, here or anywhere. The member lookup bounds only the
+ *  CONSTANT part (`pg.byte` inside `[offset, offset+size)`); the variable residual is unbounded by
+ *  construction, so `->grid[i]` can address the member after `grid` exactly as `->x[0][i]` can run
+ *  past a row. That is not this rule's defect to fix — the cast form it replaces is unbounded in
+ *  the same way, the asm supplies no bound, and refusing every unbounded index would refuse the
+ *  capability whole (`pmarr1`'s `gBlob->unk8[i]` included). It is recorded so a later reader does
+ *  not mistake the constant-side check for a bounds check on the access.
+ *
+ *  REFUSES, and each one keeps the honest cast form rather than guessing. Named with the test that
+ *  fails when it is removed (`packages/core/test/symbols.test.ts`), because a refusal nothing
+ *  ablates is a claim rather than a rule:
+ *    • any load/store displacement at all (`off !== 0`)   — "named only where the member BASE was
+ *      materialised"
+ *    • no variable residual — handed to `pointeeAccess`'s constant-offset question instead
+ *    • a pointee nothing may be named through, a qualifier the name would reintroduce, a width
+ *      mismatch, an element signedness the access contradicts (an s8 read is ldrb+lsl+asr where u8
+ *      is ldrb alone)   — "honours every gate the constant-offset one does", "a WIDER indexed
+ *      member is not named either", "a WIDTH mismatch falls back to the cast spelling"
+ *    • no array member of exactly this element width covering the accessed byte   — same three
+ *    • a member with NO stated rank   — "absence is not read as rank 1"
+ *    • a rank whose subscripts cannot be split out of the residual   — "a rank the residual cannot
+ *      be split along still spells every subscript, never a row"
+ *    • a byte offset into the member that does not land on an element boundary
+ *
+ *  NOT a `Gate` table (l3/gates.ts), unlike `FRESH_MERGE_GATES` and `CARRIER_NAME_GATES` in this
+ *  same file, and the reason is the shape rather than the effort: those refusals are predicates
+ *  over ONE prepared context, while these are interleaved with the computations that produce the
+ *  values the later ones test — the member `find`, `structFieldInnerExtents`,
+ *  `subscriptsFromExtents`. Hoisting them into a Ctx would reorder that work and change WHICH
+ *  refusal fires first, which is the attribution a gate table exists to give. */
 function pointeeElement(
   pg: PtrGlobalBase,
   off: number,
