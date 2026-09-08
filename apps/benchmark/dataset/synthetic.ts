@@ -6596,7 +6596,8 @@ export const SYNTHETIC: SynthSpec[] = [
     // shared-arm spelling"), so there was nothing for the differ to referee. What closed it is
     // `switch-recover.ts`'s PRE5 / `TargetDescription.switchRequiresFrontLoadedTests`, reading the
     // layout back per SITE — the model this comment already named, `switchArmsFollowLayout`, one
-    // question earlier. `nestacc` above collects the 6 of its own that this row isolates.
+    // question earlier. `swmixed` below is the per-site guard, and `nestacc` above collects the 6
+    // of its own that this row isolates.
     sym: 'swladder',
     src:
       's32 swladder(s32 x){\n' +
@@ -6609,6 +6610,33 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['branch'],
     toolchains: ['agbcc'],
     ctx: 's32 swladder(s32 x);',
+  },
+  {
+    // ONE FUNCTION, BOTH SPELLINGS — the row that pins the reading as PER SITE. PR #120 paid for
+    // the general form of this: a per-FUNCTION predicate cannot decide a per-SITE question, and a
+    // function-wide OR would spell both dispatches the same way and be wrong on one of them by
+    // construction. Here the `switch` on `y` is front-loaded and the ladder on `x` is interleaved,
+    // so the two sites must come back differently spelled from one lift.
+    //
+    // IT IS ALSO THE OVER-FIRING CONTROL. A gate that declined every comparison tree would
+    // close `swladder` and take this row's `switch (y)` with it, so the row stops matching the
+    // moment the reading widens past the sites whose layout earns it. (A row whose whole body
+    // is one front-loaded `switch` cannot serve: with two or three arms this small agbcc folds
+    // `case k: a = 1` into `a = x == k` and Regime A never runs — both spellings then score 8,
+    // measured, and the row would be a control over nothing.)
+    sym: 'swmixed',
+    src:
+      's32 swmixed(s32 x, s32 y){\n' +
+      '  s32 a;\n' +
+      '  a = 0;\n' +
+      '  switch (y) { case 1: a = 10; break; case 2: a = 20; break; case 3: a = 30; break; }\n' +
+      '  if (x == 100) { a = 1; }\n' +
+      '  else if (x == 30) { a = 2; }\n' +
+      '  return a;\n' +
+      '}',
+    features: ['branch'],
+    toolchains: ['agbcc'],
+    ctx: 's32 swmixed(s32 x, s32 y);',
   },
   {
     sym: 'armcb',
