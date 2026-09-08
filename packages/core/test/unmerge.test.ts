@@ -66,9 +66,9 @@ describe('what un-merges', () => {
   });
 
   // `rewrite` descends into `while`, `for` and BOTH lists of a `switch` as well as `dowhile`, and
-  // only `dowhile` was covered. The descent is where a nesting kind gets forgotten — a `switch`'s
-  // `default` is a second list, and a `for`'s body is not its init or inc — so each arm of that
-  // switch statement gets a firing, not an argument.
+  // the descent is where a nesting kind gets forgotten — a `switch`'s `default` is a second list,
+  // and a `for`'s body is not its init or inc. So each arm of that switch statement gets a firing
+  // rather than an argument.
   test('it fires inside a `while` body', () => {
     const out = unmergeJoins(fn([{ k: 'while', cond: v('cond'), body: merged() }]));
     expect(out).not.toBeNull();
@@ -111,13 +111,11 @@ describe('what un-merges', () => {
     expect(out!.locals.map((l) => l.name)).toEqual(['q']); // only the substituted temps are dropped
   });
 
-  // THE WIDENED CANDIDATE GATE IS A TWO-SIDED CHANGE. `assigns === 2` → `assigns >= 2` admits a
-  // ladder's merge temp, and it would also admit a name the arms NEVER WRITE — which `armDefs`
-  // then cannot define, so the whole site declines instead of un-merging its real temps.
-  //
-  // `assigns` is a FUNCTION-WIDE count and always was, so the arity gate did not make that name a
-  // bystander "by arithmetic": at exactly two assignments it admitted it too, and declined. The
-  // conjunct therefore does not only prune — the next test is a site `assigns === 2` REFUSED.
+  // THE CANDIDATE GATE'S TWO SIDES. `assigns >= 2` alone admits a ladder's merge temp AND a name
+  // the arms NEVER WRITE — which `armDefs` then cannot define, so the whole site declines instead
+  // of un-merging its real temps. `written.has(n)` is what keeps that name a bystander; `assigns`
+  // is a FUNCTION-WIDE count and cannot do it by arithmetic at any arity. Ablate the conjunct and
+  // this test and the next two go null.
   test('a local the join reads but the arms never write stays a BYSTANDER, not a candidate', () => {
     const body: Stmt[] = [
       asg('n', c(1)),
@@ -134,11 +132,9 @@ describe('what un-merges', () => {
     expect(site.else).toEqual([store(v('n'), c(2))]);
   });
 
-  // The same shape at exactly TWO outside assignments, which is the count `assigns === 2` also
-  // admitted: the site was declined outright before the conjunct, so this is REACH the conjunct
-  // adds rather than reach it preserves. Ablate `written.has(n)` from the candidate condition and
-  // this goes null.
-  test('a bystander with exactly TWO assignments no longer sinks the site', () => {
+  // The same shape at exactly TWO outside assignments — the arity the conjunct cannot be mistaken
+  // for, since a bystander assigned twice is exactly what a count alone admits as a candidate.
+  test('a bystander with exactly TWO assignments does not sink the site', () => {
     const body: Stmt[] = [
       asg('n', c(1)),
       asg('n', c(2)),
@@ -434,10 +430,10 @@ describe('a merge temp read from a position the mention count must see', () => {
 // soundness argument is the two-arm one read inductively: every path out of the ladder leaves
 // through exactly one terminal arm, so one copy at the end of each runs exactly once per path.
 //
-// The arity assumption goes with it: "assigned exactly once in each arm" is a count of TWO, and a
-// five-arm ladder assigns five times. TOTALITY replaces it — every definition in the whole function
-// must be one of the terminal arms just rewritten — and because that count is read from a map built
-// before the pass started rewriting, a FRESH re-read of the result is what actually carries it.
+// No arm count survives that: a five-arm ladder assigns its merge name five times. TOTALITY stands
+// in — every definition in the whole function must be one of the terminal arms just rewritten —
+// and because that count is read from a map built before the pass started rewriting, a FRESH
+// re-read of the result is what actually carries it.
 describe('an else-if LADDER un-merges into every terminal arm', () => {
   /** `if (cond) {a} else if (cond) {b} else …` — one terminal arm per entry, nested to the right. */
   const ladder = (arms: Stmt[][]): Stmt =>
@@ -516,8 +512,8 @@ describe('an else-if LADDER un-merges into every terminal arm', () => {
 });
 
 // The ladder's refusals. Each is a place the merged spelling has to survive, and the first two are
-// the ones that replace `assigns === 2`: without them this pass deletes a local the emitted tree
-// still names, which compiles to nothing at all.
+// what stands in for an arm count: without them this pass deletes a local the emitted tree still
+// names, which compiles to nothing at all.
 describe('what the ladder refuses', () => {
   const ladder = (arms: Stmt[][]): Stmt =>
     arms.length === 2 ? iff(arms[0], arms[1]) : iff(arms[0], [ladder(arms.slice(1))]);
@@ -525,8 +521,8 @@ describe('what the ladder refuses', () => {
 
   test('a definition OUTSIDE the terminal arms refuses — totality, not arity', () => {
     // `x = 0` before the `if` is a third definition with nothing left to read it once the temp is
-    // deleted. The count that catches it is "every assignment in the function is one of the arms
-    // we rewrote", which is what a widened arity gate no longer says on its own.
+    // deleted. The check that catches it is "every assignment in the function is one of the arms
+    // we rewrote" — an arity count on its own does not say that.
     declines([asg('x', c(0)), iff([asg('x', c(1))], [asg('x', c(2))]), store(v('g'), v('x'))], ['x']);
   });
 
@@ -551,9 +547,9 @@ describe('what the ladder refuses', () => {
 
 // THE COUNTS ARE STALE AND THE RECURSION IS WHAT MAKES THAT REACHABLE. `localMentions` is read once,
 // before the pass rewrites anything, and this pass DUPLICATES statements — so an earlier site inside
-// the same tree can turn one definition of a name into two while the map still says one. The arity
-// gate hid that: three definitions could never be `=== 2`. Totality alone does not, because the
-// stale count and the fresh arm count can agree by coincidence — which is exactly the tree below.
+// the same tree can turn one definition of a name into two while the map still says one. Totality
+// does not catch it, because the stale count and the fresh arm count can agree by coincidence —
+// which is exactly the tree below.
 // The gate that holds is a FRESH re-read of the rewritten statement: if a merge name is still
 // mentioned anywhere in it, the rewrite did not consume it and the local may not be deleted.
 //

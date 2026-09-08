@@ -6201,20 +6201,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //    before:
   //      armcb 8 → 14 · armcb2 (the control) 14 → 14 · maskchain 24 → 32 · sxparam 2 → 4
   //      kleod:CountCollectedGems:agbcc 3072 → 5952 (+2880, +94 %), 58.3 s → 81.5 s wall (+40 %)
-  //    AN OFFLINE CENSUS DOES REPRODUCE THE REAL TIER — an earlier version of this note said it
-  //    cannot, off a rig that read 1152 → 2304 (2.6× low) and then froze that discrepancy into a
-  //    standing prohibition instead of re-running it. The missing input was the row's own
-  //    provisioning, not something the harness alone can see: hand `enumerateCandidates` the
-  //    case's `symbols` (the vendored map, `asIfUndecompiled`), its `proto`, and the `asmData`
-  //    side table off the built target's object, exactly as `eval/asmlift.ts` does, and it returns
-  //    **3072 → 5952** on this row — the harness number, to the candidate. Re-measured, both
-  //    sides, at wave 2.
+  //    AN OFFLINE CENSUS DOES REPRODUCE THE REAL TIER, but only with the row's own provisioning:
+  //    hand `enumerateCandidates` the case's `symbols` (the vendored map, `asIfUndecompiled`), its
+  //    `proto`, and the `asmData` side table off the built target's object, exactly as
+  //    `eval/asmlift.ts` does. Under-provision any of the three and the census reads 2.6× low.
   //    The pole, same rig, enumeration only (no candidate compiles, so this is NOT the 1549 s
   //    benchmark row): `kleod:ProcessInputAndUpdateEntities:agbcc` enumerates **77760 either
-  //    way** — unmoved by the lever, which is the claim that matters, but the number is 77760 and
-  //    an earlier version of this note said 51840, from the same under-provisioned rig.
-  //    So the honest price is still per-row and still this: the corpus's second-heaviest agbcc
-  //    row pays +94 % candidates for a candidate that correctly loses.
+  //    way** — unmoved by the lever, which is the claim that matters. So the honest price is
+  //    per-row: the corpus's second-heaviest agbcc row pays +94 % candidates for a candidate that
+  //    correctly loses.
   //    AND THE REAL ROW DOES NOT MOVE, which is this gap's pass: G6 alone makes the source WORSE
   //    (the winning spelling plus `/unmerge` costs more than the winner), so its candidate is
   //    enumerated and correctly loses. `kleod:CountCollectedGems:agbcc` 171 → 171, same winning

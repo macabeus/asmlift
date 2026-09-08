@@ -114,8 +114,8 @@ export function localMentions(sfn: SFn): Map<string, Mentions> {
 
 /** THE ONE WALK behind `mentionsAnyLocal` and `mentionedLocals` below: which of `names` anything
  *  under `stmts` still NAMES — as an assignment TARGET (which carries no expression, so no walk
- *  over values can see it), as a read, or as an address. `first` stops at the earliest hit, which
- *  is all the boolean caller needs.
+ *  over values can see it), as a read, or as an address. `first` returns at the first hit it
+ *  reaches, which is all the boolean caller needs.
  *
  *  The question a pass that DELETES a declaration has to answer, and it lives here rather than in
  *  the deleting pass for the reason this file's header states about its own walk: a second walk
@@ -131,10 +131,10 @@ export function localMentions(sfn: SFn): Map<string, Mentions> {
 function scanMentions(stmts: readonly Stmt[], names: ReadonlySet<string>, first: boolean): Set<string> {
   // TWO FLAT SWEEPS, not one expression walk per nesting level. `walkExprs` already descends
   // `stmtChildren` (ast.ts), so calling it per statement from inside a recursion that ALSO
-  // descends re-walks every nested expression once per enclosing level — d^2/2 `has` calls on a
-  // chain of depth d, measured at 301 for depth 24 where one pass needs 25. It is small at
-  // today's call sites (one rewritten subtree per un-merge site; one dropped-locals set per lever
-  // tree), but this is a SHARED helper and its cost belongs in its contract.
+  // descends re-walks every nested expression once per enclosing level — quadratic in the nesting
+  // depth, 301 `has` calls at depth 24 where one pass needs 25. Small at today's call sites (one
+  // rewritten subtree per un-merge site, one dropped-locals set per lever tree), but this is a
+  // SHARED helper and its cost belongs in its contract.
   const found = new Set<string>();
   const body = [...stmts] as Stmt[];
   const stack: Stmt[] = [...body];
@@ -165,12 +165,12 @@ export function mentionsAnyLocal(stmts: readonly Stmt[], names: ReadonlySet<stri
 }
 
 /** WHICH of `names` the tree still mentions — the same walk `mentionsAnyLocal` answers "any" over,
- *  without short-circuiting, for the caller that has to NAME the survivors.
+ *  told to keep going, for the caller that has to NAME the survivors.
  *
  *  It exists so that contracts.ts's `assertNoOrphanedLocals` — the loud backstop for exactly the
  *  mistake this predicate guards — does not carry a THIRD hand-rolled copy of the node vocabulary.
  *  The boolean cannot serve it (the diagnostic needs the set) and one call per dropped name would
- *  be a walk per name; this is the same sweep, told to keep going. */
+ *  be a walk per name. */
 export function mentionedLocals(stmts: readonly Stmt[], names: ReadonlySet<string>): Set<string> {
   return scanMentions(stmts, names, false);
 }

@@ -188,9 +188,6 @@ describe('unmerge differential fuzz — the oracle this lever shipped without', 
       fired++;
       for (let world = 0; world < 3; world++) {
         const seedMem = Array.from({ length: 16 }, (_, i) => (i * 31 + seed * 7 + world * 5) % 13);
-        // NOTE: pure READS are deliberately not traced. Substituting two definitions into one
-        // statement's operands reorders them, and C fixes no operand order — which is exactly why the
-        // pass refuses an effectful or volatile definition value. Calls and writes ARE traced.
         // the four ladder conditions are locals seeded to 0 by `run`; vary them through memory by
         // assigning them at the top of both trees identically
         const pre: Stmt[] = CONDS.map((n, i) => asg(n, c((seed >> (i + world)) & 1)));
@@ -221,11 +218,11 @@ describe('unmerge differential fuzz — the oracle this lever shipped without', 
     // drifted into producing only-declined trees would go green while judging nothing.
     expect(fired).toBeGreaterThan(1000);
     expect(bad.slice(0, 6)).toEqual([]);
-    // 60000 seeds is ~0.9s alone, and this suite forks 161 files in parallel, where the sibling
+    // 60000 seeds is ~0.9s alone, and this suite forks 211 files in parallel, where the sibling
     // measured the same shape of loop at 3.4x its solo cost — past vitest's 5s default, which
     // fails as a TIMEOUT rather than as a divergence. narrowlocal-fuzz.test.ts carries the same
-    // budget for the same reason. The seed count itself is NOT the lever to turn down: at the
-    // sibling's 15000 this arm fires 845 times, under its own 1000 floor (measured).
+    // budget for the same reason. The seed count itself is NOT the lever to turn down: at 15000
+    // this arm fires 845 times, under its own 1000 floor (measured).
   }, 90_000);
 });
 

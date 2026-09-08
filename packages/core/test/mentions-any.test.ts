@@ -49,9 +49,9 @@ describe('and what it must not claim', () => {
 
 // And ONE PASS over the tree, which is a contract and not a micro-optimisation: `walkExprs` itself
 // descends `stmtChildren`, so a per-statement expression walk nested inside a recursion that also
-// descends costs d^2/2 on a chain of depth d. This helper is shared, and the reader of a shared
-// predicate cannot see that from the call site. Before the flattening these read 11 / 37 / 79 /
-// 137 / 301; the nesting exponent is what is pinned, not the constant.
+// descends is quadratic in the depth — 11 / 37 / 79 / 137 / 301 name tests where these read
+// 5 / 9 / 13 / 17 / 25. This helper is shared, and the reader of a shared predicate cannot see
+// that from the call site. The nesting exponent is what is pinned, not the constant.
 describe('and it visits each position once', () => {
   const nest = (d: number): Stmt[] => {
     let inner: Stmt[] = [asg('z', c(1))];

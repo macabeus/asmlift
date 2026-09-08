@@ -9,8 +9,8 @@
 // REAL tier compiles inside the project's vendored translation unit, where an orphaned name that
 // collides with a context symbol compiles and SCORES.
 //
-// The first test is the argument for the contract existing at all: it asserts that the other three
-// let the shape straight through.
+// The first block is the argument for the contract existing at all: it asserts that the other
+// three let the shape straight through.
 import { describe, expect, test } from 'vitest';
 
 import {

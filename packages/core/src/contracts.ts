@@ -310,13 +310,10 @@ export function assertNoOrphanedLocals(before: SFn, after: SFn): void {
   if (!dropped.size) {
     return;
   }
-  // `l3/mentions.ts`'s walk, not a third copy of the node vocabulary. That file's header states
-  // the rule ("a second walk over the node vocabulary is how a new node kind becomes a silent
-  // undercount") and this is the LOUD BACKSTOP for the mistake that predicate guards, so it is the
-  // last place that should own its own. The set form exists for this caller: the diagnostic has to
-  // NAME the survivors, which the boolean cannot, and one call per dropped name would be a walk
-  // per name. Locals only, deliberately: no L3 lever drops `SFn.params` (`pruneDeadParams` is L1
-  // block params, ir/simplify.ts), so a params arm here would be a refusal with no inhabitant.
+  // `l3/mentions.ts`'s walk, not a third copy of the node vocabulary — this is the LOUD BACKSTOP
+  // for the mistake that predicate guards, so it is the last place that should own its own.
+  // Locals only, deliberately: no L3 lever drops `SFn.params` (`pruneDeadParams` is L1 block
+  // params, ir/simplify.ts), so a params arm here would be a refusal with no inhabitant.
   const found = mentionedLocals(after.body, dropped);
   if (found.size) {
     throw new ContractError(
