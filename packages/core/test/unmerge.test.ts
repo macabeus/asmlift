@@ -484,6 +484,17 @@ describe('what the ladder refuses', () => {
 // stale count and the fresh arm count can agree by coincidence — which is exactly the tree below.
 // The gate that holds is a FRESH re-read of the rewritten statement: if a merge name is still
 // mentioned anywhere in it, the rewrite did not consume it and the local may not be deleted.
+//
+// AND THIS TEST IS THE ONLY THING IN THE REPO THAT SAYS THE GATE IS LIVE — do not delete it as
+// redundant. Measured by ablating each gate: delete the TOTALITY check and 89 random trees break
+// under `test/unmerge-fuzz.test.ts`'s oracle; delete the FRESH RE-READ and that oracle stays
+// GREEN, across 120,000 trees in two families, the second generated specifically to nest an
+// un-merge site whose own join assigns the outer merge name — the exact family the gate exists
+// for. Under that same ablation the only red in the repo is the single test below.
+//
+// `contracts.ts`'s `assertNoOrphanedLocals` is a second net and not a substitute: it fires on this
+// tree (verified under the ablation), but it lives at rank.ts's lever boundary, so it turns a
+// wrong rewrite into a DROPPED CANDIDATE, not into the merged spelling this gate preserves.
 describe('a stale mention count is caught by re-reading the result', () => {
   test('a definition an earlier rewrite duplicated leaves the count agreeing, and the tree still names `y`', () => {
     // Inner site: `if (c) p = a; else p = d;  y = *p;` un-merges to `if (c) y = *a; else y = *d;`,
