@@ -812,11 +812,26 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // therefore lose a match; it can never produce a wrong answer, and it is never a silent one —
     // the emitted source says `if`/`else if` where the target said `switch`.
     //
+    // WHAT THE POSITIONS ARE READ THROUGH, which is the premise that lives inside asmlift rather
+    // than in the compiler. `caseBlocks` holds `forwardingTarget` results (`asCase` is called on the
+    // resolved block), so an arm whose body is a bare jump contributes ITS TARGET's position, not
+    // its own. On a target that reorders no blocks — the only kind that declares this — a target
+    // laid out above the dispatch can only be reached by a BACK edge, and loop recovery declines
+    // those before recovery runs; that is why no corpus row inhabits the shape. Whoever relaxes
+    // loop recovery inherits this reader. `bodyPos` also covers the CASE bodies only: `defaultBlk`
+    // is left out deliberately, because it can be the dispatch's own fall-out block rather than an
+    // arm the source wrote (the W2/W4 withholdings above), and including it would read a position
+    // the source never chose. Both omissions can only make the gate UNDER-fire, i.e. keep a
+    // `switch`, which is the direction the rest of this comment argues is the safe one.
+    //
     // AND THE READING REFUSES ITSELF where it has nothing to read. `layoutIndex` answers `-1` for a
     // block absent from `fn.blocks`, which is not a position — taken as one it would sort below
-    // every real body and decline EVERY tree in the function, turning one unplaced block into a
-    // silent loss of the whole `switch` regime. The sort one section down can absorb a `-1` (it
-    // misorders two arms); this cannot, so it asks rather than assumes and stands down.
+    // every real body and decline EVERY tree in the function. It has no inhabitant and cannot get
+    // one without a bug upstream: `ir/verify.ts` rejects a successor that is not a block of the fn
+    // and the tower runs it after the lift and after every raising pass, and `predecessorBlocks`
+    // throws on the same state at the top of `structure()`. So this is belt-and-braces over a
+    // VERIFIER BUG, not over an expected shape — kept because standing down costs nothing, and
+    // pinned by a test that asserts those two reject it first.
     if (switchRequiresFrontLoadedTests) {
       const testPos = [...seen].map(layoutIndex);
       const bodyPos = [...caseBlocks].map(layoutIndex);

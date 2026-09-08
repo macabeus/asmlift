@@ -1354,3 +1354,29 @@ test('a front-loaded gcc2.7.2 -O1 dispatch keeps its switch under the same decla
   ).source;
   expect(out).toContain('switch (a0)');
 });
+
+test('the UNPLACED block PRE5 stands down for is a state the IR verifier already rejects', () => {
+  // PRE5's `placed` half asks whether every test and body block has a position at all, because
+  // `layoutIndex` answers -1 for a block missing from `fn.blocks` and -1 taken as a position sorts
+  // below every real body — one absent block would satisfy `max(tests) > min(bodies)` for every
+  // tree in the function and cost the whole `switch` regime silently.
+  //
+  // The guard is kept, and this pins WHY it has no inhabitant: not "unobserved on the corpus" but
+  // rejected upstream. `verify()` requires every successor to be a block of the fn, and the tower
+  // runs it after the lift and after every raising pass; `structure()` then rebuilds the predecessor
+  // map over `fn.blocks` and throws on a successor it does not hold. So the state is a VERIFIER BUG,
+  // not a shape to expect, and the reason the architecture review could not construct the test it
+  // asked for. If a future pass inserts or reorders blocks, these two are what fail first, loudly.
+  const asm = dispatch([0, 1, 2, 3]);
+  const fn = frontendFor(ARMV4T_AGBCC).lift('f', asm, ARMV4T_AGBCC, { f: { returnsVoid: true } });
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, { returnsVoid: true });
+  const bodies = fn.blocks.filter((b) => b.ops.some((o) => o.opcode === 'add'));
+  expect(bodies.length).toBeGreaterThan(0);
+  const kept = { ...fn, blocks: fn.blocks.filter((b) => b !== bodies[bodies.length - 1]) };
+  expect(() => verify(kept)).toThrow(/successor of .* is not a block of this fn/);
+  const opts = { ...structureOptionsFor(ARMV4T_AGBCC, true), spellSwitchFallthrough: true };
+  expect(opts.switchRequiresFrontLoadedTests).toBe(true);
+  expect(() => structure(kept, opts)).toThrow();
+  // …and the tree itself, with its layout intact, is one PRE5 lets through.
+  expect(cBackend.emit(structure(fn, opts))).toContain('switch (a0)');
+});
