@@ -62,14 +62,13 @@ export interface SymbolStructField {
    *  ABSENCE READS DIFFERENTLY HERE THAN IT DOES FOR A GLOBAL, and the difference is the whole
    *  point of the field. {@link arrayInnerExtents} may read an absent `SymbolInfo.dims` as rank 1
    *  because the ELF provider's capability gate refuses a @gba-kit/debug-info that cannot report
-   *  a global's rank, so absence there can only be a hand-written map stating a plain array. No
-   *  such gate has ever covered a MEMBER's rank: every vendored map predates the provider reading
-   *  it, and each one flattens a rank-2 member the project's header declares `[6][8]`. So a
-   *  consumer that must type-check against a FOREIGN declaration — the indexed member spelling,
-   *  structure.ts's `pointeeElement` — refuses on absence rather than reading it as rank 1. A
-   *  consumer synthesizing its OWN declaration may still flatten, because its access and its
-   *  declaration then agree by construction; that is why {@link structFieldInnerExtents} answers
-   *  `[]` for absence and the refusal lives at the access site instead. */
+   *  a global's rank. No such gate covers a MEMBER's rank — a member simply omits the key both
+   *  when the DWARF carries no subranges and when the package is too old to look — so absence
+   *  here means "the map could not say". A consumer that must type-check against a FOREIGN
+   *  declaration (the indexed member spelling, structure.ts's `pointeeElement`) refuses on
+   *  absence; a consumer synthesizing its OWN declaration may still flatten, because its access
+   *  and its declaration then agree by construction. That is why {@link structFieldInnerExtents}
+   *  answers `[]` for absence and the refusal lives at the access site instead. */
   dims?: (number | null)[];
   /** BITFIELD field only: the field's width in BITS. Its PRESENCE is what marks a field a
    *  bitfield — `size` above stays the byte span its bits touch (the read width the compiler
@@ -301,10 +300,9 @@ function wellFormedField(f: unknown): f is SymbolStructField {
     // The product test has to hold over the NUMERIC extents alone, not only when every extent is
     // numeric. A partly-null rank still constrains `length`: `[null, 5]` says the member's
     // elements come in rows of five, so a `length` of 48 contradicts it exactly as `[6, 9]` and 48
-    // do. Testing only the all-numeric case let that pair through — and symbolFieldType then
-    // recovers the missing outer extent as `length / prod(inner)`, which printed
-    // `u8 grid[9.6][5];`. A non-integral quotient is not a spelling defect to patch downstream: it
-    // is the same three-facts-disagree malformation, so it declines the layout here.
+    // do — and symbolFieldType, which recovers a missing outer extent as `length / prod(inner)`,
+    // would spell that pair `u8 grid[9.6][5];`. A non-integral quotient is not a spelling defect
+    // to patch downstream: it is the same three-facts-disagree malformation, declined here.
     const numeric = (m.dims as (number | null)[]).filter((d): d is number => typeof d === 'number');
     const stated = numeric.reduce((a, b) => a * b, 1);
     if (m.length !== undefined && (numeric.length === m.dims.length ? stated !== m.length : m.length % stated !== 0)) {
@@ -455,7 +453,9 @@ export function symbolFieldType(f: DeclaredField): IrType {
 
 /** The array shape the DECLARATION actually spells for a member — the extents outermost first and
  *  the element type left at the bottom — read back out of {@link symbolFieldType} rather than
- *  re-derived from the map's own facts. A NON-array member answers `{ extents: [], … }`.
+ *  re-derived from the map's own facts. It answers whatever that declaration is, which for a
+ *  member with no spellable element type is the flat `u8 name[size]`: extents `[size]` over `u8`,
+ *  not the empty shape.
  *
  *  Exists because "how many subscripts does this member take, and of what" was being answered
  *  twice: once here (which needs `length` and a base-type `elemSigned`, and declares the flat byte
@@ -463,8 +463,8 @@ export function symbolFieldType(f: DeclaredField): IrType {
  *  INDEPENDENT facts — a flexible array member states a stride and no bound (see
  *  SymbolStructField.length), and a member whose OUTERMOST subrange is unbounded (`u8 data[][8]`,
  *  legal C) reaches a map as `dims: [null, 8]` with no `length` at all. The declaration then spells
- *  `u8 grid[48];` while the access spelled `gPtr->grid[0][a0];`, which is not C
- *  (`subscripted value is not an array, pointer, or vector`). An access side that asks THIS
+ *  `u8 grid[48];` while an access reading the rank off `dims` spells `gPtr->grid[0][a0];`, which is
+ *  not C (`subscripted value is not an array, pointer, or vector`). An access side that asks THIS
  *  question cannot diverge from the declaration whatever gate symbolFieldType grows next. */
 export function declaredArrayShape(f: DeclaredField): { extents: number[]; elem: IrType } {
   let t = symbolFieldType(f);

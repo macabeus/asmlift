@@ -109,13 +109,10 @@ export type Expr =
        *  it the C backend legalizes the base through a reinterpret cast (`((u8 *)gPtr->arr)[i]`),
        *  which is the CAST form's object again and defeats the whole point of naming the member.
        *
-       *  IT IS A PRODUCER INVARIANT, and the width re-check beside the consumer is defence in
-       *  depth rather than a guard with a reachable failing input — the earlier wording ("evidence
-       *  the backend re-checks, not an assertion it trusts") overstated it, and a future producer
-       *  could read that as licence to state a type the backend will vet. It cannot vet one: it
-       *  tests the STATED type against the access width, never against the base, so it is true by
-       *  construction for anything a producer could state AND for a statement gone stale. What the
-       *  consumer does guard is PRECEDENCE — this field is consulted only where `exprCType`
+       *  IT IS A PRODUCER INVARIANT: the backend cannot vet a stated type. `derefStrideOk` tests
+       *  the STATED type against the access width, never against the base, so it is true by
+       *  construction for anything a producer could state AND for a statement gone stale. What
+       *  the consumer does guard is PRECEDENCE — this field is consulted only where `exprCType`
        *  answers nothing (cfamily.ts `legalizedIndexBase`), so wherever the walk can read the base
        *  it corrects a stale statement instead of being overridden by it. The one producer,
        *  structure/structure.ts `pointeeElement`, sets it from the same `elemSize`/`elemSigned` it
@@ -125,8 +122,8 @@ export type Expr =
        *  `width === 4`, 1 and 2 by `to.signed === signed`). The obligation is on the PRODUCER:
        *  state the type the access's own width and signedness agree with.
        *
-       *  THE ALTERNATIVE REJECTED, recorded so the next round does not re-derive it: teach
-       *  `exprCType` the pointee layout, the way `sym.noteGlobal` types the bare-array spelling —
+       *  THE ALTERNATIVE REJECTED: teach `exprCType` the pointee layout, the way
+       *  `sym.noteGlobal` types the bare-array spelling —
        *  the printer already renders `u8 grid[6][8]` for this member from this same layout. It was
        *  rejected because `SFn.globals` is also the ADDRESSABLE-BASE list, so typing the symbol
        *  there admits it as a `/livebase` base (measured on the probe: 8 extra base locals). Typing

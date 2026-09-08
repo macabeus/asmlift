@@ -978,15 +978,16 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
   });
 
   test('TWO variable terms re-associate in VISIT ORDER — a rank-2 index is two of them', () => {
-    // They used to fail the base recognizer outright, which made a rank-2 member's own index
-    // (`->x[i][j]` computes `j + i*8`) unreachable. They now re-associate into one residual, in
-    // the `+` tree's own left-to-right order and never sorted — `j + (i * 8)` and `(i * 8) + j`
-    // are different agbcc objects, so the order is part of the answer.
+    // A rank-2 member's own index IS two terms (`->x[i][j]` computes `j + i*8`), so the base
+    // recognizer re-associates them into one residual rather than refusing — in the `+` tree's
+    // own left-to-right order and never sorted, because `j + (i * 8)` and `(i * 8) + j` are
+    // different agbcc objects and the order is part of the answer.
     const body = derefAt('ldrb\tr0, [r1]', '\tadds\tr1, r1, r0\n\tadds\tr1, r1, r2\n');
     const layout = [{ name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16, dims: [16] }];
     expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).toContain('gPtr->slots[a0 + a1]');
-    // …and a member the map states no rank for still declines, on the rank gate rather than on the
-    // base decomposition — the consumer decides, the recognizer no longer decides for it.
+    // …and a member the map states no rank for still declines, on the rank gate rather than on
+    // the base decomposition: the consumer decides a residual it cannot explain, not the
+    // recognizer on its behalf.
     const noRank = [{ name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16 }];
     expect(run('f', body, mapOf([[0x03001234, pointee(noRank)]]))).not.toContain('->slots');
   });

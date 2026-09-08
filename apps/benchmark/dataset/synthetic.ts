@@ -217,9 +217,8 @@ const PROBE_BLOB_MAP: SymbolMap = new Map([
 
 // The SAME pointee, at the rank `pmarr2`/`pmarrfix` actually declare (`u8 unk8[6][8]`). It is a
 // separate map for the same reason `PROBE_FLAG_MAP` is separate from `PACKED_MAP`: a map states
-// what the row's own header says, and `pmarr1`'s header says `u8 unk8[48]`. Sharing one map across
-// two different declarations is what made the pair unable to test rank at all — the candidate
-// self-declares from the map, so a rank-1 spelling type-checked whatever the reference said.
+// what the row's own header says, and `pmarr1`'s header says `u8 unk8[48]` (see the split note
+// above `PROBE_BLOB_MAP`).
 const PROBE_GRID_MAP: SymbolMap = new Map([
   [
     0x03004670,
@@ -6102,8 +6101,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   //  • `pmarr1` 5 — CLOSED: **MATCH**. The first blocker was `pointeeAccess`'s
   //    `if (pg.idx !== null) return null`, a VARIABLE index declining whatever it lands on (81
-  //    firings on this row; 0 on `pmarrfix`, whose constant index never reaches that arm — the
-  //    "41 firings on the control" this note used to claim was never measured and is wrong). It
+  //    firings on this row; 0 on `pmarrfix`, whose constant index never reaches that arm). It
   //    was never a ranked axis and a candidate cannot referee it: the asm SAYS which spelling
   //    produced it, because the member form materialises the member's base where the cast form
   //    folds the constant into the load's displacement. `structure/structure.ts` `pointeeElement`
@@ -6225,7 +6223,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // until the score moved, which is the only reason its partner's number means anything:
   // `pmarrfix` (the same member at a CONSTANT index — so G4 is the variable index, not the member
   // spelling; it carries the rank-2 map too and stayed MATCH through the whole change, which is
-  // what says the rank did not move the constant-offset spelling), `bfconstn` (the same store with a NONZERO value — so G5 is the mask materialisation,
+  // what says the rank did not move the constant-offset spelling), `bfconstn` (the same store with
+  // a NONZERO value — so G5 is the mask materialisation,
   // not "a named bitfield store"), `armcb2` (the same store with TWO arms — so G6 is the ladder,
   // not the rewrite), `calad` (ONE ladder — so G1 is the MIX of senses, not the ladder), and
   // `joinsame` (the same two joined `if`s in the SAME sense).
@@ -6280,9 +6279,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`rows 52, none 48`, every differing row an `arg-mismatch`). So 7 is `swladder`'s class and
   // 4 is register/operand noise. Hoisting `sinkacc`'s init takes it to 4 across four declaration
   // orders, the residual an r5/r6 swap. `pmarr1` could be closed from either end — at rank 1
-  // `gBlob->unk8[i]`,
-  // `p = (u8 *)gBlob + 8; p[i]` and `p = gBlob->unk8; p[i]` are ONE object — but `pmarr2` only by
-  // the member spelling. Both are CLOSED, by the member spelling. PREDICTIONS, each with the command that falsifies it, and the G1 pair was
+  // `gBlob->unk8[i]`, `p = (u8 *)gBlob + 8; p[i]` and `p = gBlob->unk8; p[i]` are ONE object — but
+  // `pmarr2` only by the member spelling. Both are CLOSED, by the member spelling.
+  // PREDICTIONS, each with the command that falsifies it, and the G1 pair was
   // RUN: a per-SITE sense takes `mixsense`'s fan from 2 to 16 (`ASMLIFT_PERSITE_SENSE=4`) and
   // `joinsense` to 0 — both held — while `mixsense`'s score prediction of 0 was WRONG at 10, the
   // whole enumeration's floor, and the 10 is the base spelling (see the row above). A recursive arm

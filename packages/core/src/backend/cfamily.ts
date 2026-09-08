@@ -146,18 +146,15 @@ export type LeafHook = (e: Expr, rec: (e: Expr, p: number) => string) => string 
 function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Expr {
   // `baseElem` states the element type the base's own DECLARATION gives it, where the type walk
   // cannot reconstruct one (a map-declared array MEMBER — see l3/ast.ts). It is a FALLBACK, not an
-  // override, and the order is the whole guard: a stated type is true when it was produced and can
-  // only go stale, while the walk reads the tree in front of it, so wherever the walk answers at
-  // all it is the better answer and the stated one is not consulted. Inverted (`declared ??
-  // walked`) the re-check below is incapable of catching a stale statement — `derefStrideOk` tests
-  // the STATED type against the access width and never against the base, so it is true by
-  // construction for anything a producer could state AND equally true for a statement that no
-  // longer describes the base. Today nothing carries one onto a foreign base (every pass that
-  // substitutes an `index` base refuses a `field` base by its own predicate: basecse
-  // `isHoistableBase`, scopebase/argbase `eligible`, nearbase's untouched `field` subtree,
-  // reindex's `base.k === 'var'`), but `mapExprChildren` spreads the field across an arbitrary
-  // base substitution, so that invariant is five accidents rather than a check. This ordering is
-  // the check. Measured: zero test moves either way.
+  // override, and the order is the whole guard: the walk reads the tree in front of it, so
+  // wherever it answers at all it is the better answer and the stated one is not consulted.
+  // Inverted (`declared ?? walked`), a stale statement would stand — `derefStrideOk` cannot catch
+  // one, because it tests the STATED type against the access width and never against the base.
+  // No pass carries a statement onto a foreign base today (each refuses a `field` base by its own
+  // predicate: basecse `isHoistableBase`, scopebase/argbase `eligible`, nearbase's untouched
+  // `field` subtree, reindex's `base.k === 'var'`), but `mapExprChildren` spreads the field across
+  // an arbitrary base substitution, so that is five accidents rather than a check. This ordering
+  // is the check. Measured: zero test moves either way.
   const declared = ix.baseElem !== undefined ? T.ptr(ix.baseElem) : undefined;
   return derefStrideOk(exprCType(ix.base, vt.type) ?? declared, ix.width, ix.signed)
     ? ix.base

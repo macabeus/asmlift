@@ -184,9 +184,8 @@ interface PtrGlobalBase {
  *  LEFT-TO-RIGHT visit order is preserved and never sorted: `j + (i * 8)` and `(i * 8) + j` are
  *  different agbcc objects, so the order is part of the answer.
  *
- *  Every consumer still decides for itself what a residual it cannot explain means — the
- *  constant-offset member spelling ({@link pointeeAccess}) refuses any residual at all, exactly
- *  as it did when this function refused the second term on its behalf. */
+ *  Every consumer still decides for itself what a residual it cannot explain means: the
+ *  constant-offset member spelling ({@link pointeeAccess}) refuses any residual at all. */
 function ptrGlobalBase(e: Expr, isPtrGlobal: (n: string) => boolean): PtrGlobalBase | null {
   let name: string | null = null;
   let byte = 0;
@@ -445,21 +444,17 @@ function spellablePointee(
  *  or the instruction's own displacement (`off`). The gate is `off === 0` — the constant was
  *  materialised — and where the displacement carries it the cast spelling stands.
  *
- *  WHAT THAT CHANNEL DOES NOT DECIDE, because it was claimed here and is false. It does NOT say
- *  the source named the member: a HOISTED BASE LOCAL materialises the same constant. Compiled at
- *  `TOOLCHAIN.agbccFlags` against `u8 unk8[6][8]`, all three of `gBlob->unk8[0][i]`,
- *  `u8 *p = (u8 *)gBlob->unk8; p[i]` and `u8 *p = (u8 *)gBlob + 8; p[i]` emit the identical
- *  `add r1, #0x8` · `add r1, r1, r0` · `ldrb r0, [r1]`, while `*((u8 *)gBlob + 8 + i)` and
- *  `((u8 *)gBlob + i)[8]` take the displacement. So `off === 0` separates {member form, base-local
- *  form} from {the displacement forms} — and the base-local form is a spelling three shipped passes
- *  exist to emit (basecse/nearbase/scopebase).
- *
- *  This is still a per-site DEFAULT and not a ranked axis, but for the OTHER reason of the two
- *  docs/level-tower.md gives: the member form and the base-local form TIE in bytes, so an axis
- *  would enumerate a candidate that can never win. Contrast the GLOBAL rank recovery one
- *  indirection up (`cli/test/matching/array-rank-axis.test.ts`, `/flat-rank`), which IS an axis
- *  because its two spellings do not tie. Do not read this gate as "the asm decided" and carry that
- *  reading to a case where the alternatives differ in bytes.
+ *  THAT CHANNEL DOES NOT SAY THE SOURCE NAMED THE MEMBER: a HOISTED BASE LOCAL materialises the
+ *  same constant. Compiled at `TOOLCHAIN.agbccFlags` against `u8 unk8[6][8]`, all three of
+ *  `gBlob->unk8[0][i]`, `u8 *p = (u8 *)gBlob->unk8; p[i]` and `u8 *p = (u8 *)gBlob + 8; p[i]` emit
+ *  the identical `add r1, #0x8` · `add r1, r1, r0` · `ldrb r0, [r1]`, while `*((u8 *)gBlob + 8 + i)`
+ *  and `((u8 *)gBlob + i)[8]` take the displacement — and the base-local form is a spelling three
+ *  shipped passes exist to emit (basecse/nearbase/scopebase). It is a per-site DEFAULT and not a
+ *  ranked axis for the OTHER reason of the two docs/level-tower.md gives: those two forms TIE in
+ *  bytes, so an axis would enumerate a candidate that can never win. Contrast the GLOBAL rank
+ *  recovery one indirection up (`cli/test/matching/array-rank-axis.test.ts`, `/flat-rank`), which
+ *  IS an axis because its two spellings do not tie. Do not read this gate as "the asm decided" and
+ *  carry that reading to a case where the alternatives differ in bytes.
  *
  *  THE RANK IS PART OF THE SPELLING, not a later fidelity polish. The declaration this access has
  *  to type-check against belongs to the PROJECT, not to asmlift, and `->x[k]` on a `u8 x[6][8]`
@@ -469,30 +464,27 @@ function spellablePointee(
  *  spelled out in full (`->x[i][j]`, or `->x[0][i]` where the asm merged the row into one flat
  *  counter, which is the same address).
  *
- *  `->x[0][i]` TYPE-CHECKS AND IS OUT OF BOUNDS, and both halves of that are meant. Where agbcc
- *  merged a rank-2 walk into one flat counter, `i` runs the member's whole element count through a
- *  declared row of `8` — defined behaviour nowhere, byte-identical everywhere (verified: the
- *  spelling is the rank-1 object). There is no in-bounds alternative: the flat `->x[i]` is a
- *  different program (above) and the cast form is what this rule replaces. It is the only spelling
- *  that both type-checks and keeps the bytes, which is a narrower claim than "the only spelling
- *  that type-checks" — the `pmarrrow` synthetic row referees it (ablate the `needRecovered = false`
- *  below and it takes the cast form: MATCH → diff:5), and `kleod:CheckWorldCompletion:agbcc` is its
- *  real-tier inhabitant. It generalises: at rank 3 the same merge spells `->x[0][0][k]`.
+ *  `->x[0][i]` TYPE-CHECKS AND IS OUT OF BOUNDS, and both halves of that are meant: `i` runs the
+ *  member's whole element count through a declared row of `8`. There is no in-bounds alternative —
+ *  the flat `->x[i]` is a different program (above) and the cast form is what this rule replaces —
+ *  so it is the only spelling that both type-checks and keeps the bytes, which is a narrower claim
+ *  than "the only spelling that type-checks". The `pmarrrow` synthetic row referees it (pass
+ *  `subscriptsFromExtents` a `needRecovered` of true, as the global path does, and the row takes
+ *  the cast form: MATCH → diff:5); `kleod:CheckWorldCompletion:agbcc` is its real-tier inhabitant;
+ *  at rank 3 the same merge spells `->x[0][0][k]`.
  *
  *  A VARIABLE SUBSCRIPT IS NEVER BOUNDED, here or anywhere. The member lookup bounds only the
- *  CONSTANT part (`pg.byte` inside `[offset, offset+size)`); the variable residual is unbounded by
- *  construction, so `->grid[i]` can address the member after `grid` exactly as `->x[0][i]` can run
- *  past a row. That is not this rule's defect to fix — the cast form it replaces is unbounded in
- *  the same way, the asm supplies no bound, and refusing every unbounded index would refuse the
- *  capability whole (`pmarr1`'s `gBlob->unk8[i]` included). It is recorded so a later reader does
- *  not mistake the constant-side check for a bounds check on the access.
+ *  CONSTANT part (`pg.byte` inside `[offset, offset+size)`), so `->grid[i]` can address the member
+ *  after `grid` exactly as `->x[0][i]` can run past a row. Not this rule's defect to fix: the cast
+ *  form it replaces is unbounded in the same way, the asm supplies no bound, and refusing every
+ *  unbounded index would refuse the capability whole (`pmarr1`'s `gBlob->unk8[i]` included). It is
+ *  recorded so the constant-side check is not mistaken for a bounds check on the access.
  *
  *  REFUSES, and each one keeps the honest cast form rather than guessing. Named with the test that
  *  fails when it is removed (`packages/core/test/symbols.test.ts`), because a refusal nothing
  *  ablates is a claim rather than a rule:
  *    • any load/store displacement at all (`off !== 0`)   — "named only where the member BASE was
  *      materialised"
- *    • no variable residual — handed to `pointeeAccess`'s constant-offset question instead
  *    • a pointee nothing may be named through, a qualifier the name would reintroduce, a width
  *      mismatch, an element signedness the access contradicts (an s8 read is ldrb+lsl+asr where u8
  *      is ldrb alone)   — "honours every gate the constant-offset one does", "a WIDER indexed
@@ -507,21 +499,17 @@ function spellablePointee(
  *    • a byte offset into the member that does not land on an element boundary
  *
  *  NOT a `Gate` table (l3/gates.ts), unlike `FRESH_MERGE_GATES` and `CARRIER_NAME_GATES` in this
- *  same file, and the reason is the shape rather than the effort: those refusals are predicates
- *  over ONE prepared context, while these are interleaved with the computations that produce the
- *  values the later ones test — the member `find`, `structFieldInnerExtents`,
- *  `declaredArrayShape`, `subscriptsFromExtents`. Building that Ctx would run all of it on inputs
- *  the earlier gates reject. (An earlier wording added "…and change WHICH refusal fires first".
- *  That half is FALSE and is dropped: `firstRejection` reports in the AUTHORED gate order, not the
- *  computation order, so a Ctx with optional fields would attribute identically. The cost is the
- *  whole reason.)
+ *  same file: those refusals are predicates over ONE prepared context, while these interleave with
+ *  the computations that produce the values the later ones test (the member `find`,
+ *  `structFieldInnerExtents`, `declaredArrayShape`, `subscriptsFromExtents`), so building that Ctx
+ *  would run all of it on inputs the earlier gates reject.
  *
- *  A THIRD ROUTE TO THE SAME LEGALIZATION, recorded so the next round does not re-derive it.
- *  `baseElem` and the global path's env lie (`noteGlobal(name, T.ptr(elem))`) both exist because
+ *  A THIRD ROUTE TO THE SAME LEGALIZATION, deliberately not taken: peel `lead.length` array levels
+ *  off the WALKED base type before the stride check, needing neither `baseElem` nor the global
+ *  path's env lie (`noteGlobal(name, T.ptr(elem))`) — both of which exist only because
  *  `derefStrideOk` asks a SINGLE-subscript question of a node carrying `lead.length + 1`
- *  subscripts. The third answer is to peel `lead.length` array levels off the WALKED base type
- *  before the stride check — no AST field and no env lie at all. Not built: it needs `gPtr` typed
- *  in the print env, which is a bigger change than this gap should carry. */
+ *  subscripts. It needs `gPtr` typed in the print env, a bigger change than this gap should
+ *  carry. */
 function pointeeElement(
   pg: PtrGlobalBase,
   off: number,
@@ -530,6 +518,7 @@ function pointeeElement(
   isStore: boolean,
   sym: SymRenderCtx,
 ): Expr | null {
+  // `pg.idx === null` narrows the type; the sole caller reaches here only for a variable index.
   if (off !== 0 || pg.idx === null) {
     return null;
   }
