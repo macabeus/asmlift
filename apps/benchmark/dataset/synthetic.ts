@@ -375,6 +375,20 @@ const PROBE_SLOTC_MAP: SymbolMap = new Map([
   ],
 ]);
 
+// `ladcall5`'s globals: the SAME `gP` slots pointer the ladder rows carry, plus the six callees
+// its arms name. It has no `gQ` and no `gC` because the per-arm STORE body those two exist for is
+// exactly what that row replaces — the map follows the row's own src (authored-facts.test.ts
+// enforces that), so it is a consequence of the body edit, not a second variable.
+const PROBE_CALLS_MAP: SymbolMap = new Map([
+  [0x03001000, PROBE_SLOT_MAP.get(0x03001000)!],
+  [0x08001200, [{ name: 'fn0', kind: 'code' as const, declared: true }]],
+  [0x08001300, [{ name: 'fn1', kind: 'code' as const, declared: true }]],
+  [0x08001400, [{ name: 'fn2', kind: 'code' as const, declared: true }]],
+  [0x08001500, [{ name: 'fn3', kind: 'code' as const, declared: true }]],
+  [0x08001600, [{ name: 'fn4', kind: 'code' as const, declared: true }]],
+  [0x08001100, [{ name: 'fnB', kind: 'code' as const, declared: true }]],
+]);
+
 // The nest pair's global: the same pointer-to-struct shape at the RANK the two loops index it by
 // (`gP->f[i][j]`), which is what `dims: [8, 8]` states and `length: 64` alone cannot.
 const PROBE_NEST_MAP: SymbolMap = new Map([
@@ -6890,21 +6904,55 @@ export const SYNTHETIC: SynthSpec[] = [
   // The SECOND attribution round on `kleod:CountCollectedGems:agbcc`. The first one (#156)
   // partitioned that row's 290 into seven gaps by a byte-exact ablation, all seven shipped
   // (#163-#170), every row they owned closed — `pmarr1`, `pmarr2`, `bfzero`, `armcb`, `swladder`
-  // all MATCH above — and the real row went 290 -> 171 rather than to 0. These eight rows are what
+  // all MATCH above — and the real row went 290 -> 171 rather than to 0. These nine rows are what
   // the 171 turned out to be, re-decomposed from the differ's own rows and verified against agbcc
   // instead of inferred: an ELSE-LADDER whose CONJUNCTIVE guard splits and duplicates an arm
   // body (68 of the 171), and a LOOP-CARRIED ACCUMULATOR that asmlift copies in and out of a
   // local the target never spills (28 of the 171). The remaining 75 get no row here, and why is
   // at the end.
   //
-  // ARM COUNT IS NOT THE VARIABLE — the `&&` IS. An earlier revision of this block titled the
-  // family "flat up to four arms, duplicates the fifth". Measured, one edit at a time, on the
-  // `ladder5` source with the guards DE-CONJUNCTED to a single test and nothing else changed:
-  // 5 arms MATCH, 6 arms MATCH; with the conjunction kept, 5 arms score 41 and 6 arms score 159.
-  // `ladidx2` is 2 conjunctive arms and already fails at 36. So a conjunctive guard is present in
-  // every failing case and absent from every passing one, and the arm count only sets the price.
-  // `revlad5s` below is the committed one-edit control: `ladder5`'s five arms and bodies verbatim,
-  // guards de-conjuncted, MATCH. It is what a ladder-flattening lever must not regress.
+  // THREE NECESSARY TERMS, NONE OF THEM SUFFICIENT — and TWO earlier revisions of this block each
+  // named ONE of them as "the variable". The first titled the family "flat up to four arms,
+  // duplicates the fifth"; the second struck that for "ARM COUNT IS NOT THE VARIABLE — the `&&`
+  // IS ... a conjunctive guard is present in every failing case and absent from every passing
+  // one, and the arm count only sets the price". Both are false, and both counter-examples were
+  // already named in this block. Measured on `ladder5`'s source, ONE EDIT AT A TIME:
+  //
+  //   ladder5    5 conjunctive arms, per-arm four-statement STORE body        41
+  //   revlad5s   the same five arms and bodies, guards DE-CONJUNCTED       MATCH  (committed)
+  //   ladder4    the same guards and store bodies, FOUR arms               MATCH  (committed)
+  //   ladcall5   the same five conjunctive guards, body = ONE DISTINCT CALL MATCH (committed)
+  //
+  // THREE different single edits each take 41 to MATCH, so all three are terms of one conjunction
+  // and none is "the variable" — the two-sided shape [conjunctive-rows-two-sided] warns about,
+  // which this block invokes correctly for the `u8`-locals class below while two of its own
+  // headlines got it wrong. Stated no more strongly than measured:
+  //   • THE CONJUNCTION is necessary. `revlad5s` (five de-conjuncted arms) MATCHes; so does
+  //     `ladidx2` de-conjuncted (measured, not committed: MATCH against its 36). Six de-conjuncted
+  //     arms MATCH and six conjunctive arms score 159.
+  //   • THE ARM COUNT is necessary, and it is a CLIFF whose position is SHAPE-DEPENDENT, not a
+  //     price that scales. In the `ladder` body the price is ZERO at three arms (measured, not
+  //     committed: the same shape at 3 conjunctive store arms MATCHes) and at four (`ladder4`),
+  //     then 41 at five. In the `ladidx` body — arms identical UP TO the member index — the cliff
+  //     is at TWO: `ladidx1` MATCH, `ladidx2` 36. `ladder4` and `ladidx1` are the rows that pin
+  //     the cliff FROM BELOW, and they are the regression gate on the flattening side.
+  //   • THE ARM BODY is necessary, and it is the term neither earlier revision ever varied.
+  //     `ladcall5` keeps `ladder5`'s five conjunctive guards verbatim and replaces each arm's
+  //     store body with one DISTINCT call: MATCH. Distinct on purpose, so this is not `armcb`'s
+  //     cross-jump of identical arms (identical calls also MATCH, measured). WHICH part of the
+  //     body carries it — the `gQ.cur = fnA` callback store, the `gC.a = N` distinguisher, or the
+  //     read-modify-write — is NOT measured here and must not be inferred from this row. Removing
+  //     the store body also removes `gQ` and `gC` from the row and so from its map, which is a
+  //     CONSEQUENCE of the edit and not a second variable: the map is inert for asmlift here
+  //     (map-less `ladcall5` is still MATCH), so the control is not bought by its declarations.
+  //     `calad` (3 conjunctive arms, distinct calls, MATCH) is the same fact at three arms.
+  //
+  // A lever author is therefore NOT sent to the conjunction-splitting site alone: the gate is the
+  // interaction of that split with a per-arm store the ladder cannot merge, above a shape-
+  // dependent arm count. `revlad5s`, `ladder4`, `ladidx1` and `ladcall5` are the four MATCH
+  // controls such a lever must not regress; `ladder4` is the sharpest of them, because its 93/93
+  // candidates already emit the source's own four store sites (census below) while `revlad5s`'s
+  // guards are conjunction-free and a conjunction-triggered lever cannot fire on it at all.
   //
   // WHY THE CORPUS COULD NOT SEE EITHER, MEASURED RATHER THAN ASSUMED. The dataset already has
   // five else-if ladders and every one of them MATCHes on agbcc today: `calad` (3 arms, each
@@ -6955,10 +7003,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // `l3/unmerge.ts` MATCHes it. One index of difference per arm is what defeats that.
   //
   // `revacc1`/`nestacc1` isolate the accumulator copies from everything `nestacc` bundles with
-  // them, and they are a ONE-EDIT pair: same struct, same pointer global, same accumulator, same
-  // masked compare, same `sink` call — `revacc1` runs ONE loop over `f[0][j]` and MATCHes,
-  // `nestacc1` wraps it in an outer loop over `i` and scores 15. So the aggravating factor is the
-  // OUTER LOOP — which is the opposite of what a reader of `nestacc` would guess. `flatacc` (one
+  // them: same struct, same pointer global, same accumulator, same masked compare, same `sink`
+  // call — `revacc1` runs ONE loop over `f[0][j]` and MATCHes, `nestacc1` wraps it in an outer
+  // loop over `i` and scores 15. It is TWO edits, not one (the outer loop AND the subscript), so
+  // they are DECOMPOSED rather than asserted: `nestacc1` with the subscript pinned to `f[0][j]`
+  // and THE OUTER LOOP KEPT scores 14 (measured, not committed). The outer loop carries 14 of the
+  // 15 and the runtime row index carries 1, so the aggravating factor is the OUTER LOOP — which
+  // is the opposite of what a reader of `nestacc` would guess. `flatacc` (one
   // loop, THREE accumulators, an inner ladder, MATCH) is kept as the second control, but it is NOT
   // the control that establishes this: it differs from `nestacc1` in four ways at once (loop
   // depth, accumulator count, ladder, subscript), and an earlier revision of this block drew the
@@ -6968,7 +7019,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // accumulating into `v3`. Its fan is FOUR candidates against `flatacc`'s sixteen, all four
   // carrying the copies.
   //
-  // ATTRIBUTION — the first blocker for each row, and none of them is a decline. All eight lift,
+  // ATTRIBUTION — the first blocker for each row, and none of them is a decline. All nine lift,
   // structure and rank; there is no gap marker on any of them:
   //   • `ladder5` (41) and `ladidx2` (36) — NO REACH, by the census above: 0 of 93 and 0 of 38
   //     candidates spell the flat ladder past the duplicating arm. The 93/38 differ by rank AXES
@@ -6984,8 +7035,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //     accumulator over a bare `extern u8 gG2[8][8]` — no pointer, no struct, no map — scores 13
   //     of the 15. The pointer-into-struct spelling is kept for fidelity to the real function and
   //     because m2c needs the map to compile at all, not because the class needs it.
-  //   • `ladder4`, `ladidx1`, `flatacc`, `revlad5s`, `revacc1` — controls, MATCH, nothing to
-  //     attribute.
+  //   • `ladder4`, `ladidx1`, `ladcall5`, `flatacc`, `revlad5s`, `revacc1` — controls, MATCH,
+  //     nothing to attribute.
   //
   // WHAT `/unmerge` DOES HERE, because the round was sent to test it. On the REAL row, adding
   // `/unmerge` to the winning label COSTS +44 — the winner's own `/unmerge` sibling scores 215
@@ -6994,8 +7045,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // is base-dependent — the same axis is −3 at the `BC` rung and +4 at `BCG`.) The best
   // `/unmerge`-carrying candidate anywhere in the 5952-candidate fan is 192, still above 171. On
   // these rows it is in the winning label and
-  // PAYS: `ladder5` is 41 with it and 76 without, `ladder4` 0 with it and 25 without. On
-  // `ladidx2` it is exactly INERT — 36 both ways. So `/unmerge` is neither missing nor
+  // PAYS ON FOUR OF THE FIVE. Ablated by dropping every `/unmerge`-carrying candidate from the fan
+  // and letting the harness rank what is left: `ladder5` 41 -> 76, `ladder4` MATCH -> 25,
+  // `ladidx1` MATCH -> 10, `revlad5s` MATCH -> 37; `ladidx2` alone is exactly INERT, 36 both ways.
+  // TWO OF THE MATCH CONTROLS DEPEND ON IT, so a ladder-flattening lever that disturbs `/unmerge`
+  // regresses four of these rows, not two. So `/unmerge` is neither missing nor
   // mis-ranked; where the ladder duplicates an arm, the duplicated copies must re-materialise
   // their own pool operands and the merged spelling wins on price. It is downstream of the ladder
   // and cannot be attributed on its own, which is why no row here carries it as its subject.
@@ -7008,15 +7062,28 @@ export const SYNTHETIC: SynthSpec[] = [
   //     local.
   //   PROBE_SLOT_MAP   ladidx1 MATCH->MATCH · ladidx2 36->36 — INERT for asmlift, LOAD-BEARING
   //     for m2c: map-less it emits `extern ? gQ;` and the row publishes a DECLINE.
+  //   PROBE_CALLS_MAP  ladcall5 MATCH->MATCH — INERT for asmlift, LOAD-BEARING for m2c
+  //     (MATCH -> noncompile: `fn0`..`fn4` are CALLED, but m2c spells the call through a pointer
+  //     the candidate compile cannot type without the map). So the control's MATCH is not bought
+  //     by its map, which is the only way a MATCH control pins anything.
   //   PROBE_NEST_MAP   flatacc MATCH->MATCH · nestacc1 15->15 · revacc1 MATCH->MATCH — INERT for
   //     asmlift on all three, LOAD-BEARING for m2c, which goes noncompile -> MATCH, 18 and MATCH.
   //   `fnA`/`fnB` are in PROBE_SLOT_MAP as `kind: 'code'` for a reason worth stating, since it is
   //     a trap for the next author: the m2c candidate is compiled against the declarations
-  //     rendered from `symbols` ALONE (`m2cDeclarationsFor`, src/eval/evaluate.ts) — `ctx` does
-  //     not reach that compile. With the two names only in `ctx`, all four ladder rows published
-  //     `m2c=noncompile(1)` reading ``fnA' undeclared`, which is a harness artifact wearing the
-  //     costume of a decompiler failure. In the map they render as `void fnA(void);` and m2c
-  //     scores. They are inert for asmlift (MATCH/41/MATCH/36 either way).
+  //     rendered from `symbols` ALONE (`m2cDeclarationsFor`, src/eval/evaluate.ts) — `ctx` reaches
+  //     m2c's DECOMPILE (as `--context`) and never its candidate compile. With the two names only
+  //     in `ctx`, all four ladder rows published `m2c=noncompile(1)` reading ``fnA' undeclared`,
+  //     which is a harness artifact wearing the costume of a decompiler failure. In the map they
+  //     render as `void fnA(void);` and m2c scores. They are inert for asmlift (MATCH/41/MATCH/36
+  //     either way).
+  //   AND `sink` IS DELIBERATELY NOT IN PROBE_NEST_MAP, which looks like an inconsistency and is
+  //     not. `fnA` is used as a VALUE (`gQ.cur = fnA`), which C89 will not accept undeclared;
+  //     `sink` is only CALLED, so the candidate compile takes it by C89 IMPLICIT DECLARATION and
+  //     needs no map entry. Adding one is not free and was measured rather than argued: a
+  //     `kind: 'code'` entry renders as `void sink(void);` — the map has nowhere to carry an
+  //     arity — and all three PROBE_NEST_MAP rows then go m2c MATCH/MATCH/18 -> NONCOMPILE on
+  //     ``too many arguments to function `sink'``. The asymmetry is the C89 rule, not an
+  //     oversight.
   //
   // M2C, and the deficit stated rather than avoided: `ladder5` is m2c 38 against asmlift 41 and
   // `ladidx2` is m2c 19 against asmlift 36 — m2c is AHEAD on both gap rows, and its `ladder5`
@@ -7049,12 +7116,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //     blocked behind the ladder rows above: its spelling is only reachable once the ladder
   //     stops duplicating an arm.
   //
-  // ALL EIGHT ARE agbcc-ONLY, on the same terms as the family above: each was smoked alone
+  // ALL NINE ARE agbcc-ONLY, on the same terms as the family above: each was smoked alone
   // (`ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc
   // --serial`), a candidate compile has no timeout, and no row gets a toolchain nobody
-  // individually smoked. `--only lad` takes all four ladder rows AND `swladder` (the filter is a
-  // substring match); `--only nestacc` takes `nestacc1` with `nestacc`; `--only revlad` and
-  // `--only revacc` take the two controls added by the review round.
+  // individually smoked. THE `--only` FILTER IS A SUBSTRING MATCH (`sym.includes(only)`,
+  // src/cases/synthetic.ts) and collides more widely than it looks: `--only lad` takes NINE rows —
+  // `lladd`, `swladder`, `calad`, `ladder4`, `ladder5`, `ladidx1`, `ladidx2`, `revlad5s`,
+  // `ladcall5` — and `--only acc` takes five. `--only nestacc` takes `nestacc1` with `nestacc`;
+  // `--only revlad`, `--only ladcall` and `--only revacc` take one row each.
   {
     sym: 'ladder4',
     src:
@@ -7160,11 +7229,13 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: PROBE_SLOT_MAP,
   },
   {
-    // The one-edit control for `ladder5`: identical arms, identical bodies, guards DE-CONJUNCTED to
-    // one test. MATCH. It is what says the `&&` and not the arm count is the variable, and what a
-    // ladder-flattening lever must not regress. (Measured alongside, uncommitted: the same shape at
-    // SIX arms also MATCHes, and six CONJUNCTIVE arms score 159 — the cliff scales with the count
-    // only once the conjunction is there.)
+    // The CONJUNCTION control for `ladder5`: identical arms, identical bodies, guards DE-CONJUNCTED
+    // to one test. MATCH. It says the conjunction is a NECESSARY term — not that it is the only
+    // one: `ladder4` (drop an arm) and `ladcall5` (change the arm body) each take the same 41 to
+    // MATCH too. One of the four MATCH controls a ladder-flattening lever must not regress, and
+    // the weakest of them as a gate: with no conjunction left, a conjunction-triggered lever never
+    // fires here. (Measured alongside, uncommitted: the same shape at SIX arms also MATCHes, and
+    // six CONJUNCTIVE arms score 159.)
     sym: 'revlad5s',
     src:
       'extern void fnA(void);\n' +
@@ -7192,6 +7263,40 @@ export const SYNTHETIC: SynthSpec[] = [
       fnB: { params: 0, returnsVoid: true },
     },
     symbols: PROBE_SLOTC_MAP,
+  },
+  {
+    // The ARM-BODY control for `ladder5`: its five CONJUNCTIVE guards verbatim, with each arm's
+    // four-statement global-store body replaced by ONE DISTINCT call. MATCH. The calls are
+    // distinct on purpose — identical ones would MATCH through `armcb`'s cross-jump instead and
+    // prove nothing. This is the term the first two revisions of the block comment never varied,
+    // and it is why neither "the arm count" nor "the `&&`" is on its own the variable.
+    sym: 'ladcall5',
+    src:
+      'extern void fn0(void); extern void fn1(void); extern void fn2(void);\n' +
+      'extern void fn3(void); extern void fn4(void); extern void fnB(void);\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'void ladcall5(void){\n' +
+      '  if ((gP->f[7] & 0x80) != 0 && (gP->f[8] & 0x7F) == 0x7F) { fn0(); return; }\n' +
+      '  else if ((gP->f[15] & 0x80) != 0 && (gP->f[16] & 0x7F) == 0x7F) { fn1(); return; }\n' +
+      '  else if ((gP->f[23] & 0x80) != 0 && (gP->f[24] & 0x7F) == 0x7F) { fn2(); return; }\n' +
+      '  else if ((gP->f[31] & 0x80) != 0 && (gP->f[32] & 0x7F) == 0x7F) { fn3(); return; }\n' +
+      '  else if ((gP->f[39] & 0x80) != 0 && (gP->f[40] & 0x7F) == 0x7F) { fn4(); return; }\n' +
+      '  fnB();\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void fn0(void); void fn1(void); void fn2(void); void fn3(void); void fn4(void); void fnB(void); void ladcall5(void);',
+    proto: {
+      ladcall5: { returnsVoid: true },
+      fn0: { params: 0, returnsVoid: true },
+      fn1: { params: 0, returnsVoid: true },
+      fn2: { params: 0, returnsVoid: true },
+      fn3: { params: 0, returnsVoid: true },
+      fn4: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_CALLS_MAP,
   },
   {
     // The one-edit control for `nestacc1`: the same struct, pointer global, accumulator, masked
