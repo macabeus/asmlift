@@ -1202,9 +1202,9 @@ test('every withholding on the `default:` position, one call each', () => {
 // are 20 bytes each (0x14, ten Thumb instructions) and disagree instruction for instruction — the
 // `switch` front-loads both tests and sorts them ascending (0x1e before 0x64, the reverse of source
 // order), the ladder emits each test directly above its own body. `switchRequiresFrontLoadedTests`
-// reads that back off the layout, PER SITE. That pair is COMPILED AND COMMITTED, not described —
-// `corpus/agbcc-sw{frontload,ladder}.s`, asserted at the bottom of this file — so the hand-written
-// `ladderFn` below is a convenience for the recovery tests and never the evidence.
+// reads that back off the layout, PER SITE. The pair is committed as
+// `corpus/agbcc-sw{frontload,ladder}.s` and asserted against below, so the hand-written `ladderFn`
+// here is a convenience for the recovery tests and never the evidence.
 
 /** the agbcc LADDER spelling of `if (x == 100) r = 1; else if (x == 30) r = 2;` — each test
  *  directly above the body it guards, in source order. Blocks: 0 test, 1 body, 2 test, 3 body. */
@@ -1251,7 +1251,7 @@ test('…while a FRONT-LOADED dispatch is still a switch — the gate reads layo
 });
 
 test('the reading is PER SITE: one function keeps its ladder AND its switch', () => {
-  // PR #120's price, refused. A per-FUNCTION predicate cannot decide a per-SITE question: a
+  // A per-FUNCTION predicate cannot decide a per-SITE question (PR #120 paid that price): a
   // function-wide OR would spell both sites the same way and be wrong on one by construction.
   const out = src(mixedFn);
   expect(count(out, 'switch (a1)')).toBe(1);
@@ -1262,8 +1262,8 @@ test('the reading is PER SITE: one function keeps its ladder AND its switch', ()
 });
 
 test('a compiler that has not declared the front-loading keeps recovering the switch', () => {
-  // Two compilers declare this, each on its OWN compiled pair (agbcc's in target.ts, KMC-GCC's in
-  // the committed fixtures below). IDO has never been put through one, and CodeWarrior fails the
+  // Two descriptions declare this, on three committed pairs — agbcc's, and one from each toolchain
+  // `MIPS_GCC` serves — all asserted below. IDO has never been put through one, and CodeWarrior fails the
   // premise's frontend half outright — ppc.ts appends synthetic return blocks out of stream order,
   // so `fn.blocks` there is not the assembly's layout and the reading has nothing to read.
   for (const t of [MIPS_IDO, PPC_MWCC]) {
@@ -1283,9 +1283,9 @@ test('a compiler that has not declared the front-loading keeps recovering the sw
 // beside them (`corpus/probe-{,agbcc-}sw*.c`) and `scripts/regen-switch-spelling-probes.ts`
 // rebuilds all seven from those bodies, each with a provenance header naming the compiler as an
 // `ASMLIFT_*` env var, its flags and the objdump command — the standard
-// `scripts/regen-declrank-probes.ts` already sets for the declaration-rank probes. Without it
-// nothing committed could tell "compiled by this toolchain and it agreed" from "copied from the
-// sibling", which matters here because the two MIPS fixtures ARE byte-identical files.
+// `scripts/regen-declrank-probes.ts` already sets. Without a regen path nothing committed could
+// tell "compiled by this toolchain and it agreed" from "copied from the sibling", which matters
+// here because the two MIPS fixtures ARE byte-identical files.
 const dumpOf = (f: string) =>
   readFileSync(new URL(`corpus/${f}.asm`, import.meta.url), 'utf8')
     .split('\n')
@@ -1301,7 +1301,7 @@ test('the two kmc spellings of ONE body are different objects, and the layouts s
   expect(sw.join('\n')).not.toEqual(lad.join('\n')); // different objects, not one object two ways
   // the `switch`: EVERY test ahead of EVERY body. That is the whole premise the gate reads back.
   expect(Math.max(...tests(sw))).toBeLessThan(Math.min(...bodies(sw)));
-  // the ladder: a test sits AFTER a body — each `bne` directly above the store it guards.
+  // the ladder: a test sits AFTER a body — the first arm's `sw` is above the second `bne`.
   expect(Math.max(...tests(lad))).toBeGreaterThan(Math.min(...bodies(lad)));
 });
 
@@ -1360,12 +1360,10 @@ test('a front-loaded gcc2.7.2 -O1 dispatch keeps its switch under the same decla
   expect(out).toContain('switch (a0)');
 });
 
-// agbcc's OWN PAIR, on the compiler that owns four of the five rows the reading moves. It was
-// prose ("the same two-case body written either way") until wave 2 measured it and found the one
-// number in it wrong, so it is committed now: `corpus/agbcc-sw{frontload,ladder}.s` are agbcc's own
-// text at TOOLCHAIN.agbccFlags for `corpus/probe-agbcc-sw{frontload,ladder}.c`. agbcc emits
-// assembly rather than an object, so what is committed is the compiler's output itself and the
-// split is read straight off it.
+// agbcc's OWN PAIR, on the compiler that owns four of the five rows the reading moves.
+// `corpus/agbcc-sw{frontload,ladder}.s` are agbcc's own text at TOOLCHAIN.agbccFlags for
+// `corpus/probe-agbcc-sw{frontload,ladder}.c`. agbcc emits assembly rather than an object, so what
+// is committed is the compiler's output itself and the split is read straight off it.
 const armDumpOf = (f: string) =>
   readFileSync(new URL(`corpus/${f}.s`, import.meta.url), 'utf8')
     .split('\n')
@@ -1381,8 +1379,7 @@ test('the two agbcc spellings of ONE body are different objects, and the layouts
   expect(sw.join('\n')).not.toEqual(lad.join('\n')); // different objects, not one object two ways
   // BOTH ARE TEN INSTRUCTIONS — the same 20 bytes (0x14) of .text either way, which is why the
   // differ cannot separate them on size and why the LAYOUT is the only thing that says which was
-  // written. (Wave 2 caught this stated as "79 bytes" in four places; 79 is odd, and no Thumb
-  // function can be an odd number of bytes.)
+  // written.
   expect(sw.length).toBe(10);
   expect(lad.length).toBe(10);
   // the `switch`: both tests ahead of both bodies, and SORTED ASCENDING — 0x1e before 0x64, the
@@ -1408,8 +1405,8 @@ test("the gap and the fix, on agbcc's own output rather than on a hand-written s
   expect(lad).toContain('a0 == 100');
   expect(lad).toContain('a0 == 30');
 
-  // ONLY THIS HALF OF THE PAIR IS LIFTED, and saying so is the point — the same disclosure the kmc
-  // pair owes, with the halves swapped. `agbcc-swfrontload.s` never reaches Regime A at all: two
+  // ONLY THIS HALF OF THE PAIR IS LIFTED, as with the kmc pair above but with the halves swapped.
+  // `agbcc-swfrontload.s` never reaches Regime A at all: two
   // cases selecting a VALUE fold to a boolean select (`v0 = a0 == 100`) upstream of recovery, so
   // it is byte-identical with the field and without it and demonstrates nothing about the gate.
   // It is the LAYOUT evidence — asserted off the asm in the test above — and not a lift.
@@ -1419,10 +1416,10 @@ test("the gap and the fix, on agbcc's own output rather than on a hand-written s
 });
 
 test('PRE5 declines a tree RECURSIVELY, so a nested dispatch comes back as an if nest around a switch', () => {
-  // WHAT THE DECLINE ACTUALLY PRODUCES. Until wave 2 the decline was described everywhere as
-  // "if-recovery … the emitted source says `if`/`else if` where the target said `switch`" — true
-  // of the tree that was declined, and NOT the whole story, because `recognizeSwitch` runs again on
-  // the sub-trees the decline leaves behind. `corpus/agbcc-swnested.s` is agbcc's output for a
+  // WHAT THE DECLINE ACTUALLY PRODUCES. "If-recovery — the emitted source says `if`/`else if`
+  // where the target said `switch`" is true of the tree that was declined and is NOT the whole
+  // story, because `recognizeSwitch` runs again on the sub-trees the decline leaves behind.
+  // `corpus/agbcc-swnested.s` is agbcc's output for a
   // source `switch` nested inside an if/else-if ladder: PRE5 declines the OUTER tree (the ladder's
   // `x == 98` body sits between the tests, which is the ladder signature and the correct reading),
   // recovery re-runs on the sub-tree, and what comes out is an `if` nest holding a `switch` over a
@@ -1450,22 +1447,20 @@ test('PRE5 declines a tree RECURSIVELY, so a nested dispatch comes back as an if
 test('the UNPLACED block PRE5 stands down for is a state the IR verifier already rejects', () => {
   // PRE5's `placed` half asks whether every test and body block has a position at all, because
   // `layoutIndex` answers -1 for a block missing from `fn.blocks` and -1 taken as a position sorts
-  // below every real body — one absent block would satisfy `max(tests) > min(bodies)` for every
-  // tree in the function and cost the whole `switch` regime silently.
+  // below every real body — an absent body would satisfy `max(tests) > min(bodies)` and cost that
+  // tree its `switch` silently.
   //
   // The guard is kept, and this pins WHY it has no inhabitant: not "unobserved on the corpus" but
   // rejected upstream. `verify()` requires every successor to be a block of the fn, and the tower
   // runs it after the lift and after every raising pass; `structure()` then rebuilds the predecessor
   // map over `fn.blocks` and throws, by name, on a successor it does not hold. So the state is a
-  // VERIFIER BUG, not a shape to expect, and the reason the architecture review could not construct
-  // the test it asked for. If a future pass inserts or reorders blocks, these two fail first.
+  // VERIFIER BUG, not a shape to expect. If a future pass inserts or reorders blocks, these two
+  // fail first.
   //
   // WHAT THIS PINS IS THE UNREACHABILITY, NOT THE GUARD. PRE5's `placed` branch stays 100%
   // unexecuted here by construction — the assertions below are that `structure()` never gets far
-  // enough to run it. Both throws are matched on their MESSAGE: an unmatched `toThrow()` would pass
-  // on any crash from anywhere in `structure()`'s ~3300 lines, which is a test on a symptom, and
-  // the second one used to be exactly that (an unchecked `!` raising a bare `TypeError` — wave 2
-  // made `predecessorBlocks` say what it means instead).
+  // enough to run it. Both throws are matched on their MESSAGE, because a bare `toThrow()` would
+  // pass on any crash from anywhere in `structure()`'s ~3300 lines and pin a symptom.
   const asm = dispatch([0, 1, 2, 3]);
   const fn = frontendFor(ARMV4T_AGBCC).lift('f', asm, ARMV4T_AGBCC, { f: { returnsVoid: true } });
   raiseRecovered(fn, ARMV4T_AGBCC, {}, { returnsVoid: true });

@@ -1,13 +1,13 @@
 /* WHAT PRE5's DECLINE PRODUCES ON A NESTED TREE — the shape behind switch-recover.ts PRE5's
- * "WHAT THE DECLINE PRODUCES" paragraph, committed so the claim is executable rather than prose.
+ * "WHAT THE DECLINE PRODUCES" paragraph.
  *
  * `recognizeSwitch` runs on the whole comparison tree and then again on the sub-trees a decline
  * leaves behind. Here the OUTER tree interleaves (the `x == 98` arm's body sits between the tests),
  * so PRE5 declines it; recovery then runs again on the `switch`'s own sub-tree, which does NOT
  * interleave, and part of it comes back as a `switch`. The emitted C is therefore an `if` nest
- * around a `switch` over a STRICT SUBSET of the source's case labels — not the clean ladder the
- * decline's one-line description used to promise. Behaviourally identical either way; the point of
- * the fixture is that the fragment is what a reader should expect.
+ * around a `switch` over a STRICT SUBSET of the source's case labels, not a clean ladder.
+ * Behaviourally identical either way; the point of the fixture is that the fragment is what a
+ * reader should expect.
  *
  * Regenerate with: npx tsx scripts/regen-switch-spelling-probes.ts
  */

@@ -5100,19 +5100,12 @@ function mkIf(cond: Expr, thenS: Stmt[], elseS: Stmt[]): Stmt {
 }
 
 // --- CFG utilities ---
-/** Every block's in-edges. THROWS on a successor that is not a block of `fn` — the one state that
- *  makes this map lie, and the one the whole structurer reads positions and dominance out of.
- *
- *  IT SAYS SO RATHER THAN CRASHING. This was `m.get(s)!.push(b)`, which on that state dereferenced
- *  `undefined` and raised a bare `TypeError: Cannot read properties of undefined (reading 'push')`
- *  from a CFG utility 3000 lines from anything the reader recognises. `ir/verify.ts` already
- *  rejects the state with a name (`successor of 'X' is not a block of this fn`) and the tower runs
- *  it after the lift and after every raising pass, so reaching HERE means a pass built the state
- *  after the last verify — which is exactly when a named error is worth having. Two comments
- *  elsewhere (switch-recover.ts PRE5, and its test) cite this line as a loud invariant; a
- *  `TypeError` is not one, and in a repo whose discipline is loud-decline-over-silent-wrong the
- *  category matters more than the crash. Behaviour is otherwise unchanged: the same input threw
- *  before and throws now. */
+/** Every block's in-edges. THROWS BY NAME on a successor that is not a block of `fn` — the one
+ *  state that makes this map lie, and the one the whole structurer reads positions and dominance
+ *  out of. `ir/verify.ts` already rejects that state with a name and the tower runs it after the
+ *  lift and after every raising pass, so reaching HERE means a pass built it after the last verify:
+ *  exactly when a named error beats a `TypeError` from a CFG utility 3000 lines from anything the
+ *  reader recognises. switch-recover.ts PRE5 and its test cite this throw as a loud invariant. */
 function predecessorBlocks(fn: Fn): Map<Block, Block[]> {
   const m = new Map<Block, Block[]>();
   for (const b of fn.blocks) {

@@ -163,15 +163,14 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
      below is not a substitute for it. (RE-READABLE IS NOT RE-MEASURABLE: the two MIPS pairs are
      byte-identical FILES, so without a regen path nothing committed could tell "compiled by this
      toolchain and it agreed" from "copied from the sibling".)
-  2. THE REACH IS MEASURED, which is what settles the COST of the axis here — item 1 is what
-     decides default-vs-axis, and no reach number rescues a mapping that is not a function. An axis was
-     POSSIBLE — `StructuringAxis.options` is `(on: boolean) => StructureOptions` and this flag is
-     one more entry — so the absent dual is a fact about what Regime A enumerates today, not an
-     impossibility, and citing it as one would be circular. What rules the axis out is the term
-     the fork below already prices: lifting every synthetic and real row twice, once with the field
-     and once with it deleted, moves the emitted source of **5 rows out of 1026**. An axis inert on
-     99.5% of the corpus buys a dual only where the default is already right, and pays a second
-     `structure()` everywhere.
+  2. THE REACH IS MEASURED, which settles the COST of the axis here — item 1 is what decides
+     default-vs-axis, and no reach number rescues a mapping that is not a function. An axis was
+     POSSIBLE (`StructuringAxis.options` is `(on: boolean) => StructureOptions` and this flag is one
+     more entry), so the absent dual is a fact about what Regime A enumerates today rather than an
+     impossibility. What rules the axis out is the term the fork below already prices: lifting every
+     synthetic and real row twice, once with the field and once with it deleted, moves the emitted
+     source of **5 rows out of 1026**. An axis inert on 99.5% of the corpus buys a dual only where
+     the default is already right, and pays a second `structure()` everywhere.
   3. ONLY THEN the failure direction. The gate exclusively DECLINES, and Regime A's decline is
      if-recovery — behaviourally identical. A premise that breaks (a scheduler that hoists a body
      above a test, a frontend whose block list is not address order) costs the `switch` spelling on

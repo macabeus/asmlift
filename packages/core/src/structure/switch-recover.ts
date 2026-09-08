@@ -351,9 +351,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   };
 
   // --- Regime A: comparison-tree switch recovery ----------------------------------------------------
-  // Every ambiguity declines. Four preconditions are enforced below, annotated PRE1..PRE4:
+  // Every ambiguity declines. Five preconditions are enforced below, annotated PRE1..PRE5:
   // scrutinee identity/dominance, ARM EXITS (per site: `break`, `fallthrough` — which `chainArms`
-  // then places — or a decline), concrete interval consistency, test purity.
+  // then places — or a decline), concrete interval consistency, test purity, and — where the target
+  // has declared that its layout answers it — which SPELLING the source wrote.
 
   // Fold a value that is a compile-time constant (a `const`, or a synthesized immediate like agbcc's
   // `250 << 2` for a large sparse case) to a number — else null.
@@ -801,31 +802,26 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // ladder and a real `switch` must keep both readings, and a function-wide OR would collapse
     // them into one boolean and be wrong on one site by construction.
     //
-    // WHAT IT REFUSES TO DO, and the premise that can make it wrong. The reading runs BACKWARDS —
-    // from emission to spelling — so it inherits `layoutIndex`'s premise in full: `fn.blocks` is
-    // the ASSEMBLY's order (true of the thumb and mips frontends, FALSE of ppc.ts, which appends
-    // synthetic return blocks out of stream order) and nothing between the source and the asm moved
-    // a block (agbcc compiles neither sched.c nor reorg.c). A frontend or compiler that breaks
-    // either can hand this a front-loaded layout for a ladder — and then the gate simply does not
-    // fire, which is today's behaviour. The converse error, a real `switch` whose layout
-    // interleaves, costs only the `switch` SPELLING: the recovery declines to if-recovery, which is
-    // behaviourally identical (the file header) and which the differ then scores. This gate can
-    // therefore lose a match; it can never produce a wrong answer.
+    // WHAT IT REFUSES TO DO. The reading runs BACKWARDS, from emission to spelling, so it inherits
+    // `layoutIndex`'s premise (above) at the weaker of the two strengths stated there. A frontend
+    // or compiler that breaks it can hand this a front-loaded layout for a ladder, and then the
+    // gate simply does not fire. The converse error, a real `switch` whose layout interleaves,
+    // costs only the `switch` SPELLING: the recovery declines to if-recovery, behaviourally
+    // identical (the file header) and scored by the differ. This gate can lose a match; it can
+    // never produce a wrong answer.
     //
     // WHAT THE DECLINE PRODUCES, AND IT IS NOT ALWAYS A CLEAN LADDER. Recovery is RECURSIVE:
     // declining a tree here hands the tree back to if-recovery, which then runs recovery AGAIN on
-    // each sub-tree it structures. On a flat tree that is a ladder over every case value, which is
-    // what the shipped rows are and what the one-line description used to promise for all of them.
-    // On a NESTED tree it is not: `corpus/agbcc-swnested.s` (a source `switch` nested inside an
+    // each sub-tree it structures. On a flat tree that is a ladder over every case value. On a
+    // NESTED tree it is not: `corpus/agbcc-swnested.s` (a source `switch` nested inside an
     // if/else-if ladder) declines HERE on the outer tree — correctly, the ladder arm's body really
     // does sit between the tests — and the sub-tree then re-recovers, so the emitted C is an `if`
     // nest holding a `switch` over a STRICT SUBSET of the source's case labels. Still behaviourally
     // identical, and no worse than the alternative (with the reading withdrawn that same function
     // comes back as one `switch` merging two arms the source wrote apart), but it is a THIRD
     // spelling that neither reading would give, and nothing in the output says a dispatch was
-    // half-declined. Do not read "the decline is if-recovery" as "the decline is a clean ladder":
-    // that holds at the OUTERMOST tree only. Pinned by a test on the committed fixture
-    // (packages/core/test/switch-arms.test.ts, "PRE5 declines a tree RECURSIVELY").
+    // half-declined: "the decline is a clean ladder" holds at the OUTERMOST tree only. Pinned by
+    // the test "PRE5 declines a tree RECURSIVELY" on the committed fixture.
     //
     // WHAT THE POSITIONS ARE READ THROUGH, which is the premise that lives inside asmlift rather
     // than in the compiler. `caseBlocks` holds `forwardingTarget` results (`asCase` is called on the
@@ -833,36 +829,33 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // its own. A forwarding target laid out ABOVE the dispatch would then read as a body above a
     // test and decline a real `switch`.
     //
-    // WHY THAT HAS NO INHABITANT, stated as what was measured rather than as a theorem. It is
-    // TEMPTING to argue that such a block can only be reached by a back edge and that loop recovery
-    // declines those first — and that argument is unsound twice over. A block laid out before the
-    // dispatch is reached by a back edge only if it DOMINATES the dispatch; an `if` arm ahead of
-    // the `switch` does not, and cross-jumping an arm's tail onto it is an ordinary forward edge.
-    // And "a target that reorders no blocks" is not who declares this flag: `MIPS_GCC` declares it
-    // WITH a scheduler, on the half-premise stated at `layoutIndex` above. What is true is
-    // measured: across 28 compiled probes on agbcc, gcc2.7.2 -O1 and gcc2.7.2kmc -O2 — arms
-    // cross-jumped onto a shared tail ahead of the dispatch, `goto`s out of an arm to a label
-    // above it, shared early returns, `continue`/`break` out of a switch inside a loop — no
-    // toolchain placed an arm's forwarding target above its own dispatch: every firing came back
-    // with zero bodies above the first test. The reader is safe because no compiler in the corpus
-    // emits that shape, not because none can. Whoever makes one — a new frontend, a relaxed loop
-    // recovery, a scheduler that hoists a merged tail — inherits this reader. `bodyPos` also covers the CASE bodies only: `defaultBlk`
-    // is left out deliberately, because it can be the dispatch's own fall-out block rather than an
-    // arm the source wrote (the W2/W4 withholdings above), and including it would read a position
-    // the source never chose. Both omissions can only make the gate UNDER-fire, i.e. keep a
-    // `switch`, which is the direction the rest of this comment argues is the safe one.
+    // WHY THAT HAS NO INHABITANT IS MEASURED, NOT ARGUED. Two arguments that look like proofs are
+    // not: "the block is reached by a back edge" needs the block to DOMINATE the dispatch, which an
+    // `if` arm ahead of the `switch` does not, and a cross-jumped arm tail reaches it on an
+    // ordinary forward edge; "this flag's targets reorder nothing" is false — `MIPS_GCC` declares
+    // it WITH a scheduler, on the half-premise stated at `layoutIndex` above. Measured: across 28
+    // compiled probes on agbcc, gcc2.7.2 -O1 and gcc2.7.2kmc -O2 — arms cross-jumped onto a shared
+    // tail ahead of the dispatch, `goto`s out of an arm to a label above it, shared early returns,
+    // `continue`/`break` out of a switch inside a loop — no toolchain placed an arm's forwarding
+    // target above its own dispatch: every firing came back with zero bodies above the first test.
+    // Safe because no compiler in the corpus emits that shape, not because none can; whoever makes
+    // one — a new frontend, a relaxed loop recovery, a scheduler that hoists a merged tail —
+    // inherits this reader.
+    //
+    // `bodyPos` covers the CASE bodies only. `defaultBlk` is left out deliberately: it can be the
+    // dispatch's own fall-out block rather than an arm the source wrote (the W2/W4 withholdings
+    // above), so its position is one the source never chose. Both omissions can only make the gate
+    // UNDER-fire, i.e. keep a `switch`, which is the safe direction.
     //
     // AND THE READING REFUSES ITSELF where it has nothing to read. `layoutIndex` answers `-1` for a
-    // block absent from `fn.blocks`, which is not a position — taken as one it would sort below
-    // every real body and decline EVERY tree in the function. It has no inhabitant and cannot get
-    // one without a bug upstream: `ir/verify.ts` rejects a successor that is not a block of the fn
-    // and the tower runs it after the lift and after every raising pass, and `predecessorBlocks`
-    // throws by name on the same state at the top of `structure()` (it raised a bare `TypeError`
-    // off an unchecked `!` until wave 2 — cite it as an invariant only because it is now one). So
-    // this is belt-and-braces over a VERIFIER BUG, not over an expected shape — kept because
-    // standing down costs nothing. The test pinning it asserts that those two reject the state
-    // FIRST, which pins the UNREACHABILITY; the `placed` branch itself stays unexecuted, and no
-    // test covers it because none can without breaking one of the two invariants above.
+    // block absent from `fn.blocks`, which is not a position — taken as one it sorts below every
+    // real body and declines the tree holding it. That state has no inhabitant and cannot get one
+    // without a bug upstream: `ir/verify.ts` rejects a successor that is not a block of the fn and
+    // the tower runs it after the lift and after every raising pass, and `predecessorBlocks` throws
+    // by name on the same state near the top of `structure()`. So this is belt-and-braces over a
+    // VERIFIER BUG, not over an expected shape — kept because standing down costs nothing. Its test
+    // pins the UNREACHABILITY (both throws fire first); the `placed` branch itself stays
+    // unexecuted, and cannot be covered without breaking one of those two invariants.
     if (switchRequiresFrontLoadedTests) {
       const testPos = [...seen].map(layoutIndex);
       const bodyPos = [...caseBlocks].map(layoutIndex);
