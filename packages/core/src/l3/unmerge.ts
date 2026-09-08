@@ -278,7 +278,15 @@ export function unmergeJoins(sfn: SFn): SFn | null {
     const merge = new Set<string>();
     for (const n of read) {
       const m = mentions.get(n);
-      if (m && m.assigns >= 2 && readsOf(m) === 1 && m.addrTaken === 0) {
+      // `written.has(n)` is a CANDIDATE condition, not only the bystander test below. Under the
+      // old `assigns === 2` a name the arms never write could not reach two assignments inside
+      // them and so was a bystander by arithmetic; under `assigns >= 2` it can, and a candidate
+      // the arms cannot define refuses the WHOLE SITE (`armDefs` returns null) instead of being
+      // ignored. Measured on the shape `n = 1; n = 2; n = 3; if (c) x = 1; else x = 2; n[0] = x;`
+      // — `origin/main` un-merges `x`, and the widening alone declined the site outright. The
+      // conjunct costs nothing: a name the arms do not write can never satisfy `armDefs`, so this
+      // prunes only candidates that were guaranteed to refuse.
+      if (m && written.has(n) && m.assigns >= 2 && readsOf(m) === 1 && m.addrTaken === 0) {
         merge.add(n);
       } else if (written.has(n)) {
         return null; // the arms write it and this cannot substitute it

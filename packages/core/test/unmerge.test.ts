@@ -78,6 +78,27 @@ describe('what un-merges', () => {
     expect(out!.locals.map((l) => l.name)).toEqual(['q']); // only the substituted temps are dropped
   });
 
+  // THE WIDENED CANDIDATE GATE IS A TWO-SIDED CHANGE. `assigns === 2` → `assigns >= 2` admits a
+  // ladder's merge temp, and it would also admit a name the arms NEVER WRITE — which `armDefs`
+  // then cannot define, so the whole site declines instead of un-merging its real temps. Under the
+  // arity gate that name could not reach two assignments inside two arms and was a bystander by
+  // arithmetic; the conjunct now says it outright.
+  test('a local the join reads but the arms never write stays a BYSTANDER, not a candidate', () => {
+    const body: Stmt[] = [
+      asg('n', c(1)),
+      asg('n', c(2)),
+      asg('n', c(3)),
+      iff([asg('x', c(1))], [asg('x', c(2))]),
+      store(v('n'), v('x')),
+    ];
+    const out = unmergeJoins(fn(body, ['n', 'x']));
+    expect(out).not.toBeNull(); // `x` un-merges; `n` is not the pass's business
+    expect(out!.locals.map((l) => l.name)).toEqual(['n']);
+    const site = out!.body[3] as Extract<Stmt, { k: 'if' }>;
+    expect(site.then).toEqual([store(v('n'), c(1))]);
+    expect(site.else).toEqual([store(v('n'), c(2))]);
+  });
+
   test('a join reading ONE merge temp un-merges too — the rule is not about pairs', () => {
     const out = unmergeJoins(fn([iff([asg('x', c(1))], [asg('x', c(2))]), store(v('g'), v('x'))], ['x']));
     expect(out).not.toBeNull();
