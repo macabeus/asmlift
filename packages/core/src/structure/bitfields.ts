@@ -227,15 +227,19 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
     // idiom (compiled: the or-form clear is `mov #0x4; neg`), and `/no-bitfield` co-enumerates the
     // raw spelling, so the price is one candidate the differ referees — not a lost one.
     //
-    // WHY NONE OF THIS IS A `Gate` TABLE (`l3/gates.ts`), asked and declined rather than skipped.
-    // The evidence rule is a POLICY gate in a chain of legality gates — remove it and the emitted
-    // C is still correct, only named on a guess — which is exactly the `sound: false` case the
-    // table exists to price. But this recognizer is a chain of some fifteen refusals, and tabling
-    // ONE of them makes "does every sound gate have a test that fails without it?" a MISLEADING
-    // query over a file that is 1/15 tabled: a reader would read the table as the file's rules.
-    // Tabling the whole chain is a refactor, not a remediation. What the table would have bought
-    // here — a differential test per rule — is written by hand instead, and every rule stated
-    // above has one that fails when that rule alone is ablated.
+    // WHY NONE OF THIS IS A `Gate` TABLE (`l3/gates.ts`) YET, asked and deferred rather than
+    // skipped. The evidence rule is a POLICY gate in a chain of legality gates — remove it and the
+    // emitted C is still correct, only named on a guess — which is exactly the `sound: false` case
+    // the table exists to price, and it is evaluated per `(keep, insert)` candidate. By this
+    // repo's convention that makes it table material: `hazards.ts:374` states the split out loud
+    // ("`PREUPDATE_SINK_GATES` holds the per-candidate refusals … two rules are properties of the
+    // EDGE rather than of a candidate and stay here"), and neither that file nor `namecoalesce.ts`
+    // tables its whole chain — five tabled gates apiece, the rest inline. So the reason this one
+    // is not tabled is SCOPE and nothing else: introducing the file's first table is a refactor,
+    // and this fold arrived as a remediation. Until it happens, what the table would have bought —
+    // one differential test per rule, naming which rule AND WHICH FORM — is written by hand, and
+    // the width rule below is what that costs: it binds both forms, one failing test looked like a
+    // guarded rule, and the form with no inhabitant in the suite was where the rule was wrong.
     //
     // TARGET COUPLING, stated because the code cannot: every argument above is a THUMB encoding
     // argument, and the fold's only target guard is `littleEndian`. That is sound today only
@@ -392,30 +396,41 @@ export function makeBitfieldSpelling(deps: BitfieldDeps): BitfieldSpellings {
           if (width !== cellWidth) {
             continue;
           }
-          // THE ZERO FORM'S EVIDENCE RULE (header note above), in three clauses. Each one is a way
-          // the accepted materialisation differs from every raw byte-domain spelling of the same
-          // clear, and each was measured with the pinned agbcc rather than argued:
+          // THE ZERO FORM'S EVIDENCE RULE (header note above). It is ONE rule — "accept only a
+          // keep mask no RAW spelling of the same clear can produce" — plus one refusal that is
+          // about the cell rather than the mask. Each was measured with the pinned agbcc:
           //
-          //  1. the keep mask is the 32-BIT COMPLEMENT of the cleared window. A declared store
-          //     complements in `int`, so every bit above the stored cell is SET — `~0xF` = -16 for
-          //     a byte cell, `-0x1000` (a pool word, NOT a `neg`) for `u16 a : 12`. A mask with a
-          //     zero up there — a pool word like `0xFFFF00F0` — is some other function of the
-          //     cell, and the window it happens to clear is a coincidence of the arithmetic.
-          //  2. it carries bits OUTSIDE the stored cell: without them the raw byte-domain spelling
-          //     narrows to the same encodable constant (`*(u8 *)&g &= ~3` is `mov #0xfc`), the two
-          //     spellings are one object, and naming the member is a default with no byte evidence
-          //     behind it. A 4-byte cell has `cellMask === -1` and can never carry them, so it is
-          //     refused unconditionally.
-          //  3. it keeps at least one bit OF the stored cell. A clear of the WHOLE cell is not a
-          //     read-modify-write at all, so the load this fold would delete has no reason to
-          //     exist: agbcc compiles `g.f8 = 0;`, for a field filling its own byte, to
-          //     `mov #0x0; strb` — no load and no `and`. The candidate could never reproduce the
-          //     bytes it was recognized from.
+          //  1. THE MASK RULE, in two halves that must both hold. The mask is the 32-BIT
+          //     COMPLEMENT of the window (`mask === ~clear`), and it therefore carries bits
+          //     OUTSIDE the stored cell (`(mask & cellMask) !== mask`) and still keeps at least
+          //     one bit OF it (`(mask & cellMask) !== 0`). What the halves buy:
+          //       · `~0xF` = -16 for a low nibble, `-0x1000` (a POOL word, not a `neg`) for
+          //         `u16 a : 12`: neither is encodable in the byte domain, so a raw spelling of
+          //         the same clear narrows to a different object. That is the evidence.
+          //       · a pool word like `0xFFFF00F0` clears the same nibble but has a ZERO above the
+          //         cell, so it is some other function of the cell and the window it happens to
+          //         clear is a coincidence of the arithmetic.
+          //       · a mask that keeps NO bit of the cell is not a read-modify-write: agbcc
+          //         compiles `g.f8 = 0;`, for a field filling its own byte, to `mov #0x0; strb`
+          //         — no load, no `and` — so the candidate cannot reproduce its own input.
+          //     The rule REFUSES a real population as collateral and that is deliberate: agbcc
+          //     spells the HIGH nibble's clear as the narrowed in-cell `mov #0xf` (compiled:
+          //     `u8 lo:4; u8 hi:4`, `gN.lo = 0;` is `mov #0x10; neg` but `gN.hi = 0;` is
+          //     `mov #0xf`), which is byte-identical to the raw spelling. So it is NOT true that
+          //     a declared store always complements in 32 bits; it is true that when it does, no
+          //     raw spelling matches — and that is the only direction the rule needs.
+          //  2. A WORD CELL IS REFUSED OUTRIGHT, which is what `(mask & cellMask) === mask` does
+          //     once clause 1 stands: `clear` is inside the cell and `cellMask` has bit 31 clear
+          //     at widths 1-2, so `mask === ~clear` already forces a bit outside the cell there,
+          //     and the test can only bite at width 4 where `cellMask === -1`. Refusing costs
+          //     nothing — compiled, `gS.a = 0;` for `u32 a : 20` and `*(s32 *)&gS &= -1048576;`
+          //     are byte-identical — and there is no 33rd bit for a word's complement to differ in.
           //
-          // Clause 1 does NOT extend to the `or` form, and must not: there the insert seated at
-          // `lo` is the evidence, and agbcc really does spell an end-of-cell clear with the narrow
-          // in-cell constant (`mov #0xf`, the `gState.top = a0;` row below).
-          if (insV === null && (mask !== ~clear || (mask & cellMask) === mask || (mask & cellMask) === 0)) {
+          // NONE of it extends to the `or` form, and must not: there the insert seated at `lo` is
+          // the evidence, and agbcc really does spell an end-of-cell clear with the narrow in-cell
+          // constant (`mov #0xf`, the `gState.top = a0;` row below). The discriminant is
+          // `zeroForm`, the same one that built `pairs`.
+          if (zeroForm && (mask !== ~clear || (mask & cellMask) === mask || (mask & cellMask) === 0)) {
             continue;
           }
           // …and the insert must be exactly that value seated at `lo`.
