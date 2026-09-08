@@ -145,13 +145,21 @@ export type LeafHook = (e: Expr, rec: (e: Expr, p: number) => string) => string 
  *  undefined behaviour (C99 6.7.3p5). */
 function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Expr {
   // `baseElem` states the element type the base's own DECLARATION gives it, where the type walk
-  // cannot reconstruct one (a map-declared array MEMBER — see l3/ast.ts). It faces the same
-  // predicate an inferred type would, so a stated type that does not stride the access width takes
-  // the honest cast exactly as an unknown one does — but that is defence in depth against a FUTURE
-  // producer, not a live guard: today's one producer states the type only after asserting the very
-  // equality this re-tests, so no input reaching here can fail it.
+  // cannot reconstruct one (a map-declared array MEMBER — see l3/ast.ts). It is a FALLBACK, not an
+  // override, and the order is the whole guard: a stated type is true when it was produced and can
+  // only go stale, while the walk reads the tree in front of it, so wherever the walk answers at
+  // all it is the better answer and the stated one is not consulted. Inverted (`declared ??
+  // walked`) the re-check below is incapable of catching a stale statement — `derefStrideOk` tests
+  // the STATED type against the access width and never against the base, so it is true by
+  // construction for anything a producer could state AND equally true for a statement that no
+  // longer describes the base. Today nothing carries one onto a foreign base (every pass that
+  // substitutes an `index` base refuses a `field` base by its own predicate: basecse
+  // `isHoistableBase`, scopebase/argbase `eligible`, nearbase's untouched `field` subtree,
+  // reindex's `base.k === 'var'`), but `mapExprChildren` spreads the field across an arbitrary
+  // base substitution, so that invariant is five accidents rather than a check. This ordering is
+  // the check. Measured: zero test moves either way.
   const declared = ix.baseElem !== undefined ? T.ptr(ix.baseElem) : undefined;
-  return derefStrideOk(declared ?? exprCType(ix.base, vt.type), ix.width, ix.signed)
+  return derefStrideOk(exprCType(ix.base, vt.type) ?? declared, ix.width, ix.signed)
     ? ix.base
     : {
         k: 'cast',
@@ -241,11 +249,19 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       // Leading constant subscripts (a multidimensional array global's bare spelling) keep the
       // postfix form whatever `idx` is: `g[0][0]` is the element, `*g[0]` would be its ROW.
       //
-      // `lead` implies the base already strides the access width — its only producers register a
-      // matching element type for the global (structure/globalaccess.ts `bareArrayLead` and
-      // `declaredSubscripts`, both through structure.ts's `noteGlobal`). Nothing
-      // else enforced that, and the failure would be quiet-ish: legalization would wrap the base,
-      // spelling `((u16 *)g)[0][i]`, which subscripts a `u16` twice. Check it rather than assume.
+      // `lead` implies the base already strides the access width, and its producers reach that by
+      // TWO different mechanisms. The two GLOBAL ones register a matching element type for the
+      // global (structure/globalaccess.ts `bareArrayLead` and `declaredSubscripts`, both through
+      // structure.ts's `noteGlobal`, so the type walk finds it); the MEMBER one
+      // (structure.ts `pointeeElement`, `gPtr->grid[0][i]`) has no global to register and states
+      // the element type on the node instead (`baseElem`). Nothing else enforced either, and the
+      // failure would be quiet-ish: legalization would wrap the base, spelling `((u16 *)g)[0][i]`,
+      // which subscripts a `u16` twice. Check it rather than assume.
+      //
+      // This throw covers rank >= 2 ONLY, because only a rank >= 2 access carries `lead`. A rank-1
+      // member (the large majority of the corpus's dims-carrying members) has no guard here: a
+      // missing or stale `baseElem` there degrades silently to the cast form the rule replaces,
+      // which is a lost spelling rather than a wrong address.
       if (e.lead && e.lead.length > 0) {
         if (base !== e.base) {
           throw new Error(
