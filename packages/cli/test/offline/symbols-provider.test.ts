@@ -71,6 +71,7 @@ describe('layoutOf — the package facts a layout is allowed to carry', () => {
         { name: 'kind', offset: 4, size: 4, signed: true, const: true },
         { name: 'next', offset: 8, size: 4, signed: null, pointer: true },
         { name: 'slots', offset: 12, size: 16, signed: null, elemSize: 1, elemSigned: false, length: 16 },
+        { name: 'grid', offset: 28, size: 48, signed: null, elemSize: 1, elemSigned: false, length: 48, dims: [6, 8] },
       ]),
       'S',
       '/tmp/x.elf',
@@ -80,7 +81,12 @@ describe('layoutOf — the package facts a layout is allowed to carry', () => {
       { name: 'vreg', offset: 2, size: 2, signed: false, volatile: true },
       { name: 'kind', offset: 4, size: 4, signed: true, const: true },
       { name: 'next', offset: 8, size: 4, pointer: true }, // a null signedness is NOT a fact
+      // an array member with no rank stated keeps none — core reads that as "the map could not
+      // say" and declines the indexed spelling rather than reading it as rank 1
       { name: 'slots', offset: 12, size: 16, elemSize: 1, elemSigned: false, length: 16 },
+      // …and a member whose rank the package DOES state carries it, so `->grid[i][j]` can be
+      // spelled against a header that declares `u8 grid[6][8]`
+      { name: 'grid', offset: 28, size: 48, elemSize: 1, elemSigned: false, length: 48, dims: [6, 8] },
     ]);
   });
 
