@@ -6111,7 +6111,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //   G5  a named bitfield store of ZERO       bfzero 5             control bfconstn MATCH
   //   G2  loop accumulators as per-arm copies  nestacc 58 → 40 (per-arm half closed)
   //   G3  an accumulator's cross-loop home     sinkacc 17 → 4 (CLOSED; residual is width, not home)
-  //   G6  the merged-tail store, LADDER form   armcb 32             control armcb2 MATCH
+  //   G6  the merged-tail store, LADDER form   armcb 32 → MATCH (CLOSED)  control armcb2 MATCH
   //   G1  branch sense per SITE, divergent     mixsense 20 → 10     control calad MATCH
   //   G1  branch sense per SITE, JOINED        joinsense 4 → MATCH  control joinsame MATCH
   //   --  switch recovered from a comparison LADDER   swladder 7  (m2c MATCH — a deficit row)
@@ -6190,6 +6190,19 @@ export const SYNTHETIC: SynthSpec[] = [
   //    lever exists and the control `armcb2` MATCHes THROUGH it, so this 32 is the LADDER
   //    admission and not a missing rewrite. L3 ranked spelling lever (`rank.ts:329`, `/unmerge`).
   //    The row's own winner is `unsigned/flip-join` at 32 in a fan of 8 — see the G1 watch below.
+  //    **CLOSED: MATCH on `unsigned/unmerge/offmember`**, fan 8 → 14. `pushJoin` recurses into
+  //    every TERMINAL arm of the ladder and the arity gate becomes "at least twice", carried by
+  //    totality (every assignment in the function is one of the arms just rewritten) plus a fresh
+  //    re-read of the result — because `localMentions` is sampled before any rewriting and this
+  //    pass duplicates statements, so a stale count and the arm count can agree by coincidence.
+  //    Corpus reach, measured by offline enumeration over the 1025-row artifact: FOUR rows, and
+  //    they carry the whole price — `kleod:CountCollectedGems:agbcc` 1152 → 2304, `maskchain`
+  //    24 → 32, `armcb` 8 → 14, `sxparam` 2 → 4, total fan 81588 → 82756 (+1.43 %).
+  //    `kleod:ProcessInputAndUpdateEntities:agbcc` enumerates 51840 either way — the benchmark's
+  //    long pole is untouched. AND THE REAL ROW DOES NOT MOVE, which is this gap's pass: G6 alone
+  //    makes the source WORSE (the winning spelling plus `/unmerge` costs more than the winner),
+  //    so its candidate is enumerated and correctly loses. `kleod:CountCollectedGems:agbcc`
+  //    171 → 171.
   //  • `sinkacc` 17 → **4, CLOSED**, and the L3 attribution above it was a true observation with a
   //    false conclusion attached. The fan dump was right — 36 candidates, winner
   //    `unsigned/reread-globals/uns-cmp` at 17, not one of the 36 carrying `sinkinit` or
@@ -6253,7 +6266,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // what says the rank did not move the constant-offset spelling), `bfconstn` (the same store with
   // a NONZERO value — so G5 is the mask materialisation,
   // not "a named bitfield store"), `armcb2` (the same store with TWO arms — so G6 is the ladder,
-  // not the rewrite), `calad` (ONE ladder — so G1 is the MIX of senses, not the ladder), and
+  // not the rewrite; now that G6 is closed it controls for the TWO-ARM path staying byte-identical
+  // through the recursion that generalised it — `unsigned/unmerge/offmember`, unmoved), `calad`
+  // (ONE ladder — so G1 is the MIX of senses, not the ladder), and
   // `joinsame` (the same two joined `if`s in the SAME sense).
   //
   // WHAT GOT NO ROW, AND WHY — as much a part of this family as the rows:
