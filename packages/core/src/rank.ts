@@ -19,7 +19,13 @@
 //   rank-declare.ts  the DECLARATION half: what a candidate's own asm says about the globals it
 //                  names, and which of those names a declaration must refuse to claim.
 import { cBackend } from './backend/c';
-import { assertDerefsTyped, assertLocalsWritten, assertPlacementSurvives, assertResolved } from './contracts';
+import {
+  assertDerefsTyped,
+  assertLocalsWritten,
+  assertNoOrphanedLocals,
+  assertPlacementSurvives,
+  assertResolved,
+} from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
@@ -868,6 +874,7 @@ export function enumerateCandidates(
         assertResolved(alt);
         assertDerefsTyped(alt);
         assertLocalsWritten(alt);
+        assertNoOrphanedLocals(sfn, alt);
         spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
         // product mechanism (the POLICY note above carries the admission argument). Each is
@@ -905,6 +912,7 @@ export function enumerateCandidates(
                 assertResolved(shaped.out);
                 assertDerefsTyped(shaped.out);
                 assertLocalsWritten(shaped.out);
+                assertNoOrphanedLocals(alt, shaped.out);
                 assertPlacementSurvives(alt, shaped.out, minted);
                 spellings.push({
                   suffix: `${suffix}${shaped.suffix}`,
@@ -1769,6 +1777,7 @@ export function enumerateCandidates(
               assertResolved(made);
               assertDerefsTyped(made);
               assertLocalsWritten(made);
+              assertNoOrphanedLocals(sfn, made);
               // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
               // spelling, so it never becomes the row's stated cause: `FanResult.emit` is dropped
               // here and only the primary call above records one.
