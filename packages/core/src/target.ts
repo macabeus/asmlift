@@ -435,12 +435,24 @@ export const MIPS_GCC: TargetDescription = {
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
-    // DECLARED ON THIS COMPILER'S OWN PAIR, never inherited from agbcc's. The two spellings of one
-    // two-case body are committed beside the declaration-rank probes —
-    // `corpus/gcc272kmc-swfrontload.asm` and `corpus/gcc272kmc-swladder.asm`, both produced by
-    // GCC_KMC_TOOLCHAIN at its shipped flags — and they are different objects of different sizes:
-    // the `switch` emits both `beq`s before the first `sw`; the ladder emits each `bne` directly
-    // above the store it guards. (A THREE-case body says the same and more loudly, the balanced
+    // DECLARED ON A PAIR FROM EACH TOOLCHAIN THIS DESCRIPTION SERVES, never inherited from agbcc's
+    // and never from one sibling to the other. This description is keyed per DESCRIPTION while the
+    // fact is per TOOLCHAIN (the note at `spillSlotOrder`), and `MIPS_GCC` serves two, so both owe a
+    // pair: `corpus/gcc272kmc-sw{frontload,ladder}.asm` from GCC_KMC_TOOLCHAIN at -O2 and
+    // `corpus/gcc272-sw{frontload,ladder}.asm` from the Mario Party 3 toolchain at -O1, one two-case
+    // body written each way, committed beside the declaration-rank probes. Each pair is two
+    // different objects: the `switch` emits both `beq`s before the first `sw`; the ladder emits each
+    // `bne` directly above the store it guards. The two toolchains come out byte-identical on this
+    // body, which is measured and asserted rather than assumed — their declaration-rank probes do
+    // NOT agree, so the sibling pairs are not a formality.
+    //
+    // -O1 ALSO EMITS BRANCH-LIKELY, and the reading survives it. `s32 m1(s32 x, s32 *p){ switch (x)
+    // { case 6: *p = 1; break; case 7: *p = 2; break; } return 0; }` cross-jumps the two stores into
+    // one and compiles at -O1 to `beq` / `beql` with the shared `sw` after both; the same body as an
+    // if/else-if ladder puts the first arm's `li v0,1` BETWEEN the two tests. Same split, and it is
+    // not committed as a fixture only because `beql` is an unmodelled control transfer today, so the
+    // row declines before PRE5 and the pair's cross-jumped arms leave no store to read the split off.
+    // It is the shape to re-measure the day branch-likely lands. (A THREE-case body says the same and more loudly, the balanced
     // tree's `slti` bound test landing ahead of the bodies with the rest, but it is not what is
     // committed here: at three cases neither spelling reaches Regime A on this compiler, so the
     // pair could not also serve as the recovery test below.) A test lifts both fixtures and asserts

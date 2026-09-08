@@ -1314,3 +1314,43 @@ test('a front-loaded kmc dispatch keeps its switch once MIPS_GCC declares the re
   expect(out).toContain('switch (a0)');
   expect(MIPS_GCC.compilerBehaviors.switchRequiresFrontLoadedTests).toBe(true);
 });
+
+// ONE DESCRIPTION, TWO TOOLCHAINS, TWO PAIRS. `MIPS_GCC` serves `gcc2.7.2kmc` (Snowboard Kids 2, -O2)
+// AND `gcc2.7.2` (Mario Party 3, -O1), and target.ts's own KEYED BY DESCRIPTION note says a behavior
+// that can differ between them is mis-keyed by construction. The kmc pair above cannot speak for the
+// -O1 toolchain, so `corpus/gcc272-sw{frontload,ladder}.asm` are the SAME two-case body compiled by
+// `compileMipsGcc272Target` at its own shipped flags. They come out byte-identical to kmc's here —
+// which is a MEASUREMENT, not a formality: `corpus/gcc272-declrank.txt` and its kmc twin differ, so
+// these two toolchains do diverge on other facts, and this test is what would catch a divergence on
+// this one if a re-capture ever produced it.
+const gccDump = (f: string) =>
+  readFileSync(new URL(`corpus/${f}.asm`, import.meta.url), 'utf8')
+    .split('\n')
+    .map((l) => /^\s+[0-9a-f]+:\t(.*)$/.exec(l)?.[1]?.trim())
+    .filter((l): l is string => !!l);
+
+test('gcc2.7.2 at -O1 splits the two spellings the same way its kmc sibling does', () => {
+  const at = (ls: string[], re: RegExp) => ls.flatMap((l, i) => (re.test(l) ? [i] : []));
+  const tests = (ls: string[]) => at(ls, /^(beq|bne)\b/);
+  const bodies = (ls: string[]) => at(ls, /^sw\b/);
+  const sw = gccDump('gcc272-swfrontload');
+  const lad = gccDump('gcc272-swladder');
+  expect(sw.join('\n')).not.toEqual(lad.join('\n'));
+  expect(Math.max(...tests(sw))).toBeLessThan(Math.min(...bodies(sw)));
+  expect(Math.max(...tests(lad))).toBeGreaterThan(Math.min(...bodies(lad)));
+  // the two toolchains behind this ONE description agree on this body, instruction for instruction.
+  expect(sw).toEqual(kmcDump('gcc272kmc-swfrontload'));
+  expect(lad).toEqual(kmcDump('gcc272kmc-swladder'));
+});
+
+test('a front-loaded gcc2.7.2 -O1 dispatch keeps its switch under the same declaration', () => {
+  const out = decompile(
+    'swpick',
+    readFileSync(new URL('corpus/gcc272-swfrontload.asm', import.meta.url), 'utf8'),
+    MIPS_GCC,
+    {
+      prototypes: { swpick: { returnsVoid: true } },
+    },
+  ).source;
+  expect(out).toContain('switch (a0)');
+});
