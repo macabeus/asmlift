@@ -12,9 +12,26 @@
 // `*(u16 *)A2 = B2;` inside the other — two whole statements, no temps. Substituting each arm's
 // own definitions into the join statement and duplicating it back recovers that spelling.
 //
-// A LEVER, NOT A DEFAULT, and the reason is the tower's: the asm UNDERDETERMINES this. A source
-// that really did write the temps and one store compiles to the same bytes, because the merge is
-// the compiler's own. Both spellings are emitted and the differ referees.
+// A LEVER, NOT A DEFAULT, and the reason is the tower's: the LIFTED TREE underdetermines the
+// source. This is a compiler claim, so it was compiled — agbcc `gcc 2.9-arm-000512` at
+// `TOOLCHAIN.agbccFlags`, both spellings, `diff` on the `.s`:
+//
+//   - the example above (an ADDRESS temp and a VALUE temp, against `*gA1 = gB1;` in one arm and
+//     `*gA2 = gB2;` in the other, `v17` typed as the store's own type) is BYTE-IDENTICAL. There
+//     the merge really is the compiler's own, and the lever costs one candidate to say so.
+//   - `synthetic:armcb2`'s shape is NOT. Only the VALUE merges there — the store's address,
+//     `gSlot[1]`, is common to both arms — and the per-arm spelling keeps TWO literal-pool
+//     islands and a `b` to the join where the merged one has a single island and no `b`.
+//
+// So the mapping from this tree back to a source is not a function, and it is not uniformly
+// many-to-one either: which way it goes is a property of the SHAPE, which no gate here can read
+// off the tree. That is exactly the tower's test for an axis rather than a default. Both
+// spellings are emitted and the differ referees.
+//
+// (Do not restate this as "the same bytes" without re-compiling. The first version of this
+// paragraph said that, and the type of the value temp is enough to change the answer: give `v17`
+// a wider type than the store and the identical case above grows an `ldr`/`ldrh` divergence that
+// has nothing to do with the merge.)
 //
 // SOUND BY ITS DUAL'S ARGUMENT, READ BACKWARDS. The join runs on every path out of the `if`,
 // immediately after that arm's own tail, with nothing between; a copy at the end of each arm runs
