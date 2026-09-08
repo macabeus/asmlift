@@ -137,16 +137,25 @@ const PACKED_MAP: SymbolMap = new Map([
 // `PROBE_BLOB_MAP` is the first synthetic map to declare `shape: 'pointer'` with a `pointee`
 // layout — but symbol maps on synthetic rows are NOT new: `bfwordread`/`bfwordwrite` carry
 // `PACKED_MAP`, `ptrelem` carries `BGPTRS_MAP` and `sbscope` carries `TILEMAP_MAP`, and
-// `PROBE_FLAG_MAP` below is the same KIND of map as `PACKED_MAP`. It flattens `unk8` the way the
-// real vendored map does (`SymbolStructField` has no `dims`), which is what makes `pmarr2` a row
-// about a second INDEX TERM and not about rank.
+// `PROBE_FLAG_MAP` below is the same KIND of map as `PACKED_MAP`.
+//
+// IT IS TWO MAPS, and the split is the row's whole subject rather than bookkeeping. A map states
+// what the row's OWN header declares, and these three headers do not agree: `pmarr1` declares
+// `u8 unk8[48]`, `pmarr2` and `pmarrfix` declare `u8 unk8[6][8]`. One shared map flattening all
+// three is what made the pair unable to test rank at all — the candidate SELF-DECLARES from the
+// map, so a rank-1 spelling type-checked whatever the reference source said, while the real tier
+// compiles the same candidate against a fixed project header where it does not. Two maps put the
+// rank back on the axis the rows are supposed to measure.
 //
 // WHAT EACH MAP BUYS, MEASURED (re-run with `symbols:` removed, `bench run`, cache off):
-//   PROBE_BLOB_MAP  pmarr1 5→5 · pmarr2 9→9 · pmarrfix MATCH→MATCH   — INERT for asmlift: no
-//     member is ever named, so the `pointee.layout` is never read. It is kept because it is
-//     load-bearing for m2c, which goes MATCH → noncompile(1) on all three without it — and
-//     m2c-ahead on pmarr1/pmarr2 is the deficit that ranks G4. Do NOT read the pointee layout as
-//     load-bearing for asmlift; it is not, and the row pins the gap either way.
+//   PROBE_BLOB_MAP  pmarr1 MATCH→5                                  — LOAD-BEARING since the
+//     indexed member spelling shipped: `gBlob->unk8[i]` is the winner, and it needs both the
+//     pointee layout and the member's stated rank (`dims: [48]` — absence means "the map could not
+//     say", which structure.ts refuses rather than reading as rank 1). Before that it was inert
+//     for asmlift and kept only for m2c, which goes MATCH → noncompile(1) without it.
+//   PROBE_GRID_MAP  pmarr2 MATCH→9 · pmarrfix MATCH→MATCH           — LOAD-BEARING on `pmarr2`
+//     (`gBlob->unk8[i][j]`, which only a stated `dims: [6, 8]` can spell) and inert on the
+//     control, whose constant index needs no member spelling at all.
 //   PROBE_FLAG_MAP  bfconstn MATCH→diff:5 · bfzero 5→5              — LOAD-BEARING, on the
 //     CONTROL rather than on the gap row: without it `bfconstn` scores what `bfzero` scores and
 //     the pair stops being a pair. It cuts the OTHER way for m2c, and that is stated rather than
@@ -189,7 +198,42 @@ const PROBE_BLOB_MAP: SymbolMap = new Map([
             { name: 'unk5', offset: 5, size: 1, signed: false },
             { name: 'unk6', offset: 6, size: 1, signed: false },
             { name: 'unk7', offset: 7, size: 1, signed: false },
-            { name: 'unk8', offset: 8, size: 48, elemSize: 1, elemSigned: false, length: 48 },
+            { name: 'unk8', offset: 8, size: 48, elemSize: 1, elemSigned: false, length: 48, dims: [48] },
+            { name: 'unk38', offset: 56, size: 4, signed: true },
+          ],
+        },
+      },
+    ],
+  ],
+]);
+
+// The SAME pointee, at the rank `pmarr2`/`pmarrfix` actually declare (`u8 unk8[6][8]`). It is a
+// separate map for the same reason `PROBE_FLAG_MAP` is separate from `PACKED_MAP`: a map states
+// what the row's own header says, and `pmarr1`'s header says `u8 unk8[48]`. Sharing one map across
+// two different declarations is what made the pair unable to test rank at all — the candidate
+// self-declares from the map, so a rank-1 spelling type-checked whatever the reference said.
+const PROBE_GRID_MAP: SymbolMap = new Map([
+  [
+    0x03004670,
+    [
+      {
+        name: 'gBlob',
+        kind: 'data' as const,
+        declared: true,
+        shape: 'pointer' as const,
+        pointee: {
+          structName: 'Blob2',
+          size: 60,
+          layout: [
+            { name: 'unk0', offset: 0, size: 1, signed: false },
+            { name: 'unk1', offset: 1, size: 1, signed: false },
+            { name: 'unk2', offset: 2, size: 1, signed: false },
+            { name: 'unk3', offset: 3, size: 1, signed: false },
+            { name: 'unk4', offset: 4, size: 1, signed: false },
+            { name: 'unk5', offset: 5, size: 1, signed: false },
+            { name: 'unk6', offset: 6, size: 1, signed: false },
+            { name: 'unk7', offset: 7, size: 1, signed: false },
+            { name: 'unk8', offset: 8, size: 48, elemSize: 1, elemSigned: false, length: 48, dims: [6, 8] },
             { name: 'unk38', offset: 56, size: 4, signed: true },
           ],
         },
@@ -6028,7 +6072,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // 290 → 184 → 159 → 58 → 40 → 36 → 50 → 0, the last step byte-exact. These rows are that chain's
   // links at minimal size. Scores are `pnpm bench run` numbers on this tree, not CLI predictions:
   //
-  //   G4  gPtr->member[expr], VARIABLE index   pmarr1 5 · pmarr2 9   control pmarrfix MATCH
+  //   G4  gPtr->member[expr], VARIABLE index   pmarr1 5 → MATCH · pmarr2 9 → MATCH (CLOSED)
   //   G5  a named bitfield store of ZERO       bfzero 5             control bfconstn MATCH
   //   G2  loop accumulators as per-arm copies  nestacc 58 → 40 (per-arm half closed)
   //   G3  an accumulator's cross-loop home     sinkacc 17 → 4 (CLOSED; residual is width, not home)
@@ -6047,18 +6091,23 @@ export const SYNTHETIC: SynthSpec[] = [
   // `git status --short` immediately BEFORE the run, not at `bench:merge` time where the stamp
   // catches it too late to save the wall clock.
   //
-  //  • `pmarr1` 5 — `structure/structure.ts:440`, `pointeeAccess`'s `if (pg.idx !== null) return
-  //    null`: a VARIABLE index declines whatever it lands on. **81 firings** on this row (41 on
-  //    `pmarrfix`, where the raw spelling is nevertheless the same bytes — which is what makes it
-  //    the control). This is NOT a ranked axis and a candidate cannot referee it: what is missing
-  //    is one line of REACH in the licence that already exists. `raise/globalshape.ts:679` roots
-  //    the whole access walk at `if (g.opcode !== 'gaddr' …) continue`, so a POINTER global's
-  //    pointee — whose base is a LOAD of a `gaddr` — is unreachable by construction, and the
-  //    per-symbol stride licence (#143, gated by `target.ts:191 arrayShapeFromStride`, agbcc-only
-  //    at `:335`) never sees this access. L1→L2 licence + L2 default spelling, 0 candidates.
-  //  • `pmarr2` 9 — an EARLIER site: `structure/structure.ts:197`, `ptrGlobalBase`'s
-  //    `if (idx !== null) { ok = false; }`. A second index term fails the base recognizer, so
-  //    `pointeeAccess` is never called at all. **81 firings.** Not a rank-2 row — see below.
+  //  • `pmarr1` 5 — CLOSED: **MATCH**. The first blocker was `pointeeAccess`'s
+  //    `if (pg.idx !== null) return null`, a VARIABLE index declining whatever it lands on (81
+  //    firings on this row; 0 on `pmarrfix`, whose constant index never reaches that arm — the
+  //    "41 firings on the control" this note used to claim was never measured and is wrong). It
+  //    was never a ranked axis and a candidate cannot referee it: the asm SAYS which spelling
+  //    produced it, because the member form materialises the member's base where the cast form
+  //    folds the constant into the load's displacement. `structure/structure.ts` `pointeeElement`
+  //    reads that channel (`off === 0`) as a per-site DEFAULT. `raise/globalshape.ts:679`'s
+  //    `gaddr` root is NOT this row's blocker — it explains why the per-symbol stride licence
+  //    (#143) never applies, which is a separate and here non-load-bearing fact.
+  //  • `pmarr2` 9 — CLOSED: **MATCH**, and it took TWO links, not the one this note named.
+  //    `ptrGlobalBase`'s `if (idx !== null) { ok = false; }` was the first (a second index term
+  //    failed the base recognizer, 81 firings; terms now re-associate in visit order). The second
+  //    is the RANK: this row's own header declares `u8 unk8[6][8]`, and the flat member spelling
+  //    against it is not a fidelity nicety but a different program — agbcc strides the row a
+  //    second time and truncates the resulting pointer to u8. That is why `SymbolStructField`
+  //    gained `dims` inside this gap rather than in the symbol-map family; see below.
   //  • `bfzero` 5 — `structure/structure.ts:2703`, the named-bitfield-store recognizer's
   //    `orOp?.opcode !== 'or'`. It is looking for `or(and(load, keepMask), insert)`; agbcc compiles
   //    a ZERO insert to a bare `and` (`expmed.c:557-558`, `606-608` skip the `orr` when
@@ -6166,7 +6215,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // THE FIVE CONTROLS, and what each one proves. Every one MATCHes, and every one was aggravated
   // until the score moved, which is the only reason its partner's number means anything:
   // `pmarrfix` (the same member at a CONSTANT index — so G4 is the variable index, not the member
-  // spelling), `bfconstn` (the same store with a NONZERO value — so G5 is the mask materialisation,
+  // spelling; it carries the rank-2 map too and stayed MATCH through the whole change, which is
+  // what says the rank did not move the constant-offset spelling), `bfconstn` (the same store with a NONZERO value — so G5 is the mask materialisation,
   // not "a named bitfield store"), `armcb2` (the same store with TWO arms — so G6 is the ladder,
   // not the rewrite), `calad` (ONE ladder — so G1 is the MIX of senses, not the ladder), and
   // `joinsame` (the same two joined `if`s in the SAME sense).
@@ -6188,12 +6238,18 @@ export const SYNTHETIC: SynthSpec[] = [
   //    — the accumulator, then the sum, then the loop counter, which is the reference's own
   //    `s = 0; t = 0;` with the `for`'s `i = 0` last. So the position of the synthesised init is
   //    already right and no second lever is owed; the whole residual 4 is the width family.
-  //  • Rank-2 array recovery / `SymbolStructField`'s missing `dims` (`packages/core/src/symbols.ts`
-  //    — `SymbolInfo` has `dims`, the field type does not). Real, and worth ZERO bytes:
-  //    `gBlob->unk8[j + (i * 8)]` and `gBlob->unk8[i][j]` compile to BYTE-IDENTICAL objects, which
-  //    is exactly how m2c matches `pmarr2` off the flattened map. A fidelity item for the
-  //    symbol-map family that no row here can gate. (Two things do ride on it and are not free:
-  //    `(i * 8) + j` is a DIFFERENT object, and no base-home spelling reaches the rank-2 target.)
+  //  • Rank-2 array recovery / `SymbolStructField`'s missing `dims`. **THIS ENTRY WAS WRONG AND IS
+  //    RETRACTED.** It said the two spellings are one object and the rank is a fidelity item for
+  //    the symbol-map family that no row here can gate. `gBlob->unk8[j + (i * 8)]` and
+  //    `gBlob->unk8[i][j]` are byte-identical only when the DECLARATION FOLLOWS THE SPELLING —
+  //    which it does here, because the candidate self-declares from the map, and does NOT in the
+  //    real tier, which compiles it against the project's own header. Measured against a FIXED
+  //    `u8 unk8[6][8]` header, the flat spelling strides the row a second time and truncates a
+  //    pointer to `u8`: a different program that happens to compile. So the rank is INSIDE this
+  //    gap, `pmarr2` gates it (its map now states `[6, 8]`), and shipping the member spelling
+  //    without it makes candidates stop compiling wholesale rather than score worse.
+  //    (Both riders stand: `(i * 8) + j` is a DIFFERENT object, and no base-home spelling reaches
+  //    the rank-2 target.)
   //  • Register allocation (58 of the real row's 117 `arg-mismatch` rows are register-only, and the
   //    chain reaches 0 without touching one), `/reread-globals`, a `u8` local declared `s32` with a
   //    cast at each use, a function pointer stored through a struct member array, and `x &= 0x80`
@@ -6214,10 +6270,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // replacing asmlift's recovered `switch` with the source's `if/else if` ladder scores 4
   // (`rows 52, none 48`, every differing row an `arg-mismatch`). So 7 is `swladder`'s class and
   // 4 is register/operand noise. Hoisting `sinkacc`'s init takes it to 4 across four declaration
-  // orders, the residual an r5/r6 swap. `pmarr1` can be closed from either end — at rank 1
+  // orders, the residual an r5/r6 swap. `pmarr1` could be closed from either end — at rank 1
   // `gBlob->unk8[i]`,
   // `p = (u8 *)gBlob + 8; p[i]` and `p = gBlob->unk8; p[i]` are ONE object — but `pmarr2` only by
-  // the member spelling. PREDICTIONS, each with the command that falsifies it, and the G1 pair was
+  // the member spelling. Both are CLOSED, by the member spelling. PREDICTIONS, each with the command that falsifies it, and the G1 pair was
   // RUN: a per-SITE sense takes `mixsense`'s fan from 2 to 16 (`ASMLIFT_PERSITE_SENSE=4`) and
   // `joinsense` to 0 — both held — while `mixsense`'s score prediction of 0 was WRONG at 10, the
   // whole enumeration's floor, and the 10 is the base spelling (see the row above). A recursive arm
@@ -6240,9 +6296,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // M2C, and the deficit stated rather than avoided. Both tools get the SAME information — `ctx`
   // with named parameters, `proto` for `returnsVoid` and callee arities, and the same symbol map
-  // where a row has one. m2c is AHEAD on three rows: `pmarr1` and `pmarr2` (it emits
-  // `gBlob->unk8[i]` and matches) and `swladder` (it emits the ladder). Those move the headline
-  // against asmlift until G4 and the ladder class close, which is what an honest gap row does.
+  // where a row has one. m2c was AHEAD on three rows; it is now ahead on ONE. `pmarr1` and
+  // `pmarr2` are TIES (both tools MATCH) and `swladder` is the remaining deficit (m2c emits the
+  // ladder). Worth recording HOW m2c matched `pmarr2`: off the flat map it emitted
+  // `gBlob->unk8[j + (i * 8)]`, byte-exact and type-checking only because the candidate
+  // self-declares — the same spelling against this row's real `u8 unk8[6][8]` header is a
+  // different program. That is exactly the trap the rank gate exists to stop, and m2c walked into
+  // it and got away with it because the synthetic harness lets a candidate bring its own
+  // declaration.
   // The two `noncompile(1)`s are m2c's own and NOT context withheld from it: on the identical
   // rendered ctx, which names every bitfield (`struct Flags { u32 unk0_0 : 4; u32 unk0_4 : 4; … }`),
   // m2c emits `gFlags &= -0x10;` for `bfzero` and `gFlags = (-0x10 & gFlags) | 4;` for `bfconstn`
@@ -6308,10 +6369,14 @@ export const SYNTHETIC: SynthSpec[] = [
     symbols: PROBE_BLOB_MAP,
   },
   {
-    // The map flattens `unk8` to `u8 unk8[48]`, so this row cannot test rank-2 RECOVERY: what it
-    // pins is a SECOND variable index term in the base decomposition. The flattened member
-    // spelling is byte-exact against this target (`gBlob->unk8[j + (i * 8)]`), which is why m2c
-    // matches it; `(i * 8) + j` is a different object, so the term ORDER is load-bearing too.
+    // TWO facts in one row, and they are an ordered pair. The base decomposition has to admit a
+    // SECOND variable index term (agbcc computes `j + (i * 8)` into one register before adding it
+    // to the pointee's base), and the member spelling has to split that residual back along the
+    // rank `PROBE_GRID_MAP` states — `gBlob->unk8[i][j]`. The flattened spelling
+    // `gBlob->unk8[j + (i * 8)]` is byte-exact against this target and is how m2c matches it off a
+    // flat map, but it does not type-check against this row's own `u8 unk8[6][8]` header, which is
+    // the difference the real tier charges for. `(i * 8) + j` is a different object again, so the
+    // term ORDER is load-bearing on top of both.
     sym: 'pmarr2',
     src:
       'struct Blob2 { u8 unk0; u8 unk1; u8 unk2; u8 unk3; u8 unk4; u8 unk5; u8 unk6; u8 unk7; u8 unk8[6][8]; s32 unk38; };\n' +
@@ -6320,7 +6385,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['global', 'pointer', 'array', 'struct', 'variable-index'],
     toolchains: ['agbcc'],
     ctx: 'u8 pmarr2(s32 i, s32 j);',
-    symbols: PROBE_BLOB_MAP,
+    symbols: PROBE_GRID_MAP,
   },
   {
     sym: 'pmarrfix',
@@ -6331,7 +6396,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['global', 'pointer', 'array', 'struct'],
     toolchains: ['agbcc'],
     ctx: 'u8 pmarrfix(void);',
-    symbols: PROBE_BLOB_MAP,
+    symbols: PROBE_GRID_MAP,
   },
   {
     sym: 'bfconstn',
