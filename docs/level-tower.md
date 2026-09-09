@@ -636,11 +636,28 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   **The parameter is necessary and not sufficient, and the gap is where a round loses its
   afternoon**: nothing exports a corpus of lifted trees, and a tabled pass's only shipped caller is
   normally inside core, so a census is taken off a REAL `enumerateRanked` with that caller's entry
-  swapped — for `l3/unmerge.ts`, `PRE_FAN_PRODUCTS[0].apply`. `tallying`'s doc comment carries the
-  script that ran, its numbers (they reproduce `unmerge.ts`'s instrumented 40/16 split with no
-  patch), and the three hazards: the script must live inside the repo, it must be deleted before
-  any `bench run` (`provenance.ts` counts an untracked script as code and the run stamps itself
-  dirty), and the swap must hit the module instance the enumeration imports.
+  swapped — for `l3/unmerge.ts`, the `/unmerge` entry in `PRE_FAN_PRODUCTS`. **That is a subcommand,
+  `pnpm bench gates --pass unmerge`, and not a script to write**: its numbers reproduce
+  `unmerge.ts`'s instrumented 40/16 split with no patch, and it has none of the three hazards a
+  script has (where it may live, that an untracked one makes the next `bench run` stamp itself
+  dirty, and that a module duplicate censuses zero silently — all three measured in
+  `apps/benchmark/src/run/gate-census.ts`'s header).
+
+  **What makes a pass censusable is a fact about its CALLER.** Fifteen passes in `packages/core/src`
+  take their table as a parameter; ONE of them can be censused, because `rank-axes.ts` holds its
+  caller in a mutable record and the other fourteen are reached through static imports, whose
+  bindings are read-only (`retsink.sinkReturns = …` → _"Cannot assign to read only property"_). So
+  the cost of the second entry in that registry is a seam, not a wrapper — and a pass that wants to
+  be censusable should be given one when its caller is written, which is cheap then and a redesign
+  later.
+
+  **A census is FIRST REJECTIONS, which is not reach.** The other column is what an ablation MOVES,
+  and the two disagree: of the six ablatable rules in `l3/unmerge.ts`, five refuse thousands of times
+  and move zero rows, and the sixth moves exactly one row. `raise/globalshape.ts` ships the
+  convention for reporting both columns (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`)
+  and `l3/unmerge.ts` now carries the worked example
+  (`grep -n "TWO COLUMNS, AND THEY DISAGREE HERE" packages/core/src/l3/unmerge.ts`). Measure the
+  MOVED column before building an axis on a big refusal count.
 
 **And converting a pass whose refusals nobody has had to instrument buys nothing.** What a table
 removes is the edit-instrument-revert loop — patch a `return null` to log, re-run, revert — so the

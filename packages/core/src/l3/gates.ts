@@ -95,9 +95,10 @@ export interface Tallied<Ctx> {
    *  accumulating across every later call, which is what a corpus-wide census wants.
    *
    *  THERE IS NO RESET, deliberately — a per-row census is two snapshots DIFFED, not a fresh
-   *  wrapper per row. Wrapping per row would be the mistake the doc on {@link tallying} names:
-   *  the table's identity is what `rank.ts` memoizes a census on, so a new wrapper each row is a
-   *  new key each row. Counting is also keyed by `g.id`, so a table a script COMPOSES should be
+   *  wrapper per row. Wrapping per row would be the mistake the doc on {@link tallying} names: a
+   *  wrapper is a new table IDENTITY, and a reader that keys on one (`rank.ts`'s `censuses` memo
+   *  does, over basecse's tables) sees a fresh key every row. `pnpm bench gates` wraps once, for
+   *  the whole population. Counting is also keyed by `g.id`, so a table a script COMPOSES should be
    *  run past `gateTableDefects` first: two rules sharing an id sum into one number, and the
    *  contract test only checks the tables on its own roster. */
   readonly refusals: () => readonly (readonly [string, number])[];
@@ -112,46 +113,42 @@ export interface Tallied<Ctx> {
  *      console.log(t.refusals());   // [['no-merge-name', 214], ['empty-arm', 31]]
  *
  *  THAT IS THE API AND NOT YET A CENSUS: nothing exports a corpus of trees to loop over, and a
- *  tabled pass's only shipped caller is normally inside core. The census is taken off a REAL
- *  enumeration instead, which for this pass means swapping the pre-fan entry `rank.ts` calls. This
- *  ran, and its numbers are quoted below:
+ *  tabled pass's only shipped caller is normally inside core. THE CENSUS IS A SUBCOMMAND —
+ *  `pnpm bench gates --pass unmerge [--only <row>] [--toolchain id]` — which takes it off a REAL
+ *  enumeration with the pass's caller-side entry swapped, and needs no script and no revert. Over
+ *  the agbcc synthetic tier (291 rows, ~11 s, 9 rows the frontend cannot lift counted separately)
+ *  it prints, today:
  *
- *      const site = tallying(UNMERGE_SITE_GATES);
- *      const restore = PRE_FAN_PRODUCTS[0].apply;        // a MUTABLE module global — restore it,
- *      PRE_FAN_PRODUCTS[0].apply = (s) => unmergeJoins(s, { site: site.gates });
- *      try {
- *        for (const c of syntheticCases()) {
- *          const { obj, asm } = c.build();
- *          enumerateRanked(c.sym, scrubObjectHeader(asm), c.toolchain.targetDesc,
- *            rankOptionsFor(c.toolchain, obj, c.proto, c.compile, c.symbols));
- *        }
- *      } finally { PRE_FAN_PRODUCTS[0].apply = restore; }  // …or the rest of the process tallies
- *      console.log(site.refusals());
+ *      asmlift: [gates] site: empty-arm 168, no-merge-name 80, arm-writes-a-name-this-cannot-substitute 4
+ *      asmlift: [gates] arm: arm-does-not-define-them-all 336, trailing-run-holds-a-non-assignment 32
+ *      asmlift: [gates] rung: tail-is-not-an-if 40, empty-arm-has-no-tail 16
  *
- *  Over the agbcc synthetic tier that prints `[['empty-arm', 168], ['no-merge-name', 80],
- *  ['arm-writes-a-name-this-cannot-substitute', 4]]`, and the same swap reading the RUNG table
- *  prints `[['tail-is-not-an-if', 40], ['empty-arm-has-no-tail', 16]]` — the 40/16 split
- *  `l3/unmerge.ts`'s header records from the instrumented patch that licensed its conversion,
- *  recovered with no patch. THREE THINGS THE FIRST ATTEMPT GETS WRONG: the script must live inside
- *  the repo (`@asmlift/cli/*` does not resolve from outside it, though `@asmlift/core/*` does);
- *  an untracked script is CODE to `apps/benchmark/src/provenance.ts` (only `.claude/commands/` is
- *  exempt), so delete it before any `bench run` or the run stamps itself dirty; and the swap must
- *  hit the module instance the enumeration imports — `rank.ts` records a standalone script loading
- *  an ESM/CJS DUPLICATE and answering 544 where the harness answers 952, and a duplicate here
- *  censuses zero, silently.
+ *  — the 40/16 split `l3/unmerge.ts`'s header records from the instrumented patch that licensed its
+ *  conversion, recovered with no patch. IT IS A SUBCOMMAND RATHER THAN A RECIPE TO COPY because a
+ *  script has three hazards a subcommand cannot have (where it may live, that an untracked one
+ *  stamps the next `bench run` dirty, and that a module DUPLICATE censuses zero silently) — all
+ *  three measured, in `apps/benchmark/src/run/gate-census.ts`'s header, along with what it costs to
+ *  make a SECOND pass censusable. Adding a table to a pass already in that registry costs nothing;
+ *  adding a pass costs its caller a seam.
  *
  *  WHAT IT COUNTS IS AN EVALUATION THAT ANSWERED TRUE, not a site. Under `firstRejection` — which
  *  short-circuits — that is the FIRST rejecter, so this produces exactly the census those three
- *  passes produce, with the same reading: an id absent from it is starved OR SHADOWED by an earlier
- *  rule, and telling the two apart takes the same rule run with the rest of the table empty
+ *  passes produce, with the same reading: an id absent from it is starved OR REDUNDANT WITH an
+ *  earlier rule, and telling the two apart takes the same rule run with the rest of the table empty
  *  (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts` ships two inhabitants of the
  *  second case). A consumer that asks the table something else — `.some`, `.filter` — gets one
  *  count per evaluation instead, which is a different question and rarely the one wanted.
  *
+ *  AND IT COUNTS REFUSALS, WHICH IS NOT REACH. A rule can refuse hundreds of times and still change
+ *  no output, because a later rule or a narrowing outside the table would have refused the same
+ *  sites: that is the MOVED column, it costs an ablation rather than a census, and `l3/unmerge.ts`'s
+ *  header carries the worked example of the two disagreeing.
+ *
  *  IT CHANGES NO BEHAVIOUR: each wrapper's predicate IS the original's, `id`/`why`/`sound`/
  *  `guardedBy` are carried, so `without`, `ablateHeuristic` and `gateTableDefects` all still hold
- *  over the result. What it does change is the table's IDENTITY — `rank.ts` memoizes a census on
- *  it — so wrap once and reuse `gates`, rather than per call. */
+ *  over the result. What it does change is the table's IDENTITY, and some readers key on that —
+ *  `rank.ts`'s `censuses` memo is a `Map` over `Gate<BaseKey>[]` instances (basecse's tables, not
+ *  this one) — so wrap once and reuse `gates`, rather than per call. */
 export function tallying<Ctx>(gates: readonly Gate<Ctx>[]): Tallied<Ctx> {
   const counts = new Map<string, number>();
   const order = new Map(gates.map((g, i) => [g.id, i]));
