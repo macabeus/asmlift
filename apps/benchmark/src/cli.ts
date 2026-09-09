@@ -126,6 +126,19 @@ function casesFor(tier: Tier) {
 
 switch (command) {
   case 'run': {
+    // `--shard` is meaningful only on the `--serial` path: the fan-out branch below never reads
+    // `opts.shard`, so `run --shard 1/1` silently DISCARDED the shard, fanned all 8 children over
+    // the whole tier and rewrote `results/<tier>.json` — while the preflight, which exempts a
+    // shard CHILD on the ground that its parent already checked, exempted it too. That made
+    // `--shard` an untraceable way past both refusals. Reject the combination instead: it was a
+    // mis-parse before this check existed.
+    if (opts.shard && !opts.serial) {
+      console.error(
+        `--shard ${opts.shard} without --serial: this path fans out across --jobs children and ignores the shard.\n` +
+          'Use `--serial --shard i/N` (what orchestrate.ts spawns), or drop --shard.',
+      );
+      process.exit(2);
+    }
     // BEFORE anything that costs: the two conditions that make a whole-tier run worthless are both
     // decidable in under a second, and both have been paid for at ~2,350 s each. See run/preflight.ts.
     const preflight = preflightRefusals({
@@ -134,6 +147,7 @@ switch (command) {
       project: opts.project,
       toolchain: opts.toolchain,
       shard: opts.shard,
+      serial: opts.serial,
     });
     for (const w of preflight.warnings) {
       console.error(`${w}\n`);
@@ -142,6 +156,10 @@ switch (command) {
       console.error(preflight.refusals.join('\n\n'));
       process.exit(1);
     }
+    // Deliberately NOT folded into `preflightRefusals`: that function's two verdicts are each
+    // gated on a predicate (whole-tier / touches-real), while the m2c pin applies to EVERY run,
+    // shard children and `--only` included, and it throws its own remediation line. Two shapes
+    // because they answer to two audiences, not by accident.
     const { assertM2cPinned } = await import('./eval/m2c');
     assertM2cPinned();
     if (opts.serial) {

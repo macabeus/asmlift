@@ -181,16 +181,21 @@ attribution line for every decline naming its first blocker. Constraints learned
    differs from HEAD, naming the files, because `bench:merge` refuses those numbers anyway ~39
    minutes later — and twice that refusal was a single untracked env file. Put anything a worktree
    needs locally (env exports, PATH overrides) in **`.envrc.local`**, gitignored for exactly this —
-   nothing loads it, so `source .envrc.local` yourself — or in
-   `$(git rev-parse --git-path info/exclude)` (from a worktree that is the MAIN checkout's file,
-   shared with every other worktree: add, never overwrite); never reach for a way around the
-   refusal. What is exempt is a run that rewrites no tier file WHOLE — the Phase-6 smoke runs carry
+   nothing loads it, so `source .envrc.local` yourself — and anything else under **`.local/`**,
+   gitignored too. `$(git rev-parse --git-path info/exclude)` is the last resort, for a path you
+   cannot move: from a worktree it is the MAIN checkout's file, shared with every other worktree and
+   never pruned (113 lines, 40 of them one repeated pattern), so add ONE line and `grep` for it
+   first. Never reach for a way around the refusal. What is exempt is a run that rewrites no tier file WHOLE — the Phase-6 smoke runs carry
    `--only`, which scopes both tiers. `--project` alone scopes only real and `--toolchain` alone
    only synthetic, so pair either with its `--tier` or the other tier is run whole and refused. A
    scoped run is not read-only either: it rewrites `results/<tier>.json` with only its own rows. The
-   same preflight probes `cpp` — a refusal there means your shell resolved it to Apple clang, which
-   a LOGIN shell does, and the run would have failed 44 rows while reporting `✓` and exit 0 (a
-   WARNING instead of a refusal means no MIPS toolchain is installed, so those rows would SKIP).
+   `cpp` probe is on a DIFFERENT axis and this exemption does NOT cover it: **every run that touches
+   the real tier is probed, `--only` included** — that is where the trap bites (measured: one row,
+   `diff:27/32` under the GNU shim, `noncompile(1)` under Apple clang, exit 0 both times). A refusal
+   there means your shell resolved `cpp` to Apple clang, which a LOGIN shell does; a WARNING means
+   no MIPS toolchain is installed, so those rows would SKIP. A synthetic-only run is never probed —
+   no synthetic row preprocesses. **So a real-tier `noncompile` you see in Phase 6 is a real
+   attribution signal, not your shell: the preflight has already ruled that out.**
 2. Expect the two tag-vocabulary tests to fail BETWEEN adding the tag and merging the artifacts;
    they must pass after. `npx vitest run`, `pnpm test:matching`, `pnpm typecheck`,
    `pnpm lint`, `pnpm format` check.

@@ -38,4 +38,10 @@ research/
 # file is what tripped that twice, at ~2,350s each — so give it a name the check cannot see.
 # NOTHING SOURCES IT: it is a name, not a loader. `source .envrc.local` in the shell you run from.
 .envrc.local
+# ...and `.local/` for everything else a worktree needs to keep around: scratch objects, probe
+# scripts, a symlinked checkout. The alternative a round reaches for is
+# `$(git rev-parse --git-path info/exclude)`, which from ANY worktree is the MAIN checkout's file:
+# it outlives the worktree, nothing ever prunes it, and it is currently 113 lines holding 24
+# unique patterns — 40 copies of one of them. A gitignored directory is scoped and disposable.
+.local/
 packages/cli/dist/

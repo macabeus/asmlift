@@ -95,19 +95,27 @@ Per commit:
 because `pnpm bench:merge` refuses those numbers anyway, ~39 minutes later, and twice that refusal
 was one untracked env file. Commit first. Anything local a worktree needs (env exports, PATH
 overrides) goes in **`.envrc.local`**, which is gitignored for exactly this — but nothing loads it,
-so `source .envrc.local` yourself in the shell you run from; anything else local goes in
-`$(git rev-parse --git-path info/exclude)` (which from a worktree resolves to the MAIN checkout's
-file, shared with every other worktree — add, never overwrite).
+so `source .envrc.local` yourself in the shell you run from; anything else local goes under
+**`.local/`**, gitignored too. Reach for `$(git rev-parse --git-path info/exclude)` only for a path
+you cannot move: from a worktree it resolves to the MAIN checkout's file, shared with every other
+worktree and never pruned (it is at 113 lines, 40 of them one repeated pattern), so add ONE line and
+`grep` for it first.
 
 What is exempt is the run that rewrites no tier file WHOLE: `--only` scopes both tiers, so the
 Phase-3 dev loop is untouched, but `--project` scopes only the real tier and `--toolchain` only the
 synthetic one — pair those with `--tier real` / `--tier synthetic` or the other tier is still run
 whole and still refused. And note a scoped run is not read-only: it REWRITES
 `apps/benchmark/results/<tier>.json` with only the rows it selected (measured), so always run whole
-before `bench:merge`. The same preflight probes `cpp`: if it refuses there, your shell resolved
-`cpp` to Apple clang (a LOGIN shell does), and the run would have failed 44 rows while reporting
-`✓` and exit 0. If it only WARNS there, no MIPS toolchain is installed, so those rows were going to
-SKIP anyway.
+before `bench:merge`.
+
+The `cpp` probe is on a DIFFERENT axis and the scoping above does not exempt it: **every run that
+touches the real tier is probed, `--only` included**, because that is where TRAP 6 bites (measured:
+one row, `diff:27/32` under the GNU shim, `noncompile(1)` under Apple clang, exit 0 and no line
+naming `cpp` either time). If it refuses, your shell resolved `cpp` to Apple clang — a LOGIN shell
+does — and the run would have failed those rows while reporting `✓` and exit 0; if it only WARNS,
+no MIPS toolchain is installed here, so those rows were going to SKIP anyway. A synthetic-only run
+is never probed: no synthetic row preprocesses with the host `cpp`. So a real-tier row that comes
+back `noncompile` was NOT your shell — the preflight already ruled that out.
 
 Before declaring the branch done: `pnpm bench run` (all tiers), `pnpm bench:merge`, then
 `pnpm bench regression --base origin/main` and `pnpm bench diff --base origin/main`. **Any lost
