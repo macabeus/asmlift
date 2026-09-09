@@ -26,18 +26,20 @@ one) is an unfinished finding.
 
 1. Resolve the row: `pnpm bench run --tier real --only $1`. Record the outcome verbatim for both
    decompilers — **the whole `diff:N/M`, never the `N` alone** (see "the denominator moves" below).
-2. Reproduce outside the harness with **the vehicle
-   [`docs/ranked-repro.md`](../../docs/ranked-repro.md) names for a benchmark ROW** — `pnpm bench
-   target <row-id> --out <dir>`, fed the row's own `targetAsm`, which is what that file's
-   "The VEHICLE is part of the number" section measures and what the row's ready-made script in
-   `results.json` runs. **The project-checkout command at the top of that file does NOT reproduce a
-   row**: different input `.s`, different compile path, and on `kleod:StrCpy:agbcc` a different
-   score against a different denominator. The rest of the file still applies to whichever you run —
-   its flags (`--proto` when a callee's arity matters, `--jobs 6 --progress`) are part of the
-   number, and its `grep -F '[score]'` recipe is how two such runs get compared. That file is
-   shared with `/match-function`; correct it there, never here. The best `[score]` line is the
-   number every later claim is measured against, and it goes into your report verbatim, flags
-   included.
+2. Reproduce outside the harness with **the row's own generated script** — the extraction block in
+   [`docs/ranked-repro.md`](../../docs/ranked-repro.md) § "The row's own script is the vehicle",
+   which pulls `results.json` → `scripts.asmlift` and runs it. `pnpm bench target` is that script's
+   step 1, not the reproduce command: it prints no `[score]` and writes no input `.s`. **The
+   project-checkout command at the top of that file does NOT reproduce a row either**: different
+   input `.s`, different compile path, and on `kleod:StrCpy:agbcc` a different score against a
+   different denominator. Read that section's two warnings before you quote anything — `grep -n
+   '^WARN' out.err` first (a map-less run is silent and can print the SAME number), and the frozen
+   context rung means a candidate your change makes asmlift emit can noncompile here and be scored
+   by the harness. Its flags are per-vehicle: `--jobs 6 --progress` and a hand-written `--proto` are
+   the checkout command's; the script carries neither and still reproduces the row — do not add
+   them. `grep -F '[score]'` is how two runs get compared. That file is shared with
+   `/match-function`; correct it there, never here. The best `[score]` line is the number every
+   later claim is measured against, and it goes into your report verbatim, **naming the vehicle**.
 3. State the baseline in your first user-facing message.
 
 ## The denominator moves — so a residual is never a "partition"

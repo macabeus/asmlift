@@ -31,20 +31,27 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    alignment, so it moves when the candidate does. `diff:290/404 → diff:171/387` is 119 points on a
    scale that also lost 17; quoted as `290 → 171` it makes the next reader subtract.
 3. Read the asm and the current asmlift output side by side. Get the target `.o` and a working dir
-   with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness. That
-   is also the vehicle that REPRODUCES the row — fed the row's own `targetAsm`, not the
-   project's committed `.s`; see "The VEHICLE is part of the number" in
+   with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness — but
+   it is step 1 of the row's generated script, not the reproduction: it prints no `[score]`, writes
+   no input `.s`, and freezes ONE context rung while the harness escalates per candidate, so a
+   candidate your change emits that names a project type can noncompile here and be scored by the
+   harness. Reproduce with the row's own script and confirm a moved row with `pnpm bench run --tier
+   real --only <sym>`; see "The VEHICLE is part of the number" in
    [`docs/ranked-repro.md`](../../docs/ranked-repro.md).
 4. State the baseline in your first user-facing message. Never report progress without a
    before/after pair of real command output.
 5. **Write every repro command down verbatim, flags included** — the `--only` line above, and any
    ranked enumeration you run outside the harness. Every later measurement (each reviewer's, each
    remediation's, the PR body's) re-runs *that* command, not one recomposed from memory. For the
-   ranked enumeration that means **the command in [`docs/ranked-repro.md`](../../docs/ranked-repro.md),
-   verbatim**: its flags (`--proto`, `--jobs 6 --progress`) are part of the number, and so is its
-   `grep -F '[score]'` comparison recipe. Say which VEHICLE you ran it in, too — the project
-   checkout's `.s` and the `bench target` row inputs are different questions and give different
-   numbers, and only the second is comparable with a harness outcome. That file is shared with
+   ranked enumeration that means **whichever vehicle in
+   [`docs/ranked-repro.md`](../../docs/ranked-repro.md) you ran, verbatim, named by vehicle** —
+   that file documents two, and they give different numbers on the same function. Only the row's
+   generated script (§ "The row's own script is the vehicle") is comparable with a harness outcome;
+   the project-checkout command at the top of the file measures a decomp repo's function. The flags
+   belong to the vehicle: `--proto`, `--jobs 6 --progress` are part of the checkout command's
+   number, while the generated script carries neither `--jobs` nor `--progress`, takes `--proto`
+   from a file, and reproduces the row exactly — never "fix" it by adding them. `grep -F '[score]'`
+   is the comparison recipe for both. That file is shared with
    `/attribute-function` — the last time this command was described in two prompts they drifted and
    a round published a number comparable to nothing, so correct it there and never here.
 
