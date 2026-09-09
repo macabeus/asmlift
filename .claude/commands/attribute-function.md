@@ -45,7 +45,7 @@ one) is an unfinished finding.
    does not carry for a non-winner. An attribution that says "asmlift never considers X" is a claim
    about this list, so read it. Its `[ranked]` line carries the same `synthesized` count and
    `[asmlift source <sha>]` stamp as the vehicles above, so it is quotable in the same way.
-   `--enumerate` gives the same list without compiling anything (~128 candidates/s, so a huge fan
+   `--enumerate` gives the same list without compiling anything (~120 candidates/s, so a huge fan
    takes minutes to list — that is a big fan, not a hang) and still serves `--show <label>`, though
    not `--show best`: nothing has been scored, so there is no winner to name. A fan over 2,000 is
    refused unless you pass `--force`, and the refusal quotes what `--force` would cost on THIS row.
@@ -53,9 +53,12 @@ one) is an unfinished finding.
    — it is the same call `bench run` makes for the row.
    **A declined row usually has no fan at all** — and that is a finding, not a broken command:
    enumeration throws on the very gap the row declines on (`enumerateCandidates` has no annotate
-   mode), so you get `asmlift: [fan] no fan … enumerating threw — <the gap>` and exit 2, which
-   names your missing capability directly. On a `noncompile` row the `[dropped]` lines are printed
-   in full and they are the row's entire fan.
+   mode), so you get `asmlift: [fan] no fan for <row>: <the gap>` followed by "the gap named above
+   is the one this row DECLINES on", and exit 2 — which names your missing capability directly.
+   That sentence is chosen by the ERROR, so it is the same with or without `--force`. On a
+   `noncompile` row the `[dropped]`/`[withheld]` lines are printed in full and they are the row's
+   entire fan. Anything else that throws is reported as a HARNESS defect, with its stack — read
+   that as the tool being broken, never as this row's outcome.
 4. State the baseline in your first user-facing message.
 
 ## The denominator moves — so a residual is never a "partition"

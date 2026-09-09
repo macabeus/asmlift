@@ -1,5 +1,7 @@
 import type { RankedCandidate, RankedResult } from '@asmlift/cli/rank';
 import { rankedSummaryLine } from '@asmlift/cli/score-format';
+import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
+import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
 import { describe, expect, it } from 'vitest';
 
 import type { Case } from '../src/cases/types';
@@ -7,6 +9,7 @@ import {
   FAN_SCORE_LIMIT,
   SCORE_SECONDS_PER_CANDIDATE,
   estimatedScoreTime,
+  noFanReport,
   optionRefusal,
   pickCandidate,
   renderFan,
@@ -136,7 +139,7 @@ describe('pickCandidate', () => {
 });
 
 // The scope guard, pinned against the measurement that set it: `synthetic:sizebound:agbcc`
-// enumerates 800 candidates and scores them in 57 s cold. A limit at or below that refuses a row
+// enumerates 800 candidates and scores them in 47.9 s cold. A limit at or below that refuses a row
 // this command is FOR, so tightening it has to come with a new measurement rather than a hunch.
 it('will score a fan the size of the largest row measured through it', () => {
   expect(FAN_SCORE_LIMIT).toBeGreaterThan(800);
@@ -230,17 +233,31 @@ describe('optionRefusal', () => {
 // wrong by ~20x — steering a reader off `--force` on a row that answers in minutes.
 describe('estimatedScoreTime', () => {
   it('prices the limit itself in minutes, not hours', () => {
-    expect(estimatedScoreTime(FAN_SCORE_LIMIT)).toBe('about 2 min');
+    expect(estimatedScoreTime(FAN_SCORE_LIMIT, 'synthetic')).toBe('about 2 min');
   });
 
   it('is the measured cold rate, and the constant is what was measured', () => {
-    expect(SCORE_SECONDS_PER_CANDIDATE * 800).toBeCloseTo(48, 0);
-    expect(estimatedScoreTime(800)).toBe('about 48 s');
+    expect(SCORE_SECONDS_PER_CANDIDATE.synthetic * 800).toBeCloseTo(48, 0);
+    expect(estimatedScoreTime(800, 'synthetic')).toBe('about 48 s');
   });
 
-  // LoadBGTilemapData: the row this guard exists for, and the run nobody starts by accident.
+  // The second measurement, and the reason the constant is a per-tier record: ONE rate priced
+  // `kleod:CountCollectedGems:agbcc` — a REAL row, and the row the refusal's own example is — at
+  // 6 min, against two cold runs of 518 s and 483 s of scoring. A real candidate escalates through
+  // up to three preludes in `makeRealCompile`; a synthetic one is one small prelude, so the gap is
+  // structural. The bound is the two measurements, not a third decimal place.
+  it('prices a REAL row at the real tier`s rate, which is the slower one', () => {
+    expect(SCORE_SECONDS_PER_CANDIDATE.real).toBeGreaterThan(SCORE_SECONDS_PER_CANDIDATE.synthetic);
+    const priced = SCORE_SECONDS_PER_CANDIDATE.real * 5952;
+    expect(priced).toBeGreaterThanOrEqual(483);
+    expect(priced).toBeLessThanOrEqual(518);
+    expect(estimatedScoreTime(5952, 'real')).toBe('about 8 min');
+  });
+
+  // LoadBGTilemapData: the row this guard exists for, and the run nobody starts by accident. It is
+  // a REAL row, so it is priced at the real rate — the synthetic one called it 3.8 h.
   it('prices LoadBGTilemapData`s fan in hours', () => {
-    expect(estimatedScoreTime(225792)).toBe('about 3.8 h');
+    expect(estimatedScoreTime(225792, 'real')).toBe('about 5.3 h');
   });
 });
 
@@ -266,5 +283,85 @@ describe('unshowable', () => {
 
   it('falls back to the fan listing for a label nothing carries', () => {
     expect(unshowable('nope', ranked)).toContain('see the [score] lines above');
+  });
+
+  // …and on a row where nothing scored there ARE no `[score]` lines, so the caller names the list
+  // that does exist. Hard-coding one table's name is what made the first spelling send a reader
+  // looking for a line that could not be there.
+  it('names the list it was given, not always the [score] table', () => {
+    expect(unshowable('nope', ranked, 'the [dropped] lines above')).toContain('the [dropped] lines above');
+  });
+});
+
+// The blocker fix's SECOND spelling, and the reason it needed one: the first chose its sentence
+// from a `phase` string the CALL SITE passed, so `--force` — which skips the guarded pre-count
+// enumeration — sent a DECLINED row's lift error into the scoring catch and printed "every
+// candidate was refused … this is what the published row's noncompile outcome means", under zero
+// `[dropped]` lines, on a row that publishes `declined`. Both briefs tell a round to pass
+// `--force`. The sentence is now chosen by the ERROR, and that is what these pin.
+describe('noFanReport', () => {
+  const dropped = [{ label: 'unsigned', error: 'agbcc failed: c.c:12' }];
+  const withheld = [{ label: 'unreduce', score: 2, why: 'needs a byte-exact proof' }];
+
+  it('reads NOTHING SCORED off the error class, and prints the drop list that rides on it', () => {
+    const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, []);
+    const r = noFanReport('sa3:f:agbcc', e);
+    expect(r.fan).toEqual(['asmlift: [dropped] unsigned: agbcc failed: c.c:12']);
+    expect(r.notes.join('\n')).toContain('"noncompile"');
+    expect(r.harnessDefect).toBe(false);
+  });
+
+  // The all-withheld branch of core's `rankBy` ("N candidate(s) withheld, none scored") is
+  // reachable, and a dropped-only count reads "the 0 [dropped] line(s) above ARE this row's fan"
+  // printed directly under N withheld lines.
+  it('counts BOTH refusal lists, not just the dropped one', () => {
+    const e = new NoScorableCandidateError("no scorable candidate for 'f': 1 withheld", [], withheld);
+    const r = noFanReport('sa3:f:agbcc', e);
+    expect(r.fan).toHaveLength(1);
+    expect(r.notes.join('\n')).toContain('0 [dropped] and 1 [withheld]');
+  });
+
+  // THE REGRESSION. A decline reaching the scoring catch must still read as a decline.
+  it('reads a DECLINE as the row`s gap, from whichever call site caught it', () => {
+    const e = new FrontendUnsupportedError("cannot lift 'absi': unmodelled control transfer 'bltzl'");
+    const r = noFanReport('synthetic:absi:gcc2.7.2kmc', e);
+    const notes = r.notes.join('\n');
+    expect(notes).toContain('DECLINES on');
+    expect(notes).not.toContain('noncompile');
+    expect(notes).not.toContain('every candidate was refused');
+    expect(r.fan).toEqual([]);
+    expect(r.harnessDefect).toBe(false);
+  });
+
+  it('reads a BACKEND refusal as its own fact — nothing was spelled, so nothing was dropped', () => {
+    const r = noFanReport('synthetic:f:agbcc', new NoSpellableCandidateError("no spellable candidate for 'f': x"));
+    expect(r.notes.join('\n')).toContain('before anything was');
+    expect(r.harnessDefect).toBe(false);
+  });
+
+  // The guard must not become a story generator: an unclassified throw is the harness, and saying
+  // so with the stack is the whole point of the class-based branch. A `TypeError` silently
+  // reported as this row's outcome is worse than the crash the guard replaced.
+  it('calls an unclassified throw a HARNESS defect, and asks the caller for the stack', () => {
+    const r = noFanReport('sa3:f:agbcc', new TypeError('x is not a function'));
+    expect(r.harnessDefect).toBe(true);
+    expect(r.notes.join('\n')).toContain('HARNESS defect');
+  });
+
+  // A thrown `null` turned the no-fan ANSWER back into the crash it replaced.
+  it('survives a throw that is not an Error at all', () => {
+    expect(() => noFanReport('sa3:f:agbcc', null)).not.toThrow();
+  });
+
+  // `--show` was silently dropped here — on a `noncompile` row, i.e. the one row class where
+  // EVERY candidate is unshowable and the advice earns its keep.
+  it('answers --show instead of ignoring it, and names --enumerate for a dropped label', () => {
+    const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, []);
+    expect(noFanReport('sa3:f:agbcc', e, 'unsigned').notes.join('\n')).toContain('--enumerate --show unsigned');
+  });
+
+  it('says --show cannot be answered when the row produced no candidates at all', () => {
+    const e = new FrontendUnsupportedError('cannot lift');
+    expect(noFanReport('synthetic:absi:gcc2.7.2kmc', e, 'unsigned').notes.join('\n')).toContain('cannot be answered');
   });
 });

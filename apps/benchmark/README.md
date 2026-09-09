@@ -179,6 +179,14 @@ pnpm bench repro <sym|id> --run       # reproduce ONE published row outside the 
                                       #   with this machine's paths filled in, runs it, reports the
                                       #   `[ranked]` line. `bench target` is its step 1, not this.
                                       #   docs/ranked-repro.md is the argument
+pnpm bench fan <sym|id>               # every CANDIDATE the harness ranked for ONE row, not just
+                                      #   the winner it published: the `[score]` table, the
+                                      #   [dropped]/[withheld] lists, the `[ranked]` line.
+                                      #   `--enumerate` lists the fan without compiling anything,
+                                      #   `--show <label>` prints one candidate's C, `--force`
+                                      #   scores a fan over 2,000. Neighbour of `bench repro`:
+                                      #   that one re-runs the row's PUBLISHED script, this one
+                                      #   opens the ranking the script's one line summarises
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
 pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row --
                                            #   TWICE: once against `--base`, then again over the

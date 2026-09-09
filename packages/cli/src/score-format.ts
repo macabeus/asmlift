@@ -1,8 +1,11 @@
 // The one place a score becomes text, and the one place the `[ranked]` line a round is told to
-// paste is spelled. A LEAF module by design: it imports nothing, so every consumer — this CLI's
-// argv entry point, the benchmark's `bench fan` — reaches the renderers without dragging
-// objdiff-wasm (or anything else) in behind it. `main.ts` re-exports `scoreOf`, which is where the
-// offline suite reaches it.
+// paste is spelled. Its consumers today are this CLI's argv entry point and the benchmark's
+// `bench fan`; `main.ts` re-exports `scoreOf`, which is where the offline suite reaches it.
+//
+// It imports nothing, but do not read that as a CONSTRAINT that buys anything today: both current
+// consumers already pull `./score` (and objdiff-wasm behind it) on the line above, so the leafness
+// has no beneficiary yet. What this module owns is the SPELLING — the same line rendered by two
+// commands — and that is the property to preserve when adding to it.
 /** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
  *
  *  THE ONE RENDERER FOR EVERY SCORE ANY asmlift COMMAND PRINTS: the CLI's `[score]` table, the

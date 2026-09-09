@@ -90,17 +90,23 @@ symbol map), so it is comparable with the published row rather than with a check
   to answer "did my new lever produce a candidate at all" — a label that is absent was never
   enumerated, and a lever that THREW prints as `[lever] … threw (no candidate from it)`, which a
   `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely:
-  ~128 candidates/s measured, so a 225,792-candidate fan is ~30 minutes to list. A long
+  ~120 candidates/s measured, so a 225,792-candidate fan is ~30 minutes to list. A long
   enumeration is a big fan, not a hang.
 
 A fan over 2,000 candidates is refused rather than scored (`--force` overrides): that is a compile
-each, ~60 ms of it, and the refusal quotes the row's own price — 5,952 candidates is ~6 minutes
-(worth `--force`), `LoadBGTilemapData`'s 225,792 is ~4 hours (`--enumerate` is the answer there).
+each, and the refusal quotes the row's own price at its own TIER'S measured rate — 60 ms/candidate
+synthetic, 85 ms real, because a real candidate escalates through up to three preludes where a
+synthetic one is a single small one. So `kleod:CountCollectedGems:agbcc`'s 5,952 is ~8 minutes
+(measured twice at 8.0 and 8.6; worth `--force`), and `LoadBGTilemapData`'s 225,792 is over five
+hours (`--enumerate` is the answer there).
 
 **A declined or noncompile row has NO fan, and the command says so** (`asmlift: [fan] no fan …`,
 exit 2) rather than crashing: enumeration throws on the same gap the row declines on, and on a
-noncompile row every candidate was refused — there the `[dropped]` lines printed above the message
-ARE the fan, and they are the row's whole diagnostic.
+noncompile row every candidate was refused — there the `[dropped]`/`[withheld]` lines printed above
+the message ARE the fan, and they are the row's whole diagnostic. Which of the two you are looking
+at is decided by the ERROR CLASS, not by the flags, so `--force` does not change the answer; a
+throw that is neither is named a HARNESS defect and printed with its stack, and must never be read
+as this row's outcome.
 
 Write the classification down with the evidence that decided it. If it is one of the last two, go
 straight to Phase 7 and report — that is a successful outcome of this command, not a failure.

@@ -205,8 +205,9 @@ Two things it can do that nothing else can:
   refused rather than answered with whatever enumeration emitted first). That is the cheap
   configuration-identification this file's "Getting the fan alone is cheap" section describes,
   without the kill-it-after-the-first-`[progress]`-line trick. **Cheap relative to compiling, not
-  cheap absolutely**: measured at 128 candidates/s (`kleod:CountCollectedGems:agbcc`, 5,952 in
-  46 s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just to LIST. Read a long enumeration as
+  cheap absolutely**: `kleod:CountCollectedGems:agbcc`'s 5,952 labels take 50 s wall with the
+  target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
+  to LIST. Read a long enumeration as
   a big fan, not as a hang.
 
   It also prints `[lever] <label> threw (no candidate from it)`, a channel `bench run` supplies no
@@ -214,19 +215,32 @@ Two things it can do that nothing else can:
   nothing printed, and here it does not.
 
 **A fan over 2,000 candidates is refused, not scored** (`--force` overrides), and the refusal
-prices the run it is refusing from the row's own count. Scoring is a compile each:
-`synthetic:sizebound:agbcc`'s 800 take **48 s cold** (10 s warm), so the limit is ~2 minutes and
-`kleod:CountCollectedGems:agbcc`'s 5,952 is ~6 minutes — a `--force` worth typing, not an hour.
-`LoadBGTilemapData`'s 225,792 is a ~4-hour run at that rate; `--enumerate` is the answer at THAT
-size, and note the guard is checked after the pre-count enumeration, so the refusal itself pays the
-enumeration price above.
+prices the run it is refusing from the row's own count AND ITS OWN TIER. Scoring is a compile each,
+and the two tiers do not compile the same thing: `synthetic:sizebound:agbcc`'s 800 take **48 s
+cold** (10 s warm, 60 ms each), while `kleod:CountCollectedGems:agbcc`'s 5,952 took **518 s and
+483 s** on two cold runs (85 ms each, both reproducing the published `171/387`) — a real candidate
+escalates through up to three preludes in `compile/real.ts`, a synthetic one through a single small
+prelude. One rate for both under-priced the real tier by ~35%, on the row the refusal's own example
+is. So the limit is ~2 minutes of synthetic scoring, `CountCollectedGems` is ~8 minutes — a
+`--force` worth typing, not an hour — and `LoadBGTilemapData`'s 225,792 is a five-hour run;
+`--enumerate` is the answer at THAT size, and note the guard is checked after the pre-count
+enumeration, so the refusal itself pays the enumeration price above.
 
 **A row with no fan says so, and exits 2.** Neither of the ranked path's two calls can be assumed
 to return: on a `declined` row (233 of 1,035) enumeration THROWS on the same gap the published row
 annotates — `enumerateCandidates` has no annotate mode — and on a `noncompile` row every candidate
 is refused, so there is no ranking to print. Both are answered with `asmlift: [fan] no fan …` and
-exit 2, and the noncompile case prints the whole `[dropped]` list first, because on that row the
-drops ARE the fan.
+exit 2, and the noncompile case prints the whole `[dropped]`/`[withheld]` list first, because on
+that row the refusals ARE the fan.
+
+**Which of the two you are looking at is decided by the ERROR, never by which call site caught it.**
+That is not a style point: the first spelling picked its sentence from the phase, and `--force`
+skips the pre-count enumeration, so a DECLINED row's lift error landed in the scoring catch and was
+reported as `noncompile` with a `0 [dropped] line(s) above ARE this row's fan` under no lines at
+all. `NoScorableCandidateError` (nothing SCORED) and `NoSpellableCandidateError` (nothing SPELLED —
+the backend refused every tree) are separate classes for this reason, and a throw that is neither
+of them nor a decline is reported as a HARNESS defect with its stack rather than dressed up as a
+fact about the row.
 
 What it is NOT: a reproduction. It runs asmlift in-process from this repo's sources, so it proves
 nothing about the published script, and `pnpm bench fidelity` still re-runs the scripts rather than
