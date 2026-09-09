@@ -37,16 +37,21 @@ const UNTRACKED_NONCODE = /^\.claude\/commands\//;
  *  guess which of its lines this rule counted, and the two incidents behind that preflight were
  *  both a single untracked env file among the run's own artifact churn. */
 export function codeDirtyPaths(porcelain: string): string[] {
-  return porcelain
-    .split('\n')
-    .filter((l) => {
-      if (l.trim() === '') {
-        return false;
-      }
-      const path = l.slice(3).replace(/^"|"$/g, '');
-      return !ARTIFACT_PATH.test(path) && !(l.startsWith('??') && UNTRACKED_NONCODE.test(path));
-    })
-    .map((l) => l.trim());
+  return (
+    porcelain
+      .split('\n')
+      .filter((l) => {
+        if (l.trim() === '') {
+          return false;
+        }
+        const path = l.slice(3).replace(/^"|"$/g, '');
+        return !ARTIFACT_PATH.test(path) && !(l.startsWith('??') && UNTRACKED_NONCODE.test(path));
+      })
+      // Trailing whitespace only: porcelain's TWO status columns are staged-then-unstaged, so
+      // `l.trim()` maps ` M x` and `M  x` onto the same string and throws away exactly the
+      // distinction this refusal exists to spare the reader a second `git status` for.
+      .map((l) => l.replace(/\s+$/, ''))
+  );
 }
 
 /** Does this `git status --porcelain` output describe a tree whose CODE differs from HEAD? */
@@ -56,7 +61,7 @@ export function codeDirtyFrom(porcelain: string): boolean {
 
 /** The repo paths a benchmark measurement depends on — the SAME list
  *  `scripts/check-artifact-provenance.sh` invalidates the committed artifact on, kept in step by
- *  `provenance-paths.test.ts` because two copies of a list like this drift silently and the
+ *  `fidelity-provenance.test.ts` because two copies of a list like this drift silently and the
  *  drift is only ever discovered by a gate that should have fired. Deliberately the WIDE list
  *  (`paths`, not `measures`): asking "could this commit have changed a number" must err toward
  *  yes. */

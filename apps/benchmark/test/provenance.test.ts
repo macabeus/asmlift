@@ -42,8 +42,11 @@ describe('what counts as a dirty tree', () => {
   test('the same rule can name the offending lines, artifact churn excluded', () => {
     expect(
       codeDirtyPaths(' M apps/benchmark/results/results.json\n?? .envrc.probe\n M packages/core/src/rank.ts\n'),
-    ).toEqual(['?? .envrc.probe', 'M packages/core/src/rank.ts']);
+    ).toEqual(['?? .envrc.probe', ' M packages/core/src/rank.ts']);
     expect(codeDirtyPaths('')).toEqual([]);
+    // Porcelain's two columns are staged-then-unstaged. Keeping them is the whole point of
+    // "without re-running git": ` M x` (unstaged) and `M  x` (staged) must not collapse.
+    expect(codeDirtyPaths('M  packages/core/src/rank.ts\n')).toEqual(['M  packages/core/src/rank.ts']);
   });
 });
 
