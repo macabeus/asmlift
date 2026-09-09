@@ -9,6 +9,11 @@
 //                                        # paths filled in, under the gitignored .local/repro/,
 //                                        # and with --run executes it and reports `[ranked]`
 //   pnpm bench target <id> --out <dir>   # repro-script pre-step: target object + decomp.yaml
+//   pnpm bench fan <row> [--show <label>] [--enumerate] [--force]
+//                                        # ONE row's whole candidate fan — every spelling's label
+//                                        # and score, not just the winner's — in the harness's own
+//                                        # configuration; --show prints a candidate's SOURCE and
+//                                        # --enumerate lists the fan without compiling anything
 //   pnpm bench setup [--project p] [--build]
 //                                        # materialize the BENCH-OWNED project checkouts
 //                                        # (apps/benchmark/checkouts/: clone + baseroms + prepare;
@@ -91,6 +96,11 @@ const { values: opts, positionals } = parseArgs({
     // repro only: which of the row's two scripts, and whether to execute it here.
     tool: { type: 'string' },
     run: { type: 'boolean', default: false },
+    // fan only: which candidate's source to print, listing the fan without compiling it, and the
+    // override for the fan-size refusal.
+    show: { type: 'string' },
+    enumerate: { type: 'boolean', default: false },
+    force: { type: 'boolean', default: false },
   },
 });
 
@@ -362,6 +372,27 @@ switch (command) {
     );
     break;
   }
+  case 'fan': {
+    // fan <row> [--show <label>] [--enumerate] [--force] — print the ranked candidate fan the
+    // harness computes for this row and then discards (eval/asmlift.ts publishes the winner's
+    // label and source plus the two refusal lists; `RankedResult.candidates` is dropped on the
+    // floor). ROW-SCOPED by construction, and that is the point rather than an omission: the
+    // corpus's fan is ~82,756 candidates, so a tier-wide form of this would write tens of
+    // thousands of sources to answer a question that is always about one function.
+    const rowId = positionals[1];
+    if (!rowId) {
+      console.error('usage: pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force]');
+      process.exit(2);
+    }
+    const { fan } = await import('./run/fan');
+    process.exit(
+      fan(rowId, {
+        ...(opts.show ? { show: opts.show } : {}),
+        enumerateOnly: opts.enumerate,
+        force: opts.force,
+      }),
+    );
+  }
   case 'fidelity': {
     const jobs = Number(opts.jobs ?? Math.min(8, cpus().length));
     if (!Number.isInteger(jobs) || jobs < 1) {
@@ -455,7 +486,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|target|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|repro|target|fan|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }
