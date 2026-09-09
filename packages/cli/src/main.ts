@@ -40,7 +40,7 @@ import {
 } from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
-import { renderDeclarations } from './declare';
+import { declaredBlock, indentedDeclarations } from './declare';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
@@ -53,7 +53,7 @@ import type { RankedResult } from './rank';
 // must be able to reach it without importing this argv entry point — and `./score` is no home for
 // it either, because that module pulls objdiff-wasm and the note above `./rank` is about exactly
 // that edge.
-import { scoreOf } from './score-format';
+import { rankedSummaryLine, scoreOf } from './score-format';
 
 export { scoreOf } from './score-format';
 
@@ -96,15 +96,6 @@ const candCacheLine = (): string => {
         `asmlift: [candcache] ${cacheMismatches()} STORED ANSWER(S) DISAGREED WITH A FRESH COMPILE — ` +
         `the store is serving objects this toolchain no longer produces. See ${MISMATCH_LOG}\n`;
 };
-
-/** A declaration block as stderr lines: rendered, blank lines dropped, each one under the
- *  `asmlift:` prefix that separates this tool's output from the compiler's in a shared log. */
-const indentedDeclarations = (refs: Parameters<typeof renderDeclarations>[0]): string =>
-  renderDeclarations(refs)
-    .split('\n')
-    .filter((l) => l.trim() !== '')
-    .map((l) => `asmlift:   ${l}\n`)
-    .join('');
 
 export { detectName };
 
@@ -236,13 +227,7 @@ function rankedStderr(a: {
   // COUNT is zero there whatever the fan named.
   const assumed = (ranked.best.symbolRefs ?? []).filter((r) => r.synthesized);
   const synthesized = a.selfDeclared ? assumed.length : 0;
-  const declared =
-    synthesized > 0
-      ? `asmlift: [declared] ${synthesized} declaration(s) synthesized from the target asm — no symbol ` +
-        `map knows these names, so the score is about this block plus the source; check it against your ` +
-        `headers:\n` +
-        indentedDeclarations(assumed)
-      : '';
+  const declared = synthesized > 0 ? declaredBlock(assumed) : '';
   // The counts docs/ranked-repro.md requires beside every ranked score, as ONE line that is
   // ALWAYS PRESENT. AN ABSENT LINE IS NOT EVIDENCE: a clean run, a truncated log and a killed
   // run are indistinguishable to a reader counting `[dropped]` lines that are not there, and
@@ -256,11 +241,18 @@ function rankedStderr(a: {
   // indistinguishable from a clean one (provenance.ts). On the same line as the score
   // deliberately: the doc tells readers to quote this one line, so a stamp anywhere else is a
   // stamp nobody pastes.
-  const summary =
-    `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
-    `${ranked.withheld.length} withheld, ${synthesized} synthesized, ` +
-    `best ${ranked.best.label}: ${scoreOf(ranked.best.score)} ` +
-    `[${a.stamp}]\n`;
+  //
+  // SPELLED IN score-format.ts, not here: the benchmark's `bench fan` prints this same line for
+  // one row, and a second hand-spelling of it had already lost `synthesized` and the stamp — the
+  // two fields that are claims rather than counts.
+  const summary = `${rankedSummaryLine({
+    scored: ranked.candidates.length,
+    dropped: ranked.dropped.length,
+    withheld: ranked.withheld.length,
+    synthesized,
+    best: ranked.best,
+    stamp: a.stamp,
+  })}\n`;
   // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
   // tail stay adjacent.
   return (
