@@ -198,7 +198,10 @@ export const UNMERGE_SITE_GATES: readonly Gate<UnmergeSite>[] = [
     // table below refuses it a second time. This one is the scope statement, stated where a reader
     // looks for it.
     sound: false,
-    guardedBy: 'unmerge.test.ts: an EMPTY arm: nothing there defines the join',
+    // THE GUARD IS THE CENSUS, not the decline. Deleted from this table, the whole core suite
+    // stays green — the rung table refuses an empty arm a second time — so the only test that can
+    // tell this gate apart from its shadow is the one that reads the ID back.
+    guardedBy: 'unmerge.test.ts: a census names the rule that refused each site, and counts it',
     rejects: (c) => c.iff.then.length === 0 || c.iff.else.length === 0,
   },
   {
@@ -217,7 +220,10 @@ export const UNMERGE_SITE_GATES: readonly Gate<UnmergeSite>[] = [
     id: 'no-merge-name',
     why: 'the join reads nothing the arms define — there is no merge to undo',
     sound: false,
-    guardedBy: 'unmerge.test.ts: a join reading no local at all',
+    // Same shadowing as `empty-arm` above, and the same guard: ablated alone, the named decline
+    // test stays green (a join reading no merge name defines nothing to move, so the arm table
+    // refuses it next), and only the census distinguishes which rule spoke.
+    guardedBy: 'unmerge.test.ts: a census names the rule that refused each site, and counts it',
     rejects: (c) => c.merge.size === 0,
   },
 ];
@@ -341,14 +347,19 @@ export const UNMERGE_RUNG_GATES: readonly Gate<UnmergeRung>[] = [
     id: 'empty-arm-has-no-tail',
     why: 'there is no statement here to recurse into, and nothing defined the names either',
     sound: false,
-    guardedBy: 'unmerge.test.ts: an EMPTY terminal arm refuses',
+    // Shadowed by `tail-is-not-an-if` below (`arm[len - 1]` of an empty arm is `undefined`, whose
+    // `?.k` is not `'if'`), so the census test is the guard — it is also what the SPLIT this table
+    // exists to reproduce is asserted by.
+    guardedBy: 'unmerge.test.ts: the RUNG census reproduces the split the instrumented run measured, without the patch',
     rejects: (c) => c.arm.length === 0,
   },
   {
     id: 'tail-is-not-an-if',
     why: 'the ladder bottoms out only on an `if`; anything else is neither terminal nor a rung',
     sound: false,
-    guardedBy: 'unmerge.test.ts: the tail of an arm is not a two-armed',
+    // Shadowed by the type narrowing in `pushJoin` — which has to stand there whatever this table
+    // says, because both gates here are ablatable. The census test is the guard that survives that.
+    guardedBy: 'unmerge.test.ts: the RUNG census reproduces the split the instrumented run measured, without the patch',
     rejects: (c) => c.arm[c.arm.length - 1]?.k !== 'if',
   },
 ];
