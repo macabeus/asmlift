@@ -40,6 +40,22 @@ export default defineConfig({
     //   hand-written pin from a single case writes a fixture into the real store (1 namespace,
     //   1 key). Pinned here, such a case lands in a per-run throwaway instead — see
     //   vitest.candcache-store.ts, which also removes it.
+    // WHY THIS IS NOT vitest's 5000 ms default. These suites are not pure-CPU unit tests: they
+    // fork `sh` stand-in compilers, run `git`, and read vendored blobs off disk, so their cost is
+    // external process time — the thing that degrades non-linearly when the machine is also
+    // running a bench. Twice, `apps/benchmark/test` failed 8-12 tests on an UNMODIFIED tree, every
+    // failure `Test timed out in 5000ms` and never an assertion, in a different set each run, with
+    // a full `bench run` alongside; both times it was clean once the machine was quiet.
+    //
+    // The slowest test here is ~1.7 s idle, so 5 s is barely 3x headroom for work that is mostly
+    // waiting on other processes. Tests that already knew this raised their own (`{ timeout:
+    // 20_000 }` in m2c-setup, `}, 30_000)` in authored-facts, `}, 90_000)` in the fuzz sweeps) —
+    // this is the same judgement applied where it belongs, matching vitest.matching.config.ts,
+    // which sets 240_000 for the same reason: its work is a real compiler.
+    //
+    // It does not hide a hang: a hung test still fails, 15 s later. It does mean a timeout here is
+    // evidence of a hang rather than of a busy laptop, which is what a gate should report.
+    testTimeout: 20_000,
     env: {
       ASMLIFT_CANDCACHE: '0',
       ASMLIFT_CANDCACHE_SAMPLE: '0',
