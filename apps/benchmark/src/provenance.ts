@@ -29,21 +29,39 @@ const ARTIFACT_PATH = /^(apps\/benchmark\/results\/|apps\/web\/src\/pages\/bench
 // bench invocation launched through the agent would inherit.
 const UNTRACKED_NONCODE = /^\.claude\/commands\//;
 
-/** Does this `git status --porcelain` output describe a tree whose CODE differs from HEAD? Split
- *  out so the exclusions are testable without a git checkout to mutate. */
+/** WHICH lines of this `git status --porcelain` output make the tree's CODE differ from HEAD.
+ *  Split out so the exclusions are testable without a git checkout to mutate, and returning the
+ *  lines rather than a boolean because the two callers want different things from one rule: the
+ *  provenance stamp asks only whether, while `run/preflight.ts` refuses a run and must say WHICH
+ *  file — a refusal that names none sends the reader back to `git status` to guess which of its
+ *  lines this rule counted, among the run's own artifact churn. */
+export function codeDirtyPaths(porcelain: string): string[] {
+  return (
+    porcelain
+      .split('\n')
+      .filter((l) => {
+        if (l.trim() === '') {
+          return false;
+        }
+        const path = l.slice(3).replace(/^"|"$/g, '');
+        return !ARTIFACT_PATH.test(path) && !(l.startsWith('??') && UNTRACKED_NONCODE.test(path));
+      })
+      // Trailing whitespace only. Porcelain's first two columns are staged-then-unstaged, and
+      // `l.trim()` would eat the leading one: ` M x` (unstaged) comes back as `M x`, which reads
+      // as the staged form — the distinction this refusal exists to spare the reader a second
+      // `git status` for.
+      .map((l) => l.replace(/\s+$/, ''))
+  );
+}
+
+/** Does this `git status --porcelain` output describe a tree whose CODE differs from HEAD? */
 export function codeDirtyFrom(porcelain: string): boolean {
-  return porcelain.split('\n').some((l) => {
-    if (l.trim() === '') {
-      return false;
-    }
-    const path = l.slice(3).replace(/^"|"$/g, '');
-    return !ARTIFACT_PATH.test(path) && !(l.startsWith('??') && UNTRACKED_NONCODE.test(path));
-  });
+  return codeDirtyPaths(porcelain).length > 0;
 }
 
 /** The repo paths a benchmark measurement depends on — the SAME list
  *  `scripts/check-artifact-provenance.sh` invalidates the committed artifact on, kept in step by
- *  `provenance-paths.test.ts` because two copies of a list like this drift silently and the
+ *  `fidelity-provenance.test.ts` because two copies of a list like this drift silently and the
  *  drift is only ever discovered by a gate that should have fired. Deliberately the WIDE list
  *  (`paths`, not `measures`): asking "could this commit have changed a number" must err toward
  *  yes. */

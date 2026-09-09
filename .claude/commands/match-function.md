@@ -91,6 +91,30 @@ Per commit:
 
 ## Phase 4 — Full-bench zero-flip gate
 
+`pnpm bench run` REFUSES to start when the tree's code differs from HEAD, and names the files:
+`pnpm bench:merge` refuses those numbers anyway, ~39 minutes later, and twice that refusal was one
+untracked env file. Commit first. Anything local a worktree needs (env exports, PATH overrides)
+goes in **`.envrc.local`**, gitignored for exactly this — but nothing loads it, so
+`source .envrc.local` yourself in the shell you run from; anything else local goes under
+**`.local/`**, gitignored too. Reach for `$(git rev-parse --git-path info/exclude)` only for a path
+you cannot move: from a worktree it resolves to the MAIN checkout's file, shared with every other
+worktree and never pruned, so add ONE line and `grep` for it first.
+
+Exempt is the run that rewrites no tier file WHOLE: `--only` scopes both tiers, so the Phase-3 dev
+loop is untouched, but `--project` scopes only the real tier and `--toolchain` only the synthetic
+one — pair those with `--tier real` / `--tier synthetic` or the other tier is still run whole and
+still refused. A scoped run is not read-only either: it REWRITES
+`apps/benchmark/results/<tier>.json` with only the rows it selected, so always run whole before
+`bench:merge`.
+
+The `cpp` probe is on a DIFFERENT axis and that scoping does not exempt it: **every run that
+touches the real tier is probed, `--only` included**, because the scoped loop is where TRAP 6
+bites. If it refuses, your shell resolved `cpp` to Apple clang — a LOGIN shell does — and the run
+would have failed every real ido/kmc/gcc272 row while reporting `✓` and exit 0; if it only WARNS,
+no MIPS toolchain is installed here, so those rows were going to SKIP anyway. A synthetic-only run
+is never probed: no synthetic row preprocesses with the host `cpp`. So a real-tier row that comes
+back `noncompile` is a real signal, not your shell — the preflight already ruled that out.
+
 Before declaring the branch done: `pnpm bench run` (all tiers), `pnpm bench:merge`, then
 `pnpm bench regression --base origin/main` and `pnpm bench diff --base origin/main`. **Any lost
 match blocks the branch.** Pass the base ref: both gates read the COMMITTED artifact, so on a

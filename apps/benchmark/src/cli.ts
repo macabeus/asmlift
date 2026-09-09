@@ -53,6 +53,7 @@ import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
+import { preflightRefusals } from './run/preflight';
 import { parseShard, runCases } from './run/runner';
 import { smoke } from './run/smoke';
 import { verify } from './run/verify';
@@ -125,6 +126,37 @@ function casesFor(tier: Tier) {
 
 switch (command) {
   case 'run': {
+    // `--shard` is meaningful only on the `--serial` path — the fan-out branch below never reads
+    // `opts.shard`. Left to run, `run --shard i/N` discards the shard, fans every child over the
+    // whole tier and rewrites `results/<tier>.json`, while looking to a reader like the one argv
+    // the preflight exempts. Reject the argv rather than interpret it.
+    if (opts.shard && !opts.serial) {
+      console.error(
+        `--shard ${opts.shard} without --serial: this path fans out across --jobs children and ignores the shard.\n` +
+          'Use `--serial --shard i/N` (what orchestrate.ts spawns), or drop --shard.',
+      );
+      process.exit(2);
+    }
+    // BEFORE anything that costs: the two conditions that make a run's numbers worthless are both
+    // decidable in under a second. See run/preflight.ts.
+    const preflight = preflightRefusals({
+      tiers,
+      only: opts.only,
+      project: opts.project,
+      toolchain: opts.toolchain,
+      shard: opts.shard,
+      serial: opts.serial,
+    });
+    for (const w of preflight.warnings) {
+      console.error(`${w}\n`);
+    }
+    if (preflight.refusals.length > 0) {
+      console.error(preflight.refusals.join('\n\n'));
+      process.exit(1);
+    }
+    // Deliberately NOT folded into `preflightRefusals`: that function's two verdicts are each
+    // gated on a predicate (whole-tier / touches-real), while the m2c pin applies to EVERY run,
+    // shard children and `--only` included, and throws its own remediation line.
     const { assertM2cPinned } = await import('./eval/m2c');
     assertM2cPinned();
     if (opts.serial) {

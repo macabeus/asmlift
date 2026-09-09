@@ -10,7 +10,7 @@ import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { compilerDiagnostics, contentDir, run } from './util';
+import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run } from './util';
 
 /** .i → pooled docker KMC gcc → .o (same helper score.ts uses). */
 function compile(dir: string, iName: string, oName: string): void {
@@ -48,7 +48,7 @@ export const kmcReal: RealCompile = {
       iPath = join(dir, 'c.i'),
       oPath = join(dir, 'c.o');
     writeFileSync(cPath, tu);
-    const cpp = run(CPP, ['-P', '-nostdinc', cPath, '-o', iPath]);
+    const cpp = run(CPP, [...CPP_PREPROCESS_FLAGS, cPath, '-o', iPath]);
     if (cpp.status !== 0) {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
