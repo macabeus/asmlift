@@ -99,10 +99,14 @@ Per commit:
 - If the step converts a pass's refusals to a `Gate` table — or you are tempted to, because you just
   patched a `return null` to log why it fired — read the passage
   `grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md` finds, FIRST. It is settled: table the
-  refusals you had to instrument, leave the rest, name the residue in the table's doc comment.
-  Tabling ALL of a small pass's refusals is that, not a sweep. What is settled is the UNIT — do not
-  re-argue whether a file should adopt `Gate<Ctx>` wholesale; three rounds already did, and each
-  declined on a written reason the passage shows was the wrong one.
+  refusals you had to instrument — or one you suspect never fires, which is the other admission —
+  leave the rest, name the residue in the table's doc comment. Tabling ALL of a small pass's refusals
+  is that, not a sweep. And table it REPORTED: a `Gate` table whose id is compared to `null` and
+  dropped has shortened the instrument loop, not removed it, so return a `refusals` map
+  (`structure/namecoalesce.ts`) or export a census off the table (`arrayShapeRefusals` in
+  `raise/globalshape.ts`) in the same change. What is settled is the UNIT — do not re-argue whether a
+  file should adopt `Gate<Ctx>` wholesale; three rounds already did, and each decline was RIGHT while
+  its written reason was the wrong one.
 - Add unit tests in `packages/core/test/` next to the sibling capability's tests. A capability with
   no test that fails before the change is not done.
 - Gate: `npx vitest run` (NOT `pnpm test:offline` — see Phase 4's fourth bullet: `test:offline`
