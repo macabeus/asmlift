@@ -178,6 +178,15 @@ export function recognizeConsts(fn: Fn): boolean {
       //     argument is a shape the refusal HELPS (a probe row scored diff:7 -> MATCH with it
       //     firing), so widening this test would give that back.
       //
+      // NOT CONVERTIBLE TO A `Gate` TABLE, and the reason is the type rather than the minutes.
+      // `firstRejection` reads a table as a DISJUNCTION of independent refusals; the test below is
+      // a CONJUNCTION with two buy-backs, and "refuse unless exempted" decomposes only by making
+      // every term re-carry the whole conjunction. The census would then report one opaque id and
+      // stay silent about WHICH exemption fired — the only question the paragraphs above ask. Said
+      // here because a selector that ranks passes by refusal count or by instrument minutes points
+      // at this file (`grep -n "raise/const.ts" docs/level-tower.md`), and both readings are wrong
+      // about it for different reasons.
+      //
       // A REFUSAL IS ALSO A SCHEDULING DECISION, and that coupling is invisible at this site:
       // `pre-recovery.ts` registers this pass `dce: true` and runs `dce(fn)` only when the pass
       // returns TRUTHY, so a function whose ONLY const/const pair is refused gets no DCE here at

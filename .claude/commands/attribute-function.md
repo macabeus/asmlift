@@ -317,14 +317,20 @@ and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier li
    fires at all is the other. Before you instrument, check whether you have to, in this order: if the
    pass takes its gate table as a PARAMETER, wrap it in `tallying()`
    (`grep -n "export function tallying" packages/core/src/l3/gates.ts`) and read `refusals()` back
-   — a per-id census from a `tsx` script, no edit to core and nothing to revert
-   (`l3/unmerge.ts` is the worked example, and its own test shows the call). Failing that, if the
-   pass exports a census (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a `refusals`
-   map (`l3/coalesce.ts`, `l3/scopebase.ts`, `structure/namecoalesce.ts`), a test reads the id
-   straight out. Only a table that is neither injectable nor reported still costs a patch — 21 of
-   the 27 `firstRejection` call sites compare the id to `null` and drop it. All three report the
-   FIRST rejecter, so a rule missing from the census is starved or shadowed, not proven dead. If the first blocker is one a round has already reasoned about beside the
-   gate, cite that instead of re-deriving it.
+   — a per-id census from a `tsx` script, no edit to core and nothing to revert. **Copy the recipe
+   printed at that grep, do not improvise one**: nothing exports a corpus of trees to loop over, so
+   the census is taken off a real `enumerateRanked` with the pass's pre-fan entry swapped, and the
+   comment carries the three things a first attempt gets wrong — where the script may live, the
+   module-instance hazard, and that an untracked script stamps the next `bench run` DIRTY, so
+   delete it first. `l3/unmerge.ts` is the worked example, its own test shows the call, and the
+   recipe's quoted numbers reproduce that file's instrumented 40/16 split with no patch. Failing
+   that, if the pass exports a census (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a
+   `refusals` map (`l3/coalesce.ts`, `l3/scopebase.ts`, `structure/namecoalesce.ts`), a test reads
+   the id straight out. Only a table that is neither injectable nor reported still costs a patch —
+   26 of the 32 `firstRejection` call sites compare the id to `null` and drop it. All three report
+   the FIRST rejecter, so a rule missing from the census is starved or shadowed, not proven dead.
+   If the first blocker is one a round has already reasoned about beside the gate, cite that
+   instead of re-deriving it.
 3. **Never edit the benchmark to make a row look better** — the reference source defines the
    target; manifests and results are never tuned. Harness defects (a hang, a missing timeout)
    are fixed or documented as their own labelled change.

@@ -92,7 +92,14 @@ export interface Tallied<Ctx> {
   /** Hand this to the pass, in place of the table it wraps. */
   readonly gates: readonly Gate<Ctx>[];
   /** The census so far, most-refused first, ties in table order. A snapshot: counts keep
-   *  accumulating across every later call, which is what a corpus-wide census wants. */
+   *  accumulating across every later call, which is what a corpus-wide census wants.
+   *
+   *  THERE IS NO RESET, deliberately — a per-row census is two snapshots DIFFED, not a fresh
+   *  wrapper per row. Wrapping per row would be the mistake the doc on {@link tallying} names:
+   *  the table's identity is what `rank.ts` memoizes a census on, so a new wrapper each row is a
+   *  new key each row. Counting is also keyed by `g.id`, so a table a script COMPOSES should be
+   *  run past `gateTableDefects` first: two rules sharing an id sum into one number, and the
+   *  contract test only checks the tables on its own roster. */
   readonly refusals: () => readonly (readonly [string, number])[];
 }
 
@@ -101,8 +108,37 @@ export interface Tallied<Ctx> {
  *  hand-rolled into their return type, from any pass that takes its table as a parameter:
  *
  *      const t = tallying(UNMERGE_SITE_GATES);
- *      for (const sfn of corpus) unmergeJoins(sfn, { site: t.gates });
+ *      unmergeJoins(sfn, { site: t.gates });
  *      console.log(t.refusals());   // [['no-merge-name', 214], ['empty-arm', 31]]
+ *
+ *  THAT IS THE API AND NOT YET A CENSUS: nothing exports a corpus of trees to loop over, and a
+ *  tabled pass's only shipped caller is normally inside core. The census is taken off a REAL
+ *  enumeration instead, which for this pass means swapping the pre-fan entry `rank.ts` calls. This
+ *  ran, and its numbers are quoted below:
+ *
+ *      const site = tallying(UNMERGE_SITE_GATES);
+ *      const restore = PRE_FAN_PRODUCTS[0].apply;        // a MUTABLE module global — restore it,
+ *      PRE_FAN_PRODUCTS[0].apply = (s) => unmergeJoins(s, { site: site.gates });
+ *      try {
+ *        for (const c of syntheticCases()) {
+ *          const { obj, asm } = c.build();
+ *          enumerateRanked(c.sym, scrubObjectHeader(asm), c.toolchain.targetDesc,
+ *            rankOptionsFor(c.toolchain, obj, c.proto, c.compile, c.symbols));
+ *        }
+ *      } finally { PRE_FAN_PRODUCTS[0].apply = restore; }  // …or the rest of the process tallies
+ *      console.log(site.refusals());
+ *
+ *  Over the agbcc synthetic tier that prints `[['empty-arm', 168], ['no-merge-name', 80],
+ *  ['arm-writes-a-name-this-cannot-substitute', 4]]`, and the same swap reading the RUNG table
+ *  prints `[['tail-is-not-an-if', 40], ['empty-arm-has-no-tail', 16]]` — the 40/16 split
+ *  `l3/unmerge.ts`'s header records from the instrumented patch that licensed its conversion,
+ *  recovered with no patch. THREE THINGS THE FIRST ATTEMPT GETS WRONG: the script must live inside
+ *  the repo (`@asmlift/cli/*` does not resolve from outside it, though `@asmlift/core/*` does);
+ *  an untracked script is CODE to `apps/benchmark/src/provenance.ts` (only `.claude/commands/` is
+ *  exempt), so delete it before any `bench run` or the run stamps itself dirty; and the swap must
+ *  hit the module instance the enumeration imports — `rank.ts` records a standalone script loading
+ *  an ESM/CJS DUPLICATE and answering 544 where the harness answers 952, and a duplicate here
+ *  censuses zero, silently.
  *
  *  WHAT IT COUNTS IS AN EVALUATION THAT ANSWERED TRUE, not a site. Under `firstRejection` — which
  *  short-circuits — that is the FIRST rejecter, so this produces exactly the census those three

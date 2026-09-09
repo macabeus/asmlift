@@ -633,6 +633,15 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   `firstRejection` decides, so it carries the same reading as the two forms above — first rejecter
   only.
 
+  **The parameter is necessary and not sufficient, and the gap is where a round loses its
+  afternoon**: nothing exports a corpus of lifted trees, and a tabled pass's only shipped caller is
+  normally inside core, so a census is taken off a REAL `enumerateRanked` with that caller's entry
+  swapped — for `l3/unmerge.ts`, `PRE_FAN_PRODUCTS[0].apply`. `tallying`'s doc comment carries the
+  script that ran, its numbers (they reproduce `unmerge.ts`'s instrumented 40/16 split with no
+  patch), and the three hazards: the script must live inside the repo, it must be deleted before
+  any `bench run` (`provenance.ts` counts an untracked script as code and the run stamps itself
+  dirty), and the swap must hit the module instance the enumeration imports.
+
 **And converting a pass whose refusals nobody has had to instrument buys nothing.** What a table
 removes is the edit-instrument-revert loop — patch a `return null` to log, re-run, revert — so the
 trigger to table a pass is that someone has already paid that loop on it, not that the pass has many
@@ -676,7 +685,16 @@ instrument time. In that retrospective that is `l3/unmerge.ts` (47.7 min, 12 ref
 the answer to "which pass next" for as long as nobody measures a third. `raise/const.ts` (38.6 min)
 is NOT, and it is the standing warning about this selector: the recount above found three of its four
 early exits are the enumerator, so a table over it would hold ONE gate — the conversion the bullet
-above declines. The minutes are priced per FILE and this rule is consumed per REFUSAL; re-read a
+above declines. **And a second reason, which is a fact about `Gate<Ctx>` rather than about that
+file**, re-derived when the `l3/unmerge.ts` conversion shipped without it: `firstRejection` reads
+the table as a DISJUNCTION of independent refusals, while that site is a CONJUNCTION with two
+buy-backs (`edgeCarried && !hiLoPair && !memBases.has(…)`). "Refuse unless exempted" has no
+decomposition into independent gates — every term would have to re-carry the whole conjunction,
+which is not what a table means and not what a census reads back, so the id it reported would be
+one opaque `not-a-literal-being-materialised` and silent about WHICH exemption fired. That is the
+only question the file's 60 lines of measured commentary ask (`hiLoPair` carries the traffic;
+`memBases` decides 0 folds over 806 rows). A refusal shaped like that is outside what this section
+licenses, whatever its instrument minutes. The minutes are priced per FILE and this rule is consumed per REFUSAL; re-read a
 candidate's refusals by the counting rule before selecting it, because `const.ts` is where the two
 readings diverge. `raise/magicdiv.ts` — 18 refusal-shaped exits by that same grep, and no instrument
 event anyone recorded — is the shape a sweep picks first and this rule declines.
