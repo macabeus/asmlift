@@ -289,7 +289,13 @@ and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier li
    by ablating it and watching the row move, never by reading the source and inferring. A guard
    you did not watch fire is a hypothesis, and one printed as a mechanism aims the next round at
    the wrong guard — a round once attributed a decline to a refusal that fires zero times on the
-   whole corpus.
+   whole corpus. **When you had to patch a refusal to print why it fired, say so in the report and
+   name the pass** — that instrument episode is the ONLY evidence that licenses converting those
+   refusals to a `Gate` table later (`grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md`), and
+   the rounds that pay for it are the ones that never record it. Before you instrument, check the
+   same passage the other way: if the gate is already tabled, `firstRejection` names it for free, and
+   if the first blocker is one a round has already reasoned about beside the gate, cite that instead
+   of re-deriving it.
 3. **Never edit the benchmark to make a row look better** — the reference source defines the
    target; manifests and results are never tuned. Harness defects (a hang, a missing timeout)
    are fixed or documented as their own labelled change.
