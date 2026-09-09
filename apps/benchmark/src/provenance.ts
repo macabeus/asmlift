@@ -73,6 +73,22 @@ export const MEASURED_PATHS = [
   'apps/benchmark/dataset',
 ];
 
+/** The subset of `MEASURED_PATHS` that DECIDES a measurement — the decompiler, the ranking and
+ *  scoring it is graded by, the compilers it is driven through, and the inputs. Same list as
+ *  `measures` in `scripts/check-artifact-provenance.sh`, kept in step by
+ *  `fidelity-provenance.test.ts` for the same reason `MEASURED_PATHS` is.
+ *
+ *  The remainder (`apps/benchmark/src`) is the harness AROUND the decompiler, where the script
+ *  REPORTS a base change rather than failing it — not because such a commit is provably
+ *  row-neutral, but because of what has ever landed there. Anything asking "must this number be
+ *  re-measured" splits the two: a hit here is an answer, a hit in the remainder is a note. */
+export const SCORING_PATHS = [
+  'packages/core/src',
+  'packages/cli/src',
+  'packages/toolchains/src',
+  'apps/benchmark/dataset',
+];
+
 /** Do two commits hold the SAME measured code? `false` when git cannot say — a question git
  *  declines is not a yes.
  *
