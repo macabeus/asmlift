@@ -104,9 +104,8 @@ Per commit:
   is that, not a sweep. And table it REPORTED: a `Gate` table whose id is compared to `null` and
   dropped has shortened the instrument loop, not removed it, so return a `refusals` map
   (`structure/namecoalesce.ts`) or export a census off the table (`arrayShapeRefusals` in
-  `raise/globalshape.ts`) in the same change. What is settled is the UNIT — do not re-argue whether a
-  file should adopt `Gate<Ctx>` wholesale; three rounds already did, and each decline was RIGHT while
-  its written reason was the wrong one.
+  `raise/globalshape.ts`) in the same change. What is settled is the UNIT: convert refusals, not
+  files — do not re-open whether a file should adopt `Gate<Ctx>` wholesale.
 - Add unit tests in `packages/core/test/` next to the sibling capability's tests. A capability with
   no test that fails before the change is not done.
 - Gate: `npx vitest run` (NOT `pnpm test:offline` — see Phase 4's fourth bullet: `test:offline`

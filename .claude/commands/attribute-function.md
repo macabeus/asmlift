@@ -290,16 +290,15 @@ and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier li
    you did not watch fire is a hypothesis, and one printed as a mechanism aims the next round at
    the wrong guard — a round once attributed a decline to a refusal that fires zero times on the
    whole corpus. **When you had to patch a refusal to print why it fired, say so in the PR body
-   (not only in `research/`, whose path nothing may cite) and name the pass** — that instrument
-   episode is the ONLY evidence that licenses converting those refusals to a `Gate` table later
-   (`grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md`), and the rounds that pay for it are the ones that never record it — as is a refusal you come to
-   suspect never fires at all, which that passage records as the other thing worth tabling. Before
-   you instrument, check the same passage the other way: if the pass already exports a census
-   (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a `refusals` map (`l3/coalesce.ts`,
-   `l3/scopebase.ts`, `structure/namecoalesce.ts`), a test reads the id straight out with no edit to
-   the pass. A table ALONE does not buy that: 21 of the 27 `firstRejection` call sites compare the id
-   to `null` and drop it, so on those you still patch — and adding the map is the ~12-line fix worth
-   more than the patch. If the first blocker is one a round has already reasoned about beside the
+   (not only in `research/`, whose path nothing may cite) and name the pass.** That instrument
+   episode is one of the two things that license converting those refusals to a `Gate` table later
+   (`grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md`); a refusal you come to suspect never
+   fires at all is the other. Before you instrument, check whether you have to: if the pass already
+   exports a census (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a `refusals` map
+   (`l3/coalesce.ts`, `l3/scopebase.ts`, `structure/namecoalesce.ts`), a test reads the id straight
+   out with no edit to the pass. A table ALONE does not buy that: 21 of the 27 `firstRejection` call
+   sites compare the id to `null` and drop it, so on those you still patch — and adding the map is
+   the smaller change. If the first blocker is one a round has already reasoned about beside the
    gate, cite that instead of re-deriving it.
 3. **Never edit the benchmark to make a row look better** — the reference source defines the
    target; manifests and results are never tuned. Harness defects (a hang, a missing timeout)
