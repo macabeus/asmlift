@@ -185,6 +185,20 @@ export interface CliResult {
  *  A TIMING VALUE, never a timing call: `phaseReport` and `stamp` are computed by the caller at
  *  the moment the run ended, because both measure the run and neither may be re-measured by the
  *  act of rendering it. */
+/** One candidate's score as `<score>/<rows>` — the numerator over the denominator it was measured
+ *  against, on both the `[score]` table and the `[ranked]` line readers are told to quote.
+ *
+ *  `rows` is objdiff's total row count for THIS candidate's alignment against the target, so it is
+ *  a property of the candidate and not of the target: a different spelling aligns differently and
+ *  is scored on a different scale. Two runs' `[score]` lines are the project's standard
+ *  before/after comparison, and printing the numerator alone makes that comparison read as a
+ *  subtraction on a fixed scale. It is not one — `kleod:CountCollectedGems:agbcc` went 290/404 →
+ *  171/387 across two committed artifacts, 17 points of which were the scale, and an attribution
+ *  round was spent explaining the difference. */
+export function scoreOf(s: { score: number; rows: number; match: boolean }): string {
+  return `${s.score}/${s.rows}${s.match ? ' (match)' : ''}`;
+}
+
 function rankedStderr(a: {
   targetTrace: string;
   warn: string;
@@ -197,9 +211,7 @@ function rankedStderr(a: {
   protoNote: string;
 }): string {
   const { ranked } = a;
-  const table = ranked.candidates
-    .map((c) => `asmlift: [score] ${c.label}: ${c.score.score}${c.score.match ? ' (match)' : ''}\n`)
-    .join('');
+  const table = ranked.candidates.map((c) => `asmlift: [score] ${c.label}: ${scoreOf(c.score)}\n`).join('');
   // Spellings the scorer refused are recorded, not silent: a lever whose every candidate
   // fails to build looks identical to one that declined unless the drops are visible.
   // …and the same idea one stage EARLIER: `[dropped]` reports a spelling the SCORER refused,
@@ -253,7 +265,7 @@ function rankedStderr(a: {
   const summary =
     `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
     `${ranked.withheld.length} withheld, ${synthesized} synthesized, ` +
-    `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
+    `best ${ranked.best.label}: ${scoreOf(ranked.best.score)} ` +
     `[${a.stamp}]\n`;
   // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
   // tail stay adjacent.

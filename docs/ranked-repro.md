@@ -578,6 +578,17 @@ diff <(grep -F '[score]' a.err) <(grep -F '[score]' b.err)
 passes having compared nothing. A neutrality check that filters away what it is comparing is
 worse than none.
 
+**Every `[score]` line, and the `best …` on the `[ranked]` line, reads `<score>/<rows>`.** `rows`
+is objdiff's total row count for _that candidate's_ alignment against the target, so it belongs to
+the candidate and not to the target: a different spelling aligns differently and is scored against
+a different scale. **A run-to-run delta is therefore a pair of fractions, never a subtraction.**
+`kleod:CountCollectedGems:agbcc` moved 290/404 → 171/387 between two committed artifacts, and
+reading its `290 → 171` as 119 points on a fixed scale cost an attribution round. Quote both
+numbers; if the denominators differ, say so in the same sentence.
+
+(Runs recorded in this file from before that change print a bare numerator. Their `[score]` md5s
+and stdout md5s are therefore not comparable with a run made today; the line _counts_ still are.)
+
 ## Write it down
 
 Whatever you run, paste it verbatim, flags included, into your report. Every later measurement —

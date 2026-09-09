@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
-import { detectName, runCli } from '../../src/main';
+import { detectName, runCli, scoreOf } from '../../src/main';
 
 const corpus = (f: string) => readFileSync(join(import.meta.dirname, '../../../core/test/corpus', f), 'utf8');
 const run = (file: string, ...flags: string[]) => runCli([file, ...flags], corpus);
@@ -228,4 +228,23 @@ test('a DERIVED shape the source never spells prints no `[assumed]` line either'
   expect(r.code).toBe(0);
   expect(r.stdout).toContain('((struct Elem0 *)&gBgInfo)[a0].field_0');
   expect(r.stderr).not.toContain('[assumed]');
+});
+
+// THE `[score]`/`[ranked]` LINES CARRY THEIR DENOMINATOR.
+//
+// `rows` is objdiff's total row count for THIS candidate's alignment, so it is a property of the
+// candidate, not of the target: a different spelling aligns differently and is scored against a
+// different scale. `docs/ranked-repro.md` makes two runs' `[score]` lines the project's standard
+// before/after comparison and `/match-function` makes the `[ranked]` line the number every claim
+// is measured against — printed as a bare numerator, both read as a subtraction on a fixed scale.
+// They are not: `kleod:CountCollectedGems:agbcc` went 290/404 → 171/387 across two committed
+// artifacts, 17 of those 119 points being the scale, and an attribution round was spent on the
+// difference.
+test('a score is rendered over the row count it was measured against', () => {
+  expect(scoreOf({ score: 290, rows: 404, match: false })).toBe('290/404');
+  expect(scoreOf({ score: 171, rows: 387, match: false })).toBe('171/387');
+});
+
+test('a match still says so, and still shows the scale it matched on', () => {
+  expect(scoreOf({ score: 0, rows: 387, match: true })).toBe('0/387 (match)');
 });
