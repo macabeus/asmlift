@@ -48,6 +48,14 @@ import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 // through a dynamic `import()` on the ranked path alone so a plain decompile stays toolchain-light.
 // An `import type` is erased outright and adds no runtime edge.
 import type { RankedResult } from './rank';
+// Re-exported rather than defined here: `scoreOf` is the one renderer for every score any asmlift
+// command prints, and the benchmark's `bench fan` prints the same four lines. A second consumer
+// must be able to reach it without importing this argv entry point — and `./score` is no home for
+// it either, because that module pulls objdiff-wasm and the note above `./rank` is about exactly
+// that edge.
+import { scoreOf } from './score-format';
+
+export { scoreOf } from './score-format';
 
 /** Every status this CLI returns, named. `CACHE_MISMATCH_EXIT` (3) is candcache.ts's and is
  *  imported rather than restated, because the code that DETECTS a mismatch is what should own the
@@ -172,28 +180,6 @@ const isDecline = (e: unknown) => DECLINE_ERRORS.some((c) => e instanceof c);
 export interface ObjInput {
   disasm: typeof disasmObject;
   asmData: typeof asmDataForObject;
-}
-
-/** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
- *
- *  THE ONE RENDERER FOR EVERY SCORE THIS CLI PRINTS: the `[score]` table, the `[ranked]` line's
- *  `best …`, the `[withheld]` line and the `[progress]` line. A reader comparing two runs cannot
- *  be asked to know which lines carry a denominator.
- *
- *  `rows` is objdiff's total row count for THIS candidate's alignment against the target, so it is
- *  a property of the candidate and not of the target: a different spelling aligns differently and
- *  is scored on a different scale. Two runs' `[score]` lines are the project's standard
- *  before/after comparison (docs/ranked-repro.md), and printing the numerator alone makes that
- *  comparison read as a subtraction on a fixed scale. It is not one — `kleod:CountCollectedGems`
- *  went 290/404 → 171/387 across two committed artifacts, 17 points of which were the scale, and
- *  an attribution round was spent explaining the difference.
- *
- *  Both fields are OPTIONAL, and each absence means one thing. No `rows`: the scorer that produced
- *  this score supplied none (core rank.ts's `WithheldCandidate` types it optional for exactly
- *  that), so the numerator prints alone rather than against an invented denominator — never a `0`,
- *  which would read as a real scale. No `match`: the caller does not know, so nothing is claimed. */
-export function scoreOf(s: { score: number; rows?: number; match?: boolean }): string {
-  return `${s.score}${s.rows === undefined ? '' : `/${s.rows}`}${s.match === true ? ' (match)' : ''}`;
 }
 
 export interface CliResult {
