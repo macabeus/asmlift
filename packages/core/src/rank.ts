@@ -239,6 +239,26 @@ export interface WithheldCandidate {
   why: string;
 }
 
+/** EVERY candidate refused — `rankBy` has no ranked result to return, so it throws this.
+ *
+ *  The two lists ride on the error, and that is the point of having a class at all: on a row where
+ *  nothing scored, `dropped` IS the whole fan, and a bare `Error` discards it. A caller that
+ *  prints one candidate's failure (the `cause`) is showing the LAST spelling the scorer refused,
+ *  which is neither the first nor a representative one — the benchmark's own noncompile rows have
+ *  up to a thousand siblings behind that single line. The message is unchanged from the plain
+ *  `Error` this replaces: `bench fidelity` matches it verbatim to recognise a reproduced
+ *  noncompile row. */
+export class NoScorableCandidateError extends Error {
+  readonly dropped: DroppedCandidate[];
+  readonly withheld: WithheldCandidate[];
+  constructor(message: string, dropped: DroppedCandidate[], withheld: WithheldCandidate[], options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'NoScorableCandidateError';
+    this.dropped = dropped;
+    this.withheld = withheld;
+  }
+}
+
 export interface RankedResult<S> {
   best: Scored<S>; // lowest score
   candidates: Scored<S>[]; // sorted best (lowest) first
@@ -1912,7 +1932,9 @@ export function rankBy<S extends { score: number; rows?: number }>(
     // scorer failure, and a list that was entirely proof-gated is a different thing entirely.
     const why =
       lastScoreErr !== null ? firstLine(lastScoreErr) : `${withheld.length} candidate(s) withheld, none scored`;
-    throw new Error(`no scorable candidate for '${symbol}': ${why}`, { cause: lastScoreErr });
+    throw new NoScorableCandidateError(`no scorable candidate for '${symbol}': ${why}`, dropped, withheld, {
+      cause: lastScoreErr,
+    });
   }
   results.sort(compareScored);
   return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };
