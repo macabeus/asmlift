@@ -48,19 +48,29 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
 // `breathe()` below fixed the cause, so the number it forced is no longer owed to anyone.
 //
 // The 30% of `test:offline` that cut was justified by (102.9 -> 134.2 s, on the two-core hosted
-// runner) was the price of these two arms EXISTING, not of their size: restoring only the seed
-// counts measures +6.6 s of test CPU here, ~6.5% of a ~102 s baseline, and the two files cost
-// +12.9 s between them. Quote that pair of numbers rather than the 30% if you are budgeting.
+// runner) was the price of these two arms EXISTING, not of their size. What the seed counts
+// themselves cost, re-measured on a 10-core laptop under load: this file alone 2.6 -> 6.2 s of user
+// CPU (+3.6), this file plus the nested arm next door 4.0 -> 12.5 s (+8.5). The same pair came out
+// at +6.6 and +12.9 on the runner, so quote a number with the machine attached — the part that does
+// not move between boxes is the shape: single-digit seconds against a ~102 s baseline, not 30%.
 //
 // Back to 4,000, the size the two arms that predate this file have always run. Arm A is the
 // expensive half — it structures every generated function TWICE, three depths — and 16x of it
 // costs this file a few seconds; arm B is near-flat in SEEDS, since it stops at the first seed that
-// proves a gate load-bearing, though not always early: `sibling-param`'s first acyclic witness is
-// seed 289, past where this sat, and only depth 1's seed 52 kept that gate proven at 250.
+// proves a gate load-bearing.
 //
-// RAISING THIS DOES NOT REACH `loop-escape`, and never could: that finding belongs to
-// `namecoalesce-fuzz`, and the arm that would ablate it filters on `sound`, which the table denies
-// that gate. It is pinned by seed over there instead. The barrier is a predicate, not a range.
+// WHAT 4,000 BUYS HERE IS ARM A's BREADTH, NOT GATE COVERAGE — worth being exact about, because the
+// two live in different files. Measured: with this file alone cut to 250, all four of its tests
+// still pass. Every sound gate here is still proven — `sibling-param`'s first ACYCLIC witness is
+// seed 289, past where this sat, but depth 1's seed 52 proves it anyway; `carrier-live` lands at
+// seed 6 and `re-derives` at 22. The gate coverage 250 actually costs is NEXT DOOR, and it is a
+// different gate with a nearby number: `namecoalesce-fuzz`'s ablating arm goes RED at 250, because
+// its own `sibling-params` has no witness before seed 299 at any depth.
+//
+// RAISING THIS DOES NOT REACH `loop-escape`, and never could: that finding belongs to the
+// `namecoalesce` tables, and the arm that would ablate it filters on `sound`, which the table
+// denies that gate. Its two witnesses are frozen as literal IR in `namecoalesce.test.ts` instead.
+// The barrier is a predicate, not a range.
 const SEEDS = 4000;
 
 /** Both spellings of one seed, or null when the shape is not one this can judge. */

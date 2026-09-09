@@ -8,7 +8,9 @@
 // at the pass's own boundary instead; each says why where it sits.
 //
 // The whole-program check is `namecoalesce-fuzz.test.ts`. These pin named shapes; that one asks
-// whether any merge changes what a function does.
+// whether any merge changes what a function does. Two shapes here borrow that file's interpreter as
+// well, because `loop-escape` is the one gate the sweep structurally cannot reach — see the block
+// above `INNER_CLOBBERS_OUTER` — so its evidence has to be a named shape whose failure is a value.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -16,25 +18,35 @@ import { Block, Op, Value, mkOp, mkValue } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
+import type { SFn } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { NAME_COALESCE_GATES, type NameCoalesceDeps, coalesceNames } from '../src/structure/namecoalesce';
 import { structure } from '../src/structure/structure';
+import { traceOf, tracesDiffer } from './helpers';
 
-const emit = (ir: string, gate?: string): string => {
+/** The structured tree with the axis ON, optionally with one gate ablated. Separate from `emit`
+ *  because two of these are also INTERPRETED: what a merge breaks is a value, and only the tree
+ *  reaches `traceOf`. */
+const tree = (ir: string, gate?: string): SFn => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(
-    structure(fn, { coalesceMergeNames: true }, gate ? { nameCoalesceGates: without(NAME_COALESCE_GATES, gate) } : {}),
+  return structure(
+    fn,
+    { coalesceMergeNames: true },
+    gate ? { nameCoalesceGates: without(NAME_COALESCE_GATES, gate) } : {},
   );
 };
-const uncoalesced = (ir: string): string => {
+/** The same IR with the axis OFF — the reference spelling every assertion here is against. */
+const treeOff = (ir: string): SFn => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn));
+  return structure(fn);
 };
+const emit = (ir: string, gate?: string): string => cBackend.emit(tree(ir, gate));
+const uncoalesced = (ir: string): string => cBackend.emit(treeOff(ir));
 
 // Two arms, each clamping two loads through an inner join of its own — the chain the naming walk
 // cannot follow, because it only ever adopts a name BACKWARD along one edge. ^bb7 takes the arm-A
@@ -251,6 +263,118 @@ test('a candidate never unlocks a function the primary declines', () => {
   expect(() => uncoalesced(UNLOCKS_A_DECLINE)).toThrow(/pre-update loop variable/);
   expect(() => emit(UNLOCKS_A_DECLINE)).toThrow(/pre-update loop variable/);
 });
+
+// ── the two witnesses a differential fuzz found and no differential fuzz can re-find ───────────
+//
+// `namecoalesce-fuzz`'s ablating arm iterates `NAME_COALESCE_GATES.filter((x) => x.sound)`, and
+// `loop-escape` is `sound: false`. So no sweep over there has ever dropped this gate, and raising
+// its seed count never will — the barrier is a PREDICATE, not a range. These two came out of a
+// by-name ablation at depth 2 (`generateSsaFn(seed, 2)`, `without(..., 'loop-escape')`), and they
+// are the only two witnesses in 1..7000, which is why both are frozen rather than one.
+//
+// FROZEN AS IR, not replayed by seed. A seed is a live coupling to a shared PRNG-driven generator:
+// any edit to `generateSsaFn` desynchronises the stream, and a seed-replayed version then goes red
+// saying the gate is inert when the cause is the generator — the misattribution these tests exist
+// to prevent. Frozen, they are immune, and they run in single-digit milliseconds instead of
+// structuring 5,104 functions to reach the first one.
+//
+// THE SHAPE, in both: an inner loop's variable adopts the ENCLOSING loop's carrier, and then
+// overwrites it every iteration. The gate's work is one statement — the copy that gives the
+// escaping value a home of its own, hoisted to the top of the outer body. Dropped, that copy is
+// gone, the inner loop writes the carrier, and the function returns another number. Nothing
+// throws; this is the failure class the sibling `TRAILING_DOWHILE` test does NOT cover, where the
+// loop emitter's own `pre-update loop variable` check catches the merge loudly.
+const INNER_CLOBBERS_OUTER = [
+  {
+    seed: 5104,
+    escapeCopy: 'v4 = v2;',
+    ir: `fn fz5104 {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = sub %1, %1
+  %3: s32 = sub %1, %1
+  %4: s32 = sub %0, %1
+  %5: s32 = call %1 {target="f1"}
+  br ^bb1(%2, %1)
+^bb1(%6: s32, %7: s32):
+  %8: s32 = sub %1, %0
+  br ^bb2(%6, %3)
+^bb2(%9: s32, %10: s32):
+  %11: s32 = sub %0, %0
+  br ^bb3(%3)
+^bb3(%12: s32):
+  %13: s32 = sub %1, %12
+  %14: s32 = call %12 {target="f1"}
+  %15: s32 = call %0 {target="f2"}
+  %16: u32 = icmp_slt %3, %12
+  cond_br %16, ^bb2(%2, %15), ^bb4(%14)
+^bb4(%17: s32):
+  %18: s32 = add %1, %3
+  %19: s32 = add %2, %17
+  %20: u32 = icmp_slt %17, %0
+  cond_br %20, ^bb1(%0, %2), ^bb5()
+^bb5():
+  %21: s32 = call %0 {target="f0"}
+  %22: s32 = sub %0, %3
+  br ^bb6(%1, %2)
+^bb6(%23: s32, %24: s32):
+  %25: s32 = sub %23, %24
+  %26: s32 = sub %2, %3
+  ret %0
+}
+`,
+  },
+  {
+    seed: 6437,
+    escapeCopy: 'v5 = v4;',
+    ir: `fn fz6437 {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = sub %1, %0
+  %3: s32 = call %0 {target="f1"}
+  %4: s32 = sub %0, %1
+  %5: s32 = call %0 {target="f1"}
+  br ^bb1(%1, %1)
+^bb1(%6: s32, %7: s32):
+  %8: s32 = call %0 {target="f0"}
+  %9: s32 = add %2, %6
+  br ^bb2(%7, %3)
+^bb2(%10: s32, %11: s32):
+  %12: s32 = sub %11, %1
+  br ^bb3(%1)
+^bb3(%13: s32):
+  %14: s32 = sub %2, %2
+  %15: s32 = sub %13, %1
+  %16: s32 = call %15 {target="f2"}
+  %17: u32 = icmp_slt %15, %15
+  cond_br %17, ^bb2(%2, %15), ^bb4(%16)
+^bb4(%18: s32):
+  %19: s32 = sub %0, %2
+  %20: u32 = icmp_slt %2, %1
+  cond_br %20, ^bb1(%3, %3), ^bb5(%3, %2)
+^bb5(%21: s32, %22: s32):
+  %23: s32 = call %22 {target="f0"}
+  %24: s32 = call %2 {target="f1"}
+  br ^bb6(%23, %22)
+^bb6(%25: s32, %26: s32):
+  %27: s32 = add %0, %26
+  ret %3
+}
+`,
+  },
+] as const;
+
+test.each(INNER_CLOBBERS_OUTER)(
+  'ablating loop-escape lets an inner loop clobber the enclosing loop variable (seed $seed)',
+  ({ seed, ir, escapeCopy }) => {
+    // the gate's work, spelled: the escaping value keeps a home of its own
+    expect(emit(ir)).toContain(escapeCopy);
+    expect(emit(ir, 'loop-escape')).not.toContain(escapeCopy);
+    // and that copy is not cosmetic — two-sided, so this asserts the GATE's work and not a
+    // difference the axis would make regardless
+    const off = traceOf(treeOff(ir), seed);
+    expect(tracesDiffer({ off, on: traceOf(tree(ir), seed) })).toBe(false);
+    expect(tracesDiffer({ off, on: traceOf(tree(ir, 'loop-escape'), seed) })).toBe(true);
+  },
+);
 
 // ── the type rule, at the level it decides on ──────────────────────────────────────────────────
 // Two names whose DECLARATIONS disagree. A test cannot choose that freely in parsed IR — a

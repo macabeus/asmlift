@@ -62,12 +62,26 @@
 // are not the hazard, none of which this has. It IS load-bearing, and the measurement that says so
 // is not a benchmark one: dropping it over 773 rows improves 12 and regresses none (#55), and
 // `nestedloop` is `int s = 0; … s += i*j`, one accumulator the pass emits as two — but with it
-// dropped, `namecoalesce-fuzz`'s NESTED arm finds two generated functions in 7,535 that compute
-// something else, and it finds them with the interference rule at either strength. A byte score
+// dropped, two generated functions COMPUTE SOMETHING ELSE: an inner loop's variable adopts the
+// enclosing loop's carrier and then overwrites it every iteration. Both are frozen as literal IR in
+// `namecoalesce.test.ts`, which asserts the escape copy the gate forces on one side and its absence
+// on the other. NO ARM OF `namecoalesce-fuzz` FINDS THEM and no sweep size ever will: its ablating
+// arm iterates `NAME_COALESCE_GATES.filter((x) => x.sound)` and this entry is `sound: false`, so the
+// barrier is a predicate, not a range. They were found by ablating BY NAME at depth 2, first witness
+// seed 5104 and second 6437, with nothing at all in 1..4000. A byte score
 // cannot see that failure, which is the whole reason that fuzz exists. So the 12 rows are real and
 // so is the hazard, and taking them still needs `carriesPreUpdate` lifted to name classes: the
 // class-level closure, since a merge can reach a loop variable's name through an edge that carried
 // no loop variable at all.
+//
+// THE UNCOMFORTABLE PART, recorded here because this is where the flag is set. A rule whose removal
+// changes what the program COMPUTES is a legality property, and `sound: false` in this table means
+// fidelity — its neighbour `param` genuinely is fidelity. So the flag reads wrong. Relabelling it is
+// not free: `namecoalesce-fuzz`'s ablating arm would then sweep it and demand a witness inside
+// `SEEDS`, and there is none — measured, the only two witnesses in 1..7000 are 5104 and 6437, both
+// at depth 2. So the flag stays `false` on the second criterion above (not shown sound, and blunter
+// than the rule it restates), the coverage does not wait on it, and this note is the whole argument
+// so it is not re-derived in a test file.
 //
 // TWO KNOWN GAPS, both on the READ side of a relocated write:
 //
@@ -183,6 +197,10 @@ export const NAME_COALESCE_GATES: readonly Gate<NameMerge>[] = [
     id: 'loop-escape',
     why: 'outside the loop a loop variable’s name holds the value from BEFORE the update',
     sound: false,
+    // Unsound gates owe no guard, but this one HAS one and it is the only evidence that exists —
+    // the fuzz next door structurally cannot reach it (see the header), so naming the test is what
+    // keeps `gate-contract`'s title check from letting it be deleted silently.
+    guardedBy: 'namecoalesce.test.ts: ablating loop-escape lets an inner loop clobber the enclosing loop variable',
     rejects: (c) => c.loopEscapes,
   },
 ];

@@ -17,7 +17,7 @@
 // table calls SOUND and requires that one of them DOES — written over the table, so a rule added
 // later is held to the same bar without anyone remembering to. Two gates are exempt with their
 // reasons stated at `OUT_OF_REACH`.
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { type IrType, T } from '../src/ir/types';
@@ -28,6 +28,15 @@ import { NARROW_LOCAL_GATES, narrowBlockLocals } from '../src/raise/narrowlocal'
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { BREATHE_EVERY, breathe, mulberry32 } from './helpers';
+
+// CORPUS-SIZED WORK IN A PARALLEL WORKER POOL, budgeted per FILE — the idiom `carrier-name-fuzz`,
+// `namecoalesce-fuzz`, `locals-written` and `structure-purity` already use. Vitest's 5 s default is
+// a LOAD sensitivity here, not a budget: arm A structures and interprets two trees per judged
+// function and the diamond tail multiplies that twentyfold — 2.2 s solo, 9.0 s worst measured
+// inside a full `pnpm test:offline`, where this file records a contention factor of 3.4x. 60 s is a
+// 6.7x margin on that worst case, and a real hang is still loud, just 60 s later. The one arm that
+// needs more says so at its own call, with its own reason.
+vi.setConfig({ testTimeout: 60_000 });
 
 /** A random SSA function whose block parameters are often EXTENDED at their reads — the shape this
  *  pass judges. Definitions dominate uses by construction (entry values plus the reading block's
@@ -365,13 +374,7 @@ describe.each([
     expect(judged).toBeGreaterThan(100);
     expect(bad).toEqual([]);
     judgedByShippedArm.set(withLoop, judged);
-    // Structuring and interpreting two trees per judged function, and the diamond tail multiplies
-    // that count twentyfold — 2.2s alone, and this suite forks 160 files in parallel. 60 s, not the
-    // 30 s this carried while `carrier-name-fuzz` and the nested `namecoalesce-fuzz` arm sat cut to
-    // 250 seeds: restoring those two puts their CPU back into the same fork pool, and the margin
-    // here was measured at 3.3x (9.0 s worst against 30 s) against a contention factor this file
-    // records at 3.4x below. A real hang is still loud, 30 s later.
-  }, 60_000);
+  });
 
   // THE POPULATION THE ONLY UNSOUND GATE MASKS, and the reason this arm exists at all.
   //
@@ -415,8 +418,7 @@ describe.each([
     expect(shipped).toBeDefined();
     expect(judged).toBeGreaterThan(shipped as number);
     expect(bad).toEqual([]);
-    // Same budget and the same reason as the arm above.
-  }, 60_000);
+  });
 });
 
 // The two sound rules this oracle cannot reach, and why — an exemption is a visible act with a
@@ -454,7 +456,6 @@ test('every SOUND gate is load-bearing: dropping it changes what some function d
   }
   expect(inert).toEqual([]);
   expect([...OUT_OF_REACH].filter((id) => !NARROW_LOCAL_GATES.some((g) => g.id === id && g.sound))).toEqual([]);
-  // A full SEEDS sweep per gate: ~8s alone, and this suite forks 160 files in parallel, where the
-  // same loop measured 3.4x its solo cost — past vitest's 5s default, which fails as a timeout
-  // rather than as an inert gate.
+  // The one arm that overrides the file's 60 s: a full SEEDS sweep PER GATE, ~8 s solo, and this
+  // suite forks 160 files in parallel, where the same loop measured 3.4x its solo cost.
 }, 90_000);

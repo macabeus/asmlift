@@ -92,31 +92,15 @@ describe.each([
   });
 });
 
-// THE ONE PIECE OF EVIDENCE NO SWEEP ABOVE CAN PRODUCE, pinned rather than hunted for.
-//
-// `namecoalesce.ts` credits this arm with the `loop-escape` finding: dropped, that gate makes some
-// nested functions compute something else. No shipped arm has ever ablated it, and raising `SEEDS`
-// never will — arm B below iterates `NAME_COALESCE_GATES.filter((x) => x.sound)` and the table
-// declares `loop-escape` `sound: false`, so the barrier is a PREDICATE, not a range. (The seeds are
-// also outside 4,000: measured, there is no witness at all in 1..4000 at depth 2.) The recipe, for
-// whoever comes to reproduce it: drop the gate BY NAME, depth 2, at least 6,437 seeds.
-//
-// Pinned two-sided — with the gate KEPT both seeds trace identically — so this asserts the gate's
-// own work, not a difference the pass would make regardless. Which is also the uncomfortable part:
-// a rule whose removal changes what the program COMPUTES is a legality property, while `sound:
-// false` in this table means fidelity (its neighbour `param` genuinely is fidelity). Relabelling it
-// is not free — arm B would then sweep the gate and go red at `SEEDS` = 4000, since its first
-// witness is 5104 — so that stays its own decision, and this coverage does not wait on it.
-test('`loop-escape` is load-bearing, at the two seeds no sweep in this file reaches', () => {
-  for (const seed of [5104, 6437]) {
-    const dropped = spellings(seed, 2, 'loop-escape');
-    const kept = spellings(seed, 2);
-    expect(dropped, `seed ${seed} must still be a shape this can judge`).not.toBeNull();
-    expect(kept, `seed ${seed} must still be a shape this can judge`).not.toBeNull();
-    expect(tracesDiffer(dropped!), `seed ${seed}: dropping \`loop-escape\` must change the trace`).toBe(true);
-    expect(tracesDiffer(kept!), `seed ${seed}: with \`loop-escape\` kept the trace must not change`).toBe(false);
-  }
-});
+// THE ONE GATE IN THE TABLE THIS FILE CANNOT JUDGE AT ANY SIZE. Arm B below iterates
+// `NAME_COALESCE_GATES.filter((x) => x.sound)` and the table declares `loop-escape` `sound: false`,
+// so no arm here has ever ablated it and raising `SEEDS` never will — the barrier is a PREDICATE,
+// not a range. (It is also out of range: measured, the only two witnesses in 1..7000 are 5104 and
+// 6437, both at depth 2.) Its evidence is two of those functions FROZEN AS IR in
+// `namecoalesce.test.ts`, asserted two-sided there — a seed replayed here would break on any edit
+// to `generateSsaFn` and would then read as the gate being inert. To re-hunt: drop the gate by
+// name, depth 2, at least 6,437 seeds. Why the flag stays `false` is argued once, in
+// `namecoalesce.ts`'s header, where the flag is set.
 
 // The one sound rule this generator cannot reach, and why. `type` needs two names whose
 // DECLARATIONS disagree, which takes a value pool of more than one width AND a mismatch that
