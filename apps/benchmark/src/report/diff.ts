@@ -32,10 +32,16 @@ import { rowsAddedSince } from './regression';
  *  "partition of the 290", a 297-predicted / 119-delivered shortfall, and a whole extra
  *  attribution round to explain the difference. The report publishes `score/maxScore` (the
  *  Explorer and the gap badge both render it), so by this list's own rule a denominator-only move
- *  is a published claim moving and must be named. */
+ *  is a published claim moving and must be named.
+ *
+ *  `compileErrors` is here for the same reason and no other: the report publishes it (the run line
+ *  prints `noncompile(k)`, the web FunctionDetail prints `compile errors {n}`), so a row sliding
+ *  `noncompile(3) → noncompile(7)` is a published claim moving. It was previously this gate's
+ *  own stand-in for an UNCOMPARED field, which asserted the opposite of this list's rule. Cost,
+ *  measured over `eb6dec7d`→`2fed1e42`: 0 extra lines — no row in that pair moved it. */
 const FIELDS = {
-  asmlift: ['outcome', 'score', 'maxScore', 'candidateLabel', 'source', 'quality'],
-  m2c: ['outcome', 'score', 'maxScore', 'source', 'quality'],
+  asmlift: ['outcome', 'score', 'maxScore', 'compileErrors', 'candidateLabel', 'source', 'quality'],
+  m2c: ['outcome', 'score', 'maxScore', 'compileErrors', 'source', 'quality'],
 } as const;
 
 /** Compared by VALUE with a stable key order — `quality` is an object, and comparing two of those
@@ -75,8 +81,11 @@ const show = (field: string, v: unknown, res?: Record<string, unknown>): string 
   if (field.endsWith('source')) {
     return `${String(v).length} bytes`;
   }
-  if (field === 'score' && typeof res?.maxScore === 'number') {
-    return `${String(v)}/${res.maxScore}`;
+  // A scored side ALWAYS renders a denominator, `?` included: `show` is called once per side, so
+  // a fresh side that lost its `maxScore` would otherwise print `290/404 → 171` and be read as
+  // `171/404` — the fixed-scale misreading this whole rendering exists to stop.
+  if (field === 'score' && res !== undefined && 'maxScore' in res) {
+    return `${String(v)}/${typeof res.maxScore === 'number' ? res.maxScore : '?'}`;
   }
   return typeof v === 'string' ? v : JSON.stringify(v);
 };

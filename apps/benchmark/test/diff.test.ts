@@ -60,12 +60,21 @@ describe('compareMeasurements', () => {
     expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.maxScore', from: '404', to: '387' }]);
   });
 
-  test('an unscored row still renders its score without a denominator', () => {
+  // `show` renders one SIDE at a time, so a denominator missing on one side only would print
+  // `290/404 → 171` and be read as `171/404` — the fixed-scale misreading this rendering exists to
+  // stop. A scored side with no `maxScore` therefore prints `?`, never a bare numerator.
+  test('a score whose denominator is missing renders `?`, on either side', () => {
     const r = compareMeasurements(
       out(row('a', { score: 12, maxScore: null })),
       out(row('a', { score: 14, maxScore: null })),
     );
-    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.score', from: '12', to: '14' }]);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.score', from: '12/?', to: '14/?' }]);
+
+    const oneSided = compareMeasurements(
+      out(row('b', { score: 290, maxScore: 404 })),
+      out(row('b', { score: 171, maxScore: null })),
+    );
+    expect(oneSided.changed).toContainEqual({ id: 'b', field: 'asmlift.score', from: '290/404', to: '171/?' });
   });
 
   test('the ranked WINNER changing identity at an equal score is a change', () => {
@@ -105,12 +114,25 @@ describe('compareMeasurements', () => {
     expect(r.ok).toBe(false);
   });
 
-  test('provenance and timings are not compared — only the listed fields', () => {
+  // `compileErrors` used to be this test's stand-in for an uncompared field, which asserted the
+  // opposite of the FIELDS rule: the run line prints `noncompile(k)` and the web detail prints
+  // `compile errors {n}`, so it IS a published claim. It is now watched, and the sentinel here is
+  // provenance alone — the thing the title actually names.
+  test('provenance is not compared — only the listed fields', () => {
     const base = out(row('a'));
     const fresh = out(row('a'));
     (fresh.meta as unknown as Record<string, unknown>).generatedAt = 'much later';
-    (fresh.results[0].asmlift as unknown as Record<string, unknown>).compileErrors = 7;
+    (fresh.results[0] as unknown as Record<string, unknown>).note = 'a re-run on another machine';
     expect(compareMeasurements(base, fresh).ok).toBe(true);
+  });
+
+  test('a compiler-error count that moves is a published claim moving', () => {
+    const r = compareMeasurements(
+      out(row('a', { outcome: 'noncompile' as Outcome, compileErrors: 3 })),
+      out(row('a', { outcome: 'noncompile' as Outcome, compileErrors: 7 })),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.compileErrors', from: '3', to: '7' }]);
   });
 });
 
