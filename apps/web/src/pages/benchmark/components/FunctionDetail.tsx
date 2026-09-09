@@ -20,12 +20,11 @@ function Code({ text, language }: { text: string; language: CodeLanguage }) {
   return <CodeBlock code={text} language={language} className={CODE_PRE} />;
 }
 
+/** A scored row's `<score>/<maxScore>`, never a bare numerator — `?` when the denominator is
+ *  missing. `maxScore` is the winning candidate's alignment length and moves with the winner, so a
+ *  numerator alone invites reading two runs as a subtraction on a fixed scale. */
 function scoreLabel(r: DecompilerResult): string {
-  if (r.score === null) {
-    return '—';
-  }
-  const max = r.maxScore ? `/${r.maxScore}` : '';
-  return `${r.score}${max}`;
+  return r.score === null ? '—' : `${r.score}/${r.maxScore ?? '?'}`;
 }
 
 /** The nonzero readability penalties, spelled out (nothing shown for clean output). */

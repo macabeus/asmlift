@@ -144,6 +144,14 @@ describe('fmt renders a gap over its denominator', () => {
     expect(fmt(d({ score: 12, maxScore: null }))).toBe('diff:12');
   });
 
+  // The artifact types it `number | null`, but this renderer also runs over hand-built and older
+  // objects where the key is simply ABSENT, and `diff:12/undefined` is a worse answer than
+  // `diff:12`. `bench diff`'s renderer degrades the same case (to `?`); two defences for one fact
+  // is how they come to disagree.
+  test('an ABSENT denominator degrades the same way a null one does', () => {
+    expect(fmt(d({ score: 12, maxScore: undefined as unknown as null }))).toBe('diff:12');
+  });
+
   test('the other outcomes are untouched', () => {
     expect(fmt(d({ outcome: 'match' }))).toBe('MATCH');
     expect(fmt(d({ outcome: 'noncompile', compileErrors: 3 }))).toBe('noncompile(3)');

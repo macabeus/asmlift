@@ -588,7 +588,8 @@ numbers; if the denominators differ, say so in the same sentence.
 
 (Runs recorded in this file from before that change print a bare numerator, so their `[score]` md5s
 are not comparable with a run made today; the line _counts_ still are. **Their stdout md5s are
-untouched** — the denominator is rendered by `scoreOf`, whose only consumer is `rankedStderr`, and
+untouched** — every score this CLI prints is rendered by `scoreOf`, and all of its consumers write
+to stderr (`rankedStderr`, and the `[progress]` line through the process entry point's stderr sink);
 the generated C on stdout is byte-identical across the change.)
 
 ## Write it down

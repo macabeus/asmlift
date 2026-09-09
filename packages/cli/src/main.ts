@@ -174,8 +174,12 @@ export interface ObjInput {
   asmData: typeof asmDataForObject;
 }
 
-/** One candidate's score as `<score>/<rows>` — the numerator over the denominator it was measured
- *  against, on both the `[score]` table and the `[ranked]` line readers are told to quote.
+/** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
+ *
+ *  THE ONE RENDERER FOR EVERY SCORE THIS CLI PRINTS: the `[score]` table, the `[ranked]` line's
+ *  `best …`, the `[withheld]` line and the `[progress]` line. It was three renderings in this one
+ *  file for a while, which is the failure the shape exists to stop wearing a different hat — a
+ *  reader comparing two runs cannot be asked to know which lines carry a denominator.
  *
  *  `rows` is objdiff's total row count for THIS candidate's alignment against the target, so it is
  *  a property of the candidate and not of the target: a different spelling aligns differently and
@@ -183,19 +187,15 @@ export interface ObjInput {
  *  before/after comparison, and printing the numerator alone makes that comparison read as a
  *  subtraction on a fixed scale. It is not one — `kleod:CountCollectedGems:agbcc` went 290/404 →
  *  171/387 across two committed artifacts, 17 points of which were the scale, and an attribution
- *  round was spent explaining the difference. */
-export function scoreOf(s: { score: number; rows: number; match: boolean }): string {
-  return `${s.score}/${s.rows}${s.match ? ' (match)' : ''}`;
+ *  round was spent explaining the difference.
+ *
+ *  Both fields are OPTIONAL, and each absence means one thing. No `rows`: the scorer that produced
+ *  this score supplied none (core rank.ts's `WithheldCandidate` types it optional for exactly
+ *  that), so the numerator prints alone rather than against an invented denominator — never a `0`,
+ *  which would read as a real scale. No `match`: the caller does not know, so nothing is claimed. */
+export function scoreOf(s: { score: number; rows?: number; match?: boolean }): string {
+  return `${s.score}${s.rows === undefined ? '' : `/${s.rows}`}${s.match === true ? ' (match)' : ''}`;
 }
-
-/** A WITHHELD candidate's score, in the same `<score>/<rows>` shape as a published one. Its
- *  numerator is read across runs exactly like the `[score]` table's — a withheld sibling's score
- *  is the evidence that a proof-gated spelling was close — so it must not be the one line in this
- *  log that invites a subtraction on a fixed scale. `rows` is optional at the type level
- *  (core rank.ts `WithheldCandidate`) because the scorer that produced it need not supply one;
- *  absent, the numerator prints alone rather than against an invented denominator. */
-const withheldScore = (w: { score: number; rows?: number }): string =>
-  w.rows === undefined ? String(w.score) : `${w.score}/${w.rows}`;
 
 export interface CliResult {
   code: number;
@@ -239,7 +239,7 @@ function rankedStderr(a: {
   // them out entirely would make `candidates scored` under-count the fan with no trace.
   const held = ranked.withheld.length
     ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
-      `${ranked.withheld[0].label} at ${withheldScore(ranked.withheld[0])}: ${ranked.withheld[0].why}\n`
+      `${ranked.withheld[0].label} at ${scoreOf(ranked.withheld[0])}: ${ranked.withheld[0].why}\n`
     : '';
   // THE ASSUMPTIONS THE SCORE RESTS ON. A candidate names globals the asm's own literal pool
   // named, and where no symbol map knows them asmlift synthesizes their declarations — width
@@ -643,7 +643,10 @@ export async function runCli(
             return;
           }
           lastTick = now;
-          const best = bestSoFar === undefined ? '' : `, best so far ${bestSoFar.score}/${bestSoFar.rows}`;
+          // Same renderer as the `[score]` table, `(match)` included: a reader watching a
+          // six-figure fan wants "the best so far is already a match" from this line, and a score
+          // spelled one way here and another there is what this item exists to stop.
+          const best = bestSoFar === undefined ? '' : `, best so far ${scoreOf(bestSoFar)}`;
           progressSink(`asmlift: [progress] ${doneN}/${total} candidates scored${best}\n`);
         }
       : undefined;

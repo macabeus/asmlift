@@ -37,9 +37,13 @@ export interface RankOptions {
   /** a project's own toolchain — overrides the compiler registry */
   compile?: CandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
-   *  best score seen SO FAR — the whole `MatchScore`, not its numerator, because the denominator
-   *  belongs to that candidate's alignment and two candidates' numerators are not on one scale.
-   *  The ranking below is what decides the winner. */
+   *  best score seen SO FAR — the whole `MatchScore`, not its numerator, so the line can PRINT the
+   *  denominator that numerator was measured against. This is not a claim that the ranking is
+   *  wrong to compare bare numerators: core rank.ts's `compareScored` ranks one target's candidates
+   *  by `score` alone and that is right — every candidate is scored against the same target, and
+   *  fewer differing rows is a better candidate whatever the alignment length. What is not a
+   *  subtraction is TWO RUNS' scores, where the winner and therefore the alignment changed
+   *  underneath (290/404 → 171/387). The ranking below is what decides the winner. */
   onProgress?: (done: number, total: number, bestSoFar: MatchScore | undefined) => void;
   /** Where this run's phase timings accumulate (phase.ts). Absent = no timing taken. The serial
    *  driver can only separate the compile from the score when `compile` is supplied; reached

@@ -248,3 +248,17 @@ test('a score is rendered over the row count it was measured against', () => {
 test('a match still says so, and still shows the scale it matched on', () => {
   expect(scoreOf({ score: 0, rows: 387, match: true })).toBe('0/387 (match)');
 });
+
+// ONE RENDERER FOR ALL FOUR LINES. `scoreOf` also spells the `[withheld]` and `[progress]` scores,
+// which were two separate renderings in the same file — the divergence this shape exists to stop.
+// A withheld candidate's `rows` is optional at the type level (core `WithheldCandidate`) because
+// the scorer that produced it need not supply one, and `match` is absent there entirely.
+test('an absent row count prints the numerator alone, never against an invented scale', () => {
+  expect(scoreOf({ score: 35 })).toBe('35');
+  expect(scoreOf({ score: 35, rows: 47 })).toBe('35/47');
+});
+
+test('nothing is claimed about matching when the caller does not know', () => {
+  expect(scoreOf({ score: 0, rows: 47 })).toBe('0/47');
+  expect(scoreOf({ score: 0, rows: 47, match: false })).toBe('0/47');
+});

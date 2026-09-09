@@ -51,7 +51,13 @@ export function fmt(d: DecompilerResult): string {
     return 'MATCH';
   }
   if (d.outcome === 'nonmatch') {
-    return d.maxScore === null ? `diff:${d.score}` : `diff:${d.score}/${d.maxScore}`;
+    // THE SAME PREDICATE `bench diff`'s renderer uses (`typeof res.maxScore === 'number'`), and
+    // deliberately not `=== null`: the artifact types it `number | null`, but this renderer also
+    // runs over hand-built and older objects where the key is simply ABSENT, and `diff:12/undefined`
+    // is a worse answer than `diff:12`. Two defences written for one fact is how they come to
+    // disagree — this one degrades to the bare numerator, that one to `?`, and both must degrade
+    // on the same condition.
+    return typeof d.maxScore === 'number' ? `diff:${d.score}/${d.maxScore}` : `diff:${d.score}`;
   }
   if (d.outcome === 'noncompile') {
     return `noncompile(${d.compileErrors})`;
