@@ -9,7 +9,8 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { unmergeJoins } from '../src/l3/unmerge';
+import { tallying, without } from '../src/l3/gates';
+import { UNMERGE_ARM_GATES, UNMERGE_RUNG_GATES, UNMERGE_SITE_GATES, unmergeJoins } from '../src/l3/unmerge';
 import { c, v } from './helpers';
 
 const asg = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
@@ -587,5 +588,55 @@ describe('a stale mention count is caught by re-reading the result', () => {
       ...(s.k === 'if' ? [...s.then, ...s.else].flatMap(walk) : []),
     ];
     expect(out!.body.flatMap(walk)).toEqual([]);
+  });
+});
+
+// THE ACCEPTANCE TEST FOR THE TABLES: a caller outside this pass can learn WHICH rule refused, and
+// can drop one, without editing `l3/unmerge.ts`. Before the conversion both took an instrumented
+// patch and a revert — which is the episode recorded in the file's header (56 firings, 40 on a
+// non-`if` tail and 16 on an empty arm) and the evidence the conversion was licensed on.
+describe('the refusal tables are readable from outside', () => {
+  test('a census names the rule that refused each site, and counts it', () => {
+    const t = tallying(UNMERGE_SITE_GATES);
+    const gates = { site: t.gates };
+    // one empty arm, one join reading nothing the arms define, and one that fires
+    unmergeJoins(fn([iff([asg('p', v('a')), asg('x', c(1))], []), store(v('p'), v('x'))]), gates);
+    unmergeJoins(fn([iff([asg('x', c(1))], [asg('x', c(2))]), store(v('g'), c(0))], ['x']), gates);
+    unmergeJoins(fn([iff([asg('x', c(1))], [asg('x', c(2))]), store(v('h'), c(0))], ['x']), gates);
+    expect(unmergeJoins(fn(merged()), gates)).not.toBeNull();
+    expect(t.refusals()).toEqual([
+      ['no-merge-name', 2],
+      ['empty-arm', 1],
+    ]);
+  });
+
+  test('the RUNG census reproduces the split the instrumented run measured, without the patch', () => {
+    const t = tallying(UNMERGE_RUNG_GATES);
+    // an arm whose tail is a `store` rather than an `if`, and — one level down a ladder, where the
+    // site table's own `empty-arm` cannot reach it — an EMPTY terminal arm
+    unmergeJoins(fn([iff([asg('x', c(1)), store(v('g'), c(0))], [asg('x', c(2))]), store(v('h'), v('x'))], ['x']), {
+      rung: t.gates,
+    });
+    unmergeJoins(fn([iff([asg('x', c(1))], [iff([asg('x', c(2))], [])]), store(v('g'), v('x'))], ['x']), {
+      rung: t.gates,
+    });
+    expect(t.refusals()).toEqual([
+      ['empty-arm-has-no-tail', 1],
+      ['tail-is-not-an-if', 1],
+    ]);
+  });
+
+  test('a gate can be ABLATED from outside, and the pass then admits what it refused', () => {
+    // the `an intervening assignment that CLOBBERS what a definition reads` fixture: `a = 9` runs
+    // before the point `p = a` is evaluated at
+    const body = [
+      iff([asg('p', v('a')), asg('a', c(9)), asg('x', c(1))], [asg('p', v('b')), asg('a', c(9)), asg('x', c(2))]),
+      store(v('p'), v('x')),
+    ];
+    const names = ['p', 'x', 'a'];
+    expect(unmergeJoins(fn(body, names))).toBeNull();
+    expect(
+      unmergeJoins(fn(body, names), { arm: without(UNMERGE_ARM_GATES, 'intervening-write-to-a-moved-read') }),
+    ).not.toBeNull();
   });
 });
