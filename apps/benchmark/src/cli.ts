@@ -385,6 +385,9 @@ switch (command) {
       process.exit(2);
     }
     const { fan } = await import('./run/fan');
+    // `break` under an unconditional `process.exit` is unreachable and stays anyway: every other
+    // case here ends with one, and a `return` added to this block later would otherwise fall
+    // straight through into `case 'fidelity'`.
     process.exit(
       fan(rowId, {
         ...(opts.show ? { show: opts.show } : {}),
@@ -392,6 +395,7 @@ switch (command) {
         force: opts.force,
       }),
     );
+    break;
   }
   case 'fidelity': {
     const jobs = Number(opts.jobs ?? Math.min(8, cpus().length));

@@ -7,6 +7,7 @@ import { renderDeclarations } from '@asmlift/core/declare';
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
 
+import { scrubObjectHeader } from '../asm-scrub';
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
 import { rowFeatures } from '../cases/features';
 import type { Toolchain } from '../toolchains';
@@ -224,7 +225,8 @@ export function evaluate(
     // the dump header names the object's ABSOLUTE path (cache dir — machine-specific); scrub it
     // so published rows and scripts are byte-identical across machines. Nothing parses the
     // header line (the normalizer and --asm-data read the tables below it).
-    asmDump = cachedAsmDumpText(obj, tc.id)?.replace(/^\/\S+\.o:/m, 'target.o:');
+    const dump = cachedAsmDumpText(obj, tc.id);
+    asmDump = dump === undefined ? undefined : scrubObjectHeader(dump);
   } catch {
     // text-only fallback
   }

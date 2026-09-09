@@ -4,6 +4,7 @@
 import type { BenchMeta, BenchOutput, DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
 import { writeFileSync } from 'node:fs';
 
+import { scrubObjectHeader } from '../asm-scrub';
 import type { Case } from '../cases/types';
 import { type EvalSpec, evaluate } from '../eval/evaluate';
 import { asmliftProvenance } from '../provenance';
@@ -119,7 +120,7 @@ export function runCases(
       // machine-specific); scrub it so targetAsm — and everything embedding it (scripts, m2c
       // cache keys) — is byte-stable across machines and cache generations. No parser reads
       // the header line.
-      asm = asm.replace(/^\/\S+\.o:/m, 'target.o:');
+      asm = scrubObjectHeader(asm);
     } catch (e) {
       // couldn't produce the scoring target — a HARNESS defect, not a decompiler outcome.
       // Finish the shard (keep the other rows), then fail loudly below: a case with no row

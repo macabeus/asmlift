@@ -34,14 +34,20 @@ export type Scorer = (candC: string, sym: string, obj: string, declarations?: st
  *  documents a 112,896-vs-135,936 spread between two checkouts of one project, and a dropped
  *  `symbols` here reproduces exactly that class of discrepancy while printing the row's own id
  *  beside it. Built ONCE, here, and read by every driver that claims to show what the benchmark
- *  measured. */
+ *  measured.
+ *
+ *  The return type is ANNOTATED rather than inferred, and that annotation is the guard the
+ *  paragraph above asks for: an inferred object literal accepts a misspelled option silently (a
+ *  `symbolz: 1` typechecked clean here for as long as this function existed), and a mistyped
+ *  option is a dropped one. With `RankOptions` named, tsc answers "'symbolz' does not exist in
+ *  type 'RankOptions'. Did you mean to write 'symbols'?". */
 export function rankOptionsFor(
   tc: Toolchain,
   obj: string,
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
-) {
+): RankOptions {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
   // dense MIPS/PPC switch can recover. Best-effort — a missing/failed objdump (or agbcc, whose
   // table is inline) yields `undefined`.

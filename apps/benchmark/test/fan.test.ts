@@ -1,10 +1,26 @@
 import type { RankedCandidate, RankedResult } from '@asmlift/cli/rank';
+import { rankedSummaryLine } from '@asmlift/cli/score-format';
 import { describe, expect, it } from 'vitest';
 
 import type { Case } from '../src/cases/types';
-import { FAN_SCORE_LIMIT, pickCandidate, renderFan, scoreLine, selectCases } from '../src/run/fan';
+import {
+  FAN_SCORE_LIMIT,
+  SCORE_SECONDS_PER_CANDIDATE,
+  estimatedScoreTime,
+  optionRefusal,
+  pickCandidate,
+  renderFan,
+  scoreLine,
+  selectCases,
+  synthesizedRefs,
+  unshowable,
+} from '../src/run/fan';
 
 const row = (id: string): Case => ({ id }) as Case;
+
+/** A fan whose winner rests on no invented declaration, from a named tree — the two fields the
+ *  `[ranked]` line carries that are claims rather than counts. */
+const NO_DECLS = { synthesized: [], stamp: 'asmlift source deadbee' };
 
 const cand = (label: string, score: number, rows: number, match = false): RankedCandidate =>
   ({
@@ -67,11 +83,13 @@ describe('renderFan', () => {
   // THE POINT OF THE COMMAND. `eval/asmlift.ts` publishes the winner and discards
   // `RankedResult.candidates`; six rounds hand-wrote a script to get the rest back.
   it('prints every candidate, not only the winner', () => {
-    const out = renderFan(ranked());
+    const out = renderFan(ranked(), NO_DECLS);
     expect(out).toContain('asmlift: [score] a: 0/12 (match)');
     expect(out).toContain('asmlift: [score] b: 3/12');
     expect(out).toContain('asmlift: [score] c: 4/13');
-    expect(out).toContain('asmlift: [ranked] 3 candidate(s) scored, 0 dropped, 0 withheld, best a: 0/12 (match)');
+    expect(out).toContain(
+      'asmlift: [ranked] 3 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best a: 0/12 (match) [asmlift source deadbee]',
+    );
   });
 
   // The CLI prints "N candidate(s) failed to score; first: …" — a footnote under a score someone
@@ -89,6 +107,7 @@ describe('renderFan', () => {
           { label: 'w2', score: 5, why: 'needs a byte-exact proof' },
         ],
       }),
+      NO_DECLS,
     );
     expect(out).toContain('asmlift: [dropped] d1: error: x undeclared');
     expect(out).toContain('asmlift: [dropped] d2: error: y undeclared');
@@ -121,4 +140,131 @@ describe('pickCandidate', () => {
 // this command is FOR, so tightening it has to come with a new measurement rather than a hunch.
 it('will score a fan the size of the largest row measured through it', () => {
   expect(FAN_SCORE_LIMIT).toBeGreaterThan(800);
+});
+
+// F1: the `[ranked]` line is the one line the briefs tell a round to PASTE, and it now has two
+// producers — the CLI's ranked run and this command. The fields at risk are the ones that are not
+// counts of the fan: `synthesized` (the score rests on declarations asmlift invented) and the
+// source stamp (which tree produced it). The first spelling of this line here dropped both.
+describe('the [ranked] line', () => {
+  const ranked = (over: Partial<RankedResult> = {}): RankedResult =>
+    ({
+      best: cand('a', 0, 12, true),
+      candidates: [cand('a', 0, 12, true), cand('b', 3, 12)],
+      dropped: [],
+      withheld: [],
+      ...over,
+    }) as RankedResult;
+
+  it('is rendered by the one shared renderer, so the two producers cannot drift', () => {
+    const out = renderFan(ranked(), NO_DECLS);
+    expect(out.split('\n').at(-1)).toBe(
+      rankedSummaryLine({
+        scored: 2,
+        dropped: 0,
+        withheld: 0,
+        synthesized: 0,
+        best: cand('a', 0, 12, true),
+        stamp: 'asmlift source deadbee',
+      }),
+    );
+  });
+
+  // A `(match)` fitted to the target's own asm by declarations asmlift invented is publishable by
+  // pasting this line, unless the line says so.
+  it('carries the synthesized count and names the declarations it counted', () => {
+    const refs = [{ name: 'gFoo', synthesized: true, info: { kind: 'scalar', width: 4, signed: false } }];
+    const out = renderFan(ranked(), {
+      synthesized: refs as unknown as Parameters<typeof renderFan>[1]['synthesized'],
+      stamp: 'asmlift source deadbee+dirty',
+    });
+    expect(out).toContain('asmlift: [declared] 1 declaration(s) synthesized from the target asm');
+    expect(out).toContain('gFoo');
+    expect(out.split('\n').at(-1)).toContain('1 synthesized');
+    // …and the tree, on the same line, because a stamp anywhere else is a stamp nobody pastes.
+    expect(out.split('\n').at(-1)).toContain('[asmlift source deadbee+dirty]');
+  });
+});
+
+// The world a row's candidates compile in decides whether an invented declaration can affect the
+// score at all: a real row is compiled through the project's headers (compile/real.ts drops the
+// block), a synthetic row has nothing but the block.
+describe('synthesizedRefs', () => {
+  const withRefs = {
+    label: 'a',
+    symbolRefs: [
+      { name: 'gA', synthesized: true },
+      { name: 'gB', synthesized: false },
+    ],
+  } as unknown as RankedCandidate;
+
+  it('counts an invented declaration on a synthetic row, where nothing else declares the name', () => {
+    expect(synthesizedRefs('synthetic', withRefs).map((r) => r.name)).toEqual(['gA']);
+  });
+
+  it('counts none on a real row, whose every scoring rung is the project`s own headers', () => {
+    expect(synthesizedRefs('real', withRefs)).toEqual([]);
+  });
+});
+
+// F2 / the breaker's SHOULD-FIX: `--enumerate --show best` printed `unsigned` on
+// `synthetic:sizebound:agbcc`, a near-worst spelling in a fan whose winner scores 8/81 — under the
+// name of the winner, to a round both briefs had told that `--show best` is the winner.
+describe('optionRefusal', () => {
+  it('refuses --show best under --enumerate, where nothing has been scored', () => {
+    expect(optionRefusal({ enumerateOnly: true, show: 'best' })).toContain('no winner to name');
+  });
+
+  it('allows --show <label> under --enumerate — an enumerated candidate carries its source', () => {
+    expect(optionRefusal({ enumerateOnly: true, show: 'unsigned' })).toBeUndefined();
+  });
+
+  it('allows --show best on the scored path, which is sorted best-first', () => {
+    expect(optionRefusal({ show: 'best' })).toBeUndefined();
+  });
+});
+
+// The refusal's job is to price the run it is refusing. The sentence this replaces said "well over
+// an hour" for any fan over 2,000 while the same file's doc-comment said two and a half minutes;
+// measured, 800 candidates score in 47.9 s cold, so the doc-comment was right and the refusal was
+// wrong by ~20x — steering a reader off `--force` on a row that answers in minutes.
+describe('estimatedScoreTime', () => {
+  it('prices the limit itself in minutes, not hours', () => {
+    expect(estimatedScoreTime(FAN_SCORE_LIMIT)).toBe('about 2 min');
+  });
+
+  it('is the measured cold rate, and the constant is what was measured', () => {
+    expect(SCORE_SECONDS_PER_CANDIDATE * 800).toBeCloseTo(48, 0);
+    expect(estimatedScoreTime(800)).toBe('about 48 s');
+  });
+
+  // LoadBGTilemapData: the row this guard exists for, and the run nobody starts by accident.
+  it('prices LoadBGTilemapData`s fan in hours', () => {
+    expect(estimatedScoreTime(225792)).toBe('about 3.8 h');
+  });
+});
+
+// F4: a dropped candidate's source is what a reader most wants (it is the spelling that failed to
+// compile) and it is the one `--show` cannot reach — `DroppedCandidate` carries no source at all.
+// Sending them to the `[score]` lines for it is sending them to look for a line that is not there.
+describe('unshowable', () => {
+  const ranked = {
+    candidates: [],
+    dropped: [{ label: 'raw-globals', error: 'gFoo undeclared' }],
+    withheld: [{ label: 'unreduce', score: 2, why: 'needs a byte-exact proof' }],
+  } as unknown as RankedResult;
+
+  it('says a label was DROPPED, and names the flag that can still print its source', () => {
+    const msg = unshowable('raw-globals', ranked);
+    expect(msg).toContain('was dropped');
+    expect(msg).toContain('--enumerate --show raw-globals');
+  });
+
+  it('says a label was WITHHELD — it scored, so `no such candidate` would be a lie', () => {
+    expect(unshowable('unreduce', ranked)).toContain('was withheld');
+  });
+
+  it('falls back to the fan listing for a label nothing carries', () => {
+    expect(unshowable('nope', ranked)).toContain('see the [score] lines above');
+  });
 });
