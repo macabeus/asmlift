@@ -568,6 +568,117 @@ Adopt this when a pass's refusals are load-bearing — not for every `if` in the
 because a wrong hoist there costs bytes and a match, never meaning, and saying so plainly is worth
 more than three gates pretending to a soundness they do not have.
 
+**THE UNIT OF THAT DECISION IS THE REFUSAL, NOT THE PASS — a pass may be PARTIALLY tabled, provided
+the residue is NAMED.** "Adopt this" is asked about a file, and the answer is almost never all of it.
+Asked file-wide the question gets declined on cost, which is the wrong reason and settles nothing for
+the next round that asks it. Three shipped passes answer it three different ways, none of them a
+defect — and a fourth entry says what tabling has to INCLUDE either way:
+
+- **Partially tabled, residue named.** [`structure/hazards.ts`](../packages/core/src/structure/hazards.ts)
+  holds five per-candidate rules in `PREUPDATE_SINK_GATES`. The two SET-level rules — two slots
+  wanting one name, a slot that stays behind reading a sunk name — are deliberately outside it,
+  because they are properties of the whole edge rather than of a candidate, and the table's own doc
+  comment says both that they exist and where they live (`sinkablePreUpdateSlots`, "with the same
+  refusal discipline"). That comment is the whole obligation. A partial table with the residue named
+  is finished work; a partial table that reads as a complete one is the defect. Note what that
+  exclusion is NOT: both rules judge one prepared edge
+  (`grep -n "const names = new Set(dest.values())" packages/core/src/structure/hazards.ts`), so the
+  next bullet's bar does not touch them. They are outside `PREUPDATE_SINK_GATES` because a
+  `Gate<Ctx>` is per-candidate and these would need a SECOND table over a different `Ctx` — which the
+  paragraph below says to build when a round has had to instrument them, and not before.
+- **Not tabled, and the decline left in prose.** `pointeeElement` in
+  [`structure/structure.ts`](../packages/core/src/structure/structure.ts) lists its refusals in
+  prose and states that it is "NOT a `Gate` table … unlike `FRESH_MERGE_GATES` and
+  `CARRIER_NAME_GATES` in this same file: those refusals are predicates over ONE prepared context,
+  while these interleave with the computations that produce the values the later ones test […], so
+  building that Ctx would run all of it on inputs the earlier gates reject." That reason is the EAGER
+  reading of "prepared", which the same file answers in `CarrierName`: its fields are getters
+  (`grep -n "THE FIELDS ARE LAZY" packages/core/src/structure/structure.ts`), so a later gate's input
+  is computed only when the earlier ones let it be asked, and blame is unchanged.
+  `pointeeElement` is pure, so each of its refusals is expressible that way too and its interleaving
+  is a cost, not a bar. **The bar that IS structural is the lazy one: a refusal whose input cannot be
+  prepared even as a memoized getter — because preparing it performs an effect, or depends on an
+  order the pass itself establishes — is not a candidate for the table at any price.** Check it in
+  that form, and only in that form; the eager form returns either verdict for the same pass. No pass
+  here is a measured inhabitant of it, `pointeeElement` included: it stays untabled on the paragraph
+  below, which is a reason that can change.
+- **Fully tabled, and its inline conditions are not residue.**
+  [`structure/namecoalesce.ts`](../packages/core/src/structure/namecoalesce.ts) has every refusal in
+  `NAME_COALESCE_GATES`; the `continue`/`return`s left in `coalesceNames`' walk are the ENUMERATOR —
+  which pairs exist to be judged at all — and enumeration is not residue. Nor is a rule DERIVED away:
+  `mayMerge` records that "two loops' variables always escape each other … so the enclosing-loop rule
+  needs no gate of its own", which is residue that no longer exists. Counting either as an untabled
+  refusal invites a conversion that buys nothing.
+- **Tabled AND REPORTED — the half that actually removes the loop.** A table on its own changes WHAT
+  you patch (one call site instead of four `if`s), not WHETHER you patch. Of the 27 `firstRejection(`
+  call sites outside `l3/gates.ts`, **21 compare the result to `null` on the spot and throw the id
+  away**; six keep it, in the two shipped forms — a `refusals` map in the return value
+  ([`l3/coalesce.ts`](../packages/core/src/l3/coalesce.ts),
+  [`l3/scopebase.ts`](../packages/core/src/l3/scopebase.ts), `structure/namecoalesce.ts`), and a
+  census EXPORT off the shipped table that the shipped path never calls (`arrayShapeRefusals` in
+  [`raise/globalshape.ts`](../packages/core/src/raise/globalshape.ts), whose doc comment states the
+  whole idea: "the one place an attribution is measured rather than asserted"). Neither form leaves
+  `@asmlift/core`: no CLI flag, bench field or env var prints a gate id, so an attribution over the
+  lifted corpus is still a written test — or, on the 21, still a patch. **Tabling a pass and adding
+  neither is half the job**, and the missing half is small: a map, one `set` on the rejection, one
+  field on the return type — six lines in `structure/namecoalesce.ts`, against the loop the next
+  paragraph prices.
+
+**And converting a pass whose refusals nobody has had to instrument buys nothing.** What a table
+removes is the edit-instrument-revert loop — patch a `return null` to log, re-run, revert — so the
+trigger to table a pass is that someone has already paid that loop on it, not that the pass has many
+refusals. `CARRIER_NAME_GATES` is the model: it was grafted by the round that needed a rejection
+reason out of `canTakeName`, and it shipped as that round's own remediation — #164 (`428f5706`),
+whose commit body records that the rules "were four `if`s inside a 5000-line function" and that
+"naming which one fires on a given row took an instrumented patch and a revert".
+
+There is exactly one other admission, and it is the mirror of that one — read it together with **A
+GATE CAN ALSO BE STARVED FROM ABOVE** below. Nobody can have paid instrument minutes on a rule
+nothing reaches, so the trigger above would make a starved gate permanently ineligible. **Instrument
+time is the trigger for refusals that fire; a refusal suspected of never firing at all is the other
+admission.** Neither admission is "this file has a lot of `if`s". A round tabling a pass on THIS
+admission builds the bullet above's `refusals` map in the same change, or it has proved nothing.
+
+**That map is where the starvation proof STARTS, not where it ends.** `firstRejection` returns the
+FIRST gate in table order that rejects, so a rule absent from the census is either starved or
+SHADOWED by an earlier one — and `ADDRESS_GATES`' own dated census
+(`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`) ships two of the second kind
+(`no-subscript` rejects 21 symbols run alone and is first for none of them;
+`stride-is-not-the-element` 25 and none). Telling the two apart takes the other experiment that
+census records, the rule run with the rest of the table EMPTY. A rule that rejects nothing even then
+is a question about what the upstream passes leave in the program, which the section below answers
+with a reach test through the real pipeline, never with a count.
+
+Refusal count predicts none of it, on any way of counting: `structure/switch-recover.ts` has 44
+refusal-shaped exits (`grep -cE 'return (null|false)\b'`) and cost 6.5 instrument-minutes across
+seven rounds, while `raise/const.ts` has **none** by that grep, four early exits in all, and exactly
+ONE refusal by the rule above — the other three are the enumerator, and the file's own comment marks
+the one ("THE REFUSAL: this shape is not a literal being materialised") — and it cost 38.6 minutes.
+Nor does file size. Those minutes are from a 2026-09 retrospective over the CountCollectedGems
+rounds, whose transcripts are not in this repo — treat them as an order of magnitude you cannot
+re-run, not as a measurement you can cite back. The same retrospective priced the whole
+edit-and-revert population of those rounds at ~69 minutes against ~764 minutes of measurement runs in
+the same spans, which a table removes none of: you still run the bench to get the counts.
+
+**So this section licenses converting the passes whose refusals a round has actually had to
+instrument, one at a time, each naming its residue. It does not license a sweep**, and a proposal to
+table N passes at once should be read as a proposal to table the one or two of them with measured
+instrument time. In that retrospective that is `l3/unmerge.ts` (47.7 min, 12 refusal-shaped exits) —
+the answer to "which pass next" for as long as nobody measures a third. `raise/const.ts` (38.6 min)
+is NOT, and it is the standing warning about this selector: the recount above found three of its four
+early exits are the enumerator, so a table over it would hold ONE gate — the conversion the bullet
+above declines. The minutes are priced per FILE and this rule is consumed per REFUSAL; re-read a
+candidate's refusals by the counting rule before selecting it, because `const.ts` is where the two
+readings diverge. `raise/magicdiv.ts` — 18 refusal-shaped exits by that same grep, and no instrument
+event anyone recorded — is the shape a sweep picks first and this rule declines.
+
+One corollary, same economy: a refusal already known and CONTAINED is recorded beside the gate
+together with the argument that contains it, so the next round cites it instead of re-deriving it.
+A containment argument nobody wrote down gets re-proved by every round that reads the gate. Two
+instances of it ship, in the two files the bullets above cite: `structure/hazards.ts` on the third
+parallel-copy question ("needs no rule … Every leaf such an expression could read is already refused
+by a per-candidate gate", then naming all three), and `namecoalesce`'s enclosing-loop derivation.
+
 **A gate's PREMISE can be a target capability, and when it is, that is where it belongs.**
 `l3/unreduce.ts` deletes a loop-carried accumulator and re-spells each read as a closed form, which
 means a memory read in the accumulator's init is evaluated at each read instead of once where the
@@ -702,7 +813,10 @@ followed the second inhabitant, never preceded it.
   It costs a few lines and buys the ablation ("drop this rule and something breaks") as a test
   rather than a claim. A pass whose gates only trade bytes can say so in the table and skip the
   guards; one that declares a gate sound now owes a differential test, and the contract enforces
-  the debt.
+  the debt. Convert the REFUSALS a round has had to instrument, not the file: a partial table whose
+  residue is named is the normal shipped shape here, and a pass whose refusals cannot be judged
+  against one prepared context is not a candidate at all. That passage —
+  `grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md` — is this bullet's scope statement.
 - Add a **new op / representation** only when a capability genuinely cannot be expressed in the
   current one _and_ the differ can prove the result matches. Constant-offset access did not clear
   that bar; variable indexing did. If the corpus stays leaf/arithmetic-heavy, the tower may never

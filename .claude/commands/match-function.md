@@ -96,6 +96,16 @@ Per commit:
   particular **"earn the level"**: do not add a representation, opcode, or pass boundary that has no
   inhabitant. Prefer patterns-as-data over new imperative special cases. Respect the `L1 → L2 → L3`
   stage contracts (`packages/core/src/contracts.ts`) and keep `@asmlift/core` browser-pure.
+- If the step converts a pass's refusals to a `Gate` table — or you are tempted to, because you just
+  patched a `return null` to log why it fired — read the passage
+  `grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md` finds, FIRST. It is settled: table the
+  refusals you had to instrument — or one you suspect never fires, which is the other admission —
+  leave the rest, name the residue in the table's doc comment. Tabling ALL of a small pass's refusals
+  is that, not a sweep. And table it REPORTED: a `Gate` table whose id is compared to `null` and
+  dropped has shortened the instrument loop, not removed it, so return a `refusals` map
+  (`structure/namecoalesce.ts`) or export a census off the table (`arrayShapeRefusals` in
+  `raise/globalshape.ts`) in the same change. What is settled is the UNIT: convert refusals, not
+  files — do not re-open whether a file should adopt `Gate<Ctx>` wholesale.
 - Add unit tests in `packages/core/test/` next to the sibling capability's tests. A capability with
   no test that fails before the change is not done.
 - Gate: `npx vitest run` (NOT `pnpm test:offline` — see Phase 4's fourth bullet: `test:offline`
