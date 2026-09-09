@@ -404,7 +404,7 @@ switch (command) {
   case 'gates': {
     // gates --pass <id> [--only <row>] [--toolchain id] — the refusal census of a tabled pass.
     // CORPUS-WIDE by default and that is affordable, unlike `fan`: nothing is COMPILED here, the
-    // enumeration alone answers the question (~60 s over the agbcc synthetic tier).
+    // enumeration alone answers the question (~10 s over the agbcc synthetic tier).
     const { CENSUSABLE_PASSES, gateCensus } = await import('./run/gate-census');
     if (!opts.pass) {
       console.error(`usage: pnpm bench gates --pass <${CENSUSABLE_PASSES.join('|')}> [--only <row>] [--toolchain id]`);

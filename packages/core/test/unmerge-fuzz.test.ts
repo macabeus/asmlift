@@ -325,12 +325,13 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
 // yields only `sound: false` gates, and `UNMERGE_ARM_GATES` and `UNMERGE_TOTALITY_GATES` are sound
 // throughout — so today this runs 6 ablations drawn from 3 tables, and the `> 4` floor below is
 // "the enumeration still found some", not a count of the tables. All five are listed anyway
-// because the list then grows for free when a heuristic is added to either of them. `ablateHeuristic` exists so a shipped axis may
-// drop a `sound: false` gate and re-run the pass as a ranked candidate; `rank.ts`'s PRE-FAN loop
-// wraps `apply` in `try { } catch { }`, so a pass that throws under one of those ablations does not
-// fail loudly — it yields zero candidates and reads as an ordinary decline. That is exactly what a
-// cast standing where a narrowing used to stand produced here: ablating `tail-is-not-an-if` left
-// `pushJoin` reading `.then` off an `assign`.
+// because the list then grows for free when a heuristic is added to either of them.
+//
+// `ablateHeuristic` exists so a shipped axis may drop a `sound: false` gate and re-run the pass as
+// a ranked candidate; `rank.ts`'s PRE-FAN loop wraps `apply` in `try { } catch { }`, so a pass that
+// throws under one of those ablations does not fail loudly — it yields zero candidates and reads as
+// an ordinary decline. Ablating `tail-is-not-an-if` is the live instance: it leaves the rung
+// refusal to `pushJoin`'s own narrowing, and a cast there would read `.then` off an `assign`.
 describe('unmerge fuzz — every ablation a shipped axis is allowed to make', () => {
   test('declines, and never throws', () => {
     const heuristics = <C>(t: readonly Gate<C>[]): string[] => t.filter((g) => !g.sound).map((g) => g.id);

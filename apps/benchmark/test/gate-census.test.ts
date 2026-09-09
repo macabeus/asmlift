@@ -1,6 +1,5 @@
 // `pnpm bench gates` (src/run/gate-census.ts) is the supported way to take a gate table's refusal
-// census, and it replaced a ~20-line recipe a round was told to copy into the repo and delete
-// again. What can go wrong here is not the arithmetic — `tallying()` owns the counting and
+// census. What can go wrong here is not the arithmetic — `tallying()` owns the counting and
 // `packages/core/test/gate-tally.test.ts` pins it — it is the SEAM: the census counts nothing
 // unless the wrapped tables are the ones the pass actually consults, and a swap that is not undone
 // leaves the rest of the process counting into a stale wrapper.

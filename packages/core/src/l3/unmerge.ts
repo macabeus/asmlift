@@ -99,14 +99,17 @@
 //   291 agbcc synthetic rows, through `enumerateRanked`, whole fan compared label+source        1 of 6
 //
 // The one is `site/no-merge-name`, and it moves exactly one row: `synthetic:mergeloop:agbcc`, whose
-// fan grows 16 -> 24 candidates when it is ablated (that row is also where it fires 40 times —
-// `pnpm bench gates --pass unmerge --only mergeloop`). The other five refuse thousands of times
-// between them and change NOTHING, because a later rule or `pushJoin`'s own narrowing refuses the
-// same sites: `empty-arm` 168 refusals, 0 rows moved. So `ablateHeuristic` has reach into exactly
-// one rule here, and an axis built on any of the other five would measure 0 rows moved for a reason
-// that has nothing to do with the axis. RE-RUN BOTH before quoting either: the generated population
-// says 0 of 6 and the corpus says 1 of 6, which is itself the lesson — a fuzz generator's shapes are
-// not the corpus's.
+// fan grows 16 -> 24 candidates when it is ablated, and which is also where it fires 40 of its 80
+// times (`pnpm bench gates --pass unmerge --only synthetic:mergeloop:agbcc` — the full id, because a
+// bare symbol censuses every toolchain that spec targets and pools the counts). The other five
+// change NOTHING, in two different ways. Three of them refuse and are overruled, because a later
+// rule or `pushJoin`'s own narrowing refuses the same sites: `empty-arm` 168, `tail-is-not-an-if`
+// 40, `empty-arm-has-no-tail` 16. The two VALUE gates never fire at all — the census prints
+// `value: (never fired)`, and each of them carries the proof below that it cannot. So
+// `ablateHeuristic` has reach into exactly one rule here, and an axis built on any of the other five
+// would measure 0 rows moved for a reason that has nothing to do with the axis. RE-RUN BOTH before
+// quoting either: the generated population says 0 of 6 and the corpus says 1 of 6, which is itself
+// the lesson — a fuzz generator's shapes are not the corpus's.
 //
 // THE RESIDUE, NAMED. `list`'s `s.k === 'if' && isJoinable(join)` is the ENUMERATOR — which pairs
 // are judged at all — and enumeration is not residue. Nor are the `null`s `unmergeAt` and
@@ -327,8 +330,8 @@ export const UNMERGE_VALUE_GATES: readonly Gate<UnmergeMovedValue>[] = [
     // SHADOWED, not sound — and PROVABLY, not just unwitnessed. Every definition sits at a
     // position in `at`, all of which are `>= first`, so every definition is in the arm ctx's
     // `trailing`; an effectful one is therefore already refused by
-    // `trailing-run-holds-an-effectful-value` one context up. Ablated on its own, 0 of the 45 tests
-    // in unmerge.test.ts and unmerge-fuzz.test.ts redden — `a definition carrying an EFFECT
+    // `trailing-run-holds-an-effectful-value` one context up. Ablated on its own, no test in
+    // unmerge.test.ts or unmerge-fuzz.test.ts reddens — `a definition carrying an EFFECT
     // refuses` included. It stays because the scope it states is the pass's, and deleting a rule
     // that is correct-but-shadowed is how the shadowing rule silently becomes load-bearing.
     sound: false,
@@ -347,9 +350,9 @@ export const UNMERGE_VALUE_GATES: readonly Gate<UnmergeMovedValue>[] = [
     // SHADOWED BY THE SITE TABLE, provably. A merge name is one the join reads and that
     // `readsOf(m) === 1` says is read NOWHERE ELSE; a definition value reading it is a second
     // read, so it was never in `merge` — it landed in `unsubstitutable` and
-    // `arm-writes-a-name-this-cannot-substitute` refused the whole site. Ablated on its own, 0 of
-    // the 45 tests redden, its own namesake fixture included, which is why that fixture is the
-    // guard named on the site gate instead. Kept for the same reason as the gate above.
+    // `arm-writes-a-name-this-cannot-substitute` refused the whole site. Ablated on its own, no
+    // test reddens, its own namesake fixture included, which is why that fixture is the guard
+    // named on the site gate instead. Kept for the same reason as the gate above.
     sound: false,
     rejects: (c) => [...readsIn(c.value)].some((n) => c.names.has(n)),
   },

@@ -147,8 +147,8 @@ Per commit:
   (their callers are static imports, whose bindings are read-only). Making a pass censusable is
   therefore a claim about its CALLER, not about its table —
   `grep -n "WHY THE REGISTRY BELOW HAS ONE ENTRY" apps/benchmark/src/run/gate-census.ts`.
-  A refusal that is a CONJUNCTION WITH BUY-BACKS is not tabl'able at any price and the decline is
-  written down rather than re-derived
+  A refusal that is a CONJUNCTION WITH BUY-BACKS cannot become a table at any price, and that
+  decline is written down rather than re-derived
   (`grep -n "NOT CONVERTIBLE" packages/core/src/raise/const.ts`). Otherwise return a `refusals` map
   (`structure/namecoalesce.ts`) or export a census off the table (`arrayShapeRefusals` in
   `raise/globalshape.ts`) in the same change. What is settled is the UNIT: convert refusals, not

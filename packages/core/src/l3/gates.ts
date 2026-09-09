@@ -95,49 +95,35 @@ export interface Tallied<Ctx> {
    *  accumulating across every later call, which is what a corpus-wide census wants.
    *
    *  THERE IS NO RESET, deliberately — a per-row census is two snapshots DIFFED, not a fresh
-   *  wrapper per row. Wrapping per row would be the mistake the doc on {@link tallying} names: a
-   *  wrapper is a new table IDENTITY, and a reader that keys on one (`rank.ts`'s `censuses` memo
-   *  does, over basecse's tables) sees a fresh key every row. `pnpm bench gates` wraps once, for
-   *  the whole population. Counting is also keyed by `g.id`, so a table a script COMPOSES should be
-   *  run past `gateTableDefects` first: two rules sharing an id sum into one number, and the
-   *  contract test only checks the tables on its own roster. */
+   *  wrapper per row, because a wrapper is a new table IDENTITY and a reader that keys on one
+   *  (`rank.ts`'s `censuses` memo) sees a fresh key every row. Counting is keyed by `g.id`, so a
+   *  table COMPOSED from several should be run past `gateTableDefects` first: two rules sharing an
+   *  id sum into one number, and the contract test only checks the tables on its own roster. */
   readonly refusals: () => readonly (readonly [string, number])[];
 }
 
 /** The same table, wrapping each `rejects` in a counter — so a caller OUTSIDE core can obtain the
- *  per-id census that `l3/coalesce.ts`, `l3/scopebase.ts` and `structure/namecoalesce.ts` each
- *  hand-rolled into their return type, from any pass that takes its table as a parameter:
+ *  per-id census that `l3/coalesce.ts` and `structure/namecoalesce.ts` hand-roll into their return
+ *  type (`l3/scopebase.ts` reports the same attribution per KEY), from any pass that takes its
+ *  table as a parameter:
  *
  *      const t = tallying(UNMERGE_SITE_GATES);
  *      unmergeJoins(sfn, { site: t.gates });
- *      console.log(t.refusals());   // [['no-merge-name', 214], ['empty-arm', 31]]
+ *      console.log(t.refusals());   // [['empty-arm', 168], ['no-merge-name', 80]]
  *
  *  THAT IS THE API AND NOT YET A CENSUS: nothing exports a corpus of trees to loop over, and a
- *  tabled pass's only shipped caller is normally inside core. THE CENSUS IS A SUBCOMMAND —
- *  `pnpm bench gates --pass unmerge [--only <row>] [--toolchain id]` — which takes it off a REAL
- *  enumeration with the pass's caller-side entry swapped, and needs no script and no revert. Over
- *  the agbcc synthetic tier (291 rows, ~11 s, 9 rows the frontend cannot lift counted separately)
- *  it prints, today:
- *
- *      asmlift: [gates] site: empty-arm 168, no-merge-name 80, arm-writes-a-name-this-cannot-substitute 4
- *      asmlift: [gates] arm: arm-does-not-define-them-all 336, trailing-run-holds-a-non-assignment 32
- *      asmlift: [gates] rung: tail-is-not-an-if 40, empty-arm-has-no-tail 16
- *
- *  — the 40/16 split `l3/unmerge.ts`'s header records from the instrumented patch that licensed its
- *  conversion, recovered with no patch. IT IS A SUBCOMMAND RATHER THAN A RECIPE TO COPY because a
- *  script has three hazards a subcommand cannot have (where it may live, that an untracked one
- *  stamps the next `bench run` dirty, and that a module DUPLICATE censuses zero silently) — all
- *  three measured, in `apps/benchmark/src/run/gate-census.ts`'s header, along with what it costs to
- *  make a SECOND pass censusable. Adding a table to a pass already in that registry costs nothing;
- *  adding a pass costs its caller a seam.
+ *  tabled pass's only shipped caller is normally inside core. Taking the census off a REAL
+ *  enumeration is `pnpm bench gates --pass <id>`, whose header
+ *  (`apps/benchmark/src/run/gate-census.ts`) holds the measured reasons it is a subcommand rather
+ *  than a script to copy, and what a SECOND censusable pass costs.
  *
  *  WHAT IT COUNTS IS AN EVALUATION THAT ANSWERED TRUE, not a site. Under `firstRejection` — which
- *  short-circuits — that is the FIRST rejecter, so this produces exactly the census those three
- *  passes produce, with the same reading: an id absent from it is starved OR REDUNDANT WITH an
- *  earlier rule, and telling the two apart takes the same rule run with the rest of the table empty
- *  (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts` ships two inhabitants of the
- *  second case). A consumer that asks the table something else — `.some`, `.filter` — gets one
- *  count per evaluation instead, which is a different question and rarely the one wanted.
+ *  short-circuits — that is the FIRST rejecter, so this produces the same census the hand-rolled
+ *  maps do, with the same reading: an id absent from it is starved OR REDUNDANT WITH an earlier
+ *  rule, and telling the two apart takes the same rule run with the rest of the table empty
+ *  (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`, whose dated table ships three
+ *  rules of the second kind). A consumer that asks the table something else — `.some`, `.filter` —
+ *  gets one count per evaluation instead, which is a different question and rarely the one wanted.
  *
  *  AND IT COUNTS REFUSALS, WHICH IS NOT REACH. A rule can refuse hundreds of times and still change
  *  no output, because a later rule or a narrowing outside the table would have refused the same
@@ -147,8 +133,8 @@ export interface Tallied<Ctx> {
  *  IT CHANGES NO BEHAVIOUR: each wrapper's predicate IS the original's, `id`/`why`/`sound`/
  *  `guardedBy` are carried, so `without`, `ablateHeuristic` and `gateTableDefects` all still hold
  *  over the result. What it does change is the table's IDENTITY, and some readers key on that —
- *  `rank.ts`'s `censuses` memo is a `Map` over `Gate<BaseKey>[]` instances (basecse's tables, not
- *  this one) — so wrap once and reuse `gates`, rather than per call. */
+ *  `rank.ts`'s `censuses` memo is a `Map` over `Gate<BaseKey>[]` instances — so wrap once and reuse
+ *  `gates`, rather than per call. */
 export function tallying<Ctx>(gates: readonly Gate<Ctx>[]): Tallied<Ctx> {
   const counts = new Map<string, number>();
   const order = new Map(gates.map((g, i) => [g.id, i]));

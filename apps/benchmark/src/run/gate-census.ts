@@ -4,16 +4,15 @@
 // WHY A SUBCOMMAND AND NOT A DOCUMENTED SCRIPT. `tallying()` (packages/core/src/l3/gates.ts) wraps
 // a table so a caller outside core counts each rule's refusals, and that is the whole API — but a
 // tabled pass's only shipped caller is inside core, and nothing exports a corpus of lifted trees.
-// So the census is taken off `enumerateRanked` with the pass's caller-side entry SWAPPED, and for
-// a while this file's contents were a ~20-line recipe in `tallying`'s doc comment for a round to
-// copy. That recipe carried three hazards, all of them artifacts of being a script:
+// So the census is taken off `enumerateRanked` with the pass's caller-side entry SWAPPED — which a
+// round can do from a script of its own, at three hazards this file does not have:
 //
-//   - it had to live somewhere the workspace resolves BOTH `@asmlift/core/*` and `@asmlift/cli/*`,
-//     which is neither the repo root (`@asmlift/core` is not a root dependency — measured:
+//   - the script has to live somewhere the workspace resolves BOTH `@asmlift/core/*` and
+//     `@asmlift/cli/*`, which is neither the repo root (`@asmlift/core` is not a root dependency — measured:
 //     `ERR_MODULE_NOT_FOUND`) nor outside the repo (`@asmlift/cli/rank` is not resolvable there);
 //   - an untracked script is CODE to `apps/benchmark/src/provenance.ts` (only `.claude/commands/`
 //     is exempt), so forgetting to delete it stamps the next `bench run` dirty and `bench:merge`
-//     refuses the result — after ~2,000 s. That trap has cost two rounds a full run each;
+//     refuses the result — after ~2,000 s;
 //   - the swap must hit the module instance the enumeration imports, and a standalone script that
 //     loads an ESM/CJS duplicate censuses ZERO, silently — which reads exactly like "this rule
 //     never fires", the conclusion a census exists to license.
@@ -21,13 +20,12 @@
 // A subcommand has none of the three by construction, and `cli.ts`'s own header is binding here:
 // "Every path the harness offers is a subcommand here — there are no other executable scripts."
 //
-// WHY THE REGISTRY BELOW HAS ONE ENTRY, and why that is not a bar this file failed to clear.
-// Fifteen passes in `packages/core/src` take their gate table as an optional parameter, and a
-// wave-2 review read that as fifteen inhabitants waiting for this command. It is not: taking the
-// table as a parameter is necessary and NOT sufficient. The census needs a CALLER-SIDE SEAM a
-// process outside core can reach, and `unmergeJoins` has one only because `rank-axes.ts` holds it
-// in `PRE_FAN_PRODUCTS`, a mutable array of records. The other fourteen are reached through static
-// import bindings, which are read-only module-namespace properties — measured, not argued:
+// WHY THE REGISTRY BELOW HAS ONE ENTRY. Fifteen passes in `packages/core/src` take their gate table
+// as an optional parameter, which is necessary and NOT sufficient: the census also needs a
+// CALLER-SIDE SEAM a process outside core can reach, and `unmergeJoins` has one only because
+// `rank-axes.ts` holds it in `PRE_FAN_PRODUCTS`, a mutable array of records. The other fourteen are
+// reached through static import bindings, which are read-only module-namespace properties —
+// measured, not argued:
 //
 //     import * as retsink from '@asmlift/core/raise/retsink';
 //     retsink.sinkReturns = () => false;
@@ -116,9 +114,11 @@ function note(s: string): void {
 }
 
 /** The rows this census runs over. `--only` reaches BOTH tiers through the same selector
- *  `bench fan` uses, so a real row is censusable one row at a time; without it the population is
- *  the synthetic tier for one toolchain, which is where a corpus-wide count is affordable (the
- *  real tier needs project checkouts and prices the same question in tens of minutes). */
+ *  `bench fan` uses, which matches a SUBSTRING of the row id — so a bare symbol selects every
+ *  toolchain that spec targets and pools their counts, and `--toolchain` does not apply on this
+ *  path. Name the full `tier:sym:toolchain` id for one row. Without `--only` the population is the
+ *  synthetic tier for one toolchain, which is where a corpus-wide count is affordable (the real
+ *  tier needs project checkouts and prices the same question in tens of minutes). */
 function population(o: GateCensusOptions): { cases: Case[]; what: string } {
   if (o.only) {
     return { cases: selectCases([...syntheticCases(), ...realCases()], o.only), what: `--only ${o.only}` };

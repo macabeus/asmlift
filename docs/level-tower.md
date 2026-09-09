@@ -626,12 +626,11 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   **The third form is the CALLER's, and it needs no signature at all.** `tallying(gates)`
   (`grep -n "export function tallying" packages/core/src/l3/gates.ts`) returns the same table with
   each `rejects` wrapped in a counter, so any pass that already accepts its table as a PARAMETER can
-  be censused from outside `@asmlift/core` — a `tsx` script over the lifted corpus, no edit and no
-  revert. That is what a pass adopting the table should make possible: taking the tables as an
-  optional argument is the whole cost, and `l3/unmerge.ts` is the worked example (five tables, one
-  `UnmergeGates` parameter, and a test that reads the census back). It reports what
-  `firstRejection` decides, so it carries the same reading as the two forms above — first rejecter
-  only.
+  be censused from outside `@asmlift/core`, with no edit and no revert. That is what a pass adopting
+  the table should make possible: taking the tables as an optional argument is the whole cost, and
+  `l3/unmerge.ts` is the worked example (five tables, one `UnmergeGates` parameter, and a test that
+  reads the census back). It reports what `firstRejection` decides, so it carries the same reading
+  as the two forms above — first rejecter only.
 
   **The parameter is necessary and not sufficient, and the gap is where a round loses its
   afternoon**: nothing exports a corpus of lifted trees, and a tabled pass's only shipped caller is
@@ -652,8 +651,9 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   later.
 
   **A census is FIRST REJECTIONS, which is not reach.** The other column is what an ablation MOVES,
-  and the two disagree: of the six ablatable rules in `l3/unmerge.ts`, five refuse thousands of times
-  and move zero rows, and the sixth moves exactly one row. `raise/globalshape.ts` ships the
+  and the two disagree: of the six ablatable rules in `l3/unmerge.ts`, exactly one moves a row.
+  Three of the other five refuse hundreds of times over the agbcc synthetic tier and move nothing,
+  and two never fire at all. `raise/globalshape.ts` ships the
   convention for reporting both columns (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`)
   and `l3/unmerge.ts` now carries the worked example
   (`grep -n "TWO COLUMNS, AND THEY DISAGREE HERE" packages/core/src/l3/unmerge.ts`). Measure the
@@ -703,18 +703,18 @@ the answer to "which pass next" for as long as nobody measures a third. `raise/c
 is NOT, and it is the standing warning about this selector: the recount above found three of its four
 early exits are the enumerator, so a table over it would hold ONE gate — the conversion the bullet
 above declines. **And a second reason, which is a fact about `Gate<Ctx>` rather than about that
-file**, re-derived when the `l3/unmerge.ts` conversion shipped without it: `firstRejection` reads
-the table as a DISJUNCTION of independent refusals, while that site is a CONJUNCTION with two
-buy-backs (`edgeCarried && !hiLoPair && !memBases.has(…)`). "Refuse unless exempted" has no
-decomposition into independent gates — every term would have to re-carry the whole conjunction,
-which is not what a table means and not what a census reads back, so the id it reported would be
-one opaque `not-a-literal-being-materialised` and silent about WHICH exemption fired. That is the
-only question the file's 60 lines of measured commentary ask (`hiLoPair` carries the traffic;
+file**: `firstRejection` reads the table as a DISJUNCTION of independent refusals, while that site
+is a CONJUNCTION with two buy-backs (`edgeCarried && !hiLoPair && !memBases.has(…)`). "Refuse unless
+exempted" has no decomposition into independent gates — every term would have to re-carry the whole
+conjunction, which is not what a table means and not what a census reads back, so the id it reported
+would be one opaque `not-a-literal-being-materialised` and silent about WHICH exemption fired. That
+is the only question the file's 60 lines of measured commentary ask (`hiLoPair` carries the traffic;
 `memBases` decides 0 folds over 806 rows). A refusal shaped like that is outside what this section
-licenses, whatever its instrument minutes. The minutes are priced per FILE and this rule is consumed per REFUSAL; re-read a
-candidate's refusals by the counting rule before selecting it, because `const.ts` is where the two
-readings diverge. `raise/magicdiv.ts` — 18 refusal-shaped exits by that same grep, and no instrument
-event anyone recorded — is the shape a sweep picks first and this rule declines.
+licenses, whatever its instrument minutes. The minutes are priced per FILE and this rule is consumed
+per REFUSAL; re-read a candidate's refusals by the counting rule before selecting it, because
+`const.ts` is where the two readings diverge. `raise/magicdiv.ts` — 18 refusal-shaped exits by that
+same grep, and no instrument event anyone recorded — is the shape a sweep picks first and this rule
+declines.
 
 One corollary, same economy: a refusal already known and CONTAINED is recorded beside the gate
 together with the argument that contains it, so the next round cites it instead of re-deriving it.
