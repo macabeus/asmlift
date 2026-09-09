@@ -39,7 +39,15 @@ one) is an unfinished finding.
    the number every later claim is measured against** — it carries `best …` and the source sha —
    and it goes into your report verbatim, **naming the vehicle**. Never a `[score] … | tail -1`:
    that table is sorted best-first, so the last line is the WORST candidate.
-3. State the baseline in your first user-facing message.
+3. **Read the FAN before you name a missing capability**: `pnpm bench fan $1` prints every
+   candidate spelling the harness ranked for this row — label, score over its own denominator,
+   dropped, withheld — and `--show <label>` prints any one of their SOURCES, which `results.json`
+   does not carry for a non-winner. An attribution that says "asmlift never considers X" is a claim
+   about this list, so read it. `--enumerate` gives the same list in seconds without compiling
+   anything (and still serves `--show`); a fan over 2,000 is refused unless you pass `--force`,
+   because that is a compile each. Unlike the two vehicles above, this one runs in the harness's own
+   configuration by construction — it is the same call `bench run` makes for the row.
+4. State the baseline in your first user-facing message.
 
 ## The denominator moves — so a residual is never a "partition"
 

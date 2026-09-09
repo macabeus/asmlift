@@ -73,6 +73,23 @@ them are not "add a feature":
   not use (the `old_agbcc` class of bug). Then the fix is in the manifest/toolchain, not the
   decompiler, and it may *remove* the row rather than match it.
 
+**"Missing capability" vs "missing lever" is decided by the FAN, and the harness computes it for
+you.** `pnpm bench fan <sym|row-id>` prints every spelling asmlift considered for that row — each
+one's label, its score against its own denominator, the ones the scorer dropped, the ones withheld
+— in the harness's own configuration (the row's target object, prototypes, context compile and
+symbol map), so it is comparable with the published row rather than with a checkout. Two flags:
+
+- `--show <label>` prints that candidate's SOURCE. Nothing else can: `results.json` carries the
+  winner's C and no other's, so "the near-miss spelling is right and only loses on X" is a claim
+  you can now read instead of infer. `--show best` is the winner.
+- `--enumerate` lists the fan without compiling anything (seconds, at any size) and still serves
+  `--show`. Use it to answer "did my new lever produce a candidate at all" — a label that is
+  absent was never enumerated, and a lever that THREW prints as `[lever] … threw (no candidate
+  from it)`, which a `bench run` does not print anywhere.
+
+A fan over 2,000 candidates is refused rather than scored (`--force` overrides): that is a compile
+each, and `LoadBGTilemapData`'s 225,792 is hours. `--enumerate` is the answer there, not `--force`.
+
 Write the classification down with the evidence that decided it. If it is one of the last two, go
 straight to Phase 7 and report — that is a successful outcome of this command, not a failure.
 

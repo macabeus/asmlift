@@ -64,6 +64,7 @@ checkout (below).
 | ---------------------------------------------------------------------------------------------------------------------- | --------------: | ----------------------------------- |
 | the command above: `asm/matchings/system/StrCpy.s`, the checkout's `decomp.yaml`, `--score-against build/src/system.o` | `unsigned: 6/9` | `u8 *StrCpy(…) { … return v2; }`    |
 | `pnpm bench repro kleod:StrCpy:agbcc --run` (the row's own script)                                                     | `unsigned: 5/8` | byte-identical to the published row |
+| `pnpm bench fan kleod:StrCpy:agbcc` (the harness's own call, no script)                                                | `unsigned: 5/8` | byte-identical to the published row |
 | the published row, `apps/benchmark/results/results.json`                                                               |           `5/8` | —                                   |
 
 Different score, a different denominator, and a different C spelling — on a seven-instruction
@@ -172,6 +173,46 @@ consulted only for a row `results.json` does not carry at all. So after a `bench
 --only <sym>` moves your row, the reproduction still replays the rung the published source pins.
 That is right for reproducing a published row and wrong for watching your own change land: for
 that, the number is `bench run`'s.
+
+#### The whole FAN, and any candidate's source: `pnpm bench fan`
+
+```sh
+pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force]
+```
+
+The third vehicle, and the only one that answers **"which spellings did asmlift consider"** rather
+than "what did this row score". It is not a script and writes no directory: it re-enters the
+harness's own ranked call for one row, with the row's own target object, prototypes, context
+compile and vendored symbol map, assembled by the single function `bench run` assembles them with
+(`eval/asmlift.ts`'s `rankOptionsFor`). So the checkout question this whole file is about does not
+arise — there is no second tree to be in.
+
+It prints the `[score]` table this file's comparison recipe is written for, then `[dropped]`,
+`[withheld]` and `[ranked]`, all through the CLI's own renderer, denominators included. Measured on
+`kleod:StrCpy:agbcc`: `unsigned: 5/8` in **7.0 s**, the published row exactly, and
+`--show best` printed the published source byte-for-byte.
+
+Two things it can do that nothing else can:
+
+- **`--show <label>` prints a NON-WINNING candidate's source.** `results.json` carries the winner's
+  C and no other's, and `RankedResult.candidates` — every other spelling, each with its own
+  `source` — was computed and discarded on every run until this command read it. "The near-miss
+  spelling is right and only loses on X" is now a thing to read rather than infer.
+- **`--enumerate` lists the fan without compiling anything**, in seconds at any fan size, and still
+  serves `--show`. That is the cheap configuration-identification this file's "Getting the fan
+  alone is cheap" section describes, without the kill-it-after-the-first-`[progress]`-line trick.
+  It also prints `[lever] <label> threw (no candidate from it)`, a channel `bench run` supplies no
+  sink for at all — so a whole pre-fan half of a row's fan can vanish from a benchmark run with
+  nothing printed, and here it does not.
+
+**A fan over 2,000 candidates is refused, not scored** (`--force` overrides). Scoring is a compile
+each: `synthetic:sizebound:agbcc`'s 800 take 57 s cold, and `LoadBGTilemapData`'s 225,792 is a
+four-hour run at that rate. `--enumerate` is the answer at that size, not `--force`.
+
+What it is NOT: a reproduction. It runs asmlift in-process from this repo's sources, so it proves
+nothing about the published script, and `pnpm bench fidelity` still re-runs the scripts rather than
+this. When you need to quote a number a reader can re-derive from a published artifact, that is
+`bench repro`; when you need to know what asmlift thought about, it is this.
 
 ### What this vehicle does NOT reproduce: your CHANGED asmlift
 
