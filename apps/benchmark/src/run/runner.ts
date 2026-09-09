@@ -38,12 +38,20 @@ export function benchMeta(results: FunctionResult[]): BenchMeta {
   };
 }
 
-function fmt(d: DecompilerResult): string {
+/** The per-row log line's rendering of one decompiler's outcome.
+ *
+ *  A gap prints `diff:<score>/<maxScore>`, NOT `diff:<score>`, because `maxScore` is not a
+ *  constant of the row. It is the objdiff row count of the winning candidate's alignment, so it
+ *  moves whenever the candidate does: between `eb6dec7d` and `2fed1e42`,
+ *  `kleod:CountCollectedGems:agbcc` went 290/404 → 171/387 and twelve rows moved their
+ *  denominator. Printing the numerator alone invites reading two runs' scores as a subtraction on
+ *  a fixed scale, which is how a 17-point denominator move got attributed to capability gaps. */
+export function fmt(d: DecompilerResult): string {
   if (d.outcome === 'match') {
     return 'MATCH';
   }
   if (d.outcome === 'nonmatch') {
-    return `diff:${d.score}`;
+    return d.maxScore === null ? `diff:${d.score}` : `diff:${d.score}/${d.maxScore}`;
   }
   if (d.outcome === 'noncompile') {
     return `noncompile(${d.compileErrors})`;
