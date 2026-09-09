@@ -319,7 +319,13 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
   }, 90_000);
 });
 
-// A SANCTIONED ABLATION MUST DECLINE, NOT THROW. `ablateHeuristic` exists so a shipped axis may
+// A SANCTIONED ABLATION MUST DECLINE, NOT THROW.
+//
+// ENUMERATED OVER ALL FIVE TABLES, WHICH IS NOT THE SAME AS SIX ABLATIONS OVER FIVE. `heuristics()`
+// yields only `sound: false` gates, and `UNMERGE_ARM_GATES` and `UNMERGE_TOTALITY_GATES` are sound
+// throughout — so today this runs 6 ablations drawn from 3 tables, and the `> 4` floor below is
+// "the enumeration still found some", not a count of the tables. All five are listed anyway
+// because the list then grows for free when a heuristic is added to either of them. `ablateHeuristic` exists so a shipped axis may
 // drop a `sound: false` gate and re-run the pass as a ranked candidate; `rank.ts`'s PRE-FAN loop
 // wraps `apply` in `try { } catch { }`, so a pass that throws under one of those ablations does not
 // fail loudly — it yields zero candidates and reads as an ordinary decline. That is exactly what a

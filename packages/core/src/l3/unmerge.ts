@@ -85,7 +85,28 @@
 // which exists only once the other four have admitted. What licensed the conversion is the
 // instrument episode recorded at `pushJoin`'s tail refusal below (56 firings, split 40/16), which
 // is the trigger `docs/level-tower.md` states — `grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md`.
-// The 40/16 split is now two gates, so that census is a `tallying()` call rather than a patch.
+// The 40/16 split is now two gates, so that census is `pnpm bench gates --pass unmerge` rather than
+// a patch — 291 agbcc synthetic rows in ~11 s, and it prints all five tables at once.
+//
+// TWO COLUMNS, AND THEY DISAGREE HERE. A census counts FIRST REJECTIONS; what an ablation of the
+// same rule MOVES is a different number, and `raise/globalshape.ts` ships the convention for
+// reporting both (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`). Measured
+// 2026-09-09, every `sound: false` gate in these five tables ablated ONE AT A TIME against the
+// shipped table:
+//
+//   population                                                                           rules moved
+//   40,000 generated trees (unmerge-fuzz's `gen`/`gen2`, 20,000 seeds each, 13,099 firings)    0 of 6
+//   291 agbcc synthetic rows, through `enumerateRanked`, whole fan compared label+source        1 of 6
+//
+// The one is `site/no-merge-name`, and it moves exactly one row: `synthetic:mergeloop:agbcc`, whose
+// fan grows 16 -> 24 candidates when it is ablated (that row is also where it fires 40 times —
+// `pnpm bench gates --pass unmerge --only mergeloop`). The other five refuse thousands of times
+// between them and change NOTHING, because a later rule or `pushJoin`'s own narrowing refuses the
+// same sites: `empty-arm` 168 refusals, 0 rows moved. So `ablateHeuristic` has reach into exactly
+// one rule here, and an axis built on any of the other five would measure 0 rows moved for a reason
+// that has nothing to do with the axis. RE-RUN BOTH before quoting either: the generated population
+// says 0 of 6 and the corpus says 1 of 6, which is itself the lesson — a fuzz generator's shapes are
+// not the corpus's.
 //
 // THE RESIDUE, NAMED. `list`'s `s.k === 'if' && isJoinable(join)` is the ENUMERATOR — which pairs
 // are judged at all — and enumeration is not residue. Nor are the `null`s `unmergeAt` and
@@ -347,8 +368,11 @@ export const UNMERGE_RUNG_GATES: readonly Gate<UnmergeRung>[] = [
     id: 'empty-arm-has-no-tail',
     why: 'there is no statement here to recurse into, and nothing defined the names either',
     sound: false,
-    // Shadowed by `tail-is-not-an-if` below (`arm[len - 1]` of an empty arm is `undefined`, whose
-    // `?.k` is not `'if'`), so the census test is the guard — it is also what the SPLIT this table
+    // REDUNDANT WITH `tail-is-not-an-if` below (`arm[len - 1]` of an empty arm is `undefined`, whose
+    // `?.k` is not `'if'`) — not SHADOWED in `gates.ts`'s sense, which is about an id being ABSENT
+    // from a census because an EARLIER rule refused first. This rule is the earlier one and it is
+    // rank 2 in the census (16 firings); what it shares with the next is its VERDICT, so ablating it
+    // moves nothing. The census test is therefore the guard — it is also what the SPLIT this table
     // exists to reproduce is asserted by.
     guardedBy: 'unmerge.test.ts: the RUNG census reproduces the split the instrumented run measured, without the patch',
     rejects: (c) => c.arm.length === 0,
@@ -357,8 +381,10 @@ export const UNMERGE_RUNG_GATES: readonly Gate<UnmergeRung>[] = [
     id: 'tail-is-not-an-if',
     why: 'the ladder bottoms out only on an `if`; anything else is neither terminal nor a rung',
     sound: false,
-    // Shadowed by the type narrowing in `pushJoin` — which has to stand there whatever this table
-    // says, because both gates here are ablatable. The census test is the guard that survives that.
+    // REDUNDANT WITH the type narrowing in `pushJoin` — which has to stand there whatever this table
+    // says, because both gates here are ablatable. Not shadowed in `gates.ts`'s sense either: this
+    // rule fires 40 times in the census and is the table's top row; the narrowing outside the table
+    // is what makes ablating it move nothing. The census test is the guard that survives that.
     guardedBy: 'unmerge.test.ts: the RUNG census reproduces the split the instrumented run measured, without the patch',
     rejects: (c) => c.arm[c.arm.length - 1]?.k !== 'if',
   },
