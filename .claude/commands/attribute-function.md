@@ -289,6 +289,17 @@ phase whose other work does not depend on its answer, and read the log at the en
 until grep -q 'EXIT=' /tmp/<round>-bench.log; do sleep 30; done
 ```
 
+**What you keep working ON is constrained, and it is now checkable.** `provenance.ts` samples git
+DURING the run and the sample is STICKY, so ONE edit — a comment audit, a `pnpm format`, an editor
+save — stamps the whole run dirty and `bench:merge` throws the numbers away 39 minutes later. A
+round lost **2,420 s** to exactly that, auditing its comments beside its own gate bench. So a run in
+flight holds `bench-running` at the repo root, and **`pnpm bench lock` exits 1 while it does**,
+naming the pid, the argv and the elapsed time. Run it before any phase that EDITS the tree; the
+work this background pattern is for is read-only — reading the diff, grepping the corpus, running
+the unit tests, drafting the report. The marker is gitignored (so it cannot dirty the run itself),
+removed on exit and on Ctrl-C, and reads as STALE from its own pid if the run was SIGKILLed: a stale
+marker blocks nothing, and `rm bench-running` is the whole cure.
+
 **Wait on a log marker, never on `pgrep -f "<pattern>"`** when the pattern also matches your own
 waiting shell — five waiter shells once deadlocked on each other for eight hours doing exactly
 that, long after the jobs they watched had finished.
@@ -296,7 +307,9 @@ that, long after the jobs they watched had finished.
 **Two full benches must never overlap on this machine.** It has 10 cores, the run fans 8 shards,
 and a ranked run takes `--jobs 6`; a bench measured **2704 s against a neighbour versus 1800 s
 solo**. Worse than slow: a shard killed by a neighbour writes a partial tier with **no error line**,
-and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line.
+and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line. `bench run` now refuses a
+second run **in the same worktree** — both write `results/<tier>.json` — but that marker is
+per-worktree and says nothing about the neighbour: across worktrees this is still discipline.
 
 ---
 
