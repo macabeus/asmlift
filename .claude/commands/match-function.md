@@ -96,6 +96,10 @@ Per commit:
   particular **"earn the level"**: do not add a representation, opcode, or pass boundary that has no
   inhabitant. Prefer patterns-as-data over new imperative special cases. Respect the `L1 → L2 → L3`
   stage contracts (`packages/core/src/contracts.ts`) and keep `@asmlift/core` browser-pure.
+- If the step converts a pass's refusals to a `Gate` table — or you are tempted to, because you just
+  patched a `return null` to log why it fired — read "the unit of that decision is the refusal, not
+  the pass" in `docs/level-tower.md` FIRST. It is settled: table the refusals you had to instrument,
+  leave the rest, name the residue. Do not reopen the whole-pass question; three rounds already did.
 - Add unit tests in `packages/core/test/` next to the sibling capability's tests. A capability with
   no test that fails before the change is not done.
 - Gate: `npx vitest run` (NOT `pnpm test:offline` — see Phase 4's fourth bullet: `test:offline`
