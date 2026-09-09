@@ -192,10 +192,9 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   //      the source AS EMITTED (rung 2 where there are declarations) rather than rung 0's. The
   //      whole difference is the `errorMarkers` this function's own value carries, so a v16 entry
   //      replays ``gPacked' undeclared`` for a row whose deciding rung declares the symbol — the
-  //      exact wrong answer the change removes, served out of a warm store and — at the time —
-  //      invisible to every artifact comparison, `errorMarkers` being outside `FIELDS.m2c`. That
-  //      incident is why it is inside that list now. Caught by reading this list before publishing
-  //      a run, which is what it is for.
+  //      exact wrong answer the change removes, served out of a warm store and invisible to every
+  //      artifact comparison of the day — the incident that put `errorMarkers` into `FIELDS.m2c`.
+  //      Caught by reading this list before publishing a run, which is what it is for.
   // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache

@@ -19,54 +19,53 @@ import { rowsAddedSince } from './regression';
 
 /** The fields a published claim is made of, named individually when they move.
  *
- *  THIS LIST IS NOT "every field the report shows" — it was written as that rule and the rule was
- *  false in its own file: `droppedCandidates` is published (`[ranked] N dropped, M withheld`) and
- *  is 51,840 entries long on one row of the current artifact, so watching it raw emits a
- *  multi-megabyte diff line. The honest rule is: every published claim SMALL ENOUGH TO PRINT, and
- *  for the big ones the published COUNT rather than the list. A rule stated as universal and
- *  applied selectively is worse than a narrow rule stated plainly — `errorMarkers` was missed
- *  twice under the universal wording.
+ *  The rule is: every published claim SMALL ENOUGH TO PRINT, and for the big ones the published
+ *  COUNT rather than the list. Stated as "every field the report shows" it would be false in this
+ *  file — `droppedCandidates` is published (`[ranked] N dropped, M withheld`) and runs to 51,840
+ *  entries on one row of the current artifact, so watching it raw emits a multi-megabyte diff
+ *  line.
  *
  *  `source` is here because a change that moves no score can still rewrite what the report shows,
  *  `candidateLabel` because the ranked WINNER can change identity at an unchanged score (a
  *  tie-break moving is a real change), `quality` because the report publishes it — a row can move
  *  `quality.casts` 0 → 1 with score, outcome and label all unchanged — and `breakdown` for the
- *  same reason (the web FunctionDetail renders its five numbers; 17 sides moved it over
+ *  same reason (the web FunctionDetail renders its five numbers; it moved 17 lines over
  *  `eb6dec7d`→`2fed1e42`, none of them a row no other field already named).
  *
- *  `maxScore` is here because it is NOT a constant of the row, and the whole project read it as
- *  one. It is the objdiff row count of the winning candidate's alignment, so a different
- *  candidate gives a different denominator: twelve rows moved theirs between `eb6dec7d` and
- *  `2fed1e42`, `kleod:CountCollectedGems:agbcc` by 17 (404 → 387). Its `290 → 171` was therefore
- *  never a subtraction on a fixed scale, and reading it as one is what produced a six-way
- *  "partition of the 290", a 297-predicted / 119-delivered shortfall, and a whole extra
- *  attribution round to explain the difference. The report publishes `score/maxScore` (the
- *  Explorer and the gap badge both render it), so by this list's own rule a denominator-only move
- *  is a published claim moving and must be named. It has never moved ALONE — all 12 printed a
- *  `score` line on the same row and side, and that line now renders both denominators — so the
- *  entry buys 0 unique rows today and is kept for the constructible case it alone catches: an
- *  alignment whose length moves while the diff count holds. Do not re-litigate it as a duplicate.
+ *  `maxScore` is here because it is NOT a constant of the row. It is the objdiff row count of the
+ *  winning candidate's alignment, so a different candidate gives a different denominator: 14 lines
+ *  moved theirs between `eb6dec7d` and `2fed1e42` (12 asmlift, 2 m2c), and
+ *  `kleod:CountCollectedGems:agbcc` by 17 (404 → 387). Its `290 → 171` was therefore never a
+ *  subtraction on a fixed scale, and reading it as one produced a six-way "partition of the 290",
+ *  a 297-predicted / 119-delivered shortfall, and a whole extra attribution round. The report
+ *  publishes `score/maxScore` (the Explorer table and the detail view's objdiff badge), so a
+ *  denominator-only move is a published claim moving. It has never moved without its `score` moving too — all 14
+ *  printed a `score` line on the same row and side, and that line renders both denominators — so
+ *  the entry buys 0 unique rows today and is kept for the case it alone catches: an alignment
+ *  whose length moves while the diff count holds.
  *
- *  `compileErrors` is here for the same reason and no other: the report publishes it (the run line
- *  prints `noncompile(k)`, the web FunctionDetail prints `compile errors {n}`), so a row sliding
- *  `noncompile(3) → noncompile(7)` is a published claim moving. It was previously this gate's
- *  own stand-in for an UNCOMPARED field, which asserted the opposite of this list's rule. Cost,
- *  measured over `eb6dec7d`→`2fed1e42`: 0 extra lines — no row in that pair moved it.
+ *  `compileErrors` is here because the report publishes it (the run line prints `noncompile(k)`,
+ *  the web FunctionDetail prints `compile errors {n}`), so a row sliding `noncompile(3) →
+ *  noncompile(7)` is a published claim moving. Cost over `eb6dec7d`→`2fed1e42`: 0 extra lines.
  *
- *  `errorMarkers` is here because this repo has already PAID for its absence, in writing: the
- *  `v17:` note in `cache.ts` records a warm-store entry replaying ``gPacked' undeclared`` for a row
- *  whose deciding rung declares the symbol — "invisible to every artifact comparison,
- *  `errorMarkers` being outside `FIELDS.m2c`". The run line prints `declined(k gap(s))` from it and
- *  the web report derives its whole declined/failed taxonomy column from it. Cost over the same
- *  pair: 2 lines, 0 rows no other field named. Max 6 entries / 491 chars, so it prints as itself.
+ *  `errorMarkers` is here because this repo has already PAID for its absence: the `v17:` note in
+ *  `cache.ts` records a warm-store entry replaying ``gPacked' undeclared`` for a row whose deciding
+ *  rung declares the symbol, with no artifact comparison to catch it. The run line prints
+ *  `declined(k gap(s))` from it and the web report derives its whole declined/failed taxonomy
+ *  column from it. Cost over the same pair: 2 lines, 0 rows no other field named. Max 6 entries /
+ *  491 chars, so it prints as itself.
  *
- *  The two `.length` entries are the exception the first paragraph describes: `droppedCandidates`
- *  and `withheldCandidates` are published as COUNTS by the `[ranked]` line, and the count is what
- *  is watched. This is not a cosmetic saving — over `eb6dec7d`→`2fed1e42` the dropped count moved
- *  on 2 rows (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`)
- *  that NO other watched field moves on: identical source, identical score, identical label, a fan
- *  that demonstrably changed, and a gate that answered "nothing moved". `symbolsUsed` is left out
- *  for size and for nothing else. */
+ *  The two `.length` entries are the exception the rule above describes: `droppedCandidates` and
+ *  `withheldCandidates` are published as COUNTS by the `[ranked]` line, and the count is what is
+ *  watched. Not a cosmetic saving — over `eb6dec7d`→`2fed1e42` the dropped count moved on 2 rows
+ *  (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`) that NO
+ *  other watched field moves on: identical source, identical score, identical label, a fan that
+ *  demonstrably changed, and a gate that answered "nothing moved".
+ *
+ *  `symbolsUsed` is the one published field still left out, and NOT for size — it is at most 1,108
+ *  chars on any row of the current artifact. It is derived from the winning candidate, which
+ *  `source` and `candidateLabel` already name, and it moved on 0 rows over `eb6dec7d`→`2fed1e42`;
+ *  a run where a symbol's declared SHAPE moves under an unchanged winner would slip past. */
 const FIELDS = {
   asmlift: [
     'outcome',
@@ -122,8 +121,8 @@ export interface DiffReport {
 // Long text is reported by its shape, not pasted: a 40-line C body in a gate's output buries the
 // one line that says which row moved.
 //
-// `res` is the whole side-result the value came from, because a score alone is not readable: it
-// is a numerator over a denominator that moves with the winning candidate. `290 → 171` invites a
+// `res` is the whole side-result the value came from, because a score alone is not readable: it is
+// a numerator over a denominator that moves with the winning candidate. `290 → 171` invites a
 // subtraction; `290/404 → 171/387` shows that 17 of those 119 points are the scale, not the row.
 const show = (field: string, v: unknown, res: Record<string, unknown>): string => {
   if (v === undefined || v === null) {
@@ -137,11 +136,11 @@ const show = (field: string, v: unknown, res: Record<string, unknown>): string =
   if (field === 'errorMarkers') {
     return scrub(stable(v));
   }
-  // A scored side ALWAYS renders a denominator, `?` included: `show` is called once per side, so
-  // a fresh side that lost its `maxScore` would otherwise print `290/404 → 171` and be read as
-  // `171/404` — the fixed-scale misreading this whole rendering exists to stop. `res` is REQUIRED
-  // rather than optional so this cannot be re-opened by a call site that forgets it: the bare
-  // numerator would come back silently, on a path no test can reach.
+  // A side carrying the key renders a denominator, `?` included: `show` is called once per side,
+  // so a fresh side whose `maxScore` went null would otherwise print `290/404 → 171` and be read
+  // as `171/404` — the fixed-scale misreading this rendering exists to stop. A side with no
+  // `maxScore` key at all (hand-built objects; artifacts predating the field) keeps the bare
+  // numerator, since `290/404 → 171/undefined` says less than `171`.
   if (field === 'score' && 'maxScore' in res) {
     return `${String(v)}/${typeof res.maxScore === 'number' ? res.maxScore : '?'}`;
   }

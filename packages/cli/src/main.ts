@@ -177,17 +177,16 @@ export interface ObjInput {
 /** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
  *
  *  THE ONE RENDERER FOR EVERY SCORE THIS CLI PRINTS: the `[score]` table, the `[ranked]` line's
- *  `best …`, the `[withheld]` line and the `[progress]` line. It was three renderings in this one
- *  file for a while, which is the failure the shape exists to stop wearing a different hat — a
- *  reader comparing two runs cannot be asked to know which lines carry a denominator.
+ *  `best …`, the `[withheld]` line and the `[progress]` line. A reader comparing two runs cannot
+ *  be asked to know which lines carry a denominator.
  *
  *  `rows` is objdiff's total row count for THIS candidate's alignment against the target, so it is
  *  a property of the candidate and not of the target: a different spelling aligns differently and
  *  is scored on a different scale. Two runs' `[score]` lines are the project's standard
- *  before/after comparison, and printing the numerator alone makes that comparison read as a
- *  subtraction on a fixed scale. It is not one — `kleod:CountCollectedGems:agbcc` went 290/404 →
- *  171/387 across two committed artifacts, 17 points of which were the scale, and an attribution
- *  round was spent explaining the difference.
+ *  before/after comparison (docs/ranked-repro.md), and printing the numerator alone makes that
+ *  comparison read as a subtraction on a fixed scale. It is not one — `kleod:CountCollectedGems`
+ *  went 290/404 → 171/387 across two committed artifacts, 17 points of which were the scale, and
+ *  an attribution round was spent explaining the difference.
  *
  *  Both fields are OPTIONAL, and each absence means one thing. No `rows`: the scorer that produced
  *  this score supplied none (core rank.ts's `WithheldCandidate` types it optional for exactly
@@ -644,8 +643,7 @@ export async function runCli(
           }
           lastTick = now;
           // Same renderer as the `[score]` table, `(match)` included: a reader watching a
-          // six-figure fan wants "the best so far is already a match" from this line, and a score
-          // spelled one way here and another there is what this item exists to stop.
+          // six-figure fan wants "the best so far is already a match" from this line.
           const best = bestSoFar === undefined ? '' : `, best so far ${scoreOf(bestSoFar)}`;
           progressSink(`asmlift: [progress] ${doneN}/${total} candidates scored${best}\n`);
         }

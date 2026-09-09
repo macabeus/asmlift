@@ -32,14 +32,12 @@ one) is an unfinished finding.
 
 `maxScore` is not a property of the target function. It is the objdiff row count of the **winning
 candidate's** alignment, so a different candidate is scored against a different scale. Across two
-committed artifacts (`eb6dec7d` → `2fed1e42`) twelve of 1013 rows moved their denominator, and
-`kleod:CountCollectedGems:agbcc` moved 290/404 → **171/387** — 17 points of scale inside a
-119-point "improvement".
-
-This is not a footnote; it is the most expensive mistake this workflow has made. Read as a
-subtraction on a fixed 404, that row's residual was decomposed into six gaps said to **PARTITION
-the 290**; the gaps then predicted 297 points and delivered 119, and an entire extra attribution
-round was spent explaining a shortfall that was partly the scale.
+committed artifacts (`eb6dec7d` → `2fed1e42`) fourteen of 1013 rows moved their denominator (twelve
+on the asmlift side), and `kleod:CountCollectedGems:agbcc` moved 290/404 → **171/387** — 17 points
+of scale inside a 119-point "improvement". Read as a subtraction on a fixed 404, that row's
+residual was decomposed into six gaps said to **PARTITION the 290**; the gaps then predicted 297
+points and delivered 119, and an extra attribution round was spent explaining a shortfall that was
+partly the scale.
 
 Rules, and they are not optional:
 
@@ -50,12 +48,12 @@ Rules, and they are not optional:
 - **A delta is a pair of fractions, not a difference.** Quote `before N₁/M₁ → after N₂/M₂` in the
   report, the PR body and the row comment. If M moved, say so in the same sentence and say by how
   much; if you do not know M, you do not have the delta.
-- **The tools now tell you.** `pnpm bench run` prints `diff:<score>/<maxScore>` per row, and
+- **The tools tell you.** `pnpm bench run` prints `diff:<score>/<maxScore>` per row, and
   `pnpm bench diff` prints `asmlift.score: 290/404 → 171/387` plus a separate
   `asmlift.maxScore: 404 → 387` line **whenever** the denominator moves — alone or beside a moving
-  score. All twelve asmlift-side denominator moves between `eb6dec7d` and `2fed1e42` printed both
-  lines, so a `maxScore` line is never evidence that the score held still. You do not have to
-  open `results.json` to see this, and there is no excuse for a report that does not.
+  score. Every denominator move between `eb6dec7d` and `2fed1e42` printed both lines, so a
+  `maxScore` line is never evidence that the score held still. You do not have to open
+  `results.json` to see this.
 - **Gap arithmetic is a prediction until measured.** Sum-of-parts vs. whole is a claim about a
   moving scale; state it as a prediction with the ablation that falsifies it.
 

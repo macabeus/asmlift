@@ -232,9 +232,8 @@ export interface WithheldCandidate {
   /** the denominator that score was measured against — objdiff's row count for THIS candidate's
    *  alignment, so it moves with the spelling. Present whenever the injected scorer supplies one
    *  (the cli and webapp objdiff scorers both do); a scorer whose result carries no `rows` leaves
-   *  it absent rather than inventing a scale. A withheld score is compared across runs exactly
-   *  like a published one, and a bare numerator invites the subtraction on a fixed scale that
-   *  `kleod:CountCollectedGems:agbcc` (290/404 → 171/387) cost an attribution round. */
+   *  it absent rather than inventing a scale. A withheld score is read across runs exactly like a
+   *  published one, and a bare numerator there invites the same subtraction on a scale that moved. */
   rows?: number;
   /** one line: why publication needed a proof this score did not supply */
   why: string;

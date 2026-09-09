@@ -22,9 +22,8 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    `declined(k gap(s))` / `failed`) and m2c's for the same row. Every later claim of improvement is
    measured against this exact number, produced by this exact command. **Record the whole `N/M`,
    never the `N` alone**: `M` is `maxScore`, the objdiff row count of the *winning candidate's*
-   alignment, so it moves when the candidate does. A `diff:290/404 → diff:171/387` is 119 points
-   on a scale that also lost 17, and quoting it as `290 → 171` is what makes the next reader
-   subtract.
+   alignment, so it moves when the candidate does. `diff:290/404 → diff:171/387` is 119 points on a
+   scale that also lost 17; quoted as `290 → 171` it makes the next reader subtract.
 3. Read the asm and the current asmlift output side by side. Get the target `.o` and a working dir
    with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness.
 4. State the baseline in your first user-facing message. Never report progress without a
@@ -100,14 +99,12 @@ Keep the order too: `diff` exits **2**, "nothing was compared", if `results.json
 base's `generatedAt` — run before `run`+`merge` it compares the base with itself in a second and
 prints a green line. `regression` answers "did a match break"; `diff` names every row and field that
 moved — that list is the PR body's inventory of what the round did, and for a commit claiming to
-move nothing it is the gate. The fields it watches live in `report/diff.ts`'s `FIELDS` and are wider
-than the score: both sides' `outcome, score, maxScore, compileErrors, errorMarkers, breakdown,
-source, quality`, plus asmlift's `candidateLabel` and the `droppedCandidates` /
-`withheldCandidates` counts. Expect lines you did not predict from `maxScore` and `breakdown` — the
-denominator and the shape of the gap moving — and from the dropped count, which moves when the FAN
-changed even though every score held. If a match is lost, either tighten the gate on your lever or
-drop the lever — do not rationalize a trade unless the user explicitly approves it. Report the totals (asmlift vs m2c)
-before and after.
+move nothing it is the gate. The fields it watches are `report/diff.ts`'s `FIELDS`; read them there
+rather than from memory, they are wider than the score. Expect lines you did not predict: from
+`maxScore` and `breakdown` (the denominator and the shape of the gap moving), and from the dropped
+count, which moves when the FAN changed even though every score held. If a match is lost, either
+tighten the gate on your lever or drop the lever — do not rationalize a trade unless the user
+explicitly approves it. Report the totals (asmlift vs m2c) before and after.
 
 Four things this gate does not catch by itself:
 

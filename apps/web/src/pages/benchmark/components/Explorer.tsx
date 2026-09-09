@@ -53,9 +53,9 @@ function Select({
 }
 
 function ScoreCell({ result }: { result: FunctionResult['asmlift'] }) {
-  // A SCORED row always shows a denominator, `?` included. `maxScore` is objdiff's row count for
-  // the winning candidate's alignment, so it moves with the winner; a bare numerator in a column
-  // two runs get compared in is the fixed-scale misreading that cost an attribution round.
+  // A SCORED row always shows a denominator, `?` included: `maxScore` is objdiff's row count for
+  // the winning candidate's alignment, so it moves with the winner, and a bare numerator in a
+  // column two runs get compared in reads as a score on a fixed scale.
   const score = result.score === null ? '' : `${result.score}/${result.maxScore ?? '?'}`;
   return (
     <div className="flex items-center gap-2">

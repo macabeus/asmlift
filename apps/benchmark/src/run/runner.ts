@@ -41,22 +41,19 @@ export function benchMeta(results: FunctionResult[]): BenchMeta {
 /** The per-row log line's rendering of one decompiler's outcome.
  *
  *  A gap prints `diff:<score>/<maxScore>`, NOT `diff:<score>`, because `maxScore` is not a
- *  constant of the row. It is the objdiff row count of the winning candidate's alignment, so it
- *  moves whenever the candidate does: between `eb6dec7d` and `2fed1e42`,
- *  `kleod:CountCollectedGems:agbcc` went 290/404 → 171/387 and twelve rows moved their
- *  denominator. Printing the numerator alone invites reading two runs' scores as a subtraction on
- *  a fixed scale, which is how a 17-point denominator move got attributed to capability gaps. */
+ *  constant of the row: it is the objdiff row count of the winning candidate's alignment, so it
+ *  moves whenever the candidate does (`kleod:CountCollectedGems:agbcc` went 290/404 → 171/387
+ *  between two committed artifacts). A bare numerator invites reading two runs' scores as a
+ *  subtraction on a fixed scale, which is how a 17-point denominator move got attributed to
+ *  capability gaps. */
 export function fmt(d: DecompilerResult): string {
   if (d.outcome === 'match') {
     return 'MATCH';
   }
   if (d.outcome === 'nonmatch') {
-    // THE SAME PREDICATE `bench diff`'s renderer uses (`typeof res.maxScore === 'number'`), and
-    // deliberately not `=== null`: the artifact types it `number | null`, but this renderer also
-    // runs over hand-built and older objects where the key is simply ABSENT, and `diff:12/undefined`
-    // is a worse answer than `diff:12`. Two defences written for one fact is how they come to
-    // disagree — this one degrades to the bare numerator, that one to `?`, and both must degrade
-    // on the same condition.
+    // `typeof`, deliberately not `=== null`: the artifact types it `number | null`, but this
+    // renderer also runs over hand-built and older objects where the key is simply ABSENT, and
+    // `diff:12/undefined` is a worse answer than `diff:12`.
     return typeof d.maxScore === 'number' ? `diff:${d.score}/${d.maxScore}` : `diff:${d.score}`;
   }
   if (d.outcome === 'noncompile') {

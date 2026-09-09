@@ -126,11 +126,11 @@ describe('benchMeta (pinned)', () => {
   });
 });
 
-// A gap's score is a numerator over a denominator that MOVES. `maxScore` is the objdiff row count
-// of the winning candidate's alignment, so a better candidate changes it: twelve rows moved theirs
-// between `eb6dec7d` and `2fed1e42`, `kleod:CountCollectedGems:agbcc` by 17 (404 → 387). A line
-// that prints only the numerator reads as a subtraction on a fixed scale, and that reading is what
-// sent an attribution round hunting for capability gaps to explain a denominator move.
+// A gap's score is a numerator over a denominator that MOVES: `maxScore` is the objdiff row count
+// of the winning candidate's alignment, so a better candidate changes it (404 → 387 on
+// `kleod:CountCollectedGems:agbcc`). A line printing only the numerator reads as a subtraction on
+// a fixed scale, and that reading sent an attribution round hunting for capability gaps to explain
+// a denominator move.
 describe('fmt renders a gap over its denominator', () => {
   const d = (over: Partial<DecompilerResult>): DecompilerResult =>
     ({ outcome: 'nonmatch', ...over }) as DecompilerResult;
@@ -146,8 +146,7 @@ describe('fmt renders a gap over its denominator', () => {
 
   // The artifact types it `number | null`, but this renderer also runs over hand-built and older
   // objects where the key is simply ABSENT, and `diff:12/undefined` is a worse answer than
-  // `diff:12`. `bench diff`'s renderer degrades the same case (to `?`); two defences for one fact
-  // is how they come to disagree.
+  // `diff:12`.
   test('an ABSENT denominator degrades the same way a null one does', () => {
     expect(fmt(d({ score: 12, maxScore: undefined as unknown as null }))).toBe('diff:12');
   });

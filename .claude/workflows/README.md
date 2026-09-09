@@ -21,10 +21,9 @@ paths. Three agents per iteration, looped:
 
 **The hard invariant** is that nothing it ships may change a measurement: a full bench run, then a
 per-row diff of the regenerated `results.json` against `origin/main`'s (`pnpm bench diff --base
-origin/main`), comparing every field `report/diff.ts`'s `FIELDS` watches — read the list there, it is
-wider than the score: both sides' `outcome, score, maxScore, compileErrors, errorMarkers, breakdown,
-source, quality`, plus asmlift's `candidateLabel` and the `droppedCandidates` / `withheldCandidates`
-counts. Every row identical, or it does not ship. The reviewer re-proves this rather than trusting the implementer —
+origin/main`), comparing every field `report/diff.ts`'s `FIELDS` watches — read the list there, it
+is wider than the score. Every row identical, or it does not ship. The reviewer re-proves this
+rather than trusting the implementer —
 a "harmless" speedup that silently moved one row would poison every measurement in the project.
 
 **`meta-optimizer-ledger.md` is load-bearing.** It records what has already shipped, which harness

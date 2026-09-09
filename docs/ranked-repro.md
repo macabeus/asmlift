@@ -586,11 +586,9 @@ a different scale. **A run-to-run delta is therefore a pair of fractions, never 
 reading its `290 → 171` as 119 points on a fixed scale cost an attribution round. Quote both
 numbers; if the denominators differ, say so in the same sentence.
 
-(Runs recorded in this file from before that change print a bare numerator, so their `[score]` md5s
-are not comparable with a run made today; the line _counts_ still are. **Their stdout md5s are
-untouched** — every score this CLI prints is rendered by `scoreOf`, and all of its consumers write
-to stderr (`rankedStderr`, and the `[progress]` line through the process entry point's stderr sink);
-the generated C on stdout is byte-identical across the change.)
+(The runs recorded in this file predate that format, so their `[score]` md5s do not compare with a
+run made today; their line _counts_ and their **stdout** md5s do — every score the CLI prints goes
+to stderr, and the generated C on stdout is untouched.)
 
 ## Write it down
 

@@ -43,11 +43,9 @@ describe('compareMeasurements', () => {
     expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.score', from: '12/40', to: '14/40' }]);
   });
 
-  // THE DENOMINATOR MOVES. `maxScore` is the objdiff row count of the winning candidate's
-  // alignment, so a different candidate scores against a different scale: twelve rows moved theirs
-  // between `eb6dec7d` and `2fed1e42`, `kleod:CountCollectedGems:agbcc` by 17. Read as a
-  // subtraction on a fixed scale, its `290 → 171` bought a six-way "partition of the 290", a
-  // 297-predicted / 119-delivered shortfall, and an extra attribution round.
+  // THE DENOMINATOR MOVES: `maxScore` is the objdiff row count of the winning candidate's
+  // alignment, so a different candidate scores against a different scale (`290 → 171` is 119
+  // points on a scale that also lost 17).
   test('a moving score is shown over its own denominator, not as a bare numerator', () => {
     const r = compareMeasurements(
       out(row('a', { score: 290, maxScore: 404 })),
@@ -62,9 +60,8 @@ describe('compareMeasurements', () => {
     expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.maxScore', from: '404', to: '387' }]);
   });
 
-  // `show` renders one SIDE at a time, so a denominator missing on one side only would print
-  // `290/404 → 171` and be read as `171/404` — the fixed-scale misreading this rendering exists to
-  // stop. A scored side with no `maxScore` therefore prints `?`, never a bare numerator.
+  // `show` renders one SIDE at a time, so a denominator that went null on one side only would
+  // print `290/404 → 171` and be read as `171/404`. It prints `?` instead.
   test('a score whose denominator is missing renders `?`, on either side', () => {
     const r = compareMeasurements(
       out(row('a', { score: 12, maxScore: null })),
@@ -116,10 +113,6 @@ describe('compareMeasurements', () => {
     expect(r.ok).toBe(false);
   });
 
-  // `compileErrors` used to be this test's stand-in for an uncompared field, which asserted the
-  // opposite of the FIELDS rule: the run line prints `noncompile(k)` and the web detail prints
-  // `compile errors {n}`, so it IS a published claim. It is now watched, and the sentinel here is
-  // provenance alone — the thing the title actually names.
   test('provenance is not compared — only the listed fields', () => {
     const base = out(row('a'));
     const fresh = out(row('a'));
@@ -139,7 +132,7 @@ describe('compareMeasurements', () => {
 
   // `errorMarkers` is the field this repo has already paid for leaving unwatched: `cache.ts`'s
   // `v17:` note records a warm-store entry replaying a compiler error naming a cause the run does
-  // not have, "invisible to every artifact comparison, `errorMarkers` being outside `FIELDS.m2c`".
+  // not have, with no artifact comparison to catch it.
   test('a declined row that changes WHICH gap it names is a published claim moving', () => {
     const r = compareMeasurements(
       out(row('a', {}, { outcome: 'declined' as Outcome, errorMarkers: ['no frontend for `bl @far`'] })),
@@ -179,8 +172,8 @@ describe('compareMeasurements', () => {
   // THE FAN MOVED AND NOTHING ELSE DID. Over `eb6dec7d`→`2fed1e42` this is 2 real rows
   // (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`): identical
   // source, identical score, identical label, a different number of spellings that failed to build.
-  // The COUNT is watched and the LIST is not, because the list runs to 51,840 entries on one row of
-  // the current artifact and a gate that pastes it is a gate nobody reads.
+  // The COUNT is watched and the LIST is not — the list runs to 51,840 entries on one row of the
+  // current artifact.
   test('a fan that grew is caught, by its count and not by pasting it', () => {
     const many = (n: number) => Array.from({ length: n }, (_, i) => ({ label: `cand${i}`, error: 'did not build' }));
     const r = compareMeasurements(

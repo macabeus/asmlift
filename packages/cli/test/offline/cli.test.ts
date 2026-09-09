@@ -236,10 +236,8 @@ test('a DERIVED shape the source never spells prints no `[assumed]` line either'
 // candidate, not of the target: a different spelling aligns differently and is scored against a
 // different scale. `docs/ranked-repro.md` makes two runs' `[score]` lines the project's standard
 // before/after comparison and `/match-function` makes the `[ranked]` line the number every claim
-// is measured against — printed as a bare numerator, both read as a subtraction on a fixed scale.
-// They are not: `kleod:CountCollectedGems:agbcc` went 290/404 → 171/387 across two committed
-// artifacts, 17 of those 119 points being the scale, and an attribution round was spent on the
-// difference.
+// is measured against — printed as a bare numerator, both read as a subtraction on a fixed scale
+// that in fact moved (290/404 → 171/387 on one row of two committed artifacts).
 test('a score is rendered over the row count it was measured against', () => {
   expect(scoreOf({ score: 290, rows: 404, match: false })).toBe('290/404');
   expect(scoreOf({ score: 171, rows: 387, match: false })).toBe('171/387');
@@ -249,8 +247,7 @@ test('a match still says so, and still shows the scale it matched on', () => {
   expect(scoreOf({ score: 0, rows: 387, match: true })).toBe('0/387 (match)');
 });
 
-// ONE RENDERER FOR ALL FOUR LINES. `scoreOf` also spells the `[withheld]` and `[progress]` scores,
-// which were two separate renderings in the same file — the divergence this shape exists to stop.
+// ONE RENDERER FOR ALL FOUR LINES: `scoreOf` also spells the `[withheld]` and `[progress]` scores.
 // A withheld candidate's `rows` is optional at the type level (core `WithheldCandidate`) because
 // the scorer that produced it need not supply one, and `match` is absent there entirely.
 test('an absent row count prints the numerator alone, never against an invented scale', () => {
