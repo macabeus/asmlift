@@ -15,49 +15,13 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
 
 ## Phase 0 — Resolve and baseline (never skip)
 
-**Before anything else: re-derive the numbers. Any row number written into a brief — this file, a
-mining report, an orchestrator's hand-off, a memory note — is a HINT with a timestamp, not a fact.**
-Briefs are written before a round starts and PRs merge while it runs. Five probe rounds in a row
-launched detached at a commit three PRs stale and quoted its numbers; two of them mis-sized their
-gap because of it (one reported −29 and the build delivered −13; one reported the real rows going
-+4 *worse* and the build delivered −22). One mining brief said a row was at 196 while the committed
-artifact said 171.
-
-The artifact is the fact, and reading it costs one second — no bench, no checkout:
-
-```sh
-git fetch origin
-git show origin/main:apps/benchmark/results/results.json \
-  | jq -r --arg sym "$1" '.meta.generatedAt as $t | .meta.asmlift.commit as $c
-      | .results[] | select(.sym | test($sym))
-      | "\(.id)  asmlift=\(.asmlift.outcome) \(.asmlift.score)/\(.asmlift.maxScore)"
-      + "  m2c=\(.m2c.outcome) \(.m2c.score // "-")/\(.m2c.maxScore // "-")"
-      + "  [artifact \($t) @ \($c)]"'
-```
-
-**Empty output is an answer, not a failure**: that symbol has no benchmark row, so it is measured
-outside the harness (the ranked repro) or you mistyped it. Confirm which before you go on —
-`git show origin/main:apps/benchmark/results/results.json | jq -r '.results[].sym' | grep -i <part>`.
-`LoadBGTilemapData` is the standing example of a real target with no row.
-
-If that disagrees with a number you were handed, **the artifact wins**, and your first user-facing
-message names both and says which brief was stale. If it disagrees with your own `bench run` below,
-say which commit each was measured at — the artifact stamps `meta.asmlift.commit`, and code merged
-after it has not been measured — and trust the run.
-
-**And measure from a fresh base.** Create the worktree from a just-fetched `origin/main`:
-
-```sh
-git fetch origin && git worktree add <dir> -b <branch> origin/main
-```
-
-If the worktree is more than an hour old, or any PR merged while you worked, `git fetch origin &&
-git rebase origin/main` **before** you take a before/after pair. A delta measured against a base
-that has since moved is a number about nothing.
-
-*(This Phase 0 freshness block is duplicated verbatim between `/match-function` and
-`/attribute-function`. If you correct it, correct both — a two-prompt command that drifted once
-already published a number comparable to nothing.)*
+**Before anything else: re-derive the numbers, and check your base.** Any row number written into a
+brief — this file, a mining report, an orchestrator's hand-off, a memory note — is a HINT with a
+timestamp, not a fact; briefs are written before a round starts and PRs merge while it runs. Do this
+with **[`docs/baseline-freshness.md`](../../docs/baseline-freshness.md), verbatim**: it reads the
+committed artifact for this row in one second (no bench, no checkout), says which number wins when
+two disagree, and creates the worktree from a base you have just checked. That file is shared with
+`/attribute-function`; correct it there, never here.
 
 1. Resolve the row: `pnpm bench run --tier real --only $1` (`--only` is a substring match on the
    symbol; row ids are `project:sym:toolchain`). If it hits more than one row, list them and pick
