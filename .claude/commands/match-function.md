@@ -31,7 +31,10 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    alignment, so it moves when the candidate does. `diff:290/404 → diff:171/387` is 119 points on a
    scale that also lost 17; quoted as `290 → 171` it makes the next reader subtract.
 3. Read the asm and the current asmlift output side by side. Get the target `.o` and a working dir
-   with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness.
+   with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness. That
+   is also the vehicle that REPRODUCES the row — fed the row's own `targetAsm`, not the
+   project's committed `.s`; see "The VEHICLE is part of the number" in
+   [`docs/ranked-repro.md`](../../docs/ranked-repro.md).
 4. State the baseline in your first user-facing message. Never report progress without a
    before/after pair of real command output.
 5. **Write every repro command down verbatim, flags included** — the `--only` line above, and any
@@ -39,9 +42,11 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    remediation's, the PR body's) re-runs *that* command, not one recomposed from memory. For the
    ranked enumeration that means **the command in [`docs/ranked-repro.md`](../../docs/ranked-repro.md),
    verbatim**: its flags (`--proto`, `--jobs 6 --progress`) are part of the number, and so is its
-   `grep -F '[score]'` comparison recipe. That file is shared with `/attribute-function` — the last
-   time this command was described in two prompts they drifted and a round published a number
-   comparable to nothing, so correct it there and never here.
+   `grep -F '[score]'` comparison recipe. Say which VEHICLE you ran it in, too — the project
+   checkout's `.s` and the `bench target` row inputs are different questions and give different
+   numbers, and only the second is comparable with a harness outcome. That file is shared with
+   `/attribute-function` — the last time this command was described in two prompts they drifted and
+   a round published a number comparable to nothing, so correct it there and never here.
 
 ## Phase 1 — Diagnose the gap honestly
 
