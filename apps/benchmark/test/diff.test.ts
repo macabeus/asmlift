@@ -38,6 +38,33 @@ describe('compareMeasurements', () => {
   test('a score that moves without changing the outcome is caught — the case `regression` misses', () => {
     const r = compareMeasurements(out(row('a', { score: 12 })), out(row('a', { score: 14 })));
     expect(r.ok).toBe(false);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.score', from: '12/40', to: '14/40' }]);
+  });
+
+  // THE DENOMINATOR MOVES. `maxScore` is the objdiff row count of the winning candidate's
+  // alignment, so a different candidate scores against a different scale: twelve rows moved theirs
+  // between `eb6dec7d` and `2fed1e42`, `kleod:CountCollectedGems:agbcc` by 17. Read as a
+  // subtraction on a fixed scale, its `290 → 171` bought a six-way "partition of the 290", a
+  // 297-predicted / 119-delivered shortfall, and an extra attribution round.
+  test('a moving score is shown over its own denominator, not as a bare numerator', () => {
+    const r = compareMeasurements(
+      out(row('a', { score: 290, maxScore: 404 })),
+      out(row('a', { score: 171, maxScore: 387 })),
+    );
+    expect(r.changed).toContainEqual({ id: 'a', field: 'asmlift.score', from: '290/404', to: '171/387' });
+  });
+
+  test('a denominator that moves ALONE is a change, and is named', () => {
+    const r = compareMeasurements(out(row('a', { maxScore: 404 })), out(row('a', { maxScore: 387 })));
+    expect(r.ok).toBe(false);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.maxScore', from: '404', to: '387' }]);
+  });
+
+  test('an unscored row still renders its score without a denominator', () => {
+    const r = compareMeasurements(
+      out(row('a', { score: 12, maxScore: null })),
+      out(row('a', { score: 14, maxScore: null })),
+    );
     expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.score', from: '12', to: '14' }]);
   });
 
@@ -78,11 +105,11 @@ describe('compareMeasurements', () => {
     expect(r.ok).toBe(false);
   });
 
-  test('provenance and timings are not compared — only the six fields', () => {
+  test('provenance and timings are not compared — only the listed fields', () => {
     const base = out(row('a'));
     const fresh = out(row('a'));
     (fresh.meta as unknown as Record<string, unknown>).generatedAt = 'much later';
-    (fresh.results[0].asmlift as unknown as Record<string, unknown>).maxScore = 999;
+    (fresh.results[0].asmlift as unknown as Record<string, unknown>).compileErrors = 7;
     expect(compareMeasurements(base, fresh).ok).toBe(true);
   });
 });

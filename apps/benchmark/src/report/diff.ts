@@ -22,10 +22,20 @@ import { rowsAddedSince } from './regression';
  *  that moves no score can still rewrite what the report shows, `candidateLabel` because the
  *  ranked WINNER can change identity at an unchanged score (a tie-break moving is a real change),
  *  and `quality` because the report publishes it — a row can move `quality.casts` 0 → 1 with
- *  score, outcome and label all unchanged. */
+ *  score, outcome and label all unchanged.
+ *
+ *  `maxScore` is here because it is NOT a constant of the row, and the whole project read it as
+ *  one. It is the objdiff row count of the winning candidate's alignment, so a different
+ *  candidate gives a different denominator: twelve rows moved theirs between `eb6dec7d` and
+ *  `2fed1e42`, `kleod:CountCollectedGems:agbcc` by 17 (404 → 387). Its `290 → 171` was therefore
+ *  never a subtraction on a fixed scale, and reading it as one is what produced a six-way
+ *  "partition of the 290", a 297-predicted / 119-delivered shortfall, and a whole extra
+ *  attribution round to explain the difference. The report publishes `score/maxScore` (the
+ *  Explorer and the gap badge both render it), so by this list's own rule a denominator-only move
+ *  is a published claim moving and must be named. */
 const FIELDS = {
-  asmlift: ['outcome', 'score', 'candidateLabel', 'source', 'quality'],
-  m2c: ['outcome', 'score', 'source', 'quality'],
+  asmlift: ['outcome', 'score', 'maxScore', 'candidateLabel', 'source', 'quality'],
+  m2c: ['outcome', 'score', 'maxScore', 'source', 'quality'],
 } as const;
 
 /** Compared by VALUE with a stable key order — `quality` is an object, and comparing two of those
@@ -54,12 +64,19 @@ export interface DiffReport {
 
 // Long text is reported by its shape, not pasted: a 40-line C body in a gate's output buries the
 // one line that says which row moved.
-const show = (field: string, v: unknown): string => {
+//
+// `res` is the whole side-result the value came from, because a score alone is not readable: it
+// is a numerator over a denominator that moves with the winning candidate. `290 → 171` invites a
+// subtraction; `290/404 → 171/387` shows that 17 of those 119 points are the scale, not the row.
+const show = (field: string, v: unknown, res?: Record<string, unknown>): string => {
   if (v === undefined || v === null) {
     return String(v);
   }
   if (field.endsWith('source')) {
     return `${String(v).length} bytes`;
+  }
+  if (field === 'score' && typeof res?.maxScore === 'number') {
+    return `${String(v)}/${res.maxScore}`;
   }
   return typeof v === 'string' ? v : JSON.stringify(v);
 };
@@ -77,9 +94,11 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
       continue;
     }
     for (const side of ['asmlift', 'm2c'] as const) {
+      const wasSide = was[side] as unknown as Record<string, unknown>;
+      const nowSide = now[side] as unknown as Record<string, unknown>;
       for (const f of FIELDS[side]) {
-        const a = (was[side] as unknown as Record<string, unknown>)[f];
-        const b = (now[side] as unknown as Record<string, unknown>)[f];
+        const a = wasSide[f];
+        const b = nowSide[f];
         // sources are compared SCRUBBED, the same measurement-level equality stale-check uses:
         // a cold run re-mints scratch-dir names inside embedded asm comments
         const [x, y] =
@@ -89,7 +108,7 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
               ? [stable(a), stable(b)]
               : [a, b];
         if (x !== y) {
-          changed.push({ id: was.id, field: `${side}.${f}`, from: show(f, a), to: show(f, b) });
+          changed.push({ id: was.id, field: `${side}.${f}`, from: show(f, a, wasSide), to: show(f, b, nowSide) });
         }
       }
     }
