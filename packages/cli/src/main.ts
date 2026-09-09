@@ -174,17 +174,6 @@ export interface ObjInput {
   asmData: typeof asmDataForObject;
 }
 
-export interface CliResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
-/** Everything a ranked run writes to stderr, in the order a reader reads it.
- *
- *  A TIMING VALUE, never a timing call: `phaseReport` and `stamp` are computed by the caller at
- *  the moment the run ended, because both measure the run and neither may be re-measured by the
- *  act of rendering it. */
 /** One candidate's score as `<score>/<rows>` — the numerator over the denominator it was measured
  *  against, on both the `[score]` table and the `[ranked]` line readers are told to quote.
  *
@@ -199,6 +188,26 @@ export function scoreOf(s: { score: number; rows: number; match: boolean }): str
   return `${s.score}/${s.rows}${s.match ? ' (match)' : ''}`;
 }
 
+/** A WITHHELD candidate's score, in the same `<score>/<rows>` shape as a published one. Its
+ *  numerator is read across runs exactly like the `[score]` table's — a withheld sibling's score
+ *  is the evidence that a proof-gated spelling was close — so it must not be the one line in this
+ *  log that invites a subtraction on a fixed scale. `rows` is optional at the type level
+ *  (core rank.ts `WithheldCandidate`) because the scorer that produced it need not supply one;
+ *  absent, the numerator prints alone rather than against an invented denominator. */
+const withheldScore = (w: { score: number; rows?: number }): string =>
+  w.rows === undefined ? String(w.score) : `${w.score}/${w.rows}`;
+
+export interface CliResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Everything a ranked run writes to stderr, in the order a reader reads it.
+ *
+ *  A TIMING VALUE, never a timing call: `phaseReport` and `stamp` are computed by the caller at
+ *  the moment the run ended, because both measure the run and neither may be re-measured by the
+ *  act of rendering it. */
 function rankedStderr(a: {
   targetTrace: string;
   warn: string;
@@ -230,7 +239,7 @@ function rankedStderr(a: {
   // them out entirely would make `candidates scored` under-count the fan with no trace.
   const held = ranked.withheld.length
     ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
-      `${ranked.withheld[0].label} at ${ranked.withheld[0].score}: ${ranked.withheld[0].why}\n`
+      `${ranked.withheld[0].label} at ${withheldScore(ranked.withheld[0])}: ${ranked.withheld[0].why}\n`
     : '';
   // THE ASSUMPTIONS THE SCORE RESTS ON. A candidate names globals the asm's own literal pool
   // named, and where no symbol map knows them asmlift synthesizes their declarations — width
@@ -628,13 +637,13 @@ export async function runCli(
   let lastTick = 0;
   const onProgress =
     flags.has('progress') && progressSink
-      ? (doneN: number, total: number, bestSoFar: number | undefined) => {
+      ? (doneN: number, total: number, bestSoFar: { score: number; rows: number } | undefined) => {
           const now = Date.now();
           if (doneN < total && now - lastTick < 5000) {
             return;
           }
           lastTick = now;
-          const best = bestSoFar === undefined ? '' : `, best so far ${bestSoFar}`;
+          const best = bestSoFar === undefined ? '' : `, best so far ${bestSoFar.score}/${bestSoFar.rows}`;
           progressSink(`asmlift: [progress] ${doneN}/${total} candidates scored${best}\n`);
         }
       : undefined;

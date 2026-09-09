@@ -188,6 +188,19 @@ describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReaso
     expect(won.withheld).toEqual([]);
   });
 
+  // A withheld candidate's score is read across runs exactly like a published one, so it carries
+  // the denominator it was measured against — the objdiff row count of THAT spelling's alignment.
+  // A scorer that supplies no `rows` leaves it absent rather than borrowing a scale.
+  test('a withheld candidate carries the denominator its score was measured against', () => {
+    const withRows = rankBy([plain, proofed], 'f', (source) =>
+      source === 'b;' ? { score: 5, rows: 38 } : { score: 40, rows: 64 },
+    );
+    expect(withRows.withheld).toEqual([{ label: 'unsigned/unreduce', score: 5, rows: 38, why: expect.any(String) }]);
+
+    const noRows = rankBy([plain, proofed], 'f', (source) => ({ score: source === 'b;' ? 5 : 40 }));
+    expect(noRows.withheld[0]).not.toHaveProperty('rows');
+  });
+
   test('an all-withheld list fails LOUD and says so, rather than reading as a scorer failure', () => {
     expect(() => rankBy([proofed], 'f', () => ({ score: 7 }))).toThrow(/1 candidate\(s\) withheld/);
   });

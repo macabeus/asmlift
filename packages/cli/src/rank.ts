@@ -37,8 +37,10 @@ export interface RankOptions {
   /** a project's own toolchain — overrides the compiler registry */
   compile?: CandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
-   *  lowest score seen SO FAR. The ranking below is what decides the winner. */
-  onProgress?: (done: number, total: number, bestSoFar: number | undefined) => void;
+   *  best score seen SO FAR — the whole `MatchScore`, not its numerator, because the denominator
+   *  belongs to that candidate's alignment and two candidates' numerators are not on one scale.
+   *  The ranking below is what decides the winner. */
+  onProgress?: (done: number, total: number, bestSoFar: MatchScore | undefined) => void;
   /** Where this run's phase timings accumulate (phase.ts). Absent = no timing taken. The serial
    *  driver can only separate the compile from the score when `compile` is supplied; reached
    *  through the registry instead, the compile is charged to `score`. */
@@ -114,13 +116,13 @@ export function decompileRanked(
           timed(opts.clock, 'compile', () => opts.compile!(source, symbol, backendId, declarations))
       : opts.compile;
   let done = 0;
-  let best: number | undefined;
+  let best: MatchScore | undefined;
   return rankBy(candidates, name, (source, symbol, cand) => {
     try {
       const s = timed(opts.clock, 'score', () =>
         scoreSource(source, symbol, targetObj, target, backend.id, compile, declarationsOf(cand)),
       );
-      best = best === undefined || s.score < best ? s.score : best;
+      best = best === undefined || s.score < best.score ? s : best;
       return s;
     } finally {
       // a candidate the scorer REFUSED still counts as processed: progress must not stall on a
@@ -167,7 +169,7 @@ export async function decompileRankedParallel(
   const scored = new Map<string, MatchScore | Error>();
   let next = 0;
   let done = 0;
-  let best: number | undefined;
+  let best: MatchScore | undefined;
   await Promise.all(
     Array.from({ length: Math.max(1, opts.jobs) }, async () => {
       const compile = opts.worker();
@@ -183,7 +185,7 @@ export async function decompileRankedParallel(
             compile(cand.source, name, backend.id, declarationsOf(cand)),
           );
           result = timed(clock, 'score', () => scoreObjects(targetObj, obj, name));
-          best = best === undefined || result.score < best ? result.score : best;
+          best = best === undefined || result.score < best.score ? result : best;
         } catch (e) {
           // recorded, not thrown: `rankBy` below is what decides whether a refused candidate is
           // survivable (a sibling scored) or fatal (every one failed)

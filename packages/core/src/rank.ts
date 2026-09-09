@@ -229,6 +229,13 @@ export interface DroppedCandidate {
 export interface WithheldCandidate {
   label: string;
   score: number;
+  /** the denominator that score was measured against — objdiff's row count for THIS candidate's
+   *  alignment, so it moves with the spelling. Present whenever the injected scorer supplies one
+   *  (the cli and webapp objdiff scorers both do); a scorer whose result carries no `rows` leaves
+   *  it absent rather than inventing a scale. A withheld score is compared across runs exactly
+   *  like a published one, and a bare numerator invites the subtraction on a fixed scale that
+   *  `kleod:CountCollectedGems:agbcc` (290/404 → 171/387) cost an attribution round. */
+  rows?: number;
   /** one line: why publication needed a proof this score did not supply */
   why: string;
 }
@@ -1873,7 +1880,7 @@ export function enumerateCandidates(
  *  the scorer must be sync (the cli/Node objdiff path). The webapp scores asynchronously and does
  *  its own await-loop over `enumerateCandidates`, reusing this module's `Candidate`/`RankedResult`
  *  types but not this driver. */
-export function rankBy<S extends { score: number }>(
+export function rankBy<S extends { score: number; rows?: number }>(
   candidates: Candidate[],
   symbol: string,
   scoreFn: (source: string, symbol: string, candidate: Candidate) => S,
@@ -1887,7 +1894,12 @@ export function rankBy<S extends { score: number }>(
       const score = scoreFn(c.source, symbol, c);
       const why = withheldReason(c, score);
       if (why !== null) {
-        withheld.push({ label: c.label, score: score.score, why });
+        withheld.push({
+          label: c.label,
+          score: score.score,
+          ...(score.rows === undefined ? {} : { rows: score.rows }),
+          why,
+        });
         return;
       }
       results.push({ ...c, order, score });
