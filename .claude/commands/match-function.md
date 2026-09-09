@@ -98,11 +98,15 @@ match blocks the branch.** Pass the base ref: both gates read the COMMITTED arti
 branch that has already committed its own they compare it against itself and pass vacuously.
 Keep the order too: `diff` exits **2**, "nothing was compared", if `results.json` still carries the
 base's `generatedAt` — run before `run`+`merge` it compares the base with itself in a second and
-prints a green line. `regression` answers "did a match break"; `diff` names every row and field that moved
-(`asmlift.{outcome,score,candidateLabel,source}`, `m2c.{outcome,score,source}`) — that list is the
-PR body's inventory of what the round did, and for a commit claiming to move nothing it is the
-gate. If a match is lost, either tighten the gate on your lever or drop the lever — do not
-rationalize a trade unless the user explicitly approves it. Report the totals (asmlift vs m2c)
+prints a green line. `regression` answers "did a match break"; `diff` names every row and field that
+moved — that list is the PR body's inventory of what the round did, and for a commit claiming to
+move nothing it is the gate. The fields it watches live in `report/diff.ts`'s `FIELDS` and are wider
+than the score: both sides' `outcome, score, maxScore, compileErrors, errorMarkers, breakdown,
+source, quality`, plus asmlift's `candidateLabel` and the `droppedCandidates` /
+`withheldCandidates` counts. Expect lines you did not predict from `maxScore` and `breakdown` — the
+denominator and the shape of the gap moving — and from the dropped count, which moves when the FAN
+changed even though every score held. If a match is lost, either tighten the gate on your lever or
+drop the lever — do not rationalize a trade unless the user explicitly approves it. Report the totals (asmlift vs m2c)
 before and after.
 
 Four things this gate does not catch by itself:
