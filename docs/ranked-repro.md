@@ -19,10 +19,90 @@ node <repo>/packages/cli/dist/asmlift.mjs <asm/nonmatchings/…/Fn.s> \
   --jobs 6 --progress
 ```
 
+**That command measures a project checkout's function, and it is NOT how you reproduce a benchmark
+row** — a real-tier row is scored on a different input `.s` and compiled down a different path, so
+it lands on a different number. The next section has the measurement and the vehicle that does
+reproduce a row (`pnpm bench target`). Read it before you quote a number against a harness outcome.
+
 Run it from the project checkout and redirect stderr to a file — the `[score]` and `[progress]`
 lines are stderr, and they are the whole record. From a git worktree, export the harness's
 toolchain overrides first (`ASMLIFT_AGBCC` and the rest): a worktree's repo root is not the
 workspace, so without them the sibling checkouts do not resolve and the run measures nothing.
+
+## The VEHICLE is part of the number: a benchmark ROW is not this command
+
+The command above measures **a project checkout's function**. It reads the split `.s` the project
+committed under `asm/`, compiles candidates with the project's own `decomp.yaml` template against
+the project's headers, and scores them against an object the project's build produced. That is the
+right question when you are landing a match in a decomp repo.
+
+**A real-tier benchmark row is a different question, and the command above does not reproduce it.**
+The harness never reads the project's `.s` and never runs the project's `decomp.yaml`:
+
+- **The input `.s` differs.** A row's input is its `targetAsm` — the compiler's own assembly for the
+  target object the harness itself built (`eval/evaluate.ts`) — not the disassembly the project
+  committed. Same function, different text: `.L3` labels against a branch back to the symbol,
+  `.gcc2_compiled.`/`.size` against `thumb_func_start`, and in the split file the inter-function pad
+  spelled as an instruction.
+- **The compile path differs.** Real rows are compiled inside `compile/real.ts`'s vendored-context
+  escalation ladder — bare typedefs, then the manifest's `prependC`, then the vendored `ctx.i` —
+  with asmlift's canonical flags for the ISA. That file says so in its own header: _"the target is
+  our deterministic re-compile of real game code, not the shipped ROM object."_ The project's
+  template — its `-iquote include`, its `-Werror`, its `arm-none-eabi-cpp` — is not on that path.
+- **The scoring object differs**, and with it the denominator: a per-function `target.o` the harness
+  built, against whatever `build/…/tu.o` the project's make produced.
+
+Measured on `kleod:StrCpy:agbcc` — the smallest real agbcc row, ten lines of Thumb — one asmlift
+commit (`3a06c74`), ~8 s a run:
+
+| what was run                                                                                                           |  best `[score]` | the source it printed               |
+| ---------------------------------------------------------------------------------------------------------------------- | --------------: | ----------------------------------- |
+| the command above: `asm/matchings/system/StrCpy.s`, the checkout's `decomp.yaml`, `--score-against build/src/system.o` | `unsigned: 6/9` | `u8 *StrCpy(…) { … return v2; }`    |
+| `pnpm bench target` + the row's own `targetAsm`                                                                        | `unsigned: 5/8` | byte-identical to the published row |
+| the published row, `apps/benchmark/results/results.json`                                                               |           `5/8` | —                                   |
+
+Different score, a different denominator, and a different C spelling — on a ten-line function.
+Neither run is wrong; they answer different questions, and only the second one is the row. The two
+`StrCpy` runs above are this file's own measurement and are cheap enough to repeat; the same
+divergence was first found the expensive way on `LoadBGTilemapData`, where the command above landed
+on a `/raw-globals` winner over a fan of 1440 and the harness row was a different number again —
+that one is a prior round's finding, not re-measured here.
+
+### `pnpm bench target` is the vehicle that reproduces a row
+
+```sh
+pnpm bench target <project:sym:toolchain> --out <dir> [--project-root <checkout>]
+```
+
+Into `<dir>` it writes `target.o` (the harness's own target object, content-cached), a `decomp.yaml`
+whose compile command **is the benchmark's toolchain invocation**, and the scoring context for the
+escalation rung this row actually stopped at — it replays the ladder against the row's published
+source and names the rung it picked on stdout. A symbol-fed row also gets its map: grafted as
+`tools.asmlift.elf` from the checkout `--project-root` names (a missing checkout warns LOUDLY and
+degrades to map-less, which is a different number again), or written beside `target.o` as
+`symbols.json` for a synthetic row's authored map.
+
+It does not write the input `.s`, because that is the row's `targetAsm` — so take it from the row.
+**Every published row already carries the whole script**, generated from these same parts
+(`apps/benchmark/src/report/repro-scripts.ts`) and re-run for every function by the
+`pnpm bench fidelity` gate in `benchmark.yml`. Extract it rather than retyping it:
+
+```sh
+node -e 'const {results}=require("./apps/benchmark/results/results.json");
+process.stdout.write(results.find(r=>r.id===process.argv[1]).scripts.asmlift)' \
+  kleod:StrCpy:agbcc > repro.sh
+# then set ASMLIFT_PATH (and PROJECT_PATH, if the script asks for it) at the top and run it
+bash repro.sh > out.c 2> out.err
+```
+
+That script materializes the inputs with `bench target`, embeds the row's `targetAsm` verbatim, and
+passes the row's `--proto`/`--asm-data`. Run on `kleod:StrCpy:agbcc` it printed
+`best unsigned: 5/8` and a source byte-identical to the published row's. **A non-matching row's
+script exits 1** — `--score-against` exits 0 only on byte-exact — so `set -euo pipefail` makes the
+last line the failure; that is the row reproducing, not the script breaking.
+
+Everything below — the checkout, the axis set, the loader, the cache, the flags — is part of both
+numbers. Pick the vehicle first, then read the rest.
 
 ## The CHECKOUT is part of the number, and it is the one that bit
 
