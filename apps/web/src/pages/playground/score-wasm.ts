@@ -308,7 +308,7 @@ export async function rankCandidatesInBrowser(
       // it would be the playground showing a source the CLI refuses to stand behind.
       const why = withheldReason(c, score);
       if (why !== null) {
-        withheld.push({ label: c.label, score: score.score, why });
+        withheld.push({ label: c.label, score: score.score, rows: score.rows, why });
         continue;
       }
       results.push({ ...c, order, score });

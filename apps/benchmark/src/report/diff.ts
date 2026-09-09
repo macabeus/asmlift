@@ -17,19 +17,85 @@ import { RESULTS_DIR } from '../config';
 import { RESULTS_PATH, byId, headContains, readCommitted, sameRun, scrub, shortSha } from './committed';
 import { rowsAddedSince } from './regression';
 
-/** The fields a published claim is made of — every one the report shows, or the count this gate
- *  prints is the truth about the LIST and not about the row. `source` is here because a change
- *  that moves no score can still rewrite what the report shows, `candidateLabel` because the
- *  ranked WINNER can change identity at an unchanged score (a tie-break moving is a real change),
- *  and `quality` because the report publishes it — a row can move `quality.casts` 0 → 1 with
- *  score, outcome and label all unchanged. */
+/** The fields a published claim is made of, named individually when they move.
+ *
+ *  The rule is: every published claim SMALL ENOUGH TO PRINT, and for the big ones the published
+ *  COUNT rather than the list. Stated as "every field the report shows" it would be false in this
+ *  file — `droppedCandidates` is published (`[ranked] N dropped, M withheld`) and runs to 51,840
+ *  entries on one row of the current artifact, so watching it raw emits a multi-megabyte diff
+ *  line.
+ *
+ *  `source` is here because a change that moves no score can still rewrite what the report shows,
+ *  `candidateLabel` because the ranked WINNER can change identity at an unchanged score (a
+ *  tie-break moving is a real change), `quality` because the report publishes it — a row can move
+ *  `quality.casts` 0 → 1 with score, outcome and label all unchanged — and `breakdown` for the
+ *  same reason (the web FunctionDetail renders its five numbers; it moved 17 lines over
+ *  `eb6dec7d`→`2fed1e42`, none of them a row no other field already named).
+ *
+ *  `maxScore` is here because it is NOT a constant of the row. It is the objdiff row count of the
+ *  winning candidate's alignment, so a different candidate gives a different denominator: 14 lines
+ *  moved theirs between `eb6dec7d` and `2fed1e42` (12 asmlift, 2 m2c), and
+ *  `kleod:CountCollectedGems:agbcc` by 17 (404 → 387). Its `290 → 171` was therefore never a
+ *  subtraction on a fixed scale, and reading it as one produced a six-way "partition of the 290",
+ *  a 297-predicted / 119-delivered shortfall, and a whole extra attribution round. The report
+ *  publishes `score/maxScore` (the Explorer table and the detail view's objdiff badge), so a
+ *  denominator-only move is a published claim moving. It has never moved without its `score` moving too — all 14
+ *  printed a `score` line on the same row and side, and that line renders both denominators — so
+ *  the entry buys 0 unique rows today and is kept for the case it alone catches: an alignment
+ *  whose length moves while the diff count holds.
+ *
+ *  `compileErrors` is here because the report publishes it (the run line prints `noncompile(k)`,
+ *  the web FunctionDetail prints `compile errors {n}`), so a row sliding `noncompile(3) →
+ *  noncompile(7)` is a published claim moving. Cost over `eb6dec7d`→`2fed1e42`: 0 extra lines.
+ *
+ *  `errorMarkers` is here because this repo has already PAID for its absence: the `v17:` note in
+ *  `cache.ts` records a warm-store entry replaying ``gPacked' undeclared`` for a row whose deciding
+ *  rung declares the symbol, with no artifact comparison to catch it. The run line prints
+ *  `declined(k gap(s))` from it and the web report derives its whole declined/failed taxonomy
+ *  column from it. Cost over the same pair: 2 lines, 0 rows no other field named. Max 6 entries /
+ *  491 chars, so it prints as itself.
+ *
+ *  The two `.length` entries are the exception the rule above describes: `droppedCandidates` and
+ *  `withheldCandidates` are published as COUNTS by the `[ranked]` line, and the count is what is
+ *  watched. Not a cosmetic saving — over `eb6dec7d`→`2fed1e42` the dropped count moved on 2 rows
+ *  (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`) that NO
+ *  other watched field moves on: identical source, identical score, identical label, a fan that
+ *  demonstrably changed, and a gate that answered "nothing moved".
+ *
+ *  `symbolsUsed` is the one published field still left out, and NOT for size — it is at most 1,108
+ *  chars on any row of the current artifact. It is derived from the winning candidate, which
+ *  `source` and `candidateLabel` already name, and it moved on 0 rows over `eb6dec7d`→`2fed1e42`;
+ *  a run where a symbol's declared SHAPE moves under an unchanged winner would slip past. */
 const FIELDS = {
-  asmlift: ['outcome', 'score', 'candidateLabel', 'source', 'quality'],
-  m2c: ['outcome', 'score', 'source', 'quality'],
+  asmlift: [
+    'outcome',
+    'score',
+    'maxScore',
+    'compileErrors',
+    'errorMarkers',
+    'breakdown',
+    'candidateLabel',
+    'source',
+    'quality',
+    'droppedCandidates.length',
+    'withheldCandidates.length',
+  ],
+  m2c: ['outcome', 'score', 'maxScore', 'compileErrors', 'errorMarkers', 'breakdown', 'source', 'quality'],
 } as const;
 
-/** Compared by VALUE with a stable key order — `quality` is an object, and comparing two of those
- *  with `!==` reports every row as changed. */
+/** One side's value for a watched field. A `<key>.length` entry reads the COUNT of a published
+ *  list — absent list = 0, because "no fan recorded" and "an empty fan" are the same published
+ *  claim (`[ranked] 0 dropped`). */
+const read = (res: Record<string, unknown>, field: string): unknown => {
+  if (field.endsWith('.length')) {
+    const list = res[field.slice(0, -'.length'.length)];
+    return Array.isArray(list) ? list.length : 0;
+  }
+  return res[field];
+};
+
+/** Compared by VALUE with a stable key order — `quality`, `breakdown` and `errorMarkers` are
+ *  objects and arrays, and comparing two of those with `!==` reports every row as changed. */
 const stable = (v: unknown): string =>
   JSON.stringify(v, (_k, x: unknown) =>
     x && typeof x === 'object' && !Array.isArray(x)
@@ -54,12 +120,29 @@ export interface DiffReport {
 
 // Long text is reported by its shape, not pasted: a 40-line C body in a gate's output buries the
 // one line that says which row moved.
-const show = (field: string, v: unknown): string => {
+//
+// `res` is the whole side-result the value came from, because a score alone is not readable: it is
+// a numerator over a denominator that moves with the winning candidate. `290 → 171` invites a
+// subtraction; `290/404 → 171/387` shows that 17 of those 119 points are the scale, not the row.
+const show = (field: string, v: unknown, res: Record<string, unknown>): string => {
   if (v === undefined || v === null) {
     return String(v);
   }
   if (field.endsWith('source')) {
     return `${String(v).length} bytes`;
+  }
+  // Rendered the way it is COMPARED: a compiler error carries the scratch path a cold run
+  // re-mints, and a rendering that shows a difference the comparison ignored is a false line.
+  if (field === 'errorMarkers') {
+    return scrub(stable(v));
+  }
+  // A side carrying the key renders a denominator, `?` included: `show` is called once per side,
+  // so a fresh side whose `maxScore` went null would otherwise print `290/404 → 171` and be read
+  // as `171/404` — the fixed-scale misreading this rendering exists to stop. A side with no
+  // `maxScore` key at all (hand-built objects; artifacts predating the field) keeps the bare
+  // numerator, since `290/404 → 171/undefined` says less than `171`.
+  if (field === 'score' && 'maxScore' in res) {
+    return `${String(v)}/${typeof res.maxScore === 'number' ? res.maxScore : '?'}`;
   }
   return typeof v === 'string' ? v : JSON.stringify(v);
 };
@@ -77,19 +160,26 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
       continue;
     }
     for (const side of ['asmlift', 'm2c'] as const) {
-      for (const f of FIELDS[side]) {
-        const a = (was[side] as unknown as Record<string, unknown>)[f];
-        const b = (now[side] as unknown as Record<string, unknown>)[f];
-        // sources are compared SCRUBBED, the same measurement-level equality stale-check uses:
-        // a cold run re-mints scratch-dir names inside embedded asm comments
-        const [x, y] =
+      const wasSide = was[side] as unknown as Record<string, unknown>;
+      const nowSide = now[side] as unknown as Record<string, unknown>;
+      for (const f of FIELDS[side] as readonly string[]) {
+        const a = read(wasSide, f);
+        const b = read(nowSide, f);
+        // sources and compiler errors are compared SCRUBBED, the same measurement-level equality
+        // stale-check uses: a cold run re-mints scratch-dir names inside embedded asm comments and
+        // inside the paths a compiler quotes back. Objects and arrays are compared by VALUE.
+        const norm = (v: unknown): unknown =>
           f === 'source'
-            ? [scrub(String(a ?? '')), scrub(String(b ?? ''))]
-            : f === 'quality'
-              ? [stable(a), stable(b)]
-              : [a, b];
+            ? scrub(String(v ?? ''))
+            : f === 'errorMarkers'
+              ? // `stable(undefined)` is `undefined`, not a string — most sides carry no markers
+                scrub(stable(v) ?? 'absent')
+              : v !== null && typeof v === 'object'
+                ? stable(v)
+                : v;
+        const [x, y] = [norm(a), norm(b)];
         if (x !== y) {
-          changed.push({ id: was.id, field: `${side}.${f}`, from: show(f, a), to: show(f, b) });
+          changed.push({ id: was.id, field: `${side}.${f}`, from: show(f, a, wasSide), to: show(f, b, nowSide) });
         }
       }
     }

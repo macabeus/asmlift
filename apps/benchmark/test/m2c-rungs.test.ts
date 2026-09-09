@@ -11,8 +11,8 @@
 // the plain one. It breaks the moment a rung adds the DECLARATIONS the row is compiled against:
 // under that rule `bfwordread` and `bfwordwrite` publish ``gPacked' undeclared`` while the rung
 // that decides them DOES declare `gPacked` and fails with `invalid operands to binary <<`.
-// `errorMarkers` is not among `FIELDS.m2c` in report/diff.ts, so no artifact comparison catches
-// it — which is why the pin is here, on the function, and toolchain-free.
+// `report/diff.ts` watches `errorMarkers`, but a gate that names a moved field still does not say
+// WHICH rung is right — which is why the pin is here, on the function, and toolchain-free.
 import { describe, expect, test } from 'vitest';
 
 import { scoreM2c } from '../src/eval/evaluate';

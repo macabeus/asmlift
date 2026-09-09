@@ -174,6 +174,28 @@ export interface ObjInput {
   asmData: typeof asmDataForObject;
 }
 
+/** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
+ *
+ *  THE ONE RENDERER FOR EVERY SCORE THIS CLI PRINTS: the `[score]` table, the `[ranked]` line's
+ *  `best …`, the `[withheld]` line and the `[progress]` line. A reader comparing two runs cannot
+ *  be asked to know which lines carry a denominator.
+ *
+ *  `rows` is objdiff's total row count for THIS candidate's alignment against the target, so it is
+ *  a property of the candidate and not of the target: a different spelling aligns differently and
+ *  is scored on a different scale. Two runs' `[score]` lines are the project's standard
+ *  before/after comparison (docs/ranked-repro.md), and printing the numerator alone makes that
+ *  comparison read as a subtraction on a fixed scale. It is not one — `kleod:CountCollectedGems`
+ *  went 290/404 → 171/387 across two committed artifacts, 17 points of which were the scale, and
+ *  an attribution round was spent explaining the difference.
+ *
+ *  Both fields are OPTIONAL, and each absence means one thing. No `rows`: the scorer that produced
+ *  this score supplied none (core rank.ts's `WithheldCandidate` types it optional for exactly
+ *  that), so the numerator prints alone rather than against an invented denominator — never a `0`,
+ *  which would read as a real scale. No `match`: the caller does not know, so nothing is claimed. */
+export function scoreOf(s: { score: number; rows?: number; match?: boolean }): string {
+  return `${s.score}${s.rows === undefined ? '' : `/${s.rows}`}${s.match === true ? ' (match)' : ''}`;
+}
+
 export interface CliResult {
   code: number;
   stdout: string;
@@ -197,9 +219,7 @@ function rankedStderr(a: {
   protoNote: string;
 }): string {
   const { ranked } = a;
-  const table = ranked.candidates
-    .map((c) => `asmlift: [score] ${c.label}: ${c.score.score}${c.score.match ? ' (match)' : ''}\n`)
-    .join('');
+  const table = ranked.candidates.map((c) => `asmlift: [score] ${c.label}: ${scoreOf(c.score)}\n`).join('');
   // Spellings the scorer refused are recorded, not silent: a lever whose every candidate
   // fails to build looks identical to one that declined unless the drops are visible.
   // …and the same idea one stage EARLIER: `[dropped]` reports a spelling the SCORER refused,
@@ -218,7 +238,7 @@ function rankedStderr(a: {
   // them out entirely would make `candidates scored` under-count the fan with no trace.
   const held = ranked.withheld.length
     ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
-      `${ranked.withheld[0].label} at ${ranked.withheld[0].score}: ${ranked.withheld[0].why}\n`
+      `${ranked.withheld[0].label} at ${scoreOf(ranked.withheld[0])}: ${ranked.withheld[0].why}\n`
     : '';
   // THE ASSUMPTIONS THE SCORE RESTS ON. A candidate names globals the asm's own literal pool
   // named, and where no symbol map knows them asmlift synthesizes their declarations — width
@@ -253,7 +273,7 @@ function rankedStderr(a: {
   const summary =
     `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
     `${ranked.withheld.length} withheld, ${synthesized} synthesized, ` +
-    `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
+    `best ${ranked.best.label}: ${scoreOf(ranked.best.score)} ` +
     `[${a.stamp}]\n`;
   // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
   // tail stay adjacent.
@@ -616,13 +636,15 @@ export async function runCli(
   let lastTick = 0;
   const onProgress =
     flags.has('progress') && progressSink
-      ? (doneN: number, total: number, bestSoFar: number | undefined) => {
+      ? (doneN: number, total: number, bestSoFar: { score: number; rows: number } | undefined) => {
           const now = Date.now();
           if (doneN < total && now - lastTick < 5000) {
             return;
           }
           lastTick = now;
-          const best = bestSoFar === undefined ? '' : `, best so far ${bestSoFar}`;
+          // Same renderer as the `[score]` table, `(match)` included: a reader watching a
+          // six-figure fan wants "the best so far is already a match" from this line.
+          const best = bestSoFar === undefined ? '' : `, best so far ${scoreOf(bestSoFar)}`;
           progressSink(`asmlift: [progress] ${doneN}/${total} candidates scored${best}\n`);
         }
       : undefined;

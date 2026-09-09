@@ -77,7 +77,7 @@ export interface DecompilerResult {
    *  needed one. A different fact from `droppedCandidates` — nothing failed — and recorded for the
    *  same reason: a row whose winner outranks a withheld sibling, or whose own winner is published
    *  only because it matched, says none of that anywhere else. Absent ⇒ nothing was withheld. */
-  withheldCandidates?: { label: string; score: number; why: string }[];
+  withheldCandidates?: { label: string; score: number; rows?: number; why: string }[];
 }
 
 /** MEASURED size of the remaining gap (merge-time): the best compiling candidate's absolute

@@ -54,8 +54,8 @@ const M2C_DIALECT_TYPEDEFS = 'typedef float f32;typedef double f64;\n#define NUL
  *  ``gPacked' undeclared`` for a symbol the deciding rung DOES declare, while that rung's own
  *  failure is `invalid operands to binary <<` / `invalid operands to binary &`. A published error
  *  naming a cause the run does not have is a silent wrong answer wearing a measurement's clothes,
- *  and `errorMarkers` is not among `FIELDS.m2c` in report/diff.ts, so no artifact comparison
- *  reports it. The dialect rungs stay unreported for the original reason: they prepend typedefs,
+ *  and an artifact comparison names the field that moved without saying which rung is right. The
+ *  dialect rungs stay unreported for the original reason: they prepend typedefs,
  *  so their failure can be their own. Pinned by `m2c-rungs.test.ts`, which is why this function
  *  is exported. */
 export function scoreM2c(

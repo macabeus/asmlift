@@ -26,6 +26,8 @@ const row = (
 const out = (...results: FunctionResult[]): BenchOutput =>
   ({ meta: { generatedAt: 'whenever' }, results }) as unknown as BenchOutput;
 
+const drop = (label: string) => ({ label, error: 'did not build' });
+
 const at = (generatedAt: string): BenchOutput => ({ meta: { generatedAt }, results: [] }) as unknown as BenchOutput;
 
 describe('compareMeasurements', () => {
@@ -38,7 +40,40 @@ describe('compareMeasurements', () => {
   test('a score that moves without changing the outcome is caught — the case `regression` misses', () => {
     const r = compareMeasurements(out(row('a', { score: 12 })), out(row('a', { score: 14 })));
     expect(r.ok).toBe(false);
-    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.score', from: '12', to: '14' }]);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.score', from: '12/40', to: '14/40' }]);
+  });
+
+  // THE DENOMINATOR MOVES: `maxScore` is the objdiff row count of the winning candidate's
+  // alignment, so a different candidate scores against a different scale (`290 → 171` is 119
+  // points on a scale that also lost 17).
+  test('a moving score is shown over its own denominator, not as a bare numerator', () => {
+    const r = compareMeasurements(
+      out(row('a', { score: 290, maxScore: 404 })),
+      out(row('a', { score: 171, maxScore: 387 })),
+    );
+    expect(r.changed).toContainEqual({ id: 'a', field: 'asmlift.score', from: '290/404', to: '171/387' });
+  });
+
+  test('a denominator that moves ALONE is a change, and is named', () => {
+    const r = compareMeasurements(out(row('a', { maxScore: 404 })), out(row('a', { maxScore: 387 })));
+    expect(r.ok).toBe(false);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.maxScore', from: '404', to: '387' }]);
+  });
+
+  // `show` renders one SIDE at a time, so a denominator that went null on one side only would
+  // print `290/404 → 171` and be read as `171/404`. It prints `?` instead.
+  test('a score whose denominator is missing renders `?`, on either side', () => {
+    const r = compareMeasurements(
+      out(row('a', { score: 12, maxScore: null })),
+      out(row('a', { score: 14, maxScore: null })),
+    );
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.score', from: '12/?', to: '14/?' }]);
+
+    const oneSided = compareMeasurements(
+      out(row('b', { score: 290, maxScore: 404 })),
+      out(row('b', { score: 171, maxScore: null })),
+    );
+    expect(oneSided.changed).toContainEqual({ id: 'b', field: 'asmlift.score', from: '290/404', to: '171/?' });
   });
 
   test('the ranked WINNER changing identity at an equal score is a change', () => {
@@ -78,12 +113,94 @@ describe('compareMeasurements', () => {
     expect(r.ok).toBe(false);
   });
 
-  test('provenance and timings are not compared — only the six fields', () => {
+  test('provenance is not compared — only the listed fields', () => {
     const base = out(row('a'));
     const fresh = out(row('a'));
     (fresh.meta as unknown as Record<string, unknown>).generatedAt = 'much later';
-    (fresh.results[0].asmlift as unknown as Record<string, unknown>).maxScore = 999;
+    (fresh.results[0] as unknown as Record<string, unknown>).note = 'a re-run on another machine';
     expect(compareMeasurements(base, fresh).ok).toBe(true);
+  });
+
+  test('a compiler-error count that moves is a published claim moving', () => {
+    const r = compareMeasurements(
+      out(row('a', { outcome: 'noncompile' as Outcome, compileErrors: 3 })),
+      out(row('a', { outcome: 'noncompile' as Outcome, compileErrors: 7 })),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.compileErrors', from: '3', to: '7' }]);
+  });
+
+  // `errorMarkers` is the field this repo has already paid for leaving unwatched: `cache.ts`'s
+  // `v17:` note records a warm-store entry replaying a compiler error naming a cause the run does
+  // not have, with no artifact comparison to catch it.
+  test('a declined row that changes WHICH gap it names is a published claim moving', () => {
+    const r = compareMeasurements(
+      out(row('a', {}, { outcome: 'declined' as Outcome, errorMarkers: ['no frontend for `bl @far`'] })),
+      out(row('a', {}, { outcome: 'declined' as Outcome, errorMarkers: ['unhandled switch fall-through'] })),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.changed).toEqual([
+      {
+        id: 'a',
+        field: 'm2c.errorMarkers',
+        from: '["no frontend for `bl @far`"]',
+        to: '["unhandled switch fall-through"]',
+      },
+    ]);
+  });
+
+  // …but a marker differing ONLY in the scratch dir a cold run re-mints is not a moved measurement,
+  // the same equality `source` already gets.
+  test('a marker quoting a run-local scratch path is not a difference', () => {
+    const r = compareMeasurements(
+      out(row('a', { errorMarkers: ['/var/folders/x9/bench-run-a1b2c3/t.c:3: parse error'] })),
+      out(row('a', { errorMarkers: ['/var/folders/q1/bench-run-z9y8x7/t.c:3: parse error'] })),
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  test('the gap SHAPE moving at an unchanged score is caught', () => {
+    const bd = { insert: 1, delete: 1, replace: 2, opMismatch: 4, argMismatch: 4 };
+    const r = compareMeasurements(
+      out(row('a', { breakdown: bd })),
+      out(row('a', { breakdown: { ...bd, opMismatch: 5, argMismatch: 3 } })),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.changed.map((c) => c.field)).toEqual(['asmlift.breakdown']);
+  });
+
+  // THE FAN MOVED AND NOTHING ELSE DID. Over `eb6dec7d`→`2fed1e42` this is 2 real rows
+  // (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`): identical
+  // source, identical score, identical label, a different number of spellings that failed to build.
+  // The COUNT is watched and the LIST is not — the list runs to 51,840 entries on one row of the
+  // current artifact.
+  test('a fan that grew is caught, by its count and not by pasting it', () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => ({ label: `cand${i}`, error: 'did not build' }));
+    const r = compareMeasurements(
+      out(row('a', { droppedCandidates: many(41472) })),
+      out(row('a', { droppedCandidates: many(51840) })),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.droppedCandidates.length', from: '41472', to: '51840' }]);
+  });
+
+  // The count, not the order: a scheduling change that reorders one row's fan moved no measurement.
+  //
+  // NOTE this is the one watched field whose ORDER is deliberately free — every other one is
+  // compared by value, order included.
+  test('a fan that only REORDERED is not a difference', () => {
+    const r = compareMeasurements(
+      out(row('a', { droppedCandidates: [drop('x'), drop('y')] })),
+      out(row('a', { droppedCandidates: [drop('y'), drop('x')] })),
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  // An ABSENT list and an empty one are the same published claim (`[ranked] 0 dropped`), so a row
+  // that grows the key without growing the fan must not read as a move.
+  test('an absent fan counts as 0, not as a difference from an empty one', () => {
+    const r = compareMeasurements(out(row('a')), out(row('a', { droppedCandidates: [] })));
+    expect(r.ok).toBe(true);
   });
 });
 

@@ -38,12 +38,23 @@ export function benchMeta(results: FunctionResult[]): BenchMeta {
   };
 }
 
-function fmt(d: DecompilerResult): string {
+/** The per-row log line's rendering of one decompiler's outcome.
+ *
+ *  A gap prints `diff:<score>/<maxScore>`, NOT `diff:<score>`, because `maxScore` is not a
+ *  constant of the row: it is the objdiff row count of the winning candidate's alignment, so it
+ *  moves whenever the candidate does (`kleod:CountCollectedGems:agbcc` went 290/404 → 171/387
+ *  between two committed artifacts). A bare numerator invites reading two runs' scores as a
+ *  subtraction on a fixed scale, which is how a 17-point denominator move got attributed to
+ *  capability gaps. */
+export function fmt(d: DecompilerResult): string {
   if (d.outcome === 'match') {
     return 'MATCH';
   }
   if (d.outcome === 'nonmatch') {
-    return `diff:${d.score}`;
+    // `typeof`, deliberately not `=== null`: the artifact types it `number | null`, but this
+    // renderer also runs over hand-built and older objects where the key is simply ABSENT, and
+    // `diff:12/undefined` is a worse answer than `diff:12`.
+    return typeof d.maxScore === 'number' ? `diff:${d.score}/${d.maxScore}` : `diff:${d.score}`;
   }
   if (d.outcome === 'noncompile') {
     return `noncompile(${d.compileErrors})`;

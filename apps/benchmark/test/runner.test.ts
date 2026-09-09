@@ -1,13 +1,13 @@
 // Pin tests for the runner's pure pieces: the shard math the orchestrator's parent/child
 // contract rides on, the ONE meta builder, and the no-silent-row-loss build-fail contract.
-import type { FunctionResult } from '@asmlift/bench-schema';
+import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import type { Case } from '../src/cases/types';
-import { benchMeta, inShard, parseShard, runCases } from '../src/run/runner';
+import { benchMeta, fmt, inShard, parseShard, runCases } from '../src/run/runner';
 
 describe('parseShard (pinned)', () => {
   test('parses i/N', () => {
@@ -123,5 +123,38 @@ describe('benchMeta (pinned)', () => {
     expect(m.toolchains).toEqual(['agbcc', 'ido7.1']);
     // no machine identity in published artifacts (meta must never carry a hostname)
     expect(m).not.toHaveProperty('host');
+  });
+});
+
+// A gap's score is a numerator over a denominator that MOVES: `maxScore` is the objdiff row count
+// of the winning candidate's alignment, so a better candidate changes it (404 → 387 on
+// `kleod:CountCollectedGems:agbcc`). A line printing only the numerator reads as a subtraction on
+// a fixed scale, and that reading sent an attribution round hunting for capability gaps to explain
+// a denominator move.
+describe('fmt renders a gap over its denominator', () => {
+  const d = (over: Partial<DecompilerResult>): DecompilerResult =>
+    ({ outcome: 'nonmatch', ...over }) as DecompilerResult;
+
+  test('a scored gap prints score/maxScore', () => {
+    expect(fmt(d({ score: 171, maxScore: 387 }))).toBe('diff:171/387');
+    expect(fmt(d({ score: 290, maxScore: 404 }))).toBe('diff:290/404');
+  });
+
+  test('an unscored denominator degrades to the bare numerator rather than printing null', () => {
+    expect(fmt(d({ score: 12, maxScore: null }))).toBe('diff:12');
+  });
+
+  // The artifact types it `number | null`, but this renderer also runs over hand-built and older
+  // objects where the key is simply ABSENT, and `diff:12/undefined` is a worse answer than
+  // `diff:12`.
+  test('an ABSENT denominator degrades the same way a null one does', () => {
+    expect(fmt(d({ score: 12, maxScore: undefined as unknown as null }))).toBe('diff:12');
+  });
+
+  test('the other outcomes are untouched', () => {
+    expect(fmt(d({ outcome: 'match' }))).toBe('MATCH');
+    expect(fmt(d({ outcome: 'noncompile', compileErrors: 3 }))).toBe('noncompile(3)');
+    expect(fmt(d({ outcome: 'declined', errorMarkers: ['a', 'b'] }))).toBe('declined(2 gap(s))');
+    expect(fmt(d({ outcome: 'failed' }))).toBe('failed');
   });
 });

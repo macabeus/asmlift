@@ -525,7 +525,7 @@ find nothing to disagree with and go green having audited nothing.
   writes:
 
   ```
-  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best <label>: 531 [asmlift source 7362050]
+  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best <label>: 531/<rows> [asmlift source 7362050]
   ```
 
   A score from a run that dropped candidates is not comparable to one that dropped none — and
@@ -577,6 +577,18 @@ diff <(grep -F '[score]' a.err) <(grep -F '[score]' b.err)
 `grep -v '[progress]'` deletes almost every line including every `[score]` one, and the diff
 passes having compared nothing. A neutrality check that filters away what it is comparing is
 worse than none.
+
+**Every `[score]` line, and the `best …` on the `[ranked]` line, reads `<score>/<rows>`.** `rows`
+is objdiff's total row count for _that candidate's_ alignment against the target, so it belongs to
+the candidate and not to the target: a different spelling aligns differently and is scored against
+a different scale. **A run-to-run delta is therefore a pair of fractions, never a subtraction.**
+`kleod:CountCollectedGems:agbcc` moved 290/404 → 171/387 between two committed artifacts, and
+reading its `290 → 171` as 119 points on a fixed scale cost an attribution round. Quote both
+numbers; if the denominators differ, say so in the same sentence.
+
+(The runs recorded in this file predate that format, so their `[score]` md5s do not compare with a
+run made today; their line _counts_ and their **stdout** md5s do — every score the CLI prints goes
+to stderr, and the generated C on stdout is untouched.)
 
 ## Write it down
 

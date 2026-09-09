@@ -64,9 +64,11 @@ const SCOPE = `
 **THE HARD INVARIANT — output neutrality, proved mechanically.**
 
 Run the full bench on your branch and diff the regenerated \`results.json\` against \`origin/main\`'s
-committed one, comparing for EVERY row: \`asmlift.{outcome, score, candidateLabel, source}\` and
-\`m2c.{outcome, score, source}\`. **Every one must be identical.** Timings, the provenance stamp and
-\`droppedCandidates\` ordering are the only permitted differences, and you must name which differed.
+committed one on every field \`report/diff.ts\`'s \`FIELDS\` watches — read the list THERE rather
+than from memory, it is wider than the score. **Every one must be identical.** Timings and the
+provenance stamp are the only permitted differences, and you must name which differed.
+(\`droppedCandidates\` ORDER is free; its COUNT is not — a reordered fan is a scheduling detail, a
+fan that grew or shrank is a different measurement.)
 A change you cannot prove neutral this way does not ship, however obviously safe it looks.
 
 **OUT of scope — propose in the PR body, never implement:**
@@ -223,10 +225,10 @@ ${implReport}
 2. **Scope audit — BLOCKING.** Confirm the diff touches nothing owned by the live tracks
    (\`packages/core/**\`, \`apps/benchmark/dataset/**\`, \`bench-schema\`, \`cases/features.ts\`).
 3. **RE-PROVE OUTPUT NEUTRALITY YOURSELF** — do not take the implementer's word. Full bench on the
-   branch, per-row diff against \`origin/main\`'s committed \`results.json\` on
-   \`asmlift.{outcome,score,candidateLabel,source}\` and \`m2c.{outcome,score,source}\`. Any
-   difference is blocking. This is the most important thing you do: a "harmless" speedup that
-   silently moved one row would poison every measurement the project has.
+   branch, then \`pnpm bench diff --base origin/main\`: it IS the per-row comparison, over every
+   field \`report/diff.ts\`'s \`FIELDS\` watches (wider than the score). Do not hand-roll a narrower
+   one. Any difference is blocking. This is the most important thing you do: a "harmless" speedup
+   that silently moved one row would poison every measurement the project has.
 4. **Soundness.** General or a patch shaped like one incident? Does a cache key have a correct
    invalidation story? Does added parallelism introduce output-order nondeterminism something
    downstream depends on?

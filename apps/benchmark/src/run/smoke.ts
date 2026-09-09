@@ -13,7 +13,7 @@ export function smoke(): void {
       const { obj, asm } = tc.buildTarget(REF, SYM);
       const r = decompile(SYM, asm, tc.targetDesc);
       const s = tc.score(r.source, SYM, obj);
-      console.log(`[${tc.id}] asmlift → score=${s.score} match=${s.match}`);
+      console.log(`[${tc.id}] asmlift → score=${s.score}/${s.rows} match=${s.match}`);
       console.log(
         r.source
           .trimEnd()

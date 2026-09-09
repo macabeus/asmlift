@@ -18,9 +18,12 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
 1. Resolve the row: `pnpm bench run --tier real --only $1` (`--only` is a substring match on the
    symbol; row ids are `project:sym:toolchain`). If it hits more than one row, list them and pick
    the one the user meant — say which you picked.
-2. Record the **baseline** verbatim: asmlift outcome (`MATCH` / `diff:N` / `noncompile(k)` /
+2. Record the **baseline** verbatim: asmlift outcome (`MATCH` / `diff:N/M` / `noncompile(k)` /
    `declined(k gap(s))` / `failed`) and m2c's for the same row. Every later claim of improvement is
-   measured against this exact number, produced by this exact command.
+   measured against this exact number, produced by this exact command. **Record the whole `N/M`,
+   never the `N` alone**: `M` is `maxScore`, the objdiff row count of the *winning candidate's*
+   alignment, so it moves when the candidate does. `diff:290/404 → diff:171/387` is 119 points on a
+   scale that also lost 17; quoted as `290 → 171` it makes the next reader subtract.
 3. Read the asm and the current asmlift output side by side. Get the target `.o` and a working dir
    with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness.
 4. State the baseline in your first user-facing message. Never report progress without a
@@ -94,12 +97,14 @@ match blocks the branch.** Pass the base ref: both gates read the COMMITTED arti
 branch that has already committed its own they compare it against itself and pass vacuously.
 Keep the order too: `diff` exits **2**, "nothing was compared", if `results.json` still carries the
 base's `generatedAt` — run before `run`+`merge` it compares the base with itself in a second and
-prints a green line. `regression` answers "did a match break"; `diff` names every row and field that moved
-(`asmlift.{outcome,score,candidateLabel,source}`, `m2c.{outcome,score,source}`) — that list is the
-PR body's inventory of what the round did, and for a commit claiming to move nothing it is the
-gate. If a match is lost, either tighten the gate on your lever or drop the lever — do not
-rationalize a trade unless the user explicitly approves it. Report the totals (asmlift vs m2c)
-before and after.
+prints a green line. `regression` answers "did a match break"; `diff` names every row and field that
+moved — that list is the PR body's inventory of what the round did, and for a commit claiming to
+move nothing it is the gate. The fields it watches are `report/diff.ts`'s `FIELDS`; read them there
+rather than from memory, they are wider than the score. Expect lines you did not predict: from
+`maxScore` and `breakdown` (the denominator and the shape of the gap moving), and from the dropped
+count, which moves when the FAN changed even though every score held. If a match is lost, either
+tighten the gate on your lever or drop the lever — do not rationalize a trade unless the user
+explicitly approves it. Report the totals (asmlift vs m2c) before and after.
 
 Four things this gate does not catch by itself:
 

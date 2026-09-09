@@ -92,7 +92,7 @@ s32 ReadUnalignedU16(u8 * a0) {
     return *a0 | a0[1] << 8;
 }
 asmlift: [config] target agbcc (platform 'gba' in ./decomp.yaml)
-asmlift: [score] unsigned: 0 (match)
+asmlift: [score] unsigned: 0/6 (match)
 ```
 
 > 📚 Check [`packages/cli`](./packages/cli/README.md#cli-reference) to learn about all the configuration options and flags of `asmlift`.
