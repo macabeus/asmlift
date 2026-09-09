@@ -1,8 +1,10 @@
 # The ranked repro
 
-The one invocation both `/match-function` and `/attribute-function` measure a real-project row
-with, and the only place its flags are written down. **Both commands point here; edit this file,
-not a copy inside a prompt.** The last time the same command was described in two prompts they
+The two invocations both `/match-function` and `/attribute-function` measure with — the
+project-checkout command below, and the benchmark row's own generated script — and the only place
+their flags are written down. **Which one you ran is part of the number** (see "The VEHICLE is part
+of the number"); a real-tier row is reproduced by the second, never the first. **Both prompts point
+here; edit this file, not a copy inside a prompt.** The last time the same command was described in two prompts they
 drifted, and a round published `557/578` against a `547` baseline — three numbers produced by
 three different commands (PR #79).
 
@@ -22,7 +24,8 @@ node <repo>/packages/cli/dist/asmlift.mjs <asm/nonmatchings/…/Fn.s> \
 **That command measures a project checkout's function, and it is NOT how you reproduce a benchmark
 row** — a real-tier row is scored on a different input `.s` and compiled down a different path, so
 it lands on a different number. The next section has the measurement and the vehicle that does
-reproduce a row (`pnpm bench target`). Read it before you quote a number against a harness outcome.
+reproduce a row (the row's own generated script, from `results.json`). Read it before you quote a
+number against a harness outcome.
 
 Run it from the project checkout and redirect stderr to a file — the `[score]` and `[progress]`
 lines are stderr, and they are the whole record. From a git worktree, export the harness's
@@ -52,8 +55,10 @@ The harness never reads the project's `.s` and never runs the project's `decomp.
 - **The scoring object differs**, and with it the denominator: a per-function `target.o` the harness
   built, against whatever `build/…/tu.o` the project's make produced.
 
-Measured on `kleod:StrCpy:agbcc` — the smallest real agbcc row, ten lines of Thumb — one asmlift
-commit (`3a06c74`), ~8 s a run:
+Measured on `kleod:StrCpy:agbcc` — one of the smallest real agbcc rows, ten lines of Thumb (11 of
+the 126 real agbcc rows have a shorter `targetAsm`) — one asmlift commit (`3a06c74`). A run is
+seconds: 5 s warm and ~12 s with a cold `target.o` when re-measured for this file, ~25 s on a box
+running other rounds. The ratio is the machine's; the point is that it is not the LBG run.
 
 | what was run                                                                                                           |  best `[score]` | the source it printed               |
 | ---------------------------------------------------------------------------------------------------------------------- | --------------: | ----------------------------------- |
@@ -68,31 +73,23 @@ divergence was first found the expensive way on `LoadBGTilemapData`, where the c
 on a `/raw-globals` winner over a fan of 1440 and the harness row was a different number again —
 that one is a prior round's finding, not re-measured here.
 
-### `pnpm bench target` is the vehicle that reproduces a row
+### The row's own script is the vehicle; `pnpm bench target` is its step 1
+
+The thing that reproduces a row end-to-end is **the script the row already carries**. `bench target`
+is one of its steps (`cli.ts` calls it the "repro-script pre-step"); run alone it leaves you holding
+a `target.o` and no input `.s`, prints no `[score]`, and is a third number away from the row. What
+CI re-runs for every function is the script, not the pre-step. So extract the script first:
 
 ```sh
-pnpm bench target <project:sym:toolchain> --out <dir> [--project-root <checkout>]
-```
-
-Into `<dir>` it writes `target.o` (the harness's own target object, content-cached), a `decomp.yaml`
-whose compile command **is the benchmark's toolchain invocation**, and the scoring context for the
-escalation rung this row actually stopped at — it replays the ladder against the row's published
-source and names the rung it picked on stdout. A symbol-fed row also gets its map: grafted as
-`tools.asmlift.elf` from the checkout `--project-root` names (a missing checkout warns LOUDLY and
-degrades to map-less, which is a different number again), or written beside `target.o` as
-`symbols.json` for a synthetic row's authored map.
-
-It does not write the input `.s`, because that is the row's `targetAsm` — so take it from the row.
-**Every published row already carries the whole script**, generated from these same parts
-(`apps/benchmark/src/report/repro-scripts.ts`) and re-run for every function by the
-`pnpm bench fidelity` gate in `benchmark.yml`. Extract it rather than retyping it:
-
-```sh
+cd <asmlift repo root>          # the `require` below is cwd-relative
 node -e 'const {results}=require("./apps/benchmark/results/results.json");
 process.stdout.write(results.find(r=>r.id===process.argv[1]).scripts.asmlift)' \
   kleod:StrCpy:agbcc > repro.sh
-# then set ASMLIFT_PATH (and PROJECT_PATH, if the script asks for it) at the top and run it
+# set ASMLIFT_PATH (and PROJECT_PATH, if the script asks for it) at the top, then:
+#   cd <repo> && pnpm --filter @asmlift/cli build && pnpm install   # see below — the bin
 bash repro.sh > out.c 2> out.err
+grep -n '^WARN' out.err        # FIRST — a map-less run is silent apart from this
+grep -F '[score]' out.err | tail -1
 ```
 
 That script materializes the inputs with `bench target`, embeds the row's `targetAsm` verbatim, and
@@ -100,6 +97,64 @@ passes the row's `--proto`/`--asm-data`. Run on `kleod:StrCpy:agbcc` it printed
 `best unsigned: 5/8` and a source byte-identical to the published row's. **A non-matching row's
 script exits 1** — `--score-against` exits 0 only on byte-exact — so `set -euo pipefail` makes the
 last line the failure; that is the row reproducing, not the script breaking.
+
+**Build the CLI before the first run.** The script's last line is
+`"$ASMLIFT_PATH/node_modules/.bin/asmlift"`, and `packages/cli/dist/` is gitignored — so a fresh
+clone's first `pnpm install` warns (`Failed to create bin … ENOENT … dist/asmlift.mjs`) and skips
+that link. `pnpm --filter @asmlift/cli build` **and then a second `pnpm install`** creates it.
+(The bin is the built bundle, not the repo's `tsx` — see "The loader is part of the number".)
+
+**The flags are per-vehicle.** `--jobs 6 --progress` and a hand-written `--proto '{…}'` belong to
+the project-checkout command at the top of this file; the generated script carries neither `--jobs`
+nor `--progress` and takes `--proto` from a `proto.json` it writes, and still reproduces the row
+exactly. Do not "fix" the script by adding them — it is gated by `pnpm bench fidelity` in
+`benchmark.yml`, which re-runs both repro scripts for every function.
+
+#### `bench target` on its own, for iterating by hand
+
+```sh
+pnpm bench target <project:sym:toolchain> --out <dir> [--project-root <checkout>]
+```
+
+Into `<dir>` it writes `target.o` (the harness's own target object, content-cached), a `decomp.yaml`
+whose compile command **is the benchmark's toolchain invocation**, and ONE frozen scoring context —
+the escalation rung the row's published source stops at, or, on an unscored row, the richest rung
+(see "What this vehicle does NOT reproduce", below). It names the rung it picked on stdout, and that
+line is its whole output: no `[score]`. It does not write the input `.s`, because that is the
+row's `targetAsm` — so take it from the row (or just run the row's script, above). A symbol-fed row
+also gets its map: grafted as `tools.asmlift.elf` from the checkout `--project-root` names, or
+written beside `target.o` as `symbols.json` for a synthetic row's authored map.
+
+**A missing checkout does not stop anything, and it does not always move the number.** `bench
+target` prints `WARN: <project>: project checkout not found … output may differ from the published
+row` and **exits 0**; the script runs on. Re-measured for this file: with `PROJECT_PATH` pointed at
+a nonexistent path, `kleod:StrCpy:agbcc` printed the same `unsigned: 5/8` and a **byte-identical**
+source. So a cheap row will tell you your setup is right when it is not — `grep -n '^WARN' out.err`
+before quoting anything, and note the doc's own recipe (`2> out.err`) buries that one line under the
+`[score]` stream.
+
+### What this vehicle does NOT reproduce: your CHANGED asmlift
+
+The materialized context is pinned to **the published winner**, not to the ladder. The harness runs
+the escalation ladder **per candidate** (`compile/real.ts`, `makeRealCompile` — first rung that
+compiles wins, for every candidate in the fan); `bench target` replays that ladder once, against the
+row's published source, and freezes the single rung it lands on (`cli.ts`, `resolveScoringPrelude`).
+`kleod:StrCpy:agbcc` freezes rung 1 — a **161-byte** `ctx.i` of six typedefs — while the row's
+vendored context is 28 KB of project types.
+
+So a candidate your change makes asmlift emit that names a project type or global (`bool8`,
+`gEntityArray`, a `struct`) **noncompiles here and would have been scored by the harness**: the fan
+size, and therefore the `[ranked]` line, can differ from the harness's at the same commit. The
+vehicle is faithful to the row as published, and drifts from the harness exactly as your change
+starts working. Confirm a moved row with `pnpm bench run --tier real --only <sym>` (30–90 s).
+
+And on an **unscored** row it is not "the rung this row stopped at" at all: only `match`/`nonmatch`
+rows have a source that pins a rung, so for anything `declined`/`noncompile`/`failed` the caller
+falls back to the **richest** rung unconditionally (`cli.ts`, `publishedAsmliftSource` → `undefined`
+→ `ladder[ladder.length - 1]`) — **101 of the 252 real rows (40%)**, and the archetypal
+`/attribute-function` target. `real.ts`'s own comment says that fallback "is wrong whenever
+escalation stopped earlier, because a richer context can REJECT what a poorer one accepts". The
+stdout line names the rung either way and never says which case you are in.
 
 Everything below — the checkout, the axis set, the loader, the cache, the flags — is part of both
 numbers. Pick the vehicle first, then read the rest.
