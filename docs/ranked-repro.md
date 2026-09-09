@@ -525,7 +525,7 @@ find nothing to disagree with and go green having audited nothing.
   writes:
 
   ```
-  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best <label>: 531 [asmlift source 7362050]
+  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best <label>: 531/<rows> [asmlift source 7362050]
   ```
 
   A score from a run that dropped candidates is not comparable to one that dropped none — and
@@ -586,8 +586,10 @@ a different scale. **A run-to-run delta is therefore a pair of fractions, never 
 reading its `290 → 171` as 119 points on a fixed scale cost an attribution round. Quote both
 numbers; if the denominators differ, say so in the same sentence.
 
-(Runs recorded in this file from before that change print a bare numerator. Their `[score]` md5s
-and stdout md5s are therefore not comparable with a run made today; the line _counts_ still are.)
+(Runs recorded in this file from before that change print a bare numerator, so their `[score]` md5s
+are not comparable with a run made today; the line _counts_ still are. **Their stdout md5s are
+untouched** — the denominator is rendered by `scoreOf`, whose only consumer is `rankedStderr`, and
+the generated C on stdout is byte-identical across the change.)
 
 ## Write it down
 

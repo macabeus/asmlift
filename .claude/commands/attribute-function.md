@@ -52,7 +52,9 @@ Rules, and they are not optional:
   much; if you do not know M, you do not have the delta.
 - **The tools now tell you.** `pnpm bench run` prints `diff:<score>/<maxScore>` per row, and
   `pnpm bench diff` prints `asmlift.score: 290/404 → 171/387` plus a separate
-  `asmlift.maxScore: 404 → 387` line when the denominator moves on its own. You do not have to
+  `asmlift.maxScore: 404 → 387` line **whenever** the denominator moves — alone or beside a moving
+  score. All twelve asmlift-side denominator moves between `eb6dec7d` and `2fed1e42` printed both
+  lines, so a `maxScore` line is never evidence that the score held still. You do not have to
   open `results.json` to see this, and there is no excuse for a report that does not.
 - **Gap arithmetic is a prediction until measured.** Sum-of-parts vs. whole is a claim about a
   moving scale; state it as a prediction with the ablation that falsifies it.
