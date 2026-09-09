@@ -23,6 +23,14 @@ export function run(cmd: string, args: string[], cwd?: string, env?: Record<stri
   return r;
 }
 
+/** The flags the three cpp-preprocessing rungs (`ido`, `kmc`, `gcc272`) pass to `CPP` for a
+ *  CANDIDATE translation unit, and the same flags `run/preflight.ts` probes `cpp` with at run
+ *  start. One constant rather than four copies: the preflight's claim to be "the failure itself"
+ *  holds only while its argv is the rung's argv, and a copy that drifts degrades the probe into
+ *  "some cpp somewhere honours -o" without anything going red. (`preprocess()` for a real project
+ *  adds the project's own -I/-D and deliberately drops -nostdinc, so it is NOT this list.) */
+export const CPP_PREPROCESS_FLAGS = ['-P', '-nostdinc'] as const;
+
 /** Select the diagnostic lines of a compiler's output. `file:line:` prefixes count — pre-3.0 gcc
  *  writes errors without the word "error" (`` c.i:12: `x' undeclared ``), and keyword matching
  *  alone would surface only the `In function` banner. The word "failed" deliberately does NOT

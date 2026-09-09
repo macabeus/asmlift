@@ -8,7 +8,7 @@ import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
+import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
 /** .i → IDO cc → .o. Shared by target and candidate. */
 function compile(iPath: string, oPath: string): void {
@@ -46,7 +46,7 @@ export const idoReal: RealCompile = {
       iPath = join(dir, 'c.i'),
       oPath = join(dir, 'c.o');
     writeFileSync(cPath, tu);
-    const cpp = run(CPP, ['-P', '-nostdinc', cPath, '-o', iPath]);
+    const cpp = run(CPP, [...CPP_PREPROCESS_FLAGS, cPath, '-o', iPath]);
     if (cpp.status !== 0) {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
