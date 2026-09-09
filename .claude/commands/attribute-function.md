@@ -314,12 +314,16 @@ and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier li
    (not only in `research/`, whose path nothing may cite) and name the pass.** That instrument
    episode is one of the two things that license converting those refusals to a `Gate` table later
    (`grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md`); a refusal you come to suspect never
-   fires at all is the other. Before you instrument, check whether you have to: if the pass already
-   exports a census (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a `refusals` map
-   (`l3/coalesce.ts`, `l3/scopebase.ts`, `structure/namecoalesce.ts`), a test reads the id straight
-   out with no edit to the pass. A table ALONE does not buy that: 21 of the 27 `firstRejection` call
-   sites compare the id to `null` and drop it, so on those you still patch — and adding the map is
-   the smaller change. If the first blocker is one a round has already reasoned about beside the
+   fires at all is the other. Before you instrument, check whether you have to, in this order: if the
+   pass takes its gate table as a PARAMETER, wrap it in `tallying()`
+   (`grep -n "export function tallying" packages/core/src/l3/gates.ts`) and read `refusals()` back
+   — a per-id census from a `tsx` script, no edit to core and nothing to revert
+   (`l3/unmerge.ts` is the worked example, and its own test shows the call). Failing that, if the
+   pass exports a census (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a `refusals`
+   map (`l3/coalesce.ts`, `l3/scopebase.ts`, `structure/namecoalesce.ts`), a test reads the id
+   straight out. Only a table that is neither injectable nor reported still costs a patch — 21 of
+   the 27 `firstRejection` call sites compare the id to `null` and drop it. All three report the
+   FIRST rejecter, so a rule missing from the census is starved or shadowed, not proven dead. If the first blocker is one a round has already reasoned about beside the
    gate, cite that instead of re-deriving it.
 3. **Never edit the benchmark to make a row look better** — the reference source defines the
    target; manifests and results are never tuned. Harness defects (a hang, a missing timeout)

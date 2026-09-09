@@ -137,7 +137,10 @@ Per commit:
   refusals you had to instrument — or one you suspect never fires, which is the other admission —
   leave the rest, name the residue in the table's doc comment. Tabling ALL of a small pass's refusals
   is that, not a sweep. And table it REPORTED: a `Gate` table whose id is compared to `null` and
-  dropped has shortened the instrument loop, not removed it, so return a `refusals` map
+  dropped has shortened the instrument loop, not removed it. The cheapest way to close that is to
+  take the tables as an OPTIONAL PARAMETER, which costs one interface and lets a later round wrap
+  them in `tallying()` (`grep -n "export function tallying" packages/core/src/l3/gates.ts`) from
+  outside core — `l3/unmerge.ts` is the worked example. Otherwise return a `refusals` map
   (`structure/namecoalesce.ts`) or export a census off the table (`arrayShapeRefusals` in
   `raise/globalshape.ts`) in the same change. What is settled is the UNIT: convert refusals, not
   files — do not re-open whether a file should adopt `Gate<Ctx>` wholesale.

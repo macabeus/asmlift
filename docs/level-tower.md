@@ -617,12 +617,21 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   [`l3/scopebase.ts`](../packages/core/src/l3/scopebase.ts), `structure/namecoalesce.ts`), and a
   census EXPORT off the shipped table that the shipped path never calls (`arrayShapeRefusals` in
   [`raise/globalshape.ts`](../packages/core/src/raise/globalshape.ts), whose doc comment states the
-  whole idea: "the one place an attribution is measured rather than asserted"). Neither form leaves
-  `@asmlift/core`: no CLI flag, bench field or env var prints a gate id, so an attribution over the
-  lifted corpus is still a written test — or, on the 21, still a patch. **Tabling a pass and adding
-  neither is half the job**, and the missing half is small: a map, one `set` on the rejection, one
-  field on the return type — six lines in `structure/namecoalesce.ts`, against the loop the next
-  paragraph prices.
+  whole idea: "the one place an attribution is measured rather than asserted"). Both forms are the
+  PASS's: each costs a signature the author has to want, so a pass whose return type nobody wants to
+  widen has no cheap form of either. **Tabling a pass and reporting nothing is half the job**, and
+  the missing half is small: a map, one `set` on the rejection, one field on the return type — six
+  lines in `structure/namecoalesce.ts`.
+
+  **The third form is the CALLER's, and it needs no signature at all.** `tallying(gates)`
+  (`grep -n "export function tallying" packages/core/src/l3/gates.ts`) returns the same table with
+  each `rejects` wrapped in a counter, so any pass that already accepts its table as a PARAMETER can
+  be censused from outside `@asmlift/core` — a `tsx` script over the lifted corpus, no edit and no
+  revert. That is what a pass adopting the table should make possible: taking the tables as an
+  optional argument is the whole cost, and `l3/unmerge.ts` is the worked example (five tables, one
+  `UnmergeGates` parameter, and a test that reads the census back). It reports what
+  `firstRejection` decides, so it carries the same reading as the two forms above — first rejecter
+  only.
 
 **And converting a pass whose refusals nobody has had to instrument buys nothing.** What a table
 removes is the edit-instrument-revert loop — patch a `return null` to log, re-run, revert — so the
