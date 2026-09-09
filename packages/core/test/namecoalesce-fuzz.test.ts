@@ -64,18 +64,18 @@ function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[
   }
 }
 
-// The nested arm sweeps FEWER seeds than the two that predate it, and the reason is budget rather
-// than confidence: its functions are the largest the generator makes, and adding it at 4,000
-// alongside `carrier-name-fuzz` put 30% more CPU into `test:offline` than vitest's own reporter
-// could keep up with — a fully green run reported an unhandled `Timeout calling "onTaskUpdate"`
-// and the job failed. The finding `namecoalesce.ts` credits to this arm — `loop-escape` dropped
-// makes 2 of 7,535 nested functions compute something else — was taken at 8,000 seeds, so its two
-// (5104 and 6437) are outside the range that ships. Reproduce it by raising this number, not by
-// hunting inside it.
+// All three arms sweep the same range. The nested one — whose functions are the largest the
+// generator makes — spent two days at 250, because adding it at 4,000 alongside
+// `carrier-name-fuzz` produced a fully green `test:offline` that still failed on an unhandled
+// `Timeout calling "onTaskUpdate"`. That was a sweep not yielding to the reporter, not a CPU
+// ceiling, and #171 fixed it with the `breathe()` call below; the size it forced went back up with
+// the sibling's. The finding `namecoalesce.ts` credits to this arm — `loop-escape` dropped makes 2
+// of 7,535 nested functions compute something else — was taken at 8,000 seeds, so its two (5104
+// and 6437) are outside even 4,000. Reproduce it by raising this number, not by hunting inside it.
 describe.each([
   ['acyclic', 0, SEEDS],
   ['loop-bearing', 1, SEEDS],
-  ['nested', 2, 250],
+  ['nested', 2, SEEDS],
 ] as const)('%s', (_name, depth, seeds) => {
   test('no merge the pass makes changes what the function does', async () => {
     const bad: number[] = [];
