@@ -33,15 +33,13 @@ _site/
 # local Claude Code state
 .claude/worktrees
 research/
-# the ONE sanctioned name for a per-worktree env/scratch file. `bench run` refuses to start on a
-# tree whose code differs from HEAD (apps/benchmark/src/run/preflight.ts), and an untracked env
-# file is what tripped that twice, at ~2,350s each — so give it a name the check cannot see.
-# NOTHING SOURCES IT: it is a name, not a loader. `source .envrc.local` in the shell you run from.
+# The sanctioned names for per-worktree local state. `bench run` refuses to start on a tree whose
+# code differs from HEAD (apps/benchmark/src/run/preflight.ts), so anything a worktree keeps
+# locally needs a name that check cannot see. `.envrc.local` holds env exports — NOTHING SOURCES
+# IT, it is a name and not a loader, so `source .envrc.local` yourself; `.local/` holds everything
+# else (scratch objects, probe scripts, a symlinked checkout). Not `$(git rev-parse --git-path
+# info/exclude)`: from any worktree that resolves to the MAIN checkout's file, which every other
+# worktree reads and nothing prunes.
 .envrc.local
-# ...and `.local/` for everything else a worktree needs to keep around: scratch objects, probe
-# scripts, a symlinked checkout. The alternative a round reaches for is
-# `$(git rev-parse --git-path info/exclude)`, which from ANY worktree is the MAIN checkout's file:
-# it outlives the worktree, nothing ever prunes it, and it is currently 113 lines holding 24
-# unique patterns — 40 copies of one of them. A gitignored directory is scoped and disposable.
 .local/
 packages/cli/dist/

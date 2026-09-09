@@ -55,18 +55,17 @@ describe('which runs are checked at all', () => {
   });
 
   test('`--shard` WITHOUT `--serial` is not a child and is not exempt', () => {
-    // Measured on this branch before the fix: `pnpm bench run --tier synthetic --shard 1/1` on a
-    // tree carrying `?? .envrc.probe` printed no refusal, fanned 8 children over the whole tier
-    // (the fan-out branch never reads `opts.shard`) and headed for a full rewrite of
-    // synthetic.json. `cli.ts` now rejects that argv with exit 2; this pins the second lock.
+    // That argv fans out across `--jobs` children and never reads the shard, so it rewrites the
+    // tier whole while looking like the one shape the exemption is for. `cli.ts` rejects it with
+    // exit 2; this is the second lock, in case the argv ever becomes meaningful.
     expect(runIsWholeTier({ tiers: ['synthetic'], shard: '1/1' })).toBe(true);
     expect(runUsesHostCpp({ tiers: ['real'], shard: '1/1' })).toBe(true);
   });
 });
 
-// The axis wave 2 found reversed: `runIsWholeTier` is a question about REWRITING A TIER FILE and
-// was deciding the `cpp` probe too, which made the probe silent in the scoped loop where TRAP 6
-// lives and loud on a tier that never preprocesses.
+// A separate axis from `runIsWholeTier`, which asks only about REWRITING A TIER FILE. Deciding
+// the probe by that one silences it in the scoped loop, where TRAP 6 lives, and fires it on a tier
+// that never preprocesses.
 describe('which runs touch the host cpp at all', () => {
   test('every real-tier run does — scoped or whole, one row or all of them', () => {
     expect(runUsesHostCpp({ tiers: ['real'] })).toBe(true);
@@ -77,7 +76,7 @@ describe('which runs touch the host cpp at all', () => {
     expect(runUsesHostCpp({ tiers: ['real'], toolchain: 'agbcc' })).toBe(true);
   });
 
-  test('no synthetic-only run does — measured: 6 synthetic ido rows scored under a broken cpp', () => {
+  test('no synthetic-only run does — no synthetic row preprocesses with the host cpp', () => {
     expect(runUsesHostCpp({ tiers: ['synthetic'] })).toBe(false);
     expect(runUsesHostCpp({ tiers: ['synthetic'], toolchain: 'ido7.1' })).toBe(false);
   });
@@ -97,9 +96,8 @@ describe('the dirty-tree refusal', () => {
 
   test('points at the ONE sanctioned name for a local env file', () => {
     // Without a sanctioned name the refusal is just an obstacle, and the round routes around it.
-    // Asserted through the export, not a fifth copy of the literal: the constant exists precisely
-    // to be the single source of truth, and a test that restates the string leaves it with no
-    // consumer at all.
+    // Asserted through the export, not another copy of the literal: the constant exists to be the
+    // single source of truth, and a test that restates the string leaves it with no consumer.
     expect(dirtyTreeRefusal(['?? envrc.sh'])).toContain(LOCAL_ENV_FILE);
     // ...and the scoped home for everything that is not an env file, so the reader is not sent to
     // the main checkout's `info/exclude`, which no worktree ever cleans up.
@@ -131,9 +129,8 @@ describe('the cpp probe refusal', () => {
   });
 });
 
-// The two functions the acceptance criterion is actually about — the probe that decides, and the
-// composition that spawns git — were the two with no test. Neither is pure, so both are given the
-// thing they read (a `cpp` path, a repo root) rather than mocked.
+// The probe that decides and the composition that spawns git. Neither is pure, so both are given
+// the thing they read (a `cpp` path, a repo root) rather than mocked.
 describe('the cpp probe itself', () => {
   test('the incident is caught: a cpp that writes to stdout, ignores -o and exits 1', () => {
     // Apple's /usr/bin/cpp answering as clang, reproduced. Measured against the real binary:
@@ -182,8 +179,6 @@ describe('the whole preflight, against a real throwaway checkout', () => {
   });
 
   test('the same tree does NOT refuse the scoped dev loop', () => {
-    // The GIT axis only. The probe is injected healthy because a scoped real run now DOES ask the
-    // cpp question, and this test is about dirt, not about whichever `cpp` the machine has.
     const dir = repo();
     writeFileSync(join(dir, '.envrc.probe'), 'export FOO=1\n');
     expect(preflightRefusals({ tiers: ['real'], only: 'dmaback' }, { repoRoot: dir, probe: ok })).toEqual({
@@ -203,12 +198,10 @@ describe('the whole preflight, against a real throwaway checkout', () => {
 
 // The probe's claim to BE the failure holds only while its argv is the compile rung's argv, and
 // `CPP_TOOLCHAINS`' claim to name the affected rows holds only while it names every rung that
-// preprocesses. Both are guarded here, and both are guarded against a SCAN rather than a list:
-// the first version of this test looped over the literal ['ido','kmc','gcc272'] — the three files
-// that already existed — so dropping a 4th rung in (`compile/mips3k.ts` with
-// `run(CPP, ['-P','-nostdinc', ...])`) left it 20 passed. A guard against copies must not be a
-// copy of the list it guards. Same technique `fidelity-provenance.test.ts` uses on
-// `check-artifact-provenance.sh`: parse the source of truth, do not restate it.
+// preprocesses. Both are guarded by a SCAN rather than a list: a guard against copies must not be
+// a copy of the list it guards, or a 4th rung dropped into `compile/` passes it. Same technique
+// `fidelity-provenance.test.ts` uses on `check-artifact-provenance.sh`: parse the source of truth,
+// do not restate it.
 const COMPILE_DIR = join(import.meta.dirname, '..', 'src', 'compile');
 const compileSrc = (f: string) => readFileSync(join(COMPILE_DIR, f), 'utf8');
 
@@ -274,10 +267,10 @@ describe('a broken cpp is fatal only when something here would have used it', ()
   });
 
   test('the SCOPED real run is refused too — that is where the incident actually happens', () => {
-    // Measured on this branch before the fix, same worktree, same row, only ASMLIFT_CPP differing:
-    // `--tier real --only func_800600C0_60CC0` gave `asmlift=diff:27/32` under the GNU shim and
-    // `asmlift=noncompile(1)` under a broken one, exit 0 both times, with the preflight silent.
-    // `attribute-function.md` reads `noncompile` as a signal to act on.
+    // Measured, same worktree and row, only ASMLIFT_CPP differing: `--tier real --only
+    // func_800600C0_60CC0` gave `asmlift=diff:27/32` under the GNU shim and `asmlift=noncompile(1)`
+    // under a broken one, exit 0 both times. `attribute-function.md` reads `noncompile` as a
+    // signal to act on.
     for (const opts of [
       { tiers: ['real' as const], only: 'func_800600C0_60CC0' },
       { tiers: ['real' as const], project: 'marioparty3' },
@@ -291,8 +284,8 @@ describe('a broken cpp is fatal only when something here would have used it', ()
   });
 
   test('a synthetic-only run says NOTHING about cpp, whole tier included', () => {
-    // The other direction of the same reversed axis: a whole `--tier synthetic` run was refused
-    // outright under a cpp that six synthetic ido rows then compiled and scored under.
+    // The other direction: synthetic ido rows compile and score fine under a `cpp` this refusal
+    // would have stopped the run for.
     for (const opts of [{ tiers: ['synthetic' as const] }, { tiers: ['synthetic' as const], toolchain: 'ido7.1' }]) {
       const r = preflightRefusals(opts, {
         repoRoot: clean,

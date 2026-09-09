@@ -29,13 +29,12 @@ const ARTIFACT_PATH = /^(apps\/benchmark\/results\/|apps\/web\/src\/pages\/bench
 // bench invocation launched through the agent would inherit.
 const UNTRACKED_NONCODE = /^\.claude\/commands\//;
 
-/** WHICH paths in this `git status --porcelain` output make the tree's CODE differ from HEAD.
+/** WHICH lines of this `git status --porcelain` output make the tree's CODE differ from HEAD.
  *  Split out so the exclusions are testable without a git checkout to mutate, and returning the
- *  paths rather than a boolean because the two callers need different things from the same rule:
- *  the provenance stamp only asks whether, while `run/preflight.ts` refuses a run and has to say
- *  WHICH file — a refusal that does not name the file sends the reader back to `git status` to
- *  guess which of its lines this rule counted, and the two incidents behind that preflight were
- *  both a single untracked env file among the run's own artifact churn. */
+ *  lines rather than a boolean because the two callers want different things from one rule: the
+ *  provenance stamp asks only whether, while `run/preflight.ts` refuses a run and must say WHICH
+ *  file — a refusal that names none sends the reader back to `git status` to guess which of its
+ *  lines this rule counted, among the run's own artifact churn. */
 export function codeDirtyPaths(porcelain: string): string[] {
   return (
     porcelain
@@ -47,9 +46,10 @@ export function codeDirtyPaths(porcelain: string): string[] {
         const path = l.slice(3).replace(/^"|"$/g, '');
         return !ARTIFACT_PATH.test(path) && !(l.startsWith('??') && UNTRACKED_NONCODE.test(path));
       })
-      // Trailing whitespace only: porcelain's TWO status columns are staged-then-unstaged, so
-      // `l.trim()` maps ` M x` and `M  x` onto the same string and throws away exactly the
-      // distinction this refusal exists to spare the reader a second `git status` for.
+      // Trailing whitespace only. Porcelain's first two columns are staged-then-unstaged, and
+      // `l.trim()` would eat the leading one: ` M x` (unstaged) comes back as `M x`, which reads
+      // as the staged form — the distinction this refusal exists to spare the reader a second
+      // `git status` for.
       .map((l) => l.replace(/\s+$/, ''))
   );
 }

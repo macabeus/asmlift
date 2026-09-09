@@ -1,49 +1,41 @@
-// What a full `bench run` is checked for BEFORE it spends half an hour, as opposed to what it is
+// What a `bench run` is checked for BEFORE it spends half an hour, as opposed to what it is
 // checked for after.
 //
 // `provenance.ts` samples the tree DURING the run and `report/merge.ts` refuses to merge a tier
-// whose sample came back dirty. That pair is correct and stays exactly as it is — a mutation that
-// lands mid-run is invisible to anything sampled at the start, and a tree dirtied at second 400 is
-// a real incident this repo has had. But it makes the loss maximal for the one case that was
-// already decidable at second 0: four full runs were discarded across recent rounds, and two of
-// them (2,329.8 s and 2,358.5 s) were a single UNTRACKED ENV FILE — `.envrc.probe`, `envrc.sh` —
-// sitting in a worktree the whole time. `merge` said so, correctly, 39 minutes late.
+// whose sample came back dirty. That pair is correct and stays as it is — a mutation that lands
+// mid-run is invisible to anything sampled at the start. But it makes the loss maximal for the one
+// case that is already decidable at second 0: a dirty tree at the start is almost always a dirty
+// tree at the end, and twice it was a single UNTRACKED ENV FILE sitting in a worktree, costing a
+// ~2,350 s run each time. `merge` said so, correctly, 39 minutes late.
 //
 // So this is the same rule asked at the start. It refuses strictly LESS than `merge` does: every
-// tree it rejects is one whose run stamp would come back dirty and be rejected there anyway, so a
-// run that passes today still passes. It only refuses runs that REWRITE A TIER WHOLE — the scoped
-// dev loop is the shape you run on a dirty tree on purpose, and refusing it would get this whole
-// check traded away inside one round.
+// tree it rejects would have had its run stamp come back dirty and be rejected there anyway. And
+// it refuses only runs that REWRITE A TIER WHOLE — the scoped dev loop is the shape you run on a
+// dirty tree on purpose, and a check that stopped it would be traded away inside one round.
 //
-// "WHOLE" is the exact word. A scoped run does NOT leave its tier file alone: `cli.ts` writes
-// `results/<tier>.json` — the canonical file `merge` publishes — holding only the selected rows
-// (measured: `--tier synthetic --only add --toolchain agbcc --serial` wrote an 11-row
-// `synthetic.json`), and `runner.ts:75-81` records the incident where that file came back with
-// `results: []`. What makes the scoped loop safe to run dirty is that `bench:merge` still refuses
-// the tier at the end, not that nothing was written. Say the true thing here: the reader of this
-// refusal is deciding whether to commit or to route around it.
+// "WHOLE" is the exact word, because a scoped run does NOT leave its tier file alone: `cli.ts`
+// writes `results/<tier>.json` — the canonical file `merge` publishes — holding only the selected
+// rows (measured: `--tier synthetic --only add --toolchain agbcc --serial` wrote an 11-row
+// `synthetic.json`; see `runner.ts`'s `writeEmpty` for the `results: []` case). What makes the
+// scoped loop safe to run dirty is that `bench:merge` still refuses the tier at the end, not that
+// nothing was written — and the reader of this refusal is deciding whether to commit or to route
+// around it.
 //
 // TWO LAWS, TWO PREDICATES. `runIsWholeTier` asks "does this invocation rewrite a tier file
 // whole", which is the git question and only the git question. The `cpp` question is a different
-// one — "will this invocation preprocess anything with the host `cpp`" — and keying it off
-// whole-tier-ness got it wrong in BOTH directions (measured, both on this branch before the fix):
-// a whole `--tier synthetic` run was REFUSED under a broken `cpp` that six synthetic ido rows then
-// compiled and scored under, and `--tier real --only <sym>` — the shape Phase 3 of
-// `match-function.md` and Phase 6 of `attribute-function.md` both prescribe — got no verdict at
-// all while turning a `diff:27/32` row into `noncompile(1)` at exit 0. The scoped loop is where
-// TRAP 6 actually lives, so it is the last place the probe may be silent. `runUsesHostCpp` is the
-// right axis: every `CPP` call site in `compile/{ido,kmc,gcc272}.ts` sits inside the `*Real`
-// export, and `compile/real.ts` is their only consumer, so the tier alone decides it. Note
-// `--toolchain` does NOT scope the real tier (`cases/real.ts` takes only `project`/`only`), so it
-// cannot narrow this question either.
+// one — "will this invocation preprocess anything with the host `cpp`" — and the tier alone
+// decides it: every `CPP` call site in `compile/{ido,kmc,gcc272}.ts` sits inside the `*Real`
+// export, `compile/real.ts` is their only consumer, and no synthetic row preprocesses. Scoping
+// cannot narrow it (`--toolchain` does not filter the real tier at all — `cases/real.ts` takes
+// only `project`/`only`), and it must not: the scoped `--tier real --only <sym>` loop that both
+// briefs prescribe is exactly where TRAP 6 bites, so it is the last place the probe may be silent.
 //
-// The `cpp` probe rides along for free and is NOT priced as a saving: its prose version ("spend one
-// second on `which cpp` before spending 30 minutes") has been written down for four ship rounds and
-// has not stopped anything. Its incident is a login shell resolving `cpp` to Apple clang, which
-// ignores `-o`, writes the preprocessed text to stdout and exits 1 — 44 rows failed and the run
-// reported itself successful with a `✓` on both tiers and exit 0. The probe is the failure itself,
-// run on one line of C: it does not care which `cpp` is on PATH, only whether that one honours
-// `-o`.
+// The `cpp` probe rides along for free and is NOT priced as a saving: its prose version ("spend
+// one second on `which cpp` before spending 30 minutes") has been written down repeatedly and has
+// stopped nothing. Its incident is a login shell resolving `cpp` to Apple clang, which ignores
+// `-o`, writes the preprocessed text to stdout and exits 1 — 44 rows failed and the run reported
+// itself successful, `✓` on both tiers and exit 0. The probe is the failure itself, run on one
+// line of C: it does not care which `cpp` is on PATH, only whether that one honours `-o`.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -61,9 +53,9 @@ import { type Tier, tierIsFiltered } from './orchestrate';
 export const LOCAL_ENV_FILE = '.envrc.local';
 
 /** ...and the gitignored directory for everything else local. Named here rather than
- *  `$(git rev-parse --git-path info/exclude)` because that path, from any worktree, is the MAIN
- *  checkout's file — it outlives the worktree that appended to it and nothing prunes it (measured:
- *  113 lines, 24 unique patterns, 40 copies of one). A directory is scoped and disposable. */
+ *  `$(git rev-parse --git-path info/exclude)` because that path, from ANY worktree, resolves to
+ *  the MAIN checkout's file: it outlives the worktree that appended to it, every other worktree
+ *  reads it, and nothing prunes it. A gitignored directory is scoped and disposable. */
 export const LOCAL_SCRATCH_DIR = '.local/';
 
 /** How many dirty paths the refusal lists before it summarises the rest. */
@@ -72,9 +64,8 @@ const PATHS_SHOWN = 20;
 /** The toolchains whose REAL-TIER candidate compiles preprocess with the host `cpp`
  *  (`compile/{ido,kmc,gcc272}.ts`, all three inside their `*Real` export). agbcc uses
  *  `arm-none-eabi-cpp` and mwcc/ppc preprocess inside docker, so a broken `cpp` costs them
- *  nothing — and NO synthetic row preprocesses at all, which is the tier qualifier this comment
- *  and the rule below were both missing. Hand-maintained, so `preflight.test.ts` derives the same set
- *  by scanning `compile/` and `REAL_COMPILERS`, and fails if a rung added later diverges from it. */
+ *  nothing. Hand-maintained, so `preflight.test.ts` derives the same set by scanning `compile/`
+ *  and `REAL_COMPILERS`, and fails if a rung added later diverges from it. */
 export const CPP_TOOLCHAINS: readonly ToolchainId[] = ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'];
 
 export interface PreflightOptions {
@@ -87,9 +78,9 @@ export interface PreflightOptions {
 }
 
 /** A shard CHILD, exempt from BOTH verdicts: the parent that spawned it has already answered them
- *  once, and eight children re-answering would print the same refusal eight times. `--shard` alone
- *  is NOT that child — `cli.ts`'s fan-out branch ignores it and runs the tier whole — so the test
- *  is `--shard` AND `--serial`, which is exactly how `orchestrate.ts` spawns one
+ *  once, and every child re-answering would print the same refusal N times. `--shard` alone is NOT
+ *  that child — `cli.ts`'s fan-out branch ignores the shard and runs the tier whole — so the test
+ *  is `--shard` AND `--serial`, exactly how `orchestrate.ts` spawns one
  *  (`run --serial --tier X --shard i/N`). `cli.ts` rejects the other combination outright. */
 function isShardChild(opts: PreflightOptions): boolean {
   return opts.shard !== undefined && opts.serial === true;
@@ -105,9 +96,8 @@ export function runIsWholeTier(opts: PreflightOptions): boolean {
 /** Will this invocation compile anything through the host `cpp`? The REAL tier does, on the three
  *  rungs in `CPP_TOOLCHAINS`; the synthetic tier never does. Scoping does not change the answer —
  *  `--only`/`--project` still compile real rows, and `--toolchain` does not filter the real tier at
- *  all — so a one-row `--only` run is checked exactly like a whole one. It is cheaper than
- *  whole-tier-ness too: a synthetic-only run now pays neither the 42 ms probe nor, on a broken
- *  `cpp`, the 274 ms toolchain scan. */
+ *  all — so a one-row `--only` run is checked exactly like a whole one, and a synthetic-only run
+ *  pays neither the probe nor, on a broken `cpp`, the toolchain scan. */
 export function runUsesHostCpp(opts: PreflightOptions): boolean {
   return !isShardChild(opts) && opts.tiers.includes('real');
 }
@@ -119,8 +109,7 @@ export function dirtyTreeRefusal(paths: readonly string[]): string | undefined {
     return undefined;
   }
   // Capped: a tree after a rebase or a `pnpm format` sweep has hundreds of paths, and printing
-  // them all scrolls the three actionable sentences off the reader's screen — which is where the
-  // reader decides whether to commit or to invent a way around this.
+  // them all scrolls the actionable sentences below off the reader's screen.
   const shown = paths.slice(0, PATHS_SHOWN);
   return [
     `bench run REFUSED: the working tree's code differs from HEAD, in ${paths.length} path${paths.length === 1 ? '' : 's'}:`,
@@ -146,7 +135,7 @@ export function cppRefusal(probe: { ok: boolean; how: string }): string | undefi
   return [
     `bench run REFUSED: \`${CPP}\` does not preprocess to \`-o\` (${probe.how}).`,
     '',
-    'That is Apple clang answering to `cpp` — a login shell puts /usr/bin ahead of ~/.local/bin.',
+    'Usually that is Apple clang answering to `cpp`: a login shell puts /usr/bin ahead of the shim.',
     'Every REAL-tier ido, kmc and gcc272 row would come back `noncompile` and the run would still',
     'report `✓` and exit 0 — one row or 300 of them. Put the GNU shim first on PATH, or set',
     'ASMLIFT_CPP, then re-run:',
@@ -189,19 +178,18 @@ export function cppUsingToolchains(): ToolchainId[] {
     .filter((id) => CPP_TOOLCHAINS.includes(id));
 }
 
-/** Every start-time verdict, in the order they cost: the git one first, because it is the one with
- *  4,688 s of measured incidents behind it. Returns them rather than exiting, so the caller owns
- *  the exit code and the test owns neither. Each verdict is gated on ITS OWN predicate — see the
- *  header: `runIsWholeTier` for git, `runUsesHostCpp` for the probe — so a scoped real run is
- *  checked for `cpp` and not for dirt, and a whole synthetic run the other way round.
+/** Every start-time verdict. Returned rather than exited on, so the caller owns the exit code and
+ *  the test owns neither. Each verdict is gated on ITS OWN predicate — see the header:
+ *  `runIsWholeTier` for git, `runUsesHostCpp` for the probe — so a scoped real run is checked for
+ *  `cpp` and not for dirt, and a whole synthetic run the other way round.
  *
  *  A WARNING and not a refusal when `cpp` is broken but no toolchain that uses it is installed:
  *  this harness's standing policy is that a missing tool SKIPS its rows (`toolchains.ts` →
  *  `runner.ts`: `SKIP <id>: toolchain unavailable`), so refusing a whole agbcc run on a GBA-only
  *  macOS checkout — where the default `cpp` IS Apple clang and every ido/kmc/gcc272 row would have
  *  skipped — would be this check inventing a policy stricter than the run it guards. Availability
- *  is consulted ONLY on the failing path: `availableToolchains()` costs 274 ms here (it probes
- *  docker) against `probeCpp`'s 42 ms, and a `cpp` that works never pays it. */
+ *  is consulted ONLY on the failing path: `availableToolchains()` probes docker and costs several
+ *  times what `probeCpp` does, and a `cpp` that works never pays it. */
 export function preflightRefusals(
   opts: PreflightOptions,
   deps: PreflightDeps = {},
