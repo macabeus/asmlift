@@ -171,6 +171,13 @@ run in ~2 min, a warm re-run in ~40 s):
 pnpm bench run                        # both tiers -> results/{synthetic,real}.json (intermediates)
 pnpm bench run --tier synthetic --only divc      # targeted subset
 pnpm bench run --serial               # in-process, for debugging (also how shard children run)
+pnpm bench lock                       # is a run measuring this worktree RIGHT NOW? exit 1 if so,
+                                      #   naming `bench-running` (the gitignored marker `bench run`
+                                      #   holds while it works), its pid, argv and elapsed time.
+                                      #   Ask before ANY phase that edits the tree: the provenance
+                                      #   sampler below is sticky, so one mid-run edit costs the
+                                      #   whole run. A SIGKILLed run leaves the marker behind and
+                                      #   it reads as stale from its pid — that blocks nothing
 pnpm bench:merge                      # = bench merge: tiers -> results/results.json, then publish
 pnpm bench publish                    # re-stage results.json into the web app alone
 pnpm bench:smoke                      # one trivial fn through every available toolchain

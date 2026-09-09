@@ -82,7 +82,7 @@ export interface PreflightOptions {
  *  that child — `cli.ts`'s fan-out branch ignores the shard and runs the tier whole — so the test
  *  is `--shard` AND `--serial`, exactly how `orchestrate.ts` spawns one
  *  (`run --serial --tier X --shard i/N`). `cli.ts` rejects the other combination outright. */
-function isShardChild(opts: PreflightOptions): boolean {
+export function isShardChild(opts: PreflightOptions): boolean {
   return opts.shard !== undefined && opts.serial === true;
 }
 

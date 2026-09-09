@@ -73,8 +73,9 @@ import { RESULTS_DIR } from './config';
 import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
+import { acquireBenchLock, benchLockStatus, concurrentRunRefusal, readBenchLock } from './run/lock';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
-import { preflightRefusals } from './run/preflight';
+import { isShardChild, preflightRefusals } from './run/preflight';
 import { parseShard, runCases } from './run/runner';
 import { smoke } from './run/smoke';
 import { verify } from './run/verify';
@@ -188,6 +189,17 @@ switch (command) {
       console.error(preflight.refusals.join('\n\n'));
       process.exit(1);
     }
+    // Then take the worktree, so the phases that EDIT it can tell that they must not. A shard
+    // CHILD takes nothing: the parent that spawned it holds the marker already, and eight children
+    // fighting over one path would clear it the moment the first of them exited.
+    if (!isShardChild({ tiers, shard: opts.shard, serial: opts.serial })) {
+      const concurrent = concurrentRunRefusal(readBenchLock());
+      if (concurrent !== undefined) {
+        console.error(concurrent);
+        process.exit(1);
+      }
+      acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`);
+    }
     // Deliberately NOT folded into `preflightRefusals`: that function's two verdicts are each
     // gated on a predicate (whole-tier / touches-real), while the m2c pin applies to EVERY run,
     // shard children and `--only` included, and throws its own remediation line.
@@ -271,6 +283,12 @@ switch (command) {
       }
       await orchestrate({ jobs, tiers, only: opts.only, project: opts.project, toolchain: opts.toolchain });
     }
+    break;
+  }
+  case 'lock': {
+    // The read every tree-EDITING phase makes: is a bench measuring this worktree right now?
+    // Exits 1 while one is, naming the marker. See run/lock.ts.
+    process.exit(benchLockStatus());
     break;
   }
   case 'repro': {
@@ -512,7 +530,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|repro|target|fan|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|lock|repro|target|fan|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }
