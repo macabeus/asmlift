@@ -52,6 +52,45 @@ const found = SCANNED.flatMap((dir) =>
   ),
 );
 
+/** Prose also cites a place in the SOURCE, and `docs/level-tower.md`'s convention is a findable
+ *  phrase rather than a line number, because a line number rots on the next edit above it and
+ *  nothing notices. The convention only works while the phrase is still there, which is this. A
+ *  `file.ts:N` is deliberately NOT checked: the dated attribution docs are full of them and they
+ *  describe a snapshot, not a rule. */
+const ANCHORED = ['docs', '.claude/commands'];
+const ANCHOR = /grep -n "([^"]+)" ([\w./-]+)/g;
+
+const anchors = ANCHORED.flatMap((dir) =>
+  sourceFiles(join(ROOT, dir)).flatMap((file) =>
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .flatMap((text, i) =>
+        [...text.matchAll(ANCHOR)].map((m) => ({
+          file: file.slice(ROOT.length + 1),
+          line: i + 1,
+          phrase: m[1],
+          target: m[2],
+        })),
+      ),
+  ),
+);
+
+describe('every cited source anchor still hits', () => {
+  it('finds anchors at all', () => {
+    expect(anchors.length).toBeGreaterThan(0);
+  });
+
+  it.each(anchors)('$file:$line anchors on $target', ({ file, line, phrase, target }) => {
+    // The phrase is quoted for a literal `grep`, so a substring test is what the reader will run.
+    expect(
+      readFileSync(join(ROOT, target), 'utf8').includes(phrase),
+      `${file}:${line} tells the reader to find '${phrase}' in ${target}, and it is not there.\n` +
+        `  Reworded? Re-quote the new phrasing here. Moved? Re-point the anchor. Do not replace it\n` +
+        `  with a line number — that is the failure this convention exists to avoid.`,
+    ).toBe(true);
+  });
+});
+
 describe('every cited benchmark row exists', () => {
   it('finds citations at all', () => {
     // Or the suite passes loudest when the scan is broken.
