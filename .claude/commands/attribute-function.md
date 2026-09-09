@@ -178,13 +178,19 @@ attribution line for every decline naming its first blocker. Constraints learned
    stale results and is vacuous** — the order is the gate; and without `--base`, a branch that has
    already committed its own artifact compares it against itself, which is vacuous the other way.
    The commit-first order is now ENFORCED: `pnpm bench run` refuses to start on a tree whose code
-   differs from HEAD, naming the files, because `bench:merge` refuses those numbers anyway 30
+   differs from HEAD, naming the files, because `bench:merge` refuses those numbers anyway ~39
    minutes later — and twice that refusal was a single untracked env file. Put anything a worktree
-   needs locally (env exports, PATH overrides) in **`.envrc.local`**, gitignored for exactly this,
-   or in `$(git rev-parse --git-path info/exclude)`; never reach for a way around the refusal. The
-   smoke runs in Phase 6 are scoped (`--only`/`--toolchain`) and are never refused. The same
-   preflight probes `cpp` — a refusal there means your shell resolved it to Apple clang, which a
-   LOGIN shell does, and the run would have failed 44 rows while reporting `✓` and exit 0.
+   needs locally (env exports, PATH overrides) in **`.envrc.local`**, gitignored for exactly this —
+   nothing loads it, so `source .envrc.local` yourself — or in
+   `$(git rev-parse --git-path info/exclude)` (from a worktree that is the MAIN checkout's file,
+   shared with every other worktree: add, never overwrite); never reach for a way around the
+   refusal. What is exempt is a run that rewrites no tier file WHOLE — the Phase-6 smoke runs carry
+   `--only`, which scopes both tiers. `--project` alone scopes only real and `--toolchain` alone
+   only synthetic, so pair either with its `--tier` or the other tier is run whole and refused. A
+   scoped run is not read-only either: it rewrites `results/<tier>.json` with only its own rows. The
+   same preflight probes `cpp` — a refusal there means your shell resolved it to Apple clang, which
+   a LOGIN shell does, and the run would have failed 44 rows while reporting `✓` and exit 0 (a
+   WARNING instead of a refusal means no MIPS toolchain is installed, so those rows would SKIP).
 2. Expect the two tag-vocabulary tests to fail BETWEEN adding the tag and merging the artifacts;
    they must pass after. `npx vitest run`, `pnpm test:matching`, `pnpm typecheck`,
    `pnpm lint`, `pnpm format` check.

@@ -128,15 +128,18 @@ switch (command) {
   case 'run': {
     // BEFORE anything that costs: the two conditions that make a whole-tier run worthless are both
     // decidable in under a second, and both have been paid for at ~2,350 s each. See run/preflight.ts.
-    const refusals = preflightRefusals({
+    const preflight = preflightRefusals({
       tiers,
       only: opts.only,
       project: opts.project,
       toolchain: opts.toolchain,
       shard: opts.shard,
     });
-    if (refusals.length > 0) {
-      console.error(refusals.join('\n\n'));
+    for (const w of preflight.warnings) {
+      console.error(`${w}\n`);
+    }
+    if (preflight.refusals.length > 0) {
+      console.error(preflight.refusals.join('\n\n'));
       process.exit(1);
     }
     const { assertM2cPinned } = await import('./eval/m2c');
