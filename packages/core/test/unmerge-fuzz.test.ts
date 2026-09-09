@@ -20,6 +20,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import type { Gate } from '../src/l3/gates';
 import { ablateHeuristic } from '../src/l3/gates';
 import type { UnmergeGates } from '../src/l3/unmerge';
 import {
@@ -326,34 +327,42 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
 // `pushJoin` reading `.then` off an `assign`.
 describe('unmerge fuzz — every ablation a shipped axis is allowed to make', () => {
   test('declines, and never throws', () => {
-    const tables = [
-      ['site', UNMERGE_SITE_GATES],
-      ['arm', UNMERGE_ARM_GATES],
-      ['value', UNMERGE_VALUE_GATES],
-      ['rung', UNMERGE_RUNG_GATES],
-      ['totality', UNMERGE_TOTALITY_GATES],
-    ] as const;
+    const heuristics = <C>(t: readonly Gate<C>[]): string[] => t.filter((g) => !g.sound).map((g) => g.id);
+    const ablations: [string, UnmergeGates][] = [
+      ...heuristics(UNMERGE_SITE_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { site: ablateHeuristic(UNMERGE_SITE_GATES, id) },
+      ]),
+      ...heuristics(UNMERGE_ARM_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { arm: ablateHeuristic(UNMERGE_ARM_GATES, id) },
+      ]),
+      ...heuristics(UNMERGE_VALUE_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { value: ablateHeuristic(UNMERGE_VALUE_GATES, id) },
+      ]),
+      ...heuristics(UNMERGE_RUNG_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { rung: ablateHeuristic(UNMERGE_RUNG_GATES, id) },
+      ]),
+      ...heuristics(UNMERGE_TOTALITY_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { totality: ablateHeuristic(UNMERGE_TOTALITY_GATES, id) },
+      ]),
+    ];
     const bad: string[] = [];
-    let ablations = 0;
-    for (const [key, table] of tables) {
-      for (const g of table) {
-        if (g.sound) {
-          continue;
-        }
-        ablations++;
-        const gates = { [key]: ablateHeuristic(table, g.id) } as UnmergeGates;
-        for (let seed = 1; seed <= 4000; seed++) {
-          for (const tree of [gen(seed), gen2(seed)]) {
-            try {
-              unmergeJoins(tree, gates);
-            } catch (e) {
-              bad.push(`${g.id} seed ${seed}: ${e instanceof Error ? e.message : String(e)}`);
-            }
+    for (const [id, gates] of ablations) {
+      for (let seed = 1; seed <= 4000; seed++) {
+        for (const tree of [gen(seed), gen2(seed)]) {
+          try {
+            unmergeJoins(tree, gates);
+          } catch (e) {
+            bad.push(`${id} seed ${seed}: ${e instanceof Error ? e.message : String(e)}`);
           }
         }
       }
     }
-    expect(ablations).toBeGreaterThan(4);
+    expect(ablations.length).toBeGreaterThan(4);
     expect(bad.slice(0, 4)).toEqual([]);
   }, 90_000);
 });
