@@ -4,7 +4,7 @@
 // output is compiled+scored exactly as the target was built.
 import type { DecompilerResult } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
-import { decompileRanked } from '@asmlift/cli/rank';
+import { type RankOptions, type RankedResult, decompileRanked } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
@@ -25,19 +25,23 @@ import { assessQuality } from './quality';
  *  Optional: a scorer whose rows declare nothing ignores it. */
 export type Scorer = (candC: string, sym: string, obj: string, declarations?: string) => MatchScore;
 
-// asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous levers
-// (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the
-// winner — single-shot `decompile` would under-score what asmlift can match. decompileRanked
-// scores internally via the target-dispatched `scoreSource` (the same per-toolchain scorer).
-export function runAsmlift(
+/** THE INPUTS one benchmark row hands asmlift — the asm-data side table, the row's prototypes,
+ *  the candidate compiler and the vendored symbol map — as the single options object both phases
+ *  below are driven with.
+ *
+ *  Exported because `bench fan` re-enters the SAME ranked path for one row, and a fan enumerated
+ *  under options assembled a second time is a fan of a different configuration: docs/ranked-repro.md
+ *  documents a 112,896-vs-135,936 spread between two checkouts of one project, and a dropped
+ *  `symbols` here reproduces exactly that class of discrepancy while printing the row's own id
+ *  beside it. Built ONCE, here, and read by every driver that claims to show what the benchmark
+ *  measured. */
+export function rankOptionsFor(
   tc: Toolchain,
-  sym: string,
-  asm: string,
   obj: string,
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
-): DecompilerResult {
+) {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
   // dense MIPS/PPC switch can recover. Best-effort — a missing/failed objdump (or agbcc, whose
   // table is inline) yields `undefined`.
@@ -53,7 +57,7 @@ export function runAsmlift(
   // On the synthetic tier (no context), the generated decomp.yaml compiler (the unconfigured
   // user path). This is what lets recovered GLOBALS (a bare `gSym`) compile at all.
   const compile = contextCompile ?? benchCompilerFor(tc.id);
-  const opts = {
+  return {
     ...(prototypes ? { prototypes } : {}),
     ...(asmData ? { asmData } : {}),
     ...(compile ? { compile } : {}),
@@ -61,6 +65,41 @@ export function runAsmlift(
     // ranked lever rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
   };
+}
+
+/** Phase 2 alone: the row's WHOLE ranked fan, every candidate carrying its label, its score and
+ *  the source it was scored from (`Scored extends Candidate`).
+ *
+ *  `runAsmlift` publishes four facts out of this object — the winner's label and source, the
+ *  dropped list and the withheld list — and drops `candidates` on the floor, which is how six
+ *  consecutive rounds came to hand-write a script to recompute it. This is that script's one
+ *  supported entry point (`bench fan`), and it is deliberately the SAME call the harness makes
+ *  rather than a parallel one: `decompileRankedParallel` would reorder nothing but is a different
+ *  driver, and a published measurement must not depend on a scheduler. */
+export function asmliftFan(
+  tc: Toolchain,
+  sym: string,
+  asm: string,
+  obj: string,
+  opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onLeverError'>,
+): RankedResult {
+  return decompileRanked(sym, asm, tc.targetDesc, obj, opts);
+}
+
+// asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous levers
+// (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the
+// winner — single-shot `decompile` would under-score what asmlift can match. decompileRanked
+// scores internally via the target-dispatched `scoreSource` (the same per-toolchain scorer).
+export function runAsmlift(
+  tc: Toolchain,
+  sym: string,
+  asm: string,
+  obj: string,
+  prototypes?: Prototypes,
+  contextCompile?: CandidateCompiler,
+  symbols?: SymbolMap,
+): DecompilerResult {
+  const opts = rankOptionsFor(tc, obj, prototypes, contextCompile, symbols);
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
   // scored (the marker could compile via an implicit declaration and grade meaningless code).
@@ -105,7 +144,7 @@ export function runAsmlift(
 
   // Phase 2 — rank candidates (compile + objdiff-score each) and take the differ-picked best.
   try {
-    const ranked = decompileRanked(sym, asm, tc.targetDesc, obj, opts);
+    const ranked = asmliftFan(tc, sym, asm, obj, opts);
     const best = ranked.best;
     const s = best.score;
     return {
