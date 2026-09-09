@@ -40,18 +40,21 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
   },
 ];
 
-// SIZED, not maximal, and the size is a CI budget rather than a confidence statement. Arm A is the
-// expensive half — it structures every generated function TWICE — and `test:offline` shares a
-// two-core runner with `narrowlocal-fuzz`, which alone takes a minute there. At 4,000 this file
-// plus the nested arm next door put 30% more CPU into that suite than vitest's own reporter could
-// keep up with: two of three runs ended `2696 passed` and an unhandled
-// `[vitest-worker]: Timeout calling "onTaskUpdate"`, which fails the job.
+// SIZED, not maximal: 4,000 is the size the sibling fuzz's arms run, and the cost of matching it is
+// single-digit seconds of CPU against `test:offline`'s ~102 s. Arm A is the expensive half — it
+// structures every generated function TWICE, at three depths; arm B is near-flat in SEEDS, since it
+// stops at the first seed that proves a gate load-bearing.
 //
-// 250 still judges an order of magnitude more functions than the vacuity guard below asks for, and
-// arm B is unaffected — it stops at the first seed that proves a gate load-bearing, which every
-// reachable one does within the first handful. RAISE IT LOCALLY when hunting: that is how the
-// `loop-escape` finding next door was taken, at 8,000.
-const SEEDS = 250;
+// WHAT THE SIZE BUYS HERE IS ARM A's BREADTH, NOT GATE COVERAGE. Measured: cut to 250 all four
+// tests still pass, because every sound gate keeps a witness under it — `sibling-param`'s first
+// ACYCLIC witness is seed 289, but depth 1's seed 52 proves it anyway; `carrier-live` lands at seed
+// 6 and `re-derives` at 22. Gate coverage is what a small size costs NEXT DOOR: `namecoalesce-fuzz`
+// goes red at 250, its `sibling-params` having no witness before seed 299 at any depth.
+//
+// RAISING THIS DOES NOT REACH `namecoalesce`'s `loop-escape`, and never could — the arm that would
+// ablate it filters on `sound`, which that table denies the gate. The barrier is a predicate, not a
+// range, and its witnesses are frozen as IR in `namecoalesce.test.ts` instead.
+const SEEDS = 4000;
 
 /** Both spellings of one seed, or null when the shape is not one this can judge. */
 function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[]; on: Event[] } | null {

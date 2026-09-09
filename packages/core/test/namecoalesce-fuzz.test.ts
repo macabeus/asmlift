@@ -64,33 +64,35 @@ function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[
   }
 }
 
-// The nested arm sweeps FEWER seeds than the two that predate it, and the reason is budget rather
-// than confidence: its functions are the largest the generator makes, and adding it at 4,000
-// alongside `carrier-name-fuzz` put 30% more CPU into `test:offline` than vitest's own reporter
-// could keep up with — a fully green run reported an unhandled `Timeout calling "onTaskUpdate"`
-// and the job failed. The finding `namecoalesce.ts` credits to this arm — `loop-escape` dropped
-// makes 2 of 7,535 nested functions compute something else — was taken at 8,000 seeds, so its two
-// (5104 and 6437) are outside the range that ships. Reproduce it by raising this number, not by
-// hunting inside it.
+// All three arms sweep `SEEDS`, the nested one included even though its functions are the largest
+// the generator makes: it costs a couple of seconds, and a per-arm size would be a knob claiming an
+// asymmetry that is not there.
 describe.each([
-  ['acyclic', 0, SEEDS],
-  ['loop-bearing', 1, SEEDS],
-  ['nested', 2, 250],
-] as const)('%s', (_name, depth, seeds) => {
+  ['acyclic', 0],
+  ['loop-bearing', 1],
+  ['nested', 2],
+] as const)('%s', (_name, depth) => {
   test('no merge the pass makes changes what the function does', async () => {
     const bad: number[] = [];
     let judged = 0;
-    for (let seed = 1; seed <= seeds; seed++) {
+    for (let seed = 1; seed <= SEEDS; seed++) {
       if (seed % BREATHE_EVERY === 0) await breathe();
       const r = spellings(seed, depth);
       if (!r) continue;
       judged++;
       if (tracesDiffer(r)) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(seeds / 10); // the sweep is not vacuous
+    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
     expect(bad).toEqual([]);
   });
 });
+
+// `loop-escape` IS LOAD-BEARING AND NO SIZE HERE SHOWS IT. Arm B below iterates
+// `NAME_COALESCE_GATES.filter((x) => x.sound)`, and that gate is `sound: false` — as is `param`,
+// and `type` is exempted below — so raising `SEEDS` never reaches it. Unlike the other two, its
+// ablation changes what a function computes; the witnesses are frozen as IR in
+// `namecoalesce.test.ts`, which also carries how to re-hunt them. Why the flag stays `false` is
+// argued in `namecoalesce.ts`'s header, where it is set.
 
 // The one sound rule this generator cannot reach, and why. `type` needs two names whose
 // DECLARATIONS disagree, which takes a value pool of more than one width AND a mismatch that

@@ -57,17 +57,24 @@
 // the outer variable's home is outside the inner body, a disjoint pair in both directions — so the
 // enclosing-loop rule needs no gate of its own.
 //
-// It is NOT marked sound, because it has not been shown to be, and it is BLUNTER than the rule it
-// restates: `carriesPreUpdate` branches on which emitter owns the latch and names four shapes that
-// are not the hazard, none of which this has. It IS load-bearing, and the measurement that says so
-// is not a benchmark one: dropping it over 773 rows improves 12 and regresses none (#55), and
-// `nestedloop` is `int s = 0; … s += i*j`, one accumulator the pass emits as two — but with it
-// dropped, `namecoalesce-fuzz`'s NESTED arm finds two generated functions in 7,535 that compute
-// something else, and it finds them with the interference rule at either strength. A byte score
-// cannot see that failure, which is the whole reason that fuzz exists. So the 12 rows are real and
-// so is the hazard, and taking them still needs `carriesPreUpdate` lifted to name classes: the
-// class-level closure, since a merge can reach a loop variable's name through an edge that carried
-// no loop variable at all.
+// It is BLUNTER than the rule it restates: `carriesPreUpdate` branches on which emitter owns the
+// latch and names four shapes that are not the hazard, none of which this has. It IS load-bearing,
+// and the measurement that says so is not a benchmark one: dropping it over 773 rows improves 12
+// and regresses none (#55), and `nestedloop` is `int s = 0; … s += i*j`, one accumulator the pass
+// emits as two — but with it dropped, two generated functions COMPUTE SOMETHING ELSE: an inner
+// loop's variable adopts the enclosing loop's carrier and then overwrites it every iteration. Both
+// are frozen as literal IR in `namecoalesce.test.ts`, which asserts the escape copy the gate forces
+// on one side and its absence on the other. A byte score cannot see that failure, which is the
+// whole reason that fuzz exists. So the 12 rows are real and so is the hazard, and taking them
+// still needs `carriesPreUpdate` lifted to name classes: the class-level closure, since a merge can
+// reach a loop variable's name through an edge that carried no loop variable at all.
+//
+// WHY THE FLAG IS `false` ANYWAY, recorded here because this is where it is set. By `gates.ts`'s
+// definition — remove it and some candidate is WRONG — this gate qualifies, and the two frozen
+// witnesses are the proof. It stays `false` on the bluntness above: what is shown wrong is the
+// SHAPE this rejects, not the rule as written, which also refuses merges `carriesPreUpdate` would
+// allow. Flipping it costs a line in `namecoalesce-fuzz`'s `OUT_OF_REACH` — the ablating arm has no
+// witness inside `SEEDS` — and buys no coverage that `namecoalesce.test.ts` does not already hold.
 //
 // TWO KNOWN GAPS, both on the READ side of a relocated write:
 //
@@ -183,6 +190,9 @@ export const NAME_COALESCE_GATES: readonly Gate<NameMerge>[] = [
     id: 'loop-escape',
     why: 'outside the loop a loop variable’s name holds the value from BEFORE the update',
     sound: false,
+    // Not required of an unsound gate, and named anyway: the differential fuzz never ablates this
+    // one, so the frozen witnesses are its only evidence and `gate-contract` pins their test.
+    guardedBy: 'namecoalesce.test.ts: ablating loop-escape lets an inner loop clobber the enclosing loop variable',
     rejects: (c) => c.loopEscapes,
   },
 ];

@@ -6270,8 +6270,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //    NOT this walk: with the interference rule made edge-aware the same way, `/merge-names`
   //    refuses one gate later on `loop-escape` (`structure/namecoalesce.ts`), which that file
   //    called blunter than the hazard it restates and which is in fact LOAD-BEARING — dropping it
-  //    makes 2 of 7,535 nested generated functions compute something else
-  //    (`namecoalesce-fuzz.test.ts`, `depth: 2`, seeds 5104 and 6437). Taking the second half
+  //    lets an inner loop's variable adopt the enclosing loop's carrier and overwrite it every
+  //    iteration, so the function computes something else — frozen as IR in `namecoalesce.test.ts`,
+  //    where the differential sweep cannot reach it. Taking the second half
   //    needs `carriesPreUpdate` lifted to name classes, which that file already names as the work.
   //    The other door — waiving `enclosingNames` in the loop-header seeding — reaches 11 under a
   //    probe and would be a new ranked axis with the same soundness question.
