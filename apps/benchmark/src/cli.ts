@@ -14,6 +14,10 @@
 //                                        # pre-publish gate: re-run BOTH repro scripts, every function
 //   pnpm bench merge                     # tiers → results.json, then publish
 //   pnpm bench publish                   # re-stage results.json into the web app
+//   pnpm bench baseline <sym> [--base ref]
+//                                        # the COMMITTED number for a row, plus whether anything
+//                                        # since can have moved it — what a round opens with,
+//                                        # instead of inheriting a brief's number
 //   pnpm bench stale-check [--base ref]  # committed vs fresh results (measurement-level)
 //   pnpm bench regression [--base ref]   # committed vs fresh MATCH gate: exit 1 on any lost match
 //   pnpm bench diff [--base ref]         # committed vs fresh per-ROW, per-FIELD: exit 1 on any move
@@ -352,6 +356,32 @@ switch (command) {
   case 'publish':
     publish();
     break;
+  case 'baseline': {
+    // Phase 0 of every round: what does the PUBLISHED benchmark say about this row, and is that
+    // still the answer. `docs/baseline-freshness.md` is the argument; this is the command.
+    //
+    // `--base origin/main` by default and not HEAD, unlike the comparison gates: the question is
+    // what the published baseline says, and a branch that has committed its own artifact would
+    // otherwise be asked about itself. An unfetched `origin/main` throws out of `readCommitted`
+    // with the fetch instruction — the one thing the `git show … | jq` fence this replaces did
+    // silently, printing the empty output that reads as "this symbol has no row".
+    const sym = positionals[1];
+    if (!sym) {
+      console.error(
+        'usage: bench baseline <sym> [--base ref]   # <sym> is a substring, or a full project:sym:toolchain id',
+      );
+      process.exit(2);
+    }
+    const { baseline } = await import('./report/baseline');
+    try {
+      process.exit(baseline(sym, opts.base ?? 'origin/main'));
+    } catch (e) {
+      // The message, not a stack: the only way here is a ref this checkout cannot read, and
+      // `readCommitted`'s text already says what to do about it (`git fetch origin`).
+      console.error(`baseline: ${e instanceof Error ? e.message : e}`);
+      process.exit(2);
+    }
+  }
   case 'stale-check': {
     // exit 0 either way; a thrown safety refusal (shrunk coverage / dirty provenance) exits 1.
     // Emits `stale=true|false` for GitHub Actions when GITHUB_OUTPUT is set.
@@ -397,7 +427,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|target|setup|fidelity|merge|publish|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|target|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }

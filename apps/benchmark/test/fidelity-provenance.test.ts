@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { REPO_ROOT } from '../src/config';
-import { MEASURED_PATHS } from '../src/provenance';
+import { MEASURED_PATHS, SCORING_PATHS } from '../src/provenance';
 import { tierRows } from '../src/run/fidelity';
 
 const tier = (asmlift?: { commit: string; dirty: boolean }): string =>
@@ -113,5 +113,25 @@ describe('MEASURED_PATHS agrees with the provenance script', () => {
 
   test('the two lists are the same set', () => {
     expect([...MEASURED_PATHS].sort()).toEqual(line![1].split(/\s+/).filter(Boolean).sort());
+  });
+
+  // The NARROW half, for the same reason and by the same mechanism. `bench baseline` splits the
+  // commits since the artifact into "changes what it measures" (an answer) and "the harness
+  // around it" (a note), which is the script's own two-tier verdict — so it needs both lists, and
+  // a doc or a command holding a hand-copied spelling of either is the third copy this describe
+  // block exists to prevent.
+  const measuresLine = /^measures='([^']+)'/m.exec(script);
+
+  test('the script still spells its `measures` subset the way this test reads it', () => {
+    expect(measuresLine).not.toBeNull();
+  });
+
+  test('SCORING_PATHS is the same set as `measures`', () => {
+    expect([...SCORING_PATHS].sort()).toEqual(measuresLine![1].split(/\s+/).filter(Boolean).sort());
+  });
+
+  test('and it is a strict subset of the wide list', () => {
+    expect(SCORING_PATHS.every((p) => MEASURED_PATHS.includes(p))).toBe(true);
+    expect(SCORING_PATHS.length).toBeLessThan(MEASURED_PATHS.length);
   });
 });

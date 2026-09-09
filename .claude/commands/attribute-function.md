@@ -18,13 +18,11 @@ one) is an unfinished finding.
 
 ## Phase 0 — Resolve and baseline (never skip)
 
-**Before anything else: re-derive the numbers, and check your base.** Any row number written into a
-brief — this file, a mining report, an orchestrator's hand-off, a memory note — is a HINT with a
-timestamp, not a fact; briefs are written before a round starts and PRs merge while it runs. Do this
-with **[`docs/baseline-freshness.md`](../../docs/baseline-freshness.md), verbatim**: it reads the
-committed artifact for this row in one second (no bench, no checkout), says which number wins when
-two disagree, and creates the worktree from a base you have just checked. That file is shared with
-`/match-function`; correct it there, never here.
+0. **Re-derive the baseline before you attribute against it**: `git fetch origin && pnpm bench
+   baseline $1`. A number handed to you is a hint with a timestamp, and a gap sized against a stale
+   one is sized against nothing. The rule, and the fresh-base worktree it must be measured in, is
+   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) — shared with `/match-function`,
+   so correct it there.
 
 1. Resolve the row: `pnpm bench run --tier real --only $1`. Record the outcome verbatim for both
    decompilers — **the whole `diff:N/M`, never the `N` alone** (see "the denominator moves" below).
