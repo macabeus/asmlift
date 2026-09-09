@@ -86,3 +86,73 @@ export function gateTableDefects<Ctx>(gates: readonly Gate<Ctx>[]): string[] {
   }
   return out;
 }
+
+/** A gate table that counts its own refusals — {@link tallying}'s return. */
+export interface Tallied<Ctx> {
+  /** Hand this to the pass, in place of the table it wraps. */
+  readonly gates: readonly Gate<Ctx>[];
+  /** The census so far, most-refused first, ties in table order. A snapshot: counts keep
+   *  accumulating across every later call, which is what a corpus-wide census wants.
+   *
+   *  THERE IS NO RESET, deliberately — a per-row census is two snapshots DIFFED, not a fresh
+   *  wrapper per row, because a wrapper is a new table IDENTITY and a reader that keys on one
+   *  (`rank.ts`'s `censuses` memo) sees a fresh key every row. Counting is keyed by `g.id`, so a
+   *  table COMPOSED from several should be run past `gateTableDefects` first: two rules sharing an
+   *  id sum into one number, and the contract test only checks the tables on its own roster. */
+  readonly refusals: () => readonly (readonly [string, number])[];
+}
+
+/** The same table, wrapping each `rejects` in a counter — so a caller OUTSIDE core can obtain the
+ *  per-id census that `l3/coalesce.ts` and `structure/namecoalesce.ts` hand-roll into their return
+ *  type (`l3/scopebase.ts` reports the same attribution per KEY), from any pass that takes its
+ *  table as a parameter:
+ *
+ *      const t = tallying(UNMERGE_SITE_GATES);
+ *      unmergeJoins(sfn, { site: t.gates });
+ *      console.log(t.refusals());   // [['empty-arm', 168], ['no-merge-name', 80]]
+ *
+ *  THAT IS THE API AND NOT YET A CENSUS: nothing exports a corpus of trees to loop over, and a
+ *  tabled pass's only shipped caller is normally inside core. Taking the census off a REAL
+ *  enumeration is `pnpm bench gates --pass <id>`, whose header
+ *  (`apps/benchmark/src/run/gate-census.ts`) holds the measured reasons it is a subcommand rather
+ *  than a script to copy, and what a SECOND censusable pass costs.
+ *
+ *  WHAT IT COUNTS IS AN EVALUATION THAT ANSWERED TRUE, not a site. Under `firstRejection` — which
+ *  short-circuits — that is the FIRST rejecter, so this produces the same census the hand-rolled
+ *  maps do, with the same reading: an id absent from it is starved OR REDUNDANT WITH an earlier
+ *  rule, and telling the two apart takes the same rule run with the rest of the table empty
+ *  (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`, whose dated table ships three
+ *  rules of the second kind). A consumer that asks the table something else — `.some`, `.filter` —
+ *  gets one count per evaluation instead, which is a different question and rarely the one wanted.
+ *
+ *  AND IT COUNTS REFUSALS, WHICH IS NOT REACH. A rule can refuse hundreds of times and still change
+ *  no output, because a later rule or a narrowing outside the table would have refused the same
+ *  sites: that is the MOVED column, it costs an ablation rather than a census, and `l3/unmerge.ts`'s
+ *  header carries the worked example of the two disagreeing.
+ *
+ *  IT CHANGES NO BEHAVIOUR: each wrapper's predicate IS the original's, `id`/`why`/`sound`/
+ *  `guardedBy` are carried, so `without`, `ablateHeuristic` and `gateTableDefects` all still hold
+ *  over the result. What it does change is the table's IDENTITY, and some readers key on that —
+ *  `rank.ts`'s `censuses` memo is a `Map` over `Gate<BaseKey>[]` instances — so wrap once and reuse
+ *  `gates`, rather than per call. */
+export function tallying<Ctx>(gates: readonly Gate<Ctx>[]): Tallied<Ctx> {
+  const counts = new Map<string, number>();
+  const order = new Map(gates.map((g, i) => [g.id, i]));
+  return {
+    gates: gates.map((g) => ({
+      ...g,
+      rejects: (c: Ctx) => {
+        const r = g.rejects(c);
+        if (r) {
+          counts.set(g.id, (counts.get(g.id) ?? 0) + 1);
+        }
+        return r;
+      },
+    })),
+    refusals: () =>
+      [...counts].sort((a, b) => b[1] - a[1] || (order.get(a[0]) ?? 0) - (order.get(b[0]) ?? 0)) as readonly (readonly [
+        string,
+        number,
+      ])[],
+  };
+}

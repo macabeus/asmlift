@@ -20,7 +20,17 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { unmergeJoins } from '../src/l3/unmerge';
+import type { Gate } from '../src/l3/gates';
+import { ablateHeuristic } from '../src/l3/gates';
+import type { UnmergeGates } from '../src/l3/unmerge';
+import {
+  UNMERGE_ARM_GATES,
+  UNMERGE_RUNG_GATES,
+  UNMERGE_SITE_GATES,
+  UNMERGE_TOTALITY_GATES,
+  UNMERGE_VALUE_GATES,
+  unmergeJoins,
+} from '../src/l3/unmerge';
 import { mulberry32 } from './helpers';
 
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -306,5 +316,60 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
     expect(fired).toBeGreaterThan(1000);
     expect(bad.slice(0, 4)).toEqual([]);
     // ~1.7s alone, the slower of the two arms — see the budget note above.
+  }, 90_000);
+});
+
+// A SANCTIONED ABLATION MUST DECLINE, NOT THROW.
+//
+// ENUMERATED OVER ALL FIVE TABLES, WHICH IS NOT THE SAME AS SIX ABLATIONS OVER FIVE. `heuristics()`
+// yields only `sound: false` gates, and `UNMERGE_ARM_GATES` and `UNMERGE_TOTALITY_GATES` are sound
+// throughout — so today this runs 6 ablations drawn from 3 tables, and the `> 4` floor below is
+// "the enumeration still found some", not a count of the tables. All five are listed anyway
+// because the list then grows for free when a heuristic is added to either of them.
+//
+// `ablateHeuristic` exists so a shipped axis may drop a `sound: false` gate and re-run the pass as
+// a ranked candidate; `rank.ts`'s PRE-FAN loop wraps `apply` in `try { } catch { }`, so a pass that
+// throws under one of those ablations does not fail loudly — it yields zero candidates and reads as
+// an ordinary decline. Ablating `tail-is-not-an-if` is the live instance: it leaves the rung
+// refusal to `pushJoin`'s own narrowing, and a cast there would read `.then` off an `assign`.
+describe('unmerge fuzz — every ablation a shipped axis is allowed to make', () => {
+  test('declines, and never throws', () => {
+    const heuristics = <C>(t: readonly Gate<C>[]): string[] => t.filter((g) => !g.sound).map((g) => g.id);
+    const ablations: [string, UnmergeGates][] = [
+      ...heuristics(UNMERGE_SITE_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { site: ablateHeuristic(UNMERGE_SITE_GATES, id) },
+      ]),
+      ...heuristics(UNMERGE_ARM_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { arm: ablateHeuristic(UNMERGE_ARM_GATES, id) },
+      ]),
+      ...heuristics(UNMERGE_VALUE_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { value: ablateHeuristic(UNMERGE_VALUE_GATES, id) },
+      ]),
+      ...heuristics(UNMERGE_RUNG_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { rung: ablateHeuristic(UNMERGE_RUNG_GATES, id) },
+      ]),
+      ...heuristics(UNMERGE_TOTALITY_GATES).map((id): [string, UnmergeGates] => [
+        id,
+        { totality: ablateHeuristic(UNMERGE_TOTALITY_GATES, id) },
+      ]),
+    ];
+    const bad: string[] = [];
+    for (const [id, gates] of ablations) {
+      for (let seed = 1; seed <= 4000; seed++) {
+        for (const tree of [gen(seed), gen2(seed)]) {
+          try {
+            unmergeJoins(tree, gates);
+          } catch (e) {
+            bad.push(`${id} seed ${seed}: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+    }
+    expect(ablations.length).toBeGreaterThan(4);
+    expect(bad.slice(0, 4)).toEqual([]);
   }, 90_000);
 });

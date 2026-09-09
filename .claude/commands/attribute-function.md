@@ -314,13 +314,30 @@ and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier li
    (not only in `research/`, whose path nothing may cite) and name the pass.** That instrument
    episode is one of the two things that license converting those refusals to a `Gate` table later
    (`grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md`); a refusal you come to suspect never
-   fires at all is the other. Before you instrument, check whether you have to: if the pass already
-   exports a census (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a `refusals` map
+   fires at all is the other. Before you instrument, check whether you have to, in this order:
+   **`pnpm bench gates --pass unmerge` prints the per-id refusal census of a tabled pass** — every
+   rule, how many times it refused first, over the agbcc synthetic tier in ~10 s, with no edit to
+   core and nothing to revert. `--toolchain id` picks another synthetic tier; `--only` reaches both
+   tiers but matches a SUBSTRING of the row id and pools every match, so name the full
+   `tier:sym:toolchain` id when you want one row. Its numbers reproduce `l3/unmerge.ts`'s
+   instrumented 40/16 split with no patch, which is what a census is FOR. **Do not write your own
+   script for this** — the three hazards measured in
+   `grep -n "WHY A SUBCOMMAND AND NOT A DOCUMENTED SCRIPT" apps/benchmark/src/run/gate-census.ts`
+   are why it is a subcommand, and one of them stamps your next `bench run` DIRTY after 2,000 s. A
+   pass NOT in that registry is not censusable this way and the command says so: the seam its caller
+   needs is what a second entry costs. A count is FIRST REJECTIONS and not reach — of the six
+   ablatable rules in `l3/unmerge.ts` exactly one moves a row, three refuse and are overruled, and
+   two never fire — so read the MOVED column beside it
+   (`grep -n "TWO COLUMNS, AND THEY DISAGREE HERE" packages/core/src/l3/unmerge.ts`) before you
+   build anything on a big number. Failing that, if the pass exports a census
+   (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a `refusals` map
    (`l3/coalesce.ts`, `l3/scopebase.ts`, `structure/namecoalesce.ts`), a test reads the id straight
-   out with no edit to the pass. A table ALONE does not buy that: 21 of the 27 `firstRejection` call
-   sites compare the id to `null` and drop it, so on those you still patch — and adding the map is
-   the smaller change. If the first blocker is one a round has already reasoned about beside the
-   gate, cite that instead of re-deriving it.
+   out. Only a table that is neither injectable nor reported still costs a patch —
+   26 of the 32 `firstRejection` call sites compare the id to `null` and drop it. All three report
+   the FIRST rejecter, so a rule missing from the census is starved or refused-earlier, not proven
+   dead.
+   If the first blocker is one a round has already reasoned about beside the gate, cite that
+   instead of re-deriving it.
 3. **Never edit the benchmark to make a row look better** — the reference source defines the
    target; manifests and results are never tuned. Harness defects (a hang, a missing timeout)
    are fixed or documented as their own labelled change.

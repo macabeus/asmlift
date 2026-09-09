@@ -79,12 +79,42 @@
 //   - the terminal arms are not ALL of the name's definitions, or a merge name is still mentioned
 //     in the rewritten statement — the two halves of totality, below.
 //
-// THESE REFUSALS ARE NOT AN `l3/gates.ts` TABLE, and the reason is cost, not shape: that file
-// would carry them (three tables at three recursion depths — the site context, `armDefs`'s,
-// `pushJoin`'s — is a shape it supports, and `raise/globalshape.ts` already has two consumers
-// owning their own rule objects over a shared predicate). What the decline buys is the ergonomics
-// of an ablation query, against the behaviour risk of converting nine per-site early returns.
-// Whoever revisits this weighs those two, and gets a `guardedBy` on each rule for free.
+// THESE REFUSALS ARE AN `l3/gates.ts` TABLE — five of them, at four contexts, because a `Gate<Ctx>`
+// is per-context and this pass judges four: the SITE (an `if` and the statement after it), one
+// ARM's trailing run, one moved VALUE, and an arm as a RUNG. The fifth judges the REWRITTEN site,
+// which exists only once the other four have admitted. What licensed the conversion is the
+// instrument episode recorded at `pushJoin`'s tail refusal below (56 firings, split 40/16), which
+// is the trigger `docs/level-tower.md` states — `grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md`.
+// The 40/16 split is now two gates, so that census is `pnpm bench gates --pass unmerge` rather than
+// a patch — 291 agbcc synthetic rows in ~11 s, and it prints all five tables at once.
+//
+// TWO COLUMNS, AND THEY DISAGREE HERE. A census counts FIRST REJECTIONS; what an ablation of the
+// same rule MOVES is a different number, and `raise/globalshape.ts` ships the convention for
+// reporting both (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`). Measured
+// 2026-09-09, every `sound: false` gate in these five tables ablated ONE AT A TIME against the
+// shipped table:
+//
+//   population                                                                           rules moved
+//   40,000 generated trees (unmerge-fuzz's `gen`/`gen2`, 20,000 seeds each, 13,099 firings)    0 of 6
+//   291 agbcc synthetic rows, through `enumerateRanked`, whole fan compared label+source        1 of 6
+//
+// The one is `site/no-merge-name`, and it moves exactly one row: `synthetic:mergeloop:agbcc`, whose
+// fan grows 16 -> 24 candidates when it is ablated, and which is also where it fires 40 of its 80
+// times (`pnpm bench gates --pass unmerge --only synthetic:mergeloop:agbcc` — the full id, because a
+// bare symbol censuses every toolchain that spec targets and pools the counts). The other five
+// change NOTHING, in two different ways. Three of them refuse and are overruled, because a later
+// rule or `pushJoin`'s own narrowing refuses the same sites: `empty-arm` 168, `tail-is-not-an-if`
+// 40, `empty-arm-has-no-tail` 16. The two VALUE gates never fire at all — the census prints
+// `value: (never fired)`, and each of them carries the proof below that it cannot. So
+// `ablateHeuristic` has reach into exactly one rule here, and an axis built on any of the other five
+// would measure 0 rows moved for a reason that has nothing to do with the axis. RE-RUN BOTH before
+// quoting either: the generated population says 0 of 6 and the corpus says 1 of 6, which is itself
+// the lesson — a fuzz generator's shapes are not the corpus's.
+//
+// THE RESIDUE, NAMED. `list`'s `s.k === 'if' && isJoinable(join)` is the ENUMERATOR — which pairs
+// are judged at all — and enumeration is not residue. Nor are the `null`s `unmergeAt` and
+// `pushJoin` propagate out of a nested call: that refusal was already delivered, and counting it
+// twice would make the census read as if a second rule fired.
 //
 // THE ARMS ARE THE PATHS, WHICH IS WHY THE LADDER IS THE SAME REWRITE. agbcc cross-jumps the shared
 // tail of an else-if CHAIN exactly as it cross-jumps a two-armed `if`'s, and the lifted tree then
@@ -132,6 +162,7 @@ import {
   stmtChildren,
   walkExprs,
 } from './ast';
+import { type Gate, firstRejection } from './gates';
 import { localMentions, mentionsAnyLocal, readsOf } from './mentions';
 
 /** every statement under `body`, itself included */
@@ -169,12 +200,248 @@ function readsIn(e: Expr): Set<string> {
   return out;
 }
 
+// ── THE REFUSALS, AS DATA ────────────────────────────────────────────────────────────────────
+
+/** What the SITE table judges: one `if` and the statement that follows it.
+ *
+ *  THE FIELDS ARE LAZY. Classifying the join's reads walks both arms and reads the function-wide
+ *  mention counts, and a site with an empty arm is refused before either is asked. */
+export interface UnmergeSite {
+  readonly iff: Extract<Stmt, { k: 'if' }>;
+  /** the merge temps a rewrite here would substitute */
+  readonly merge: ReadonlySet<string>;
+  /** names the arms write that this cannot substitute — a copy would read a different value */
+  readonly unsubstitutable: ReadonlySet<string>;
+}
+
+export const UNMERGE_SITE_GATES: readonly Gate<UnmergeSite>[] = [
+  {
+    id: 'empty-arm',
+    why: 'that path would get no copy of the join at all',
+    // Not sound only because it is not the LAST word: an empty arm defines nothing, so the rung
+    // table below refuses it a second time. This one is the scope statement, stated where a reader
+    // looks for it.
+    sound: false,
+    // THE GUARD IS THE CENSUS, not the decline. Deleted from this table, the whole core suite
+    // stays green — the rung table refuses an empty arm a second time — so the only test that can
+    // tell this gate apart from its shadow is the one that reads the ID back.
+    guardedBy: 'unmerge.test.ts: a census names the rule that refused each site, and counts it',
+    rejects: (c) => c.iff.then.length === 0 || c.iff.else.length === 0,
+  },
+  {
+    id: 'arm-writes-a-name-this-cannot-substitute',
+    why: 'the copy would read that name at the arm`s end, where it holds a different value',
+    sound: true,
+    // THE GUARD IS NOT THE TEST THAT NAMES THIS REFUSAL. Ablated alone, `a join reading a local
+    // the arms WRITE but this cannot substitute refuses` stays GREEN — that fixture is refused a
+    // second time further down — while three others go red. The one named here is the informative
+    // one: it is the shape `moved-value-reads-another-merge-name` claims to catch, and this gate
+    // is what actually catches it (see that gate).
+    guardedBy: 'unmerge.test.ts: a definition whose value reads ANOTHER merge temp refuses',
+    rejects: (c) => c.unsubstitutable.size > 0,
+  },
+  {
+    id: 'no-merge-name',
+    why: 'the join reads nothing the arms define — there is no merge to undo',
+    sound: false,
+    // Same shadowing as `empty-arm` above, and the same guard: ablated alone, the named decline
+    // test stays green (a join reading no merge name defines nothing to move, so the arm table
+    // refuses it next), and only the census distinguishes which rule spoke.
+    guardedBy: 'unmerge.test.ts: a census names the rule that refused each site, and counts it',
+    rejects: (c) => c.merge.size === 0,
+  },
+];
+
+/** What the ARM table judges: whether one arm is TERMINAL — a trailing run of assignments defining
+ *  every merge name, with nothing beside them that could answer a moved read differently.
+ *
+ *  THE FIELDS ARE LAZY for the same reason: `first` is `Math.min` over an empty map when the arm
+ *  does not define them all, and `clobbersAMovedRead` reads every definition's value. */
+export interface UnmergeArm {
+  /** where in the arm each merge name is defined */
+  readonly at: ReadonlyMap<string, number>;
+  readonly names: ReadonlySet<string>;
+  /** the tree's own locals and params — the objects a kept assignment may write */
+  readonly declared: ReadonlySet<string>;
+  /** the arm from its FIRST definition on: the run the copy is appended to */
+  readonly trailing: readonly Stmt[];
+  /** does a kept assignment after that point write a name one of the moved values reads? */
+  readonly clobbersAMovedRead: boolean;
+}
+
+export const UNMERGE_ARM_GATES: readonly Gate<UnmergeArm>[] = [
+  {
+    id: 'arm-does-not-define-them-all',
+    why: 'a name with no definition here has nothing to substitute',
+    sound: true,
+    // Ablated, `a merge temp assigned in only ONE arm (or three times) refuses` stays green —
+    // totality catches that one — and the LADDERS break instead, which is the real cost: this is
+    // the gate that says an arm is not terminal, so without it a rung is rewritten as though it
+    // were a leaf.
+    guardedBy: 'unmerge.test.ts: a THREE-arm ladder puts the join in all three',
+    rejects: (c) => c.at.size !== c.names.size,
+  },
+  // The three halves of "nothing but an EFFECT-FREE assignment TO A DECLARED LOCAL stands between
+  // the first definition and the arm's end", one gate each — the header says all three are tested,
+  // and separating them is what lets a census say WHICH one a corpus actually hits. A disjunction
+  // of existentials is the existential of the disjunction, so the split is exact.
+  {
+    id: 'trailing-run-holds-a-non-assignment',
+    why: 'a store or a call there runs before a value this moves to the arm`s end',
+    sound: true,
+    guardedBy: 'unmerge.test.ts: a definition that is NOT in the arm',
+    rejects: (c) => c.trailing.some((s) => s.k !== 'assign'),
+  },
+  {
+    id: 'trailing-run-writes-an-undeclared-name',
+    why: 'structure.ts spells a write to a scalar GLOBAL as an `assign`, and that writes memory',
+    sound: true,
+    guardedBy: 'unmerge.test.ts: an intervening assignment to a GLOBAL refuses',
+    rejects: (c) => c.trailing.some((s) => s.k === 'assign' && !c.declared.has(s.name)),
+  },
+  {
+    id: 'trailing-run-holds-an-effectful-value',
+    why: 'a call on the right-hand side answers a moved load after itself instead of before',
+    sound: true,
+    guardedBy: 'unmerge.test.ts: an intervening assignment whose VALUE is a CALL refuses',
+    rejects: (c) => c.trailing.some((s) => s.k === 'assign' && exprHasEffect(s.value)),
+  },
+  {
+    id: 'intervening-write-to-a-moved-read',
+    why: 'it would change a value this moves past it',
+    sound: true,
+    guardedBy: 'unmerge.test.ts: an intervening assignment that CLOBBERS what a definition reads refuses',
+    rejects: (c) => c.clobbersAMovedRead,
+  },
+];
+
+/** What the VALUE table judges: ONE definition's value, asked whether the substitution may
+ *  relocate it to the arm's end. Per value, not per arm — a table entry names the reason. */
+export interface UnmergeMovedValue {
+  readonly value: Expr;
+  readonly names: ReadonlySet<string>;
+  readonly sfn: SFn;
+}
+
+export const UNMERGE_VALUE_GATES: readonly Gate<UnmergeMovedValue>[] = [
+  {
+    id: 'moved-value-has-an-effect',
+    why: 'C fixes no order between one statement`s operands, so the backend would choose one',
+    // SHADOWED, not sound — and PROVABLY, not just unwitnessed. Every definition sits at a
+    // position in `at`, all of which are `>= first`, so every definition is in the arm ctx's
+    // `trailing`; an effectful one is therefore already refused by
+    // `trailing-run-holds-an-effectful-value` one context up. Ablated on its own, no test in
+    // unmerge.test.ts or unmerge-fuzz.test.ts reddens — `a definition carrying an EFFECT
+    // refuses` included. It stays because the scope it states is the pass's, and deleting a rule
+    // that is correct-but-shadowed is how the shadowing rule silently becomes load-bearing.
+    sound: false,
+    rejects: (c) => exprHasEffect(c.value),
+  },
+  {
+    id: 'moved-value-reads-volatile',
+    why: 'the source pinned that access so it would not be moved, and its order is observable',
+    sound: true,
+    guardedBy: 'unmerge.test.ts: a definition reading a DEVICE REGISTER refuses',
+    rejects: (c) => exprReadsVolatile(c.value, c.sfn),
+  },
+  {
+    id: 'moved-value-reads-another-merge-name',
+    why: 'the substitutions would need an order between them that the join statement does not fix',
+    // SHADOWED BY THE SITE TABLE, provably. A merge name is one the join reads and that
+    // `readsOf(m) === 1` says is read NOWHERE ELSE; a definition value reading it is a second
+    // read, so it was never in `merge` — it landed in `unsubstitutable` and
+    // `arm-writes-a-name-this-cannot-substitute` refused the whole site. Ablated on its own, no
+    // test reddens, its own namesake fixture included, which is why that fixture is the guard
+    // named on the site gate instead. Kept for the same reason as the gate above.
+    sound: false,
+    rejects: (c) => [...readsIn(c.value)].some((n) => c.names.has(n)),
+  },
+];
+
+/** What the RUNG table judges: an arm that is not terminal, asked whether the copy belongs one
+ *  level down instead. Two gates rather than one because the instrument episode the header cites
+ *  measured them SEPARATELY — 40 firings on a non-`if` tail, 16 on an empty arm — and a table that
+ *  fused them could not reproduce that split. */
+export interface UnmergeRung {
+  readonly arm: readonly Stmt[];
+}
+
+export const UNMERGE_RUNG_GATES: readonly Gate<UnmergeRung>[] = [
+  {
+    id: 'empty-arm-has-no-tail',
+    why: 'there is no statement here to recurse into, and nothing defined the names either',
+    sound: false,
+    // REDUNDANT WITH `tail-is-not-an-if` below (`arm[len - 1]` of an empty arm is `undefined`, whose
+    // `?.k` is not `'if'`) — not SHADOWED in `gates.ts`'s sense, which is about an id being ABSENT
+    // from a census because an EARLIER rule refused first. This rule is the earlier one and it is
+    // rank 2 in the census (16 firings); what it shares with the next is its VERDICT, so ablating it
+    // moves nothing. The census test is therefore the guard — it is also what the SPLIT this table
+    // exists to reproduce is asserted by.
+    guardedBy: 'unmerge.test.ts: the RUNG census reproduces the split the instrumented run measured, without the patch',
+    rejects: (c) => c.arm.length === 0,
+  },
+  {
+    id: 'tail-is-not-an-if',
+    why: 'the ladder bottoms out only on an `if`; anything else is neither terminal nor a rung',
+    sound: false,
+    // REDUNDANT WITH the type narrowing in `pushJoin` — which has to stand there whatever this table
+    // says, because both gates here are ablatable. Not shadowed in `gates.ts`'s sense either: this
+    // rule fires 40 times in the census and is the table's top row; the narrowing outside the table
+    // is what makes ablating it move nothing. The census test is the guard that survives that.
+    guardedBy: 'unmerge.test.ts: the RUNG census reproduces the split the instrumented run measured, without the patch',
+    rejects: (c) => c.arm[c.arm.length - 1]?.k !== 'if',
+  },
+];
+
+/** What the TOTALITY table judges: the REWRITTEN site. It exists only once every other table has
+ *  admitted, which is why it is a table of its own rather than three more site gates.
+ *
+ *  `out` IS LAZY: the first gate reads only counts, and building the rewritten `if` for a site
+ *  that fails it would be a spread nothing reads. */
+export interface UnmergeTotality {
+  readonly merge: ReadonlySet<string>;
+  readonly mentions: ReturnType<typeof localMentions>;
+  /** how many copies of the join the rewrite took — one per terminal arm */
+  readonly used: number;
+  readonly out: Stmt;
+}
+
+export const UNMERGE_TOTALITY_GATES: readonly Gate<UnmergeTotality>[] = [
+  {
+    id: 'a-definition-the-rewrite-did-not-consume',
+    why: 'it survives with nothing left to read it, and its local is about to be deleted',
+    sound: true,
+    guardedBy: 'unmerge.test.ts: a definition OUTSIDE the terminal arms refuses',
+    rejects: (c) => [...c.merge].some((n) => c.mentions.get(n)?.assigns !== c.used),
+  },
+  {
+    id: 'merge-name-survives-the-rewrite',
+    why: 'the counts are STALE, so totality is asked of the result as well as of the map',
+    sound: true,
+    guardedBy: 'unmerge.test.ts: a definition an earlier rewrite duplicated leaves the count agreeing',
+    rejects: (c) => mentionsAnyLocal([c.out], c.merge),
+  },
+];
+
+/** The tables `unmergeJoins` consults, each overridable — which is how a caller outside core takes
+ *  a per-id refusal census (`tallying`) or an ablation (`without`) off this pass without editing
+ *  it. Test and diagnostic seam; the shipped path passes nothing. */
+export interface UnmergeGates {
+  readonly site?: readonly Gate<UnmergeSite>[];
+  readonly arm?: readonly Gate<UnmergeArm>[];
+  readonly value?: readonly Gate<UnmergeMovedValue>[];
+  readonly rung?: readonly Gate<UnmergeRung>[];
+  readonly totality?: readonly Gate<UnmergeTotality>[];
+}
+
 /** The arm's definitions of `names` and the statements that survive beside them, or null when the
- *  substituted copy would not evaluate to the same values at the arm's end. */
+ *  substituted copy would not evaluate to the same values at the arm's end — `UNMERGE_ARM_GATES`
+ *  carries every reason. */
 function armDefs(
   arm: Stmt[],
   names: ReadonlySet<string>,
   declared: ReadonlySet<string>,
+  gates: readonly Gate<UnmergeArm>[],
 ): { defs: Map<string, Expr>; keep: Stmt[] } | null {
   const at = new Map<string, number>();
   arm.forEach((s, i) => {
@@ -182,31 +449,33 @@ function armDefs(
       at.set(s.name, i);
     }
   });
-  if (at.size !== names.size) {
+  const valueAt = (i: number): Expr => (arm[i] as Extract<Stmt, { k: 'assign' }>).value;
+  let first: number | undefined;
+  const firstDef = (): number => (first ??= Math.min(...at.values()));
+  let clobbers: boolean | undefined;
+  const ctx: UnmergeArm = {
+    at,
+    names,
+    declared,
+    get trailing() {
+      return arm.slice(firstDef());
+    },
+    get clobbersAMovedRead() {
+      if (clobbers === undefined) {
+        // `declared` is the tree's own locals and params, so a kept assignment's target is an
+        // object no moved read can reach except by the name this keys on.
+        const read = new Set([...at.values()].flatMap((i) => [...readsIn(valueAt(i))]));
+        clobbers = arm.some((s, i) => i > firstDef() && s.k === 'assign' && !names.has(s.name) && read.has(s.name));
+      }
+      return clobbers;
+    },
+  };
+  if (firstRejection(gates, ctx) !== null) {
     return null;
   }
-  const first = Math.min(...at.values());
-  // From the first definition on, nothing but EFFECT-FREE assignments TO A DECLARED LOCAL: a store
-  // or a call there would run BEFORE a value this moves to the arm's end, and could answer a load
-  // inside it differently. All three halves are load-bearing — see the header's third refusal for
-  // why the statement KIND and the assignment's TARGET each fail to say it alone. `declared` is
-  // the tree's own locals and params, so the target has to be an object no moved read can reach
-  // except by the name the refusal below already keys on.
-  if (arm.slice(first).some((s) => s.k !== 'assign' || !declared.has(s.name) || exprHasEffect(s.value))) {
-    return null;
-  }
-  const defs = new Map([...at].map(([n, i]) => [n, (arm[i] as Extract<Stmt, { k: 'assign' }>).value] as const));
-  const read = new Set([...defs.values()].flatMap((v) => [...readsIn(v)]));
-  const keep: Stmt[] = [];
-  for (const [i, s] of arm.entries()) {
-    if (i >= first && s.k === 'assign' && names.has(s.name)) {
-      continue; // the definition itself, consumed by the substitution
-    }
-    if (i > first && s.k === 'assign' && read.has(s.name)) {
-      return null; // it would change a value this moves past it
-    }
-    keep.push(s);
-  }
+  const defs = new Map([...at].map(([n, i]) => [n, valueAt(i)] as const));
+  // Everything but the definitions themselves, which the substitution consumed.
+  const keep = arm.filter((s, i) => !(i >= firstDef() && s.k === 'assign' && names.has(s.name)));
   return { defs, keep };
 }
 
@@ -229,11 +498,12 @@ function pushJoin(
   declared: ReadonlySet<string>,
   join: Joinable,
   sfn: SFn,
+  gates: UnmergeGates,
 ): { arm: Stmt[]; used: number } | null {
-  const here = armDefs(arm, names, declared);
+  const here = armDefs(arm, names, declared, gates.arm ?? UNMERGE_ARM_GATES);
   if (here !== null) {
     for (const v of here.defs.values()) {
-      if (exprHasEffect(v) || exprReadsVolatile(v, sfn) || [...readsIn(v)].some((n) => names.has(n))) {
+      if (firstRejection(gates.value ?? UNMERGE_VALUE_GATES, { value: v, names, sfn }) !== null) {
         return null;
       }
     }
@@ -256,22 +526,31 @@ function pushJoin(
   // inhabitant, which this file's own standard rejects.
   //
   // REFUSES when the tail is anything else, and THIS REFUSAL HAS INHABITANTS — do not read the
-  // success count as evidence about it. Instrumented at the return below and re-run over the
-  // synthetic agbcc tier (281 rows, exit 0): 56 firings in 2 functions — 40 on an `assign` tail
-  // (32 in `maskchain`, 8 in `dmascope2`) and 16 on an EMPTY arm (`maskchain`). `dmascope2` is not
-  // one of the four rows that reach the ladder SUCCESSFULLY, so it appears in no success count at
-  // all. Only `while` and `switch` tails are unwitnessed; a plain statement is not.
+  // success count as evidence about it. Instrumented at this return and re-run over the synthetic
+  // agbcc tier (281 rows, exit 0): 56 firings in 2 functions — 40 on an `assign` tail (32 in
+  // `maskchain`, 8 in `dmascope2`) and 16 on an EMPTY arm (`maskchain`). `dmascope2` is not one of
+  // the four rows that reach the ladder SUCCESSFULLY, so it appears in no success count at all.
+  // Only `while` and `switch` tails are unwitnessed; a plain statement is not. That episode is the
+  // instrument evidence this pass's tables were converted on, and the two counts it produced are
+  // now the two `UNMERGE_RUNG_GATES` ids.
   //
   // An EMPTY arm is delivered its refusal HERE, not by `armDefs`: `armDefs` declines it first
   // (`names` is never empty, so no run of statements in an empty arm can supply it) and the tail
   // check is what turns that decline into the site's. Same for an arm whose statements simply do
   // not define the names.
+  if (firstRejection(gates.rung ?? UNMERGE_RUNG_GATES, { arm }) !== null) {
+    return null;
+  }
+  // The gate above owns the ATTRIBUTION; this owns the TYPE. They are not the same job: both rung
+  // gates are `sound: false`, so `ablateHeuristic` sanctions a shipped table without
+  // `tail-is-not-an-if`, and a cast here would then read `.then` off an `assign` — a TypeError
+  // inside `rank.ts`'s `try { pf.apply(sfn) } catch {}`, i.e. a silent zero-candidate decline.
   const last = arm[arm.length - 1];
   if (last === undefined || last.k !== 'if') {
     return null;
   }
-  const t = pushJoin(last.then, names, declared, join, sfn);
-  const e = pushJoin(last.else, names, declared, join, sfn);
+  const t = pushJoin(last.then, names, declared, join, sfn, gates);
+  const e = pushJoin(last.else, names, declared, join, sfn, gates);
   if (t === null || e === null) {
     return null;
   }
@@ -280,7 +559,7 @@ function pushJoin(
 
 /** The tree with every eligible join statement pushed back into its arms, or null when no site
  *  qualified — the lever declines rather than re-emitting the primary spelling. */
-export function unmergeJoins(sfn: SFn): SFn | null {
+export function unmergeJoins(sfn: SFn, gates: UnmergeGates = {}): SFn | null {
   const mentions = localMentions(sfn);
   const localNames = new Set(sfn.locals.map((l) => l.name));
   // Locals AND params — both name an automatic object, and an assignment to either is the write
@@ -289,23 +568,24 @@ export function unmergeJoins(sfn: SFn): SFn | null {
   const declaredNames = new Set([...localNames, ...sfn.params.map((p) => p.name)]);
   const consumed = new Set<string>();
 
-  const unmergeAt = (iff: Extract<Stmt, { k: 'if' }>, join: Joinable): Stmt | null => {
-    if (iff.then.length === 0 || iff.else.length === 0) {
-      return null;
-    }
+  /** The join's reads, split into the merge temps a rewrite would substitute and the names the
+   *  arms write that it could not. ONE walk, because both gates read the same classification and
+   *  the site's first gate may refuse before either is asked. */
+  const classify = (iff: Extract<Stmt, { k: 'if' }>, join: Joinable) => {
     const read = namesRead(join, localNames);
     const written = new Set(
       [...iff.then, ...iff.else].flatMap((s) => [...walkStmts([s])].filter((x) => x.k === 'assign').map((x) => x.name)),
     );
     const merge = new Set<string>();
+    const unsubstitutable = new Set<string>();
     for (const n of read) {
       const m = mentions.get(n);
-      // `written.has(n)` is a CANDIDATE condition, not only the bystander test below, and it
-      // ADMITS sites an arity gate alone declines. A candidate the arms cannot define refuses the
-      // WHOLE SITE (`armDefs` returns null) instead of being ignored, and `m.assigns` is
-      // `localMentions`'s FUNCTION-WIDE count, never arm-scoped — so without this conjunct a name
-      // assigned only OUTSIDE the arms reaches the candidate set and sinks the site. Measured,
-      // against the same pass with the conjunct removed:
+      // `written.has(n)` is a CANDIDATE condition, not only the bystander test, and it ADMITS
+      // sites an arity gate alone declines. A candidate the arms cannot define refuses the WHOLE
+      // SITE instead of being ignored, and `m.assigns` is `localMentions`'s FUNCTION-WIDE count,
+      // never arm-scoped — so without this conjunct a name assigned only OUTSIDE the arms reaches
+      // the candidate set and sinks the site. Measured, against the same pass with the conjunct
+      // removed:
       //
       //   n = 1; n = 2;  if (c) x = 1; else x = 2;  n[0] = x;   without: NULL · here: FIRES
       //   y = 1; y = 2;  if (c) p = a; else p = b;  *p = y;     without: NULL · here: FIRES
@@ -316,41 +596,57 @@ export function unmergeJoins(sfn: SFn): SFn | null {
       if (m && written.has(n) && m.assigns >= 2 && readsOf(m) === 1 && m.addrTaken === 0) {
         merge.add(n);
       } else if (written.has(n)) {
-        return null; // the arms write it and this cannot substitute it
+        unsubstitutable.add(n);
       }
     }
-    if (merge.size === 0) {
+    return { merge, unsubstitutable };
+  };
+
+  const unmergeAt = (iff: Extract<Stmt, { k: 'if' }>, join: Joinable): Stmt | null => {
+    let split: { merge: Set<string>; unsubstitutable: Set<string> } | undefined;
+    const of = () => (split ??= classify(iff, join));
+    const site: UnmergeSite = {
+      iff,
+      get merge() {
+        return of().merge;
+      },
+      get unsubstitutable() {
+        return of().unsubstitutable;
+      },
+    };
+    if (firstRejection(gates.site ?? UNMERGE_SITE_GATES, site) !== null) {
       return null;
     }
-    const then = pushJoin(iff.then, merge, declaredNames, join, sfn);
-    const els = pushJoin(iff.else, merge, declaredNames, join, sfn);
+    const merge = of().merge;
+    const then = pushJoin(iff.then, merge, declaredNames, join, sfn, gates);
+    const els = pushJoin(iff.else, merge, declaredNames, join, sfn, gates);
     if (then === null || els === null) {
       return null;
     }
     // TOTALITY: every assignment to a merge name ANYWHERE in the function has to be one of the
-    // terminal arms just rewritten. A definition the rewrite did not consume survives with nothing
-    // left to read it, and the local it names is about to be deleted.
-    const used = then.used + els.used;
-    if ([...merge].some((n) => mentions.get(n)?.assigns !== used)) {
-      return null;
-    }
-    const out: Stmt = { ...iff, then: then.arm, else: els.arm };
-    // AND THE COUNTS ARE STALE, so totality is checked against the RESULT as well: an earlier site
-    // inside this same tree can turn one assignment into two, leaving `mentions` short by exactly
-    // the number of arms the ladder then consumes, and the two counts agree by coincidence. A
-    // merge name still mentioned in the rewritten statement means the rewrite did not consume it
-    // and the declaration may not go. `test/unmerge.test.ts` builds the tree where totality alone
-    // admits it.
+    // terminal arms just rewritten, AND the counts are STALE — an earlier site inside this same
+    // tree can turn one assignment into two, leaving `mentions` short by exactly the number of
+    // arms the ladder then consumes, so the two counts agree by coincidence. Only re-reading the
+    // RESULT catches that, which is why the second gate exists and why `out` is what it reads.
     //
     // What this does NOT cover, stated rather than implied: a mention OUTSIDE `out`, which
     // `readsOf(m) === 1` answers from the same stale map. A sibling site duplicating a read is the
     // shape that would reach it; no inhabitant is known. That is the pass's standing model, not
-    // this gate's job.
-    if (mentionsAnyLocal([out], merge)) {
+    // this table's job.
+    let out: Stmt | undefined;
+    const totality: UnmergeTotality = {
+      merge,
+      mentions,
+      used: then.used + els.used,
+      get out() {
+        return (out ??= { ...iff, then: then.arm, else: els.arm });
+      },
+    };
+    if (firstRejection(gates.totality ?? UNMERGE_TOTALITY_GATES, totality) !== null) {
       return null;
     }
     merge.forEach((n) => consumed.add(n));
-    return out;
+    return totality.out;
   };
 
   const list = (xs: Stmt[]): Stmt[] => {

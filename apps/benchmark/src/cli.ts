@@ -14,6 +14,13 @@
 //                                        # and score, not just the winner's — in the harness's own
 //                                        # configuration; --show prints a candidate's SOURCE and
 //                                        # --enumerate lists the fan without compiling anything
+//   pnpm bench gates --pass <id> [--only <row>] [--toolchain id]
+//                                        # the per-id REFUSAL CENSUS of an l3/gates.ts table, off a
+//                                        # real enumeration: which rule refused, how many times, in
+//                                        # the harness's own configuration. Replaces the
+//                                        # edit-instrument-revert loop for a tabled pass whose
+//                                        # caller-side seam is reachable (`--pass` with no value
+//                                        # lists them)
 //   pnpm bench setup [--project p] [--build]
 //                                        # materialize the BENCH-OWNED project checkouts
 //                                        # (apps/benchmark/checkouts/: clone + baseroms + prepare;
@@ -101,6 +108,8 @@ const { values: opts, positionals } = parseArgs({
     show: { type: 'string' },
     enumerate: { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
+    // gates only: which tabled pass to census (see run/gate-census.ts's registry).
+    pass: { type: 'string' },
   },
 });
 
@@ -392,6 +401,24 @@ switch (command) {
     );
     break;
   }
+  case 'gates': {
+    // gates --pass <id> [--only <row>] [--toolchain id] — the refusal census of a tabled pass.
+    // CORPUS-WIDE by default and that is affordable, unlike `fan`: nothing is COMPILED here, the
+    // enumeration alone answers the question (~10 s over the agbcc synthetic tier).
+    const { CENSUSABLE_PASSES, gateCensus } = await import('./run/gate-census');
+    if (!opts.pass) {
+      console.error(`usage: pnpm bench gates --pass <${CENSUSABLE_PASSES.join('|')}> [--only <row>] [--toolchain id]`);
+      process.exit(2);
+    }
+    process.exit(
+      gateCensus({
+        pass: opts.pass,
+        ...(opts.only ? { only: opts.only } : {}),
+        ...(opts.toolchain ? { toolchain: opts.toolchain } : {}),
+      }),
+    );
+    break;
+  }
   case 'fidelity': {
     const jobs = Number(opts.jobs ?? Math.min(8, cpus().length));
     if (!Number.isInteger(jobs) || jobs < 1) {
@@ -485,7 +512,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|repro|target|fan|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|repro|target|fan|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }

@@ -25,6 +25,13 @@ import { OFFMEMBER_GATES } from '../src/l3/offmember';
 import { PTR_FIELD_GATES } from '../src/l3/ptrfield';
 import { COUNTDOWN_GATES } from '../src/l3/reindex';
 import { REGIONBASE_GATES, SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES } from '../src/l3/scopebase';
+import {
+  UNMERGE_ARM_GATES,
+  UNMERGE_RUNG_GATES,
+  UNMERGE_SITE_GATES,
+  UNMERGE_TOTALITY_GATES,
+  UNMERGE_VALUE_GATES,
+} from '../src/l3/unmerge';
 import { UNREDUCE_GATES } from '../src/l3/unreduce';
 import { VOL_SLOT_GATES } from '../src/l3/volatileval';
 import { VOL_STORE_GATES } from '../src/l3/volstore';
@@ -88,6 +95,12 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   COUNTDOWN_GATES: COUNTDOWN_GATES as readonly Gate<never>[],
   VOL_STORE_GATES: VOL_STORE_GATES as readonly Gate<never>[],
   UNREDUCE_GATES: UNREDUCE_GATES as readonly Gate<never>[],
+  // l3/unmerge.ts's five, one per context it judges — see its header for which is which
+  UNMERGE_SITE_GATES: UNMERGE_SITE_GATES as readonly Gate<never>[],
+  UNMERGE_ARM_GATES: UNMERGE_ARM_GATES as readonly Gate<never>[],
+  UNMERGE_VALUE_GATES: UNMERGE_VALUE_GATES as readonly Gate<never>[],
+  UNMERGE_RUNG_GATES: UNMERGE_RUNG_GATES as readonly Gate<never>[],
+  UNMERGE_TOTALITY_GATES: UNMERGE_TOTALITY_GATES as readonly Gate<never>[],
   PTR_FIELD_GATES: PTR_FIELD_GATES as readonly Gate<never>[],
   FRESH_MERGE_GATES: FRESH_MERGE_GATES as readonly Gate<never>[],
   CARRIER_NAME_GATES: CARRIER_NAME_GATES as readonly Gate<never>[],

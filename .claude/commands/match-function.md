@@ -137,7 +137,19 @@ Per commit:
   refusals you had to instrument — or one you suspect never fires, which is the other admission —
   leave the rest, name the residue in the table's doc comment. Tabling ALL of a small pass's refusals
   is that, not a sweep. And table it REPORTED: a `Gate` table whose id is compared to `null` and
-  dropped has shortened the instrument loop, not removed it, so return a `refusals` map
+  dropped has shortened the instrument loop, not removed it. The cheapest way to close that is to
+  take the tables as an OPTIONAL PARAMETER, which costs one interface and lets a later round census
+  them from outside core with `tallying()`
+  (`grep -n "export function tallying" packages/core/src/l3/gates.ts`) — `l3/unmerge.ts` is the
+  worked example, and `pnpm bench gates --pass unmerge` is what reading it back looks like. The
+  parameter is NECESSARY AND NOT SUFFICIENT: the census also needs a caller-side seam a process
+  outside core can reach, and fourteen of the fifteen passes that take a table today do not have one
+  (their callers are static imports, whose bindings are read-only). Making a pass censusable is
+  therefore a claim about its CALLER, not about its table —
+  `grep -n "WHY THE REGISTRY BELOW HAS ONE ENTRY" apps/benchmark/src/run/gate-census.ts`.
+  A refusal that is a CONJUNCTION WITH BUY-BACKS cannot become a table at any price, and that
+  decline is written down rather than re-derived
+  (`grep -n "NOT CONVERTIBLE" packages/core/src/raise/const.ts`). Otherwise return a `refusals` map
   (`structure/namecoalesce.ts`) or export a census off the table (`arrayShapeRefusals` in
   `raise/globalshape.ts`) in the same change. What is settled is the UNIT: convert refusals, not
   files — do not re-open whether a file should adopt `Gate<Ctx>` wholesale.

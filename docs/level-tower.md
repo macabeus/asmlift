@@ -617,12 +617,47 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   [`l3/scopebase.ts`](../packages/core/src/l3/scopebase.ts), `structure/namecoalesce.ts`), and a
   census EXPORT off the shipped table that the shipped path never calls (`arrayShapeRefusals` in
   [`raise/globalshape.ts`](../packages/core/src/raise/globalshape.ts), whose doc comment states the
-  whole idea: "the one place an attribution is measured rather than asserted"). Neither form leaves
-  `@asmlift/core`: no CLI flag, bench field or env var prints a gate id, so an attribution over the
-  lifted corpus is still a written test — or, on the 21, still a patch. **Tabling a pass and adding
-  neither is half the job**, and the missing half is small: a map, one `set` on the rejection, one
-  field on the return type — six lines in `structure/namecoalesce.ts`, against the loop the next
-  paragraph prices.
+  whole idea: "the one place an attribution is measured rather than asserted"). Both forms are the
+  PASS's: each costs a signature the author has to want, so a pass whose return type nobody wants to
+  widen has no cheap form of either. **Tabling a pass and reporting nothing is half the job**, and
+  the missing half is small: a map, one `set` on the rejection, one field on the return type — six
+  lines in `structure/namecoalesce.ts`.
+
+  **The third form is the CALLER's, and it needs no signature at all.** `tallying(gates)`
+  (`grep -n "export function tallying" packages/core/src/l3/gates.ts`) returns the same table with
+  each `rejects` wrapped in a counter, so any pass that already accepts its table as a PARAMETER can
+  be censused from outside `@asmlift/core`, with no edit and no revert. That is what a pass adopting
+  the table should make possible: taking the tables as an optional argument is the whole cost, and
+  `l3/unmerge.ts` is the worked example (five tables, one `UnmergeGates` parameter, and a test that
+  reads the census back). It reports what `firstRejection` decides, so it carries the same reading
+  as the two forms above — first rejecter only.
+
+  **The parameter is necessary and not sufficient, and the gap is where a round loses its
+  afternoon**: nothing exports a corpus of lifted trees, and a tabled pass's only shipped caller is
+  normally inside core, so a census is taken off a REAL `enumerateRanked` with that caller's entry
+  swapped — for `l3/unmerge.ts`, the `/unmerge` entry in `PRE_FAN_PRODUCTS`. **That is a subcommand,
+  `pnpm bench gates --pass unmerge`, and not a script to write**: its numbers reproduce
+  `unmerge.ts`'s instrumented 40/16 split with no patch, and it has none of the three hazards a
+  script has (where it may live, that an untracked one makes the next `bench run` stamp itself
+  dirty, and that a module duplicate censuses zero silently — all three measured in
+  `apps/benchmark/src/run/gate-census.ts`'s header).
+
+  **What makes a pass censusable is a fact about its CALLER.** Fifteen passes in `packages/core/src`
+  take their table as a parameter; ONE of them can be censused, because `rank-axes.ts` holds its
+  caller in a mutable record and the other fourteen are reached through static imports, whose
+  bindings are read-only (`retsink.sinkReturns = …` → _"Cannot assign to read only property"_). So
+  the cost of the second entry in that registry is a seam, not a wrapper — and a pass that wants to
+  be censusable should be given one when its caller is written, which is cheap then and a redesign
+  later.
+
+  **A census is FIRST REJECTIONS, which is not reach.** The other column is what an ablation MOVES,
+  and the two disagree: of the six ablatable rules in `l3/unmerge.ts`, exactly one moves a row.
+  Three of the other five refuse hundreds of times over the agbcc synthetic tier and move nothing,
+  and two never fire at all. `raise/globalshape.ts` ships the
+  convention for reporting both columns (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`)
+  and `l3/unmerge.ts` now carries the worked example
+  (`grep -n "TWO COLUMNS, AND THEY DISAGREE HERE" packages/core/src/l3/unmerge.ts`). Measure the
+  MOVED column before building an axis on a big refusal count.
 
 **And converting a pass whose refusals nobody has had to instrument buys nothing.** What a table
 removes is the edit-instrument-revert loop — patch a `return null` to log, re-run, revert — so the
@@ -667,10 +702,19 @@ instrument time. In that retrospective that is `l3/unmerge.ts` (47.7 min, 12 ref
 the answer to "which pass next" for as long as nobody measures a third. `raise/const.ts` (38.6 min)
 is NOT, and it is the standing warning about this selector: the recount above found three of its four
 early exits are the enumerator, so a table over it would hold ONE gate — the conversion the bullet
-above declines. The minutes are priced per FILE and this rule is consumed per REFUSAL; re-read a
-candidate's refusals by the counting rule before selecting it, because `const.ts` is where the two
-readings diverge. `raise/magicdiv.ts` — 18 refusal-shaped exits by that same grep, and no instrument
-event anyone recorded — is the shape a sweep picks first and this rule declines.
+above declines. **And a second reason, which is a fact about `Gate<Ctx>` rather than about that
+file**: `firstRejection` reads the table as a DISJUNCTION of independent refusals, while that site
+is a CONJUNCTION with two buy-backs (`edgeCarried && !hiLoPair && !memBases.has(…)`). "Refuse unless
+exempted" has no decomposition into independent gates — every term would have to re-carry the whole
+conjunction, which is not what a table means and not what a census reads back, so the id it reported
+would be one opaque `not-a-literal-being-materialised` and silent about WHICH exemption fired. That
+is the only question the file's 60 lines of measured commentary ask (`hiLoPair` carries the traffic;
+`memBases` decides 0 folds over 806 rows). A refusal shaped like that is outside what this section
+licenses, whatever its instrument minutes. The minutes are priced per FILE and this rule is consumed
+per REFUSAL; re-read a candidate's refusals by the counting rule before selecting it, because
+`const.ts` is where the two readings diverge. `raise/magicdiv.ts` — 18 refusal-shaped exits by that
+same grep, and no instrument event anyone recorded — is the shape a sweep picks first and this rule
+declines.
 
 One corollary, same economy: a refusal already known and CONTAINED is recorded beside the gate
 together with the argument that contains it, so the next round cites it instead of re-deriving it.
