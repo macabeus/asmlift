@@ -20,7 +20,16 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { unmergeJoins } from '../src/l3/unmerge';
+import { ablateHeuristic } from '../src/l3/gates';
+import type { UnmergeGates } from '../src/l3/unmerge';
+import {
+  UNMERGE_ARM_GATES,
+  UNMERGE_RUNG_GATES,
+  UNMERGE_SITE_GATES,
+  UNMERGE_TOTALITY_GATES,
+  UNMERGE_VALUE_GATES,
+  unmergeJoins,
+} from '../src/l3/unmerge';
 import { mulberry32 } from './helpers';
 
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -306,5 +315,45 @@ describe('unmerge fuzz — nested sites, where the sampled mention count goes st
     expect(fired).toBeGreaterThan(1000);
     expect(bad.slice(0, 4)).toEqual([]);
     // ~1.7s alone, the slower of the two arms — see the budget note above.
+  }, 90_000);
+});
+
+// A SANCTIONED ABLATION MUST DECLINE, NOT THROW. `ablateHeuristic` exists so a shipped axis may
+// drop a `sound: false` gate and re-run the pass as a ranked candidate; `rank.ts`'s PRE-FAN loop
+// wraps `apply` in `try { } catch { }`, so a pass that throws under one of those ablations does not
+// fail loudly — it yields zero candidates and reads as an ordinary decline. That is exactly what a
+// cast standing where a narrowing used to stand produced here: ablating `tail-is-not-an-if` left
+// `pushJoin` reading `.then` off an `assign`.
+describe('unmerge fuzz — every ablation a shipped axis is allowed to make', () => {
+  test('declines, and never throws', () => {
+    const tables = [
+      ['site', UNMERGE_SITE_GATES],
+      ['arm', UNMERGE_ARM_GATES],
+      ['value', UNMERGE_VALUE_GATES],
+      ['rung', UNMERGE_RUNG_GATES],
+      ['totality', UNMERGE_TOTALITY_GATES],
+    ] as const;
+    const bad: string[] = [];
+    let ablations = 0;
+    for (const [key, table] of tables) {
+      for (const g of table) {
+        if (g.sound) {
+          continue;
+        }
+        ablations++;
+        const gates = { [key]: ablateHeuristic(table, g.id) } as UnmergeGates;
+        for (let seed = 1; seed <= 4000; seed++) {
+          for (const tree of [gen(seed), gen2(seed)]) {
+            try {
+              unmergeJoins(tree, gates);
+            } catch (e) {
+              bad.push(`${g.id} seed ${seed}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+        }
+      }
+    }
+    expect(ablations).toBeGreaterThan(4);
+    expect(bad.slice(0, 4)).toEqual([]);
   }, 90_000);
 });

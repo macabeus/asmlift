@@ -501,7 +501,14 @@ function pushJoin(
   if (firstRejection(gates.rung ?? UNMERGE_RUNG_GATES, { arm }) !== null) {
     return null;
   }
-  const last = arm[arm.length - 1] as Extract<Stmt, { k: 'if' }>;
+  // The gate above owns the ATTRIBUTION; this owns the TYPE. They are not the same job: both rung
+  // gates are `sound: false`, so `ablateHeuristic` sanctions a shipped table without
+  // `tail-is-not-an-if`, and a cast here would then read `.then` off an `assign` — a TypeError
+  // inside `rank.ts`'s `try { pf.apply(sfn) } catch {}`, i.e. a silent zero-candidate decline.
+  const last = arm[arm.length - 1];
+  if (last === undefined || last.k !== 'if') {
+    return null;
+  }
   const t = pushJoin(last.then, names, declared, join, sfn, gates);
   const e = pushJoin(last.else, names, declared, join, sfn, gates);
   if (t === null || e === null) {
