@@ -33,4 +33,8 @@ _site/
 # local Claude Code state
 .claude/worktrees
 research/
+# the ONE sanctioned name for a per-worktree env/scratch file. `bench run` refuses to start on a
+# tree whose code differs from HEAD (apps/benchmark/src/run/preflight.ts), and an untracked env
+# file is what tripped that twice, at ~2,350s each — so give it a name the check cannot see.
+.envrc.local
 packages/cli/dist/

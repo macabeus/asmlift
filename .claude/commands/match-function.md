@@ -91,6 +91,15 @@ Per commit:
 
 ## Phase 4 — Full-bench zero-flip gate
 
+`pnpm bench run` now REFUSES to start when the tree's code differs from HEAD, naming the files —
+because `pnpm bench:merge` refuses those numbers anyway, 30 minutes later, and twice that refusal
+was one untracked env file. Commit first. Anything local a worktree needs (env exports, PATH
+overrides) goes in **`.envrc.local`**, which is gitignored for exactly this; anything else local
+goes in `$(git rev-parse --git-path info/exclude)`. Scoped runs (`--only`/`--project`/
+`--toolchain`) are never refused — the dirty-tree dev loop of Phase 3 is untouched. The same
+preflight probes `cpp`: if it refuses there, your shell resolved `cpp` to Apple clang (a LOGIN
+shell does), and the run would have failed 44 rows while reporting `✓` and exit 0.
+
 Before declaring the branch done: `pnpm bench run` (all tiers), `pnpm bench:merge`, then
 `pnpm bench regression --base origin/main` and `pnpm bench diff --base origin/main`. **Any lost
 match blocks the branch.** Pass the base ref: both gates read the COMMITTED artifact, so on a
