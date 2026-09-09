@@ -81,14 +81,26 @@ symbol map), so it is comparable with the published row rather than with a check
 
 - `--show <label>` prints that candidate's SOURCE. Nothing else can: `results.json` carries the
   winner's C and no other's, so "the near-miss spelling is right and only loses on X" is a claim
-  you can now read instead of infer. `--show best` is the winner.
-- `--enumerate` lists the fan without compiling anything (seconds, at any size) and still serves
-  `--show`. Use it to answer "did my new lever produce a candidate at all" — a label that is
-  absent was never enumerated, and a lever that THREW prints as `[lever] … threw (no candidate
-  from it)`, which a `bench run` does not print anywhere.
+  you can now read instead of infer. `--show best` is the winner (on the SCORED path only — under
+  `--enumerate` nothing has been scored, so `--enumerate --show best` is refused rather than
+  answered with whatever came out of the enumerator first). A DROPPED candidate's source — usually
+  the one worth reading — is reachable only as `--enumerate --show <label>`, and the command says
+  so when you ask for it the other way.
+- `--enumerate` lists the fan without compiling anything and still serves `--show <label>`. Use it
+  to answer "did my new lever produce a candidate at all" — a label that is absent was never
+  enumerated, and a lever that THREW prints as `[lever] … threw (no candidate from it)`, which a
+  `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely:
+  ~128 candidates/s measured, so a 225,792-candidate fan is ~30 minutes to list. A long
+  enumeration is a big fan, not a hang.
 
 A fan over 2,000 candidates is refused rather than scored (`--force` overrides): that is a compile
-each, and `LoadBGTilemapData`'s 225,792 is hours. `--enumerate` is the answer there, not `--force`.
+each, ~60 ms of it, and the refusal quotes the row's own price — 5,952 candidates is ~6 minutes
+(worth `--force`), `LoadBGTilemapData`'s 225,792 is ~4 hours (`--enumerate` is the answer there).
+
+**A declined or noncompile row has NO fan, and the command says so** (`asmlift: [fan] no fan …`,
+exit 2) rather than crashing: enumeration throws on the same gap the row declines on, and on a
+noncompile row every candidate was refused — there the `[dropped]` lines printed above the message
+ARE the fan, and they are the row's whole diagnostic.
 
 Write the classification down with the evidence that decided it. If it is one of the last two, go
 straight to Phase 7 and report — that is a successful outcome of this command, not a failure.

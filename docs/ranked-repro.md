@@ -188,7 +188,9 @@ compile and vendored symbol map, assembled by the single function `bench run` as
 arise — there is no second tree to be in.
 
 It prints the `[score]` table this file's comparison recipe is written for, then `[dropped]`,
-`[withheld]` and `[ranked]`, all through the CLI's own renderer, denominators included. Measured on
+`[withheld]`, the `[declared]` block and `[ranked]` — all through the CLI's own renderers, the same
+functions `pnpm asmlift` prints them with, so the `[ranked]` line here carries the `synthesized`
+count and the `[asmlift source <sha>]` stamp this file tells you to quote. Measured on
 `kleod:StrCpy:agbcc`: `unsigned: 5/8` in **7.0 s**, the published row exactly, and
 `--show best` printed the published source byte-for-byte.
 
@@ -198,16 +200,33 @@ Two things it can do that nothing else can:
   C and no other's, and `RankedResult.candidates` — every other spelling, each with its own
   `source` — was computed and discarded on every run until this command read it. "The near-miss
   spelling is right and only loses on X" is now a thing to read rather than infer.
-- **`--enumerate` lists the fan without compiling anything**, in seconds at any fan size, and still
-  serves `--show`. That is the cheap configuration-identification this file's "Getting the fan
-  alone is cheap" section describes, without the kill-it-after-the-first-`[progress]`-line trick.
+- **`--enumerate` lists the fan without compiling anything**, and still serves `--show <label>`
+  (not `--show best` — nothing is scored, so there is no winner to name, and that combination is
+  refused rather than answered with whatever enumeration emitted first). That is the cheap
+  configuration-identification this file's "Getting the fan alone is cheap" section describes,
+  without the kill-it-after-the-first-`[progress]`-line trick. **Cheap relative to compiling, not
+  cheap absolutely**: measured at 128 candidates/s (`kleod:CountCollectedGems:agbcc`, 5,952 in
+  46 s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just to LIST. Read a long enumeration as
+  a big fan, not as a hang.
+
   It also prints `[lever] <label> threw (no candidate from it)`, a channel `bench run` supplies no
   sink for at all — so a whole pre-fan half of a row's fan can vanish from a benchmark run with
   nothing printed, and here it does not.
 
-**A fan over 2,000 candidates is refused, not scored** (`--force` overrides). Scoring is a compile
-each: `synthetic:sizebound:agbcc`'s 800 take 57 s cold, and `LoadBGTilemapData`'s 225,792 is a
-four-hour run at that rate. `--enumerate` is the answer at that size, not `--force`.
+**A fan over 2,000 candidates is refused, not scored** (`--force` overrides), and the refusal
+prices the run it is refusing from the row's own count. Scoring is a compile each:
+`synthetic:sizebound:agbcc`'s 800 take **48 s cold** (10 s warm), so the limit is ~2 minutes and
+`kleod:CountCollectedGems:agbcc`'s 5,952 is ~6 minutes — a `--force` worth typing, not an hour.
+`LoadBGTilemapData`'s 225,792 is a ~4-hour run at that rate; `--enumerate` is the answer at THAT
+size, and note the guard is checked after the pre-count enumeration, so the refusal itself pays the
+enumeration price above.
+
+**A row with no fan says so, and exits 2.** Neither of the ranked path's two calls can be assumed
+to return: on a `declined` row (233 of 1,035) enumeration THROWS on the same gap the published row
+annotates — `enumerateCandidates` has no annotate mode — and on a `noncompile` row every candidate
+is refused, so there is no ranking to print. Both are answered with `asmlift: [fan] no fan …` and
+exit 2, and the noncompile case prints the whole `[dropped]` list first, because on that row the
+drops ARE the fan.
 
 What it is NOT: a reproduction. It runs asmlift in-process from this repo's sources, so it proves
 nothing about the published script, and `pnpm bench fidelity` still re-runs the scripts rather than

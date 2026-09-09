@@ -324,6 +324,7 @@ Host prerequisites (macOS; verified empirically):
 | `toolchains.ts`    | 4 toolchain adapters over `@asmlift/toolchains` (`buildTarget` + `score`)                                                                                                                                        |
 | `decomp-config.ts` | candidate compilation through the real `decomp.yaml` user path                                                                                                                                                   |
 | `cache.ts`         | content-keyed result cache (tmp-then-rename; m2c dirty-checkout fail-closed; versioned key)                                                                                                                      |
+| `asm-scrub.ts`     | the objdump header scrub (`/abs/path/x.o:` -> `target.o:`), one spelling for the runner, the evaluator and `bench fan`                                                                                           |
 
 The result schema is [`@asmlift/bench-schema`](../../packages/bench-schema/README.md) — the ONE
 definition this harness produces and the web Benchmark view consumes, including the closed feature
