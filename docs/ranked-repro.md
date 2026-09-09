@@ -55,12 +55,10 @@ The harness never reads the project's `.s` and never runs the project's `decomp.
 - **The scoring object differs**, and with it the denominator: a per-function `target.o` the harness
   built, against whatever `build/…/tu.o` the project's make produced.
 
-Measured on `kleod:StrCpy:agbcc` — one of the smallest real agbcc rows, ten lines of Thumb (11 of
-the 126 real agbcc rows have a shorter `targetAsm`) — one asmlift commit (`3a06c74`). A run is
-seconds: 5-10 s warm and ~12 s with a cold `target.o` across three re-measurements for this file,
-~25 s on a box running other rounds. The ratio is the machine's; the point is that it is not the LBG
-run. The one exception is minutes, not seconds, and it is step 1's: an unbuilt sidecar ELF makes
-`bench target` run `make asmlift-elf` in your checkout (below).
+Measured on `kleod:StrCpy:agbcc`, one of the smallest real agbcc rows (11 of the 126 have a shorter
+`targetAsm`), at one asmlift commit (`3a06c74`). Both runs are seconds. The one step that can take
+minutes is step 1's: an unbuilt sidecar ELF makes `bench target` run `make asmlift-elf` in your
+checkout (below).
 
 | what was run                                                                                                           |  best `[score]` | the source it printed               |
 | ---------------------------------------------------------------------------------------------------------------------- | --------------: | ----------------------------------- |
@@ -68,12 +66,8 @@ run. The one exception is minutes, not seconds, and it is step 1's: an unbuilt s
 | `pnpm bench repro kleod:StrCpy:agbcc --run` (the row's own script)                                                     | `unsigned: 5/8` | byte-identical to the published row |
 | the published row, `apps/benchmark/results/results.json`                                                               |           `5/8` | —                                   |
 
-Different score, a different denominator, and a different C spelling — on a ten-line function.
-Neither run is wrong; they answer different questions, and only the second one is the row. The two
-`StrCpy` runs above are this file's own measurement and are cheap enough to repeat; the same
-divergence was first found the expensive way on `LoadBGTilemapData`, where the command above landed
-on a `/raw-globals` winner over a fan of 1440 and the harness row was a different number again —
-that one is a prior round's finding, not re-measured here.
+Different score, a different denominator, and a different C spelling — on a seven-instruction
+function. Neither run is wrong; they answer different questions, and only the second one is the row.
 
 ### The row's own script is the vehicle: `pnpm bench repro`
 
@@ -123,13 +117,13 @@ exactly. Do not "fix" the script by adding them — it is gated by `pnpm bench f
 `benchmark.yml`, which re-runs both repro scripts for every function.
 
 **Run it in a gitignored directory, which is what the default gives you.** The script's step 1 is
-`bench target … --out "$PWD"`, so running it in the repo root leaves `out.c`, `decomp.yaml`,
-`proto.json`, `ctx.i`, `in.asm` and the script itself untracked there — and `bench run`'s
-dirty-tree preflight then **refuses the round**, 39 minutes into the gate agent's full run, naming
-files this page told you to make. (A scoped `--only` run is exempt, so the confirm passes and the
-refusal lands later.) `.local/` and `.envrc.local` are the sanctioned names; `bench repro` defaults
-under the first of them. Running it inside `apps/benchmark/checkouts/<project>` is worse than
-untidy: `--out "$PWD"` **overwrites that checkout's own `decomp.yaml`**.
+`bench target … --out "$PWD"`, so running it in the repo root leaves `decomp.yaml`, `ctx.i`,
+`in.asm`, `proto.json` and the script itself untracked there — and `bench run`'s dirty-tree
+preflight then **refuses the round**, ~39 minutes in. (A scoped `--only` run is exempt, so the
+confirm passes and the refusal lands later.) `.local/` and `.envrc.local` are the sanctioned names;
+`bench repro` defaults under the first of them. Running it inside
+`apps/benchmark/checkouts/<project>` is worse than untidy: `--out "$PWD"` **overwrites that
+checkout's own `decomp.yaml`**.
 
 #### `bench target` on its own, for iterating by hand
 
@@ -157,15 +151,16 @@ unbuilt sidecar project is minutes and a write into that tree, not the ~10 s a w
 
 **A missing checkout does not stop anything, and it does not always move the number.** `bench
 target` prints `WARN: <project>: project checkout not found … output may differ from the published
-row` and **exits 0**; the script runs on. Re-measured for this file: with `PROJECT_PATH` pointed at
-a nonexistent path, `kleod:StrCpy:agbcc` printed the same `unsigned: 5/8` and a **byte-identical**
-source. So a cheap row will tell you your setup is right when it is not. `bench repro --run`
+row` and **exits 0**; the script runs on. With the script's `PROJECT_PATH=` line pointed at a
+nonexistent path — it is a plain assignment, so an env var of that name does not override it —
+`kleod:StrCpy:agbcc` printed the same `unsigned: 5/8` and a **byte-identical** source. So a cheap
+row will tell you your setup is right when it is not. `bench repro --run`
 surfaces any `WARN` line above the `[ranked]` line for you; running the script by hand, `grep -n
 '^WARN' out.err` before quoting anything.
 
 **And `^WARN` catches a MISSING map, not a WRONG one.** `resolveProjectElf` reads whatever
 `decomp.yaml` sits at the root it is handed and never checks that the checkout is **this row's**
-project — point `PROJECT_PATH` at a different one and a foreign symbol map is grafted silently, at
+project — point that line at a different one and a foreign symbol map is grafted silently, at
 exit 0, with no `WARN`. That is strictly worse than map-less: the names come out wrong rather than
 absent. `bench repro` resolves the checkout from the row's own manifest and cannot do this; if you
 pass `--project-root` yourself, `grep -n 'elf:' decomp.yaml` and check the path names this row's
@@ -183,7 +178,8 @@ that, the number is `bench run`'s.
 The materialized context is pinned to **the published winner**, not to the ladder. The harness runs
 the escalation ladder **per candidate** (`compile/real.ts`, `makeRealCompile` — first rung that
 compiles wins, for every candidate in the fan); `bench target` replays that ladder once, against the
-row's published source, and freezes the single rung it lands on (`cli.ts`, `resolveScoringPrelude`).
+row's published source, and freezes the single rung it lands on (`compile/real.ts`'s
+`resolveScoringPrelude`, called from `cli.ts`).
 `kleod:StrCpy:agbcc` freezes rung 1 — a **161-byte** `ctx.i` of six typedefs — while the row's
 vendored context is 28 KB of project types.
 

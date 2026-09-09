@@ -1,31 +1,25 @@
 // THE VEHICLE THAT REPRODUCES ONE ROW — hand a reader the row's own generated script, with this
 // machine's paths already in it, in a directory the repo ignores.
 //
-// A subcommand rather than the `node -e '…results.json…' > repro.sh` block this page used to
-// print, for the reason `report/baseline.ts` gives about its own one-liner: in a copy-pasted
-// pipeline the failure is silent. Measured, with one character wrong in the row id — the shape a
-// reader actually produces:
+// A subcommand rather than a `node -e '…results.json…' > repro.sh` recipe, for the reason
+// `report/baseline.ts` gives about its own one-liner: in a copy-pasted pipeline the failure is
+// silent. One character wrong in the row id and the REDIRECT has already truncated `repro.sh` to 0
+// bytes when node exits 1; `bash repro.sh` then exits 0 with no output, and the `grep -n '^WARN'`
+// that follows finds nothing — which is what a reader is taught means "your setup is right". So
+// every way of finding no row here is a message and an exit 1 instead.
 //
-//   node -e … > repro.sh      node exits 1, but the REDIRECT already truncated repro.sh to 0 bytes
-//   bash repro.sh …           exit 0, out.err 0 bytes   (separate lines: no `&&`, no `set -e`)
-//   grep -n '^WARN' out.err   nothing — which the page teaches means "your setup is right"
-//   grep -F '[score]' …       nothing
-//
-// So a typo rendered as a clean run with no score. Every way of finding no row here is a message
-// and an exit 1 instead.
-//
-// Three more things the block could not do, each of which cost a round:
-//   * `--out "$PWD"` in the repo root leaves 7 untracked files (`out.c`, `proto.json`,
-//     `decomp.yaml`, …) that `bench run`'s dirty-tree preflight then REFUSES the round for. The
+// Three more hazards a hand-run recipe leaves open:
+//   * `--out "$PWD"` in the repo root leaves `decomp.yaml`, `ctx.i`, `in.asm` and `proto.json`
+//     untracked there, and `bench run`'s dirty-tree preflight then REFUSES the round for them. The
 //     default out dir here is under the gitignored `.local/`.
-//   * the checkout it points PROJECT_PATH at is resolved from the row's own manifest, so a map
-//     from a DIFFERENT project cannot be grafted. `bench target` warns about a MISSING map; a
-//     wrong one is silent (`cases/project-elf.ts` reads whatever `decomp.yaml` is at the root it
-//     is given), and a wrong map is worse than none — the names come out wrong, not absent.
-//   * `--run` reports the `[ranked]` line, which carries `best …` AND the source sha. The block
-//     said `grep -F '[score]' | tail -1`, and that table is sorted best-first: on
-//     `kleod:GetEntityLookupData:agbcc` it returned `signed: 15/18` where the row (and the run's
-//     own best) is `unsigned/raw-globals: 4/14`. It had been validated on a 1-candidate row.
+//   * the checkout PROJECT_PATH names is resolved from the row's own manifest, so a map from a
+//     DIFFERENT project cannot be grafted. `bench target` warns about a MISSING map; a wrong one is
+//     silent (`cases/project-elf.ts` reads whatever `decomp.yaml` is at the root it is given), and
+//     a wrong map is worse than none — the names come out wrong, not absent.
+//   * `--run` reports the `[ranked]` line, which carries `best …` AND the source sha. A
+//     `grep -F '[score]' | tail -1` reports the WORST candidate, because that table is sorted
+//     best-first: on `kleod:GetEntityLookupData:agbcc` it gives `signed: 15/18` where the row is
+//     `unsigned/raw-globals: 4/14`.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -158,9 +152,8 @@ export async function repro(
 }
 
 /** Run the script in its own directory, capturing both streams to files. Buffered rather than
- *  piped: `pipe()` closes the file stream on its own, so a `close` listener attached later —
- *  when the CHILD exits — can be attached after the event already fired, and the command then
- *  hangs on a promise that never settles. A decompiled function and its stderr are small. */
+ *  piped into write streams: those close on their own, so a listener attached when the CHILD exits
+ *  can miss the event and leave the command hanging. A function and its stderr are small. */
 function execute(path: string, dir: string, log: (s: string) => void, err: (s: string) => void): Promise<number> {
   log(`repro: running (stdout → ${join(dir, 'out.c')}, stderr → ${join(dir, 'out.err')})`);
   return new Promise((res, rej) => {

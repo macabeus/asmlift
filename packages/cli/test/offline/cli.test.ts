@@ -126,11 +126,11 @@ test('--proto: unreadable file and non-object JSON stay distinguishable (66 vs 6
   expect(scalar.stderr).toContain('must be an object mapping a symbol name to its prototype');
 });
 
-// docs/ranked-repro.md's canonical command passes the table INLINE, and so does the `[proto]`
-// note's own printed remedy — but the flag used to resolve every value as a path, so following
-// either exited 66 on a missing file literally named `{"thunk_HeapFree":{"params":1}}`. Three
-// separate scratch proto.json files got invented around that, carrying two different tables for
-// what the doc calls one canonical run.
+// docs/ranked-repro.md's project-checkout command passes the table INLINE, and so does the
+// `[proto]` note's own printed remedy — but the flag used to resolve every value as a path, so
+// following either exited 66 on a missing file literally named `{"thunk_HeapFree":{"params":1}}`.
+// Three separate scratch proto.json files got invented around that, carrying two different tables
+// for one command.
 test('--proto: an inline table is read as JSON, and means exactly what the file means', async () => {
   const table = { callee: { params: 1 } };
   const inline = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', JSON.stringify(table));

@@ -32,12 +32,12 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    scale that also lost 17; quoted as `290 → 171` it makes the next reader subtract.
 3. Read the asm and the current asmlift output side by side. Get the target `.o` and a working dir
    with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness — but
-   it is step 1 of the row's generated script, not the reproduction: it prints no `[score]`, writes
-   no input `.s`, and freezes ONE context rung while the harness escalates per candidate, so a
-   candidate your change emits that names a project type can noncompile here and be scored by the
-   harness. Reproduce with the row's own script (`pnpm bench repro <sym|id> --run`) and confirm a
-   moved row with `pnpm bench run --tier real --only <sym>`; see "The VEHICLE is part of the
-   number" in [`docs/ranked-repro.md`](../../docs/ranked-repro.md).
+   that is step 1 of the row's generated script, not the reproduction: no `[score]`, no input `.s`,
+   and ONE frozen context rung where the harness escalates per candidate, so a candidate your
+   change emits that names a project type can noncompile here and still be scored by the harness.
+   Reproduce with the row's own script (`pnpm bench repro <sym|id> --run`) and confirm a moved row
+   with `pnpm bench run --tier real --only <sym>`; see "The VEHICLE is part of the number" in
+   [`docs/ranked-repro.md`](../../docs/ranked-repro.md).
 4. State the baseline in your first user-facing message. Never report progress without a
    before/after pair of real command output.
 5. **Write every repro command down verbatim, flags included** — the `--only` line above, and any
@@ -45,18 +45,15 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    remediation's, the PR body's) re-runs *that* command, not one recomposed from memory. For the
    ranked enumeration that means **whichever vehicle in
    [`docs/ranked-repro.md`](../../docs/ranked-repro.md) you ran, verbatim, named by vehicle** —
-   that file documents two, and they give different numbers on the same function. Only the row's
-   generated script is comparable with a harness outcome, and `pnpm bench repro <sym|id> --run` is
-   how you run it (§ "The row's own script is the vehicle"); the project-checkout command at the
-   top of the file measures a decomp repo's function. The flags belong to the vehicle: `--proto`,
-   `--jobs 6 --progress` are part of the checkout command's number, while the generated script
-   carries neither `--jobs` nor `--progress`, takes `--proto` from a file, and reproduces the row
-   exactly — never "fix" it by adding them. The **`[ranked]` line** is the comparison recipe for
-   both: it carries `best …` and the `[asmlift source <sha>]` stamp. Never `grep '[score]' |
-   tail -1` — that table is sorted best-first, so the last line is the WORST candidate, and on
-   `kleod:GetEntityLookupData:agbcc` it reports `15/18` against a published `4/14`. That file is shared with
-   `/attribute-function` — the last time this command was described in two prompts they drifted and
-   a round published a number comparable to nothing, so correct it there and never here.
+   that file documents two, they give different numbers on the same function, and their flags do
+   not transfer (never "fix" the generated script by adding the checkout command's). Only the row's
+   generated script is comparable with a harness outcome: `pnpm bench repro <sym|id> --run`. The
+   **`[ranked]` line** is the comparison recipe for both — it carries `best …` and the
+   `[asmlift source <sha>]` stamp. Never `grep '[score]' | tail -1`: that table is sorted
+   best-first, so the last line is the WORST candidate, and on `kleod:GetEntityLookupData:agbcc` it
+   reports `15/18` against a published `4/14`. That file is shared with `/attribute-function` — the
+   last time this command was described in two prompts they drifted and a round published a number
+   comparable to nothing, so correct it there and never here.
 
 ## Phase 1 — Diagnose the gap honestly
 
@@ -168,10 +165,10 @@ Four things this gate does not catch by itself:
   primary output is byte-identical" is a claim about one candidate out of tens of thousands, not
   about the best score. Launch it beside the final `pnpm bench run`, not after it, with the same
   `docs/ranked-repro.md` flags **of whichever vehicle you ran** — the two carry different ones, and
-  only the project-checkout command has `--progress`. Skipping it is now unquotable: on that
-  vehicle the `[progress]` lines timestamp the run's own cost, so "it had not finished" is
-  checkable against the log — a round once wrote that of a re-score "not finished after 2h", in a
-  session under an hour long that had run no ranked command at all.
+  only the project-checkout command has `--progress`. Skipping it is unquotable on that vehicle:
+  the `[progress]` lines timestamp the run's own cost, so "it had not finished" is checkable
+  against the log — a round once wrote that of a re-score "not finished after 2h", in a session
+  under an hour long that had run no ranked command at all.
 - **A CI SUITE THAT NO OTHER GATE RUNS.** `pnpm test:offline` runs three directories
   (`packages/core/test`, `packages/cli/test/offline`, `packages/toolchains/test`); hosted CI runs
   those three PLUS `apps/benchmark/test` and `apps/web/test` (`ci.yml`), and `pnpm test:matching`

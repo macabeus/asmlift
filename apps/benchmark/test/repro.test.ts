@@ -1,13 +1,11 @@
-// `bench repro` is the vehicle both function briefs now send a round to, and what is pinned here
-// is every way it can be WRONG WITHOUT ERRORING — because the block it replaces failed exactly
-// that way. A `node -e … > repro.sh` with one character wrong in the row id left a 0-byte script
-// that `bash` then ran to exit 0 with empty output, three lines after the page taught the reader
-// that an empty `grep '^WARN'` means the setup is right.
+// `bench repro` is the vehicle both function briefs send a round to, and what is pinned here is
+// every way it can be WRONG WITHOUT ERRORING — the failure mode a hand-run recipe has: a row id
+// with one character wrong leaves a 0-byte script that `bash` runs to exit 0 with empty output,
+// which reads as "no warnings, so the setup is right".
 //
 // So: no row and an ambiguous needle must both be a message and a nonzero code; the script must
 // carry the row's own inputs with this machine's paths substituted; and the out dir must be one
-// `bench run`'s dirty-tree preflight tolerates — the previous recipe's `--out "$PWD"` in the repo
-// root left seven untracked files that the preflight refuses whole rounds for.
+// `bench run`'s dirty-tree preflight tolerates.
 import type { BenchOutput } from '@asmlift/bench-schema';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -75,7 +73,7 @@ describe('bench repro — the script it hands over', () => {
   const id = 'kleod:StrCpy:agbcc';
   const fn = results.find((r) => r.id === id)!;
 
-  test('carries the row s own input asm and the built-bin invocation, with no placeholder left', async () => {
+  test("carries the row's own input asm and the built-bin invocation, with no placeholder left", async () => {
     const dir = scratch();
     const r = await run(id, { out: dir });
     expect(r.code).toBe(0);
@@ -102,9 +100,9 @@ describe('bench repro — the script it hands over', () => {
   });
 
   test('the default out dir is one a bench run will not refuse the round for', () => {
-    // `--out "$PWD"` at the repo root was the old recipe, and it leaves out.c/decomp.yaml/
-    // proto.json untracked there — which `run/preflight.ts` then refuses a whole TIER over,
-    // 39 minutes into the gate agent's run, naming files the page told the round to make.
+    // The script's step 1 is `bench target … --out "$PWD"`, so run at the repo root it leaves
+    // decomp.yaml/ctx.i/in.asm/proto.json untracked there — which `run/preflight.ts` refuses a
+    // whole TIER over, ~39 minutes into a full run.
     // Asked of git, not of a regex over .gitignore: `codeDirtyPaths` cannot answer it, because
     // `git status --porcelain` never lists an ignored path in the first place — which is exactly
     // why the fix is an ignored directory and not a smarter predicate.

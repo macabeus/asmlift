@@ -110,14 +110,13 @@ const RUNG_NAMES = ['bare typedefs', '+ manifest prependC', 'vendored ctx'];
  *  used.
  *
  *  `results.json` first, because that is the COMMITTED file every checkout has — a user running a
- *  published reproduction script must land on the same rung the benchmark did. Note what that
- *  ordering costs, because the reachable-looking fallback below hides it: the gitignored per-tier
- *  `real.json` is read ONLY for a row `results.json` does not carry at all, so a local
- *  `bench run --tier real --only <sym>` that moves a PUBLISHED row does not refresh the rung —
- *  the reproduction stays frozen at the published one. That is the intended answer for a reader
- *  reproducing a published row, and the wrong one for an author iterating; the author's confirm
- *  is `bench run`, not this. Neither file has the row, or the row is unscored ⇒ undefined, and
- *  the caller takes the richest rung — the behavior before the rung was derived at all. */
+ *  published reproduction script must land on the same rung the benchmark did. The gitignored
+ *  per-tier `real.json` is read ONLY for a row `results.json` does not carry at all, so a local
+ *  `bench run --tier real --only <sym>` that moves a PUBLISHED row does not refresh the rung — the
+ *  reproduction stays frozen at the published one. Right for a reader reproducing a published row,
+ *  wrong for an author iterating: the author's confirm is `bench run`, not this. Neither file has
+ *  the row, or the row is unscored ⇒ undefined, and the caller takes the richest rung — the
+ *  behavior before the rung was derived at all. */
 function publishedAsmliftSource(rowId: string): string | undefined {
   for (const file of ['results.json', 'real.json']) {
     let results: FunctionResult[];

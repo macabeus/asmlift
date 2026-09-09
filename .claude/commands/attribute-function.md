@@ -29,21 +29,16 @@ one) is an unfinished finding.
 2. Reproduce outside the harness with **the row's own generated script**: `pnpm bench repro $1
    --run`. It writes that script (`results.json` → `scripts.asmlift`) into the gitignored
    `.local/repro/<row>/` with this machine's paths filled in, runs it, and prints the `[ranked]`
-   line. `pnpm bench target` is that script's step 1, not the reproduce command: it prints no
-   `[score]` and writes no input `.s`. **The project-checkout command at the top of
-   [`docs/ranked-repro.md`](../../docs/ranked-repro.md) does NOT reproduce a row either**:
-   different input `.s`, different compile path, and on `kleod:StrCpy:agbcc` a different score
-   against a different denominator. Read § "The row's own script is the vehicle" and its four
-   warnings before you quote anything — a map-less run is silent apart from one `WARN` and can
-   print the SAME number; a WRONG map prints no `WARN` at all; `bench target` freezes the
-   PUBLISHED context rung, so a candidate your change makes asmlift emit can noncompile here and
-   be scored by the harness, and a local `bench run` does not refresh that rung. Its flags are
-   per-vehicle: `--jobs 6 --progress` and a hand-written `--proto` are the checkout command's; the
-   script carries neither and still reproduces the row — do not add them. That file is shared with
-   `/match-function`; correct it there, never here. **The `[ranked]` line is the number every later
-   claim is measured against** — it carries `best …` and the source sha — and it goes into your
-   report verbatim, **naming the vehicle**. Never a `[score] … | tail -1`: that table is sorted
-   best-first, so the last line is the WORST candidate.
+   line. Two commands look like this one and are not: `pnpm bench target` is the script's step 1
+   (no `[score]`, no input `.s`), and the project-checkout command at the top of
+   [`docs/ranked-repro.md`](../../docs/ranked-repro.md) measures a decomp repo's function — a
+   different input `.s` down a different compile path, and on `kleod:StrCpy:agbcc` a different
+   score against a different denominator. **Read § "The VEHICLE is part of the number" and its
+   four warnings before you quote anything**; the flags are per-vehicle and do not transfer. That
+   file is shared with `/match-function`; correct it there, never here. **The `[ranked]` line is
+   the number every later claim is measured against** — it carries `best …` and the source sha —
+   and it goes into your report verbatim, **naming the vehicle**. Never a `[score] … | tail -1`:
+   that table is sorted best-first, so the last line is the WORST candidate.
 3. State the baseline in your first user-facing message.
 
 ## The denominator moves — so a residual is never a "partition"

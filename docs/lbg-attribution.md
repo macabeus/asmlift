@@ -123,14 +123,12 @@ the baseline census contextually separates those cases.
 Independent shape alignment strips instruction aliases and normalizes pool/branch references;
 its counts are not objdiff scores. Literal data never counts as register drift.
 
-Every number in this document is the **project-checkout vehicle**, not the benchmark row: it reads
+Every number in this document is the **project-checkout vehicle**, not a benchmark row: it reads
 the project's committed `asm/nonmatchings/…` split file and scores against the project's own
 `build/src/gfx.o`. `LoadBGTilemapData` has no benchmark row at all — it is a klonoa checkout
-function, which is why every number here is the checkout vehicle's and why none of them is
-comparable with a harness outcome, on this function or a neighbouring one: a row is scored on a
-different input `.s` down a different compile path. See "The VEHICLE is part of the number" in
-[ranked-repro.md](ranked-repro.md). Nothing here needs re-measuring; this is a label on which
-vehicle produced it.
+function — so none of these numbers is comparable with a harness outcome, here or on a neighbouring
+function: a row is scored on a different input `.s` down a different compile path. See "The VEHICLE
+is part of the number" in [ranked-repro.md](ranked-repro.md).
 
 Set `REPO` to the attribution worktree and run from the benchmark-owned checkout:
 
