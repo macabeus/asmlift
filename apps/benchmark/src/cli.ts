@@ -3,6 +3,11 @@
 //
 //   pnpm bench run [--jobs N] [--tier synthetic|real|both] [--only s] [--project p]
 //                  [--serial] [--shard i/N] [--toolchain id]
+//   pnpm bench repro <sym|id> [--out <dir>] [--tool asmlift|m2c] [--run]
+//                                        # THE vehicle that reproduces one published row: writes
+//                                        # the row's own generated script with this machine's
+//                                        # paths filled in, under the gitignored .local/repro/,
+//                                        # and with --run executes it and reports `[ranked]`
 //   pnpm bench target <id> --out <dir>   # repro-script pre-step: target object + decomp.yaml
 //   pnpm bench setup [--project p] [--build]
 //                                        # materialize the BENCH-OWNED project checkouts
@@ -83,6 +88,9 @@ const { values: opts, positionals } = parseArgs({
     // vendor only: rewrite just the derived symbol maps, leaving the preprocessed TUs, index.json
     // and PROVENANCE.json exactly as committed (see cases/vendor.ts).
     'symbols-only': { type: 'boolean', default: false },
+    // repro only: which of the row's two scripts, and whether to execute it here.
+    tool: { type: 'string' },
+    run: { type: 'boolean', default: false },
   },
 });
 
@@ -102,10 +110,13 @@ const RUNG_NAMES = ['bare typedefs', '+ manifest prependC', 'vendored ctx'];
  *  used.
  *
  *  `results.json` first, because that is the COMMITTED file every checkout has — a user running a
- *  published reproduction script must land on the same rung the benchmark did. The per-tier
- *  `real.json` is gitignored (present only right after a local `bench run`) and serves the
- *  pre-merge loop. Neither present, or the row unscored ⇒ undefined, and the caller takes the
- *  richest rung — the behavior before the rung was derived at all. */
+ *  published reproduction script must land on the same rung the benchmark did. The gitignored
+ *  per-tier `real.json` is read ONLY for a row `results.json` does not carry at all, so a local
+ *  `bench run --tier real --only <sym>` that moves a PUBLISHED row does not refresh the rung — the
+ *  reproduction stays frozen at the published one. Right for a reader reproducing a published row,
+ *  wrong for an author iterating: the author's confirm is `bench run`, not this. Neither file has
+ *  the row, or the row is unscored ⇒ undefined, and the caller takes the richest rung — the
+ *  behavior before the rung was derived at all. */
 function publishedAsmliftSource(rowId: string): string | undefined {
   for (const file of ['results.json', 'real.json']) {
     let results: FunctionResult[];
@@ -240,6 +251,23 @@ switch (command) {
         process.exit(2);
       }
       await orchestrate({ jobs, tiers, only: opts.only, project: opts.project, toolchain: opts.toolchain });
+    }
+    break;
+  }
+  case 'repro': {
+    // The reproduce-one-row command both function briefs point at. `bench target` is its step 1,
+    // not this: run alone it prints no `[score]` and writes no input `.s`.
+    const sym = positionals[1];
+    if (!sym) {
+      console.error('usage: pnpm bench repro <sym|project:sym:toolchain> [--out <dir>] [--tool asmlift|m2c] [--run]');
+      process.exit(2);
+    }
+    const { repro } = await import('./report/repro');
+    try {
+      process.exit(await repro(sym, { out: opts.out, tool: opts.tool, run: opts.run }));
+    } catch (e) {
+      console.error(`repro: ${e instanceof Error ? e.message : e}`);
+      process.exit(2);
     }
     break;
   }

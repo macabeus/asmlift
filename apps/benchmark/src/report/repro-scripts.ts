@@ -249,9 +249,13 @@ PROTO_INPUT`
   const realNote =
     fn.tier === 'real'
       ? `
-# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the
-# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates
-# it ahead of every candidate, so this scores in the same world the benchmark did)`
+# (real tier: candidates are scored INSIDE a project context — step 1 materializes ONE rung of
+# the benchmark's escalation ladder next to target.o as ctx.i, and the generated decomp.yaml
+# concatenates it ahead of every candidate. That rung is the one THIS ROW'S PUBLISHED SOURCE
+# stops at — the richest rung on a row asmlift declined — while the harness escalates PER
+# CANDIDATE. So this reproduces the row; it does not reproduce a CHANGED asmlift, whose new
+# candidate may name a project type this rung does not declare. See docs/ranked-repro.md,
+# "What this vehicle does NOT reproduce".)`
       : '';
   return `#!/usr/bin/env bash
 # Reproduce asmlift on \`${fn.sym}\` — benchmark function ${fn.id}.
@@ -305,7 +309,10 @@ ${flagLine('--proto proto.json', 'the prototype hints above (callee arities / vo
 ${flagLine('--config decomp.yaml', 'the compile command from step 1')}
 ${flagLine('--score-against target.o', 'rank candidate variants, objdiff-score each; exit 0 only on byte-exact')}
 )
-# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)
+# the checkout's own asmlift bin — the BUILT bundle, not the repo's TypeScript sources run
+# through a loader. That build output is gitignored, so a fresh clone's first \`pnpm install\`
+# cannot create this link (it warns \`Failed to create bin … ENOENT\` and skips it): run
+# \`pnpm --filter @asmlift/cli build\` in the checkout, then \`pnpm install\` again.
 "$ASMLIFT_PATH/node_modules/.bin/asmlift" "\${args[@]}"
 `;
 }

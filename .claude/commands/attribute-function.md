@@ -26,12 +26,19 @@ one) is an unfinished finding.
 
 1. Resolve the row: `pnpm bench run --tier real --only $1`. Record the outcome verbatim for both
    decompilers — **the whole `diff:N/M`, never the `N` alone** (see "the denominator moves" below).
-2. Reproduce outside the harness with **the command in
-   [`docs/ranked-repro.md`](../../docs/ranked-repro.md), verbatim** — its flags (`--proto` when a
-   callee's arity matters, `--jobs 6 --progress`) are part of the number, and its `grep -F
-   '[score]'` recipe is how two such runs get compared. That file is shared with
-   `/match-function`; correct it there, never here. The best `[score]` line is the number every
-   later claim is measured against, and it goes into your report verbatim, flags included.
+2. Reproduce outside the harness with **the row's own generated script**: `pnpm bench repro $1
+   --run`. It writes that script (`results.json` → `scripts.asmlift`) into the gitignored
+   `.local/repro/<row>/` with this machine's paths filled in, runs it, and prints the `[ranked]`
+   line. Two commands look like this one and are not: `pnpm bench target` is the script's step 1
+   (no `[score]`, no input `.s`), and the project-checkout command at the top of
+   [`docs/ranked-repro.md`](../../docs/ranked-repro.md) measures a decomp repo's function — a
+   different input `.s` down a different compile path, and on `kleod:StrCpy:agbcc` a different
+   score against a different denominator. **Read § "The VEHICLE is part of the number" and its
+   four warnings before you quote anything**; the flags are per-vehicle and do not transfer. That
+   file is shared with `/match-function`; correct it there, never here. **The `[ranked]` line is
+   the number every later claim is measured against** — it carries `best …` and the source sha —
+   and it goes into your report verbatim, **naming the vehicle**. Never a `[score] … | tail -1`:
+   that table is sorted best-first, so the last line is the WORST candidate.
 3. State the baseline in your first user-facing message.
 
 ## The denominator moves — so a residual is never a "partition"

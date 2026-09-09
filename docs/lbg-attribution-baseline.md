@@ -174,5 +174,7 @@ does, then assemble with `-mcpu=arm7tdmi -mthumb-interwork`. The target object S
 `4179071f8be0a0e637a1cb769feb26bb92e8109b46f5f5ee0cf8b50867bd88c7`.
 Reassembly and `scoreObjects` against that object can verify retained assembly without invoking
 candidate-cache initialization or enumerating another fan. Canonical full-run instructions remain
-in [ranked-repro.md](ranked-repro.md); the completed record here does not claim the separate full
+in [ranked-repro.md](ranked-repro.md) — and note that the scores in this record are that file's
+**project-checkout vehicle**; `LoadBGTilemapData` has no benchmark row, so none of them is
+comparable with a harness outcome. The completed record here does not claim the separate full
 benchmark, regression, tests, or publication gates have finished.

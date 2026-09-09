@@ -1,8 +1,10 @@
 # The ranked repro
 
-The one invocation both `/match-function` and `/attribute-function` measure a real-project row
-with, and the only place its flags are written down. **Both commands point here; edit this file,
-not a copy inside a prompt.** The last time the same command was described in two prompts they
+The two invocations both `/match-function` and `/attribute-function` measure with — the
+project-checkout command below, and the benchmark row's own generated script — and the only place
+their flags are written down. **Which one you ran is part of the number** (see "The VEHICLE is part
+of the number"); a real-tier row is reproduced by the second, never the first. **Both prompts point
+here; edit this file, not a copy inside a prompt.** The last time the same command was described in two prompts they
 drifted, and a round published `557/578` against a `547` baseline — three numbers produced by
 three different commands (PR #79).
 
@@ -19,10 +21,184 @@ node <repo>/packages/cli/dist/asmlift.mjs <asm/nonmatchings/…/Fn.s> \
   --jobs 6 --progress
 ```
 
+**That command measures a project checkout's function, and it is NOT how you reproduce a benchmark
+row** — a real-tier row is scored on a different input `.s` and compiled down a different path, so
+it lands on a different number. The next section has the measurement and the vehicle that does
+reproduce a row (the row's own generated script, from `results.json`). Read it before you quote a
+number against a harness outcome.
+
 Run it from the project checkout and redirect stderr to a file — the `[score]` and `[progress]`
 lines are stderr, and they are the whole record. From a git worktree, export the harness's
 toolchain overrides first (`ASMLIFT_AGBCC` and the rest): a worktree's repo root is not the
 workspace, so without them the sibling checkouts do not resolve and the run measures nothing.
+
+## The VEHICLE is part of the number: a benchmark ROW is not this command
+
+The command above measures **a project checkout's function**. It reads the split `.s` the project
+committed under `asm/`, compiles candidates with the project's own `decomp.yaml` template against
+the project's headers, and scores them against an object the project's build produced. That is the
+right question when you are landing a match in a decomp repo.
+
+**A real-tier benchmark row is a different question, and the command above does not reproduce it.**
+The harness never reads the project's `.s` and never runs the project's `decomp.yaml`:
+
+- **The input `.s` differs.** A row's input is its `targetAsm` — the compiler's own assembly for the
+  target object the harness itself built (`eval/evaluate.ts`) — not the disassembly the project
+  committed. Same function, different text: `.L3` labels against a branch back to the symbol,
+  `.gcc2_compiled.`/`.size` against `thumb_func_start`, and in the split file the inter-function pad
+  spelled as an instruction.
+- **The compile path differs.** Real rows are compiled inside `compile/real.ts`'s vendored-context
+  escalation ladder — bare typedefs, then the manifest's `prependC`, then the vendored `ctx.i` —
+  with asmlift's canonical flags for the ISA. That file says so in its own header: _"the target is
+  our deterministic re-compile of real game code, not the shipped ROM object."_ The project's
+  template — its `-iquote include`, its `-Werror`, its `arm-none-eabi-cpp` — is not on that path.
+- **The scoring object differs**, and with it the denominator: a per-function `target.o` the harness
+  built, against whatever `build/…/tu.o` the project's make produced.
+
+Measured on `kleod:StrCpy:agbcc`, one of the smallest real agbcc rows (11 of the 126 have a shorter
+`targetAsm`), at one asmlift commit (`3a06c74`). Both runs are seconds. The one step that can take
+minutes is step 1's: an unbuilt sidecar ELF makes `bench target` run `make asmlift-elf` in your
+checkout (below).
+
+| what was run                                                                                                           |  best `[score]` | the source it printed               |
+| ---------------------------------------------------------------------------------------------------------------------- | --------------: | ----------------------------------- |
+| the command above: `asm/matchings/system/StrCpy.s`, the checkout's `decomp.yaml`, `--score-against build/src/system.o` | `unsigned: 6/9` | `u8 *StrCpy(…) { … return v2; }`    |
+| `pnpm bench repro kleod:StrCpy:agbcc --run` (the row's own script)                                                     | `unsigned: 5/8` | byte-identical to the published row |
+| the published row, `apps/benchmark/results/results.json`                                                               |           `5/8` | —                                   |
+
+Different score, a different denominator, and a different C spelling — on a seven-instruction
+function. Neither run is wrong; they answer different questions, and only the second one is the row.
+
+### The row's own script is the vehicle: `pnpm bench repro`
+
+The thing that reproduces a row end-to-end is **the script the row already carries**, and one
+command hands it to you with this machine's paths already in it:
+
+```sh
+pnpm bench repro kleod:StrCpy:agbcc --run
+```
+
+It writes the row's `scripts.asmlift` into `.local/repro/<row>/` (gitignored, deliberately — see
+below), fills in `ASMLIFT_PATH` and the row's own project checkout, runs it with stdout to `out.c`
+and stderr to `out.err`, and reports **the `[ranked]` line**:
+
+```
+repro: kleod:GetEntityLookupData:agbcc — nonmatch 4/14 as published
+repro: symbol map from …/apps/benchmark/checkouts/klonoa-empire-of-dreams
+asmlift: [ranked] 4 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best unsigned/raw-globals: 4/14 [asmlift source 3a06c74]
+repro: script exit 1 — a non-matching row exits nonzero by design
+```
+
+**Quote the `[ranked]` line, not a `[score]` line.** It carries `best …` and the `[asmlift source
+<sha>]` stamp this file requires beside every fan number, in one line whatever the fan size. The
+`[score]` table above it is sorted **best first**, so a `| tail -1` reports the WORST candidate —
+measured on the row above, `signed: 15/18` against a published `4/14`, a different numerator and a
+different denominator. If you want one `[score]` line it is `head -1`.
+
+Without `--run` it writes the script and prints how to run it, for editing a flag or stepping
+through the three sections by hand. `--tool m2c` writes the row's m2c script instead. A needle with
+no `:` is a symbol substring, exactly as `bench run --only` reads it; anything that selects no row
+or more than one exits 1 saying so, rather than leaving you a script that runs clean and prints
+nothing.
+
+**A non-matching row's script exits nonzero, and that is the row reproducing** — `--score-against`
+exits 0 only on byte-exact, and the script is `set -euo pipefail`.
+
+**Build the CLI before the first run.** The script's last line is
+`"$ASMLIFT_PATH/node_modules/.bin/asmlift"`, and `packages/cli/dist/` is gitignored — so a fresh
+clone's first `pnpm install` warns (`Failed to create bin … ENOENT … dist/asmlift.mjs`) and skips
+that link. `pnpm --filter @asmlift/cli build` **and then a second `pnpm install`** creates it.
+(The bin is the built bundle, not the repo's `tsx` — see "The loader is part of the number".)
+
+**The flags are per-vehicle.** `--jobs 6 --progress` and a hand-written `--proto '{…}'` belong to
+the project-checkout command at the top of this file; the generated script carries neither `--jobs`
+nor `--progress` and takes `--proto` from a `proto.json` it writes, and still reproduces the row
+exactly. Do not "fix" the script by adding them — it is gated by `pnpm bench fidelity` in
+`benchmark.yml`, which re-runs both repro scripts for every function.
+
+**Run it in a gitignored directory, which is what the default gives you.** The script's step 1 is
+`bench target … --out "$PWD"`, so running it in the repo root leaves `decomp.yaml`, `ctx.i`,
+`in.asm`, `proto.json` and the script itself untracked there — and `bench run`'s dirty-tree
+preflight then **refuses the round**, ~39 minutes in. (A scoped `--only` run is exempt, so the
+confirm passes and the refusal lands later.) `.local/` and `.envrc.local` are the sanctioned names;
+`bench repro` defaults under the first of them. Running it inside
+`apps/benchmark/checkouts/<project>` is worse than untidy: `--out "$PWD"` **overwrites that
+checkout's own `decomp.yaml`**.
+
+#### `bench target` on its own, for iterating by hand
+
+```sh
+pnpm bench target <project:sym:toolchain> --out <dir> [--project-root <checkout>]
+```
+
+`bench target` is one of the script's steps (`cli.ts` calls it the "repro-script pre-step"); run
+alone it leaves you holding a `target.o` and no input `.s`, prints no `[score]`, and is a third
+number away from the row. What CI re-runs for every function is the script, not the pre-step.
+
+Into `<dir>` it writes `target.o` (the harness's own target object, content-cached), a `decomp.yaml`
+whose compile command **is the benchmark's toolchain invocation**, and ONE frozen scoring context —
+the escalation rung the row's published source stops at, or, on an unscored row, the richest rung
+(see "What this vehicle does NOT reproduce", below). Its last stdout line names the rung it picked;
+there is no `[score]` on any of them. It does not write the input `.s`, because that is the row's
+`targetAsm` — so take it from the row (or just run `bench repro`, above). A symbol-fed row also gets
+its map: grafted as `tools.asmlift.elf` from the checkout `--project-root` names, or written beside
+`target.o` as `symbols.json` for a synthetic row's authored map.
+
+It is also the step with the long pole in it. If the checkout's declared `tools.asmlift.elf` is not
+built and its Makefile has an `asmlift-elf` target, `cases/project-elf.ts` runs
+`make asmlift-elf` **in your checkout**, with a ten-minute timeout — so a first run against an
+unbuilt sidecar project is minutes and a write into that tree, not the ~10 s a warm one takes.
+
+**A missing checkout does not stop anything, and it does not always move the number.** `bench
+target` prints `WARN: <project>: project checkout not found … output may differ from the published
+row` and **exits 0**; the script runs on. With the script's `PROJECT_PATH=` line pointed at a
+nonexistent path — it is a plain assignment, so an env var of that name does not override it —
+`kleod:StrCpy:agbcc` printed the same `unsigned: 5/8` and a **byte-identical** source. So a cheap
+row will tell you your setup is right when it is not. `bench repro --run`
+surfaces any `WARN` line above the `[ranked]` line for you; running the script by hand, `grep -n
+'^WARN' out.err` before quoting anything.
+
+**And `^WARN` catches a MISSING map, not a WRONG one.** `resolveProjectElf` reads whatever
+`decomp.yaml` sits at the root it is handed and never checks that the checkout is **this row's**
+project — point that line at a different one and a foreign symbol map is grafted silently, at
+exit 0, with no `WARN`. That is strictly worse than map-less: the names come out wrong rather than
+absent. `bench repro` resolves the checkout from the row's own manifest and cannot do this; if you
+pass `--project-root` yourself, `grep -n 'elf:' decomp.yaml` and check the path names this row's
+project.
+
+**`bench target` freezes the PUBLISHED rung, and a local run does not refresh it.** The rung comes
+from `results.json` — the committed file — and the gitignored per-tier `real.json` beside it is
+consulted only for a row `results.json` does not carry at all. So after a `bench run --tier real
+--only <sym>` moves your row, the reproduction still replays the rung the published source pins.
+That is right for reproducing a published row and wrong for watching your own change land: for
+that, the number is `bench run`'s.
+
+### What this vehicle does NOT reproduce: your CHANGED asmlift
+
+The materialized context is pinned to **the published winner**, not to the ladder. The harness runs
+the escalation ladder **per candidate** (`compile/real.ts`, `makeRealCompile` — first rung that
+compiles wins, for every candidate in the fan); `bench target` replays that ladder once, against the
+row's published source, and freezes the single rung it lands on (`compile/real.ts`'s
+`resolveScoringPrelude`, called from `cli.ts`).
+`kleod:StrCpy:agbcc` freezes rung 1 — a **161-byte** `ctx.i` of six typedefs — while the row's
+vendored context is 28 KB of project types.
+
+So a candidate your change makes asmlift emit that names a project type or global (`bool8`,
+`gEntityArray`, a `struct`) **noncompiles here and would have been scored by the harness**: the fan
+size, and therefore the `[ranked]` line, can differ from the harness's at the same commit. The
+vehicle is faithful to the row as published, and drifts from the harness exactly as your change
+starts working. Confirm a moved row with `pnpm bench run --tier real --only <sym>` (30–90 s).
+
+And on an **unscored** row it is not "the rung this row stopped at" at all: only `match`/`nonmatch`
+rows have a source that pins a rung, so for anything `declined`/`noncompile`/`failed` the caller
+falls back to the **richest** rung unconditionally (`cli.ts`, `publishedAsmliftSource` → `undefined`
+→ `ladder[ladder.length - 1]`) — **101 of the 252 real rows (40%)**, and the archetypal
+`/attribute-function` target. `real.ts`'s own comment says that fallback "is wrong whenever
+escalation stopped earlier, because a richer context can REJECT what a poorer one accepts". The
+stdout line names the rung either way and never says which case you are in.
+
+Everything below — the checkout, the axis set, the loader, the cache, the flags — is part of both
+numbers. Pick the vehicle first, then read the rest.
 
 ## The CHECKOUT is part of the number, and it is the one that bit
 

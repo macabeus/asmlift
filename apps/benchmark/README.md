@@ -174,6 +174,11 @@ pnpm bench run --serial               # in-process, for debugging (also how shar
 pnpm bench:merge                      # = bench merge: tiers -> results/results.json, then publish
 pnpm bench publish                    # re-stage results.json into the web app alone
 pnpm bench:smoke                      # one trivial fn through every available toolchain
+pnpm bench repro <sym|id> --run       # reproduce ONE published row outside the harness: writes
+                                      #   that row's own generated script into .local/repro/<row>/
+                                      #   with this machine's paths filled in, runs it, reports the
+                                      #   `[ranked]` line. `bench target` is its step 1, not this.
+                                      #   docs/ranked-repro.md is the argument
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
 pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row --
                                            #   TWICE: once against `--base`, then again over the
