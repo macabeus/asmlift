@@ -13,16 +13,11 @@
 // this file returns and a status the README documents cannot drift apart.
 import { cBackend } from '@asmlift/core/backend/c';
 import { pascalBackend } from '@asmlift/core/backend/pascal';
-import { ContractError } from '@asmlift/core/contracts';
 import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
-import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
-import { VerifyError } from '@asmlift/core/ir/verify';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
-import { RaiseUnsupportedError } from '@asmlift/core/raise/errors';
-import { StructureError } from '@asmlift/core/structure/structure';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -41,6 +36,7 @@ import {
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
+import { isDecline } from './decline';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
@@ -161,11 +157,6 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
 Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 3 the candidate-object cache served
             bytes a fresh compile disagrees with · 64 usage · 66 unreadable input.
 Full reference (flags, decomp.yaml integration): the @asmlift/cli README.`;
-
-// A principled decline (the pipeline refusing to guess) vs an internal error (a bug) must be
-// distinguishable at the CLI surface — both exit 1, but the prefix names which one happened.
-const DECLINE_ERRORS = [FrontendUnsupportedError, RaiseUnsupportedError, StructureError, ContractError, VerifyError];
-const isDecline = (e: unknown) => DECLINE_ERRORS.some((c) => e instanceof c);
 
 // The object-input seam, injectable so the offline CLI tests can fake the objdump spawns.
 export interface ObjInput {

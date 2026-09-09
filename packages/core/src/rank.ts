@@ -259,6 +259,22 @@ export class NoScorableCandidateError extends Error {
   }
 }
 
+/** EVERY spelling refused BY THE BACKEND, before anything was compiled — `enumerateCandidates`
+ *  has no fan to return, so it throws this.
+ *
+ *  It is a sibling of `NoScorableCandidateError` and a DIFFERENT fact, which is the whole reason
+ *  it is a class: nothing was scored there because nothing COMPILED, and nothing was scored here
+ *  because nothing was ever spelled. A surface that cannot tell the two apart prints one of them
+ *  under the other's name — `bench fan` shipped a version that guessed from which call site
+ *  caught, and reported a declined row as `noncompile`. The message is unchanged from the plain
+ *  `Error` this replaces (`packages/core/test/rank-backend-decline.test.ts` matches it). */
+export class NoSpellableCandidateError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'NoSpellableCandidateError';
+  }
+}
+
 export interface RankedResult<S> {
   best: Scored<S>; // lowest score
   candidates: Scored<S>[]; // sorted best (lowest) first
@@ -1886,9 +1902,10 @@ export function enumerateCandidates(
   // candidate; all of them together is the row, and it stays LOUD — the alternative is a caller
   // ranking an empty list and reporting no match for a function nothing ever tried to spell.
   if (out.length === 0) {
-    throw new Error(`no spellable candidate for '${name}': ${firstLine(lastEmitError ?? 'no candidate produced')}`, {
-      cause: lastEmitError,
-    });
+    throw new NoSpellableCandidateError(
+      `no spellable candidate for '${name}': ${firstLine(lastEmitError ?? 'no candidate produced')}`,
+      { cause: lastEmitError },
+    );
   }
   return out;
 }

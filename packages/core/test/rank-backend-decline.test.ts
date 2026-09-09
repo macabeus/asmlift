@@ -10,7 +10,7 @@ import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import type { LanguageBackend } from '../src/l3/ast';
-import { enumerateCandidates } from '../src/rank';
+import { NoScorableCandidateError, NoSpellableCandidateError, enumerateCandidates, rankBy } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
 // `a0 < a1 ? 1 : 0` — a divergent if whose compare the signedness pin casts under the `unsigned`
@@ -57,6 +57,65 @@ test('a backend that refuses every tree fails LOUD, naming the refusal', () => {
   expect(() => enumerateCandidates('f', ASM, ARMV4T_AGBCC, { backend: refusing(/.*/) })).toThrow(
     /no spellable candidate for 'f': refusing backend/,
   );
+});
+
+// …AS ITS OWN CLASS. Nothing scored and nothing SPELLED are different facts about a row, and a
+// surface that cannot separate them prints one under the other's name: `bench fan` shipped a
+// version that guessed from which call site caught and reported a declined row as `noncompile`.
+// The message is asserted here too, because it is the only thing that was pinned before the class
+// existed and it must stay byte-identical.
+test('the total refusal is NoSpellableCandidateError, not a bare Error', () => {
+  let thrown: unknown;
+  try {
+    enumerateCandidates('f', ASM, ARMV4T_AGBCC, { backend: refusing(/.*/) });
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(NoSpellableCandidateError);
+  expect((thrown as Error).message.startsWith("no spellable candidate for 'f': ")).toBe(true);
+  // …and it is NOT the scoring-side sibling, which is the confusion the two classes exist to end.
+  expect(thrown).not.toBeInstanceOf(NoScorableCandidateError);
+});
+
+// THE OTHER HALF: `rankBy`'s throw. Two things ride on it and neither was pinned — `run/fan.ts`
+// reaches the whole fan of a `noncompile` row through `dropped`/`withheld` (there is no ranked
+// result to return, so those lists ARE the fan), and `apps/benchmark/src/run/fidelity.ts` matches
+// this MESSAGE verbatim, alongside `code === 1`, to recognise a reproduced noncompile row. A
+// one-word edit to either would pass every other gate in the repo.
+test('every candidate failing to score throws the class, carrying both refusal lists', () => {
+  const candidates = enumerateCandidates('f', ASM, ARMV4T_AGBCC).slice(0, 3);
+  let thrown: unknown;
+  try {
+    rankBy(candidates, 'f', () => {
+      throw new Error('agbcc failed: c.c:1: parse error');
+    });
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(NoScorableCandidateError);
+  const e = thrown as NoScorableCandidateError;
+  expect(e.message.startsWith("no scorable candidate for 'f': ")).toBe(true);
+  expect(e.dropped.map((d) => d.label)).toEqual(candidates.map((c) => c.label));
+  expect(e.withheld).toEqual([]);
+});
+
+// The all-WITHHELD branch: nothing threw, so there is no `cause` to quote and the count is the
+// only fact there is. `bench fan` prints these lines as the fan too.
+test('an entirely withheld fan throws the same class, with the withheld list on it', () => {
+  const candidates = enumerateCandidates('f', ASM, ARMV4T_AGBCC)
+    .slice(0, 2)
+    .map((c) => ({ ...c, matchOnly: true as const }));
+  let thrown: unknown;
+  try {
+    rankBy(candidates, 'f', () => ({ score: 7, rows: 12 }));
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(NoScorableCandidateError);
+  const e = thrown as NoScorableCandidateError;
+  expect(e.dropped).toEqual([]);
+  expect(e.withheld.map((w) => w.label)).toEqual(candidates.map((c) => c.label));
+  expect(e.message).toContain('2 candidate(s) withheld, none scored');
 });
 
 // …AND IT MUST SAY WHICH SPELLING IT REFUSED. The PRE-FAN products (rank.ts PRE_FAN_PRODUCTS)
