@@ -29,16 +29,29 @@ const ARTIFACT_PATH = /^(apps\/benchmark\/results\/|apps\/web\/src\/pages\/bench
 // bench invocation launched through the agent would inherit.
 const UNTRACKED_NONCODE = /^\.claude\/commands\//;
 
-/** Does this `git status --porcelain` output describe a tree whose CODE differs from HEAD? Split
- *  out so the exclusions are testable without a git checkout to mutate. */
+/** WHICH paths in this `git status --porcelain` output make the tree's CODE differ from HEAD.
+ *  Split out so the exclusions are testable without a git checkout to mutate, and returning the
+ *  paths rather than a boolean because the two callers need different things from the same rule:
+ *  the provenance stamp only asks whether, while `run/preflight.ts` refuses a run and has to say
+ *  WHICH file — a refusal that does not name the file sends the reader back to `git status` to
+ *  guess which of its lines this rule counted, and the two incidents behind that preflight were
+ *  both a single untracked env file among the run's own artifact churn. */
+export function codeDirtyPaths(porcelain: string): string[] {
+  return porcelain
+    .split('\n')
+    .filter((l) => {
+      if (l.trim() === '') {
+        return false;
+      }
+      const path = l.slice(3).replace(/^"|"$/g, '');
+      return !ARTIFACT_PATH.test(path) && !(l.startsWith('??') && UNTRACKED_NONCODE.test(path));
+    })
+    .map((l) => l.trim());
+}
+
+/** Does this `git status --porcelain` output describe a tree whose CODE differs from HEAD? */
 export function codeDirtyFrom(porcelain: string): boolean {
-  return porcelain.split('\n').some((l) => {
-    if (l.trim() === '') {
-      return false;
-    }
-    const path = l.slice(3).replace(/^"|"$/g, '');
-    return !ARTIFACT_PATH.test(path) && !(l.startsWith('??') && UNTRACKED_NONCODE.test(path));
-  });
+  return codeDirtyPaths(porcelain).length > 0;
 }
 
 /** The repo paths a benchmark measurement depends on — the SAME list

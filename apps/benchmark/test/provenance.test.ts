@@ -5,7 +5,7 @@
 import type { BenchOutput } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
-import { codeDirtyFrom, combineProvenance } from '../src/provenance';
+import { codeDirtyFrom, codeDirtyPaths, combineProvenance } from '../src/provenance';
 import { checkTierProvenance } from '../src/report/merge';
 
 const tier = (asmlift?: { commit: string; dirty: boolean }): BenchOutput =>
@@ -34,6 +34,16 @@ describe('what counts as a dirty tree', () => {
   test('a clean tree is clean', () => {
     expect(codeDirtyFrom('')).toBe(false);
     expect(codeDirtyFrom('\n')).toBe(false);
+  });
+
+  // The preflight refusal quotes these lines back, so the rule has to survive being asked WHICH
+  // rather than WHETHER: the same exclusions, and the offending lines kept whole (status letters
+  // included) so a reader can tell an untracked file from a modified one without re-running git.
+  test('the same rule can name the offending lines, artifact churn excluded', () => {
+    expect(
+      codeDirtyPaths(' M apps/benchmark/results/results.json\n?? .envrc.probe\n M packages/core/src/rank.ts\n'),
+    ).toEqual(['?? .envrc.probe', 'M packages/core/src/rank.ts']);
+    expect(codeDirtyPaths('')).toEqual([]);
   });
 });
 
