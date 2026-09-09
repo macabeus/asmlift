@@ -45,9 +45,10 @@ one) is an unfinished finding.
    does not carry for a non-winner. An attribution that says "asmlift never considers X" is a claim
    about this list, so read it. Its `[ranked]` line carries the same `synthesized` count and
    `[asmlift source <sha>]` stamp as the vehicles above, so it is quotable in the same way.
-   `--enumerate` gives the same list without compiling anything (~120 candidates/s, so a huge fan
-   takes minutes to list — that is a big fan, not a hang) and still serves `--show <label>`, though
-   not `--show best`: nothing has been scored, so there is no winner to name. A fan over 2,000 is
+   `--enumerate` lists the same candidates' LABELS without compiling anything — no scores, because
+   nothing was compiled (~120 candidates/s, so a huge fan takes minutes to list: that is a big fan,
+   not a hang). It still serves `--show <label>`, though not `--show best`: nothing has been
+   scored, so there is no winner to name. A fan over 2,000 is
    refused unless you pass `--force`, and the refusal quotes what `--force` would cost on THIS row.
    Unlike the two vehicles above, this one runs in the harness's own configuration by construction
    — it is the same call `bench run` makes for the row.

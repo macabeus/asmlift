@@ -4,9 +4,8 @@
 // `eval/asmlift.ts` ranks every candidate spelling and then publishes four facts out of the
 // result: the winner's label, the winner's source, the dropped list and the withheld list.
 // `RankedResult.candidates` — every OTHER spelling, each carrying its own label, its score and
-// the exact source it was scored from — is computed, paid for, and dropped on the floor. Six
-// consecutive rounds hand-wrote the same ~25-line script to recompute it. This is that script,
-// with a row id instead of a hard-coded symbol.
+// the exact source it was scored from — is computed, paid for, and dropped on the floor. This is
+// the supported way to read it, taking a row id.
 //
 // WHY A SUBCOMMAND AND NOT A `bench run` FLAG: the question is always about ONE row, and a flag on
 // `run` prices a one-row question at a full tier (~2,100 s). This builds one target, ranks one
@@ -55,9 +54,8 @@ import { asmliftFan, rankOptionsFor } from '../eval/asmlift';
  *  — `--enumerate`, which compiles nothing and still prints every label and, with `--show`, any
  *  candidate's source — is one flag away. It is CHEAP RELATIVE TO COMPILING and not cheap
  *  absolutely: `kleod:CountCollectedGems:agbcc`'s 5,952 labels take 50 s wall, target build
- *  included (~120 candidates/s), so LBG's fan is ~30 minutes to merely LIST — and this guard is checked after the
- *  pre-count enumeration, so the refusal itself pays that. Both prices are stated where they are
- *  paid rather than promised away. */
+ *  included (~120 candidates/s), so LBG's fan is ~30 minutes to merely LIST — and this guard is
+ *  checked after the pre-count enumeration, so the refusal itself pays that. */
 export const FAN_SCORE_LIMIT = 2000;
 
 /** Seconds per candidate on the SCORING path — a compile plus an objdiff alignment — PER TIER,
@@ -75,19 +73,14 @@ export const FAN_SCORE_LIMIT = 2000;
  *  enumeration, and both runs reproduced the published `171/387`. The constant is the middle of
  *  the two; the spread is machine load, and the tier gap is 40% either way.)
  *
- *  One rate for both was wrong by ~35% on the real tier, and wrong in the direction that matters:
- *  the refusal quotes this price to a reader deciding whether to start the run, and it quoted it
- *  on `CountCollectedGems` — a REAL row, and the row six rounds were about. The first spelling
- *  also claimed 60 ms was "the pessimistic end", which the real-tier measurement falsifies.
+ *  ONE rate for both under-prices the real tier by ~35%, and that is the tier the refusal quotes
+ *  on `CountCollectedGems`. The mechanism is in `compile/real.ts`: a real candidate escalates
+ *  through up to three preludes (`makeRealCompile`), where a synthetic one is a single small
+ *  prelude — so the real tier pays more compiler invocations per candidate, and the gap is
+ *  structural rather than noise.
  *
- *  The mechanism is in `compile/real.ts`: a real candidate escalates through up to three preludes
- *  (`makeRealCompile`), where a synthetic one is a single small prelude — so the real tier pays
- *  more compiler invocations per candidate, and the gap is structural rather than noise.
- *
- *  It exists to make the refusal QUOTE A PRICE rather than assert one: the sentence this replaces
- *  said a fan over the limit is "well over an hour" while the constant's own doc-comment two
- *  screens up said two and a half minutes, and the second one was right. A reader who is steered
- *  off `--force` by a number that is wrong by 20x loses the answer the command exists to give. */
+ *  The point of the constant is that the refusal QUOTES a price instead of asserting one: a reader
+ *  steered off `--force` by a wrong number loses the answer the command exists to give. */
 export const SCORE_SECONDS_PER_CANDIDATE: Record<Case['tier'], number> = {
   synthetic: 0.06,
   real: 0.085,
@@ -213,12 +206,11 @@ export function pickCandidate<C extends Candidate>(candidates: C[], label: strin
 /** Flag combinations that cannot mean anything, refused BEFORE the row is built — enumeration on a
  *  big row costs ~46 s, and paying it to be told the flags were nonsense is the worst order.
  *
- *  There is one, and it was shipped working: `--enumerate --show best` printed `candidate
- *  unsigned` on `synthetic:sizebound:agbcc`, whose real winner scores 8/81 while `unsigned` is
- *  near the bottom of the same fan. Nothing had been scored, so `best` resolved to whatever
- *  enumeration emitted first — a near-worst spelling, presented under the name of the winner, to a
- *  round that both briefs had told `--show best` is the winner and `--enumerate` still serves
- *  `--show`. A wrong answer in the shape of a right one is worse than a refusal. */
+ *  There is one: `--enumerate --show best`. Nothing has been scored, so `best` would resolve to
+ *  whatever enumeration emitted first — a near-worst spelling presented under the name of the
+ *  winner, to a round both briefs have told that `--show best` is the winner and that
+ *  `--enumerate` still serves `--show`. A wrong answer in the shape of a right one is worse than
+ *  a refusal. */
 export function optionRefusal(o: FanOptions): string | undefined {
   if (o.enumerateOnly && o.show === 'best') {
     return (
@@ -261,13 +253,9 @@ const stampFrom = (treeBefore: ReturnType<typeof sampleSourceTree>): string =>
  *    (233 of 1,035 rows). Enumeration has no annotate mode, so it throws where the published row
  *    gets an `ASMLIFT_ERROR` marker.
  *
- *  The first shipped version picked its sentence from a `phase` string the CALLER passed, which is
- *  the same "read the label, not the instrument" mistake the `dmanest`/`max3` rounds are
- *  memorialised for — and it was wrong in practice within one commit: `--force` skips the guarded
- *  pre-count enumeration, so a DECLINED row's lift error lands in the scoring catch and got
- *  "every candidate was refused … this is what the published row's noncompile outcome means" under
- *  zero `[dropped]` lines, on a row that publishes `declined`. Both briefs tell a round to pass
- *  `--force`.
+ *  The sentence is chosen by the ERROR and never by which call site caught it: `--force` skips the
+ *  guarded pre-count enumeration, so a declined row's lift error arrives at the scoring catch,
+ *  where a call-site guess would call it `noncompile`. Both briefs tell a round to pass `--force`.
  *
  *  Anything the three tests do not classify is a HARNESS DEFECT and says so, with the stack: a
  *  guard that swallows a `TypeError` into a confident sentence about the row is strictly worse
@@ -319,9 +307,8 @@ export function noFanReport(rowId: string, e: unknown, show?: string): NoFanRepo
     );
   }
 
-  // `--show` on this path was silently dropped by the first version, on exactly the row class
-  // where the flag's advice earns its keep: a noncompile row is the one row where EVERY candidate
-  // is unshowable.
+  // `--show` is answered on this path too — a noncompile row is the one row class where EVERY
+  // candidate is unshowable, which is exactly where the flag's advice earns its keep.
   if (show !== undefined) {
     notes.push(
       dropped.length + withheld.length === 0
@@ -393,9 +380,8 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     return 2;
   }
   // AFTER the row is resolved, and before it is built. A nonsense flag pair is worth refusing
-  // before a 46 s enumeration is paid for it — but not before the command can say the row does not
-  // exist, which was the first spelling's order: `bench fan nosuchrowatall --enumerate --show best`
-  // lectured about the flags. Case selection is in-memory, so this ordering costs nothing.
+  // before a ~46 s enumeration is paid for it — but not before the command can say the row does
+  // not exist. Case selection is in-memory, so this ordering costs nothing.
   const refusal = optionRefusal(o);
   if (refusal !== undefined) {
     note(refusal);
@@ -409,8 +395,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   //
   // GUARDED, and it is the one throw on this path that is NOT a fact about the row: a target that
   // will not build is the harness broken (the runner names it the same way — "a HARNESS defect,
-  // not a decompiler outcome"). Unguarded it was a raw Node stack, which is the reading the rest
-  // of this file spends a commit eliminating.
+  // not a decompiler outcome").
   let built: ReturnType<Case['build']>;
   try {
     built = c.build();
@@ -448,9 +433,8 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   const leverErrors = new Map<string, string>();
   // ANNOTATED, for the same reason `rankOptionsFor`'s return type is: a mistyped option key is a
   // SILENTLY DROPPED option, and a dropped `symbols` is the 112,896-vs-135,936 discrepancy class
-  // docs/ranked-repro.md is about. The annotation on `rankOptionsFor` does not reach here — this
-  // object is built by spread, and excess-property checking only fires on a literal that is
-  // itself annotated (verified: `symbolz: 1` in this literal typechecks clean without it).
+  // docs/ranked-repro.md is about. `rankOptionsFor`'s own annotation does not reach here —
+  // excess-property checking fires on a literal only where that literal is itself annotated.
   const withLevers: RankOptions = {
     ...opts,
     onLeverError: (label: string, error: string) => leverErrors.set(label, error.split('\n')[0]),
@@ -474,9 +458,8 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   if (o.enumerateOnly || !o.force) {
     // GUARDED, because `enumerateCandidates` has no annotate mode: the gap the phase-1 pass above
     // turns into an `ASMLIFT_ERROR` marker is a THROW here, and 233 of the corpus's 1,035 rows
-    // publish `declined` on exactly such a gap. Unguarded, this command printed "the fan below is
-    // what WOULD be scored" and then a Node stack trace with no fan below it — on the very rows
-    // `attribute-function.md` sends a round here to read.
+    // publish `declined` on exactly such a gap — the very rows `attribute-function.md` sends a
+    // round here to read.
     let cands: Candidate[];
     try {
       cands = enumerateRanked(c.sym, asm, c.toolchain.targetDesc, withLevers);

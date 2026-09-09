@@ -326,11 +326,10 @@ export async function rankCandidatesInBrowser(
   emit({ phase: 'ranking' });
   if (results.length === 0) {
     const why = lastErr instanceof Error ? lastErr.message.split('\n')[0] : String(lastErr ?? 'no candidate produced');
-    // The ERROR CLASS is imported for the third time in this function, and for the same reason as
-    // `compareScored` and `withheldReason`: the two lists are the whole fan on a row where nothing
-    // scored, and a bare `Error` drops them on the floor. Core's `rankBy` carries them; this
-    // driver used not to, which made the playground's "ranking unavailable" toast the one place
-    // a drop list dies. The message is byte-identical either way.
+    // CORE'S CLASS, for the same reason this driver borrows `compareScored` and `withheldReason`:
+    // on a row where nothing scored the two lists are the whole fan, and a bare `Error` drops them
+    // on the floor — leaving the playground's "ranking unavailable" toast with nothing behind it.
+    // The message is byte-identical either way.
     throw new NoScorableCandidateError(`no scorable candidate for '${name}': ${why}`, dropped, withheld, {
       cause: lastErr,
     });

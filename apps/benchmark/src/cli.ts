@@ -374,10 +374,8 @@ switch (command) {
   }
   case 'fan': {
     // fan <row> [--show <label>] [--enumerate] [--force] — print the ranked candidate fan the
-    // harness computes for this row and then discards (eval/asmlift.ts publishes the winner's
-    // label and source plus the two refusal lists; `RankedResult.candidates` is dropped on the
-    // floor). ROW-SCOPED by construction, and that is the point rather than an omission: the
-    // corpus's fan is ~82,756 candidates, so a tier-wide form of this would write tens of
+    // harness computes for this row and then discards (run/fan.ts). ROW-SCOPED by construction,
+    // and that is the point rather than an omission: a tier-wide form would write tens of
     // thousands of sources to answer a question that is always about one function.
     const rowId = positionals[1];
     if (!rowId) {
@@ -385,9 +383,6 @@ switch (command) {
       process.exit(2);
     }
     const { fan } = await import('./run/fan');
-    // `break` under an unconditional `process.exit` is unreachable and stays anyway: every other
-    // case here ends with one, and a `return` added to this block later would otherwise fall
-    // straight through into `case 'fidelity'`.
     process.exit(
       fan(rowId, {
         ...(opts.show ? { show: opts.show } : {}),

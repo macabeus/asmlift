@@ -60,10 +60,8 @@ test('a backend that refuses every tree fails LOUD, naming the refusal', () => {
 });
 
 // …AS ITS OWN CLASS. Nothing scored and nothing SPELLED are different facts about a row, and a
-// surface that cannot separate them prints one under the other's name: `bench fan` shipped a
-// version that guessed from which call site caught and reported a declined row as `noncompile`.
-// The message is asserted here too, because it is the only thing that was pinned before the class
-// existed and it must stay byte-identical.
+// surface that cannot separate them prints one under the other's name. The message is asserted
+// here too: it must stay byte-identical, because surfaces match it.
 test('the total refusal is NoSpellableCandidateError, not a bare Error', () => {
   let thrown: unknown;
   try {
@@ -77,11 +75,11 @@ test('the total refusal is NoSpellableCandidateError, not a bare Error', () => {
   expect(thrown).not.toBeInstanceOf(NoScorableCandidateError);
 });
 
-// THE OTHER HALF: `rankBy`'s throw. Two things ride on it and neither was pinned — `run/fan.ts`
-// reaches the whole fan of a `noncompile` row through `dropped`/`withheld` (there is no ranked
-// result to return, so those lists ARE the fan), and `apps/benchmark/src/run/fidelity.ts` matches
-// this MESSAGE verbatim, alongside `code === 1`, to recognise a reproduced noncompile row. A
-// one-word edit to either would pass every other gate in the repo.
+// THE OTHER HALF: `rankBy`'s throw. Two things ride on it — `run/fan.ts` reaches the whole fan of a
+// `noncompile` row through `dropped`/`withheld` (there is no ranked result to return, so those
+// lists ARE the fan), and `apps/benchmark/src/run/fidelity.ts` matches this MESSAGE verbatim,
+// alongside `code === 1`, to recognise a reproduced noncompile row. A one-word edit to either would
+// pass every other gate in the repo.
 test('every candidate failing to score throws the class, carrying both refusal lists', () => {
   const candidates = enumerateCandidates('f', ASM, ARMV4T_AGBCC).slice(0, 3);
   let thrown: unknown;

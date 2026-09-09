@@ -2,10 +2,9 @@
 // paste is spelled. Its consumers today are this CLI's argv entry point and the benchmark's
 // `bench fan`; `main.ts` re-exports `scoreOf`, which is where the offline suite reaches it.
 //
-// It imports nothing, but do not read that as a CONSTRAINT that buys anything today: both current
-// consumers already pull `./score` (and objdiff-wasm behind it) on the line above, so the leafness
-// has no beneficiary yet. What this module owns is the SPELLING — the same line rendered by two
-// commands — and that is the property to preserve when adding to it.
+// It imports nothing, and that leafness buys nothing today: both consumers already pull `./score`
+// (and objdiff-wasm behind it). What this module owns is the SPELLING — the same line rendered by
+// two commands — and that is the property to preserve when adding to it.
 /** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
  *
  *  THE ONE RENDERER FOR EVERY SCORE ANY asmlift COMMAND PRINTS: the CLI's `[score]` table, the
@@ -33,9 +32,8 @@ export function scoreOf(s: { score: number; rows?: number; match?: boolean }): s
  *  paste as the measurement every later claim is compared against. It lives here, beside `scoreOf`
  *  and in the same leaf module, because it now has TWO producers: the CLI's own ranked run
  *  (`main.ts`) and the benchmark's `bench fan`, which re-enters the harness's ranked call for one
- *  row. A second hand-spelling of it was the actual bug this function replaces — the copy had
- *  dropped `synthesized` and the source stamp, i.e. exactly the two fields that are not counts of
- *  the fan but claims about what the score RESTS ON:
+ *  row. Two fields on it are not counts of the fan but claims about what the score RESTS ON, and
+ *  they are the ones a hand-spelling drops:
  *
  *  - `synthesized` — how many of the winner's declarations asmlift invented from the target's own
  *    asm. Such a declaration is fitted to the bytes it is scored against: it cannot lose score,
@@ -45,9 +43,9 @@ export function scoreOf(s: { score: number; rows?: number; match?: boolean }): s
  *    indistinguishable from a clean one (provenance.ts), and a stamp anywhere but on the pasted
  *    line is a stamp nobody pastes.
  *
- *  Structural parameter types, not the CLI's `RankedResult`: importing that type would make this
- *  module reach `./rank` → `./score` → objdiff-wasm, which is the one thing its leafness buys.
- *  No trailing newline — the caller owns line separation. */
+ *  Structural parameter types, not the CLI's `RankedResult`: the benchmark assembles the same six
+ *  fields from its own row and its own stamp, and neither caller should have to build a
+ *  `RankedResult` to render one line. No trailing newline — the caller owns line separation. */
 export function rankedSummaryLine(a: {
   scored: number;
   dropped: number;

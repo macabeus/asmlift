@@ -245,9 +245,9 @@ export interface WithheldCandidate {
  *  nothing scored, `dropped` IS the whole fan, and a bare `Error` discards it. A caller that
  *  prints one candidate's failure (the `cause`) is showing the LAST spelling the scorer refused,
  *  which is neither the first nor a representative one — the benchmark's own noncompile rows have
- *  up to a thousand siblings behind that single line. The message is unchanged from the plain
- *  `Error` this replaces: `bench fidelity` matches it verbatim to recognise a reproduced
- *  noncompile row. */
+ *  up to a thousand siblings behind that single line. The MESSAGE is load-bearing and must stay
+ *  byte-identical: `bench fidelity` matches it verbatim to recognise a reproduced noncompile
+ *  row. */
 export class NoScorableCandidateError extends Error {
   readonly dropped: DroppedCandidate[];
   readonly withheld: WithheldCandidate[];
@@ -265,9 +265,8 @@ export class NoScorableCandidateError extends Error {
  *  It is a sibling of `NoScorableCandidateError` and a DIFFERENT fact, which is the whole reason
  *  it is a class: nothing was scored there because nothing COMPILED, and nothing was scored here
  *  because nothing was ever spelled. A surface that cannot tell the two apart prints one of them
- *  under the other's name — `bench fan` shipped a version that guessed from which call site
- *  caught, and reported a declined row as `noncompile`. The message is unchanged from the plain
- *  `Error` this replaces (`packages/core/test/rank-backend-decline.test.ts` matches it). */
+ *  under the other's name. The message is load-bearing too
+ *  (`packages/core/test/rank-backend-decline.test.ts` matches it). */
 export class NoSpellableCandidateError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);

@@ -37,10 +37,9 @@ export type Scorer = (candC: string, sym: string, obj: string, declarations?: st
  *  measured.
  *
  *  The return type is ANNOTATED rather than inferred, and that annotation is the guard the
- *  paragraph above asks for: an inferred object literal accepts a misspelled option silently (a
- *  `symbolz: 1` typechecked clean here for as long as this function existed), and a mistyped
- *  option is a dropped one. With `RankOptions` named, tsc answers "'symbolz' does not exist in
- *  type 'RankOptions'. Did you mean to write 'symbols'?". */
+ *  paragraph above asks for: an inferred object literal accepts a misspelled option silently, and
+ *  a mistyped option is a dropped one. With `RankOptions` named, tsc answers "'symbolz' does not
+ *  exist in type 'RankOptions'. Did you mean to write 'symbols'?". */
 export function rankOptionsFor(
   tc: Toolchain,
   obj: string,
@@ -77,11 +76,10 @@ export function rankOptionsFor(
  *  the source it was scored from (`Scored extends Candidate`).
  *
  *  `runAsmlift` publishes four facts out of this object — the winner's label and source, the
- *  dropped list and the withheld list — and drops `candidates` on the floor, which is how six
- *  consecutive rounds came to hand-write a script to recompute it. This is that script's one
- *  supported entry point (`bench fan`), and it is deliberately the SAME call the harness makes
- *  rather than a parallel one: `decompileRankedParallel` would reorder nothing but is a different
- *  driver, and a published measurement must not depend on a scheduler. */
+ *  dropped list and the withheld list — and drops `candidates` on the floor. `bench fan` is the
+ *  one supported way to read them, and it is deliberately the SAME call the harness makes rather
+ *  than a parallel one: `decompileRankedParallel` would reorder nothing but is a different driver,
+ *  and a published measurement must not depend on a scheduler. */
 export function asmliftFan(
   tc: Toolchain,
   sym: string,

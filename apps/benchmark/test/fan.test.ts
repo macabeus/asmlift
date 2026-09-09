@@ -145,10 +145,10 @@ it('will score a fan the size of the largest row measured through it', () => {
   expect(FAN_SCORE_LIMIT).toBeGreaterThan(800);
 });
 
-// F1: the `[ranked]` line is the one line the briefs tell a round to PASTE, and it now has two
-// producers — the CLI's ranked run and this command. The fields at risk are the ones that are not
-// counts of the fan: `synthesized` (the score rests on declarations asmlift invented) and the
-// source stamp (which tree produced it). The first spelling of this line here dropped both.
+// The `[ranked]` line is the one line the briefs tell a round to PASTE, and it has two producers —
+// the CLI's ranked run and this command. The fields at risk are the ones that are not counts of the
+// fan, because a hand-spelling drops them: `synthesized` (the score rests on declarations asmlift
+// invented) and the source stamp (which tree produced it).
 describe('the [ranked] line', () => {
   const ranked = (over: Partial<RankedResult> = {}): RankedResult =>
     ({
@@ -210,9 +210,9 @@ describe('synthesizedRefs', () => {
   });
 });
 
-// F2 / the breaker's SHOULD-FIX: `--enumerate --show best` printed `unsigned` on
-// `synthetic:sizebound:agbcc`, a near-worst spelling in a fan whose winner scores 8/81 — under the
-// name of the winner, to a round both briefs had told that `--show best` is the winner.
+// Under `--enumerate` nothing is scored, so `best` would name whatever enumeration emitted first —
+// a near-worst spelling under the winner's name, to a round both briefs have told that `--show
+// best` is the winner.
 describe('optionRefusal', () => {
   it('refuses --show best under --enumerate, where nothing has been scored', () => {
     expect(optionRefusal({ enumerateOnly: true, show: 'best' })).toContain('no winner to name');
@@ -227,10 +227,9 @@ describe('optionRefusal', () => {
   });
 });
 
-// The refusal's job is to price the run it is refusing. The sentence this replaces said "well over
-// an hour" for any fan over 2,000 while the same file's doc-comment said two and a half minutes;
-// measured, 800 candidates score in 47.9 s cold, so the doc-comment was right and the refusal was
-// wrong by ~20x — steering a reader off `--force` on a row that answers in minutes.
+// The refusal's job is to price the run it is refusing, from this row's own count and tier. A fan
+// at the limit answers in minutes (800 candidates score in 47.9 s cold), and a scare sentence that
+// calls that "well over an hour" steers a reader off `--force` on a row that would have answered.
 describe('estimatedScoreTime', () => {
   it('prices the limit itself in minutes, not hours', () => {
     expect(estimatedScoreTime(FAN_SCORE_LIMIT, 'synthetic')).toBe('about 2 min');
@@ -255,13 +254,13 @@ describe('estimatedScoreTime', () => {
   });
 
   // LoadBGTilemapData: the row this guard exists for, and the run nobody starts by accident. It is
-  // a REAL row, so it is priced at the real rate — the synthetic one called it 3.8 h.
+  // a REAL row, so it is priced at the real rate; the synthetic rate would call it 3.8 h.
   it('prices LoadBGTilemapData`s fan in hours', () => {
     expect(estimatedScoreTime(225792, 'real')).toBe('about 5.3 h');
   });
 });
 
-// F4: a dropped candidate's source is what a reader most wants (it is the spelling that failed to
+// A dropped candidate's source is what a reader most wants (it is the spelling that failed to
 // compile) and it is the one `--show` cannot reach — `DroppedCandidate` carries no source at all.
 // Sending them to the `[score]` lines for it is sending them to look for a line that is not there.
 describe('unshowable', () => {
@@ -286,19 +285,18 @@ describe('unshowable', () => {
   });
 
   // …and on a row where nothing scored there ARE no `[score]` lines, so the caller names the list
-  // that does exist. Hard-coding one table's name is what made the first spelling send a reader
-  // looking for a line that could not be there.
+  // that does exist. Hard-coding one table's name sends a reader to look for a line that cannot
+  // be there.
   it('names the list it was given, not always the [score] table', () => {
     expect(unshowable('nope', ranked, 'the [dropped] lines above')).toContain('the [dropped] lines above');
   });
 });
 
-// The blocker fix's SECOND spelling, and the reason it needed one: the first chose its sentence
-// from a `phase` string the CALL SITE passed, so `--force` — which skips the guarded pre-count
-// enumeration — sent a DECLINED row's lift error into the scoring catch and printed "every
-// candidate was refused … this is what the published row's noncompile outcome means", under zero
-// `[dropped]` lines, on a row that publishes `declined`. Both briefs tell a round to pass
-// `--force`. The sentence is now chosen by the ERROR, and that is what these pin.
+// The sentence is chosen by the ERROR, never by which call site caught it, and that is what these
+// pin: `--force` skips the guarded pre-count enumeration, so a DECLINED row's lift error arrives at
+// the scoring catch — where a call-site guess prints "every candidate was refused … this is what
+// the published row's noncompile outcome means" under zero `[dropped]` lines. Both briefs tell a
+// round to pass `--force`.
 describe('noFanReport', () => {
   const dropped = [{ label: 'unsigned', error: 'agbcc failed: c.c:12' }];
   const withheld = [{ label: 'unreduce', score: 2, why: 'needs a byte-exact proof' }];

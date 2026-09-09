@@ -191,24 +191,23 @@ It prints the `[score]` table this file's comparison recipe is written for, then
 `[withheld]`, the `[declared]` block and `[ranked]` — all through the CLI's own renderers, the same
 functions `pnpm asmlift` prints them with, so the `[ranked]` line here carries the `synthesized`
 count and the `[asmlift source <sha>]` stamp this file tells you to quote. Measured on
-`kleod:StrCpy:agbcc`: `unsigned: 5/8` in **7.0 s**, the published row exactly, and
-`--show best` printed the published source byte-for-byte.
+`kleod:StrCpy:agbcc`: `unsigned: 5/8` in **9 s**, the published row exactly, and `--show best`
+printed the published source byte-for-byte.
 
 Two things it can do that nothing else can:
 
 - **`--show <label>` prints a NON-WINNING candidate's source.** `results.json` carries the winner's
-  C and no other's, and `RankedResult.candidates` — every other spelling, each with its own
-  `source` — was computed and discarded on every run until this command read it. "The near-miss
-  spelling is right and only loses on X" is now a thing to read rather than infer.
+  C and no other's, while `RankedResult.candidates` — every other spelling, each with its own
+  `source` — is computed on every run and discarded. "The near-miss spelling is right and only
+  loses on X" is a thing to read here rather than infer.
 - **`--enumerate` lists the fan without compiling anything**, and still serves `--show <label>`
   (not `--show best` — nothing is scored, so there is no winner to name, and that combination is
   refused rather than answered with whatever enumeration emitted first). That is the cheap
   configuration-identification this file's "Getting the fan alone is cheap" section describes,
-  without the kill-it-after-the-first-`[progress]`-line trick. **Cheap relative to compiling, not
+  without killing the run after its first `[progress]` line. **Cheap relative to compiling, not
   cheap absolutely**: `kleod:CountCollectedGems:agbcc`'s 5,952 labels take 50 s wall with the
   target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
-  to LIST. Read a long enumeration as
-  a big fan, not as a hang.
+  to LIST. Read a long enumeration as a big fan, not as a hang.
 
   It also prints `[lever] <label> threw (no candidate from it)`, a channel `bench run` supplies no
   sink for at all — so a whole pre-fan half of a row's fan can vanish from a benchmark run with
@@ -220,7 +219,7 @@ and the two tiers do not compile the same thing: `synthetic:sizebound:agbcc`'s 8
 cold** (10 s warm, 60 ms each), while `kleod:CountCollectedGems:agbcc`'s 5,952 took **518 s and
 483 s** on two cold runs (85 ms each, both reproducing the published `171/387`) — a real candidate
 escalates through up to three preludes in `compile/real.ts`, a synthetic one through a single small
-prelude. One rate for both under-priced the real tier by ~35%, on the row the refusal's own example
+prelude; one rate for both under-prices the real tier by ~35%, on the row the refusal's own example
 is. So the limit is ~2 minutes of synthetic scoring, `CountCollectedGems` is ~8 minutes — a
 `--force` worth typing, not an hour — and `LoadBGTilemapData`'s 225,792 is a five-hour run;
 `--enumerate` is the answer at THAT size, and note the guard is checked after the pre-count
@@ -233,14 +232,13 @@ is refused, so there is no ranking to print. Both are answered with `asmlift: [f
 exit 2, and the noncompile case prints the whole `[dropped]`/`[withheld]` list first, because on
 that row the refusals ARE the fan.
 
-**Which of the two you are looking at is decided by the ERROR, never by which call site caught it.**
-That is not a style point: the first spelling picked its sentence from the phase, and `--force`
-skips the pre-count enumeration, so a DECLINED row's lift error landed in the scoring catch and was
-reported as `noncompile` with a `0 [dropped] line(s) above ARE this row's fan` under no lines at
-all. `NoScorableCandidateError` (nothing SCORED) and `NoSpellableCandidateError` (nothing SPELLED —
-the backend refused every tree) are separate classes for this reason, and a throw that is neither
-of them nor a decline is reported as a HARNESS defect with its stack rather than dressed up as a
-fact about the row.
+**Which of the two you are looking at is decided by the ERROR, never by which call site caught it**,
+so `--force` does not change the answer — it skips the pre-count enumeration, and a declined row's
+lift error then arrives at the scoring catch, where a call-site guess would report it as
+`noncompile` under no `[dropped]` lines at all. `NoScorableCandidateError` (nothing SCORED) and
+`NoSpellableCandidateError` (nothing SPELLED — the backend refused every tree) are separate classes
+for this reason, and a throw that is neither of them nor a decline is reported as a HARNESS defect
+with its stack rather than dressed up as a fact about the row.
 
 What it is NOT: a reproduction. It runs asmlift in-process from this repo's sources, so it proves
 nothing about the published script, and `pnpm bench fidelity` still re-runs the scripts rather than
