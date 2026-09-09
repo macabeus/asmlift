@@ -18,9 +18,13 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
 1. Resolve the row: `pnpm bench run --tier real --only $1` (`--only` is a substring match on the
    symbol; row ids are `project:sym:toolchain`). If it hits more than one row, list them and pick
    the one the user meant — say which you picked.
-2. Record the **baseline** verbatim: asmlift outcome (`MATCH` / `diff:N` / `noncompile(k)` /
+2. Record the **baseline** verbatim: asmlift outcome (`MATCH` / `diff:N/M` / `noncompile(k)` /
    `declined(k gap(s))` / `failed`) and m2c's for the same row. Every later claim of improvement is
-   measured against this exact number, produced by this exact command.
+   measured against this exact number, produced by this exact command. **Record the whole `N/M`,
+   never the `N` alone**: `M` is `maxScore`, the objdiff row count of the *winning candidate's*
+   alignment, so it moves when the candidate does. A `diff:290/404 → diff:171/387` is 119 points
+   on a scale that also lost 17, and quoting it as `290 → 171` is what makes the next reader
+   subtract.
 3. Read the asm and the current asmlift output side by side. Get the target `.o` and a working dir
    with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness.
 4. State the baseline in your first user-facing message. Never report progress without a

@@ -19,7 +19,7 @@ one) is an unfinished finding.
 ## Phase 0 — Resolve and baseline (never skip)
 
 1. Resolve the row: `pnpm bench run --tier real --only $1`. Record the outcome verbatim for both
-   decompilers.
+   decompilers — **the whole `diff:N/M`, never the `N` alone** (see "the denominator moves" below).
 2. Reproduce outside the harness with **the command in
    [`docs/ranked-repro.md`](../../docs/ranked-repro.md), verbatim** — its flags (`--proto` when a
    callee's arity matters, `--jobs 6 --progress`) are part of the number, and its `grep -F
@@ -27,6 +27,35 @@ one) is an unfinished finding.
    `/match-function`; correct it there, never here. The best `[score]` line is the number every
    later claim is measured against, and it goes into your report verbatim, flags included.
 3. State the baseline in your first user-facing message.
+
+## The denominator moves — so a residual is never a "partition"
+
+`maxScore` is not a property of the target function. It is the objdiff row count of the **winning
+candidate's** alignment, so a different candidate is scored against a different scale. Across two
+committed artifacts (`eb6dec7d` → `2fed1e42`) twelve of 1013 rows moved their denominator, and
+`kleod:CountCollectedGems:agbcc` moved 290/404 → **171/387** — 17 points of scale inside a
+119-point "improvement".
+
+This is not a footnote; it is the most expensive mistake this workflow has made. Read as a
+subtraction on a fixed 404, that row's residual was decomposed into six gaps said to **PARTITION
+the 290**; the gaps then predicted 297 points and delivered 119, and an entire extra attribution
+round was spent explaining a shortfall that was partly the scale.
+
+Rules, and they are not optional:
+
+- **Never write "partition", "accounts for all of", "the N decomposes into", or any other
+  exhaustive-decomposition word about a residual** unless you have shown the denominator is fixed
+  across every measurement you are comparing. Write "these gaps cover X of the N *measured at
+  maxScore M*" and give M.
+- **A delta is a pair of fractions, not a difference.** Quote `before N₁/M₁ → after N₂/M₂` in the
+  report, the PR body and the row comment. If M moved, say so in the same sentence and say by how
+  much; if you do not know M, you do not have the delta.
+- **The tools now tell you.** `pnpm bench run` prints `diff:<score>/<maxScore>` per row, and
+  `pnpm bench diff` prints `asmlift.score: 290/404 → 171/387` plus a separate
+  `asmlift.maxScore: 404 → 387` line when the denominator moves on its own. You do not have to
+  open `results.json` to see this, and there is no excuse for a report that does not.
+- **Gap arithmetic is a prediction until measured.** Sum-of-parts vs. whole is a claim about a
+  moving scale; state it as a prediction with the ablation that falsifies it.
 
 ## Phase 1 — Capture what was actually compiled
 
@@ -93,8 +122,9 @@ pattern:
 - **MATCH** → the capability exists; the shape is a CONTROL. Then find where it stops: add the
   aggravation from the real function (a read-back, a second block, a fixed-index access) until
   the score moves. The minimal failing shape is the row; the passing one may be its control.
-- **diff:N** → a gap row. Attribute the N by diffing the probe's candidate asm the Phase-2 way —
-  a small N can still be a distinct capability (operand order) or can be noise.
+- **diff:N/M** → a gap row. Attribute the N by diffing the probe's candidate asm the Phase-2 way —
+  a small N can still be a distinct capability (operand order) or can be noise. Quote `M` too:
+  two probes' Ns are comparable only when their Ms agree.
 - **declined** → name the FIRST blocker from the decline message. If it is a pre-existing link
   (branch-likely on MIPS is the usual one), the row still measures something on that toolchain —
   but say which link, and never credit the decline to this family.
