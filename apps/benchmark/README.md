@@ -179,6 +179,14 @@ pnpm bench repro <sym|id> --run       # reproduce ONE published row outside the 
                                       #   with this machine's paths filled in, runs it, reports the
                                       #   `[ranked]` line. `bench target` is its step 1, not this.
                                       #   docs/ranked-repro.md is the argument
+pnpm bench fan <sym|id>               # every CANDIDATE the harness ranked for ONE row, not just
+                                      #   the winner it published: the `[score]` table, the
+                                      #   [dropped]/[withheld] lists, the `[ranked]` line.
+                                      #   `--enumerate` lists the fan without compiling anything,
+                                      #   `--show <label>` prints one candidate's C, `--force`
+                                      #   scores a fan over 2,000. Neighbour of `bench repro`:
+                                      #   that one re-runs the row's PUBLISHED script, this one
+                                      #   opens the ranking the script's one line summarises
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
 pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row --
                                            #   TWICE: once against `--base`, then again over the
@@ -312,18 +320,19 @@ Host prerequisites (macOS; verified empirically):
 
 ## Harness layout (`src/`)
 
-| module             | role                                                                                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cli.ts`           | THE entry point: one argv parser, subcommand dispatch                                                                                                                           |
-| `config.ts`        | ALL env/path resolution (m2c, cpp, WORKSPACE)                                                                                                                                   |
-| `cases/`           | the `Case` abstraction + both tier providers (`synthetic.ts`, `real.ts`) + manifest loader/validation                                                                           |
-| `compile/`         | one module per toolchain — real-tier build + candidate steps shared (candidate-compile commands live in `dataset/toolchains/`)                                                  |
-| `eval/`            | `evaluate.ts` (both decompilers on one case), `asmlift.ts`, `m2c.ts`, `m2c-normalizer.ts` (objdump-to-GNU-as normalizer), `outcome.ts` (the symmetric classifier), `quality.ts` |
-| `run/`             | `runner.ts` (the ONE case loop), `orchestrate.ts` (spawns the shards, merges their partial results), `fidelity.ts` (the script-fidelity gate), `smoke.ts`, `verify.ts`          |
-| `report/`          | `merge.ts` (pure: tiers -> results.json), `gap-size.ts`, `repro-scripts.ts`, the three gates (`stale-check`/`regression`/`diff`) over `committed.ts`, `publish.ts`              |
-| `toolchains.ts`    | 4 toolchain adapters over `@asmlift/toolchains` (`buildTarget` + `score`)                                                                                                       |
-| `decomp-config.ts` | candidate compilation through the real `decomp.yaml` user path                                                                                                                  |
-| `cache.ts`         | content-keyed result cache (tmp-then-rename; m2c dirty-checkout fail-closed; versioned key)                                                                                     |
+| module             | role                                                                                                                                                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cli.ts`           | THE entry point: one argv parser, subcommand dispatch                                                                                                                                                            |
+| `config.ts`        | ALL env/path resolution (m2c, cpp, WORKSPACE)                                                                                                                                                                    |
+| `cases/`           | the `Case` abstraction + both tier providers (`synthetic.ts`, `real.ts`) + manifest loader/validation                                                                                                            |
+| `compile/`         | one module per toolchain — real-tier build + candidate steps shared (candidate-compile commands live in `dataset/toolchains/`)                                                                                   |
+| `eval/`            | `evaluate.ts` (both decompilers on one case), `asmlift.ts`, `m2c.ts`, `m2c-normalizer.ts` (objdump-to-GNU-as normalizer), `outcome.ts` (the symmetric classifier), `quality.ts`                                  |
+| `run/`             | `runner.ts` (the ONE case loop), `orchestrate.ts` (spawns the shards, merges their partial results), `fidelity.ts` (the script-fidelity gate), `fan.ts` (one row's whole candidate fan), `smoke.ts`, `verify.ts` |
+| `report/`          | `merge.ts` (pure: tiers -> results.json), `gap-size.ts`, `repro-scripts.ts`, the three gates (`stale-check`/`regression`/`diff`) over `committed.ts`, `publish.ts`                                               |
+| `toolchains.ts`    | 4 toolchain adapters over `@asmlift/toolchains` (`buildTarget` + `score`)                                                                                                                                        |
+| `decomp-config.ts` | candidate compilation through the real `decomp.yaml` user path                                                                                                                                                   |
+| `cache.ts`         | content-keyed result cache (tmp-then-rename; m2c dirty-checkout fail-closed; versioned key)                                                                                                                      |
+| `asm-scrub.ts`     | the objdump header scrub (`/abs/path/x.o:` -> `target.o:`), one spelling for the runner, the evaluator and `bench fan`                                                                                           |
 
 The result schema is [`@asmlift/bench-schema`](../../packages/bench-schema/README.md) — the ONE
 definition this harness produces and the web Benchmark view consumes, including the closed feature

@@ -18,6 +18,7 @@ import { cBackend } from '@asmlift/core/backend/c';
 import { selfDeclaredContextFor } from '@asmlift/core/declare';
 import {
   type DroppedCandidate,
+  NoScorableCandidateError,
   type RankedResult,
   type RefusedDeclarationReason,
   type Scored,
@@ -325,7 +326,13 @@ export async function rankCandidatesInBrowser(
   emit({ phase: 'ranking' });
   if (results.length === 0) {
     const why = lastErr instanceof Error ? lastErr.message.split('\n')[0] : String(lastErr ?? 'no candidate produced');
-    throw new Error(`no scorable candidate for '${name}': ${why}`, { cause: lastErr });
+    // CORE'S CLASS, for the same reason this driver borrows `compareScored` and `withheldReason`:
+    // on a row where nothing scored the two lists are the whole fan, and a bare `Error` drops them
+    // on the floor — leaving the playground's "ranking unavailable" toast with nothing behind it.
+    // The message is byte-identical either way.
+    throw new NoScorableCandidateError(`no scorable candidate for '${name}': ${why}`, dropped, withheld, {
+      cause: lastErr,
+    });
   }
   results.sort(compareScored);
   return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld, refused };

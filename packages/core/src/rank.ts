@@ -239,6 +239,41 @@ export interface WithheldCandidate {
   why: string;
 }
 
+/** EVERY candidate refused — `rankBy` has no ranked result to return, so it throws this.
+ *
+ *  The two lists ride on the error, and that is the point of having a class at all: on a row where
+ *  nothing scored, `dropped` IS the whole fan, and a bare `Error` discards it. A caller that
+ *  prints one candidate's failure (the `cause`) is showing the LAST spelling the scorer refused,
+ *  which is neither the first nor a representative one — the benchmark's own noncompile rows have
+ *  up to a thousand siblings behind that single line. The MESSAGE is load-bearing and must stay
+ *  byte-identical: `bench fidelity` matches it verbatim to recognise a reproduced noncompile
+ *  row. */
+export class NoScorableCandidateError extends Error {
+  readonly dropped: DroppedCandidate[];
+  readonly withheld: WithheldCandidate[];
+  constructor(message: string, dropped: DroppedCandidate[], withheld: WithheldCandidate[], options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'NoScorableCandidateError';
+    this.dropped = dropped;
+    this.withheld = withheld;
+  }
+}
+
+/** EVERY spelling refused BY THE BACKEND, before anything was compiled — `enumerateCandidates`
+ *  has no fan to return, so it throws this.
+ *
+ *  It is a sibling of `NoScorableCandidateError` and a DIFFERENT fact, which is the whole reason
+ *  it is a class: nothing was scored there because nothing COMPILED, and nothing was scored here
+ *  because nothing was ever spelled. A surface that cannot tell the two apart prints one of them
+ *  under the other's name. The message is load-bearing too
+ *  (`packages/core/test/rank-backend-decline.test.ts` matches it). */
+export class NoSpellableCandidateError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'NoSpellableCandidateError';
+  }
+}
+
 export interface RankedResult<S> {
   best: Scored<S>; // lowest score
   candidates: Scored<S>[]; // sorted best (lowest) first
@@ -1866,9 +1901,10 @@ export function enumerateCandidates(
   // candidate; all of them together is the row, and it stays LOUD — the alternative is a caller
   // ranking an empty list and reporting no match for a function nothing ever tried to spell.
   if (out.length === 0) {
-    throw new Error(`no spellable candidate for '${name}': ${firstLine(lastEmitError ?? 'no candidate produced')}`, {
-      cause: lastEmitError,
-    });
+    throw new NoSpellableCandidateError(
+      `no spellable candidate for '${name}': ${firstLine(lastEmitError ?? 'no candidate produced')}`,
+      { cause: lastEmitError },
+    );
   }
   return out;
 }
@@ -1912,7 +1948,9 @@ export function rankBy<S extends { score: number; rows?: number }>(
     // scorer failure, and a list that was entirely proof-gated is a different thing entirely.
     const why =
       lastScoreErr !== null ? firstLine(lastScoreErr) : `${withheld.length} candidate(s) withheld, none scored`;
-    throw new Error(`no scorable candidate for '${symbol}': ${why}`, { cause: lastScoreErr });
+    throw new NoScorableCandidateError(`no scorable candidate for '${symbol}': ${why}`, dropped, withheld, {
+      cause: lastScoreErr,
+    });
   }
   results.sort(compareScored);
   return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };

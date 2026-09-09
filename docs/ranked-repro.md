@@ -64,6 +64,7 @@ checkout (below).
 | ---------------------------------------------------------------------------------------------------------------------- | --------------: | ----------------------------------- |
 | the command above: `asm/matchings/system/StrCpy.s`, the checkout's `decomp.yaml`, `--score-against build/src/system.o` | `unsigned: 6/9` | `u8 *StrCpy(…) { … return v2; }`    |
 | `pnpm bench repro kleod:StrCpy:agbcc --run` (the row's own script)                                                     | `unsigned: 5/8` | byte-identical to the published row |
+| `pnpm bench fan kleod:StrCpy:agbcc` (the harness's own call, no script)                                                | `unsigned: 5/8` | byte-identical to the published row |
 | the published row, `apps/benchmark/results/results.json`                                                               |           `5/8` | —                                   |
 
 Different score, a different denominator, and a different C spelling — on a seven-instruction
@@ -172,6 +173,77 @@ consulted only for a row `results.json` does not carry at all. So after a `bench
 --only <sym>` moves your row, the reproduction still replays the rung the published source pins.
 That is right for reproducing a published row and wrong for watching your own change land: for
 that, the number is `bench run`'s.
+
+#### The whole FAN, and any candidate's source: `pnpm bench fan`
+
+```sh
+pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force]
+```
+
+The third vehicle, and the only one that answers **"which spellings did asmlift consider"** rather
+than "what did this row score". It is not a script and writes no directory: it re-enters the
+harness's own ranked call for one row, with the row's own target object, prototypes, context
+compile and vendored symbol map, assembled by the single function `bench run` assembles them with
+(`eval/asmlift.ts`'s `rankOptionsFor`). So the checkout question this whole file is about does not
+arise — there is no second tree to be in.
+
+It prints the `[score]` table this file's comparison recipe is written for, then `[dropped]`,
+`[withheld]`, the `[declared]` block and `[ranked]` — all through the CLI's own renderers, the same
+functions `pnpm asmlift` prints them with, so the `[ranked]` line here carries the `synthesized`
+count and the `[asmlift source <sha>]` stamp this file tells you to quote. Measured on
+`kleod:StrCpy:agbcc`: `unsigned: 5/8` in **9 s**, the published row exactly, and `--show best`
+printed the published source byte-for-byte.
+
+Two things it can do that nothing else can:
+
+- **`--show <label>` prints a NON-WINNING candidate's source.** `results.json` carries the winner's
+  C and no other's, while `RankedResult.candidates` — every other spelling, each with its own
+  `source` — is computed on every run and discarded. "The near-miss spelling is right and only
+  loses on X" is a thing to read here rather than infer.
+- **`--enumerate` lists the fan without compiling anything**, and still serves `--show <label>`
+  (not `--show best` — nothing is scored, so there is no winner to name, and that combination is
+  refused rather than answered with whatever enumeration emitted first). That is the cheap
+  configuration-identification this file's "Getting the fan alone is cheap" section describes,
+  without killing the run after its first `[progress]` line. **Cheap relative to compiling, not
+  cheap absolutely**: `kleod:CountCollectedGems:agbcc`'s 5,952 labels take 50 s wall with the
+  target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
+  to LIST. Read a long enumeration as a big fan, not as a hang.
+
+  It also prints `[lever] <label> threw (no candidate from it)`, a channel `bench run` supplies no
+  sink for at all — so a whole pre-fan half of a row's fan can vanish from a benchmark run with
+  nothing printed, and here it does not.
+
+**A fan over 2,000 candidates is refused, not scored** (`--force` overrides), and the refusal
+prices the run it is refusing from the row's own count AND ITS OWN TIER. Scoring is a compile each,
+and the two tiers do not compile the same thing: `synthetic:sizebound:agbcc`'s 800 take **48 s
+cold** (10 s warm, 60 ms each), while `kleod:CountCollectedGems:agbcc`'s 5,952 took **518 s and
+483 s** on two cold runs (85 ms each, both reproducing the published `171/387`) — a real candidate
+escalates through up to three preludes in `compile/real.ts`, a synthetic one through a single small
+prelude; one rate for both under-prices the real tier by ~35%, on the row the refusal's own example
+is. So the limit is ~2 minutes of synthetic scoring, `CountCollectedGems` is ~8 minutes — a
+`--force` worth typing, not an hour — and `LoadBGTilemapData`'s 225,792 is a five-hour run;
+`--enumerate` is the answer at THAT size, and note the guard is checked after the pre-count
+enumeration, so the refusal itself pays the enumeration price above.
+
+**A row with no fan says so, and exits 2.** Neither of the ranked path's two calls can be assumed
+to return: on a `declined` row (233 of 1,035) enumeration THROWS on the same gap the published row
+annotates — `enumerateCandidates` has no annotate mode — and on a `noncompile` row every candidate
+is refused, so there is no ranking to print. Both are answered with `asmlift: [fan] no fan …` and
+exit 2, and the noncompile case prints the whole `[dropped]`/`[withheld]` list first, because on
+that row the refusals ARE the fan.
+
+**Which of the two you are looking at is decided by the ERROR, never by which call site caught it**,
+so `--force` does not change the answer — it skips the pre-count enumeration, and a declined row's
+lift error then arrives at the scoring catch, where a call-site guess would report it as
+`noncompile` under no `[dropped]` lines at all. `NoScorableCandidateError` (nothing SCORED) and
+`NoSpellableCandidateError` (nothing SPELLED — the backend refused every tree) are separate classes
+for this reason, and a throw that is neither of them nor a decline is reported as a HARNESS defect
+with its stack rather than dressed up as a fact about the row.
+
+What it is NOT: a reproduction. It runs asmlift in-process from this repo's sources, so it proves
+nothing about the published script, and `pnpm bench fidelity` still re-runs the scripts rather than
+this. When you need to quote a number a reader can re-derive from a published artifact, that is
+`bench repro`; when you need to know what asmlift thought about, it is this.
 
 ### What this vehicle does NOT reproduce: your CHANGED asmlift
 

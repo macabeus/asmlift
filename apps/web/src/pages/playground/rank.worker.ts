@@ -4,6 +4,8 @@
 // RankRequest and receives a RankResponse. The H1 stale-guard (discarding a superseded response)
 // is enforced by the MAIN thread against the echoed `reqId` — the worker just processes each
 // request and echoes its id back.
+import { NoScorableCandidateError } from '@asmlift/core/rank';
+
 import { throttleProgress, whileCurrent } from './rank-progress';
 import {
   type RankInbound,
@@ -55,11 +57,30 @@ self.onmessage = async (e: MessageEvent<RankInbound>) => {
     const result = await rankCandidatesInBrowser(name, asm, target, symbols, post);
     postMessage({ kind: 'result', reqId, ok: true, result } satisfies RankResponse);
   } catch (err) {
+    // ONLY A STRING CROSSES THIS BOUNDARY, so the refusal lists a total failure carries
+    // (`NoScorableCandidateError.dropped`/`.withheld` — on that row they ARE the whole fan) die
+    // here unless they are folded INTO the string. A `structuredClone` of the error drops the
+    // subclass fields anyway, and a fan-sized list is not a toast; the counts plus the first few
+    // labels are what turns "ranking unavailable" from a dead end into a place to look.
     postMessage({
       kind: 'result',
       reqId,
       ok: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: err instanceof Error ? `${err.message}${refusalSummary(err)}` : String(err),
     } satisfies RankResponse);
   }
 };
+
+/** The counts and a first few labels off a total refusal, appended to the message because the
+ *  message is all the worker protocol carries. Empty for every other error. */
+function refusalSummary(err: Error): string {
+  if (!(err instanceof NoScorableCandidateError)) {
+    return '';
+  }
+  const labels = [...err.dropped.map((d) => d.label), ...err.withheld.map((w) => w.label)];
+  const shown = labels.slice(0, 3).join(', ');
+  return (
+    ` (${err.dropped.length} dropped, ${err.withheld.length} withheld` +
+    `${shown === '' ? '' : `: ${shown}${labels.length > 3 ? `, +${labels.length - 3} more` : ''}`})`
+  );
+}

@@ -13,16 +13,11 @@
 // this file returns and a status the README documents cannot drift apart.
 import { cBackend } from '@asmlift/core/backend/c';
 import { pascalBackend } from '@asmlift/core/backend/pascal';
-import { ContractError } from '@asmlift/core/contracts';
 import { detectName } from '@asmlift/core/detect';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
-import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
-import { VerifyError } from '@asmlift/core/ir/verify';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
-import { RaiseUnsupportedError } from '@asmlift/core/raise/errors';
-import { StructureError } from '@asmlift/core/structure/structure';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -40,7 +35,8 @@ import {
 } from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
-import { renderDeclarations } from './declare';
+import { declaredBlock, indentedDeclarations } from './declare';
+import { isDecline } from './decline';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
@@ -48,6 +44,14 @@ import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 // through a dynamic `import()` on the ranked path alone so a plain decompile stays toolchain-light.
 // An `import type` is erased outright and adds no runtime edge.
 import type { RankedResult } from './rank';
+// Re-exported rather than defined here: `scoreOf` is the one renderer for every score any asmlift
+// command prints, and the benchmark's `bench fan` prints the same four lines. A second consumer
+// must be able to reach it without importing this argv entry point — and `./score` is no home for
+// it either, because that module pulls objdiff-wasm and the note above `./rank` is about exactly
+// that edge.
+import { rankedSummaryLine, scoreOf } from './score-format';
+
+export { scoreOf } from './score-format';
 
 /** Every status this CLI returns, named. `CACHE_MISMATCH_EXIT` (3) is candcache.ts's and is
  *  imported rather than restated, because the code that DETECTS a mismatch is what should own the
@@ -88,15 +92,6 @@ const candCacheLine = (): string => {
         `asmlift: [candcache] ${cacheMismatches()} STORED ANSWER(S) DISAGREED WITH A FRESH COMPILE — ` +
         `the store is serving objects this toolchain no longer produces. See ${MISMATCH_LOG}\n`;
 };
-
-/** A declaration block as stderr lines: rendered, blank lines dropped, each one under the
- *  `asmlift:` prefix that separates this tool's output from the compiler's in a shared log. */
-const indentedDeclarations = (refs: Parameters<typeof renderDeclarations>[0]): string =>
-  renderDeclarations(refs)
-    .split('\n')
-    .filter((l) => l.trim() !== '')
-    .map((l) => `asmlift:   ${l}\n`)
-    .join('');
 
 export { detectName };
 
@@ -163,37 +158,10 @@ Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 3 the candidate-object 
             bytes a fresh compile disagrees with · 64 usage · 66 unreadable input.
 Full reference (flags, decomp.yaml integration): the @asmlift/cli README.`;
 
-// A principled decline (the pipeline refusing to guess) vs an internal error (a bug) must be
-// distinguishable at the CLI surface — both exit 1, but the prefix names which one happened.
-const DECLINE_ERRORS = [FrontendUnsupportedError, RaiseUnsupportedError, StructureError, ContractError, VerifyError];
-const isDecline = (e: unknown) => DECLINE_ERRORS.some((c) => e instanceof c);
-
 // The object-input seam, injectable so the offline CLI tests can fake the objdump spawns.
 export interface ObjInput {
   disasm: typeof disasmObject;
   asmData: typeof asmDataForObject;
-}
-
-/** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
- *
- *  THE ONE RENDERER FOR EVERY SCORE THIS CLI PRINTS: the `[score]` table, the `[ranked]` line's
- *  `best …`, the `[withheld]` line and the `[progress]` line. A reader comparing two runs cannot
- *  be asked to know which lines carry a denominator.
- *
- *  `rows` is objdiff's total row count for THIS candidate's alignment against the target, so it is
- *  a property of the candidate and not of the target: a different spelling aligns differently and
- *  is scored on a different scale. Two runs' `[score]` lines are the project's standard
- *  before/after comparison (docs/ranked-repro.md), and printing the numerator alone makes that
- *  comparison read as a subtraction on a fixed scale. It is not one — `kleod:CountCollectedGems`
- *  went 290/404 → 171/387 across two committed artifacts, 17 points of which were the scale, and
- *  an attribution round was spent explaining the difference.
- *
- *  Both fields are OPTIONAL, and each absence means one thing. No `rows`: the scorer that produced
- *  this score supplied none (core rank.ts's `WithheldCandidate` types it optional for exactly
- *  that), so the numerator prints alone rather than against an invented denominator — never a `0`,
- *  which would read as a real scale. No `match`: the caller does not know, so nothing is claimed. */
-export function scoreOf(s: { score: number; rows?: number; match?: boolean }): string {
-  return `${s.score}${s.rows === undefined ? '' : `/${s.rows}`}${s.match === true ? ' (match)' : ''}`;
 }
 
 export interface CliResult {
@@ -250,13 +218,7 @@ function rankedStderr(a: {
   // COUNT is zero there whatever the fan named.
   const assumed = (ranked.best.symbolRefs ?? []).filter((r) => r.synthesized);
   const synthesized = a.selfDeclared ? assumed.length : 0;
-  const declared =
-    synthesized > 0
-      ? `asmlift: [declared] ${synthesized} declaration(s) synthesized from the target asm — no symbol ` +
-        `map knows these names, so the score is about this block plus the source; check it against your ` +
-        `headers:\n` +
-        indentedDeclarations(assumed)
-      : '';
+  const declared = synthesized > 0 ? declaredBlock(assumed) : '';
   // The counts docs/ranked-repro.md requires beside every ranked score, as ONE line that is
   // ALWAYS PRESENT. AN ABSENT LINE IS NOT EVIDENCE: a clean run, a truncated log and a killed
   // run are indistinguishable to a reader counting `[dropped]` lines that are not there, and
@@ -270,11 +232,18 @@ function rankedStderr(a: {
   // indistinguishable from a clean one (provenance.ts). On the same line as the score
   // deliberately: the doc tells readers to quote this one line, so a stamp anywhere else is a
   // stamp nobody pastes.
-  const summary =
-    `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
-    `${ranked.withheld.length} withheld, ${synthesized} synthesized, ` +
-    `best ${ranked.best.label}: ${scoreOf(ranked.best.score)} ` +
-    `[${a.stamp}]\n`;
+  //
+  // SPELLED IN score-format.ts, not here: the benchmark's `bench fan` prints this same line for
+  // one row, and a second hand-spelling of it had already lost `synthesized` and the stamp — the
+  // two fields that are claims rather than counts.
+  const summary = `${rankedSummaryLine({
+    scored: ranked.candidates.length,
+    dropped: ranked.dropped.length,
+    withheld: ranked.withheld.length,
+    synthesized,
+    best: ranked.best,
+    stamp: a.stamp,
+  })}\n`;
   // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
   // tail stay adjacent.
   return (

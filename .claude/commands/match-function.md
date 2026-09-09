@@ -73,6 +73,41 @@ them are not "add a feature":
   not use (the `old_agbcc` class of bug). Then the fix is in the manifest/toolchain, not the
   decompiler, and it may *remove* the row rather than match it.
 
+**"Missing capability" vs "missing lever" is decided by the FAN, and the harness computes it for
+you.** `pnpm bench fan <sym|row-id>` prints every spelling asmlift considered for that row — each
+one's label, its score against its own denominator, the ones the scorer dropped, the ones withheld
+— in the harness's own configuration (the row's target object, prototypes, context compile and
+symbol map), so it is comparable with the published row rather than with a checkout. Two flags:
+
+- `--show <label>` prints that candidate's SOURCE. Nothing else can: `results.json` carries the
+  winner's C and no other's, so "the near-miss spelling is right and only loses on X" is a claim
+  you can now read instead of infer. `--show best` is the winner (on the SCORED path only — under
+  `--enumerate` nothing has been scored, so `--enumerate --show best` is refused rather than
+  answered with whatever came out of the enumerator first). A DROPPED candidate's source — usually
+  the one worth reading — is reachable only as `--enumerate --show <label>`, and the command says
+  so when you ask for it the other way.
+- `--enumerate` lists the fan without compiling anything and still serves `--show <label>`. Use it
+  to answer "did my new lever produce a candidate at all" — a label that is absent was never
+  enumerated, and a lever that THREW prints as `[lever] … threw (no candidate from it)`, which a
+  `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely:
+  ~120 candidates/s measured, so a 225,792-candidate fan is ~30 minutes to list. A long
+  enumeration is a big fan, not a hang.
+
+A fan over 2,000 candidates is refused rather than scored (`--force` overrides): that is a compile
+each, and the refusal quotes the row's own price at its own TIER'S measured rate — 60 ms/candidate
+synthetic, 85 ms real, because a real candidate escalates through up to three preludes where a
+synthetic one is a single small one. So `kleod:CountCollectedGems:agbcc`'s 5,952 is ~8 minutes
+(measured twice at 8.0 and 8.6; worth `--force`), and `LoadBGTilemapData`'s 225,792 is over five
+hours (`--enumerate` is the answer there).
+
+**A declined or noncompile row has NO fan, and the command says so** (`asmlift: [fan] no fan …`,
+exit 2) rather than crashing: enumeration throws on the same gap the row declines on, and on a
+noncompile row every candidate was refused — there the `[dropped]`/`[withheld]` lines printed above
+the message ARE the fan, and they are the row's whole diagnostic. Which of the two you are looking
+at is decided by the ERROR CLASS, not by the flags, so `--force` does not change the answer; a
+throw that is neither is named a HARNESS defect and printed with its stack, and must never be read
+as this row's outcome.
+
 Write the classification down with the evidence that decided it. If it is one of the last two, go
 straight to Phase 7 and report — that is a successful outcome of this command, not a failure.
 

@@ -65,7 +65,13 @@ const declarationsOf = (cand: Candidate): string | undefined =>
 
 // ONE enumeration for both drivers below: they must rank the same candidate set, or the pooled
 // run would be answering a different question than the serial one.
-const enumerate = (name: string, asm: string, target: TargetDescription, opts: RankOptions): Candidate[] =>
+//
+// EXPORTED because there is now a third caller that must not drift from those two: `bench fan
+// --enumerate` lists a row's fan without compiling anything, and a fan listed by a second mapping
+// of `RankOptions` onto `enumerateCandidates` (forgetting `backend`, say, or `symbols`) would be a
+// different fan wearing the same name — which is the failure docs/ranked-repro.md is entirely
+// about. One function, three callers.
+export const enumerateRanked = (name: string, asm: string, target: TargetDescription, opts: RankOptions): Candidate[] =>
   enumerateCandidates(name, asm, target, {
     patterns: opts.patterns,
     backend: opts.backend ?? cBackend,
@@ -108,7 +114,7 @@ export function decompileRanked(
   opts: RankOptions = {},
 ): RankedResult {
   const backend = opts.backend ?? cBackend;
-  const candidates = timed(opts.clock, 'enumerate', () => enumerate(name, asm, target, opts));
+  const candidates = timed(opts.clock, 'enumerate', () => enumerateRanked(name, asm, target, opts));
   // The compile happens INSIDE scoreSource here, so it is charged from the compiler itself and the
   // `score` frame around the call keeps the rest. The pooled driver awaits the two separately.
   const compile: SyncCompiler | undefined =
@@ -165,7 +171,7 @@ export async function decompileRankedParallel(
   if (clock) {
     clock.workers = Math.max(1, opts.jobs);
   }
-  const candidates = timed(clock, 'enumerate', () => enumerate(name, asm, target, opts));
+  const candidates = timed(clock, 'enumerate', () => enumerateRanked(name, asm, target, opts));
   // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
   const scored = new Map<string, MatchScore | Error>();
   let next = 0;

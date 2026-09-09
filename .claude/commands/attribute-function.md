@@ -39,7 +39,28 @@ one) is an unfinished finding.
    the number every later claim is measured against** — it carries `best …` and the source sha —
    and it goes into your report verbatim, **naming the vehicle**. Never a `[score] … | tail -1`:
    that table is sorted best-first, so the last line is the WORST candidate.
-3. State the baseline in your first user-facing message.
+3. **Read the FAN before you name a missing capability**: `pnpm bench fan $1` prints every
+   candidate spelling the harness ranked for this row — label, score over its own denominator,
+   dropped, withheld — and `--show <label>` prints any one of their SOURCES, which `results.json`
+   does not carry for a non-winner. An attribution that says "asmlift never considers X" is a claim
+   about this list, so read it. Its `[ranked]` line carries the same `synthesized` count and
+   `[asmlift source <sha>]` stamp as the vehicles above, so it is quotable in the same way.
+   `--enumerate` lists the same candidates' LABELS without compiling anything — no scores, because
+   nothing was compiled (~120 candidates/s, so a huge fan takes minutes to list: that is a big fan,
+   not a hang). It still serves `--show <label>`, though not `--show best`: nothing has been
+   scored, so there is no winner to name. A fan over 2,000 is
+   refused unless you pass `--force`, and the refusal quotes what `--force` would cost on THIS row.
+   Unlike the two vehicles above, this one runs in the harness's own configuration by construction
+   — it is the same call `bench run` makes for the row.
+   **A declined row usually has no fan at all** — and that is a finding, not a broken command:
+   enumeration throws on the very gap the row declines on (`enumerateCandidates` has no annotate
+   mode), so you get `asmlift: [fan] no fan for <row>: <the gap>` followed by "the gap named above
+   is the one this row DECLINES on", and exit 2 — which names your missing capability directly.
+   That sentence is chosen by the ERROR, so it is the same with or without `--force`. On a
+   `noncompile` row the `[dropped]`/`[withheld]` lines are printed in full and they are the row's
+   entire fan. Anything else that throws is reported as a HARNESS defect, with its stack — read
+   that as the tool being broken, never as this row's outcome.
+4. State the baseline in your first user-facing message.
 
 ## The denominator moves — so a residual is never a "partition"
 
