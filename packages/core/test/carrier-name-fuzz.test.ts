@@ -40,37 +40,20 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
   },
 ];
 
-// SIZED, not maximal, but the size is now a statement about the sweep rather than about the
-// runner. This stood at 250 for two days: at 4,000 this file plus the nested arm next door ended
-// two of three `test:offline` runs on `2696 passed` plus an unhandled `[vitest-worker]: Timeout
-// calling "onTaskUpdate"`, which fails the job. That was never a CPU ceiling — the birpc reply had
-// already arrived, and its 60 s timer matured first only because the sweep never yielded.
-// `breathe()` below fixed the cause, so the number it forced is no longer owed to anyone.
+// SIZED, not maximal: 4,000 is the size the sibling fuzz's arms run, and the cost of matching it is
+// single-digit seconds of CPU against `test:offline`'s ~102 s. Arm A is the expensive half — it
+// structures every generated function TWICE, at three depths; arm B is near-flat in SEEDS, since it
+// stops at the first seed that proves a gate load-bearing.
 //
-// The 30% of `test:offline` that cut was justified by (102.9 -> 134.2 s, on the two-core hosted
-// runner) was the price of these two arms EXISTING, not of their size. What the seed counts
-// themselves cost, re-measured on a 10-core laptop under load: this file alone 2.6 -> 6.2 s of user
-// CPU (+3.6), this file plus the nested arm next door 4.0 -> 12.5 s (+8.5). The same pair came out
-// at +6.6 and +12.9 on the runner, so quote a number with the machine attached — the part that does
-// not move between boxes is the shape: single-digit seconds against a ~102 s baseline, not 30%.
+// WHAT THE SIZE BUYS HERE IS ARM A's BREADTH, NOT GATE COVERAGE. Measured: cut to 250 all four
+// tests still pass, because every sound gate keeps a witness under it — `sibling-param`'s first
+// ACYCLIC witness is seed 289, but depth 1's seed 52 proves it anyway; `carrier-live` lands at seed
+// 6 and `re-derives` at 22. Gate coverage is what a small size costs NEXT DOOR: `namecoalesce-fuzz`
+// goes red at 250, its `sibling-params` having no witness before seed 299 at any depth.
 //
-// Back to 4,000, the size the two arms that predate this file have always run. Arm A is the
-// expensive half — it structures every generated function TWICE, three depths — and 16x of it
-// costs this file a few seconds; arm B is near-flat in SEEDS, since it stops at the first seed that
-// proves a gate load-bearing.
-//
-// WHAT 4,000 BUYS HERE IS ARM A's BREADTH, NOT GATE COVERAGE — worth being exact about, because the
-// two live in different files. Measured: with this file alone cut to 250, all four of its tests
-// still pass. Every sound gate here is still proven — `sibling-param`'s first ACYCLIC witness is
-// seed 289, past where this sat, but depth 1's seed 52 proves it anyway; `carrier-live` lands at
-// seed 6 and `re-derives` at 22. The gate coverage 250 actually costs is NEXT DOOR, and it is a
-// different gate with a nearby number: `namecoalesce-fuzz`'s ablating arm goes RED at 250, because
-// its own `sibling-params` has no witness before seed 299 at any depth.
-//
-// RAISING THIS DOES NOT REACH `loop-escape`, and never could: that finding belongs to the
-// `namecoalesce` tables, and the arm that would ablate it filters on `sound`, which the table
-// denies that gate. Its two witnesses are frozen as literal IR in `namecoalesce.test.ts` instead.
-// The barrier is a predicate, not a range.
+// RAISING THIS DOES NOT REACH `namecoalesce`'s `loop-escape`, and never could — the arm that would
+// ablate it filters on `sound`, which that table denies the gate. The barrier is a predicate, not a
+// range, and its witnesses are frozen as IR in `namecoalesce.test.ts` instead.
 const SEEDS = 4000;
 
 /** Both spellings of one seed, or null when the shape is not one this can judge. */

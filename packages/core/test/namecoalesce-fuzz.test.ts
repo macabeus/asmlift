@@ -64,14 +64,9 @@ function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[
   }
 }
 
-// All three arms sweep the same range. The nested one — whose functions are the largest the
-// generator makes — spent two days at 250, because adding it at 4,000 alongside
-// `carrier-name-fuzz` produced a fully green `test:offline` that still failed on an unhandled
-// `Timeout calling "onTaskUpdate"`. That was a sweep not yielding to the reporter, not a CPU
-// ceiling, and #171 fixed it with the `breathe()` call below; the size it forced went back up with
-// the sibling's. The table is two columns because all three arms take `SEEDS`: a per-arm size was
-// the exception this restore deleted, and a third column re-spelling one constant would be a knob
-// claiming an asymmetry the file no longer has.
+// All three arms sweep `SEEDS`, the nested one included even though its functions are the largest
+// the generator makes: it costs a couple of seconds, and a per-arm size would be a knob claiming an
+// asymmetry that is not there.
 describe.each([
   ['acyclic', 0],
   ['loop-bearing', 1],
@@ -92,15 +87,12 @@ describe.each([
   });
 });
 
-// THE ONE GATE IN THE TABLE THIS FILE CANNOT JUDGE AT ANY SIZE. Arm B below iterates
-// `NAME_COALESCE_GATES.filter((x) => x.sound)` and the table declares `loop-escape` `sound: false`,
-// so no arm here has ever ablated it and raising `SEEDS` never will — the barrier is a PREDICATE,
-// not a range. (It is also out of range: measured, the only two witnesses in 1..7000 are 5104 and
-// 6437, both at depth 2.) Its evidence is two of those functions FROZEN AS IR in
-// `namecoalesce.test.ts`, asserted two-sided there — a seed replayed here would break on any edit
-// to `generateSsaFn` and would then read as the gate being inert. To re-hunt: drop the gate by
-// name, depth 2, at least 6,437 seeds. Why the flag stays `false` is argued once, in
-// `namecoalesce.ts`'s header, where the flag is set.
+// `loop-escape` IS LOAD-BEARING AND NO SIZE HERE SHOWS IT. Arm B below iterates
+// `NAME_COALESCE_GATES.filter((x) => x.sound)`, and that gate is `sound: false` — as is `param`,
+// and `type` is exempted below — so raising `SEEDS` never reaches it. Unlike the other two, its
+// ablation changes what a function computes; the witnesses are frozen as IR in
+// `namecoalesce.test.ts`, which also carries how to re-hunt them. Why the flag stays `false` is
+// argued in `namecoalesce.ts`'s header, where it is set.
 
 // The one sound rule this generator cannot reach, and why. `type` needs two names whose
 // DECLARATIONS disagree, which takes a value pool of more than one width AND a mismatch that

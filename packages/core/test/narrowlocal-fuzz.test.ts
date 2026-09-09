@@ -32,10 +32,9 @@ import { BREATHE_EVERY, breathe, mulberry32 } from './helpers';
 // CORPUS-SIZED WORK IN A PARALLEL WORKER POOL, budgeted per FILE — the idiom `carrier-name-fuzz`,
 // `namecoalesce-fuzz`, `locals-written` and `structure-purity` already use. Vitest's 5 s default is
 // a LOAD sensitivity here, not a budget: arm A structures and interprets two trees per judged
-// function and the diamond tail multiplies that twentyfold — 2.2 s solo, 9.0 s worst measured
-// inside a full `pnpm test:offline`, where this file records a contention factor of 3.4x. 60 s is a
-// 6.7x margin on that worst case, and a real hang is still loud, just 60 s later. The one arm that
-// needs more says so at its own call, with its own reason.
+// function and the diamond tail multiplies that twentyfold, ~2.6 s solo against the 3.4x contention
+// this file measures under a full `pnpm test:offline`. A real hang is still loud, just 60 s later.
+// The one arm that needs more says so at its own call, with its own reason.
 vi.setConfig({ testTimeout: 60_000 });
 
 /** A random SSA function whose block parameters are often EXTENDED at their reads — the shape this
