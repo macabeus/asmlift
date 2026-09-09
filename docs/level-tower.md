@@ -581,7 +581,12 @@ none of them is a defect:
   because they are properties of the whole edge rather than of a candidate, and the table's own doc
   comment says both that they exist and where they live (`sinkablePreUpdateSlots`, "with the same
   refusal discipline"). That comment is the whole obligation. A partial table with the residue named
-  is finished work; a partial table that reads as a complete one is the defect.
+  is finished work; a partial table that reads as a complete one is the defect. Note what that
+  exclusion is NOT: both rules read `dest`, `names`, `exitArgs` and `sub` at one program point
+  (`hazards.ts:485-488`), so an edge context is perfectly preparable and the next bullet's bar does
+  not touch them. They are outside `PREUPDATE_SINK_GATES` because a `Gate<Ctx>` is per-candidate and
+  these would need a SECOND table over a different `Ctx` — which the paragraph below says to build
+  when a round has had to instrument them, and not before.
 - **Not tabled, and the bar is structural rather than economic.** `pointeeElement` in
   [`structure/structure.ts`](../packages/core/src/structure/structure.ts) lists its refusals in
   prose and states that it is "NOT a `Gate` table … unlike `FRESH_MERGE_GATES` and
@@ -603,16 +608,36 @@ none of them is a defect:
 removes is the edit-instrument-revert loop — patch a `return null` to log, re-run, revert — so the
 trigger to table a pass is that someone has already paid that loop on it, not that the pass has many
 refusals. `CARRIER_NAME_GATES` is the model: it was grafted by the round that needed a rejection
-reason out of `canTakeName` and had resorted to a `globalThis` hack to get one, and it shipped as
-that round's own remediation. Refusal count predicts none of this — `structure/switch-recover.ts`
-carries 44 refusal sites and cost a retrospective-measured 6.5 instrument-minutes across seven
-rounds, while `raise/const.ts` carries four and cost 38.6 — and neither does file size. The same
-retrospective priced the whole edit-and-revert population of those rounds at ~69 minutes against
-~764 minutes of measurement runs in the same spans, which a table removes none of: you still run the
-bench to get the counts. **So this section licenses converting the passes whose refusals a round has
-actually had to instrument, one at a time, each naming its residue. It does not license a sweep**,
-and a proposal to table N passes at once should be read as a proposal to table the one or two of them
-with measured instrument time.
+reason out of `canTakeName`, and it shipped as that round's own remediation — #164 (`428f5706`),
+whose commit body records that the rules "were four `if`s inside a 5000-line function" and that
+"naming which one fires on a given row took an instrumented patch and a revert".
+
+There is exactly one other admission, and it is the mirror of that one — read it together with **A
+GATE CAN ALSO BE STARVED FROM ABOVE** below, which is the incident it comes from. Nobody can have
+paid instrument minutes on a rule nothing reaches, so the trigger above would make a starved gate
+permanently ineligible; but a table is what settles starvation, because it reports WHICH gate refused
+each candidate and a rule that never appears is a rule with no input. **Instrument time is the
+trigger for refusals that fire; a refusal suspected of never firing at all is the other admission,
+and the table is how you prove it.** Neither admission is "this file has a lot of `if`s".
+
+Refusal count predicts none of it, on any way of counting: `structure/switch-recover.ts` has 44
+refusal-shaped exits (`grep -cE 'return (null|false)\b'`) and cost 6.5 instrument-minutes across
+seven rounds, while `raise/const.ts` has **none** by that grep, four early exits in all, and exactly
+ONE refusal by the rule above — the other three are the enumerator, and the file's own comment marks
+the one ("THE REFUSAL: this shape is not a literal being materialised") — and it cost 38.6 minutes.
+Nor does file size. Those minutes are from a 2026-09 retrospective over the CountCollectedGems
+rounds, whose transcripts are not in this repo — treat them as an order of magnitude you cannot
+re-run, not as a measurement you can cite back. The same retrospective priced the whole
+edit-and-revert population of those rounds at ~69 minutes against ~764 minutes of measurement runs in
+the same spans, which a table removes none of: you still run the bench to get the counts.
+
+**So this section licenses converting the passes whose refusals a round has actually had to
+instrument, one at a time, each naming its residue. It does not license a sweep**, and a proposal to
+table N passes at once should be read as a proposal to table the one or two of them with measured
+instrument time. In that retrospective those are `l3/unmerge.ts` (47.7 min) and `raise/const.ts`
+(38.6) — the two the reading rule selects, and the answer to "which pass next" for as long as nobody
+measures a third. `raise/magicdiv.ts` — 18 refusal-shaped exits by that same grep, and no instrument
+event anyone recorded — is the shape a sweep picks first and this rule declines.
 
 One corollary, same economy: a refusal already known and CONTAINED is recorded beside the gate
 together with the argument that contains it, so the next round cites it instead of re-deriving it.
@@ -754,8 +779,8 @@ followed the second inhabitant, never preceded it.
   guards; one that declares a gate sound now owes a differential test, and the contract enforces
   the debt. Convert the REFUSALS a round has had to instrument, not the file: a partial table whose
   residue is named is the normal shipped shape here, and a pass whose refusals cannot be judged
-  against one prepared context is not a candidate at all — see "the unit of that decision is the
-  refusal, not the pass" above, which is this bullet's scope statement.
+  against one prepared context is not a candidate at all. That passage —
+  `grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md` — is this bullet's scope statement.
 - Add a **new op / representation** only when a capability genuinely cannot be expressed in the
   current one _and_ the differ can prove the result matches. Constant-offset access did not clear
   that bar; variable indexing did. If the corpus stays leaf/arithmetic-heavy, the tower may never
