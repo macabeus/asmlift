@@ -169,15 +169,19 @@ test('--jobs must be a positive integer', async () => {
   }
 });
 
-// docs/ranked-repro.md is the repo's ONE canonical ranked command, and the two tests above are
-// what its `--proto` spelling has to agree with. Nothing else re-runs the page, so a claim about
-// the flag can sit there being false for as long as nobody types it.
+// docs/ranked-repro.md documents TWO vehicles, and this pins the first one: the project-checkout
+// command, for a target that is not a benchmark row. Nothing else re-runs that page, so a claim
+// about the flag can sit there being false for as long as nobody types it.
 // The command BLOCK is checked, not the prose around it: the block is what gets copied. A page
 // that quotes the inline form only to call it broken passes a prose-wide check.
-// Requiring the block to be inline is deliberate, not incidental — a path means a scratch file,
-// and scratch files carrying different tables for "the canonical run" is the drift the page opens
-// by describing.
-test("docs/ranked-repro.md's canonical command spells --proto a way the CLI accepts", async () => {
+// Requiring THIS block's `--proto` to be inline is deliberate, not incidental — the checkout
+// command is hand-composed per run, and a path in it means a scratch file, so scratch files
+// carrying different tables for "the run I did" is the drift that page opens by describing. The
+// OTHER vehicle spells `--proto` as a path on purpose: `bench repro` generates it into a
+// `proto.json` and nobody hand-edits it. That vehicle is pinned as BEHAVIOUR, in
+// `apps/benchmark/test/repro.test.ts`, rather than by a regex over rendered Markdown — which is
+// what this test can only be, and the reason it must never be the whole guard on the page.
+test("docs/ranked-repro.md's project-checkout command spells --proto a way the CLI accepts", async () => {
   const doc = readFileSync(join(import.meta.dirname, '../../../../docs/ranked-repro.md'), 'utf8');
   const block = doc.match(/```sh\n([\s\S]*?)```/)?.[1];
   const spelled = block?.match(/--proto\s+(\S+)/)?.[1];

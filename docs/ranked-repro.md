@@ -57,13 +57,15 @@ The harness never reads the project's `.s` and never runs the project's `decomp.
 
 Measured on `kleod:StrCpy:agbcc` — one of the smallest real agbcc rows, ten lines of Thumb (11 of
 the 126 real agbcc rows have a shorter `targetAsm`) — one asmlift commit (`3a06c74`). A run is
-seconds: 5 s warm and ~12 s with a cold `target.o` when re-measured for this file, ~25 s on a box
-running other rounds. The ratio is the machine's; the point is that it is not the LBG run.
+seconds: 5-10 s warm and ~12 s with a cold `target.o` across three re-measurements for this file,
+~25 s on a box running other rounds. The ratio is the machine's; the point is that it is not the LBG
+run. The one exception is minutes, not seconds, and it is step 1's: an unbuilt sidecar ELF makes
+`bench target` run `make asmlift-elf` in your checkout (below).
 
 | what was run                                                                                                           |  best `[score]` | the source it printed               |
 | ---------------------------------------------------------------------------------------------------------------------- | --------------: | ----------------------------------- |
 | the command above: `asm/matchings/system/StrCpy.s`, the checkout's `decomp.yaml`, `--score-against build/src/system.o` | `unsigned: 6/9` | `u8 *StrCpy(…) { … return v2; }`    |
-| `pnpm bench target` + the row's own `targetAsm`                                                                        | `unsigned: 5/8` | byte-identical to the published row |
+| `pnpm bench repro kleod:StrCpy:agbcc --run` (the row's own script)                                                     | `unsigned: 5/8` | byte-identical to the published row |
 | the published row, `apps/benchmark/results/results.json`                                                               |           `5/8` | —                                   |
 
 Different score, a different denominator, and a different C spelling — on a ten-line function.
@@ -73,30 +75,40 @@ divergence was first found the expensive way on `LoadBGTilemapData`, where the c
 on a `/raw-globals` winner over a fan of 1440 and the harness row was a different number again —
 that one is a prior round's finding, not re-measured here.
 
-### The row's own script is the vehicle; `pnpm bench target` is its step 1
+### The row's own script is the vehicle: `pnpm bench repro`
 
-The thing that reproduces a row end-to-end is **the script the row already carries**. `bench target`
-is one of its steps (`cli.ts` calls it the "repro-script pre-step"); run alone it leaves you holding
-a `target.o` and no input `.s`, prints no `[score]`, and is a third number away from the row. What
-CI re-runs for every function is the script, not the pre-step. So extract the script first:
+The thing that reproduces a row end-to-end is **the script the row already carries**, and one
+command hands it to you with this machine's paths already in it:
 
 ```sh
-cd <asmlift repo root>          # the `require` below is cwd-relative
-node -e 'const {results}=require("./apps/benchmark/results/results.json");
-process.stdout.write(results.find(r=>r.id===process.argv[1]).scripts.asmlift)' \
-  kleod:StrCpy:agbcc > repro.sh
-# set ASMLIFT_PATH (and PROJECT_PATH, if the script asks for it) at the top, then:
-#   cd <repo> && pnpm --filter @asmlift/cli build && pnpm install   # see below — the bin
-bash repro.sh > out.c 2> out.err
-grep -n '^WARN' out.err        # FIRST — a map-less run is silent apart from this
-grep -F '[score]' out.err | tail -1
+pnpm bench repro kleod:StrCpy:agbcc --run
 ```
 
-That script materializes the inputs with `bench target`, embeds the row's `targetAsm` verbatim, and
-passes the row's `--proto`/`--asm-data`. Run on `kleod:StrCpy:agbcc` it printed
-`best unsigned: 5/8` and a source byte-identical to the published row's. **A non-matching row's
-script exits 1** — `--score-against` exits 0 only on byte-exact — so `set -euo pipefail` makes the
-last line the failure; that is the row reproducing, not the script breaking.
+It writes the row's `scripts.asmlift` into `.local/repro/<row>/` (gitignored, deliberately — see
+below), fills in `ASMLIFT_PATH` and the row's own project checkout, runs it with stdout to `out.c`
+and stderr to `out.err`, and reports **the `[ranked]` line**:
+
+```
+repro: kleod:GetEntityLookupData:agbcc — nonmatch 4/14 as published
+repro: symbol map from …/apps/benchmark/checkouts/klonoa-empire-of-dreams
+asmlift: [ranked] 4 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best unsigned/raw-globals: 4/14 [asmlift source 3a06c74]
+repro: script exit 1 — a non-matching row exits nonzero by design
+```
+
+**Quote the `[ranked]` line, not a `[score]` line.** It carries `best …` and the `[asmlift source
+<sha>]` stamp this file requires beside every fan number, in one line whatever the fan size. The
+`[score]` table above it is sorted **best first**, so a `| tail -1` reports the WORST candidate —
+measured on the row above, `signed: 15/18` against a published `4/14`, a different numerator and a
+different denominator. If you want one `[score]` line it is `head -1`.
+
+Without `--run` it writes the script and prints how to run it, for editing a flag or stepping
+through the three sections by hand. `--tool m2c` writes the row's m2c script instead. A needle with
+no `:` is a symbol substring, exactly as `bench run --only` reads it; anything that selects no row
+or more than one exits 1 saying so, rather than leaving you a script that runs clean and prints
+nothing.
+
+**A non-matching row's script exits nonzero, and that is the row reproducing** — `--score-against`
+exits 0 only on byte-exact, and the script is `set -euo pipefail`.
 
 **Build the CLI before the first run.** The script's last line is
 `"$ASMLIFT_PATH/node_modules/.bin/asmlift"`, and `packages/cli/dist/` is gitignored — so a fresh
@@ -110,28 +122,61 @@ nor `--progress` and takes `--proto` from a `proto.json` it writes, and still re
 exactly. Do not "fix" the script by adding them — it is gated by `pnpm bench fidelity` in
 `benchmark.yml`, which re-runs both repro scripts for every function.
 
+**Run it in a gitignored directory, which is what the default gives you.** The script's step 1 is
+`bench target … --out "$PWD"`, so running it in the repo root leaves `out.c`, `decomp.yaml`,
+`proto.json`, `ctx.i`, `in.asm` and the script itself untracked there — and `bench run`'s
+dirty-tree preflight then **refuses the round**, 39 minutes into the gate agent's full run, naming
+files this page told you to make. (A scoped `--only` run is exempt, so the confirm passes and the
+refusal lands later.) `.local/` and `.envrc.local` are the sanctioned names; `bench repro` defaults
+under the first of them. Running it inside `apps/benchmark/checkouts/<project>` is worse than
+untidy: `--out "$PWD"` **overwrites that checkout's own `decomp.yaml`**.
+
 #### `bench target` on its own, for iterating by hand
 
 ```sh
 pnpm bench target <project:sym:toolchain> --out <dir> [--project-root <checkout>]
 ```
 
+`bench target` is one of the script's steps (`cli.ts` calls it the "repro-script pre-step"); run
+alone it leaves you holding a `target.o` and no input `.s`, prints no `[score]`, and is a third
+number away from the row. What CI re-runs for every function is the script, not the pre-step.
+
 Into `<dir>` it writes `target.o` (the harness's own target object, content-cached), a `decomp.yaml`
 whose compile command **is the benchmark's toolchain invocation**, and ONE frozen scoring context —
 the escalation rung the row's published source stops at, or, on an unscored row, the richest rung
-(see "What this vehicle does NOT reproduce", below). It names the rung it picked on stdout, and that
-line is its whole output: no `[score]`. It does not write the input `.s`, because that is the
-row's `targetAsm` — so take it from the row (or just run the row's script, above). A symbol-fed row
-also gets its map: grafted as `tools.asmlift.elf` from the checkout `--project-root` names, or
-written beside `target.o` as `symbols.json` for a synthetic row's authored map.
+(see "What this vehicle does NOT reproduce", below). Its last stdout line names the rung it picked;
+there is no `[score]` on any of them. It does not write the input `.s`, because that is the row's
+`targetAsm` — so take it from the row (or just run `bench repro`, above). A symbol-fed row also gets
+its map: grafted as `tools.asmlift.elf` from the checkout `--project-root` names, or written beside
+`target.o` as `symbols.json` for a synthetic row's authored map.
+
+It is also the step with the long pole in it. If the checkout's declared `tools.asmlift.elf` is not
+built and its Makefile has an `asmlift-elf` target, `cases/project-elf.ts` runs
+`make asmlift-elf` **in your checkout**, with a ten-minute timeout — so a first run against an
+unbuilt sidecar project is minutes and a write into that tree, not the ~10 s a warm one takes.
 
 **A missing checkout does not stop anything, and it does not always move the number.** `bench
 target` prints `WARN: <project>: project checkout not found … output may differ from the published
 row` and **exits 0**; the script runs on. Re-measured for this file: with `PROJECT_PATH` pointed at
 a nonexistent path, `kleod:StrCpy:agbcc` printed the same `unsigned: 5/8` and a **byte-identical**
-source. So a cheap row will tell you your setup is right when it is not — `grep -n '^WARN' out.err`
-before quoting anything, and note the doc's own recipe (`2> out.err`) buries that one line under the
-`[score]` stream.
+source. So a cheap row will tell you your setup is right when it is not. `bench repro --run`
+surfaces any `WARN` line above the `[ranked]` line for you; running the script by hand, `grep -n
+'^WARN' out.err` before quoting anything.
+
+**And `^WARN` catches a MISSING map, not a WRONG one.** `resolveProjectElf` reads whatever
+`decomp.yaml` sits at the root it is handed and never checks that the checkout is **this row's**
+project — point `PROJECT_PATH` at a different one and a foreign symbol map is grafted silently, at
+exit 0, with no `WARN`. That is strictly worse than map-less: the names come out wrong rather than
+absent. `bench repro` resolves the checkout from the row's own manifest and cannot do this; if you
+pass `--project-root` yourself, `grep -n 'elf:' decomp.yaml` and check the path names this row's
+project.
+
+**`bench target` freezes the PUBLISHED rung, and a local run does not refresh it.** The rung comes
+from `results.json` — the committed file — and the gitignored per-tier `real.json` beside it is
+consulted only for a row `results.json` does not carry at all. So after a `bench run --tier real
+--only <sym>` moves your row, the reproduction still replays the rung the published source pins.
+That is right for reproducing a published row and wrong for watching your own change land: for
+that, the number is `bench run`'s.
 
 ### What this vehicle does NOT reproduce: your CHANGED asmlift
 
