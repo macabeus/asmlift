@@ -363,8 +363,7 @@ switch (command) {
     // `--base origin/main` by default and not HEAD, unlike the comparison gates: the question is
     // what the published baseline says, and a branch that has committed its own artifact would
     // otherwise be asked about itself. An unfetched `origin/main` throws out of `readCommitted`
-    // with the fetch instruction — the one thing the `git show … | jq` fence this replaces did
-    // silently, printing the empty output that reads as "this symbol has no row".
+    // carrying the fetch instruction, rather than reading as "this symbol has no row".
     const sym = positionals[1];
     if (!sym) {
       console.error(
@@ -376,11 +375,12 @@ switch (command) {
     try {
       process.exit(baseline(sym, opts.base ?? 'origin/main'));
     } catch (e) {
-      // The message, not a stack: the only way here is a ref this checkout cannot read, and
-      // `readCommitted`'s text already says what to do about it (`git fetch origin`).
+      // The message, not a stack: what reaches here is an unreadable ref, whose text from
+      // `readCommitted` already says what to do about it (`git fetch origin`).
       console.error(`baseline: ${e instanceof Error ? e.message : e}`);
       process.exit(2);
     }
+    break;
   }
   case 'stale-check': {
     // exit 0 either way; a thrown safety refusal (shrunk coverage / dirty provenance) exits 1.

@@ -16,10 +16,10 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
 ## Phase 0 — Resolve and baseline (never skip)
 
 0. **Re-derive the baseline before you believe it**: `git fetch origin && pnpm bench baseline $1`.
-   Any row number in a brief — including this one — is a hint with a timestamp. The rule, what to do
-   when it answers `NOT CURRENT`, and the fresh base it must be measured on are
-   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md). Shared with
-   `/attribute-function` — correct it there.
+   Any row number you were handed is a hint with a timestamp. The rule, what to do when it answers
+   `NOT CURRENT`, and the fresh base it must be measured on are
+   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md). `/attribute-function` opens
+   with the same step, so correct the rule in that doc and not here.
 
 1. Resolve the row: `pnpm bench run --tier real --only $1` (`--only` is a substring match on the
    symbol; row ids are `project:sym:toolchain`). If it hits more than one row, list them and pick

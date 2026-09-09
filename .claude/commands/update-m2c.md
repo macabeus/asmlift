@@ -27,11 +27,10 @@ Key facts about the setup (verified 2026-08-05):
    checkout after `git fetch origin`.
 2. **Snapshot first**: copy `apps/benchmark/results/results.json` to the scratchpad as
    `results-old.json` *before* anything reruns. The whole row-diff analysis depends on it. Snapshot
-   the working tree's file, but check it is the committed one — if this checkout has a local `bench
-   run` in it, the "before" side is not what main published. `pnpm bench baseline <sym>` reads any
-   single row straight from `origin/main`, and
-   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) is the rule for which of two
-   numbers wins.
+   the working tree's file, but check it is the committed one: after any local `bench run` the
+   "before" side is not what main published. `pnpm bench baseline <sym>` reads a single row straight
+   from `origin/main`, and [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) is the
+   rule for which of two numbers wins.
 3. Write the new sha to `apps/benchmark/M2C_COMMIT`; `git -C ../m2c checkout <NEW>`.
 4. Smoke-test the new m2c under the local Python before the full run: `python3 m2c.py --help`
    (upstream occasionally breaks on newer Pythons; catch it in 2 seconds, not mid-run).

@@ -165,10 +165,10 @@ State the selection rule in one sentence, and check GitHub issues for each pick.
 Launch them in parallel batches. Each brief carries: the worktree path, the function, its baseline
 scores in both arms, the traps checklist, and this escalation ladder.
 
-**A baseline you write into a brief is a hint with a timestamp** — you are manufacturing exactly the
-stale numbers [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) is about. Derive each
-one with `pnpm bench baseline <sym>` at launch time, quote the whole `N/M`, and tell each agent to
-re-derive it in its own worktree before believing it.
+**A baseline you write into a brief is a hint with a timestamp** — it is stale from the moment the
+next PR merges. Derive each one with `pnpm bench baseline <sym>` at launch time, quote the whole
+`N/M`, and tell each agent to re-derive it in its own worktree before believing it
+([`docs/baseline-freshness.md`](../../docs/baseline-freshness.md)).
 
 **Do not give up early.** A "stuck" verdict is only admissible after all six rungs, and it must name
 the exact differing instructions plus a hypothesis class — never a vague "register allocation":

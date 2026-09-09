@@ -1,17 +1,18 @@
 # The baseline is re-derived, never inherited
 
 The Phase 0 freshness check every round opens with, and the only place it is written down. **The
-briefs point here; edit this file, not a copy inside a prompt.** The last time a shared command
-lived in two prompts they drifted and a round published a number comparable to nothing (PR #79).
+briefs point here; edit this file, not a copy inside a prompt.** A repro rule that lived in only one
+of the two briefs is how a round published a score against a baseline measured with different flags
+(#76, diagnosed in #79).
 
 ## 1. Any row number written into a brief is a HINT with a timestamp
 
 This file, a mining report, an orchestrator's hand-off, a memory note — none of them is a fact.
-Briefs are written before a round starts and PRs merge while it runs. Five probe rounds in a row
-launched detached at a commit three PRs stale and quoted its numbers; two of them mis-sized their
-gap because of it (one reported −29 and the build delivered −13; one reported the real rows going
-+4 _worse_ and the build delivered −22). One mining brief said a row was at 196 while the committed
-artifact said 171.
+Briefs are written before a round starts and PRs merge while it runs. Five parallel probes ran in
+worktrees pinned before #164, which merged 16 minutes after they started; every headline they
+reported was a delta on a base no consumer ever stood on, and each of the four rounds that consumed
+them opened by refuting the number it was handed — a −29 re-measured as −13, a 241 base that was 174
+on main. One mining brief said a row was at 196 while the committed artifact said 171.
 
 ## 2. Read the committed artifact — one command, no bench
 
@@ -40,10 +41,10 @@ about itself.
 **Every way of getting no row is an error here, not an empty answer.** Exit 1 says the symbol has
 no benchmark row, which means it is measured outside the harness (the ranked repro — the standing
 example is `LoadBGTilemapData`) or you mistyped it, and it offers the case-insensitive near-misses.
-Exit 2 is a bad invocation, or a ref this checkout cannot read, and says which. Nothing here
-answers by printing nothing: a silent empty is what the `git show … | jq` fence this replaces did
-for an unfetched ref, an unsubstituted placeholder and a pasted row id alike — and "empty" is the
-output a reader takes as "go ahead".
+Exit 2 is a bad invocation, or a ref this checkout cannot read, and says which. **Do not answer this
+question with a `git show … | jq` one-liner instead.** In a pipeline the exit status is jq's, so an
+unfetched ref, an unsubstituted placeholder and a pasted row id all print nothing and succeed — and
+"empty" is the output a reader takes as "go ahead".
 
 ## 3. Which number wins
 
@@ -83,9 +84,9 @@ git fetch origin && git worktree add <dir> -b <branch> origin/main && (cd <dir> 
 ```
 
 Then give it the projects the real tier compiles. `pnpm bench setup` materializes the bench-owned
-checkouts (`apps/benchmark/checkouts/`) by itself; a checkout you already have is found as a
-sibling of the workspace, or by pointing `ASMLIFT_PROJ_<PROJECT>` at it
-(`apps/benchmark/src/cases/manifests.ts` owns that resolution order). Everything else local goes in
+checkouts (`apps/benchmark/checkouts/`) by itself; a checkout you already have is picked up by
+pointing `ASMLIFT_PROJ_<PROJECT>` at it, or as a sibling of the workspace — in that precedence, which
+`apps/benchmark/src/cases/manifests.ts` owns. Everything else local goes in
 `.local/` or `.envrc.local` — both gitignored, and both exist because **an untracked file makes a
 run stamp itself dirty and `bench:merge` refuses the tier**, which has cost ~2,350 s twice.
 

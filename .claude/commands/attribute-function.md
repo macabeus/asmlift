@@ -21,8 +21,8 @@ one) is an unfinished finding.
 0. **Re-derive the baseline before you attribute against it**: `git fetch origin && pnpm bench
    baseline $1`. A number handed to you is a hint with a timestamp, and a gap sized against a stale
    one is sized against nothing. The rule, and the fresh-base worktree it must be measured in, is
-   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) — shared with `/match-function`,
-   so correct it there.
+   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md). `/match-function` opens with
+   the same step, so correct the rule in that doc and not here.
 
 1. Resolve the row: `pnpm bench run --tier real --only $1`. Record the outcome verbatim for both
    decompilers — **the whole `diff:N/M`, never the `N` alone** (see "the denominator moves" below).

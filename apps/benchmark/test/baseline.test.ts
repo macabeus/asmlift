@@ -1,8 +1,7 @@
-// `bench baseline` replaced a `git show … | jq` fence that a round pasted into a prompt, and the
-// reason it is code now is that every way the fence could go wrong went wrong SILENTLY — an
-// unfetched ref, an unsubstituted `<SYM>` placeholder and a pasted row id all printed nothing and
-// exited 0, into a doc that reads empty output as "this symbol has no benchmark row". So what is
-// pinned here is the selection, which is the half that can be wrong without erroring.
+// What is pinned here is `bench baseline`'s SELECTION — the half that can be wrong without
+// erroring. Every other way of finding no row raises (an unreadable ref throws, no match exits 1),
+// but a selection that quietly picks the wrong set, or none, prints the empty output a reader takes
+// as "this symbol has no benchmark row, so it is measured outside the harness".
 import type { FunctionResult } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
@@ -44,16 +43,15 @@ describe('selectRows', () => {
     expect(selectRows(rows, 'synthetic:').length).toBe(2);
   });
 
-  // An unsubstituted placeholder is the failure the fence had no guard for. It must select
-  // nothing here so the caller can exit 1 on it — never match by accident.
+  // A brief's placeholder that reached the command unsubstituted must select nothing, so the
+  // caller exits 1 on it — never match by accident.
   test('an unsubstituted <SYM> placeholder matches nothing', () => {
     expect(selectRows(rows, '<SYM>')).toEqual([]);
   });
 
-  // The empty pattern is the original incident: as a jq regex it matched all 1035 rows and printed
-  // a plausible table. `includes('')` is true for every string, so the caller rejects the empty
-  // argument before this is ever reached (`cli.ts`'s usage exit) — this pins WHY that check is
-  // load-bearing rather than cosmetic.
+  // `includes('')` is true for every string, so an empty argument selects the whole artifact and
+  // prints a plausible table of every row. The caller rejects it before this is ever reached
+  // (`cli.ts`'s usage exit) — this pins WHY that check is load-bearing rather than cosmetic.
   test('the empty argument would select everything, which is why the CLI refuses it', () => {
     expect(selectRows(rows, '').length).toBe(rows.length);
   });
@@ -64,8 +62,9 @@ describe('formatRow', () => {
     expect(formatRow(rows[1])).toBe('af:_MtxF_to_Mtx:ido7.1  asmlift=nonmatch 171/387  m2c=noncompile -/-');
   });
 
-  // The whole `N/M`, because the denominator moves: #174 changed how scores are printed against
-  // the denominator they were measured with, and a round quoting the `N` alone compares nothing.
+  // The whole `N/M`: `maxScore` is objdiff's row count for the WINNING candidate's alignment, so a
+  // different spelling wins and the denominator moves. A round quoting the `N` alone compares
+  // nothing.
   test('both halves of the fraction are printed', () => {
     expect(formatRow(rows[0])).toContain('171/387');
   });

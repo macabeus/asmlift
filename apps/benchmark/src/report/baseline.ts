@@ -3,18 +3,16 @@
 //
 // Every other gate here (`stale-check`, `regression`, `diff`) compares the committed artifact
 // against a FRESH run, so none of them can answer "what does the published benchmark say about
-// this row" without spending a run first. A round opens with exactly that question, and the two
-// ways it was answered before were a hand-written number in a brief (a hint with a timestamp:
-// one said 196 while the artifact said 171) and a `git show … | jq` fence pasted into a prompt.
+// this row" without spending a run first. A round opens with exactly that question, and the
+// answer it inherits instead is a hand-written number in a brief — a hint with a timestamp: one
+// said 196 where the artifact said 171.
 //
-// The fence is why this is a subcommand and not a snippet. In a pipeline the exit status is
-// jq's, so an unfetched ref, a renamed artifact path or a remote that is not `origin` all print
-// NOTHING and exit 0 — and "empty" is the output that reads as "this symbol has no benchmark
-// row, so it is measured outside the harness". Every silent-empty path this file has is turned
-// into a message: a missing ref throws out of `readCommitted`, a symbol with no row exits 1
-// naming both causes, and the pathspec that decides freshness is passed as argv (this repo's
-// shell is zsh, which does not word-split `$VAR`, so the same list in a variable would match
-// nothing and print the empty output that means "go ahead").
+// A subcommand rather than the `git show … | jq` one-liner it would otherwise take, because in a
+// pipeline the exit status is jq's: an unfetched ref, a renamed artifact path or a remote that is
+// not `origin` all print NOTHING and succeed, and "empty" is the output that reads as "this symbol
+// has no benchmark row, so it is measured outside the harness". So every way of finding no row
+// here is a message instead: a missing ref throws out of `readCommitted`, and a symbol with no row
+// exits 1 naming both causes.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { execFileSync } from 'node:child_process';
 
