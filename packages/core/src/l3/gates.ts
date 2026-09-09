@@ -86,3 +86,54 @@ export function gateTableDefects<Ctx>(gates: readonly Gate<Ctx>[]): string[] {
   }
   return out;
 }
+
+/** A gate table that counts its own refusals — {@link tallying}'s return. */
+export interface Tallied<Ctx> {
+  /** Hand this to the pass, in place of the table it wraps. */
+  readonly gates: readonly Gate<Ctx>[];
+  /** The census so far, most-refused first, ties in table order. A snapshot: counts keep
+   *  accumulating across every later call, which is what a corpus-wide census wants. */
+  readonly refusals: () => readonly (readonly [string, number])[];
+}
+
+/** The same table, wrapping each `rejects` in a counter — so a caller OUTSIDE core can obtain the
+ *  per-id census that `l3/coalesce.ts`, `l3/scopebase.ts` and `structure/namecoalesce.ts` each
+ *  hand-rolled into their return type, from any pass that takes its table as a parameter:
+ *
+ *      const t = tallying(UNMERGE_SITE_GATES);
+ *      for (const sfn of corpus) unmergeJoins(sfn, { site: t.gates });
+ *      console.log(t.refusals());   // [['no-merge-name', 214], ['empty-arm', 31]]
+ *
+ *  WHAT IT COUNTS IS AN EVALUATION THAT ANSWERED TRUE, not a site. Under `firstRejection` — which
+ *  short-circuits — that is the FIRST rejecter, so this produces exactly the census those three
+ *  passes produce, with the same reading: an id absent from it is starved OR SHADOWED by an earlier
+ *  rule, and telling the two apart takes the same rule run with the rest of the table empty
+ *  (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts` ships two inhabitants of the
+ *  second case). A consumer that asks the table something else — `.some`, `.filter` — gets one
+ *  count per evaluation instead, which is a different question and rarely the one wanted.
+ *
+ *  IT CHANGES NO BEHAVIOUR: each wrapper's predicate IS the original's, `id`/`why`/`sound`/
+ *  `guardedBy` are carried, so `without`, `ablateHeuristic` and `gateTableDefects` all still hold
+ *  over the result. What it does change is the table's IDENTITY — `rank.ts` memoizes a census on
+ *  it — so wrap once and reuse `gates`, rather than per call. */
+export function tallying<Ctx>(gates: readonly Gate<Ctx>[]): Tallied<Ctx> {
+  const counts = new Map<string, number>();
+  const order = new Map(gates.map((g, i) => [g.id, i]));
+  return {
+    gates: gates.map((g) => ({
+      ...g,
+      rejects: (c: Ctx) => {
+        const r = g.rejects(c);
+        if (r) {
+          counts.set(g.id, (counts.get(g.id) ?? 0) + 1);
+        }
+        return r;
+      },
+    })),
+    refusals: () =>
+      [...counts].sort((a, b) => b[1] - a[1] || (order.get(a[0]) ?? 0) - (order.get(b[0]) ?? 0)) as readonly (readonly [
+        string,
+        number,
+      ])[],
+  };
+}
