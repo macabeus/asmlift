@@ -48,6 +48,20 @@ message names both and says which brief was stale. If it disagrees with your own
 say which commit each was measured at — the artifact stamps `meta.asmlift.commit`, and code merged
 after it has not been measured — and trust the run.
 
+**And measure from a fresh base.** Create the worktree from a just-fetched `origin/main`:
+
+```sh
+git fetch origin && git worktree add <dir> -b <branch> origin/main
+```
+
+If the worktree is more than an hour old, or any PR merged while you worked, `git fetch origin &&
+git rebase origin/main` **before** you take a before/after pair. A delta measured against a base
+that has since moved is a number about nothing.
+
+*(This Phase 0 freshness block is duplicated verbatim between `/match-function` and
+`/attribute-function`. If you correct it, correct both — a two-prompt command that drifted once
+already published a number comparable to nothing.)*
+
 1. Resolve the row: `pnpm bench run --tier real --only $1`. Record the outcome verbatim for both
    decompilers — **the whole `diff:N/M`, never the `N` alone** (see "the denominator moves" below).
 2. Reproduce outside the harness with **the command in
