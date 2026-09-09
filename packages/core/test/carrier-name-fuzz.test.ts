@@ -41,19 +41,26 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
 ];
 
 // SIZED, not maximal, but the size is now a statement about the sweep rather than about the
-// runner. This stood at 250 for two days: at 4,000 this file plus the nested arm next door put 30%
-// more CPU into `test:offline` than vitest's own reporter could keep up with, and two of three runs
-// ended `2696 passed` plus an unhandled `[vitest-worker]: Timeout calling "onTaskUpdate"`, which
-// fails the job. That was never a CPU ceiling — the birpc reply had already arrived, and its 60 s
-// timer matured first only because the sweep never yielded. `breathe()` below fixed the cause, so
-// the number it forced is no longer owed to anyone.
+// runner. This stood at 250 for two days: at 4,000 this file plus the nested arm next door ended
+// two of three `test:offline` runs on `2696 passed` plus an unhandled `[vitest-worker]: Timeout
+// calling "onTaskUpdate"`, which fails the job. That was never a CPU ceiling — the birpc reply had
+// already arrived, and its 60 s timer matured first only because the sweep never yielded.
+// `breathe()` below fixed the cause, so the number it forced is no longer owed to anyone.
+//
+// The 30% of `test:offline` that cut was justified by (102.9 -> 134.2 s, on the two-core hosted
+// runner) was the price of these two arms EXISTING, not of their size: restoring only the seed
+// counts measures +6.6 s of test CPU here, ~6.5% of a ~102 s baseline, and the two files cost
+// +12.9 s between them. Quote that pair of numbers rather than the 30% if you are budgeting.
 //
 // Back to 4,000, the size the two arms that predate this file have always run. Arm A is the
 // expensive half — it structures every generated function TWICE, three depths — and 16x of it
-// costs this file a few seconds; arm B is flat in SEEDS, since it stops at the first seed that
-// proves a gate load-bearing and every reachable one does that within the first handful. RAISE IT
-// FURTHER when hunting: the `loop-escape` finding next door was taken at 8,000, and its two seeds
-// (5104 and 6437) are outside even this range.
+// costs this file a few seconds; arm B is near-flat in SEEDS, since it stops at the first seed that
+// proves a gate load-bearing, though not always early: `sibling-param`'s first acyclic witness is
+// seed 289, past where this sat, and only depth 1's seed 52 kept that gate proven at 250.
+//
+// RAISING THIS DOES NOT REACH `loop-escape`, and never could: that finding belongs to
+// `namecoalesce-fuzz`, and the arm that would ablate it filters on `sound`, which the table denies
+// that gate. It is pinned by seed over there instead. The barrier is a predicate, not a range.
 const SEEDS = 4000;
 
 /** Both spellings of one seed, or null when the shape is not one this can judge. */

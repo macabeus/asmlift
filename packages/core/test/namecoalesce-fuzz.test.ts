@@ -69,27 +69,53 @@ function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[
 // `carrier-name-fuzz` produced a fully green `test:offline` that still failed on an unhandled
 // `Timeout calling "onTaskUpdate"`. That was a sweep not yielding to the reporter, not a CPU
 // ceiling, and #171 fixed it with the `breathe()` call below; the size it forced went back up with
-// the sibling's. The finding `namecoalesce.ts` credits to this arm — `loop-escape` dropped makes 2
-// of 7,535 nested functions compute something else — was taken at 8,000 seeds, so its two (5104
-// and 6437) are outside even 4,000. Reproduce it by raising this number, not by hunting inside it.
+// the sibling's. The table is two columns because all three arms take `SEEDS`: a per-arm size was
+// the exception this restore deleted, and a third column re-spelling one constant would be a knob
+// claiming an asymmetry the file no longer has.
 describe.each([
-  ['acyclic', 0, SEEDS],
-  ['loop-bearing', 1, SEEDS],
-  ['nested', 2, SEEDS],
-] as const)('%s', (_name, depth, seeds) => {
+  ['acyclic', 0],
+  ['loop-bearing', 1],
+  ['nested', 2],
+] as const)('%s', (_name, depth) => {
   test('no merge the pass makes changes what the function does', async () => {
     const bad: number[] = [];
     let judged = 0;
-    for (let seed = 1; seed <= seeds; seed++) {
+    for (let seed = 1; seed <= SEEDS; seed++) {
       if (seed % BREATHE_EVERY === 0) await breathe();
       const r = spellings(seed, depth);
       if (!r) continue;
       judged++;
       if (tracesDiffer(r)) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(seeds / 10); // the sweep is not vacuous
+    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
     expect(bad).toEqual([]);
   });
+});
+
+// THE ONE PIECE OF EVIDENCE NO SWEEP ABOVE CAN PRODUCE, pinned rather than hunted for.
+//
+// `namecoalesce.ts` credits this arm with the `loop-escape` finding: dropped, that gate makes some
+// nested functions compute something else. No shipped arm has ever ablated it, and raising `SEEDS`
+// never will — arm B below iterates `NAME_COALESCE_GATES.filter((x) => x.sound)` and the table
+// declares `loop-escape` `sound: false`, so the barrier is a PREDICATE, not a range. (The seeds are
+// also outside 4,000: measured, there is no witness at all in 1..4000 at depth 2.) The recipe, for
+// whoever comes to reproduce it: drop the gate BY NAME, depth 2, at least 6,437 seeds.
+//
+// Pinned two-sided — with the gate KEPT both seeds trace identically — so this asserts the gate's
+// own work, not a difference the pass would make regardless. Which is also the uncomfortable part:
+// a rule whose removal changes what the program COMPUTES is a legality property, while `sound:
+// false` in this table means fidelity (its neighbour `param` genuinely is fidelity). Relabelling it
+// is not free — arm B would then sweep the gate and go red at `SEEDS` = 4000, since its first
+// witness is 5104 — so that stays its own decision, and this coverage does not wait on it.
+test('`loop-escape` is load-bearing, at the two seeds no sweep in this file reaches', () => {
+  for (const seed of [5104, 6437]) {
+    const dropped = spellings(seed, 2, 'loop-escape');
+    const kept = spellings(seed, 2);
+    expect(dropped, `seed ${seed} must still be a shape this can judge`).not.toBeNull();
+    expect(kept, `seed ${seed} must still be a shape this can judge`).not.toBeNull();
+    expect(tracesDiffer(dropped!), `seed ${seed}: dropping \`loop-escape\` must change the trace`).toBe(true);
+    expect(tracesDiffer(kept!), `seed ${seed}: with \`loop-escape\` kept the trace must not change`).toBe(false);
+  }
 });
 
 // The one sound rule this generator cannot reach, and why. `type` needs two names whose

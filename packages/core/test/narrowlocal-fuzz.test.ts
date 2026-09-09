@@ -366,8 +366,12 @@ describe.each([
     expect(bad).toEqual([]);
     judgedByShippedArm.set(withLoop, judged);
     // Structuring and interpreting two trees per judged function, and the diamond tail multiplies
-    // that count twentyfold — 2.2s alone, and this suite forks 160 files in parallel.
-  }, 30_000);
+    // that count twentyfold — 2.2s alone, and this suite forks 160 files in parallel. 60 s, not the
+    // 30 s this carried while `carrier-name-fuzz` and the nested `namecoalesce-fuzz` arm sat cut to
+    // 250 seeds: restoring those two puts their CPU back into the same fork pool, and the margin
+    // here was measured at 3.3x (9.0 s worst against 30 s) against a contention factor this file
+    // records at 3.4x below. A real hang is still loud, 30 s later.
+  }, 60_000);
 
   // THE POPULATION THE ONLY UNSOUND GATE MASKS, and the reason this arm exists at all.
   //
@@ -411,7 +415,8 @@ describe.each([
     expect(shipped).toBeDefined();
     expect(judged).toBeGreaterThan(shipped as number);
     expect(bad).toEqual([]);
-  }, 30_000);
+    // Same budget and the same reason as the arm above.
+  }, 60_000);
 });
 
 // The two sound rules this oracle cannot reach, and why — an exemption is a visible act with a
