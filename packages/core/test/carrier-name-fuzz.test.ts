@@ -40,18 +40,21 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
   },
 ];
 
-// SIZED, not maximal, and the size is a CI budget rather than a confidence statement. Arm A is the
-// expensive half — it structures every generated function TWICE — and `test:offline` shares a
-// two-core runner with `narrowlocal-fuzz`, which alone takes a minute there. At 4,000 this file
-// plus the nested arm next door put 30% more CPU into that suite than vitest's own reporter could
-// keep up with: two of three runs ended `2696 passed` and an unhandled
-// `[vitest-worker]: Timeout calling "onTaskUpdate"`, which fails the job.
+// SIZED, not maximal, but the size is now a statement about the sweep rather than about the
+// runner. This stood at 250 for two days: at 4,000 this file plus the nested arm next door put 30%
+// more CPU into `test:offline` than vitest's own reporter could keep up with, and two of three runs
+// ended `2696 passed` plus an unhandled `[vitest-worker]: Timeout calling "onTaskUpdate"`, which
+// fails the job. That was never a CPU ceiling — the birpc reply had already arrived, and its 60 s
+// timer matured first only because the sweep never yielded. `breathe()` below fixed the cause, so
+// the number it forced is no longer owed to anyone.
 //
-// 250 still judges an order of magnitude more functions than the vacuity guard below asks for, and
-// arm B is unaffected — it stops at the first seed that proves a gate load-bearing, which every
-// reachable one does within the first handful. RAISE IT LOCALLY when hunting: that is how the
-// `loop-escape` finding next door was taken, at 8,000.
-const SEEDS = 250;
+// Back to 4,000, the size the two arms that predate this file have always run. Arm A is the
+// expensive half — it structures every generated function TWICE, three depths — and 16x of it
+// costs this file a few seconds; arm B is flat in SEEDS, since it stops at the first seed that
+// proves a gate load-bearing and every reachable one does that within the first handful. RAISE IT
+// FURTHER when hunting: the `loop-escape` finding next door was taken at 8,000, and its two seeds
+// (5104 and 6437) are outside even this range.
+const SEEDS = 4000;
 
 /** Both spellings of one seed, or null when the shape is not one this can judge. */
 function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[]; on: Event[] } | null {
