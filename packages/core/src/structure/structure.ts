@@ -4900,28 +4900,71 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // main's default candidate reaches on agbcc's own output (the `acc += a[i][j]` nest).
   //
   // So the latch reads such a value under the name its inner loop left it in: the back-edge
-  // substitution of each CHILD loop (`forest.parent`) that dominates the latch and does not contain
-  // it — a loop in one arm of an `if` cannot hand the latch a value, and a grandchild's substitution
-  // ends where its parent's exit region does. Dominating loops apply outermost first, so a later one
-  // wins, as the nested `withSub`s do. A test-at-top `while` installs no substitution (its
-  // latch-computed values never reach past its header exit), so it contributes nothing.
+  // substitution of every loop INSIDE this one that dominates the latch and does not contain it.
+  // Every depth, not only children: a grandchild's value reaches the latch raw whenever the loop
+  // between them does not carry it (`for i { for j { s = j; for k { s += …; } } gO[i] = s; }` —
+  // `latch-inner-sub.test.ts`'s `GRANDCHILD`, 64 of 64 inputs wrong when only children counted).
+  // Where that middle loop DOES carry it, both loops map the value to the one name the carrying
+  // shares, and the inner one wins. Dominating loops apply outermost first, so a later one wins, as
+  // the nested `withSub`s do. A test-at-top `while` installs no substitution (its latch-computed
+  // values never reach past its header exit), so it contributes nothing. Dominance is not a
+  // soundness term — a value of a loop that does not dominate the latch cannot be read there — it
+  // is what keeps the map EMPTY when no loop can hand the latch a value, and `emitDoWhile` then
+  // spells every line as it did before the map existed.
   //
-  // NARROWER THAN THE EXIT REGION'S `withSub`, on purpose, in two ways — each keeps the latch on its
-  // old raw reading where the substitution is not the better one:
-  //   • only an UNNAMED value DEFINED INSIDE the child loop. A named value renders under its own
-  //     name, and one defined outside the loop (an entry value handed round the back edge unchanged)
-  //     re-derives from operands the loop never wrote, so its raw reading is already right;
-  //   • only while the name still HOLDS it. A name written between the child loop and the latch —
-  //     a block param of the exit region or of the latch itself, or a materialized def there — no
-  //     longer holds the loop's last value. The IR oracle found that one: substituting an entry value
-  //     `a1 - a1` by its inner name after the exit copy `v2 = v1` had rewritten it (generated seed
-  //     16501). This loop's own header is exempt: its params are written by the update copies
-  //     below, which read under this very substitution.
-  const latchInnerSub = (dw: DoWhileInfo): Map<Value, string> => {
+  // NARROWER THAN THE EXIT REGION'S `withSub`, in two ways:
+  //   • only an UNNAMED value DEFINED INSIDE the inner loop. A named value renders under its own
+  //     name, and one defined outside the loop (an entry value handed round the back edge
+  //     unchanged) re-derives from operands the loop never wrote. The IR oracle found the second
+  //     (generated seed 16501, `fz16501`): substituting an entry value `a1 - a1` by its inner name
+  //     after the exit copy `v2 = v1` had rewritten it. That witness is held by EITHER narrowing
+  //     (measured, dropping one at a time); this one also keeps the refusal below from judging
+  //     values whose re-derivation the loop cannot have made stale;
+  //   • only while the name still HOLDS it. A name written between the inner loop and the latch —
+  //     a block param of the exit region, of an enclosing loop's header or of the latch itself, or
+  //     a materialized def there — no longer holds the loop's last value, unless what it wrote IS
+  //     that value (`aliasOf`: a merge every arm of which hands it the inner value,
+  //     `IDENTITY_MERGE`). This loop's own header is exempt: its params are written by the update
+  //     copies below, which read under this very substitution, and `enclosingCarrierName` hands
+  //     an inner value exactly that name (`LATCH_SUM`, measured).
+  //     Such an entry is not substituted, and then the latch re-derives it, which is right only if
+  //     the re-derivation reads no name written after the value was computed — the inner loop's own
+  //     and that stretch's. `unreadable` holds the ones for which it does: no spelling at the latch
+  //     is that value, and `emitDoWhile` declines LOUD if a latch reader needs one. `T2_MERGE` and
+  //     `T2_INVARIANT` in `latch-inner-sub.test.ts` are the two sides: a merge after the inner loop
+  //     that took the inner name, with an inner value the raw reading re-derives wrong (neither
+  //     reading is right) and right (the raw reading is). The refusal is per VALUE and per
+  //     stretch, not per name: an entry another loop's substitution still covers (a middle loop
+  //     that carries the grandchild's value under the name they share) is read through that one.
+  //
+  // `writtenAfter` is that set of names per entry, for the test's own refusal in `emitDoWhile`.
+  // Does `w` hold `v` — `v` itself, or a block param every in-edge of which hands it `v` (or such a
+  // param)? The write of a param like that stores what the name already held. A cycle of such
+  // params is `v` too, which is why a revisit answers yes.
+  const aliasOf = (w: Value, v: Value, seen: Set<Value>): boolean => {
+    if (w === v || seen.has(w)) {
+      return true;
+    }
+    seen.add(w);
+    const b = paramBlock.get(w);
+    if (b === undefined || b === entry) {
+      return false;
+    }
+    const k = b.params.indexOf(w);
+    const ins = [...inEdgeRecords(preds, b)];
+    return ins.length > 0 && ins.every(({ succ }) => aliasOf(succ.args[k], v, seen));
+  };
+  const latchInnerSub = (
+    dw: DoWhileInfo,
+  ): { sub: Map<Value, string>; unreadable: Set<Value>; writtenAfter: Map<Value, Set<string>> } => {
     const out = new Map<Value, string>();
+    const refused = new Set<Value>();
+    const writtenAfter = new Map<Value, Set<string>>();
     const latchDoms = dom.get(dw.latch)!;
     const kids = [...forest.byHeader.values()]
-      .filter((l) => forest.parent.get(l.header) === dw.header && !l.body.has(dw.latch) && latchDoms.has(l.header))
+      .filter(
+        (l) => l.header !== dw.header && dw.body.has(l.header) && !l.body.has(dw.latch) && latchDoms.has(l.header),
+      )
       .sort((x, y) => dom.get(x.header)!.size - dom.get(y.header)!.size);
     for (const l of kids) {
       const self = loops.get(l.header);
@@ -4930,22 +4973,39 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (s === null) {
         continue;
       }
-      const rewritten = new Set<string>();
+      const rewrittenBy = new Map<string, Value[]>();
+      const written = new Set<string>();
       for (const [v, n] of varName) {
         const d = defs.get(v);
         const home = paramBlock.get(v) ?? (d !== undefined && materialize.has(d) ? opBlock.get(d) : undefined);
-        if (home !== undefined && home !== dw.header && dw.body.has(home) && !l.body.has(home)) {
-          rewritten.add(n);
+        if (home === undefined || !dw.body.has(home) || home === dw.header) {
+          continue;
+        }
+        written.add(n);
+        if (!l.body.has(home)) {
+          rewrittenBy.set(n, [...(rewrittenBy.get(n) ?? []), v]);
         }
       }
       for (const [v, n] of s) {
         const d = defs.get(v);
-        if (!varName.has(v) && d !== undefined && l.body.has(opBlock.get(d)!) && !rewritten.has(n)) {
+        if (varName.has(v) || d === undefined || !l.body.has(opBlock.get(d)!)) {
+          continue;
+        }
+        writtenAfter.set(v, written);
+        if (rewrittenBy.get(n)?.some((w) => !aliasOf(w, v, new Set())) === true) {
+          refused.add(v);
+        } else {
           out.set(v, n);
         }
       }
     }
-    return out;
+    const unreadable = new Set<Value>();
+    for (const v of refused) {
+      if (!out.has(v) && readsClobbered(v, out, writtenAfter.get(v)!)) {
+        unreadable.add(v);
+      }
+    }
+    return { sub: out, unreadable, writtenAfter };
   };
 
   // Bottom-test `do-while`: the body runs header..latch (structured, with `b`'s do-while hook masked
@@ -4963,12 +5023,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // The inner loops' post-loop substitution the latch reads under (`latchInnerSub`). Empty — and
     // then every line below spells what it did before the substitution existed — unless an unnamed
     // value an inner loop computed could reach the latch.
-    const innerSub = latchInnerSub(dw);
-    const updates = argAssigns(
-      dw.latch,
-      dw.header,
-      innerSub.size > 0 ? new Map([...(activeSub ?? []), ...innerSub]) : null,
-    );
+    //
+    // The update copies take it MERGED with `activeSub`, because a map passed to `argAssigns`
+    // replaces the ambient `expr` it would otherwise render with: without the merge, a copy reading
+    // an ENCLOSING loop's post-loop value would re-derive it (`ACTIVE_SUB` in
+    // `latch-inner-sub.test.ts`). One thing a map changes that `expr` does not: identity elision
+    // consults it, so a copy that `activeSub` spells `n = n` is dropped rather than written. The
+    // two programs are the same, and it is left conditional so an empty `innerSub` keeps the line
+    // exactly as it was (the corpus census is byte-identical either side of this commit's parent).
+    const { sub: innerSub, unreadable, writtenAfter } = latchInnerSub(dw);
+    const latchMap = innerSub.size > 0 ? new Map([...(activeSub ?? []), ...innerSub]) : null;
+    const updates = argAssigns(dw.latch, dw.header, latchMap);
     const updateWrites = loopWriteSet(updates, dw.body, dw.header);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
     // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
@@ -5082,10 +5147,58 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // The test reads this loop's own update under `sub`, and anything else an inner loop left under
     // `innerSub` — the outer loop's own reading wins where a value is both. The test runs AFTER the
     // update copies, so an inner name one of them really writes no longer holds the inner value, and
-    // that entry keeps the raw reading.
+    // that entry keeps the raw reading — the same refusal `latchInnerSub` makes for a name written
+    // before the latch, with the update's writes added to what the re-derivation must not read.
     const writtenByUpdate = innerSub.size > 0 ? updateWriteSet(updates) : new Set<string>();
     const condInner = [...innerSub].filter(([, n]) => !writtenByUpdate.has(n));
-    let cond = exprWith(condInner.length > 0 ? new Map([...condInner, ...sub]) : sub)(lterm.operands[0]);
+    const condMap = condInner.length > 0 ? new Map([...condInner, ...sub]) : sub;
+    // NEITHER READING IS THE VALUE — decline LOUD. An inner value whose name was rewritten before a
+    // latch reader runs is not substituted, and its re-derivation reads a name written after it
+    // was computed: the name holds something else and the re-derivation computes something else.
+    // Which readers these are is exactly what the lines above render under each map: the latch's
+    // side effects and update copies under `latchMap` (or the ambient `activeSub`), the test under
+    // `condMap`. Materialized and effectful ops are the side effects' roots; a pure op renders at
+    // its use, which is one of the other two roots or outside the latch.
+    const condUnreadable = new Set(unreadable);
+    for (const [v] of innerSub) {
+      if (!condMap.has(v) && readsClobbered(v, condMap, new Set([...writtenAfter.get(v)!, ...writtenByUpdate]))) {
+        condUnreadable.add(v);
+      }
+    }
+    if (condUnreadable.size > 0) {
+      const needs = (root: Value, stop: ReadonlyMap<Value, string> | null, targets: ReadonlySet<Value>): boolean => {
+        const seen = new Set<Value>();
+        const walk = (x: Value): boolean => {
+          if (seen.has(x) || stop?.has(x) === true || varName.has(x)) {
+            return false;
+          }
+          if (targets.has(x)) {
+            return true;
+          }
+          seen.add(x);
+          return defs.get(x)?.operands.some(walk) ?? false;
+        };
+        return walk(root);
+      };
+      const bodyMap = latchMap ?? activeSub;
+      const effectRoots = dw.latch.ops
+        .slice(0, -1)
+        .filter(
+          (op) => op.results.length === 0 || materialize.has(op) || EFFECTFUL_OPS.has(op.opcode) || unreadResult(op),
+        )
+        .flatMap((op) => op.operands);
+      const updateRoots = successorTo(dw.latch, dw.header)!.args;
+      if (
+        [...effectRoots, ...updateRoots].some((r) => needs(r, bodyMap, unreadable)) ||
+        needs(lterm.operands[0], condMap, condUnreadable)
+      ) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': a loop latch reads an inner loop's value whose name was rewritten ` +
+            `after the inner loop, and re-deriving it reads a name the inner loop wrote`,
+        );
+      }
+    }
+    let cond = exprWith(condMap)(lterm.operands[0]);
     if (lterm.successors[1].block === dw.header) {
       cond = negateCond(cond);
     } // continue edge must be `taken`
