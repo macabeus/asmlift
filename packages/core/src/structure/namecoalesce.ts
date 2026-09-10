@@ -52,10 +52,15 @@
 // still holds the value the iteration started with — `structure.ts` refuses to let a merge outside
 // the loop adopt it for exactly that reason (`carriesPreUpdate`), and refuses to let an inner
 // loop's variable adopt an enclosing one's, which the inner loop would then mutate every iteration.
-// `loop-escape` restates both over classes: a class holding a loop header's parameter may absorb
-// only values the loop's body contains. Two loops' variables always fail it — a nested pair because
-// the outer variable's home is outside the inner body, a disjoint pair in both directions — so the
-// enclosing-loop rule needs no gate of its own.
+// That second refusal has ONE exception there, `enclosingCarrierName`: a value the frontend's
+// write-order record shows crossing into the inner loop in the register it already had, and — its
+// `carriedByBothLoops` clause, this gate's premise stated per site — one that every outer back
+// edge hands back as a value the inner loop carries. So the walk can already hand this pass a class
+// holding BOTH headers' parameters; what it cannot hand it is a class the outer loop overwrites
+// behind the inner one's back. `loop-escape` restates both refusals over classes: a class holding
+// a loop header's parameter may absorb only values the loop's body contains. Two loops' variables
+// always fail it — a nested pair because the outer variable's home is outside the inner body, a
+// disjoint pair in both directions — so the enclosing-loop rule needs no gate of its own here.
 //
 // It is BLUNTER than the rule it restates: `carriesPreUpdate` branches on which emitter owns the
 // latch and names four shapes that are not the hazard, none of which this has. It IS load-bearing,

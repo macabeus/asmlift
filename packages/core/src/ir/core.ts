@@ -117,6 +117,14 @@ export type SlotHomes = Map<Value, Set<number>>;
  *  param have no common scale. LAST write, not first: a predecessor commonly writes one key several
  *  times (1,867 of 5,283 records over three checkouts), and the edge carries what the last left.
  *
+ *  A SECOND CONSUMER READS THE ABSENCE, not the order. `structure.ts`'s `enclosingCarrierName` takes
+ *  a missing `lastWrite` entry on a measured block as the licence to give a nested loop's parameter
+ *  the enclosing header's NAME: the key was not written, so the machine carried the value into the
+ *  inner loop in the register it had — one variable, not a copy. There a stale or over-eager "not
+ *  written" is not a mis-sorted copy but a copy the emitted C no longer makes, so the absence
+ *  semantics below are load-bearing for naming, and a pass that drops a record it should have
+ *  folded changes spellings, not just orders.
+ *
  *  Keyed by OBJECTS (the predecessor block, the destination param), never by arg position, so the
  *  param splices in `ir/simplify.ts` cannot leave it stale. A pass that moves one block's ops into
  *  another owes `foldWriteOrder`.

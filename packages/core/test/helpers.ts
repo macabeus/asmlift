@@ -9,7 +9,8 @@
 // The SSA generator and the tree interpreter below are the same three functions two differential
 // fuzzes need — `namecoalesce-fuzz` for the `/merge-names` axis and `carrier-name-fuzz` for the
 // naming walk's own admission table. They ask different questions of the same oracle: generate a
-// function, structure it two ways, interpret both, and compare what they observed.
+// function, structure it two ways, interpret both, and compare what they observed. `irTraceOf` is
+// the oracle for the question neither can ask — whether EVERY spelling is wrong the same way.
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
@@ -304,6 +305,72 @@ export const tracesDiffer = (r: { off: Event[]; on: Event[] }): boolean => {
     return e.args.some((a, k) => a !== UNDEF && f.args[k] !== UNDEF && a !== f.args[k]);
   });
 };
+
+/** The same observables as {@link traceOf}, read off the IR itself rather than a structured tree —
+ *  the oracle for a defect the structurer's OWN admit-nothing spelling also has. `traceOf` against
+ *  that reference compares one naming with another, so an EMISSION defect both share is invisible
+ *  to it: an inner loop's back-edge value re-derived at the enclosing loop's latch was wrong in
+ *  every spelling at once, and only this caught it. Same seeding, same deterministic call model,
+ *  same 32-bit wrap. The generator's vocabulary only; anything else throws, as does a run past the
+ *  step cap. */
+export function irTraceOf(fn: Fn, seed: number): Event[] {
+  const trace: Event[] = [];
+  const env = new Map<Value, number>();
+  fn.blocks[0].params.forEach((p, i) => env.set(p, ((seed >> (i * 3)) % 11) - 5));
+  let calls = 0;
+  let steps = 0;
+  const read = (x: Value): number => {
+    const n = env.get(x);
+    if (n === undefined) {
+      throw new Error('read of an undefined value');
+    }
+    return n;
+  };
+  let b: Block = fn.blocks[0];
+  for (;;) {
+    let next: { block: Block; args: Value[] } | undefined;
+    for (const op of b.ops) {
+      if (++steps > 20000) {
+        throw new Error('step cap');
+      }
+      const o = op.operands.map(read);
+      const r = op.results[0];
+      switch (op.opcode) {
+        case 'const':
+          env.set(r, op.attrs.value as number);
+          break;
+        case 'add':
+          env.set(r, (o[0] + o[1]) | 0);
+          break;
+        case 'sub':
+          env.set(r, (o[0] - o[1]) | 0);
+          break;
+        case 'icmp_slt':
+          env.set(r, o[0] < o[1] ? 1 : 0);
+          break;
+        case 'call':
+          trace.push({ fn: op.attrs.target as string, args: o });
+          calls++;
+          env.set(r, o.reduce((x, y) => x + y, calls) | 0);
+          break;
+        case 'ret':
+          trace.push({ fn: 'ret', args: o });
+          return trace;
+        case 'br':
+          next = op.successors[0];
+          break;
+        case 'cond_br':
+          next = o[0] !== 0 ? op.successors[0] : op.successors[1];
+          break;
+        default:
+          throw new Error(`the generator does not emit ${op.opcode}`);
+      }
+    }
+    const vals = next!.args.map(read);
+    next!.block.params.forEach((p, i) => env.set(p, vals[i]));
+    b = next!.block;
+  }
+}
 
 /** Hand the worker's event loop a turn, mid-sweep.
  *

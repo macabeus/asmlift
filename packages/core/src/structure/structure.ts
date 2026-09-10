@@ -2438,16 +2438,95 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // write-order record answers: `E` wrote nothing into `p`'s key, so the machine carried the value
   // into the inner loop in the register it already had — there is no copy to reproduce.
   //
+  // THE NARROW FORM OF A PROXY THAT WAS MEASURED AND LOST. `target.ts`'s MIPS_GCC note records the
+  // wide form — adopt the entry value's name whenever the forward predecessor did not write the
+  // param's key — moving 36 of 736 synthetic rows for four matches lost net, because a predecessor
+  // that COMPUTES the initial value into the param's own register writes the key and still
+  // coalesces. Here the argument is `E`'s own parameter, which `E` does not compute: `E` can write
+  // `p`'s key only by moving that value into it, which is the copy the two-variable spelling spells.
+  // So in this scope the record answers the question exactly, and the measured reach is 4 rows over
+  // the 1,036 of the corpus, all four moved toward the target.
+  //
+  // The argument above is an agbcc one (two `mov`s). The rule has no compiler gate, and it reaches
+  // no corpus row on any other toolchain (0 of the MIPS and PPC rows change), so for those the claim
+  // is UNMEASURED rather than established.
+  //
   // Refuses — `p` keeps the seeding below — when:
   //   • `p` has more than one forward predecessor, or its one forward predecessor is not the header
-  //     of a loop that strictly encloses `p`'s header: the record is per predecessor, so a block
-  //     between `E` and the inner header could have made the copy and no record would say so;
+  //     of a loop that strictly encloses `p`'s header. That is a limit of the DATUM, not of the
+  //     hazard: the record is keyed by successor params, and a single-predecessor block has none,
+  //     so it cannot say whether a block between `E` and the inner header made the copy. It is also
+  //     what holds the rule to the unguarded, constant-trip nest: nestacc1 with its inner bound
+  //     `j < 7` made `j < n` is entered through its guard and keeps both copies (measured, agbcc).
+  //     The register-key identity the MIPS_GCC note names (`frontend/ssa.ts` `phiKey`) is the
+  //     datum that would lift it;
   //   • the argument is not one of `E`'s own params (it is not `E`'s loop-carried value);
   //   • the frontend did not measure `E`, or measured it WRITING `p`'s key — the copy the source
   //     spelled, which the fresh name reproduces;
-  //   • `canTakeName` refuses. This is the one guard against the collision `enclosingNames`
-  //     excludes wholesale: a value of `E` still read after the inner loop is `carrier-live`, and an
-  //     unnamed one re-derived from it there (the outer update `(u8)(v0 + 1)`) is `re-derives`.
+  //   • the value is not carried by BOTH loops (`carriedByBothLoops`, below);
+  //   • `canTakeName` refuses. With the clause above, these are the guards against the collision
+  //     `enclosingNames` excludes wholesale: a value of `E` still read after the inner loop is
+  //     `carrier-live`, and an unnamed one re-derived from it there (the outer update
+  //     `(u8)(v0 + 1)`) is `re-derives`. `canTakeName` alone is NOT enough — it reads `varName`
+  //     only, and sharing the name reaches two readers that are not in it.
+  //
+  // THE VALUE MUST BE CARRIED BY BOTH LOOPS — the per-site form of `structure/namecoalesce.ts`'s
+  // `loop-escape` premise. Sharing the name hands it to more values than `p`: the inner back edge's
+  // argument takes it through `backArgName` (unconditionally, in `seedLoopParams`), and `E`'s own
+  // back-edge argument for `a`'s slot takes it as the outer loop's un-rotation alias. If the outer
+  // back edge hands `a`'s slot something the inner loop did not produce, the outer update copy
+  // overwrites the name the inner loop's value is read under, and a merge after the loop that
+  // adopts that value's `backArgName` reads the outer value instead. That is `namecoalesce.test.ts`'s
+  // frozen `INNER_CLOBBERS_OUTER` pair (`fz5104`, `fz6437`): given ONE realistic record fact — `E`
+  // did not write `p`'s key, nestacc1's own shape — the rule without this clause emits both as a
+  // different program, and nothing throws. So every in-edge of `E` from inside its loop must hand
+  // `a`'s slot either `a` (then `a` is live across the inner loop, and `carrier-live` refuses), `p`
+  // (what the name holds when a test-at-top `while` exits from its header; after a bottom-tested
+  // loop it is a pre-update read, the inner emitter's own hazard and the same one whichever name
+  // `p` has), an inner back-edge argument for `p`, or a merge every in-edge of which hands it one of
+  // those. One level of merge, not a closure: a deeper chain refuses, which costs reach and never
+  // soundness.
+  const carriedByBothLoops = (p: Value, i: number, header: Block, E: Block, a: Value): boolean => {
+    const outer = forest.byHeader.get(E);
+    const inner = forest.byHeader.get(header);
+    if (!outer || !inner) {
+      return false;
+    }
+    const carried = new Set<Value>([a, p]);
+    for (const { pred, succ } of inEdgeRecords(preds, header)) {
+      if (inner.body.has(pred)) {
+        carried.add(succ.args[i]);
+      }
+    }
+    const k = E.params.indexOf(a);
+    let backEdges = 0;
+    for (const { pred, succ } of inEdgeRecords(preds, E)) {
+      if (!outer.body.has(pred)) {
+        continue;
+      }
+      backEdges++;
+      const r = succ.args[k];
+      if (carried.has(r)) {
+        continue;
+      }
+      const rb = paramBlock.get(r);
+      if (rb === undefined || rb === entry) {
+        return false;
+      }
+      const j = rb.params.indexOf(r);
+      let ins = 0;
+      for (const { succ: s } of inEdgeRecords(preds, rb)) {
+        ins++;
+        if (!carried.has(s.args[j])) {
+          return false;
+        }
+      }
+      if (ins === 0) {
+        return false;
+      }
+    }
+    return backEdges > 0;
+  };
   const enclosingCarrierName = (
     p: Value,
     i: number,
@@ -2464,6 +2543,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const a = successorTo(E, header)?.args[i];
     const order = fn.writeOrder;
     if (a === undefined || !E.params.includes(a) || !order?.writes.has(E) || order.lastWrite.get(E)?.has(p)) {
+      return undefined;
+    }
+    if (!carriedByBothLoops(p, i, header, E, a)) {
       return undefined;
     }
     const nm = varName.get(a);

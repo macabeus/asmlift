@@ -130,7 +130,19 @@ describe.each([
 // measured or not. KNOWN GAP, not this rule's: ablating `canTakeName`'s `pureAlias` waiver clears 6
 // of them (a fact about one value, waiving `carrier-live` for every value under the name), and the
 // seventh survives that and the back-edge adoption's ablation alike. What the record may not do is
-// ADD one: an unguarded rule (no `canTakeName`) is caught here, at seed 1472.
+// ADD one. This arm USED to catch an unguarded rule (no `canTakeName`), at seed 1472; with
+// `carriedByBothLoops` in front of it that shape is refused first: dropping `canTakeName` from the
+// rule leaves this arm green, and dropping both reddens it at 1472 again. The two `canTakeName`
+// refusals the rule reaches are pinned in `nested-carrier.test.ts`, each by a fixture and its
+// ablation, rather than here.
+//
+// WHAT THIS ARM CANNOT SEE: the rule's other collision, where the outer back edge hands the
+// enclosing slot a value the inner loop did not produce (`carriedByBothLoops`). It lives in the
+// PLAIN depth-2 generator rather than this mode, and past this range at one input per seed —
+// measured with the clause ablated, 20,000 seeds x 12 inputs: 9 new wrong answers on the plain
+// generator (the first at 1062, whose one input here hits the step cap) and 1 in this mode (18381);
+// 0 with it. The two smallest plain witnesses are frozen as IR in `loop-escape-witnesses.ts`, and
+// `nested-carrier.test.ts` replays them measured.
 test('nested, measured: a carried value adopting its enclosing header name adds no wrong answer', async () => {
   const bad: number[] = [];
   const preexisting = new Set<number>();

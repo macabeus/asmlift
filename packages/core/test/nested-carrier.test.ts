@@ -18,7 +18,8 @@ import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, structure } from '../src/structure/structure';
-import { traceOf } from './helpers';
+import { irTraceOf, traceOf } from './helpers';
+import { INNER_CLOBBERS_OUTER } from './loop-escape-witnesses';
 
 const NEST = `fn nest {
 ^bb0(%0: s32):
@@ -118,25 +119,122 @@ test('ablating carrier-live lets the inner loop overwrite the value the outer la
   expect(differs).toBe(true);
 });
 
-// The inner INDUCTION variable starts at the outer one (`for (j = i; …)`), and the outer update
-// `i + 1` is an unnamed value re-derived at the outer latch — from `i`'s name, which the inner loop
-// would have advanced.
+// The inner INDUCTION variable starts at the outer one (`for (j = i; …)`), and the outer back edge
+// hands `i` the outer update `i + 1` — not anything the inner loop produced. The value is carried
+// by one loop, not both, and `carriedByBothLoops` refuses before `canTakeName` is asked.
 const INDUCTION = NEST.replace('br ^bb2(%5, %4)', 'br ^bb2(%3, %4)');
 
-test('an inner induction variable seeded from the outer one keeps its own name (re-derives)', () => {
+test('an inner induction variable seeded from the outer one keeps its own name (carried by one loop)', () => {
   const fn = lifted(INDUCTION);
   expect(emit(fn)).toMatch(/v2 = v0;/);
   for (let seed = 1; seed <= 64; seed++) {
-    expect(traceOf(structure(fn), seed)).toEqual(traceOf(reference(fn), seed));
+    expect(traceOf(structure(fn), seed)).toEqual(irTraceOf(fn, seed));
+  }
+});
+
+// The same induction variable, now SHARED by the two loops (the outer back edge hands `i` the
+// inner loop's final `j`), so the clause above admits it — and an unnamed `i + 1` still read after
+// the inner loop (`f1(i + 1)` at the outer latch) is re-derived there from `i`'s name. That is
+// `re-derives`' refusal, reached through this rule.
+const RE_DERIVES = INDUCTION.replace(
+  '  %20: u32 = icmp_slt %7, %19\n  cond_br %20, ^bb1(%7, %14), ^bb6()',
+  '  %21: s32 = call %7 {target="f1"}\n  %20: u32 = icmp_slt %16, %19\n  cond_br %20, ^bb1(%16, %14), ^bb6()',
+);
+
+test('an unnamed value re-derived from the shared induction variable keeps it apart (re-derives)', () => {
+  const fn = lifted(RE_DERIVES);
+  expect(emit(fn)).toMatch(/v2 = v0;/);
+  for (let seed = 1; seed <= 64; seed++) {
+    expect(traceOf(structure(fn), seed)).toEqual(irTraceOf(fn, seed));
   }
 });
 
 test('ablating re-derives advances the outer induction variable inside the inner loop', () => {
-  const fn = lifted(INDUCTION);
+  const fn = lifted(RE_DERIVES);
   expect(copies(emit(fn, 're-derives'))).toEqual([]);
   const ablated = structure(fn, {}, { carrierNameGates: without(CARRIER_NAME_GATES, 're-derives') });
   const differs = [...Array(64).keys()].some(
-    (s) => JSON.stringify(traceOf(ablated, s + 1)) !== JSON.stringify(traceOf(reference(fn), s + 1)),
+    (s) => JSON.stringify(traceOf(ablated, s + 1)) !== JSON.stringify(irTraceOf(fn, s + 1)),
   );
   expect(differs).toBe(true);
+});
+
+// ── the collision `canTakeName` cannot see: `carriedByBothLoops` ──────────────────────────────
+// `namecoalesce.test.ts`'s frozen `INNER_CLOBBERS_OUTER` pair, given the one record fact this rule
+// reads. Sharing the name also hands it to the inner back edge's argument (`backArgName`) and to
+// the outer back edge's un-rotation alias; neither is in `varName`, so neither `carrier-live` nor
+// `re-derives` sees the reader. The outer back edge hands the enclosing slot something the inner
+// loop did not produce, so the rule must refuse: without the clause both return another number,
+// and nothing throws. Two records per witness — every block passing everything through, and only
+// the outer header leaving the inner parameter's key unwritten (every other key WRITTEN, so no
+// other admission can be the one that fires).
+const passThrough = (): Map<Block, Map<Value, number>> => new Map();
+const onlyTheInnerKeyUnwritten =
+  (slot: number) =>
+  (fn: Fn): Map<Block, Map<Value, number>> => {
+    const unwritten = fn.blocks[2].params[slot];
+    const record = new Map<Block, Map<Value, number>>();
+    for (const b of fn.blocks) {
+      const keys = new Map<Value, number>();
+      for (const op of b.ops) {
+        for (const s of op.successors) {
+          for (const p of s.block.params) {
+            if (!(b === fn.blocks[1] && p === unwritten)) {
+              keys.set(p, keys.size);
+            }
+          }
+        }
+      }
+      record.set(b, keys);
+    }
+    return record;
+  };
+
+test.each(
+  INNER_CLOBBERS_OUTER.flatMap(({ seed, ir }) => [
+    { seed, ir, record: 'pass-through', wrote: passThrough },
+    { seed, ir, record: 'only the inner key unwritten', wrote: onlyTheInnerKeyUnwritten(0) },
+  ]),
+)('a value the outer back edge replaces is not the inner loop’s to share (seed $seed, $record)', ({ ir, wrote }) => {
+  const fn = lifted(ir, wrote);
+  const tree = structure(fn);
+  const ref = reference(fn);
+  for (let seed = 1; seed <= 64; seed++) {
+    let want;
+    try {
+      want = traceOf(ref, seed);
+    } catch {
+      continue; // the step cap: this input loops forever in every spelling
+    }
+    expect(traceOf(tree, seed)).toEqual(want);
+  }
+});
+
+// ── the scope refusals, pinned by what they refuse ────────────────────────────────────────────
+// Neither is a soundness guard — the name is `carriedByBothLoops`' and `canTakeName`'s to judge —
+// they bound what the record can be evidence FOR. Widening either is a decision about new evidence
+// (the architect's note names the register-key identity), so each keeps a fixture that goes red.
+//
+// A block between the enclosing header and the inner one: the record is per predecessor, so the
+// block could have made the copy and no record would say so. (Two refusals decide this together —
+// the forward predecessor is not a loop header, and the argument is not its param — and no fixture
+// separates them from `carriedByBothLoops`, which needs both too.)
+const PREHEADER = NEST.replace(
+  '  br ^bb2(%5, %4)\n^bb2(',
+  '  br ^bb7()\n^bb7():\n  %30: s32 = const {value=0}\n  br ^bb2(%30, %4)\n^bb2(',
+);
+
+test('a block between the enclosing header and the inner one keeps two variables', () => {
+  expect(copies(emit(lifted(PREHEADER))).length).toBe(2);
+});
+
+// An inner header entered from a second block too: the record for `E` says nothing about the
+// other edge.
+const TWO_ENTRIES = NEST.replace(
+  '  br ^bb2(%5, %4)\n^bb2(',
+  '  %31: u32 = icmp_slt %3, %0\n  cond_br %31, ^bb2(%5, %4), ^bb7()\n^bb7():\n  %32: s32 = const {value=2}\n  br ^bb2(%32, %4)\n^bb2(',
+);
+
+test('an inner header with a second forward predecessor keeps two variables', () => {
+  expect(copies(emit(lifted(TWO_ENTRIES))).length).toBeGreaterThan(0);
 });
