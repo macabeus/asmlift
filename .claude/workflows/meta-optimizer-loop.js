@@ -89,7 +89,9 @@ const HOUSE = `
 - **NEVER \`git stash\`.**
 - \`research/\` is gitignored — never cite a research/ path in a commit, a PR body, or a doc.
 - **Numbers come from commands.** Never state a timing, a count or a behaviour you did not observe.
-- Lint is \`npx eslint apps packages\` (NOT \`pnpm lint\`). \`pnpm format\` before committing.
+- Lint is \`npx eslint apps packages\` (NOT \`pnpm lint\`). \`pnpm format\` before committing — it is
+  \`prettier --write .\`, a tree WRITE, so \`pnpm bench in-flight\` first: exit 1 means a bench is
+  measuring this worktree, and one save stamps its whole run dirty (one round paid 2,420 s for it).
 - \`source /tmp/wt-env.sh\` in every shell before any harness command, or rows silently SKIP.
 - Never wait with a \`pgrep -f\` pattern matching your own shell; use a log marker.
 - Commit messages end with:
@@ -234,7 +236,11 @@ ${implReport}
    downstream depends on?
 5. **Re-run every gate yourself.** If the change adds a fail-loud check, verify it fires on the bad
    condition AND does not fire on a clean run — a false-alarming guard stalls every future round.
-6. **Apply fixes yourself** rather than bouncing back; commit, push, say what you changed.
+6. **Apply fixes yourself** rather than bouncing back; commit, push, say what you changed. This is
+   an EDIT in the worktree that just ran step 3's full bench, which is the 2,420 s shape: run
+   \`pnpm bench in-flight\` before you touch a file, and if you edit anyway the run prints
+   \`[provenance] THE TREE WENT DIRTY MID-RUN\` within ~2 s — the run is lost at that point, so
+   stop it and start it again rather than let it finish.
 7. **Merge when CI is green** (poll \`gh pr checks\`, never with a self-matching \`pgrep\`), then
    \`gh pr merge <n> --squash\`, and **verify main is still green**.
 8. **Refuse to merge** if a blocking finding cannot be fixed soundly. Refusing is a valid outcome.

@@ -1,24 +1,40 @@
-// Is a `bench run` measuring THIS worktree right now? An advisory marker, and the one question
-// `preflight.ts` structurally cannot answer.
+// Which `bench run`s are measuring something on this MACHINE right now? An advisory register of
+// records, and the two questions `preflight.ts` structurally cannot answer from a git status.
 //
-// The start-time refusal there asks "is the tree dirty at second 0". `provenance.ts` asks "was it
-// dirty at any sample DURING the run", stickily, and `merge` refuses the tier. Between them sits a
-// run that starts clean and is dirtied while it is in flight — a comment audit, a `pnpm format`, an
-// editor save. That run is 39 minutes of measurement no commit holds, and it is the shape that cost
-// the most: one round lost 2,420 s to a comment audit run beside its own gate bench.
+// QUESTION 1 — "may I edit this tree?" The start-time refusal in `preflight.ts` asks "is the tree
+// dirty at second 0". `provenance.ts` asks "was it dirty at any sample DURING the run", stickily,
+// and `merge` refuses the tier. Between them sits a run that starts clean and is dirtied while it
+// is in flight — a comment audit, a `pnpm format`, an editor save. That run is 39 minutes of
+// measurement no commit holds, and it is the shape that cost the most: one round lost 2,420 s to a
+// comment audit run beside its own gate bench.
 //
-// The fix is not a machine-wide queue. It is a name for the fact: `bench run` writes a record under
-// `bench-running/` at the repo root and removes it on the way out, and the phases that EDIT the
-// tree read it and refuse (`pnpm bench lock`, wired into the function briefs' audit phase).
+// QUESTION 2 — "may I start a run?" Two full benches on one machine halve each other (2,704 s
+// against a neighbour versus 1,800 s solo) and, worse, a shard killed by a neighbour writes a
+// partial tier with NO error line. That is the standing house rule "two full benches must never
+// overlap on this machine", and it is the hazard with two recorded incidents.
 //
-// ONE RECORD PER RUN, not one slot. `bench-running/<pid>.json`, because a single slot makes the
-// guard LIE: a second run that took the slot would delete the first run's protection when IT
-// finished, and `bench lock` would then clear an audit to edit the tree under a bench still in
-// flight — louder than no guard, and wrong. A worktree is held while ANY record names a live
-// process, and a run only ever writes and unlinks its own.
+// So the register is MACHINE-WIDE and each record names the tree it measures: a run writes
+// `<register>/<pid>.json` on the way in and removes it on the way out, and every reader filters by
+// what it actually cares about. Question 1 reads only the records whose `root` is this worktree —
+// a neighbour's bench cannot be dirtied by an edit here. Question 2 reads them all: a whole-tier
+// run is refused against a whole-tier run at ANY root, and same-root runs are refused when they
+// write the same `results/<tier>.json`.
 //
-// ADVISORY, on purpose. It coordinates one worktree's agents, not the machine: two worktrees have
-// two directories, and nothing here waits, queues, or retries.
+// WHERE, and why not `os.tmpdir()`. A machine-wide rendezvous is worth nothing if two processes
+// disagree about where it is, and `tmpdir()` disagrees: measured on this machine, an interactive
+// shell gives `/var/folders/…/T` from `$TMPDIR` while the same node with `TMPDIR` unset gives
+// `/tmp`. Two agents would then hold two registers and each would read the other as absent — the
+// guard firing green while the hazard is live, which is worse than no guard. `/tmp` is resolved
+// from no environment variable, so every process on this machine agrees. The uid suffix is for
+// permissions, not privacy: `/tmp` is sticky, and a second user's records would be unremovable.
+//
+// ADVISORY: nothing here waits, queues or retries, and `--no-lock` walks past it (see
+// `concurrentRunRefusal`). The register is a name for a fact, not a mutex.
+//
+// ONE RECORD PER RUN, not one slot. A single slot makes the guard LIE: a second run that took the
+// slot would delete the first run's protection when IT finished, and a tree-editing phase would
+// then be cleared to edit under a bench still in flight — louder than no guard, and wrong. A run
+// only ever writes and unlinks its own record.
 //
 // NO SIGNAL HANDLERS, and this is the one place tidiness had to lose. `orchestrate.ts` blocks the
 // event loop in `spawnSync` for every case, so a JS listener for SIGTERM turns an OS-level kill
@@ -36,46 +52,54 @@
 // So a run that dies without reaching its exit path leaves its record behind, exactly like a
 // SIGKILL: it names a pid that is gone, so it reads `stale`, and stale blocks nothing.
 //
-// GITIGNORED (`/bench-running`, anchored) — and that is load-bearing rather than tidy. An untracked
-// path at the repo root is exactly what `preflight.ts` refuses to start on and what the mid-run
-// sampler stamps dirty, so a marker git can see would cause the loss it exists to prevent.
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
+// OUTSIDE EVERY WORKTREE, which is what makes it free. A marker inside the tree is an untracked
+// path — exactly what `preflight.ts` refuses to start on and what the mid-run sampler stamps
+// dirty — so it would have to be gitignored, and the guard would be one `.gitignore` edit away
+// from causing the loss it exists to prevent. In `/tmp` it cannot be seen by git at all.
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { REPO_ROOT } from '../config';
 
-/** The marker's name at the repo root: a directory of `<pid>.json` records. Quoted in every
- *  refusal, and in `.gitignore` as `/bench-running` — unanchored, the pattern would also hide
- *  anything of that name anywhere in the tree, which is how a real committed artifact once went
- *  missing here. */
-export const BENCH_LOCK_FILE = 'bench-running';
+/** The register's directory: machine-wide, per-uid, and derived from NO environment variable —
+ *  see the header for the `tmpdir()` measurement that rules that function out here. Quoted in
+ *  every refusal, so a reader can `ls` it. */
+export const BENCH_LOCK_DIR =
+  process.platform === 'win32'
+    ? join(tmpdir(), 'asmlift-bench-running')
+    : `/tmp/asmlift-bench-running-${typeof process.getuid === 'function' ? process.getuid() : 0}`;
 
-/** What one run records: enough for a reader to decide whether to wait or to clear it, and enough
- *  for the NEXT run to tell whether the two of them collide on a `results/<tier>.json`. */
+/** What one run records. Enough for a reader to decide whether to wait or to clear it, enough for
+ *  the NEXT run to tell whether the two collide on a `results/<tier>.json`, and enough to tell a
+ *  run measuring THIS worktree from one measuring a neighbour. */
 export interface BenchLockRecord {
   pid: number;
   startedAt: string;
   command: string;
-  /** The tiers this run writes. Empty only for a record written by an older build. */
+  /** The tiers this run writes. */
   tiers: string[];
+  /** The worktree it measures. Absent in a record this build cannot parse; absent means UNKNOWN,
+   *  and unknown is never a clearance — it matches every root. */
+  root?: string;
+  /** Does it rewrite at least one tier file WHOLE (`preflight.ts`'s `runIsWholeTier`)? That, not
+   *  "is it slow", is what makes two runs a house-rule violation rather than a dev loop. */
+  whole: boolean;
 }
 
 export type BenchLockState =
-  /** No live record: nothing is measuring this worktree. */
+  /** No live record anywhere on this machine. */
   | { state: 'free'; path: string }
-  /** At least one record naming a live process, oldest first. */
+  /** At least one record naming a live process, oldest first. Records at ANY root: it is each
+   *  reader's job to filter, because the two questions filter differently. */
   | { state: 'held'; path: string; records: BenchLockRecord[] }
   /** The directory is there but every record in it is dead or unreadable — a SIGKILLed or
    *  signalled run, or a lost machine. Treated as free by every reader, because the alternative is
    *  a round blocked on a file nobody can explain. */
   | { state: 'stale'; path: string; why: string };
 
-export function benchLockPath(root: string = REPO_ROOT): string {
-  return join(root, BENCH_LOCK_FILE);
-}
-
-function recordPath(root: string, pid: number): string {
-  return join(benchLockPath(root), `${pid}.json`);
+function recordPath(dir: string, pid: number): string {
+  return join(dir, `${pid}.json`);
 }
 
 /** Is that pid a process this machine still has? EPERM means yes and owned by someone else; only
@@ -83,7 +107,8 @@ function recordPath(root: string, pid: number): string {
  *
  *  A recycled pid therefore reads as HELD when the bench that wrote it is long dead. That is the
  *  direction to be wrong in: a false `held` costs one `rm` of a record named on screen, while a
- *  false `stale` costs the 2,420 s this file exists to keep. */
+ *  false `stale` costs the 2,420 s this file exists to keep. `/tmp` is cleared on reboot, which is
+ *  when recycling is likeliest. */
 function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -104,6 +129,10 @@ function parseRecord(text: string): BenchLockRecord | undefined {
       startedAt: String(r.startedAt ?? 'unknown'),
       command: String(r.command ?? 'unknown'),
       tiers: Array.isArray(r.tiers) ? r.tiers.map(String) : [],
+      root: typeof r.root === 'string' ? r.root : undefined,
+      // Unknown is not a clearance, on this axis too: a record that does not say gets treated as
+      // the run that collides.
+      whole: r.whole !== false,
     };
   } catch {
     // A half-written or hand-edited record names no process, so no reader can ever clear it by
@@ -114,15 +143,25 @@ function parseRecord(text: string): BenchLockRecord | undefined {
 
 /** Every record on disk, live and dead, so acquire can sweep the dead ones and read can explain
  *  itself. Anything that is not a readable `<pid>.json` counts as one dead record. */
-function scan(root: string): { live: BenchLockRecord[]; dead: string[] } {
-  const dir = benchLockPath(root);
+function scan(dir: string): { live: BenchLockRecord[]; dead: string[] } {
   let names: string[];
   try {
     names = readdirSync(dir).filter((n) => n.endsWith('.json'));
   } catch {
-    // Missing, or a plain FILE where the directory should be (an older build's marker, a stray
-    // `touch`). Either way there is no live record in it.
-    return { live: [], dead: existsSync(dir) ? [dir] : [] };
+    // Either it is not there at all, or something that is not a readable directory is. A PLAIN
+    // file (a stray `touch`) names no live run and is safe to clear; an unreadable DIRECTORY is
+    // not — sweeping that would delete live records — so it is reported as neither, and the
+    // acquire below fails loudly on its own write instead.
+    if (!existsSync(dir)) {
+      return { live: [], dead: [] };
+    }
+    let isDir = false;
+    try {
+      isDir = lstatSync(dir).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    return { live: [], dead: isDir ? [] : [dir] };
   }
   const live: BenchLockRecord[] = [];
   const dead: string[] = [];
@@ -132,6 +171,9 @@ function scan(root: string): { live: BenchLockRecord[]; dead: string[] } {
     try {
       record = parseRecord(readFileSync(path, 'utf8'));
     } catch {
+      // Including EISDIR: a DIRECTORY named `<pid>.json` is junk, and it is swept like any other
+      // unreadable record. The sweep's `rmSync` is recursive for exactly this case — without it,
+      // one such directory makes every later `bench run` in this register die on a Node stack.
       record = undefined;
     }
     if (record && pidAlive(record.pid)) {
@@ -144,16 +186,21 @@ function scan(root: string): { live: BenchLockRecord[]; dead: string[] } {
   return { live, dead };
 }
 
-export function readBenchLock(root: string = REPO_ROOT): BenchLockState {
-  const path = benchLockPath(root);
-  const { live, dead } = scan(root);
+export function readBenchLock(dir: string = BENCH_LOCK_DIR): BenchLockState {
+  const { live, dead } = scan(dir);
   if (live.length > 0) {
-    return { state: 'held', path, records: live };
+    return { state: 'held', path: dir, records: live };
   }
   if (dead.length > 0) {
-    return { state: 'stale', path, why: `${dead.length} record(s), none naming a live process` };
+    return { state: 'stale', path: dir, why: `${dead.length} record(s), none naming a live process` };
   }
-  return { state: 'free', path };
+  return { state: 'free', path: dir };
+}
+
+/** Does this record measure that worktree? A record that does not say which tree it measures
+ *  matches every one: unknown is not a clearance. */
+function measures(r: BenchLockRecord, root: string): boolean {
+  return r.root === undefined || r.root === root;
 }
 
 function elapsed(startedAt: string): string {
@@ -164,58 +211,108 @@ function elapsed(startedAt: string): string {
   return `${Math.round((Date.now() - t) / 1000)} s`;
 }
 
-function describe(r: BenchLockRecord): string {
+/** One record as a line a reader can act on. The directory comes from the STATE that was read,
+ *  never from `BENCH_LOCK_DIR`: every refusal here quotes a path to `rm`, and a message naming a
+ *  path the reader did not read is a message that sends them to delete the wrong file. */
+function describe(r: BenchLockRecord, dir: string): string {
   return (
-    `\`${BENCH_LOCK_FILE}/${r.pid}.json\` (pid ${r.pid}, started ${r.startedAt}, ` +
-    `${elapsed(r.startedAt)} ago): ${r.command}`
+    `\`${dir}/${r.pid}.json\` (pid ${r.pid}, started ${r.startedAt}, ` + `${elapsed(r.startedAt)} ago): ${r.command}`
   );
 }
 
-/** What a tree-editing phase is told when a run is in flight, or undefined when it may proceed. */
-export function benchInFlightRefusal(state: BenchLockState): string | undefined {
+/** What a tree-editing phase is told when a run is measuring THIS worktree, or undefined when it
+ *  may proceed. Filtered by root on purpose: a neighbour worktree's bench cannot be stamped dirty
+ *  by an edit here, and refusing on it would block every round on this machine whenever any round
+ *  is measuring. */
+export function benchInFlightRefusal(state: BenchLockState, root: string = REPO_ROOT): string | undefined {
   if (state.state !== 'held') {
     return undefined;
   }
+  const mine = state.records.filter((r) => measures(r, root));
+  if (mine.length === 0) {
+    return undefined;
+  }
   return [
-    `REFUSED: a bench run is measuring this worktree — ${describe(state.records[0])}`,
-    ...state.records.slice(1).map((r) => `  and ${describe(r)}`),
+    `REFUSED: a bench run is measuring this worktree — ${describe(mine[0], state.path)}`,
+    ...mine.slice(1).map((r) => `  and ${describe(r, state.path)}`),
     '',
     'Editing the tree now does not just risk the edit: `provenance.ts` samples git DURING the run',
     'and the sample is STICKY, so one save stamps the whole run dirty and `bench:merge` throws the',
     'numbers away — 39 minutes, after the fact, for a change that was reverted.',
     'Wait for the run (its log ends in an `EXIT=` line), then edit. If the run is dead, the record',
-    `names its pid: check, then \`rm ${BENCH_LOCK_FILE}/<pid>.json\`.`,
+    `names its pid: check, then \`rm ${state.path}/<pid>.json\`.`,
   ].join('\n');
 }
 
-/** What `bench run` is told when a run already in flight writes a tier file it is about to write.
+/** What this run is: the three facts every verdict below is decided on. */
+export interface BenchRunIdentity {
+  tiers: readonly string[];
+  /** Does it rewrite a tier file whole? `preflight.ts`'s `runIsWholeTier`. */
+  whole: boolean;
+  root?: string;
+}
+
+/** What `bench run` is told when another run makes starting this one a mistake, on either of the
+ *  two counts that have actually cost time.
  *
- *  Gated on the TIERS, not on "a run is in flight". A background `--tier real` and a scoped
- *  `--tier synthetic --only <sym>` touch different files and are the dev loop HARD RULE 2 and both
- *  briefs prescribe; refusing that would be the trade `preflight.ts` warns about in advance — "one
- *  sanctioned name beats an escape hatch", and the invented way past a wrong refusal here is `rm`,
- *  which is the one move that can silently unprotect the run still in flight. A scoped run on the
- *  SAME tier is still refused: it rewrites `results/<tier>.json` with its handful of rows. */
-export function concurrentRunRefusal(state: BenchLockState, tiers: readonly string[]): string | undefined {
+ *  SAME WORKTREE, SAME TIER FILE. A run already in flight here writes `results/<tier>.json`, and so
+ *  does this one — including a one-row `--only` run, which rewrites the canonical file with its
+ *  handful of rows (`orchestrate.ts`'s `stitch`). The tiers decide it and not "a run is in flight":
+ *  a scoped `--tier synthetic --only <sym>` beside a background `--tier real` touches different
+ *  files and is the dev loop the house rules and both briefs prescribe.
+ *
+ *  TWO FULL BENCHES, ANY WORKTREE. The house rule, mechanised: 2,704 s against a neighbour versus
+ *  1,800 s solo, and a shard killed by a neighbour writes a partial tier with no error line. Only
+ *  whole-tier against whole-tier — a 15 s scoped probe is not what fans 8 shards, and refusing it
+ *  because a neighbour is busy would be this guard inventing a rule nobody has an incident for.
+ *
+ *  AND THERE IS A SANCTIONED DOOR, `--no-lock`. Not because the refusal is doubted: it is right,
+ *  and the wait is the correct move. It is here because the alternative door is `rm`ing someone
+ *  else's record, which is the one move that can silently unprotect a run still in flight — the
+ *  same "one sanctioned name beats an escape hatch" trade `preflight.ts` makes for `.envrc.local`.
+ *  A refusal an agent cannot legitimately pass is a refusal it passes illegitimately. */
+export function concurrentRunRefusal(state: BenchLockState, run: BenchRunIdentity): string | undefined {
   if (state.state !== 'held') {
     return undefined;
   }
-  const clashes = state.records
-    .map((r) => ({ record: r, shared: r.tiers.filter((t) => tiers.includes(t)) }))
-    // An older build's record carries no tiers; assume it collides rather than assume it does not.
-    .filter((c) => c.shared.length > 0 || c.record.tiers.length === 0);
-  if (clashes.length === 0) {
+  const root = run.root ?? REPO_ROOT;
+  const sameFile = state.records.find(
+    (r) => measures(r, root) && (r.tiers.length === 0 || r.tiers.some((t) => run.tiers.includes(t))),
+  );
+  if (sameFile !== undefined) {
+    const shared = sameFile.tiers.filter((t) => run.tiers.includes(t));
+    const files = (shared.length > 0 ? shared : run.tiers).map((t) => `apps/benchmark/results/${t}.json`).join(', ');
+    return [
+      `bench run REFUSED: pid ${sameFile.pid} is already measuring this worktree — ${describe(sameFile, state.path)}`,
+      '',
+      `Both runs write ${files}, so the second publishes a tier stitched from two`,
+      'measurements — a one-row `--only` run rewrites that file too, with its one row.',
+      'Wait for it (its log ends in an `EXIT=` line), or run a SCOPED probe (`--only`) on a tier it',
+      'is not writing — scoped, because a second WHOLE tier beside this one halves both runs and',
+      'can kill a shard with no error line. A separate worktree is the other way.',
+      `If that pid is dead: \`rm ${state.path}/${sameFile.pid}.json\`. If you have a reason to`,
+      'measure anyway, `--no-lock` says so out loud and leaves every other record alone — never',
+      "`rm` a record you did not write, which is the one move that unprotects someone else's run.",
+    ].join('\n');
+  }
+  if (!run.whole) {
     return undefined;
   }
-  const shared = clashes[0].shared;
-  const files = (shared.length > 0 ? shared : tiers).map((t) => `apps/benchmark/results/${t}.json`).join(', ');
+  const otherWhole = state.records.find((r) => r.whole);
+  if (otherWhole === undefined) {
+    return undefined;
+  }
   return [
-    `bench run REFUSED: pid ${clashes[0].record.pid} is already running one here — ${describe(clashes[0].record)}`,
+    `bench run REFUSED: a full bench is already running on this machine — ${describe(otherWhole, state.path)}`,
+    `  in ${otherWhole.root ?? 'an unrecorded worktree'}`,
     '',
-    `Both runs write ${files}, so the second publishes a tier stitched from two`,
-    'measurements — and on a 10-core machine they halve each other besides.',
-    'Wait for it, run a tier it is not writing, or use a separate worktree. If that pid is dead,',
-    `\`rm ${BENCH_LOCK_FILE}/${clashes[0].record.pid}.json\`.`,
+    'Two full benches must never overlap here: 10 cores, 8 shards each, and one measured 2,704 s',
+    'against a neighbour versus 1,800 s solo. Worse than slow — a shard killed by a neighbour',
+    'writes a partial tier with NO error line, and `grep -c SKIP` reads 0 either way.',
+    'Wait for it, or scope this one (`--only <sym>`, or `--tier` the one it is not writing): a',
+    'scoped probe is not refused against a neighbour, only against a run writing the same file.',
+    `If that pid is dead: \`rm ${state.path}/${otherWhole.pid}.json\`. If you have a reason to`,
+    'measure anyway, `--no-lock` says so out loud and leaves every other record alone.',
   ].join('\n');
 }
 
@@ -227,66 +324,81 @@ export function concurrentRunRefusal(state: BenchLockState, tiers: readonly stri
  *  record naming a dead pid, which is what `stale` is for, and the same is true of SIGKILL or a
  *  lost machine.
  *
- *  Never touches another run's record, on either side. Two runs launched in the same millisecond
- *  can both read `free` and both proceed — a read/write window `concurrentRunRefusal` cannot close
- *  from here. Left open knowingly: with one record per pid the racing pair only DUPLICATES work,
- *  where the single-slot shape had the second run EVICT the first's protection, and real launches
- *  are seconds apart. */
-export function acquireBenchLock(command: string, tiers: readonly string[], root: string = REPO_ROOT): string {
-  const dir = benchLockPath(root);
-  const { dead } = scan(root);
+ *  Never touches another run's record, on either side, and never removes the DIRECTORY: an empty
+ *  register costs nothing outside the tree, while removing it would race a neighbour that has just
+ *  created it and not yet written into it, throwing ENOENT out of a 35-minute command before it
+ *  did any work.
+ *
+ *  Two runs launched in the same millisecond can both read `free` and both proceed — a read/write
+ *  window no reader can close from here. Left open knowingly: with one record per pid the racing
+ *  pair only DUPLICATES work, where the single-slot shape had the second run EVICT the first's
+ *  protection, and real launches are seconds apart. */
+export function acquireBenchLock(command: string, run: BenchRunIdentity, dir: string = BENCH_LOCK_DIR): string {
+  const { dead } = scan(dir);
   if (dead.length === 1 && dead[0] === dir) {
-    // A plain file where the directory belongs. It names no live run, so it is safe to clear.
-    console.error(`[bench lock] cleared a stale \`${BENCH_LOCK_FILE}\` left by an older build`);
-    rmSync(dir, { force: true });
+    // Something that is not a directory where the register belongs. It names no live run.
+    console.error(`[bench lock] cleared a stray \`${dir}\` that is not a directory`);
+    rmSync(dir, { recursive: true, force: true });
   }
   mkdirSync(dir, { recursive: true });
   for (const path of dead) {
     if (path === dir) {
       continue;
     }
-    console.error(`[bench lock] cleared a stale record: ${path.slice(root.length + 1)}`);
-    rmSync(path, { force: true });
+    console.error(`[bench lock] cleared a stale record: ${path}`);
+    // Recursive because a DIRECTORY named `<pid>.json` reaches this list too, and a plain `rmSync`
+    // throws EISDIR on it — which would brick every later run in this register.
+    rmSync(path, { recursive: true, force: true });
   }
   const record: BenchLockRecord = {
     pid: process.pid,
     startedAt: new Date().toISOString(),
     command,
-    tiers: [...tiers],
+    tiers: [...run.tiers],
+    root: run.root ?? REPO_ROOT,
+    whole: run.whole,
   };
-  const path = recordPath(root, process.pid);
+  const path = recordPath(dir, process.pid);
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`);
-  process.on('exit', () => releaseBenchLock(root, record.pid));
+  process.on('exit', () => releaseBenchLock(dir, record.pid));
   return path;
 }
 
-/** Remove OUR record, and the directory once it holds nothing. Another run's record is never
- *  touched: deleting one would silently unlock a live run, which is the failure that makes an
- *  advisory guard worse than none. */
-export function releaseBenchLock(root: string = REPO_ROOT, pid: number = process.pid): void {
-  rmSync(recordPath(root, pid), { force: true });
-  try {
-    rmdirSync(benchLockPath(root));
-  } catch {
-    // Not empty (another run holds a record), or already gone. Both are fine.
-  }
+/** Remove OUR record. Another run's record is never touched: deleting one would silently unlock a
+ *  live run, which is the failure that makes an advisory guard worse than none. */
+export function releaseBenchLock(dir: string = BENCH_LOCK_DIR, pid: number = process.pid): void {
+  rmSync(recordPath(dir, pid), { recursive: true, force: true });
 }
 
-/** `bench lock`: the read the audit phases run. Exit 0 = go ahead, 1 = a run is in flight. */
-export function benchLockStatus(root: string = REPO_ROOT): number {
-  const state = readBenchLock(root);
-  const refusal = benchInFlightRefusal(state);
+/** `bench in-flight`: the read the tree-editing phases run. Exit 0 = go ahead, 1 = a run is
+ *  measuring THIS worktree. A neighbour's run is reported and does not change the verdict — it
+ *  cannot be dirtied from here, but a reader deciding whether to start a bench wants to know. */
+export function benchLockStatus(dir: string = BENCH_LOCK_DIR, root: string = REPO_ROOT): number {
+  const state = readBenchLock(dir);
+  const elsewhere = state.state === 'held' ? state.records.filter((r) => !measures(r, root)) : [];
+  const note = (): void => {
+    for (const r of elsewhere) {
+      console.log(
+        `(a bench is also running in ${r.root} — ${describe(r, state.path)}; it does not block an edit here,`,
+      );
+      console.log(' but starting a second FULL bench beside it is refused, and for good reason)');
+    }
+  };
+  const refusal = benchInFlightRefusal(state, root);
   if (refusal !== undefined) {
     console.error(refusal);
+    note();
     return 1;
   }
   if (state.state === 'stale') {
     console.log(
-      `no bench run in flight — \`${BENCH_LOCK_FILE}\` holds only records of dead runs (${state.why}). ` +
-        `The next \`bench run\` sweeps them; \`rm -r ${BENCH_LOCK_FILE}\` to be rid of them now.`,
+      `no bench run in flight — \`${dir}\` holds only records of dead runs (${state.why}). ` +
+        `The next \`bench run\` sweeps them; \`rm -r ${dir}\` to be rid of them now.`,
     );
+    note();
     return 0;
   }
-  console.log(`no bench run in flight (no \`${BENCH_LOCK_FILE}\`) — the tree is yours to edit.`);
+  console.log(`no bench run is measuring this worktree (no live record in \`${dir}\`) — it is yours to edit.`);
+  note();
   return 0;
 }

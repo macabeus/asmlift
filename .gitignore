@@ -42,9 +42,4 @@ research/
 # worktree reads and nothing prunes.
 .envrc.local
 .local/
-# `bench run`'s advisory marker (apps/benchmark/src/run/lock.ts): a directory of `<pid>.json`
-# records, one per run in flight, written at the repo root and read by the phases that edit the
-# tree. ANCHORED: unanchored it would also hide anything of this name anywhere in the tree. It must
-# be invisible to git or it becomes the untracked path the preflight above refuses to start on.
-/bench-running
 packages/cli/dist/

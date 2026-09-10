@@ -279,7 +279,7 @@ on the corpus. A finding already triaged is not a new finding unless it falsifie
 Do this AFTER the adversarial rounds, never before: remediation rewrites code, and a comment
 written for the first version is the likeliest thing in the diff to have become false. And **not
 while a bench is in flight** — this phase rewrites files across the whole diff, the mid-run sampler
-is sticky, and a round paid 2,420 s for the pair. **Run `pnpm bench lock` first**: exit 1 means a
+is sticky, and a round paid 2,420 s for the pair. **Run `pnpm bench in-flight` first**: exit 1 means a
 run is measuring this worktree, so wait for its `EXIT=` line before you touch a file.
 
 Inventory first — `git diff main HEAD`, added lines matching `^\+\s*(//|/\*|\*)`, counted per
@@ -304,7 +304,8 @@ Then, over every comment you added or changed, **tests included**:
 Keep the refusal conditions, and any *why* not derivable from the code: a compiler behaviour, a
 shape the IR cannot represent, why an absence is deliberate.
 
-Finish with a mechanical sweep for survivors and re-run `pnpm format`. No test covers a comment, so
+Finish with a mechanical sweep for survivors and re-run `pnpm format` (a `prettier --write .`, so
+`pnpm bench in-flight` first if a bench is still in flight). No test covers a comment, so
 this phase is the only pass they get.
 
 ## Phase 7 — Report and write back
@@ -356,14 +357,20 @@ until grep -q 'EXIT=' /tmp/<round>-bench.log; do sleep 30; done
 DURING the run and the sample is STICKY, so ONE edit — a comment audit, a `pnpm format`, an editor
 save — stamps the whole run dirty and `bench:merge` throws the numbers away 39 minutes later. A
 round lost **2,420 s** to exactly that, auditing its comments beside its own gate bench. So a run in
-flight records itself in `bench-running/<pid>.json` at the repo root. **Run `pnpm bench lock`
-before any phase that EDITS the tree, and read its exit code: 1 means a run is in flight — wait for
-its `EXIT=` line — and 0 means the tree is yours.** The refusal names the pid, the argv and the
-elapsed time. The work this background pattern is for is read-only — reading the diff, grepping the
-corpus, running the unit tests, drafting the report. The records are gitignored (so they cannot
-dirty the run itself) and removed when the run exits; a run that dies without getting there leaves
-its record behind, and that record reads as STALE from its dead pid: stale blocks nothing, the next
-run sweeps it, and `rm bench-running/<pid>.json` clears it now.
+flight records itself, in `/tmp/asmlift-bench-running-<uid>/<pid>.json`. **Run `pnpm bench in-flight`
+before any phase that EDITS the tree, and read its exit code: 1 means a run is measuring this
+worktree — wait for its `EXIT=` line — and 0 means the tree is yours.** The refusal names the pid,
+the argv and the elapsed time. The work this background pattern is for is read-only — reading the
+diff, grepping the corpus, running the unit tests, drafting the report. The register lives outside
+every worktree, so it can never dirty the run itself; records are removed when the run exits, and a
+run that dies without getting there leaves its record behind, reading STALE from its dead pid:
+stale blocks nothing, the next run sweeps it, and `rm /tmp/asmlift-bench-running-<uid>/<pid>.json`
+clears it now.
+
+**If you edit anyway, the run says so within ~2 s** — `[provenance] THE TREE WENT DIRTY MID-RUN`,
+on the run's own stderr, once, naming the paths. That line means the run is already lost: the
+sample is sticky and reverting does not undo it. Stop it, revert or commit, start it again. Do not
+read it as a warning to be careful for the rest of the run.
 
 **`kill -TERM` does not stop a `bench run`** — measured: one sent SIGTERM 6 s in ran all 291 cases
 and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
@@ -377,11 +384,14 @@ that, long after the jobs they watched had finished.
 **Two full benches must never overlap on this machine.** It has 10 cores, the run fans 8 shards,
 and a ranked run takes `--jobs 6`; a bench measured **2704 s against a neighbour versus 1800 s
 solo**. Worse than slow: a shard killed by a neighbour writes a partial tier with **no error line**,
-and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line. `bench run` now refuses a
-second run **in the same worktree that writes a tier file the live one is writing** — a scoped
-`--tier synthetic --only <sym>` beside a background `--tier real` is not refused, because they
-touch different files. That marker is per-worktree and says nothing about the neighbour: across
-worktrees this is still discipline.
+and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line. **`bench run` now
+enforces this**: the register is machine-wide, so a second FULL bench is refused while one is
+running in ANY worktree, and a second run in THIS worktree is refused when it writes a tier file
+the live one is writing. What is still allowed is the scoped dev loop — a `--tier synthetic --only
+<sym>` probe beside a background `--tier real`, here or beside a neighbour's full bench — because a
+15 s probe is not what fans 8 shards. If you have a real reason to measure anyway, `--no-lock` says
+so out loud and leaves every other record alone; **never `rm` a record you did not write**, which
+is the one move that silently unprotects someone else's run.
 
 ---
 

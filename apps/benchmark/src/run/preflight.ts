@@ -21,8 +21,9 @@
 // nothing was written — and the reader of this refusal is deciding whether to commit or to route
 // around it.
 //
-// TWO LAWS, TWO PREDICATES. `runIsWholeTier` asks "does this invocation rewrite a tier file
-// whole", which is the git question and only the git question. The `cpp` question is a different
+// THREE LAWS, THREE PREDICATES. `runIsWholeTier` asks "does this invocation rewrite a tier file
+// whole", which is the git question and only the git question — and, in `run/lock.ts`, also the
+// question of whether starting it beside a neighbour's full bench breaks the house rule. The `cpp` question is a different
 // one — "will this invocation preprocess anything with the host `cpp`" — and the tier alone
 // decides it: every `CPP` call site in `compile/{ido,kmc,gcc272}.ts` sits inside the `*Real`
 // export, `compile/real.ts` is their only consumer, and no synthetic row preprocesses. Scoping
@@ -45,6 +46,7 @@ import { CPP_PREPROCESS_FLAGS } from '../compile/util';
 import { CPP, REPO_ROOT } from '../config';
 import { codeDirtyPaths } from '../provenance';
 import { type ToolchainId, availableToolchains } from '../toolchains';
+import { type BenchLockState, concurrentRunRefusal, readBenchLock } from './lock';
 import { type Tier, tierIsFiltered } from './orchestrate';
 
 /** The gitignored name a local env file is expected to take, quoted in the refusal. One sanctioned
@@ -77,13 +79,25 @@ export interface PreflightOptions {
   serial?: boolean;
 }
 
-/** A shard CHILD, exempt from BOTH verdicts: the parent that spawned it has already answered them
- *  once, and every child re-answering would print the same refusal N times. `--shard` alone is NOT
- *  that child — `cli.ts`'s fan-out branch ignores the shard and runs the tier whole — so the test
- *  is `--shard` AND `--serial`, exactly how `orchestrate.ts` spawns one
- *  (`run --serial --tier X --shard i/N`). `cli.ts` rejects the other combination outright. */
-export function isShardChild(opts: PreflightOptions): boolean {
+/** A shard CHILD, exempt from EVERY verdict in this file and from taking a lock record: the parent
+ *  that spawned it has already answered them once, and every child re-answering would print the
+ *  same refusal N times — or, for the record, would say eight runs are in flight. `--shard` alone
+ *  is NOT that child — `cli.ts`'s fan-out branch ignores the shard and runs the tier whole — so
+ *  the test is `--shard` AND `--serial`, exactly how `orchestrate.ts` spawns one
+ *  (`run --serial --tier X --shard i/N`). `cli.ts` rejects the other combination outright.
+ *
+ *  Private: the three predicates below are the exported surface, so that every exemption is
+ *  spelled in the file that owns the sentence above rather than re-derived by a caller. */
+function isShardChild(opts: PreflightOptions): boolean {
   return opts.shard !== undefined && opts.serial === true;
+}
+
+/** Does this invocation write a record into `run/lock.ts`'s register, so the phases that edit the
+ *  tree can see it? Every run but a shard child. Exported for `cli.ts`, which takes the record
+ *  after this file's verdicts pass — taking one is not a refusal, so it does not belong in
+ *  `preflightRefusals`, but WHICH invocations are exempt does belong here with the other two. */
+export function runTakesTheBenchLock(opts: PreflightOptions): boolean {
+  return !isShardChild(opts);
 }
 
 /** Will this invocation rewrite at least one tier file WHOLE? That — not "is it slow" — is the
@@ -169,6 +183,10 @@ export interface PreflightDeps {
   repoRoot?: string;
   probe?: () => { ok: boolean; how: string };
   cppUsingToolchains?: () => ToolchainId[];
+  lockState?: () => BenchLockState;
+  /** `--no-lock`: the sanctioned way past the concurrent-run verdict, and the reason the verdict
+   *  can afford to be strict. See `concurrentRunRefusal`. */
+  ignoreLock?: boolean;
 }
 
 /** Which of the cpp-preprocessing toolchains are actually installed here. */
@@ -180,8 +198,14 @@ export function cppUsingToolchains(): ToolchainId[] {
 
 /** Every start-time verdict. Returned rather than exited on, so the caller owns the exit code and
  *  the test owns neither. Each verdict is gated on ITS OWN predicate — see the header:
- *  `runIsWholeTier` for git, `runUsesHostCpp` for the probe — so a scoped real run is checked for
- *  `cpp` and not for dirt, and a whole synthetic run the other way round.
+ *  `runTakesTheBenchLock` for the concurrent-run register, `runIsWholeTier` for git,
+ *  `runUsesHostCpp` for the probe — so a scoped real run is checked for `cpp` and not for dirt,
+ *  and a whole synthetic run the other way round.
+ *
+ *  The concurrent-run verdict lives HERE and not in `cli.ts` because it is the same shape as the
+ *  other two — a start-time refusal, gated on a predicate over the same options — and this file's
+ *  first sentence is its charter. `cli.ts` keeps only the WRITE (`acquireBenchLock`), which is not
+ *  a verdict.
  *
  *  A WARNING and not a refusal when `cpp` is broken but no toolchain that uses it is installed:
  *  this harness's standing policy is that a missing tool SKIPS its rows (`toolchains.ts` →
@@ -196,8 +220,21 @@ export function preflightRefusals(
 ): { refusals: string[]; warnings: string[] } {
   const refusals: string[] = [];
   const warnings: string[] = [];
+  const repoRoot = deps.repoRoot ?? REPO_ROOT;
+  // First, because it costs a readdir where the next verdict costs a `git status` and the one
+  // after it a compile — and because it is the verdict whose answer changes while you read it.
+  if (runTakesTheBenchLock(opts) && deps.ignoreLock !== true) {
+    const concurrent = concurrentRunRefusal((deps.lockState ?? readBenchLock)(), {
+      tiers: opts.tiers,
+      whole: runIsWholeTier(opts),
+      root: repoRoot,
+    });
+    if (concurrent !== undefined) {
+      refusals.push(concurrent);
+    }
+  }
   if (runIsWholeTier(opts)) {
-    const status = spawnSync('git', ['-C', deps.repoRoot ?? REPO_ROOT, 'status', '--porcelain'], { encoding: 'utf8' });
+    const status = spawnSync('git', ['-C', repoRoot, 'status', '--porcelain'], { encoding: 'utf8' });
     // git being unreadable is not a dirty tree, and the run-time stamp already reports that case as
     // dirty on its own. Refusing here on it would block a bench run in a tarball checkout.
     const dirty = status.status === 0 ? dirtyTreeRefusal(codeDirtyPaths(status.stdout)) : undefined;
