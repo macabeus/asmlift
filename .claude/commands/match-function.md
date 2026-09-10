@@ -361,7 +361,11 @@ auditing its comments beside its own gate bench. So a run in flight records itse
 `/tmp/asmlift-bench-running-<uid>/<pid>.json`. **Run `pnpm bench in-flight` before any phase that
 EDITS the tree, and read its exit code: 1 means a run is measuring this worktree — wait for its
 `EXIT=` line — and 0 means the tree is yours.** The work this background pattern is for is
-read-only: reading the diff, grepping the corpus, running the unit tests, drafting the report. A
+read-only: reading the diff, grepping the corpus, drafting the report. **The unit suites are NOT**
+— `packages/cli/test/offline/provenance.test.ts` writes an untracked `__provenance-probe__/` into
+`packages/` for the length of one test (it has to: it is asserting that the sampler can tell three
+dirty states apart), and a bench that samples inside that window is stamped dirty for good. Measured
+on this branch's own gate run. Run the suites before the bench or after it, not beside it. A
 run that was killed leaves its record behind and it reads STALE — that blocks nothing, and the next
 run sweeps it.
 
