@@ -669,6 +669,10 @@ refusals. `CARRIER_NAME_GATES` is the model: it was grafted by the round that ne
 reason out of `canTakeName`, and it shipped as that round's own remediation — #164 (`428f5706`),
 whose commit body records that the rules "were four `if`s inside a 5000-line function" and that
 "naming which one fires on a given row took an instrumented patch and a revert".
+`ENCLOSING_CARRIER_GATES`, beside it, is the same trigger firing inside one round: the admission
+that lets a nested loop's carried value keep its enclosing loop's name was five `if`s, and the round
+that built it paid the loop on them three times (the build's source ablations, its remediation's
+clause ablations, and a review's environment switches) before tabling it in the remediation.
 
 There is exactly one other admission, and it is the mirror of that one — read it together with **A
 GATE CAN ALSO BE STARVED FROM ABOVE** below. Nobody can have paid instrument minutes on a rule

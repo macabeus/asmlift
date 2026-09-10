@@ -142,7 +142,10 @@ describe.each([
 // measured with the clause ablated, 20,000 seeds x 12 inputs: 9 new wrong answers on the plain
 // generator (the first at 1062, whose one input here hits the step cap) and 1 in this mode (18381);
 // 0 with it. The two smallest plain witnesses are frozen as IR in `loop-escape-witnesses.ts`, and
-// `nested-carrier.test.ts` replays them measured.
+// `nested-carrier.test.ts` replays them measured. That rule is `carried-by-one-loop`, the one sound
+// gate of `ENCLOSING_CARRIER_GATES` — a SECOND table, which this file's "written over the TABLE"
+// bar does not cover: its guard is the frozen pair dropped with `without()`, because no seed in
+// this range reaches it.
 test('nested, measured: a carried value adopting its enclosing header name adds no wrong answer', async () => {
   const bad: number[] = [];
   const preexisting = new Set<number>();

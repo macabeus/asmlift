@@ -1207,6 +1207,71 @@ export const CARRIER_NAME_GATES: readonly Gate<CarrierName>[] = [
   },
 ];
 
+/** A nested loop's header parameter offered its ENCLOSING loop's name, as
+ *  `ENCLOSING_CARRIER_GATES` judges it — the admission `enclosingCarrierName` makes before
+ *  `canTakeName` (`CARRIER_NAME_GATES`) is asked. `E` is the inner header's first forward
+ *  predecessor and `a` the argument `E` hands the parameter.
+ *
+ *  Lazy for the same reason `CarrierName` is: `carriedByBoth` walks the in-edges of both headers,
+ *  so it sits last and runs only when every cheaper rule admits. Every field is TOTAL — false when
+ *  `E` or `a` does not exist — so a test can drop any one gate and the rest still answer. */
+export interface EnclosingCarrier {
+  /** every forward predecessor of the inner header is the one block `E`, and `E` is not the header */
+  readonly oneForwardEntry: boolean;
+  /** `E` heads a loop whose body holds the inner header */
+  readonly entryEncloses: boolean;
+  /** `a` is one of `E`'s own parameters — `E`'s loop-carried value, which `E` does not compute */
+  readonly argIsEnclosingParam: boolean;
+  /** the frontend measured `E`, and `E` wrote nothing into the parameter's key */
+  readonly keyUnwritten: boolean;
+  /** the value is carried by BOTH loops (`carriedByBothLoops`). False whenever the two rules above
+   *  it are, since it needs `E`'s loop and `a`'s slot in `E` — which is why no fixture can separate
+   *  those two from this one */
+  readonly carriedByBoth: boolean;
+}
+
+/** `enclosingCarrierName`'s own admission. The argument for each rule is the block comment above
+ *  `enclosingCarrierName`; the ids are here so a refusal can be named and a rule dropped by a test.
+ *
+ *  ONE rule is sound, and it is the last. The four before it bound what the write-order record can
+ *  be EVIDENCE for — a refusal keeps the two-variable spelling, which is correct by construction —
+ *  so each is `sound: false`: dropping one spells a different, still-correct program (the fixtures
+ *  in `nested-carrier.test.ts` show what each keeps). `carried-by-one-loop` is the collision
+ *  `canTakeName` cannot see, and dropping it emits another program. */
+export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
+  {
+    id: 'one-forward-entry',
+    why: 'the record is per predecessor, so it cannot vouch for a second edge into the inner header',
+    sound: false,
+    rejects: (c) => !c.oneForwardEntry,
+  },
+  {
+    id: 'enclosing-header',
+    why: 'only the enclosing header itself has a record that can say the entry copy was not made',
+    sound: false,
+    rejects: (c) => !c.entryEncloses,
+  },
+  {
+    id: 'enclosing-param',
+    why: 'only a value the enclosing header did not compute can have reached the inner loop uncopied',
+    sound: false,
+    rejects: (c) => !c.argIsEnclosingParam,
+  },
+  {
+    id: 'key-written',
+    why: 'the enclosing header wrote the key (or was not measured): the source spelled the copy',
+    sound: false,
+    rejects: (c) => !c.keyUnwritten,
+  },
+  {
+    id: 'carried-by-one-loop',
+    why: 'a value the outer back edge replaces would be overwritten under a name the inner loop reads',
+    sound: true,
+    guardedBy: 'nested-carrier.test.ts: ablating carried-by-one-loop lets the outer update clobber the inner value',
+    rejects: (c) => !c.carriedByBoth,
+  },
+];
+
 // Structuring levers, threaded as DATA so a new one is a field here + its consumer, not a new
 // positional boolean widened across every call site:
 //   returnsVoid                    — from the function's own prototype (suppress phantom r0 return);
@@ -1564,6 +1629,9 @@ export interface StructureHooks {
    *  entry is sound, so this exists for the differential test that drops one and watches the
    *  emitted program change, never for a shipped ablation. */
   carrierNameGates?: readonly Gate<CarrierName>[];
+  /** `enclosingCarrierName`'s admission rules (`ENCLOSING_CARRIER_GATES`), ablatable the same way —
+   *  and, wrapped in `tallying`, the census of which rule refuses a nest. */
+  enclosingCarrierGates?: readonly Gate<EnclosingCarrier>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
@@ -2451,19 +2519,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // no corpus row on any other toolchain (0 of the MIPS and PPC rows change), so for those the claim
   // is UNMEASURED rather than established.
   //
-  // Refuses — `p` keeps the seeding below — when:
-  //   • `p` has more than one forward predecessor, or its one forward predecessor is not the header
-  //     of a loop that strictly encloses `p`'s header. That is a limit of the DATUM, not of the
-  //     hazard: the record is keyed by successor params, and a single-predecessor block has none,
-  //     so it cannot say whether a block between `E` and the inner header made the copy. It is also
-  //     what holds the rule to the unguarded, constant-trip nest: nestacc1 with its inner bound
-  //     `j < 7` made `j < n` is entered through its guard and keeps both copies (measured, agbcc).
-  //     The register-key identity the MIPS_GCC note names (`frontend/ssa.ts` `phiKey`) is the
-  //     datum that would lift it;
-  //   • the argument is not one of `E`'s own params (it is not `E`'s loop-carried value);
-  //   • the frontend did not measure `E`, or measured it WRITING `p`'s key — the copy the source
-  //     spelled, which the fresh name reproduces;
-  //   • the value is not carried by BOTH loops (`carriedByBothLoops`, below);
+  // THE REFUSALS ARE A TABLE (`ENCLOSING_CARRIER_GATES`, in table order), and then `canTakeName`'s.
+  // `p` keeps the seeding below when:
+  //   • `one-forward-entry` / `enclosing-header`: `p` has more than one forward predecessor, or its
+  //     one forward predecessor is not the header of a loop that strictly encloses `p`'s header.
+  //     That is a limit of the DATUM, not of the hazard: the record is keyed by successor params,
+  //     and a single-predecessor block has none, so it cannot say whether a block between `E` and
+  //     the inner header made the copy. It is also what holds the rule to the unguarded,
+  //     constant-trip nest: nestacc1 with its inner bound `j < 7` made `j < n` is entered through
+  //     its guard and keeps both copies (measured, agbcc). The register-key identity the MIPS_GCC
+  //     note names (`frontend/ssa.ts` `phiKey`) is the datum that would lift it;
+  //   • `enclosing-param`: the argument is not one of `E`'s own params (it is not `E`'s
+  //     loop-carried value);
+  //   • `key-written`: the frontend did not measure `E`, or measured it WRITING `p`'s key — the
+  //     copy the source spelled, which the fresh name reproduces;
+  //   • `carried-by-one-loop`: the value is not carried by BOTH loops (`carriedByBothLoops`, below).
+  //     The one SOUND rule of the five; the four above bound the evidence, and dropping one spells
+  //     a different program that is still correct;
   //   • `canTakeName` refuses. With the clause above, these are the guards against the collision
   //     `enclosingNames` excludes wholesale: a value of `E` still read after the inner loop is
   //     `carrier-live`, and an unnamed one re-derived from it there (the outer update
@@ -2499,6 +2571,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
     }
     const k = E.params.indexOf(a);
+    if (k < 0) {
+      return false; // not `E`'s loop-carried value — `enclosing-param`'s question, asked again
+    }
     let backEdges = 0;
     for (const { pred, succ } of inEdgeRecords(preds, E)) {
       if (!outer.body.has(pred)) {
@@ -2534,22 +2609,25 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     forwardPreds: readonly Block[],
   ): string | undefined => {
     const [E] = forwardPreds;
-    if (E === undefined || E === header || forwardPreds.some((fp) => fp !== E)) {
-      return undefined;
-    }
-    if (!forest.byHeader.get(E)?.body.has(header)) {
-      return undefined;
-    }
-    const a = successorTo(E, header)?.args[i];
+    const a = E === undefined ? undefined : successorTo(E, header)?.args[i];
     const order = fn.writeOrder;
-    if (a === undefined || !E.params.includes(a) || !order?.writes.has(E) || order.lastWrite.get(E)?.has(p)) {
-      return undefined;
-    }
-    if (!carriedByBothLoops(p, i, header, E, a)) {
-      return undefined;
-    }
-    const nm = varName.get(a);
-    return nm !== undefined && canTakeName(p, header, nm) ? nm : undefined;
+    const refused = firstRejection(hooks.enclosingCarrierGates ?? ENCLOSING_CARRIER_GATES, {
+      oneForwardEntry: E !== undefined && E !== header && forwardPreds.every((fp) => fp === E),
+      get entryEncloses() {
+        return E !== undefined && forest.byHeader.get(E)?.body.has(header) === true;
+      },
+      get argIsEnclosingParam() {
+        return a !== undefined && E!.params.includes(a);
+      },
+      get keyUnwritten() {
+        return E !== undefined && order?.writes.has(E) === true && order.lastWrite.get(E)?.has(p) !== true;
+      },
+      get carriedByBoth() {
+        return E !== undefined && a !== undefined && carriedByBothLoops(p, i, header, E, a);
+      },
+    });
+    const nm = a === undefined ? undefined : varName.get(a);
+    return refused === null && nm !== undefined && canTakeName(p, header, nm) ? nm : undefined;
   };
   // ONE seeding routine for self-loop and structured-loop headers. On a coalesceLoopInit target,
   // keep the induction variable in its entry (forward-edge) value's register — reproducing a

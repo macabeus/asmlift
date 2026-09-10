@@ -50,7 +50,7 @@ import { FALL_IN_GATES } from '../src/raise/retsink';
 import { ARM_REREAD_GATES } from '../src/raise/shortcircuit';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
-import { CARRIER_NAME_GATES, FRESH_MERGE_GATES } from '../src/structure/structure';
+import { CARRIER_NAME_GATES, ENCLOSING_CARRIER_GATES, FRESH_MERGE_GATES } from '../src/structure/structure';
 
 // Every declared table, DERIVED tables included (LIVEBASE_GATES is basecse's admission with the
 // placement heuristics ablated, LIVEBASE_BLOCK_GATES that one plus a selectivity rule —
@@ -106,6 +106,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   PTR_FIELD_GATES: PTR_FIELD_GATES as readonly Gate<never>[],
   FRESH_MERGE_GATES: FRESH_MERGE_GATES as readonly Gate<never>[],
   CARRIER_NAME_GATES: CARRIER_NAME_GATES as readonly Gate<never>[],
+  ENCLOSING_CARRIER_GATES: ENCLOSING_CARRIER_GATES as readonly Gate<never>[],
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
   REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],

@@ -9,15 +9,19 @@
 // The fixture is `synthetic:nestacc1:agbcc`'s shape, with the data read spelled as a call so the
 // interpreter in `helpers.ts` can run it. The last two pairs are the two collisions the walk's
 // `enclosingNames` exclusion exists for, reached through this rule, and what refuses each one.
+//
+// The rule's own refusals are a table, `ENCLOSING_CARRIER_GATES`; every fixture below names the
+// rule in it that decides it (the census at the bottom), and each rule is dropped with `without()`
+// where a fixture can show what it keeps.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import type { Block, Fn, Value } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import { without } from '../src/l3/gates';
+import { tallying, without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
-import { CARRIER_NAME_GATES, structure } from '../src/structure/structure';
+import { CARRIER_NAME_GATES, ENCLOSING_CARRIER_GATES, structure } from '../src/structure/structure';
 import { irTraceOf, traceOf } from './helpers';
 import { INNER_CLOBBERS_OUTER } from './loop-escape-witnesses';
 
@@ -237,4 +241,129 @@ const TWO_ENTRIES = NEST.replace(
 
 test('an inner header with a second forward predecessor keeps two variables', () => {
   expect(copies(emit(lifted(TWO_ENTRIES))).length).toBeGreaterThan(0);
+});
+
+// ── each rule of the table, dropped ───────────────────────────────────────────────────────────
+const ablatedEnclosing = (fn: Fn, ...ids: string[]) =>
+  structure(fn, {}, { enclosingCarrierGates: ids.reduce((g, id) => without(g, id), ENCLOSING_CARRIER_GATES) });
+
+test.each(INNER_CLOBBERS_OUTER.map(({ seed, ir }) => ({ seed, ir })))(
+  'ablating carried-by-one-loop lets the outer update clobber the inner value (seed $seed)',
+  ({ ir }) => {
+    const fn = lifted(ir, onlyTheInnerKeyUnwritten(0));
+    const ablated = ablatedEnclosing(fn, 'carried-by-one-loop');
+    const ref = reference(fn);
+    const differs = [...Array(64).keys()].some((s) => {
+      try {
+        return JSON.stringify(traceOf(ablated, s + 1)) !== JSON.stringify(traceOf(ref, s + 1));
+      } catch {
+        return false; // the step cap: this input loops forever in every spelling
+      }
+    });
+    expect(differs).toBe(true);
+  },
+);
+
+// The four rules above it bound the EVIDENCE, and each is `sound: false`: dropping one spells the
+// nest with one variable where the record could not vouch for it, and the program stays the same.
+const correct = (fn: Fn, tree: ReturnType<typeof structure>): void => {
+  for (let seed = 1; seed <= 64; seed++) {
+    expect(traceOf(tree, seed)).toEqual(irTraceOf(fn, seed));
+  }
+};
+
+test('ablating one-forward-entry shares the name across a nest entered from two blocks', () => {
+  const fn = lifted(TWO_ENTRIES);
+  const tree = ablatedEnclosing(fn, 'one-forward-entry');
+  expect(cBackend.emit(tree)).not.toMatch(/v\d+ = v1;/);
+  expect(copies(cBackend.emit(tree)).length).toBeLessThan(copies(emit(fn)).length);
+  correct(fn, tree);
+});
+
+test('ablating key-written drops the copy the record says the source spelled', () => {
+  const fn = lifted(NEST, (f) => new Map([[f.blocks[1], new Map([[f.blocks[2].params[1], 0]])]]));
+  const tree = ablatedEnclosing(fn, 'key-written');
+  expect(copies(cBackend.emit(tree))).toEqual([]);
+  correct(fn, tree);
+});
+
+// `PREHEADER`'s two scope rules cannot be separated from the sound one: `carriedByBothLoops` needs
+// `E` to head a loop and `a` to be one of its params, so with both scope rules dropped it refuses
+// the same nest.
+test('ablating enclosing-header and enclosing-param leaves the preheader nest to carried-by-one-loop', () => {
+  const fn = lifted(PREHEADER);
+  expect(copies(cBackend.emit(ablatedEnclosing(fn, 'enclosing-header', 'enclosing-param'))).length).toBe(2);
+});
+
+// ── the admission `carriedByBothLoops` makes through a merge ──────────────────────────────────
+// `for i { for j { old = a; a += gT[i][j]; keep = (gT[i][j] & 1) ? old : a; } a = keep; }` — the
+// outer back edge hands the accumulator's slot a MERGE inside the inner loop whose two in-edges
+// carry the inner back-edge value and `p` itself. The only shape (of 58 agbcc probes) that needs
+// either the one-level merge or `p` in the carried set; without either the rule refuses it and the
+// nest keeps its two copies. The parity test is spelled as a compare so both interpreters run it.
+const ZD03 = `fn zd03 {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: s32 = const {value=0}
+  br ^bb1(%1, %2)
+^bb1(%4: s32, %5: s32):
+  %7: s32 = const {value=1}
+  %8: s32 = add %4, %7
+  %10: s32 = const {value=0}
+  br ^bb2(%5, %10)
+^bb2(%11: s32, %13: s32):
+  %14: s32 = call %13 {target="f0"}
+  %15: s32 = add %11, %14
+  %16: u32 = icmp_slt %14, %0
+  cond_br %16, ^bb4(%15), ^bb3()
+^bb3():
+  br ^bb4(%11)
+^bb4(%19: s32):
+  %22: s32 = const {value=1}
+  %23: s32 = add %13, %22
+  %24: s32 = const {value=3}
+  %25: u32 = icmp_slt %23, %24
+  cond_br %25, ^bb2(%15, %23), ^bb5()
+^bb5():
+  %26: s32 = const {value=2}
+  %27: u32 = icmp_slt %8, %26
+  cond_br %27, ^bb1(%8, %19), ^bb6()
+^bb6():
+  ret %19
+}
+`;
+
+test('a merge inside the inner loop of the inner value and the parameter itself is carried by both loops', () => {
+  const fn = lifted(ZD03, onlyTheInnerKeyUnwritten(0));
+  const tree = structure(fn);
+  expect(copies(cBackend.emit(tree))).not.toContain('v1 = v1;');
+  expect(copies(cBackend.emit(tree)).length).toBeLessThan(copies(cBackend.emit(reference(fn))).length);
+  correct(fn, tree);
+});
+
+// ── the census: which rule decides each fixture ───────────────────────────────────────────────
+test('ENCLOSING_CARRIER_GATES names the rule that refuses each nest', () => {
+  const census = (fn: Fn): readonly (readonly [string, number])[] => {
+    const t = tallying(ENCLOSING_CARRIER_GATES);
+    structure(fn, {}, { enclosingCarrierGates: t.gates });
+    return t.refusals();
+  };
+  const refusedBy = (fn: Fn): string[] => census(fn).map(([id]) => id);
+  expect(refusedBy(lifted(TWO_ENTRIES))).toContain('one-forward-entry');
+  expect(refusedBy(lifted(PREHEADER))).toContain('enclosing-header');
+  expect(refusedBy(lifted(INDUCTION))).toContain('carried-by-one-loop');
+  expect(refusedBy(lifted(NEST, (f) => new Map([[f.blocks[1], new Map([[f.blocks[2].params[1], 0]])]])))).toContain(
+    'key-written',
+  );
+  const unmeasured = parse(NEST);
+  verify(unmeasured);
+  recoverTypes(unmeasured);
+  expect(refusedBy(unmeasured)).toContain('key-written');
+  // the admitted nest: nothing refuses the accumulator. Two refusals are the OUTER header's params,
+  // entered from the function's entry block, which heads no loop; the third is the inner induction
+  // variable, which `E` hands a constant it computed.
+  expect(census(lifted(NEST))).toEqual([
+    ['enclosing-header', 2],
+    ['enclosing-param', 1],
+  ]);
 });
