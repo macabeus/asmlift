@@ -28,10 +28,10 @@
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
 //     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
-//     Four exceptions are read off the target directly, their consumers not being the
+//     Five exceptions are read off the target directly, their consumers not being the
 //     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers),
-//     `hoistsSingleSetArm` (raise/pre-recovery.ts, a raising pass) and `arrayShapeFromStride`
-//     (raise/globalshape.ts, run on the LIFTED fn). The field names are a
+//     `hoistsSingleSetArm` and `reloadsLocalReread` (raise/pre-recovery.ts, raising passes) and
+//     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn). The field names are a
 //     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
@@ -301,6 +301,20 @@ export interface TargetDescription {
     // ABSENT ⇒ the rule stands down, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
     // been put through that pair. A compiler opts in on its own evidence, never by inheriting.
     readsStayWhereWritten?: boolean;
+    // Does a LOCAL initialised with a memory read its dominating TEST already performed cost this
+    // compiler a SECOND load? The pair is the arm of `if (a && (p[1] & 0x7f) == 0x7f) { … }` spelled
+    // `u8 v = p[1]; p[2] = v;` against `p[2] = p[1];`, and again with a store and with a call
+    // between the local and its use. agbcc loads `p[1]` TWICE for every local spelling and once
+    // for the inline one; ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc_242_81 load it ONCE for every
+    // local spelling, holding the register across the store and across the call. agbcc is the
+    // odd one out of five, so the one agbcc-shaped claim that rested on it — raise/shortcircuit.ts's
+    // `read-behind-effect`, "a copy analysis.ts spells as a local costs a load" — reads it here
+    // rather than running on every target, where on mwcc it refused two probes their byte-match.
+    // Read off the target by a raising pass (raise/pre-recovery.ts), not by the structurer.
+    //
+    // ABSENT ⇒ false: the refusal stands down, and a compiler opts IN on its own compiled pair. The
+    // four that measured false set it anyway, so absent means UNMEASURED rather than "no".
+    reloadsLocalReread?: boolean;
   };
 }
 
@@ -362,6 +376,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchRequiresFrontLoadedTests: true,
     hoistsSingleSetArm: true,
     arrayShapeFromStride: true,
+    reloadsLocalReread: true,
     // agbcc: reload walks pseudos ascending handing each global-alloc loser a fresh slot, a user
     // local's pseudo number is its `expand_decl` position, and the Thumb frame grows UPWARD
     // (FRAME_GROWS_DOWNWARD is commented out in thumb.h). So the earlier-declared spilled local
@@ -391,6 +406,8 @@ export const MIPS_IDO: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
     switchAllowsNeqCase: false,
+    reloadsLocalReread: false, // MEASURED — the pair at the field compiles to one load of `p[1]`
+    // for every local spelling
     // MEASURED `descending` (the earlier-declared spilled local takes the HIGHER offset) and NOT
     // SHIPPED. The probe is COMMITTED — `packages/core/test/corpus/probe-declrank.c` and its
     // reversed-declaration twin, with this compiler's objects beside them — and a test reads the
@@ -472,6 +489,9 @@ export const MIPS_GCC: TargetDescription = {
     // sub-trees a decline leaves, so a NESTED dispatch comes back as an `if` nest around a `switch`
     // over some of its arms.
     switchRequiresFrontLoadedTests: true,
+    // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
+    // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
+    reloadsLocalReread: false,
     // MEASURED `ascending` on both toolchains this description serves — 7 of 7 spills each, and
     // rank → offset unchanged under a reversed declaration list — and NOT SHIPPED, for the same
     // reason as ido7.1: no row on either tier lifts with two or more spilled user locals. Both
@@ -505,6 +525,11 @@ export const PPC_MWCC: TargetDescription = {
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
+    // MEASURED — one load of `p[1]` for every local spelling of the pair at the field, the value
+    // held in a callee-saved register across the call. And the rule it turns off pays here:
+    // `u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; }` under an `if (a)`
+    // matches only once `read-behind-effect` stops refusing it (3/24 → MATCH 0/22).
+    reloadsLocalReread: false,
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
     // locals, and the compiler does not spill the committed declaration-rank probe either: at

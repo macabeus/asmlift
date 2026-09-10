@@ -128,9 +128,16 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // counts 0 fused heads across the 782 rows that lift map-lessly, so the hazard has no producer
   // there. The reverse direction never could: the value form replaces its head's `cond_br` with a
   // `br`, which this pass never matches.
+  // The `target` argument is read by ONE conjunct of ONE gate, as at `narrowlocal` below and for
+  // the same reason: the fold's sound rules are claims about C, and only `read-behind-effect`'s
+  // "a local costs a second load" is a claim about a compiler (raise/shortcircuit.ts).
   {
     id: 'branch-shortcircuit',
-    run: (fn, _self, opts) => recognizeBranchShortCircuit(fn, opts.shortCircuit),
+    run: (fn, _self, opts, target) =>
+      recognizeBranchShortCircuit(fn, {
+        ...opts.shortCircuit,
+        reloadsLocalReread: target.compilerBehaviors.reloadsLocalReread,
+      }),
     dce: true,
   },
   // LAST, and the position IS load-bearing: this pass reads the CFG's edge arguments to find a

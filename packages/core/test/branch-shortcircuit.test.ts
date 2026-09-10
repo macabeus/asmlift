@@ -444,25 +444,106 @@ describe('refusals', () => {
     expect(recognizeBranchShortCircuit(fn, { armReread: without(ARM_REREAD_GATES, 'moves-a-read') })).toBe(true);
   });
 
+  // `read-behind-effect` is the one rule that reads the TARGET (`reloadsLocalReread`, agbcc's value):
+  // every test of it passes `AGBCC_RELOADS`, and the last one pins what the conjunct buys.
+  const AGBCC_RELOADS = { reloadsLocalReread: true } as const;
+  const call = () => mkOp('call', { operands: [], results: [mkValue(T.unk(32))], attrs: { target: 'fnB' } });
+  /** a store of the constant 5 to `base + off`, with the constant it stores */
+  const storeFive = (base: Value, off: number): Op[] => {
+    const k = mkValue(T.unk(32));
+    return [
+      mkOp('const', { results: [k], attrs: { value: 5 } }),
+      mkOp('store', { operands: [base, k], attrs: { off, width: 1 } }),
+    ];
+  };
+
   test('REFUSED: a READ the arm holds across an effect is not re-derived', () => {
     // `{ fnB(); sink(v); }`: analysis.ts cannot spell the copy inline past the call, so it becomes a
     // local at the arm's head — a SECOND load agbcc does not merge — where the nest reads once.
     const { fn, arm, store } = armReadsCondition();
-    arm.ops.splice(arm.ops.indexOf(store), 0, mkOp('call', { operands: [], attrs: { callee: 'fnB' } }));
-    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    arm.ops.splice(arm.ops.indexOf(store), 0, call());
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(false);
     expect(connective(fn)).toBeNull();
-    expect(recognizeBranchShortCircuit(fn, { armReread: without(ARM_REREAD_GATES, 'read-behind-effect') })).toBe(true);
+    expect(
+      recognizeBranchShortCircuit(fn, { ...AGBCC_RELOADS, armReread: without(ARM_REREAD_GATES, 'read-behind-effect') }),
+    ).toBe(true);
   });
 
   test('a READ the arm uses at its first effect, and only there, is still re-derived', () => {
-    // The bound is inclusive: `p->f = v & …` stores what it reads. What is held across the effect
-    // is the reader AFTER it, including through a value the arm computed from the copy.
-    const { fn, arm, store, load } = armReadsCondition();
-    const later = mkOp('store', { operands: [load.operands[0], store.operands[1]], attrs: { off: 2, width: 1 } });
+    // `p->f = v & …` stores what it reads, so the reader is not "behind" itself. What is held
+    // across the effect is the reader AFTER it — here a store to ANOTHER cell of an unrelated base.
+    const { fn, arm, store } = armReadsCondition();
+    const other = mkValue(T.ptr(T.u(8)));
+    const later = mkOp('store', { operands: [other, store.operands[1]], attrs: { off: 2, width: 1 } });
     arm.ops.splice(arm.ops.indexOf(store) + 1, 0, later);
-    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(false);
     arm.ops.splice(arm.ops.indexOf(later), 1);
-    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(true);
+    verify(fn);
+  });
+
+  test("a store to a DISJOINT slot of the read's own base is not a barrier — analysis.ts inlines past it", () => {
+    // `{ p->x = 5; p->fl &= 0x80; }`: `disjointConstSlots` (ir/alias.ts) clears the store, so
+    // analysis.ts spells the copy inline and agbcc merges it into the test's register. Counting
+    // ANY effect cost `r->x = 5; r->fl &= 0x80;` its byte-match (8/22 → MATCH 0/18).
+    const { fn, arm, store, load } = armReadsCondition();
+    arm.ops.splice(arm.ops.indexOf(store), 0, ...storeFive(load.operands[0], 4));
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(true);
+    verify(fn);
+    // …the SAME cell is not disjoint, and neither is a cell of another base
+    for (const base of ['own', 'other'] as const) {
+      const { fn: f2, arm: a2, store: s2, load: l2 } = armReadsCondition();
+      const b = base === 'own' ? l2.operands[0] : mkValue(T.ptr(T.u(8)));
+      a2.ops.splice(a2.ops.indexOf(s2), 0, ...storeFive(b, 0));
+      expect(recognizeBranchShortCircuit(f2, AGBCC_RELOADS)).toBe(false);
+    }
+  });
+
+  test('a disjoint store still bars a read the arm renders TWICE — the multi-render rule has no exemption', () => {
+    // `{ p->x = 1; p->a = v; p->b = v; }` against the same arm with ONE reader.
+    for (const readers of [1, 2]) {
+      const { fn, arm, store, load } = armReadsCondition();
+      const at = (off: number, v: Value) =>
+        mkOp('store', { operands: [load.operands[0], v], attrs: { off, width: 1 } });
+      const uses = [5, 6].slice(0, readers).map((off) => at(off, load.results[0]));
+      arm.ops.splice(arm.ops.indexOf(store), 1, ...storeFive(load.operands[0], 4), ...uses);
+      expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(readers === 1);
+    }
+  });
+
+  test('an ADDRESS the copy re-derives carries no read, however it is spelled', () => {
+    // `{ p[i] &= 0x80; fnB(); p[i] = 1; }`: the copy holds the load AND the `add` that forms
+    // `p + i`, and the store after the call reads only the address. Seeding from every copied op
+    // refused this where `p[5]` (no `add`) folded — the verdict flipped on how the address was
+    // spelled (3/22 → MATCH 0/20 once it does not).
+    const { fn, arm, store, load } = armReadsCondition();
+    const g = fn.blocks[1];
+    const addr = mkValue(T.ptr(T.u(8)));
+    const i = mkValue(T.unk(32));
+    g.ops.splice(
+      1,
+      0,
+      mkOp('const', { results: [i], attrs: { value: 3 } }),
+      mkOp('add', { operands: [load.operands[0], i], results: [addr] }),
+    );
+    load.operands = [addr];
+    store.operands = [addr, store.operands[1]];
+    arm.ops.splice(
+      arm.ops.indexOf(store) + 1,
+      0,
+      call(),
+      mkOp('store', { operands: [addr, i], attrs: { off: 0, width: 1 } }),
+    );
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(true);
+    verify(fn);
+  });
+
+  test('the rule reads the TARGET: where a local is ONE load, the held read is re-derived', () => {
+    // ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc_242_81 hold the local's register across the call
+    // (target.ts `reloadsLocalReread`), so analysis.ts's local IS the target's spelling there.
+    const { fn, arm, store } = armReadsCondition();
+    arm.ops.splice(arm.ops.indexOf(store), 0, call());
+    expect(recognizeBranchShortCircuit(fn, { reloadsLocalReread: false })).toBe(true);
     verify(fn);
   });
 
@@ -480,9 +561,9 @@ describe('refusals', () => {
 
   test('the re-read refusals are REPORTED: a census names the rule that refused each site', () => {
     const { fn, arm, store } = armReadsCondition();
-    arm.ops.splice(arm.ops.indexOf(store), 0, mkOp('call', { operands: [], attrs: { callee: 'fnB' } }));
+    arm.ops.splice(arm.ops.indexOf(store), 0, call());
     const t = tallying(ARM_REREAD_GATES);
-    expect(recognizeBranchShortCircuit(fn, { armReread: t.gates })).toBe(false);
+    expect(recognizeBranchShortCircuit(fn, { ...AGBCC_RELOADS, armReread: t.gates })).toBe(false);
     expect(t.refusals()).toEqual([['read-behind-effect', 1]]);
     // nothing escapes → the table is never asked
     const quiet = tallying(ARM_REREAD_GATES);

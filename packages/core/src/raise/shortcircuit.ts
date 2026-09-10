@@ -40,6 +40,7 @@
 // is NEGATABLE whenever the orientation inverts it — an icmp by opcode swap or a `logic_and`/`logic_or` by
 // De Morgan, both via `negateCondOps`, which the control-flow form below shares. Any deviation falls
 // through untouched (a miss, never a miscompile).
+import { disjointConstSlots } from '../ir/alias';
 import {
   Block,
   Fn,
@@ -512,8 +513,13 @@ export interface BranchShortCircuitOptions {
    *  boolean. */
   onTreeOwned?: () => void;
   /** The RE-READ admission's refusals — {@link ARM_REREAD_GATES} when absent. A parameter so a
-   *  census can hand in `tallying(ARM_REREAD_GATES).gates` and a test can ablate one rule. */
+   *  census can hand in `tallying(ARM_REREAD_GATES).gates` and a test can ablate one rule; the
+   *  census does, through `bench gates --pass arm-reread` (apps/benchmark/src/run/gate-census.ts). */
   armReread?: readonly Gate<ArmRereadSite>[];
+  /** The TARGET's `compilerBehaviors.reloadsLocalReread` (target.ts), which one conjunct of one rule
+   *  in {@link ARM_REREAD_GATES} reads — `read-behind-effect`. Threaded by raise/pre-recovery.ts from
+   *  the target it already holds, the way `narrowlocal`'s `hoistsSingleSetArm` is. Absent ⇒ false. */
+  reloadsLocalReread?: boolean;
 }
 
 export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOptions = {}): boolean {
@@ -586,13 +592,6 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         }
         const treeOwned = !throughRelay && sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0]);
         const otherEdge = sharedEdge === gTaken ? gFall : gTaken;
-        // Every value ^g defines is consumed only by ^g itself, once, or re-derived in the arm —
-        // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of
-        // the short circuit.
-        const reread = armRereadCone(fn, g, otherEdge.block, preds, opts.armReread ?? ARM_REREAD_GATES);
-        if (!reread || !definedValuesStayLocal(fn, g, reread)) {
-          continue;
-        }
         if (!sameArgs(sharedFromH.args, sharedEdge.args)) {
           continue;
         }
@@ -605,6 +604,18 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // than an opcode swap. `negateCondOps` does both, and returns null on anything else.
         const negation = wantEdge !== gTaken ? negateCondOps(defs, c2, NEGATE_BUDGET) : null;
         if (wantEdge !== gTaken && !negation) {
+          continue;
+        }
+        // Every value ^g defines is consumed only by ^g itself, once, or re-derived in the arm —
+        // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of
+        // the short circuit. Asked AFTER the two structural refusals above, so a census of
+        // `ARM_REREAD_GATES` counts only sites nothing cheaper had already refused: asked first,
+        // it credited `read-behind-effect` with void functions whose shared edges carry different
+        // dead `r0` values, which `sameArgs` refuses anyway. The verdict is a conjunction of pure
+        // tests, so the order moves no fold. And BEFORE tree ownership, so `onTreeOwned` keeps its
+        // meaning — the one thing in the way.
+        const reread = armRereadCone(fn, g, otherEdge.block, preds, opts);
+        if (!reread || !definedValuesStayLocal(fn, g, reread)) {
           continue;
         }
         // LAST refusal, so `onTreeOwned` reports a site where tree ownership is the ONE thing in the
@@ -858,7 +869,7 @@ const readsOf = (op: Op): Value[] => [...op.operands, ...op.successors.flatMap((
  *  outside `g` with the part of its operand cone `g` computes, and `drop` the originals in `copy`
  *  nothing left in `g` reads — the ones that would MOVE rather than duplicate. Both empty when
  *  nothing escapes — then no gate is asked, because there is nothing to re-derive; null when a
- *  gate in `gates` (default {@link ARM_REREAD_GATES}) refuses the site.
+ *  gate in `opts.armReread` (default {@link ARM_REREAD_GATES}) refuses the site.
  *
  *  The copy is exact at the arm's head because nothing runs between: `g`'s body is pure (its
  *  caller refuses anything in HOIST_UNSAFE_OPS), so a load copied there reads what `g`'s own load
@@ -872,7 +883,7 @@ function armRereadCone(
   g: Block,
   arm: Block,
   preds: Map<Block, Block[]>,
-  gates: readonly Gate<ArmRereadSite>[],
+  opts: BranchShortCircuitOptions,
 ): ArmReread | null {
   const defOf = new Map<Value, Op>();
   for (const op of g.ops) {
@@ -886,8 +897,10 @@ function armRereadCone(
   if (readers.length === 0) {
     return { copy: new Set(), drop: new Set() };
   }
-  const site = armRereadSite(fn, g, arm, preds, defOf, readers);
-  return firstRejection(gates, site) === null ? { copy: site.copy, drop: site.drop } : null;
+  const site = armRereadSite(fn, g, arm, preds, defOf, readers, opts.reloadsLocalReread === true);
+  return firstRejection(opts.armReread ?? ARM_REREAD_GATES, site) === null
+    ? { copy: site.copy, drop: site.drop }
+    : null;
 }
 
 /** One site the RE-READ admission judges: a condition block ^g that defines a value something past
@@ -911,6 +924,9 @@ export interface ArmRereadSite {
   /** the originals in `copy` nothing left in ^g reads — deleted from ^g, so they MOVE to the arm.
    *  Reverse order, so an original that fed only another dropped original goes too. */
   readonly drop: ReadonlySet<Op>;
+  /** the target's compiler loads a LOCAL initialised with a read its test already performed a
+   *  second time (`BranchShortCircuitOptions.reloadsLocalReread`) */
+  readonly targetReloadsLocalReread: boolean;
 }
 
 function armRereadSite(
@@ -920,6 +936,7 @@ function armRereadSite(
   preds: Map<Block, Block[]>,
   defOf: Map<Value, Op>,
   readers: Op[],
+  targetReloadsLocalReread: boolean,
 ): ArmRereadSite {
   let copy: Set<Op> | undefined;
   let drop: Set<Op> | undefined;
@@ -954,6 +971,7 @@ function armRereadSite(
     preds,
     defOf,
     readers,
+    targetReloadsLocalReread,
     get copy() {
       return (copy ??= coneOf());
     },
@@ -988,47 +1006,124 @@ function leavesALoop(fn: Fn, g: Block, arm: Block, preds: ReadonlyMap<Block, rea
   return false;
 }
 
-/** Whether a copied READ would have to be held across an effect in the arm: every op that reads the
- *  copy — directly, or through what an arm op computed from it — sits in the arm block at or before
- *  its first effect, or this answers yes. An effect op may itself read the copy (`p->f = v & 0x80`
- *  stores what it reads), so the bound is inclusive. */
+/** Whether analysis.ts would spell the arm's copy of a READ as a LOCAL rather than inline — asked
+ *  with analysis.ts's OWN placement and barrier rules (structure/analysis.ts: `emitPos`, the
+ *  single-render `isBarrier`, the multi-render `isWrite`), never a coarser copy of them, so the two
+ *  levels read one rule. The copy sits at the arm's head, so every question is about the arm block.
+ *
+ *  Only the copied READS are asked about. An address member of the cone (`add`, `gaddr`) re-derives
+ *  at every use and carries nothing, however the address is spelled — so `p[i]` and `p[5]` get the
+ *  same answer. A read answers yes when:
+ *
+ *    - it renders nowhere single: some PURE value between it and a statement has two consumers, so
+ *      `emitPos` is null and analysis.ts materializes it whatever stands in the way
+ *      (`p[2] = p[1] & 0x80; p[3] = p[1] & 0x80;` — one `and`, two stores);
+ *    - it has MORE THAN ONE direct reader, and an effect precedes one of their render positions —
+ *      the multi-render rule, `isWrite = EFFECTFUL_OPS`, which exempts nothing;
+ *    - it has ONE, and an effect precedes its render position that analysis.ts's `isBarrier`
+ *      counts: any `astore`/`opaque`, a `call` that is not rendered inside that same statement,
+ *      and a `store` UNLESS it is to a provably disjoint slot of the read's own base
+ *      (`disjointConstSlots`, ir/alias.ts — the helper `isBarrier` calls).
+ *
+ *  A reader in any block other than the arm answers yes — the copy then outlives the arm's first
+ *  block. What this does NOT mirror, and which way each gap errs, is ARM_REREAD_GATES' RESIDUE. */
 function readHeldAcrossEffect(c: ArmRereadSite): boolean {
-  if (![...c.copy].some((op) => ORDER_SENSITIVE_OPS.has(op.opcode))) {
+  const reads = [...c.copy].filter((op) => ORDER_SENSITIVE_OPS.has(op.opcode));
+  if (reads.length === 0) {
     return false;
   }
-  const tainted = new Set<Value>([...c.copy].flatMap((op) => op.results));
-  const firstEffect = c.arm.ops.findIndex((op) => EFFECTFUL_OPS.has(op.opcode));
-  const bound = firstEffect < 0 ? c.arm.ops.length : firstEffect;
-  for (const [i, op] of c.arm.ops.entries()) {
-    if (readsOf(op).some((v) => tainted.has(v))) {
-      if (i > bound) {
+  // The arm as analysis.ts will see it: the copied cone at its head (position 0 — nothing runs
+  // before it), then the arm's own ops. A copied op's consumers are the arm ops and the OTHER copied
+  // ops reading it, so a read feeding a copied `add` the arm reads renders where that `add` does.
+  const cone = c.g.ops.filter((op) => c.copy.has(op));
+  const posOf = (op: Op): number => Math.max(0, c.arm.ops.indexOf(op));
+  const escapes = (vs: readonly Value[]): boolean =>
+    c.fn.blocks.some((b) => b !== c.g && b !== c.arm && b.ops.some((op) => readsOf(op).some((v) => vs.includes(v))));
+  const consumersOf = (vs: readonly Value[]): Op[] =>
+    [...cone, ...c.arm.ops].filter((op) => readsOf(op).some((v) => vs.includes(v)));
+  // `emitPos`: a statement renders where it stands, a value where its one consumer renders. A pure
+  // value with two consumers renders in both — null. A load or call with two is one analysis.ts
+  // names (a call executes once), so it renders where it stands. A consumer outside the arm leaves
+  // the position unresolved — null, the other-block clause.
+  const at = (op: Op): number | null => {
+    if (op.successors.length > 0 || op.opcode === 'ret' || op.results.length === 0) {
+      return posOf(op);
+    }
+    if (escapes(op.results)) {
+      return null;
+    }
+    const cs = consumersOf(op.results);
+    if (cs.length === 0) {
+      return posOf(op);
+    }
+    if (cs.length === 1) {
+      return at(cs[0]);
+    }
+    return ORDER_SENSITIVE_OPS.has(op.opcode) ? posOf(op) : null;
+  };
+  for (const l of reads) {
+    if (escapes(l.results)) {
+      return true;
+    }
+    const renders = consumersOf(l.results).map(at);
+    if (renders.some((i) => i === null)) {
+      return true;
+    }
+    const multi = renders.length > 1;
+    const bars = (x: Op, pos: number): boolean => {
+      if (!EFFECTFUL_OPS.has(x.opcode)) {
+        return false;
+      }
+      if (multi) {
         return true;
       }
-      op.results.forEach((r) => tainted.add(r));
+      if (x.opcode === 'store') {
+        return !(l.opcode === 'load' && disjointConstSlots(l, x));
+      }
+      if (x.opcode === 'call') {
+        return at(x) !== pos;
+      }
+      return true;
+    };
+    if (renders.some((pos) => c.arm.ops.slice(0, pos!).some((x) => bars(x, pos!)))) {
+      return true;
     }
   }
-  return c.fn.blocks.some(
-    (b) => b !== c.g && b !== c.arm && b.ops.some((op) => readsOf(op).some((v) => tainted.has(v))),
-  );
+  return false;
 }
 
 // ── THE RE-READ ADMISSION'S REFUSALS, AS DATA ─────────────────────────────────────────────────
 //
 // A table because its refusals had to be instrumented to be found — `definedValuesStayLocal`'s
-// escape clause by the round that built this admission, and every clause below by the two review
-// rounds after it. Taken as an OPTIONAL parameter (`BranchShortCircuitOptions.armReread`), so a
-// census from outside core is `tallying(ARM_REREAD_GATES)` handed to the pass — which needs a
-// caller-side seam no `bench gates` driver has yet (rank.ts reaches this pass through
-// `runPreRecovery`'s static pass list; see apps/benchmark/src/run/gate-census.ts).
+// escape clause by the round that built this admission, and every clause below by the review
+// rounds after it. Taken as an OPTIONAL parameter (`BranchShortCircuitOptions.armReread`), and
+// censused from outside core by `pnpm bench gates --pass arm-reread`, which swaps this pass's
+// entry in `PRE_RECOVERY_PASSES` (apps/benchmark/src/run/gate-census.ts). The table is asked only
+// at a site `sameArgs` and the negatability check have already passed, so a count is its own.
 //
 // SOUND is two rules — `entry-arm` and `second-pred` put the copy on a path the original never
 // ran. The other five are FIDELITY: each refuses a site where re-deriving costs bytes the nest did
 // not, and a wrong answer there is a miss, never wrong C, because the copy stays under the guard
 // either way.
 //
-// RESIDUE, named because it is not in the table: the USE-COUNT half of `definedValuesStayLocal` —
-// a value ^g reads twice itself is materialized before the `if` — which judges ^g's own reads
-// rather than this site's re-derivation, and runs after the table on every fold, escaping or not.
+// RESIDUE, named because it is not in the table:
+//
+//   - the USE-COUNT half of `definedValuesStayLocal` — a value ^g reads twice itself is
+//     materialized before the `if` — which judges ^g's own reads rather than this site's
+//     re-derivation, and runs after the table on every fold, escaping or not.
+//   - what `read-behind-effect` does not mirror of analysis.ts, of two kinds that err opposite
+//     ways. (1) `/reread-globals`. Under that STRUCTURING axis analysis.ts lets a store to a
+//     DIFFERENT named global through (`mayWriteGlobal`, ir/alias.ts), so there the copy inlines —
+//     but this pass runs once per LIFT, and rank.ts structures every `/reread-globals` candidate
+//     from a lift it shares with the others (`liftVariants`), so the verdict cannot follow the
+//     axis without a lift of its own. It errs toward REFUSING, at a measured price:
+//     `if (a && (gQ2[1] & 0x7f) == 0x7f) { gK = 1; gQ2[1] &= 0x80; return; } fnB();` keeps a 3/23
+//     nest where the fold matches on that axis (MATCH 0/21 with this rule ablated), and so does the
+//     same arm over a struct global's member; no corpus row. (2) the scopes analysis.ts
+//     materializes a read in for reasons OTHER than a barrier — `liveAcrossLoop`, the address-home
+//     axis, a load fed to a `cond_br` edge. They err toward ADMITTING: a local, under the guard,
+//     one extra load on agbcc; no inhabitant measured. The DIFFERENTIAL in
+//     packages/cli/test/matching/shortcircuit-branch.test.ts is what notices either one growing.
 //
 // MEASURED over the whole corpus, every row's default lift and whole enumerated fan with its
 // symbol map, both tiers (LBG and ProcessInputAndUpdateEntities default lift only): something
@@ -1039,7 +1134,10 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
 // `TrySetCantSelectMoveBattleScript` are refused at every site and come out as main did. Before
 // `loop-exit`, `moves-a-read` and `read-behind-effect` existed, those two last rows moved too, and
 // each rule cost a probe outside the corpus a byte-match or a whole decompilation. Their prices
-// are on each rule.
+// are on each rule. Scoping `read-behind-effect` to its compiler and asking it analysis.ts's own
+// question moved nothing in the corpus — default source and fan byte-identical on all 784
+// synthetic and 252 real rows, and the same verdict at every site — so what those two changes buy
+// is off the corpus, and the rule's comment says where.
 export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
   {
     id: 'entry-arm',
@@ -1070,7 +1168,15 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
     rejects: (c) => c.readers.some((op) => op.successors.some((s) => s.args.some((v) => c.defOf.has(v)))),
   },
   {
-    // No corpus inhabitant (both review rounds' census); held on its unit test.
+    // A value the SSA builder homed in a frame slot (`fn.slotHomes`) is one the target held in a
+    // DECLARED local and reloads in the arm (`ldr rN, [sp, #k]`). The copy re-derives it instead,
+    // and the copy's result carries no home, so the local and its `[sp, #k]` traffic are spelled
+    // away and the frame order `l3/slotorder.ts` reads loses that name — silently, the failure
+    // `replaceAllUsesWith` (ir/core.ts) ships an equally inhabitant-less guard against. Those are
+    // the bytes it protects. NO INHABITANT in either tier or in any probe three rounds wrote, and
+    // stated rather than argued away: only Thumb stamps homes, and on agbcc a value spilled in ^g
+    // is one live across a call in the arm, which `read-behind-effect` refuses on its own unless
+    // the copy is a pure ADDRESS — the only shape where this rule alone would decide.
     id: 'slot-home',
     why: 'the machine kept this value in a stack slot rather than re-deriving it',
     sound: false,
@@ -1087,8 +1193,13 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
     // `/reread-globals` candidates all threw, which `bench run` does not report. Refusing the
     // re-read at a loop exit keeps exactly the nest main produced there. No row this admission
     // matches has its arm outside a loop ^g is in.
+    //
+    // What it protects that no corpus row pins is the ordinary SEARCH LOOP: `for (i = 0; i < 8;
+    // i++) { if (q[i] != 0 && (v = p[i]) > 5) { r[0] = v; return; } } fnB();` matches as the nest
+    // and scores 21/33 fused, and its `p[i] &= 0x80` twin MATCH against 31/37. The first is in the
+    // matching suite (shortcircuit-branch.test.ts), which fails with this rule ablated.
     id: 'loop-exit',
-    why: 'fusing a loop body`s whole condition makes this arm the header`s exit, which loop recovery misreads',
+    why: "fusing a loop body's whole condition makes this arm the header's exit, which loop recovery misreads",
     sound: false,
     guardedBy: 'branch-shortcircuit.test.ts: REFUSED: a value the ARM re-reads, when the arm LEAVES the loop',
     rejects: (c) => leavesALoop(c.fn, c.g, c.arm, c.preds),
@@ -1107,30 +1218,42 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
     rejects: (c) => [...c.drop].some((op) => ORDER_SENSITIVE_OPS.has(op.opcode)),
   },
   {
-    // THE BYTES HALF of the copy (see `armRereadCone`). Compiled at the agbcc flags, the arm of
-    // `if (a && (p[1] & 0x7f) == 0x7f) { … }` loads `p[1]` again or not by SPELLING:
+    // THE BYTES HALF of the copy (see `armRereadCone`), and a claim about ONE compiler. The arm of
+    // `if (a && (p[1] & 0x7f) == 0x7f) { … }` loads `p[1]` again or not by SPELLING — loads of
+    // `p[1]`, compiled at each bench toolchain's flags:
     //
-    //     p[1] &= 0x80;                    1 load      u8 v = p[1]; p[2] = v;           2 loads
-    //     p[2] = p[1];                     1 load      u8 v = p[1]; q[0] = 5; p[2] = v; 2 loads
-    //     q[0] = 5; p[1] &= 0x80;          1 load      fnB(); p[2] = p[1];              2 loads
+    //                                        agbcc  ido7.1  gcc2.7.2kmc  gcc2.7.2  mwcc_242_81
+    //     p[1] &= 0x80;                        1      1         1          1          1
+    //     q[0] = 5; p[1] &= 0x80;              1      2         2          2          2
+    //     p[3] = 5; p[1] &= 0x80;              1      1         2          2          2
+    //     fnB(); p[2] = p[1];                  2      2         2          2          2
+    //     u8 v = p[1]; p[2] = v;               2      1         1          1          1
+    //     u8 v = p[1]; q[0] = 5; p[2] = v;     2      1         1          1          1
+    //     u8 v = p[1]; fnB(); p[2] = v;        2      1         1          1          1
     //
-    // An inline re-read merges into the condition's register, a LOCAL never does. analysis.ts
-    // spells the copy inline only when no write stands between it and a use, and otherwise
-    // materializes a local at the arm's head — correct, under the guard, and a second load. So a
-    // read the arm holds across an effect (`{ fnB(); sink(v); }`, `{ sink(v); sink(v); }`,
-    // `{ gP->f[3] = 0; sink(v); }`) is refused, and the nest main spells, which matched on all
-    // three, stays. An ADDRESS cone is exempt: arithmetic re-derives at every use, and an address
-    // is what `ladder4`/`ladder5`/`CountCollectedGems` copy.
+    // A LOCAL at the arm's head costs agbcc a second load and costs the other four nothing — the
+    // target's `compilerBehaviors.reloadsLocalReread` (target.ts), the conjunct below. analysis.ts
+    // spells the copy inline unless something stands between it and a use, and otherwise
+    // materializes a local at the arm's head: correct, under the guard, and on agbcc a second
+    // load. So on agbcc a read analysis.ts would materialize is refused, and the nest main spells
+    // stays — `{ fnB(); sink(v); }`, `{ sink(v); sink(v); }` and `{ gP->f[3] = 0; sink(v); }` each
+    // match only as the nest. Elsewhere the local IS the target's spelling: on mwcc,
+    // `if (a) { u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; } } fnB();` was
+    // 3/24 with this rule running there and matches without it.
     //
-    // It duplicates analysis.ts's barrier (`memWriteBetween`) at L1, conservatively: it counts ANY
-    // effect, where analysis.ts lets a provably disjoint store through, and it follows the copy
-    // through what the arm computes from it. Wrong in either direction it costs bytes, never
-    // meaning — the copy is under the guard however it is spelled.
+    // WHICH copies analysis.ts materializes is asked with analysis.ts's own rules
+    // (`readHeldAcrossEffect`): only the copied READS, never the address arithmetic beside them,
+    // and a store to a provably disjoint slot is no barrier. The first version counted ANY effect
+    // and seeded from every copied op, and that approximation had a price it did not state: 13
+    // agbcc probes it held at 3 to 8 points byte-match once it asks the real question — `r->x = 5;
+    // r->fl &= 0x80;`, `p[3] = 5; p[1] &= 0x80;`, `p[i] &= 0x80; fnB(); p[i] = 1;` among them — 8
+    // more score better, and none of 249 probes over five toolchains scores worse. What it still
+    // does not mirror is the RESIDUE above.
     id: 'read-behind-effect',
-    why: 'a re-read the arm holds across an effect is spelled as a local, which agbcc loads twice',
+    why: 'a re-read analysis.ts spells as a local costs a second load on a target whose compiler reloads one',
     sound: false,
     guardedBy: 'branch-shortcircuit.test.ts: REFUSED: a READ the arm holds across an effect is not re-derived',
-    rejects: readHeldAcrossEffect,
+    rejects: (c) => c.targetReloadsLocalReread && readHeldAcrossEffect(c),
   },
 ];
 
