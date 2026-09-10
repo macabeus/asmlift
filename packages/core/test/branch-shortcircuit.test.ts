@@ -5,7 +5,9 @@
 // The four orientation cases are the whole truth table (which of the head's edges leads to the
 // second condition × which of the second's edges rejoins the head's other successor), so each gets
 // a test. The refusals get one each too: every one of them is a way the fold would be WRONG, not a
-// missed opportunity, and a silently-relaxed guard is exactly what these pin down.
+// missed opportunity, and a silently-relaxed guard is exactly what these pin down. The exception is
+// the RE-READ admission's fidelity rules (`ARM_REREAD_GATES` with `sound: false`), which refuse
+// where re-deriving costs bytes; their tests ablate the one rule and watch the fold go ahead.
 import { describe, expect, test } from 'vitest';
 
 import {
@@ -19,7 +21,8 @@ import {
 } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
-import { recognizeBranchShortCircuit, recognizeShortCircuit } from '../src/raise/shortcircuit';
+import { tallying, without } from '../src/l3/gates';
+import { ARM_REREAD_GATES, recognizeBranchShortCircuit, recognizeShortCircuit } from '../src/raise/shortcircuit';
 
 const blk = (ops: Op[], params: Value[] = []): Block => ({ params, ops });
 
@@ -410,8 +413,23 @@ describe('refusals', () => {
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
   });
 
-  test('an original only the arm read MOVES to the arm instead of staying behind dead', () => {
-    // A dead read left in the head is one the structurer may still spell as a `volatile` read.
+  test('a PURE original only the arm read MOVES to the arm instead of staying behind dead', () => {
+    // An address the second test computed and only the arm uses: re-derived at every use whatever
+    // this does, so it moves rather than leaving a dead op behind in the head.
+    const { fn, arm } = armReadsCondition();
+    const g = fn.blocks[1];
+    const extra = mkOp('add', { operands: [g.ops[0].results[0], g.ops[2].results[0]], results: [mkValue(T.unk(32))] });
+    g.ops.splice(3, 0, extra);
+    arm.ops.unshift(mkOp('neg', { operands: [extra.results[0]], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    verify(fn);
+    expect(fn.blocks.flatMap((b) => b.ops)).not.toContain(extra);
+    expect(arm.ops.filter((o) => o.opcode === 'add')).toHaveLength(1);
+  });
+
+  test('REFUSED: a READ only the arm consumes would move under the second test', () => {
+    // `if (a) { v = p->f; if (b) use(v); }`: the target reads `p->f` on BOTH exits of `b`, before
+    // `b`'s reads. Moved into the arm it would run on one of them only, and after them.
     const { fn, arm } = armReadsCondition();
     const g = fn.blocks[1];
     const extra = mkOp('load', {
@@ -421,10 +439,57 @@ describe('refusals', () => {
     });
     g.ops.splice(1, 0, extra);
     arm.ops.unshift(mkOp('neg', { operands: [extra.results[0]], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(recognizeBranchShortCircuit(fn, { armReread: without(ARM_REREAD_GATES, 'moves-a-read') })).toBe(true);
+  });
+
+  test('REFUSED: a READ the arm holds across an effect is not re-derived', () => {
+    // `{ fnB(); sink(v); }`: analysis.ts cannot spell the copy inline past the call, so it becomes a
+    // local at the arm's head — a SECOND load agbcc does not merge — where the nest reads once.
+    const { fn, arm, store } = armReadsCondition();
+    arm.ops.splice(arm.ops.indexOf(store), 0, mkOp('call', { operands: [], attrs: { callee: 'fnB' } }));
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(recognizeBranchShortCircuit(fn, { armReread: without(ARM_REREAD_GATES, 'read-behind-effect') })).toBe(true);
+  });
+
+  test('a READ the arm uses at its first effect, and only there, is still re-derived', () => {
+    // The bound is inclusive: `p->f = v & …` stores what it reads. What is held across the effect
+    // is the reader AFTER it, including through a value the arm computed from the copy.
+    const { fn, arm, store, load } = armReadsCondition();
+    const later = mkOp('store', { operands: [load.operands[0], store.operands[1]], attrs: { off: 2, width: 1 } });
+    arm.ops.splice(arm.ops.indexOf(store) + 1, 0, later);
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    arm.ops.splice(arm.ops.indexOf(later), 1);
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
     verify(fn);
-    expect(fn.blocks.flatMap((b) => b.ops)).not.toContain(extra);
-    expect(arm.ops.filter((o) => o.opcode === 'load').map((o) => o.attrs.off)).toEqual([1, 0]);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the arm LEAVES the loop', () => {
+    // A loop body's `if (a && b) { …; return; }`: fused whole into the header, the header's out-edge
+    // becomes this early-return arm and loop recovery takes it for the loop's exit.
+    const { fn } = armReadsCondition();
+    const [head, , shared] = fn.blocks;
+    shared.ops = [{ ...mkOp('br'), successors: [{ block: head, args: [] }] }];
+    fn.blocks.unshift(blk([{ ...mkOp('br'), successors: [{ block: head, args: [] }] }]));
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(recognizeBranchShortCircuit(fn, { armReread: without(ARM_REREAD_GATES, 'loop-exit') })).toBe(true);
+  });
+
+  test('the re-read refusals are REPORTED: a census names the rule that refused each site', () => {
+    const { fn, arm, store } = armReadsCondition();
+    arm.ops.splice(arm.ops.indexOf(store), 0, mkOp('call', { operands: [], attrs: { callee: 'fnB' } }));
+    const t = tallying(ARM_REREAD_GATES);
+    expect(recognizeBranchShortCircuit(fn, { armReread: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['read-behind-effect', 1]]);
+    // nothing escapes → the table is never asked
+    const quiet = tallying(ARM_REREAD_GATES);
+    expect(
+      recognizeBranchShortCircuit(chain({ gOnTaken: false, sharedOnGTaken: true }), { armReread: quiet.gates }),
+    ).toBe(true);
+    expect(quiet.refusals()).toEqual([]);
   });
 
   test('a value defined in the condition block used TWICE is not folded', () => {
