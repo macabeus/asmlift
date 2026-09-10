@@ -54,7 +54,7 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
 //
 // RAISING THIS DOES NOT REACH `namecoalesce`'s `loop-escape`, and never could — the arm that would
 // ablate it filters on `sound`, which that table denies the gate. The barrier is a predicate, not a
-// range, and its witnesses are frozen as IR in `namecoalesce.test.ts` instead.
+// range, and its witnesses are frozen as IR in `loop-escape-witnesses.ts` instead.
 const SEEDS = 4000;
 
 /** A write-order record under which every block was measured and wrote nothing, so every edge

@@ -86,8 +86,9 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2, readsOuter = false
   // header defined — its params and ops, which dominate them — so a value carried by the outer loop
   // can still be live after the inner one ran. Not the tail, and not the inner header's values: a
   // read of a loop header's param past its own loop is a shape the do-while emitter declines. Off by
-  // default, and then `avail` and the stream are exactly what they were: `namecoalesce.test.ts`
-  // freezes witnesses by seed.
+  // default, and then `avail` and the stream are exactly what they were — the fuzz arms state their
+  // measurements per SEED (`carrier-name-fuzz`'s 1472 and 1062), which a moved stream repoints
+  // silently. The IR witnesses in `loop-escape-witnesses.ts` are frozen precisely so they do not.
   const outerDefs: Value[] = [];
   for (let i = 0; i < nBlocks; i++) {
     const b = blocks[i];

@@ -68,9 +68,9 @@
 // and regresses none (#55), and `nestedloop` is `int s = 0; … s += i*j`, one accumulator the pass
 // emits as two — but with it dropped, two generated functions COMPUTE SOMETHING ELSE: an inner
 // loop's variable adopts the enclosing loop's carrier and then overwrites it every iteration. Both
-// are frozen as literal IR in `namecoalesce.test.ts`, which asserts the escape copy the gate forces
-// on one side and its absence on the other. A byte score cannot see that failure, which is the
-// whole reason that fuzz exists. So the 12 rows are real and so is the hazard, and taking them
+// are frozen as literal IR in `test/loop-escape-witnesses.ts`, and `namecoalesce.test.ts` asserts
+// the escape copy the gate forces on one side and its absence on the other. A byte score cannot
+// see that failure, which is the whole reason that fuzz exists. So the 12 rows are real and so is the hazard, and taking them
 // still needs `carriesPreUpdate` lifted to name classes: the class-level closure, since a merge can
 // reach a loop variable's name through an edge that carried no loop variable at all.
 //

@@ -5,9 +5,11 @@
 // was RE-DERIVED from the inner variable's name, which already held it — the last iteration counted
 // twice. Every spelling the structurer can produce had it, the admit-nothing reference included, so
 // the naming fuzzes (which compare spellings with each other) could not see it: these compare the
-// structured tree with the IR itself (`irTraceOf`). NO GENERATOR REACHES ANY OF THESE — the 2-deep
+// structured tree with the IR itself (`irTraceOf`). NO SWEEP RE-FINDS A SINGLE TERM — the 2-deep
 // generator, and six hand-written shapes up to 3 deep at 6,000 seeds each, move by 0 wrong answers
-// when this substitution's terms are dropped one at a time — so every term is pinned by a fixture.
+// when this substitution's terms are dropped ONE AT A TIME — so every term is pinned by a fixture.
+// A generator reaches the defect only with the substitution absent ALTOGETHER, which is where the
+// two `fz` fixtures below come from.
 //
 // `LATCH_SUM` is the `acc += a[i][j]` nest agbcc compiles to a one-block inner loop, the load
 // spelled as a call so both interpreters can run it; measured, it is also where the rule COMPOSES

@@ -164,7 +164,7 @@ test('ablating re-derives advances the outer induction variable inside the inner
 });
 
 // ── the collision `canTakeName` cannot see: `carriedByBothLoops` ──────────────────────────────
-// `namecoalesce.test.ts`'s frozen `INNER_CLOBBERS_OUTER` pair, given the one record fact this rule
+// `loop-escape-witnesses.ts`'s frozen `INNER_CLOBBERS_OUTER` pair, given the one record fact this rule
 // reads. Sharing the name also hands it to the inner back edge's argument (`backArgName`) and to
 // the outer back edge's un-rotation alias; neither is in `varName`, so neither `carrier-live` nor
 // `re-derives` sees the reader. The outer back edge hands the enclosing slot something the inner

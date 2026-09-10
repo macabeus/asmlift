@@ -1224,9 +1224,10 @@ export interface EnclosingCarrier {
   readonly argIsEnclosingParam: boolean;
   /** the frontend measured `E`, and `E` wrote nothing into the parameter's key */
   readonly keyUnwritten: boolean;
-  /** the value is carried by BOTH loops (`carriedByBothLoops`). False whenever the two rules above
-   *  it are, since it needs `E`'s loop and `a`'s slot in `E` — which is why no fixture can separate
-   *  those two from this one */
+  /** the value is carried by BOTH loops (`carriedByBothLoops`). False whenever `entryEncloses` or
+   *  `argIsEnclosingParam` is, since it needs `E`'s loop and `a`'s slot in `E` — which is why no
+   *  fixture can separate those two from this one. Independent of `keyUnwritten`, which no part of
+   *  the walk consults */
   readonly carriedByBoth: boolean;
 }
 
@@ -2548,8 +2549,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // back-edge argument for `a`'s slot takes it as the outer loop's un-rotation alias. If the outer
   // back edge hands `a`'s slot something the inner loop did not produce, the outer update copy
   // overwrites the name the inner loop's value is read under, and a merge after the loop that
-  // adopts that value's `backArgName` reads the outer value instead. That is `namecoalesce.test.ts`'s
-  // frozen `INNER_CLOBBERS_OUTER` pair (`fz5104`, `fz6437`): given ONE realistic record fact — `E`
+  // adopts that value's `backArgName` reads the outer value instead. That is the frozen
+  // `INNER_CLOBBERS_OUTER` pair (`fz5104`, `fz6437`, in `test/loop-escape-witnesses.ts`, replayed
+  // against this rule by `nested-carrier.test.ts`): given ONE realistic record fact — `E`
   // did not write `p`'s key, nestacc1's own shape — the rule without this clause emits both as a
   // different program, and nothing throws. So every in-edge of `E` from inside its loop must hand
   // `a`'s slot either `a` (then `a` is live across the inner loop, and `carrier-live` refuses), `p`

@@ -6292,9 +6292,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //    refuses one gate later on `loop-escape` (`structure/namecoalesce.ts`), which that file
   //    called blunter than the hazard it restates and which is in fact LOAD-BEARING — dropping it
   //    lets an inner loop's variable adopt the enclosing loop's carrier and overwrite it every
-  //    iteration, so the function computes something else — frozen as IR in `namecoalesce.test.ts`,
-  //    where the differential sweep cannot reach it. Taking the second half
-  //    needs `carriesPreUpdate` lifted to name classes, which that file already names as the work.
+  //    iteration, so the function computes something else — frozen as IR in
+  //    `core/test/loop-escape-witnesses.ts`, because the differential sweep cannot reach it. Taking
+  //    the second half needs `carriesPreUpdate` lifted to name classes, which `namecoalesce.ts`
+  //    already names as the work.
   //    The other door — waiving `enclosingNames` in the loop-header seeding — reaches 11 under a
   //    probe and would be a new ranked axis with the same soundness question.
   //  • `swladder` 7 — `structure/switch-recover.ts` recovers a `switch` from a comparison ladder

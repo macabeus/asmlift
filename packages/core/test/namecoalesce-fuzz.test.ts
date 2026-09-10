@@ -91,7 +91,7 @@ describe.each([
 // `NAME_COALESCE_GATES.filter((x) => x.sound)`, and that gate is `sound: false` — as is `param`,
 // and `type` is exempted below — so raising `SEEDS` never reaches it. Unlike the other two, its
 // ablation changes what a function computes; the witnesses are frozen as IR in
-// `namecoalesce.test.ts`, which also carries how to re-hunt them. Why the flag stays `false` is
+// `loop-escape-witnesses.ts`, which also carries how to re-hunt them. Why the flag stays `false` is
 // argued in `namecoalesce.ts`'s header, where it is set.
 
 // The one sound rule this generator cannot reach, and why. `type` needs two names whose
