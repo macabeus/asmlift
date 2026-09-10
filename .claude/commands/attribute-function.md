@@ -173,6 +173,11 @@ exclusions) get written down for their own future family, not smuggled into this
 
 ## Phase 6 — Author the rows
 
+This phase writes into `apps/benchmark/dataset`, one of the five paths
+`scripts/check-artifact-provenance.sh` measures, so **run `pnpm bench lock` first**: exit 1 means a
+bench is measuring this worktree, and one save stamps its whole run dirty (the sampler is sticky) —
+wait for that run's `EXIT=` line. A round paid 2,420 s for editing beside its own gate bench.
+
 One family, one block comment, modeled on the existing families in `dataset/synthetic.ts` (the
 uninit-local block is the reference): what each row isolates, which are controls, and an
 attribution line for every decline naming its first blocker. Constraints learned the hard way:
@@ -293,12 +298,19 @@ until grep -q 'EXIT=' /tmp/<round>-bench.log; do sleep 30; done
 DURING the run and the sample is STICKY, so ONE edit — a comment audit, a `pnpm format`, an editor
 save — stamps the whole run dirty and `bench:merge` throws the numbers away 39 minutes later. A
 round lost **2,420 s** to exactly that, auditing its comments beside its own gate bench. So a run in
-flight holds `bench-running` at the repo root, and **`pnpm bench lock` exits 1 while it does**,
-naming the pid, the argv and the elapsed time. Run it before any phase that EDITS the tree; the
-work this background pattern is for is read-only — reading the diff, grepping the corpus, running
-the unit tests, drafting the report. The marker is gitignored (so it cannot dirty the run itself),
-removed on exit and on Ctrl-C, and reads as STALE from its own pid if the run was SIGKILLed: a stale
-marker blocks nothing, and `rm bench-running` is the whole cure.
+flight records itself in `bench-running/<pid>.json` at the repo root. **Run `pnpm bench lock`
+before any phase that EDITS the tree, and read its exit code: 1 means a run is in flight — wait for
+its `EXIT=` line — and 0 means the tree is yours.** The refusal names the pid, the argv and the
+elapsed time. The work this background pattern is for is read-only — reading the diff, grepping the
+corpus, running the unit tests, drafting the report. The records are gitignored (so they cannot
+dirty the run itself) and removed when the run exits; a run that dies without getting there leaves
+its record behind, and that record reads as STALE from its dead pid: stale blocks nothing, the next
+run sweeps it, and `rm bench-running/<pid>.json` clears it now.
+
+**`kill -TERM` does not stop a `bench run`** — measured: one sent SIGTERM 6 s in ran all 291 cases
+and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
+case, so no signal handler can run until it is done. `kill -9` is the stop that works, and the
+record it strands is stale.
 
 **Wait on a log marker, never on `pgrep -f "<pattern>"`** when the pattern also matches your own
 waiting shell — five waiter shells once deadlocked on each other for eight hours doing exactly
@@ -308,8 +320,10 @@ that, long after the jobs they watched had finished.
 and a ranked run takes `--jobs 6`; a bench measured **2704 s against a neighbour versus 1800 s
 solo**. Worse than slow: a shard killed by a neighbour writes a partial tier with **no error line**,
 and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line. `bench run` now refuses a
-second run **in the same worktree** — both write `results/<tier>.json` — but that marker is
-per-worktree and says nothing about the neighbour: across worktrees this is still discipline.
+second run **in the same worktree that writes a tier file the live one is writing** — a scoped
+`--tier synthetic --only <sym>` beside a background `--tier real` is not refused, because they
+touch different files. That marker is per-worktree and says nothing about the neighbour: across
+worktrees this is still discipline.
 
 ---
 
