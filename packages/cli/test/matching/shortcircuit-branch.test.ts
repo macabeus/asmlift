@@ -5,11 +5,27 @@
 // This is the executable half of what synthetic:ifand_near:agbcc publishes. Both orientations are
 // enumerated — `/flip-branch` where the arms diverge, `/flip-join` where they reconverge — so the
 // differ referees the orientation instead of the fold committing to one.
-import { ARMV4T_AGBCC } from '@asmlift/core/target';
-import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
+import { type Gate, firstRejection, without } from '@asmlift/core/l3/gates';
+import { decompile } from '@asmlift/core/pipeline';
+import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
+import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
+import { ARMV4T_AGBCC, PPC_MWCC } from '@asmlift/core/target';
+import {
+  assembleTarget,
+  compileMipsGcc272Target,
+  compileMipsGccTarget,
+  compileMipsTarget,
+  compilePpcTarget,
+  compileTargetAsm,
+  gcc272Available,
+  idoAvailable,
+  scoreC,
+  scoreCPpc,
+} from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
 import { decompileRanked } from '../../src/rank';
+import { dockerGate, ppcDockerGate } from './docker-gate';
 
 const ARM = 'p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4;';
 const src = (op: string) =>
@@ -159,9 +175,10 @@ describe('a loop-exit connective folds, and the loop it un-declines stays recove
 // fold copies that read to the arm's head, and whether the copy compiles back to ONE load is a
 // question about how analysis.ts spells it — inline, where agbcc merges it into the condition's
 // register, or as a local, which agbcc loads a second time. The first test is the compiler fact;
-// the other four are the two sides of the gate that rests on it. The positive one fails with every
-// escape refused (main, before the admission: the nest scores 3); each of the three nests fails
-// with its own rule ablated (`read-behind-effect` the first two, `moves-a-read` the third).
+// the rest are the two sides of the gate that rests on it. The positive ones fail with every
+// escape refused (main, before the admission); each nest fails with its own rule ablated
+// (`read-behind-effect` the call and double use, `moves-a-read` the moved read, `loop-exit` the
+// search loop). The DIFFERENTIAL below is the property the rule exists for, run as a test.
 describe('an arm that re-reads what its second test loaded', () => {
   const PROTOS = { fnB: { params: 0, returnsVoid: true }, sink: { params: 1, returnsVoid: true } };
   const X = 'extern void fnB(void); extern void sink(s32);\n';
@@ -211,5 +228,185 @@ describe('an arm that re-reads what its second test loaded', () => {
     // The target reads p[5] before `b == 3`, on both of its exits.
     const b = best('void f(u8 *p, s32 a, s32 b){ u8 v; if (a) { v = p[5]; if (b == 3) sink(v); } }', { params: 3 });
     expect(b.score.match).toBe(true);
+  });
+
+  test('a store to ANOTHER field of the same struct is no barrier, and the flat fold matches', () => {
+    // analysis.ts inlines the copy past a provably disjoint store (`disjointConstSlots`), so agbcc
+    // merges it into the test's load. Counting every effect kept the nest here: 8/22.
+    const b = best(
+      'struct R { s32 x; u16 h; u8 fl; u8 k; };\n' +
+        'void f(struct R *r, s32 a){ if (a && (r->fl & 0x7f) == 0x7f) { r->x = 5; r->fl &= 0x80; return; } fnB(); }',
+      { params: 2 },
+    );
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('&&');
+  });
+
+  test('an INDEXED re-read folds like a constant-offset one — the address carries no read', () => {
+    // The copy re-derives `p + i` beside the load. Treating that `add` as a read refused this where
+    // `p[5]` folded (3/22).
+    const b = best(
+      'void f(u8 *p, s32 i, s32 a){ if (a && (p[i] & 0x7f) == 0x7f) { p[i] &= 0x80; fnB(); p[i] = 1; return; } fnB(); }',
+      { params: 3 },
+    );
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('&&');
+  });
+
+  test('a search loop whose hit arm returns keeps its nest, which matches', () => {
+    // `loop-exit`: fused whole, the condition becomes the loop header's exit. Ablated, 21/33.
+    const b = best(
+      'void f(u8 *p, u8 *q, u8 *r){ u8 v; s32 i; for (i = 0; i < 8; i++) { if (q[i] != 0 && (v = p[i]) > 5) { r[0] = v; return; } } fnB(); }',
+      { params: 3 },
+    );
+    expect(b.score.match).toBe(true);
+  });
+
+  // THE DIFFERENTIAL. `read-behind-effect` predicts an L2 decision at L1: it refuses exactly where
+  // analysis.ts would spell the arm's copy as a LOCAL. So for each spelling, take the fold with the
+  // rule ABLATED — the copy is always made — and check that a local holding the read appears iff
+  // the full table refuses. The two predicates drifting apart (the day `disjointConstSlots` widens,
+  // or `emitPos` changes) fails here, which no single-probe test above would notice. The swap goes
+  // through `PRE_RECOVERY_PASSES` — the seam `bench gates --pass arm-reread` uses — and every case
+  // must actually reach the table, or it would pass vacuously.
+  test('the rule refuses exactly where analysis.ts would spell the copy as a local', () => {
+    const H = 'struct R { s32 x; u16 h; u8 fl; u8 k; }; struct G { u8 f[8]; }; extern struct G *gP; extern s32 gK;\n';
+    const T = (arm: string) =>
+      `void f(u8 *p, u8 *q, s32 a){ if (a && (p[1] & 0x7f) == 0x7f) { ${arm} return; } fnB(); }`;
+    const V = (arm: string) =>
+      `void f(u8 *p, u8 *q, s32 a){ u8 v; if (a && ((v = p[3]) & 0x7f) == 0x7f) { ${arm} return; } fnB(); }`;
+    const cases = [
+      T('p[1] &= 0x80;'),
+      T('q[0] = 5; p[1] &= 0x80;'),
+      T('p[3] = 5; p[1] &= 0x80;'),
+      T('p[1] &= 0x80; p[3] = 5;'),
+      T('p[3] = 5; p[2] = p[1]; p[4] = p[1];'),
+      T('p[2] = p[1] & 0x80; p[3] = p[1] & 0x80;'),
+      T('p[2] = p[1]; p[1] = 0;'),
+      'void f(struct R *r, s32 a){ if (a && (r->fl & 0x7f) == 0x7f) { r->x = 5; r->fl &= 0x80; return; } fnB(); }',
+      'void f(struct R *r, s32 a){ if (a && (r->fl & 0x7f) == 0x7f) { r->h = 0; r->k = r->fl; return; } fnB(); }',
+      'void f(s32 a){ if (a && (gP->f[5] & 0x7f) == 0x7f) { gP->f[4] = 1; gP->f[5] &= 0x80; return; } fnB(); }',
+      'void f(s32 a){ if (a && (gP->f[5] & 0x7f) == 0x7f) { gK = 1; gP->f[5] &= 0x80; return; } fnB(); }',
+      'void f(u8 *p, s32 i, s32 a){ if (a && (p[i] & 0x7f) == 0x7f) { p[i] &= 0x80; fnB(); p[i] = 1; return; } fnB(); }',
+      V('sink(v); sink(v);'),
+      V('fnB(); sink(v);'),
+      V('sink(v); fnB();'),
+      V('p[5] = 0; sink(v);'),
+      V('p[2] = v; p[4] = v;'),
+      V('p[2] = v + 1;'),
+      V('sink(v & 3);'),
+    ];
+    const entry = PRE_RECOVERY_PASSES.find((p) => p.id === 'branch-shortcircuit')!;
+    const run = entry.run;
+    const seen: { refused: boolean; local: boolean }[] = [];
+    for (const c of cases) {
+      const asm = compileTargetAsm(X + H + c);
+      const verdicts: (string | null)[] = [];
+      // First in the table and never refusing: it records the FULL table's verdict at each site.
+      const probe: Gate<ArmRereadSite> = {
+        id: 'probe',
+        why: 'records the verdict',
+        sound: false,
+        guardedBy: 'this test',
+        rejects: (site) => {
+          verdicts.push(firstRejection(ARM_REREAD_GATES, site));
+          return false;
+        },
+      };
+      entry.run = (fn, self, opts, target, lifted) =>
+        run(
+          fn,
+          self,
+          {
+            ...opts,
+            shortCircuit: {
+              ...opts.shortCircuit,
+              armReread: [probe, ...without(ARM_REREAD_GATES, 'read-behind-effect')],
+            },
+          },
+          target,
+          lifted,
+        );
+      let source: string;
+      try {
+        const params = c.slice(c.indexOf('void f(') + 7, c.indexOf(')')).split(',').length;
+        source = decompile('f', asm, ARMV4T_AGBCC, {
+          prototypes: { f: { params, returnsVoid: true }, ...PROTOS },
+        }).source;
+      } finally {
+        entry.run = run;
+      }
+      expect(verdicts.length, c).toBeGreaterThan(0);
+      expect(
+        verdicts.every((v) => v === null || v === 'read-behind-effect'),
+        c,
+      ).toBe(true);
+      // a local assigned from a memory read: a subscript, a member, a deref, or a named global
+      const local = /^\s+v\d+ = [^;]*(\[|->|\*|\bg[A-Z]\w*)[^;]*;$/m.test(source);
+      seen.push({ refused: verdicts.includes('read-behind-effect'), local });
+      expect({ case: c, local }).toEqual({ case: c, local: verdicts.includes('read-behind-effect') });
+    }
+    // both sides are inhabited, or the property is not being tested
+    expect(seen.filter((x) => x.refused).length).toBeGreaterThan(3);
+    expect(seen.filter((x) => !x.refused).length).toBeGreaterThan(3);
+  });
+});
+
+// The same fact on the compilers that declare it the OTHER way (target.ts `reloadsLocalReread`):
+// ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc_242_81 hold a local's register instead of reloading it, so
+// analysis.ts's local is their spelling and `read-behind-effect` stands down there.
+describe('a local that re-reads the second test costs no load outside agbcc', () => {
+  const pair = (arm: string) => `void f(u8 *p, u8 *q, s32 a){ if (a && (p[1] & 0x7f) == 0x7f) { ${arm} } }`;
+  const LOCALS = [
+    '{ u8 v = p[1]; p[2] = v; }',
+    '{ u8 v = p[1]; q[0] = 5; p[2] = v; }',
+    '{ u8 v = p[1]; fnB(); p[2] = v; }',
+  ];
+  const X = 'extern void fnB(void);\n';
+  const cases: [string, boolean, (c: string) => string, RegExp][] = [
+    ['ido7.1', idoAvailable(), (c) => compileMipsTarget(c, 'f').asm, /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/],
+    [
+      'gcc2.7.2kmc',
+      dockerGate('reread-kmc'),
+      (c) => compileMipsGccTarget(c, 'f').asm,
+      /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/,
+    ],
+    ['gcc2.7.2', gcc272Available(), (c) => compileMipsGcc272Target(c, 'f').asm, /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/],
+    [
+      'mwcc_242_81',
+      ppcDockerGate('reread-mwcc'),
+      (c) => compilePpcTarget(c, 'f').asm,
+      /\blbz\s+r\d+,\s*(0x)?1\(r\d+\)/,
+    ],
+  ];
+  for (const [id, have, compile, load] of cases) {
+    test.runIf(have)(`${id}: every local spelling loads p[1] once`, () => {
+      for (const arm of LOCALS) {
+        expect(
+          compile(X + pair(arm))
+            .split('\n')
+            .filter((l) => load.test(l)).length,
+          arm,
+        ).toBe(1);
+      }
+    });
+  }
+
+  test.runIf(ppcDockerGate('reread-mwcc'))('mwcc: a read held across a call folds flat, and the local matches', () => {
+    // On agbcc this is the nest `read-behind-effect` keeps; on mwcc the rule stands down and the
+    // default lift spells `v0 = a0[3]; fnA(); a0[4] = v0;` — the target's own bytes (was 3/24).
+    const c =
+      'extern void fnA(void); extern void fnB(void);\n' +
+      'void f(u8 *p, s32 a){ if (a) { u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; } } fnB(); }';
+    const { asm, obj } = compilePpcTarget(c, 'f');
+    const r = decompile('f', asm, PPC_MWCC, {
+      prototypes: {
+        f: { params: 2, returnsVoid: true },
+        fnA: { params: 0, returnsVoid: true },
+        fnB: { params: 0, returnsVoid: true },
+      },
+    });
+    expect(r.source).toContain('&&');
+    expect(scoreCPpc(r.source, 'f', obj).match).toBe(true);
   });
 });
