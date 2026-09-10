@@ -2430,13 +2430,53 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const k = header!.params.indexOf(c);
     return !!back && k >= 0 && back.args[k] !== c && !back.args.includes(c);
   };
+  // A NESTED LOOP'S CARRIED VALUE KEEPS THE NAME ITS ENCLOSING LOOP GAVE IT. `p`, a param of the
+  // inner header, is entered straight from the enclosing loop's header `E` with `E`'s own param —
+  // an accumulator (or any loop-carried value) crossing into the inner loop. Minting `p` a fresh
+  // name spells `v3 = v1; do { … v3 … } while (…); v1 = v3;`, and on agbcc that pair is two `mov`s
+  // the target does not contain. Whether the source had ONE variable or TWO is what the frontend's
+  // write-order record answers: `E` wrote nothing into `p`'s key, so the machine carried the value
+  // into the inner loop in the register it already had — there is no copy to reproduce.
+  //
+  // Refuses — `p` keeps the seeding below — when:
+  //   • `p` has more than one forward predecessor, or its one forward predecessor is not the header
+  //     of a loop that strictly encloses `p`'s header: the record is per predecessor, so a block
+  //     between `E` and the inner header could have made the copy and no record would say so;
+  //   • the argument is not one of `E`'s own params (it is not `E`'s loop-carried value);
+  //   • the frontend did not measure `E`, or measured it WRITING `p`'s key — the copy the source
+  //     spelled, which the fresh name reproduces;
+  //   • `canTakeName` refuses. This is the one guard against the collision `enclosingNames`
+  //     excludes wholesale: a value of `E` still read after the inner loop is `carrier-live`, and an
+  //     unnamed one re-derived from it there (the outer update `(u8)(v0 + 1)`) is `re-derives`.
+  const enclosingCarrierName = (
+    p: Value,
+    i: number,
+    header: Block,
+    forwardPreds: readonly Block[],
+  ): string | undefined => {
+    const [E] = forwardPreds;
+    if (E === undefined || E === header || forwardPreds.some((fp) => fp !== E)) {
+      return undefined;
+    }
+    if (!forest.byHeader.get(E)?.body.has(header)) {
+      return undefined;
+    }
+    const a = successorTo(E, header)?.args[i];
+    const order = fn.writeOrder;
+    if (a === undefined || !E.params.includes(a) || !order?.writes.has(E) || order.lastWrite.get(E)?.has(p)) {
+      return undefined;
+    }
+    const nm = varName.get(a);
+    return nm !== undefined && canTakeName(p, header, nm) ? nm : undefined;
+  };
   // ONE seeding routine for self-loop and structured-loop headers. On a coalesceLoopInit target,
   // keep the induction variable in its entry (forward-edge) value's register — reproducing a
   // compiler that mutates the arg register across the loop instead of copying to a fresh local,
   // so the init copy vanishes. The loop mutates the adopted name every iteration — canTakeName
   // declines it when any value under it is still live at the header. `exclude` are names never to
-  // adopt (enclosing loops' induction vars — the cross-level collision below); every seeded
-  // param's name is ADDED to it, so sibling params can't collapse.
+  // adopt (enclosing loops' induction vars — the cross-level collision below) except through
+  // `enclosingCarrierName`, which measures the collision instead; every seeded param's name is
+  // ADDED to it, so sibling params can't collapse.
   const seedLoopParams = (
     header: Block,
     forwardPreds: Block[],
@@ -2455,6 +2495,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             }
           }
         }
+        name ??= enclosingCarrierName(p, i, header, forwardPreds);
         // A MATERIALIZED back-edge arg is this variable's in-place update (`add r4, r4, r0`
         // mutates the same register the param lives in) — adopt its name so the def assigns the
         // loop variable directly and the update copy elides. Sound only when every read of the
@@ -2531,7 +2572,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // loop (the outer latch reads it after). If the inner var is coalesced onto the outer var's name
   // (its init reads the outer var), the inner loop would MUTATE the outer variable — a silent
   // miscompile. Process OUTERMOST-first (so an enclosing loop is named first) and, per loop, exclude
-  // the names of every enclosing loop's header params from the coalescing candidates.
+  // the names of every enclosing loop's header params from the coalescing candidates — all but the
+  // one `enclosingCarrierName` hands over with the evidence and the `canTakeName` check above.
   // `enclosingNames(l)` = names of params of headers whose natural body strictly contains `l.header`.
   structuredLoops.sort((a, b) => b.body.size - a.body.size); // outermost first
   const enclosingNames = (l: { header: Block; body: Set<Block> }): Set<string> => {

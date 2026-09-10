@@ -55,7 +55,7 @@ export function mulberry32(seed: number): () => number {
  *  arguments: a skip edge that lands inside a loop body from outside makes the region irreducible,
  *  and what depth 2 exists to reach is the value that is carried by BOTH loops — the accumulator a
  *  nested `for` writes, whose home is outside the inner loop it is nevertheless updated in. */
-export function generateSsaFn(seed: number, depth: 0 | 1 | 2): Fn {
+export function generateSsaFn(seed: number, depth: 0 | 1 | 2, readsOuter = false): Fn {
   const rnd = mulberry32(seed);
   const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
   const nBlocks = depth === 2 ? 6 + Math.floor(rnd() * 2) : 4 + Math.floor(rnd() * 3);
@@ -81,9 +81,17 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2): Fn {
   const loopHeader = depth === 1 ? 1 + Math.floor(rnd() * (nBlocks - 2)) : -1;
   // depth 2: ^bb1 outer header, ^bb2 inner header, ^bb3 inner latch, ^bb4 outer latch
   const innerHeader = depth === 2 ? 2 : -1;
+  // `readsOuter` (depth 2 only): the blocks inside the outer loop may also read what the OUTER
+  // header defined — its params and ops, which dominate them — so a value carried by the outer loop
+  // can still be live after the inner one ran. Not the tail, and not the inner header's values: a
+  // read of a loop header's param past its own loop is a shape the do-while emitter declines. Off by
+  // default, and then `avail` and the stream are exactly what they were: `namecoalesce.test.ts`
+  // freezes witnesses by seed.
+  const outerDefs: Value[] = [];
   for (let i = 0; i < nBlocks; i++) {
     const b = blocks[i];
-    const avail = [...entryVals, ...b.params];
+    const insideOuter = readsOuter && depth === 2 && i > 1 && i <= innerHeader + 2;
+    const avail = [...entryVals, ...(insideOuter ? outerDefs : []), ...b.params];
     for (let k = 0; k < 1 + Math.floor(rnd() * 3); k++) {
       const r = mkValue(T.s(32));
       b.ops.push(
@@ -92,6 +100,9 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2): Fn {
           : mkOp(pick(['add', 'sub']), { operands: [pick(avail), pick(avail)], results: [r] }),
       );
       avail.push(r);
+    }
+    if (readsOuter && i === 1) {
+      outerDefs.push(...b.params, ...b.ops.flatMap((o) => o.results));
     }
     const argsFor = (t: Block): Value[] => t.params.map(() => pick(avail));
     if (i === nBlocks - 1) {

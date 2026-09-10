@@ -16,6 +16,7 @@
 // bar without anyone remembering to.
 import { describe, expect, test, vi } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import type { Fn } from '../src/ir/core';
 import { verify } from '../src/ir/verify';
 import type { SFn } from '../src/l3/ast';
@@ -56,11 +57,29 @@ const ADMIT_NOTHING: readonly Gate<CarrierName>[] = [
 // range, and its witnesses are frozen as IR in `namecoalesce.test.ts` instead.
 const SEEDS = 4000;
 
+/** A write-order record under which every block was measured and wrote nothing, so every edge
+ *  argument reads as carried in the register it arrived in. Generated IR has no record at all, and
+ *  the one naming rule that asks for it — a nested loop's carried value adopting the enclosing
+ *  header's name (`enclosingCarrierName`) — refuses on an unmeasured function, so without this the
+ *  sweep never reaches it. The most permissive record there is, which is what a soundness sweep
+ *  wants: the rule then fires wherever the CFG lets it, and only `canTakeName` stands in its way. */
+const passThrough = (fn: Fn): void => {
+  fn.writeOrder = { lastWrite: new Map(), writes: new Map(fn.blocks.map((b) => [b, 0] as const)) };
+};
+
 /** Both spellings of one seed, or null when the shape is not one this can judge. */
-function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[]; on: Event[] } | null {
+function spellings(
+  seed: number,
+  depth: 0 | 1 | 2,
+  drop?: string,
+  nested?: { measured: boolean },
+): { off: Event[]; on: Event[]; src: string } | null {
   let fn: Fn;
   try {
-    fn = generateSsaFn(seed, depth);
+    fn = generateSsaFn(seed, depth, nested !== undefined);
+    if (nested?.measured) {
+      passThrough(fn);
+    }
     verify(fn);
     recoverTypes(fn);
   } catch {
@@ -75,7 +94,7 @@ function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[
     return null; // a decline is not a difference
   }
   try {
-    return { off: traceOf(off, seed), on: traceOf(on, seed) };
+    return { off: traceOf(off, seed), on: traceOf(on, seed), src: cBackend.emit(on) };
   } catch {
     return null; // step cap, or a construct the interpreter does not model
   }
@@ -99,6 +118,47 @@ describe.each([
     expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
     expect(bad).toEqual([]);
   });
+});
+
+// The nested sweep again, on the arm that reaches `enclosingCarrierName`: the generator lets the
+// blocks inside the outer loop read what the outer header defined (without that, no value of it is
+// ever live after the inner loop, and `carrier-live` has no collision to refuse), and every edge is
+// measured as a pass-through, which is the evidence the rule asks for.
+//
+// A DIFFERENTIAL AGAINST THE SAME GENERATOR UNMEASURED, not an absolute `bad = []`. That shape
+// reaches wrong answers the walk gives with or WITHOUT this rule — 7 of 4,000 seeds, the same 7
+// measured or not. KNOWN GAP, not this rule's: ablating `canTakeName`'s `pureAlias` waiver clears 6
+// of them (a fact about one value, waiving `carrier-live` for every value under the name), and the
+// seventh survives that and the back-edge adoption's ablation alike. What the record may not do is
+// ADD one: an unguarded rule (no `canTakeName`) is caught here, at seed 1472.
+test('nested, measured: a carried value adopting its enclosing header name adds no wrong answer', async () => {
+  const bad: number[] = [];
+  const preexisting = new Set<number>();
+  let judged = 0;
+  let adopted = 0;
+  for (let seed = 1; seed <= SEEDS; seed++) {
+    if (seed % BREATHE_EVERY === 0) {
+      await breathe();
+    }
+    const r = spellings(seed, 2, undefined, { measured: true });
+    const u = spellings(seed, 2, undefined, { measured: false });
+    if (u && tracesDiffer(u)) {
+      preexisting.add(seed);
+    }
+    if (!r) {
+      continue;
+    }
+    judged++;
+    if (tracesDiffer(r)) {
+      bad.push(seed);
+    }
+    if (r.src !== u?.src) {
+      adopted++;
+    }
+  }
+  expect(judged).toBeGreaterThan(SEEDS / 10);
+  expect(adopted).toBeGreaterThan(0); // the rule fired: a seed whose spelling the record changed
+  expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
 
 // The three rules this generator cannot reach, and why — each with the file that carries its
