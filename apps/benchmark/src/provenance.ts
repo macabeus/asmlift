@@ -12,11 +12,7 @@
 // `report/merge.ts` refuses to merge a tier whose stamp disagrees with merge time. The two
 // samples together cover the whole window.
 //
-// AND IT SAYS SO AT THE TRANSITION (`announceWentDirty`). The refusal at `bench:merge` is correct
-// and 39 minutes late; the sample that decides it is taken after every case, so the loss is
-// knowable within ~2 s. That line is the DETECTIVE half of `run/lock.ts`'s preventive register:
-// the register only works if whoever edits the tree asks first, while this fires whatever the
-// cause.
+// AND IT SAYS SO AT THE TRANSITION, on the run's own stderr — see `wentDirtyNotice`.
 //
 // STICKY, and that is the point rather than an optimization: a mutation that appears and is
 // reverted mid-run must still be reported, so once a sample sees a dirty tree this process reports

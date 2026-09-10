@@ -205,8 +205,7 @@ switch (command) {
     // Then record that this worktree is being measured, so the phases that EDIT it — and the next
     // `bench run` on this machine — can tell. Taking the record is a WRITE and not a verdict,
     // which is why it is here and the refusal is in preflight.ts; which invocations are exempt is
-    // that file's `runTakesTheBenchLock` (a shard child writes nothing: the parent that spawned it
-    // already did, and eight children's records would say eight runs are in flight).
+    // that file's `runTakesTheBenchLock`.
     if (runTakesTheBenchLock(runOpts)) {
       if (opts['no-lock']) {
         console.error(
@@ -220,9 +219,9 @@ switch (command) {
         });
       }
     }
-    // Deliberately NOT folded into `preflightRefusals`: that function's two verdicts are each
-    // gated on a predicate (whole-tier / touches-real), while the m2c pin applies to EVERY run,
-    // shard children and `--only` included, and throws its own remediation line.
+    // Deliberately NOT folded into `preflightRefusals`: each of that function's verdicts is gated
+    // on a predicate (takes-a-record / whole-tier / touches-real), while the m2c pin applies to
+    // EVERY run, shard children and `--only` included, and throws its own remediation line.
     const { assertM2cPinned } = await import('./eval/m2c');
     assertM2cPinned();
     if (opts.serial) {

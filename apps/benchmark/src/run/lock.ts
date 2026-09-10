@@ -46,8 +46,7 @@
 // its own hidden SIGINT/SIGTERM handler (hidden: it patches `process.listenerCount`, which reports
 // 0), so the CLI is signal-deferred on `origin/main` too — measured, with no handler of ours: a
 // `bench run --tier synthetic --serial` sent SIGTERM 6 s in ran all 291 cases, REWROTE
-// `results/synthetic.json`, and only then exited 143. `kill -9` is the stop that works. Adding a
-// second listener on top of that could only make things worse, and did.
+// `results/synthetic.json`, and only then exited 143. `kill -9` is the stop that works.
 //
 // So a run that dies without reaching its exit path leaves its record behind, exactly like a
 // SIGKILL: it names a pid that is gone, so it reads `stale`, and stale blocks nothing.
@@ -62,9 +61,10 @@ import { join } from 'node:path';
 
 import { REPO_ROOT } from '../config';
 
-/** The register's directory: machine-wide, per-uid, and derived from NO environment variable —
- *  see the header for the `tmpdir()` measurement that rules that function out here. Quoted in
- *  every refusal, so a reader can `ls` it. */
+/** The register's directory: machine-wide, per-uid, and — where the incidents happen — derived
+ *  from NO environment variable; see the header for the `tmpdir()` measurement that rules that
+ *  function out. Windows has no `/tmp` to agree on and no bench, so it falls back. Quoted in every
+ *  refusal, so a reader can `ls` it. */
 export const BENCH_LOCK_DIR =
   process.platform === 'win32'
     ? join(tmpdir(), 'asmlift-bench-running')
@@ -79,8 +79,9 @@ export interface BenchLockRecord {
   command: string;
   /** The tiers this run writes. */
   tiers: string[];
-  /** The worktree it measures. Absent in a record this build cannot parse; absent means UNKNOWN,
-   *  and unknown is never a clearance — it matches every root. */
+  /** The worktree it measures. Absent in a record that did not say which — an older build, or a
+   *  hand-written one. Absent means UNKNOWN, and unknown is never a clearance: it matches every
+   *  root. */
   root?: string;
   /** Does it rewrite at least one tier file WHOLE (`preflight.ts`'s `runIsWholeTier`)? That, not
    *  "is it slow", is what makes two runs a house-rule violation rather than a dev loop. */
@@ -107,8 +108,7 @@ function recordPath(dir: string, pid: number): string {
  *
  *  A recycled pid therefore reads as HELD when the bench that wrote it is long dead. That is the
  *  direction to be wrong in: a false `held` costs one `rm` of a record named on screen, while a
- *  false `stale` costs the 2,420 s this file exists to keep. `/tmp` is cleared on reboot, which is
- *  when recycling is likeliest. */
+ *  false `stale` costs the 2,420 s this file exists to keep. */
 function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);

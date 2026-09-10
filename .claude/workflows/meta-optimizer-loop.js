@@ -237,9 +237,8 @@ ${implReport}
 5. **Re-run every gate yourself.** If the change adds a fail-loud check, verify it fires on the bad
    condition AND does not fire on a clean run — a false-alarming guard stalls every future round.
 6. **Apply fixes yourself** rather than bouncing back; commit, push, say what you changed. This is
-   an EDIT in the worktree that just ran step 3's full bench, which is the 2,420 s shape: run
-   \`pnpm bench in-flight\` before you touch a file, and if you edit anyway the run prints
-   \`[provenance] THE TREE WENT DIRTY MID-RUN\` within ~2 s — the run is lost at that point, so
+   an EDIT in a worktree that may still be measuring: \`pnpm bench in-flight\` before you touch a
+   file, and if a run prints \`[provenance] THE TREE WENT DIRTY MID-RUN\` it is already lost —
    stop it and start it again rather than let it finish.
 7. **Merge when CI is green** (poll \`gh pr checks\`, never with a self-matching \`pgrep\`), then
    \`gh pr merge <n> --squash\`, and **verify main is still green**.

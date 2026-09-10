@@ -172,19 +172,14 @@ pnpm bench run                        # both tiers -> results/{synthetic,real}.j
 pnpm bench run --tier synthetic --only divc      # targeted subset
 pnpm bench run --serial               # in-process, for debugging (also how shard children run)
 pnpm bench in-flight                  # is a run measuring this worktree RIGHT NOW? exit 1 if so,
-                                      #   naming the record each `bench run` writes while it works
-                                      #   (`/tmp/asmlift-bench-running-<uid>/<pid>.json`), its pid,
-                                      #   argv and elapsed time. Run it before ANY phase that edits
-                                      #   the tree: the provenance sampler below is sticky, so one
-                                      #   mid-run edit costs the whole run. A killed run leaves its
-                                      #   record behind and it reads as stale from its pid — that
-                                      #   blocks nothing, and the next run sweeps it. The register
-                                      #   is machine-wide and each record names its worktree, so
-                                      #   `bench run` refuses a second run that writes a tier file
-                                      #   the live one is writing, AND a second FULL bench beside
-                                      #   one running anywhere on this machine. `--no-lock` is the
-                                      #   sanctioned way past that, out loud; never `rm` a record
-                                      #   you did not write
+                                      #   naming the record `bench run` writes while it works
+                                      #   (`/tmp/asmlift-bench-running-<uid>/<pid>.json`). Run it
+                                      #   before ANY phase that edits the tree: the provenance
+                                      #   sampler below is sticky, so one mid-run edit costs the
+                                      #   whole run. `bench run` reads the same register and
+                                      #   refuses a second run writing a tier file the live one is
+                                      #   writing, or a second FULL bench anywhere on this machine;
+                                      #   `--no-lock` is the sanctioned way past that
 pnpm bench:merge                      # = bench merge: tiers -> results/results.json, then publish
 pnpm bench publish                    # re-stage results.json into the web app alone
 pnpm bench:smoke                      # one trivial fn through every available toolchain

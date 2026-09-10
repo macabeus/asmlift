@@ -354,8 +354,8 @@ describe('what a SECOND bench run is told', () => {
 });
 
 describe('the marker survives the ways a run actually ends', () => {
-  // The item's second design point, and the one nothing in-process can check: these spawn a real
-  // child, so `process.on('exit')` and the ABSENCE of signal handlers are what is under test.
+  // Nothing in-process can check this: these spawn a real child, so `process.on('exit')` and the
+  // ABSENCE of signal handlers are what is under test.
   const child = (root: string, body: string): string => {
     const dir = mkdtempSync(join(tmpdir(), 'asmlift-lock-child-'));
     const script = join(dir, 'child.mjs');

@@ -21,11 +21,13 @@
 // nothing was written — and the reader of this refusal is deciding whether to commit or to route
 // around it.
 //
-// THREE LAWS, THREE PREDICATES. `runIsWholeTier` asks "does this invocation rewrite a tier file
-// whole", which is the git question and only the git question — and, in `run/lock.ts`, also the
-// question of whether starting it beside a neighbour's full bench breaks the house rule. The `cpp` question is a different
-// one — "will this invocation preprocess anything with the host `cpp`" — and the tier alone
-// decides it: every `CPP` call site in `compile/{ido,kmc,gcc272}.ts` sits inside the `*Real`
+// THREE LAWS, THREE PREDICATES. `runTakesTheBenchLock` asks "is this a run at all, rather than one
+// of its own shard children" — the only invocations that carry a record in `run/lock.ts`'s
+// register, and so the only ones its concurrent-run refusal is about. `runIsWholeTier` asks "does
+// this invocation rewrite a tier file whole": the git question, and also what makes a second run
+// beside a neighbour's a breach of the house rule rather than a dev loop. The `cpp` question is a
+// different one — "will this invocation preprocess anything with the host `cpp`" — and the tier
+// alone decides it: every `CPP` call site in `compile/{ido,kmc,gcc272}.ts` sits inside the `*Real`
 // export, `compile/real.ts` is their only consumer, and no synthetic row preprocesses. Scoping
 // cannot narrow it (`--toolchain` does not filter the real tier at all — `cases/real.ts` takes
 // only `project`/`only`), and it must not: the scoped `--tier real --only <sym>` loop that both
