@@ -189,16 +189,20 @@ switch (command) {
       console.error(preflight.refusals.join('\n\n'));
       process.exit(1);
     }
-    // Then take the worktree, so the phases that EDIT it can tell that they must not. A shard
-    // CHILD takes nothing: the parent that spawned it holds the marker already, and eight children
-    // fighting over one path would clear it the moment the first of them exited.
+    // Then record that this worktree is being measured, so the phases that EDIT it can tell that
+    // they must not. A shard CHILD records nothing: the parent that spawned it already did, and
+    // eight children's records would say eight runs are in flight.
+    //
+    // The refusal is on the TIERS this run writes, not on "a run is in flight": a scoped probe on
+    // a tier the background run is not writing collides with nothing, and refusing it would send
+    // the round looking for a way past the guard.
     if (!isShardChild({ tiers, shard: opts.shard, serial: opts.serial })) {
-      const concurrent = concurrentRunRefusal(readBenchLock());
+      const concurrent = concurrentRunRefusal(readBenchLock(), tiers);
       if (concurrent !== undefined) {
         console.error(concurrent);
         process.exit(1);
       }
-      acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`);
+      acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, tiers);
     }
     // Deliberately NOT folded into `preflightRefusals`: that function's two verdicts are each
     // gated on a predicate (whole-tier / touches-real), while the m2c pin applies to EVERY run,
