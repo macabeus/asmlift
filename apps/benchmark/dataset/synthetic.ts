@@ -5603,8 +5603,8 @@ export const SYNTHETIC: SynthSpec[] = [
     // the suppressed phantom return value of a void function — analysis.ts drops the `ret` operand
     // from the use registry, so it arrives at the walk unread. That is why this row's read is the
     // final statement and why the loop is gone: without both, it tests a different thing.
-    // Cost of not having it: the rule's only corpus inhabitant was a REAL-tier row in a local
-    // project checkout, so CI could not regress-detect it at all.
+    // The rule's only other corpus inhabitant is a real-tier row in a local project checkout,
+    // which CI cannot run, so without this row nothing regress-detects the rule.
     sym: 'dmareadback',
     src:
       'void dmareadback(s32 src, s32 dst, s32 ctl){\n' +

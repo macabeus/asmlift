@@ -187,7 +187,7 @@ test('composition: mwcc `!(x == 0)` folds through cntlzw-eq0 into a single `x !=
 });
 
 test('the five effect views over the registry name five different questions', () => {
-  // Each set answers one question about an op, and all four are derived from the signature flags
+  // Each set answers one question about an op, and all five are derived from the signature flags
   // rather than listed, so registering an opcode cannot leave one behind. Pinned because the
   // memberships OVERLAP, and the disagreements are the whole reason there is more than one set.
   expect([...EFFECTFUL_OPS].sort()).toEqual(['astore', 'call', 'opaque', 'store']);
@@ -215,10 +215,9 @@ test('the five effect views over the registry name five different questions', ()
   expect(ORDER_SENSITIVE_OPS.has('sdiv')).toBe(false);
   expect(REEVAL_UNSAFE_OPS.has('sdiv')).toBe(true);
   // `SPELLED_WHEN_DEAD_OPS` asks "did the machine do something a source statement must stand for",
-  // which is a DIFFERENT question from "may this move" — and today the two derive the same set.
-  // The identity is pinned rather than expressed as an alias: if a later registry change makes
-  // them differ, this line is where that surfaces as a decision to make, and if someone edits one
-  // question's filter intending only that question, the other does not silently follow.
+  // a DIFFERENT question from "may this move" that today derives the same set. Pinned here rather
+  // than expressed as an alias, so a later registry change that makes them differ surfaces as a
+  // decision to make instead of following silently.
   expect([...SPELLED_WHEN_DEAD_OPS].sort()).toEqual([...ORDER_SENSITIVE_OPS].sort());
   expect(SPELLED_WHEN_DEAD_OPS).not.toBe(ORDER_SENSITIVE_OPS);
 });

@@ -87,8 +87,8 @@ export function globalCellOf(defs: Map<Value, Op>, addr: Value, off: number): Gl
 }
 
 /**
- * The NUMERIC address an access denotes, resolved through defs alone — a literal base, or
- * `literal + literal` in either operand order — plus the access's own `off`. Null when the address
+ * The NUMERIC address an access denotes, resolved through defs alone — a literal base, or the sum
+ * of two literals — plus the access's own `off`. Null when the address
  * does not reduce to a literal: a `gaddr` (ask {@link globalCellOf} instead), a parameter, a
  * materialized base, anything carrying a runtime term.
  *

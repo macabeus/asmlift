@@ -1374,11 +1374,11 @@ export interface StructureOptions {
   littleEndian?: boolean;
   // HARDWARE fact from TargetDescription.capabilities.deviceRegisters, threaded by
   // `structureOptionsFor` like `littleEndian` above: the half-open byte window whose cells are
-  // hardware registers rather than objects a source declares. The structurer asks it ONE question
-  // and it is the same one its four other readers ask — "would a source have spelled this address
-  // `volatile`" — so it may be approximate: it decides a SPELLING, not a memory model (that is
-  // `deviceMemoryWriters`, and no structurer rule reads it). Here it is a REFUSAL: absent, a dead
-  // read at a literal address is dropped exactly as it was before the rule existed.
+  // hardware registers rather than objects a source declares. The structurer asks it the same
+  // question its four other readers ask — "would a source have spelled this address `volatile`" —
+  // so it may be approximate: it decides a SPELLING, not a memory model (that is
+  // `deviceMemoryWriters`, which no structurer rule reads). Used as a REFUSAL: absent, a dead read
+  // at a literal address is dropped.
   deviceRegisters?: readonly [number, number];
   // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
   // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` axis, because the named
@@ -3729,82 +3729,52 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   /** THE REFUSAL for the read half of `unreadResult`. TWO questions, and the statement is spelled
-   *  only where BOTH answer yes. Wave 1 of this rule asked the first alone and the second was
-   *  falsified in review at every address the first admits.
+   *  only where BOTH answer yes; the second is not implied by the first.
    *
-   *   1. EVIDENCE — would a source plausibly have declared this access `volatile`? Nothing else in
-   *      the tree says so, so the answer has to come from DATA: the target's declared
-   *      device-register window (`capabilities.deviceRegisters`, threaded by `structureOptionsFor`
-   *      — the same datum that gates `/vol-store`, `/unreduce` and rank.ts's volatility tie-break),
-   *      or the project symbol map's own `volatile` on the named global. `volatile` is a
-   *      CORRECTNESS claim about an address, not a spelling preference, and asserting one about
-   *      ordinary RAM is a wrong answer rather than a wrong spelling.
-   *   2. REACHABILITY — will the spelling this access actually gets CARRY a qualifier, here or in
-   *      some candidate enumerated from this tree? The payoff of spelling a dead read is that a
-   *      qualifier can then land on it and the differ can referee the pair; where none can, the
-   *      statement is not inert but a permanent bare deref in the DEFAULT source, which is what
-   *      the playground pins and what a decomp author copies.
+   *   1. EVIDENCE — would a source plausibly have declared this access `volatile`? The answer has
+   *      to come from DATA: the target's declared device-register window
+   *      (`capabilities.deviceRegisters`) or the symbol map's own `volatile` on the named global.
+   *      `volatile` is a CORRECTNESS claim about an address, not a spelling preference, and
+   *      asserting one about ordinary RAM is a wrong answer rather than a wrong spelling.
+   *   2. REACHABILITY — will the spelling this access gets CARRY a qualifier, here or in some
+   *      candidate enumerated from this tree? The payoff of spelling a dead read is that a
+   *      qualifier can land on it and the differ can referee the pair; where none can, the
+   *      statement is a permanent bare deref in the DEFAULT source, which is what the playground
+   *      pins and what a decomp author copies. This question refuses far less than question 1:
+   *      `/volatile` qualifies an EWRAM or ROM address quite happily.
    *
-   *  THE SECOND IS NOT IMPLIED BY THE FIRST, which is the correction wave 2 measured. An earlier
-   *  revision of this comment justified refusing EWRAM and ROM by saying no qualifier could ever
-   *  reach them; measured, `/volatile` mints `volatile s32 *p0 = (s32 *)33554688;` for an EWRAM
-   *  address quite happily. Those addresses refuse on question 1, not question 2. The one place
-   *  the old sentence held is `void g(s32 *a0) { a0[1] = 5; *a0; }` — l3/volatileptr.ts admits a
-   *  LOCAL fed a rematerializable address and a parameter is neither, so that read is
-   *  unqualifiable AND unevidenced.
+   *  THE MAP ARM needs the read spelled through the global's own NAME, which is where the map's
+   *  qualifier lands — memAccess's two name-carrying arms for a global, the bare scalar
+   *  (`gStatus;`) and the declared struct MEMBER (`gState.ctl;`). A CAST spelling
+   *  (`((s32 *)&REG_DMA3SAD)[2]`) has thrown the qualifier away in the spelling itself, whatever
+   *  the declaration says. The member arm asks the CONTAINER's qualifier and not the member's own
+   *  (`SymbolStructField.volatile`), which looks backwards and is not: `memberQualsAllow` above
+   *  refuses to NAME a volatile member at all, so a `vu16` member is spelled `((s32 *)&gSym)[k]`
+   *  with nothing in the spelling for a lever to hold, while `volatile struct S gSym;` qualifies
+   *  every member and `gSym.ctl;` really is an observable read. Every other map spelling refuses —
+   *  `gPtr->member`, a bare-name array element, a multidimensional subscript — because
+   *  over-refusing costs a SPELLING and admitting wrongly costs an ANSWER, this file's standing
+   *  asymmetry.
    *
-   *  HOW EACH ARM ANSWERS QUESTION 2, since the two arms reach different spellings:
-   *
-   *   • THE MAP ARM requires the read to be spelled through the global's own NAME, because that
-   *     is where the map's declared qualifier lands. Exactly memAccess's two name-carrying arms
-   *     for a global: the bare scalar (`gStatus;` — off 0 of a `scalarGlobals` name) and the
-   *     declared struct MEMBER (`gState.ctl;` — exact offset and width). A CAST spelling
-   *     (`((s32 *)&REG_DMA3SAD)[2]`) has thrown the qualifier away in the spelling itself,
-   *     whatever the declaration says, and wave 1 admitted exactly that on the target row's own
-   *     map-fed default.
-   *
-   *     The member arm asks the CONTAINER's qualifier and NOT the member's own
-   *     (`SymbolStructField.volatile`, the `vu16 field;` MMIO idiom), which looks backwards and is
-   *     not: `memberQualsAllow` above REFUSES TO NAME a volatile member at all, deliberately and
-   *     with its own measurement, because the named spelling would reintroduce a qualifier the
-   *     cast form it replaces never carried. So a `vu16` member is spelled `((s32 *)&gSym)[k]` —
-   *     nothing in the spelling for a lever to hold — while `volatile struct S gSym;` qualifies
-   *     every member of it and `gSym.ctl;` really is an observable read. The conjunction with
-   *     `memberQualsAllow` is what keeps this arm from drifting off the spelling rule it depends
-   *     on. Every other map spelling refuses — `gPtr->member`, a bare-name array element,
-   *     a multidimensional subscript: conservative, because over-refusing costs a SPELLING and
-   *     admitting wrongly costs an ANSWER, which is this file's standing asymmetry.
-   *   • THE LITERAL ARM requires the base value to have a use OTHER than this read.
-   *     l3/volatileptr.ts qualifies a pointer LOCAL; l3/basecse.ts only mints that local for a
-   *     base something else also touches. A single-access read — `*(s32 *)0x04000200;`, the
-   *     `REG_IF`/`REG_VCOUNT` acknowledge idiom, and the shape a WRONG `returnsVoid` on a
-   *     register accessor produces — has no local to qualify and never will, however plainly its
-   *     address is a device register. "Some other use" is NECESSARY for that local, not
-   *     sufficient; the gate states the necessary half deliberately, on the same asymmetry.
+   *  THE LITERAL ARM needs the base value to have a use OTHER than this read: l3/volatileptr.ts
+   *  qualifies a pointer LOCAL, and l3/basecse.ts only mints that local for a base something else
+   *  also touches. A single-access read — `*(s32 *)0x04000200;`, the `REG_IF` acknowledge idiom,
+   *  and the shape a WRONG `returnsVoid` on a register accessor produces — has no local to qualify
+   *  and never will, however plainly its address is a device register. "Some other use" is
+   *  NECESSARY for that local, not sufficient; the gate states the necessary half.
    *
    *  ONLY `load` REACHES EITHER ARM. `aload` carries its index in `operands[1]` and has no `off`
    *  attr at all, so both address queries would answer for the BARE BASE — `globalCellOf` resolves
-   *  a base and discards the index by construction (ir/alias.ts), and `constAddressOf` sees the
-   *  literal with `off` defaulted to 0. An earlier revision of this comment claimed the address
-   *  question kept `aload` out; measured, it did not, and it minted
-   *  `volatile s32 *p0 = (s32 *)0x04000000; p0[a0];` — a qualified access at an address the
-   *  declared window does not cover, which is the very hazard question 1 exists to prevent. The
-   *  whitelist is by OPCODE so a read op added later refuses until someone answers both questions
-   *  for it.
+   *  a base and discards the index by construction (ir/alias.ts), `constAddressOf` sees the literal
+   *  with `off` defaulted to 0 — which admits `volatile s32 *p0 = (s32 *)0x04000000; p0[a0];`, a
+   *  qualified access at an address the declared window does not cover. The whitelist is by OPCODE
+   *  so a read op added later refuses until someone answers both questions for it.
    *
-   *  WHERE EACH ARM ACTUALLY FIRES, because they do not share a population. With a symbol map the
-   *  frontend spells a pool word as `gaddr`, so `constAddressOf` returns null and the LITERAL arm
-   *  is unreachable in the map-fed tree — on any GBA decomp that maps its MMIO registers, that arm
-   *  inhabits `/raw-globals` (which re-structures with NO map) and nothing else. The map arm is the
-   *  default-source one. That is why the target row still matches with the map arm ablated, and
-   *  why the map-fed default of a DMA function spells no read at all: its wait-read is cast-spelled
-   *  (see `BASECSE_GATES`' `repeated-const-offset`, whose base local this refusal hands back).
-   *
-   *  Measured on the benchmark checkouts with `returnsVoid` FORCED on every function (the
-   *  configuration that MAXIMISES firings): the gate refuses a ROM-table read in `MidiKeyToCgbFreq`
-   *  that reached this walk only because a wrong `returnsVoid` turned a return value into a dead
-   *  read — the exact defect `apps/benchmark/src/cases/authored-facts.ts` exists to correct — and
-   *  admits the genuine device wait-reads. */
+   *  THE ARMS DO NOT SHARE A POPULATION. With a symbol map the frontend spells a pool word as
+   *  `gaddr`, so `constAddressOf` returns null and the literal arm inhabits only `/raw-globals`,
+   *  which re-structures with NO map. The map arm is the default-source one, and a map-fed DMA
+   *  function spells no read at all — its wait-read is cast-spelled (see `BASECSE_GATES`'
+   *  `repeated-const-offset`, whose base local this refusal hands back). */
   const volatileQualifiable = (op: Op): boolean => {
     if (op.opcode !== 'load') {
       return false;
@@ -3852,40 +3822,32 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  no statement at all (measured on agbcc, IDO and mwcc). What it does is put the access where a
    *  qualifier can reach it — and `volatileQualifiable` is the condition under which one can.
    *
-   *  WHICH LEVER REACHES IT, precisely, because "a qualifier" is two levers and only one of them
-   *  does: l3/volatileptr.ts's `/volatile` qualifies the pointer LOCAL the read is spelled
-   *  through, and that is the arm every match here rides. l3/volstore.ts's `/vol-store` mints
-   *  `volatile` at an inline cast STORE and never visits an `exprstmt`, so on a tree with no base
-   *  local it emits the cell qualified for its writes and plain for this read — a candidate that
-   *  provably cannot reproduce the surviving `ldr`. That is a wasted candidate rather than a wrong
-   *  one (the differ refuses it), and teaching that lever the read is a widening with its own
-   *  window census to pay for: see its header for the measurement such a change owes.
+   *  WHICH LEVER REACHES IT, because "a qualifier" is two levers and only one of them does:
+   *  l3/volatileptr.ts's `/volatile` qualifies the pointer LOCAL the read is spelled through, and
+   *  that is the arm every match here rides. l3/volstore.ts's `/vol-store` mints `volatile` at an
+   *  inline cast STORE and never visits an `exprstmt`, so on a tree with no base local it emits the
+   *  cell qualified for its writes and plain for this read — a candidate that cannot reproduce the
+   *  surviving `ldr`. Wasted rather than wrong (the differ refuses it); teaching that lever the
+   *  read is a widening with its own window census to pay for, priced in its header.
    *
    *  TWO THINGS DELIBERATELY NOT DONE HERE, priced rather than left for a reader to rediscover.
    *
    *  1. THE LITERAL ARM IS A BACKWARDS DEFAULT AND ITS PREIMAGE IS NOT EMPTY. docs/level-tower.md
    *     admits a default that reads the map backwards only when the backwards mapping is ITSELF a
-   *     function. "A surviving dead read implies the source said `volatile`" is not quite one: the
-   *     other preimage is a function whose `returnsVoid` fact is WRONG, so its return value
-   *     arrived here as a dead read. The second-use clause above removes the common shape of that
-   *     (a bare register accessor), leaving a function that both STORES to a device register and
-   *     reads one back — a DMA routine, not a getter — so the preimage is narrow but not proven
-   *     empty. The MAP arm has no such problem: `gStatus;` under `extern volatile u32 gStatus;`
-   *     compiles differently from its own absence, so the differ can referee it and the mapping
-   *     from map datum to spelling really is a function.
-   *     The clean fix is to move the LITERAL arm off the default and spell the read only in
-   *     candidates that also qualify it, paired the way `/livebase/volatile` already pairs. It is
-   *     declined here because it is not a comment change: the default would stop carrying the
-   *     statement, every device row's fan shape moves, `/volatile` has to compose with the new
-   *     token, and the target row's winner (`unsigned/livebase/volatile/raw-globals`) is on the
-   *     other side of that composition. That wants its own round and its own zero-flip gate over
-   *     BOTH tiers, not a remediation commit.
+   *     function, and "a surviving dead read implies the source said `volatile`" is not quite one:
+   *     the other preimage is a function whose `returnsVoid` fact is WRONG, so its return value
+   *     arrived here as a dead read. The second-use clause removes the common shape of that (a bare
+   *     register accessor), leaving a function that both STORES to a device register and reads one
+   *     back — narrow, but not proven empty. The MAP arm has no such problem: `gStatus;` under
+   *     `extern volatile u32 gStatus;` compiles differently from its own absence, so the differ can
+   *     referee it. The clean fix — spell the read only in candidates that also qualify it, paired
+   *     the way `/livebase/volatile` already pairs — moves every device row's fan shape and wants
+   *     its own round and zero-flip gate over BOTH tiers.
    *  2. THE REFUSAL IS SILENT. When this returns false for a `load`, the machine performed a read
    *     that no statement stands for and nothing records the decision — against this project's own
-   *     "instrument the refusal, never read it" rule. `structure()` has no diagnostic sink to
-   *     write into, so the fix is not free. What exists instead is the ADMISSION side's zero
-   *     point, `synthetic:dmareadback`, which fails loudly if the rule stops firing; counting the
-   *     refusals still means patching this function. */
+   *     "instrument the refusal" rule; `structure()` has no diagnostic sink to write into. What
+   *     exists instead is the ADMISSION side's zero point, `synthetic:dmareadback`, which fails
+   *     loudly if the rule stops firing. */
   const unreadResult = (op: Op): boolean =>
     SPELLED_WHEN_DEAD_OPS.has(op.opcode) &&
     op.results.length > 0 &&

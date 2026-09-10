@@ -409,16 +409,13 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
     // comment records was bought with a real match. It wants its own round and its own zero-flip
     // gate.
     //
-    // WHAT THE DMA FAMILY'S DEFAULT ACTUALLY DOES, since an earlier version of this note said the
-    // structurer's dead-read spelling (structure.ts `unreadResult`) had made the demotion that
-    // family's default shape: it has not, and the reason is worth keeping beside the gate. That
-    // spelling requires a qualifier to reach the access, a CAST spelling
+    // THE STRUCTURER'S DEAD-READ SPELLING (structure.ts `unreadResult`) INTERACTS, but not on the
+    // map-fed default: that spelling requires a qualifier to reach the access, a CAST spelling
     // (`((s32 *)&REG_DMA3SAD)[2]`) carries none, and a map-fed DMA tree spells it exactly that
     // way — so no statement is emitted there, offset 8 is touched once, and the base local
-    // survives into the default. The interaction is real but its inhabitant is the `/raw-globals`
-    // subtree, where the read IS spelled and this gate DOES demote; that subtree's own winner is
-    // a `/livebase` candidate, so nothing on the ranked path loses by it. Stated because the
-    // demotion is invisible from either file alone.
+    // survives. The inhabitant is the `/raw-globals` subtree, where the read IS spelled and this
+    // gate DOES demote; that subtree's own winner is a `/livebase` candidate, so nothing on the
+    // ranked path loses by it. Stated because the demotion is invisible from either file alone.
     id: 'repeated-const-offset',
     why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
     sound: false,

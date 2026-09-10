@@ -16,19 +16,16 @@
 //     or a symbol map that declares the named global `volatile`. Ordinary RAM, a ROM table and a
 //     caller's pointer all refuse here;
 //   • NO SPELLING FOR A QUALIFIER TO LAND ON, which is a SEPARATE question and not implied by the
-//     one above — an earlier version of this file said EWRAM and ROM refuse because "no axis could
-//     improve them", and that is measurably false (`/volatile` mints `volatile s32 *p0 =
-//     (s32 *)33554688;` for an EWRAM address quite happily; they refuse on the evidence question).
-//     Three populations refuse here and each has its own test: a device read that is the base's
-//     ONLY access, so basecse mints no local for `/volatile` to qualify; a map-declared register
-//     reached through a CAST, which has dropped the qualifier in the spelling itself; and a
-//     RUNTIME-INDEXED read, whose address neither query can answer for.
+//     one above — `/volatile` mints `volatile s32 *p0 = (s32 *)33554688;` for an EWRAM address
+//     quite happily, so a reachability argument would admit ordinary RAM and only the evidence
+//     question refuses it. Three populations refuse on THIS question and each has its own test: a
+//     device read that is the base's ONLY access, so basecse mints no local for `/volatile` to
+//     qualify; a map-declared register reached through a CAST, which has dropped the qualifier in
+//     the spelling itself; and a RUNTIME-INDEXED read, whose address neither query can answer for.
 //
-// SCOPE OF THE CENSUS, quoted with the number: over the 22 kleod BENCHMARK ROWS that declare
-// `returnsVoid`, 14 functions reach the suppressed `ret`, 3 carry a value nothing else consumes
-// (`VBlankDMA_LevelNoop` a param, `StrCpy` an add, `DmaSpriteToObjVram` a load) and 1 of those is
-// a read. That is the row scope, NOT the project scope — the same shape occurs on project
-// functions no benchmark row covers.
+// The rule's population is narrow: of the 22 kleod benchmark rows that declare `returnsVoid`,
+// `DmaSpriteToObjVram` is the only one whose suppressed value is a memory read. The synthetic row
+// `dmareadback` is the zero point that fails loudly if the rule stops firing.
 import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
@@ -73,8 +70,8 @@ test('a void function’s trailing read at a DEVICE register is spelled as a sta
 test('an ARITHMETIC leftover in r0 really is phantom, and stays dropped', () => {
   // Same shape with the trailing load replaced by an add: nothing observed it, nothing ran that a
   // statement would stand for, and spelling it would be noise in every void function that ends in
-  // a computation. Asserted as the WHOLE body — an earlier version of this test looked for a `+`
-  // and passed vacuously against an ablation whose extra statement constant-folded to `3;`.
+  // a computation. Asserted as the WHOLE body — matching on a `+` passes vacuously against an
+  // ablation whose extra statement constant-folds to `3;`.
   const src = lift(
     'f:\n' +
       '\tldr\tr3, _pool\t@ =0x040000D4\n' +
@@ -118,7 +115,7 @@ test('ORDINARY RAM refuses on EVIDENCE — a lever CAN qualify it, which is why 
   // …and the reason stated is the one that HOLDS. Widen the same EWRAM address to the three-store
   // shape and `/volatile` mints `volatile s32 * p0;` over it — at EWRAM, exactly as at a device
   // register. So a REACHABILITY argument would admit ordinary RAM; only the EVIDENCE question
-  // refuses it, and the statement stays dropped here for that reason and not the other one.
+  // refuses it.
   const wide =
     'f:\n\tldr\tr3, _pool\t@ =0x02000100\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x0]\n' +
     '\tstr\tr0, [r3, #0x4]\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tbx\tlr\n' +
@@ -143,7 +140,7 @@ test('a SINGLE-ACCESS device read refuses: no second use, so basecse mints no lo
 
 test('a RUNTIME-INDEXED read refuses — neither address query can answer for the cell it touches', () => {
   // `aload` keeps its index in operands[1] and carries no `off`, so both queries see the bare base.
-  // Admitting on that alone once minted `volatile s32 *p0 = (s32 *)67108864; p0[a0];` — a qualified
+  // Admitting on that alone mints `volatile s32 *p0 = (s32 *)67108864; p0[a0];` — a qualified
   // access at an unbounded address, which is the hazard the window exists to prevent.
   const indexed =
     'f:\n\tldr\tr3, _pool\t@ =0x04000000\n\tmovs\tr2, #0x1\n\tstr\tr2, [r3, #0x0]\n' +
@@ -192,8 +189,8 @@ test('a map-declared VOLATILE register reached through a CAST refuses — the sp
   // wait read, but the access is spelled `((s32 *)&REG_DMA3SAD)[2]` — a cast to a PLAIN `s32 *`,
   // which is not a volatile lvalue whatever the declaration says. The declaration's qualifier only
   // reaches a NAME-spelled access, so this arm refuses and hands `BASECSE_GATES` back the base
-  // local its `repeated-const-offset` rule had demoted: the default regains `s32 *p0 = …`, which is
-  // the reference's own shape. The row still MATCHes, through `/raw-globals` and the literal arm.
+  // local its `repeated-const-offset` rule demotes. The row matches through `/raw-globals`, where
+  // the literal arm spells the read.
   const asm =
     'f:\n\tldr\tr3, _pool\t@ =0x040000D4\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x0]\n' +
     '\tstr\tr0, [r3, #0x4]\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tbx\tlr\n' +
