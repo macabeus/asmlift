@@ -7384,6 +7384,41 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { nestacc1: { returnsVoid: true }, sink: { params: 3, returnsVoid: true } },
     symbols: PROBE_NEST_MAP,
   },
+  // `nestcnt` — A CORRECTNESS PIN, not a gap row: the nest where `enclosingCarrierName` and
+  // `latchInnerSub` (structure/structure.ts) have to hold TOGETHER. The inner count-down loop
+  // leaves the accumulator in the outer loop's variable, and the outer latch reads it
+  // (`gO[i] = n + a`). Before both rules, BOTH candidates in its fan re-derived that value at the
+  // latch — the last `a += n` counted twice — and the winner published 26/34 while computing
+  // another program (3000 of 3000 native inputs wrong; the same source as a standalone probe,
+  // agbcc, on this branch's merge-base).
+  //
+  // WHY A ROW AND NOT ONLY A UNIT TEST. The failure this family produces is a WRONG candidate
+  // scoring BETTER, which a byte score reads as an improvement — so the wave-1 review declined to
+  // author one. A MATCH is the exception: it cannot become a wrong spelling silently, because any
+  // wrong spelling scores worse and `bench regression` reports the lost match. Measured on the
+  // same source, ablating one rule at a time: with `latchInnerSub` emptied it is 23/32 and both
+  // candidates are wrong; with the exemption for the name `enclosingCarrierName` shares removed,
+  // the latch can read the value under neither name and the function DECLINES.
+  //
+  // The unit fixtures for the two rules are `latch-inner-sub.test.ts` and `nested-carrier.test.ts`;
+  // this row is what makes a regression visible in the artifact as well.
+  {
+    sym: 'nestcnt',
+    src:
+      'extern s32 gT[5][8];\n' +
+      'extern s32 gO[5];\n' +
+      's32 nestcnt(void){\n' +
+      '  s32 a = 0, i, n;\n' +
+      '  for (i = 0; i < 5; i++) {\n' +
+      '    n = (gT[i][0] & 7) + 1;\n' +
+      '    do { a += n; n--; } while (n > 0);\n' +
+      '    gO[i] = n + a;\n' +
+      '  }\n' +
+      '  return a;\n' +
+      '}',
+    features: ['global', 'array', 'mask', 'value-home'],
+    toolchains: ['agbcc'],
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
