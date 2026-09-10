@@ -11,12 +11,18 @@
 //
 //   • an arithmetic leftover in r0 really is phantom — nothing ran that a statement stands for;
 //   • a read something else consumes is already spelled at that consumer;
-//   • AN ADDRESS NO QUALIFIER COULD EVER REACH. The payoff is that a lever can qualify the
-//     access, so where none can the statement is not inert — it is a permanent bare deref in the
-//     DEFAULT source. `void g(s32 *a0) { a0[1] = 5; *a0; }` reads as a null-deref bug and no axis
-//     improves it. The two admissions are DATA: the target's declared device-register window
-//     (`capabilities.deviceRegisters`), and a symbol map that declares the named global
-//     `volatile`. Ordinary RAM, a ROM table and a caller's pointer all refuse.
+//   • NO EVIDENCE THE ACCESS WAS `volatile`. That claim is about correctness, not spelling, so it
+//     comes from DATA: the target's declared device-register window (`capabilities.deviceRegisters`)
+//     or a symbol map that declares the named global `volatile`. Ordinary RAM, a ROM table and a
+//     caller's pointer all refuse here;
+//   • NO SPELLING FOR A QUALIFIER TO LAND ON, which is a SEPARATE question and not implied by the
+//     one above — an earlier version of this file said EWRAM and ROM refuse because "no axis could
+//     improve them", and that is measurably false (`/volatile` mints `volatile s32 *p0 =
+//     (s32 *)33554688;` for an EWRAM address quite happily; they refuse on the evidence question).
+//     Three populations refuse here and each has its own test: a device read that is the base's
+//     ONLY access, so basecse mints no local for `/volatile` to qualify; a map-declared register
+//     reached through a CAST, which has dropped the qualifier in the spelling itself; and a
+//     RUNTIME-INDEXED read, whose address neither query can answer for.
 //
 // SCOPE OF THE CENSUS, quoted with the number: over the 22 kleod BENCHMARK ROWS that declare
 // `returnsVoid`, 14 functions reach the suppressed `ret`, 3 carry a value nothing else consumes
@@ -102,13 +108,51 @@ test('with a return VALUE to consume it, the read stays in the return', () => {
   expect(src).not.toMatch(/^\s*\*\(s32 \*\)\d+;$/m);
 });
 
-test('ORDINARY RAM refuses: no lever can qualify it, so the statement would be permanent noise', () => {
+test('ORDINARY RAM refuses on EVIDENCE — a lever CAN qualify it, which is why that is not the test', () => {
   // 0x02000100 is EWRAM — outside `capabilities.deviceRegisters` [0x04000000, 0x04000400).
   expect(body(lift(deadRead('0x02000100'), true))).toEqual(['*(s32 *)33554688 = 1;', 'return;']);
   // 0x08117BCC is ROM. This is the population the refusal actually protects: a WRONG `returnsVoid`
   // in a dataset turns a function's RETURN VALUE into a dead read, and without the gate the
   // truncated body is replaced by confident-looking C that computes a table index and discards it.
   expect(body(lift(deadRead('0x08117BCC'), true))).toEqual(['*(s32 *)135363532 = 1;', 'return;']);
+  // …and the reason stated is the one that HOLDS. Widen the same EWRAM address to the three-store
+  // shape and `/volatile` mints `volatile s32 * p0;` over it — at EWRAM, exactly as at a device
+  // register. So a REACHABILITY argument would admit ordinary RAM; only the EVIDENCE question
+  // refuses it, and the statement stays dropped here for that reason and not the other one.
+  const wide =
+    'f:\n\tldr\tr3, _pool\t@ =0x02000100\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x0]\n' +
+    '\tstr\tr0, [r3, #0x4]\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tbx\tlr\n' +
+    pool('0x02000100');
+  const vol = enumerateCandidates('f', wide, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).filter((c) =>
+    /volatile s32 \* p0;/.test(c.source),
+  );
+  expect(vol.length).toBeGreaterThan(0);
+  expect(body(lift(wide, true)).some((l) => /^p0\[2\];$/.test(l))).toBe(false);
+});
+
+test('a SINGLE-ACCESS device read refuses: no second use, so basecse mints no local to qualify', () => {
+  // The `REG_IF`/`REG_VCOUNT` acknowledge idiom, and also what a WRONG `returnsVoid` on a register
+  // accessor (`u16 GetKeys(void) { return REG_KEYINPUT; }`) produces. The address passes the
+  // evidence question outright — 0x04000200 is REG_IE, inside the window — so this test pins the
+  // SECOND question on its own. With one access there is no pointer local anywhere in the fan.
+  const single = 'f:\n\tldr\tr3, _pool\t@ =0x04000200\n\tldr\tr0, [r3, #0x0]\n\tbx\tlr\n' + pool('0x04000200');
+  expect(body(lift(single, true))).toEqual(['return;']);
+  const cands = enumerateCandidates('f', single, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } });
+  expect(cands.every((c) => !/volatile/.test(c.source))).toBe(true);
+});
+
+test('a RUNTIME-INDEXED read refuses — neither address query can answer for the cell it touches', () => {
+  // `aload` keeps its index in operands[1] and carries no `off`, so both queries see the bare base.
+  // Admitting on that alone once minted `volatile s32 *p0 = (s32 *)67108864; p0[a0];` — a qualified
+  // access at an unbounded address, which is the hazard the window exists to prevent.
+  const indexed =
+    'f:\n\tldr\tr3, _pool\t@ =0x04000000\n\tmovs\tr2, #0x1\n\tstr\tr2, [r3, #0x0]\n' +
+    '\tlsls\tr1, r0, #0x2\n\tldr\tr0, [r3, r1]\n\tbx\tlr\n' +
+    pool('0x04000000');
+  const src = decompile('f', indexed, ARMV4T_AGBCC, {
+    prototypes: { f: { params: ['s32'], returnsVoid: true } },
+  }).source;
+  expect(body(src)).toEqual(['*(s32 *)67108864 = 1;', 'return;']);
 });
 
 test('a CALLER’S POINTER refuses — volatileptr admits a local, never a parameter', () => {
@@ -141,6 +185,72 @@ test('a map-declared VOLATILE global admits the read even outside the device win
 
 test('the SAME global without the map’s `volatile` refuses — the map owns the qualifier', () => {
   expect(lift(NAMED, true, new Map([[0x03000100, [gInfo(false)]]]))).not.toMatch(/^\s*gStatus;$/m);
+});
+
+test('a map-declared VOLATILE register reached through a CAST refuses — the spelling dropped it', () => {
+  // The target row's own map-fed default: REG_DMA3SAD declared `volatile`, three stores and the
+  // wait read, but the access is spelled `((s32 *)&REG_DMA3SAD)[2]` — a cast to a PLAIN `s32 *`,
+  // which is not a volatile lvalue whatever the declaration says. The declaration's qualifier only
+  // reaches a NAME-spelled access, so this arm refuses and hands `BASECSE_GATES` back the base
+  // local its `repeated-const-offset` rule had demoted: the default regains `s32 *p0 = …`, which is
+  // the reference's own shape. The row still MATCHes, through `/raw-globals` and the literal arm.
+  const asm =
+    'f:\n\tldr\tr3, _pool\t@ =0x040000D4\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x0]\n' +
+    '\tstr\tr0, [r3, #0x4]\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tbx\tlr\n' +
+    pool('0x040000D4');
+  const reg: SymbolInfo = {
+    name: 'REG_DMA3SAD',
+    kind: 'data',
+    shape: 'scalar',
+    signed: false,
+    size: 4,
+    declared: true,
+    volatile: true,
+  };
+  expect(body(lift(asm, true, new Map([[0x040000d4, [reg]]])))).toEqual([
+    's32 * p0;',
+    'p0 = (s32 *)&REG_DMA3SAD;',
+    '*p0 = 1;',
+    'p0[1] = 1;',
+    'p0[2] = 1;',
+    'return;',
+  ]);
+});
+
+test('a volatile CONTAINER admits its named member; a `vu16` MEMBER refuses, because it is never named', () => {
+  // Both halves are one rule. `memberQualsAllow` refuses to spell a volatile member by name at all
+  // (the name would reintroduce a qualifier the cast form it replaces never carried), so a `vu16`
+  // member is reached as `((s32 *)&gState)[2]` — no qualifier in the spelling, nothing to hold.
+  // `volatile struct State gState;` qualifies every member, and `gState.ctl;` really is observable.
+  const asm =
+    'f:\n\tldr\tr3, _pool\t@ =0x03000100\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x8]\n' +
+    '\tldr\tr0, [r3, #0x8]\n\tbx\tlr\n' +
+    pool('0x03000100');
+  const st = (memberVol: boolean, declVol: boolean): SymbolMap =>
+    new Map([
+      [
+        0x03000100,
+        [
+          {
+            name: 'gState',
+            kind: 'data',
+            shape: 'struct',
+            size: 12,
+            declared: true,
+            structName: 'State',
+            ...(declVol ? { volatile: true } : {}),
+            layout: [
+              { name: 'a', offset: 0, size: 4, signed: false },
+              { name: 'b', offset: 4, size: 4, signed: false },
+              { name: 'ctl', offset: 8, size: 4, signed: false, ...(memberVol ? { volatile: true } : {}) },
+            ],
+          } as SymbolInfo,
+        ],
+      ],
+    ]);
+  expect(body(lift(asm, true, st(false, true)))).toEqual(['gState.ctl = 1;', 'gState.ctl;', 'return;']);
+  expect(body(lift(asm, true, st(true, false)))).toEqual(['((s32 *)&gState)[2] = 1;', 'return;']);
+  expect(body(lift(asm, true, st(false, false)))).toEqual(['gState.ctl = 1;', 'return;']);
 });
 
 // ── the payoff a stranger needs to see ───────────────────────────────────────────────────────

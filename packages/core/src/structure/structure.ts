@@ -3728,30 +3728,77 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
   };
 
-  /** THE REFUSAL for the read half of `unreadResult`: can a `volatile` qualifier ever reach this
-   *  access? The whole payoff of spelling a dead read is that l3/volatileptr.ts can then qualify
-   *  it and the differ can referee the pair, so where no axis in the tree could ever qualify it the
-   *  statement is not inert — it is a permanent bare deref in the DEFAULT source, which is what the
-   *  playground pins and what a decomp author copies. `void g(s32 *a0) { a0[1] = 5; *a0; }` reads
-   *  as a null-deref bug and no lever can ever improve it: volatileptr admits a LOCAL fed a
-   *  rematerializable address, and a parameter is neither.
+  /** THE REFUSAL for the read half of `unreadResult`. TWO questions, and the statement is spelled
+   *  only where BOTH answer yes. Wave 1 of this rule asked the first alone and the second was
+   *  falsified in review at every address the first admits.
    *
-   *  Two ways the answer is yes, and both are DATA rather than a rule written here:
+   *   1. EVIDENCE — would a source plausibly have declared this access `volatile`? Nothing else in
+   *      the tree says so, so the answer has to come from DATA: the target's declared
+   *      device-register window (`capabilities.deviceRegisters`, threaded by `structureOptionsFor`
+   *      — the same datum that gates `/vol-store`, `/unreduce` and rank.ts's volatility tie-break),
+   *      or the project symbol map's own `volatile` on the named global. `volatile` is a
+   *      CORRECTNESS claim about an address, not a spelling preference, and asserting one about
+   *      ordinary RAM is a wrong answer rather than a wrong spelling.
+   *   2. REACHABILITY — will the spelling this access actually gets CARRY a qualifier, here or in
+   *      some candidate enumerated from this tree? The payoff of spelling a dead read is that a
+   *      qualifier can then land on it and the differ can referee the pair; where none can, the
+   *      statement is not inert but a permanent bare deref in the DEFAULT source, which is what
+   *      the playground pins and what a decomp author copies.
    *
-   *   • a literal address inside the target's declared device-register window
-   *     (`capabilities.deviceRegisters`, threaded by `structureOptionsFor`) — the same datum, and
-   *     the same question, that gates `/vol-store`, `/unreduce` and rank.ts's volatility
-   *     tie-break: "would a source have spelled this address `volatile`". It may be approximate
-   *     because it decides a SPELLING;
-   *   • a named global the project's symbol map declares `volatile` — the map's own declaration,
-   *     which is why l3/volatileptr.ts vetoes `&gSym` rather than guessing at it. This is the arm
-   *     the map-fed DEFAULT source takes; the `/raw-globals` axis re-structures with no map at all
-   *     and takes the literal arm above, which is why the target row still matches with this arm
-   *     ablated.
+   *  THE SECOND IS NOT IMPLIED BY THE FIRST, which is the correction wave 2 measured. An earlier
+   *  revision of this comment justified refusing EWRAM and ROM by saying no qualifier could ever
+   *  reach them; measured, `/volatile` mints `volatile s32 *p0 = (s32 *)33554688;` for an EWRAM
+   *  address quite happily. Those addresses refuse on question 1, not question 2. The one place
+   *  the old sentence held is `void g(s32 *a0) { a0[1] = 5; *a0; }` — l3/volatileptr.ts admits a
+   *  LOCAL fed a rematerializable address and a parameter is neither, so that read is
+   *  unqualifiable AND unevidenced.
    *
-   *  Everything else refuses, INCLUDING an address this pass cannot resolve: the question is about
-   *  the board, so "unknown" is not "ordinary memory" but it is not a licence either. In practice
-   *  that is what keeps `aload` out — its address carries a runtime index.
+   *  HOW EACH ARM ANSWERS QUESTION 2, since the two arms reach different spellings:
+   *
+   *   • THE MAP ARM requires the read to be spelled through the global's own NAME, because that
+   *     is where the map's declared qualifier lands. Exactly memAccess's two name-carrying arms
+   *     for a global: the bare scalar (`gStatus;` — off 0 of a `scalarGlobals` name) and the
+   *     declared struct MEMBER (`gState.ctl;` — exact offset and width). A CAST spelling
+   *     (`((s32 *)&REG_DMA3SAD)[2]`) has thrown the qualifier away in the spelling itself,
+   *     whatever the declaration says, and wave 1 admitted exactly that on the target row's own
+   *     map-fed default.
+   *
+   *     The member arm asks the CONTAINER's qualifier and NOT the member's own
+   *     (`SymbolStructField.volatile`, the `vu16 field;` MMIO idiom), which looks backwards and is
+   *     not: `memberQualsAllow` above REFUSES TO NAME a volatile member at all, deliberately and
+   *     with its own measurement, because the named spelling would reintroduce a qualifier the
+   *     cast form it replaces never carried. So a `vu16` member is spelled `((s32 *)&gSym)[k]` —
+   *     nothing in the spelling for a lever to hold — while `volatile struct S gSym;` qualifies
+   *     every member of it and `gSym.ctl;` really is an observable read. The conjunction with
+   *     `memberQualsAllow` is what keeps this arm from drifting off the spelling rule it depends
+   *     on. Every other map spelling refuses — `gPtr->member`, a bare-name array element,
+   *     a multidimensional subscript: conservative, because over-refusing costs a SPELLING and
+   *     admitting wrongly costs an ANSWER, which is this file's standing asymmetry.
+   *   • THE LITERAL ARM requires the base value to have a use OTHER than this read.
+   *     l3/volatileptr.ts qualifies a pointer LOCAL; l3/basecse.ts only mints that local for a
+   *     base something else also touches. A single-access read — `*(s32 *)0x04000200;`, the
+   *     `REG_IF`/`REG_VCOUNT` acknowledge idiom, and the shape a WRONG `returnsVoid` on a
+   *     register accessor produces — has no local to qualify and never will, however plainly its
+   *     address is a device register. "Some other use" is NECESSARY for that local, not
+   *     sufficient; the gate states the necessary half deliberately, on the same asymmetry.
+   *
+   *  ONLY `load` REACHES EITHER ARM. `aload` carries its index in `operands[1]` and has no `off`
+   *  attr at all, so both address queries would answer for the BARE BASE — `globalCellOf` resolves
+   *  a base and discards the index by construction (ir/alias.ts), and `constAddressOf` sees the
+   *  literal with `off` defaulted to 0. An earlier revision of this comment claimed the address
+   *  question kept `aload` out; measured, it did not, and it minted
+   *  `volatile s32 *p0 = (s32 *)0x04000000; p0[a0];` — a qualified access at an address the
+   *  declared window does not cover, which is the very hazard question 1 exists to prevent. The
+   *  whitelist is by OPCODE so a read op added later refuses until someone answers both questions
+   *  for it.
+   *
+   *  WHERE EACH ARM ACTUALLY FIRES, because they do not share a population. With a symbol map the
+   *  frontend spells a pool word as `gaddr`, so `constAddressOf` returns null and the LITERAL arm
+   *  is unreachable in the map-fed tree — on any GBA decomp that maps its MMIO registers, that arm
+   *  inhabits `/raw-globals` (which re-structures with NO map) and nothing else. The map arm is the
+   *  default-source one. That is why the target row still matches with the map arm ablated, and
+   *  why the map-fed default of a DMA function spells no read at all: its wait-read is cast-spelled
+   *  (see `BASECSE_GATES`' `repeated-const-offset`, whose base local this refusal hands back).
    *
    *  Measured on the benchmark checkouts with `returnsVoid` FORCED on every function (the
    *  configuration that MAXIMISES firings): the gate refuses a ROM-table read in `MidiKeyToCgbFreq`
@@ -3759,17 +3806,36 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  read — the exact defect `apps/benchmark/src/cases/authored-facts.ts` exists to correct — and
    *  admits the genuine device wait-reads. */
   const volatileQualifiable = (op: Op): boolean => {
+    if (op.opcode !== 'load') {
+      return false;
+    }
     const off = typeof op.attrs.off === 'number' ? op.attrs.off : 0;
+    const width = op.attrs.width as number;
     const cell = globalCellOf(defs, op.operands[0], off);
     if (cell) {
-      return symbols?.get(cell.name)?.volatile === true;
+      const si = symbols?.get(cell.name);
+      if (si === undefined) {
+        return false;
+      }
+      if (si.shape === 'struct') {
+        // the SAME find memAccess's struct arm makes, so the two cannot disagree about which
+        // accesses reach the `gSym.field` spelling this arm's qualifier rides on
+        const fld = symCtx
+          ?.fieldsOf(cell.name)
+          ?.find((f) => f.offset === cell.byte && f.size === width && !isArrayField(f) && !isBitfieldField(f));
+        return fld !== undefined && memberQualsAllow(fld, si.const, false) && si.volatile === true;
+      }
+      return cell.byte === 0 && scalarGlobals.has(cell.name) && si.volatile === true;
     }
     const window = opts.deviceRegisters;
     if (!window) {
       return false;
     }
     const addr = constAddressOf(defs, op.operands[0], off);
-    return addr !== null && addr >= window[0] && addr < window[1];
+    if (addr === null || addr < window[0] || addr >= window[1]) {
+      return false;
+    }
+    return (useSitesOf.get(op.operands[0]) ?? []).some((s) => s.op !== op);
   };
 
   /** Ops the `sideEffects` walk must SPELL even though nothing consumes their result — the

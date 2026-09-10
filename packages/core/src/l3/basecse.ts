@@ -397,21 +397,28 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
     rejects: (c) => c.inLoop,
   },
   {
-    // A KNOWN COUNTEREXAMPLE, recorded here rather than fixed, because both available fixes are
-    // worse than the fact. `LIVEBASE_GATES` already names it — an MMIO wait or poll stores and
-    // re-reads ONE fixed offset through ONE register the whole time — and the structurer's
-    // dead-read spelling (structure.ts `unreadResult`) makes it the DEFAULT shape of the DMA
-    // family: the bare `p[2];` is a second touch of offset 8, so this gate rejects a base the
-    // target demonstrably held in a register. Measured on `kleod:DmaSpriteToObjVram:agbcc`, whose
-    // map-fed default lost `s32 *p0 = (s32 *)&REG_DMA3SAD;` when that statement appeared; the row
-    // still MATCHes, carried by `/livebase`, which is this table minus the placement gates.
+    // A KNOWN COUNTEREXAMPLE, recorded here rather than fixed. `LIVEBASE_GATES` already names it —
+    // an MMIO wait or poll stores and re-reads ONE fixed offset through ONE register the whole
+    // time — so this gate rejects a base the target demonstrably held in a register, and the row
+    // it costs is carried by `/livebase`, which is this table minus the placement gates.
     //
-    // NOT FIXED BY EXCLUDING THE VALUELESS READ FROM THE CENSUS: that hides a real access to make
+    // NOT FIXED BY EXCLUDING A VALUELESS READ FROM THE CENSUS: that hides a real access to make
     // the gate right for the wrong reason — the premise is falsified by the function's assembly,
     // not by how the access is spelled. NOT FIXED BY EXEMPTING DEVICE-REGISTER BASES EITHER: that
     // is the sound rule, and its blast radius is every MMIO row in the corpus against a gate this
     // comment records was bought with a real match. It wants its own round and its own zero-flip
     // gate.
+    //
+    // WHAT THE DMA FAMILY'S DEFAULT ACTUALLY DOES, since an earlier version of this note said the
+    // structurer's dead-read spelling (structure.ts `unreadResult`) had made the demotion that
+    // family's default shape: it has not, and the reason is worth keeping beside the gate. That
+    // spelling requires a qualifier to reach the access, a CAST spelling
+    // (`((s32 *)&REG_DMA3SAD)[2]`) carries none, and a map-fed DMA tree spells it exactly that
+    // way — so no statement is emitted there, offset 8 is touched once, and the base local
+    // survives into the default. The interaction is real but its inhabitant is the `/raw-globals`
+    // subtree, where the read IS spelled and this gate DOES demote; that subtree's own winner is
+    // a `/livebase` candidate, so nothing on the ranked path loses by it. Stated because the
+    // demotion is invisible from either file alone.
     id: 'repeated-const-offset',
     why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
     sound: false,

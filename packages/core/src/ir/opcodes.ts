@@ -307,8 +307,21 @@ export const ORDER_SENSITIVE_OPS: ReadonlySet<string> = new Set(
  *
  *  Consumer: structure.ts's `sideEffects` walk. Derived rather than re-listed for the reason
  *  `EFFECTFUL_OPS` gives above — three hand-written copies of that membership are how the models
- *  drifted apart before, and this walk used to carry a fourth. */
-export const SPELLED_WHEN_DEAD_OPS: ReadonlySet<string> = ORDER_SENSITIVE_OPS;
+ *  drifted apart before, and this walk used to carry a fourth.
+ *
+ *  DERIVED FROM THE REGISTRY, not aliased to `ORDER_SENSITIVE_OPS`, even though the two are
+ *  extensionally identical today and `HOIST_UNSAFE_OPS` above does alias `EFFECTFUL_OPS`. An alias
+ *  makes two DIFFERENT questions incapable of ever differing, so the day one of them acquires an
+ *  opcode the other should not have, the edit lands on both silently — which is the drift this
+ *  file's whole argument is against, one level up from the hand-written copies. The identity is
+ *  pinned by a test instead (test/opcodes.test.ts), where a future divergence surfaces as a
+ *  decision to make rather than a coupling nobody sees. */
+export const SPELLED_WHEN_DEAD_OPS: ReadonlySet<string> = new Set(
+  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
+    const sig = OPCODES[k] as OpSig;
+    return sig.effects || sig.reads;
+  }),
+);
 
 /** Ops that may not be RE-EVALUATED at another program point — order-sensitive, or trapping. The
  *  trap half is what separates this from `ORDER_SENSITIVE_OPS`: it only matters when the new point
