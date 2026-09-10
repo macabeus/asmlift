@@ -360,11 +360,23 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     (`af:adds:ido7.1` and the `divv`/`gcd`/`modv` rows).
 //   - ^g holds a side effect — its ops move into ^h, which runs UNCONDITIONALLY. A store in `b`
 //     would then execute even when `a` already decided the branch. (`a || (*p = 1)`.)
-//   - a value defined in ^g is used outside ^g, or used more than once. Then the structurer
-//     MATERIALIZES it into a local, which renders as a statement BEFORE the `if` — turning `b`'s
-//     conditional computation into an unconditional one. Single-use-and-local is precisely the
-//     shape analysis.ts inlines into the connective's right operand, where C's own short-circuit
+//   - a value defined in ^g is used more than once inside ^g. Then the structurer MATERIALIZES it
+//     into a local, which renders as a statement BEFORE the `if` — turning `b`'s conditional
+//     computation into an unconditional one. Single-use-and-local is precisely the shape
+//     analysis.ts inlines into the connective's right operand, where C's own short-circuit
 //     re-guards it. This is what keeps a load in `b` from being hoisted across the guard in `a`.
+//   - a value defined in ^g is ALSO read past ^g, and the arm ^g's non-shared edge enters has a
+//     second predecessor or is the entry block, or the read is an edge ARGUMENT (a loop's
+//     induction start — `synthetic:nestinit`), or the value was homed in a frame slot. A read
+//     past ^g is otherwise not a refusal: on verified IR it can only sit under that arm (^g
+//     dominates nothing else — the shared block is reached from ^h too), so the arm RE-DERIVES
+//     it (`armRereadCone`, bottom of this file) and ^g keeps only its own use. That is the
+//     source's spelling — `if (a && (p->f & 0x7F) == 0x7F) { p->f &= 0x80; }` names `p->f`
+//     twice, gcc reads it once and carries the register into the arm — and refusing it split the
+//     condition into a nest whose shared block is duplicated into both negative branches
+//     (`synthetic:ladidx2`, `synthetic:ladder5`). A second predecessor would re-run the re-read
+//     on a path that never ran the original (a loop back into the arm); `predecessors()` cannot
+//     see the entry edge.
 //   - the two edges into the shared block carry DIFFERENT args. Only one edge survives the fold,
 //     so it can only carry one argument list; picking either would silently drop the other path's
 //     phi input.
@@ -533,17 +545,11 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         if (gTaken.block === gFall.block) {
           continue;
         }
-        // ^g's body must be pure, and every value it defines must be consumed only by ^g itself —
-        // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of the
-        // short circuit.
+        // ^g's body must be pure — see the REFUSALS note.
         // HOIST_UNSAFE_OPS includes `opaque`: an instruction asmlift could not model, and moving it
         // out of the arm that guards it is the reordering this refuses. Loud either way today — a
         // decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under `annotate`.
-        const body = g.ops.slice(0, -1);
-        if (body.some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
-          continue;
-        }
-        if (!definedValuesStayLocal(fn, g)) {
+        if (g.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;
         }
         // Which of ^g's edges rejoins ^h's other successor? That is the shared block. A DIRECT edge
@@ -573,6 +579,13 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         }
         const treeOwned = !throughRelay && sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0]);
         const otherEdge = sharedEdge === gTaken ? gFall : gTaken;
+        // Every value ^g defines is consumed only by ^g itself, once, or re-derived in the arm —
+        // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of
+        // the short circuit.
+        const reread = armRereadCone(fn, g, otherEdge.block, preds);
+        if (!reread || !definedValuesStayLocal(fn, g, reread)) {
+          continue;
+        }
         if (!sameArgs(sharedFromH.args, sharedEdge.args)) {
           continue;
         }
@@ -599,6 +612,8 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
             continue;
           }
         }
+        rereadInArm(fn, g, otherEdge.block, reread);
+        const body = g.ops.slice(0, -1);
         const second = negation ? negation.result : c2;
         const negated: Op[] = negation ? negation.ops : [];
         const res = mkValue(T.unk(32));
@@ -824,32 +839,151 @@ function constTestScrutinee(defs: Map<Value, Op>, c: Value): Value | null {
   return xc === yc ? null : xc ? y : x;
 }
 
-/** True when every value `g` defines is read at most once, and any read is inside `g`.
+/** `armRereadCone`'s answer: the ops the arm copies, and the originals that then leave ^g. */
+interface ArmReread {
+  copy: ReadonlySet<Op>;
+  drop: ReadonlySet<Op>;
+}
+
+const readsOf = (op: Op): Value[] => [...op.operands, ...op.successors.flatMap((s) => s.args)];
+
+/** What the arm must RE-DERIVE for the fold to go ahead: `copy` is every `g`-defined value read
+ *  outside `g` with the part of its operand cone `g` computes, and `drop` the originals in `copy`
+ *  nothing left in `g` reads — the ones that MOVE rather than duplicate. Both empty when nothing
+ *  escapes; null when the arm cannot host the copy.
+ *
+ *  The copy is exact at the arm's head because nothing runs between: `g`'s body is pure (its
+ *  caller refuses anything in HOIST_UNSAFE_OPS), so a load copied there reads what `g`'s own load
+ *  read, and `g` is the arm's ONLY predecessor, so the copy runs exactly when the original's
+ *  value would have been live there. On verified IR that also places every escaping read under
+ *  the arm: `g` dominates nothing else, because the shared block is reached from ^h directly.
+ *  Whether the copy then renders inline at each use (a re-read) or as a local at the top of the
+ *  arm is analysis.ts's ordinary decision — both are under the guard, which is the point.
+ *
+ *  REFUSES (null): the arm is the entry block, whose implicit edge `predecessors()` does not see;
+ *  the arm has a second predecessor, which would run the copy on a path that never ran the
+ *  original — a loop back into the arm re-reading memory the loop wrote; an escaping read that is
+ *  an edge ARGUMENT; and a cone value the frame homed (`fn.slotHomes`), which the machine kept in
+ *  a stack slot rather than re-derived.
+ *
+ *  The edge argument is the loop-guard shape, `for (i = 0; i < n; …)` under an `if`: agbcc tests
+ *  the register it just set to the induction's start (`mov r3, #0; cmp r3, r5`) and carries that
+ *  register into the loop, so ^g's condition reads a VARIABLE the arm goes on to own. A copy
+ *  re-derives the constant and the fold hands the outer `if` a `0 < n` the loop recovery needed
+ *  as its own guard — `synthetic:nestinit:agbcc` MATCH → 6/49. A value an edge carries becomes a
+ *  named variable, never an expression an arm re-reads. */
+function armRereadCone(fn: Fn, g: Block, arm: Block, preds: Map<Block, Block[]>): ArmReread | null {
+  const defOf = new Map<Value, Op>();
+  for (const op of g.ops) {
+    for (const r of op.results) {
+      defOf.set(r, op);
+    }
+  }
+  const copy = new Set<Op>();
+  const outside = fn.blocks.filter((b) => b !== g).flatMap((b) => b.ops);
+  const work = outside.flatMap(readsOf).filter((v) => defOf.has(v));
+  if (work.length === 0) {
+    return { copy, drop: new Set() };
+  }
+  if (arm === fn.blocks[0] || (preds.get(arm) ?? []).length !== 1) {
+    return null;
+  }
+  if (outside.some((op) => op.successors.some((s) => s.args.some((v) => defOf.has(v))))) {
+    return null;
+  }
+  while (work.length) {
+    const d = defOf.get(work.pop()!);
+    if (d && !copy.has(d)) {
+      copy.add(d);
+      work.push(...d.operands);
+    }
+  }
+  if ([...copy].some((op) => op.results.some((r) => fn.slotHomes?.has(r)))) {
+    return null;
+  }
+  // Reverse order, so an original that fed only another dropped original goes too.
+  const drop = new Set<Op>();
+  const live = new Set<Value>();
+  for (let i = g.ops.length - 1; i >= 0; i--) {
+    const op = g.ops[i];
+    if (copy.has(op) && op.results.every((r) => !live.has(r))) {
+      drop.add(op);
+    } else {
+      readsOf(op).forEach((v) => live.add(v));
+    }
+  }
+  return { copy, drop };
+}
+
+/** Copy `copy` to the head of `arm`, point every read outside `g` at the copies, and delete `drop`.
+ *  A dropped original is deleted rather than left for the hoist: the arm now performs it, and a
+ *  dead READ left in ^h is one the structurer may still spell (SPELLED_WHEN_DEAD_OPS). */
+function rereadInArm(fn: Fn, g: Block, arm: Block, { copy, drop }: ArmReread): void {
+  const copyOf = new Map<Value, Value>();
+  const copies = g.ops
+    .filter((op) => copy.has(op))
+    .map((op): Op => ({
+      opcode: op.opcode,
+      operands: op.operands.map((v) => copyOf.get(v) ?? v),
+      results: op.results.map((r) => {
+        const c = mkValue(r.type);
+        copyOf.set(r, c);
+        return c;
+      }),
+      attrs: { ...op.attrs },
+      successors: [],
+    }));
+  const redirect = (v: Value): Value => copyOf.get(v) ?? v;
+  for (const b of fn.blocks) {
+    if (b === g) {
+      continue;
+    }
+    for (const op of b.ops) {
+      op.operands = op.operands.map(redirect);
+      for (const s of op.successors) {
+        s.args = s.args.map(redirect);
+      }
+    }
+  }
+  arm.ops.unshift(...copies);
+  g.ops = g.ops.filter((op) => !drop.has(op));
+}
+
+/** True when every value `g` defines is read at most once, and any read is inside `g` or is one
+ *  `armRereadCone` answered for — reads outside `g` move to the arm's copy, and reads BY a
+ *  dropped original leave with it.
  *
  *  The VALUE form above needs no such check, and the asymmetry is real rather than drift: its feeder
  *  ends in `br M`, so the feeder has no successor of its own to dominate and every value it defines
  *  is either read in the feeder or carried to `M` as the phi argument the fold consumes. Here ^g
  *  ends in `cond_br` and its `other` successor IS ^g-dominated, so a ^g-defined value genuinely can
- *  escape, and only this check stops it.
+ *  escape, and only this check and the arm's copy stop it.
  *
  *  What the two folds genuinely DO share is the `fn.blocks[0]` refusal, and each has a test that
  *  pins its own half: 'a feeder that is the entry block is not folded away' for the value form, and
  *  'the ENTRY block is never folded away' for the branch form. They are deliberately NOT routed
  *  through one shared `isEntry` helper — a helper enforces nothing, and it is the two tests that
  *  hold each fold to the refusal. When changing either fold, check the other. */
-function definedValuesStayLocal(fn: Fn, g: Block): boolean {
+function definedValuesStayLocal(fn: Fn, g: Block, { copy, drop }: ArmReread): boolean {
   const defined = new Set<Value>(g.ops.flatMap((op) => op.results));
   if (defined.size === 0) {
     return true;
   }
+  const copied = new Set<Value>([...copy].flatMap((op) => op.results));
   const uses = new Map<Value, number>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      for (const v of [...op.operands, ...op.successors.flatMap((s) => s.args)]) {
+      if (drop.has(op)) {
+        continue;
+      }
+      for (const v of readsOf(op)) {
         if (!defined.has(v)) {
           continue;
         }
         if (b !== g) {
+          if (copied.has(v)) {
+            continue; // re-derived in the arm (`rereadInArm`)
+          }
           return false; // escapes ^g — the structurer would render it before the `if`
         }
         uses.set(v, (uses.get(v) ?? 0) + 1);

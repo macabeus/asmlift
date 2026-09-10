@@ -111,6 +111,33 @@ function chain(opts: {
   return { name: 'f', blocks, writeOrder: undefined, slotHomes: undefined };
 }
 
+/** `chain` whose second condition tests a byte READ, and whose other arm writes back through the
+ *  same address the value that read produced — `if (a || (p->f & 0x7F) == 0x7F) … else p->f = …`
+ *  as agbcc leaves it, one load feeding both. */
+function armReadsCondition(): { fn: Fn; arm: Block; load: Op; store: Op } {
+  let load: Op | undefined;
+  const fn = chain({
+    gOnTaken: false,
+    sharedOnGTaken: true,
+    gBody: (out) => {
+      const addr = mkValue(T.ptr(T.u(8)));
+      const v = mkValue(T.u(8));
+      const k = mkValue(T.unk(32));
+      load = mkOp('load', { operands: [addr], results: [v], attrs: { off: 0, width: 1, signed: false } });
+      return [
+        mkOp('const', { results: [addr], attrs: { value: 0x03001000 } }),
+        load,
+        mkOp('const', { results: [k], attrs: { value: 0x7f } }),
+        mkOp('icmp_eq', { operands: [v, k], results: [out] }),
+      ];
+    },
+  });
+  const arm = fn.blocks[3];
+  const store = mkOp('store', { operands: [load!.operands[0], load!.results[0]], attrs: { off: 0, width: 1 } });
+  arm.ops.unshift(store);
+  return { fn, arm, load: load!, store };
+}
+
 /** The connective a fold produced, or null when nothing fired. */
 const connective = (fn: Fn): string | null =>
   fn.blocks.flatMap((b) => b.ops).find((o) => o.opcode === 'logic_or' || o.opcode === 'logic_and')?.opcode ?? null;
@@ -323,13 +350,81 @@ describe('refusals', () => {
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
   });
 
-  test('a value defined in the condition block that ESCAPES it is not folded', () => {
-    // The structurer would materialize it into a local, rendering the second condition's work as a
-    // statement BEFORE the `if` — unconditionally.
-    const fn = chain({ gOnTaken: false, sharedOnGTaken: true });
-    const escaping = fn.blocks[1].ops[1].results[0]; // the second condition value itself
-    fn.blocks[3].ops.unshift(mkOp('neg', { operands: [escaping], results: [mkValue(T.unk(32))] }));
+  test('a value the ARM re-reads is re-derived there, and the condition folds', () => {
+    // `if (a || (p->f & 0x7F) != 0x7F) … else { p->f = … }`: gcc reads `p->f` once in the second
+    // test and carries the register into the arm. Refusing this split the connective into a nest
+    // and duplicated the shared block into both negative branches (synthetic:ladidx2).
+    const { fn, arm, load, store } = armReadsCondition();
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(connective(fn)).toBe('logic_or');
+    verify(fn);
+    // the arm's own copy of the read, at its head, is what the arm's store now reads …
+    const copy = arm.ops.find((o) => o.opcode === 'load')!;
+    expect(copy).not.toBe(load);
+    expect(copy.attrs).toEqual(load.attrs);
+    expect(arm.ops.indexOf(copy)).toBeLessThan(arm.ops.indexOf(store));
+    expect(store.operands[1]).toBe(copy.results[0]);
+    // … and the original keeps its ONE use, the fused condition's operand
+    expect(fn.blocks[0].ops).toContain(load);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the arm has a second predecessor', () => {
+    // The copy would run on a path that never ran the original — a loop back into the arm reads
+    // memory the loop has since written.
+    const { fn, arm } = armReadsCondition();
+    fn.blocks.push(blk([{ ...mkOp('br'), successors: [{ block: arm, args: [] }] }]));
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+  });
+
+  test('REFUSED: a value the ARM carries on as an edge ARGUMENT', () => {
+    // `if (go) for (i = 0; i < n; …)`: the second test compares the register the loop then owns
+    // as its induction, so the value is a variable, not an expression the arm can re-read.
+    const { fn, arm, load, store } = armReadsCondition();
+    const loop = blk([mkOp('ret', { operands: [] })], [mkValue(T.u(8))]);
+    arm.ops.splice(arm.ops.indexOf(store), 1);
+    arm.ops.splice(-1, 1, { ...mkOp('br'), successors: [{ block: loop, args: [load.results[0]] }] });
+    fn.blocks.push(loop);
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the frame homed it', () => {
+    const { fn, load } = armReadsCondition();
+    fn.slotHomes = new Map([[load.results[0], new Set([4])]]);
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the arm is the entry block', () => {
+    // `predecessors()` does not model the entry edge, so an entry block whose one real predecessor
+    // is ^g passes the sole-predecessor test while the copy would also run on function entry.
+    const { fn, arm } = armReadsCondition();
+    fn.blocks.splice(fn.blocks.indexOf(arm), 1);
+    fn.blocks.unshift(arm);
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the condition block reads it TWICE', () => {
+    const { fn, load } = armReadsCondition();
+    const g = fn.blocks[1];
+    g.ops.splice(-1, 0, mkOp('neg', { operands: [load.results[0]], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('an original only the arm read MOVES to the arm instead of staying behind dead', () => {
+    // A dead read left in the head is one the structurer may still spell as a `volatile` read.
+    const { fn, arm } = armReadsCondition();
+    const g = fn.blocks[1];
+    const extra = mkOp('load', {
+      operands: [g.ops[0].results[0]],
+      results: [mkValue(T.u(8))],
+      attrs: { off: 1, width: 1, signed: false },
+    });
+    g.ops.splice(1, 0, extra);
+    arm.ops.unshift(mkOp('neg', { operands: [extra.results[0]], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    verify(fn);
+    expect(fn.blocks.flatMap((b) => b.ops)).not.toContain(extra);
+    expect(arm.ops.filter((o) => o.opcode === 'load').map((o) => o.attrs.off)).toEqual([1, 0]);
   });
 
   test('a value defined in the condition block used TWICE is not folded', () => {
