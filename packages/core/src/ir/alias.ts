@@ -87,6 +87,30 @@ export function globalCellOf(defs: Map<Value, Op>, addr: Value, off: number): Gl
 }
 
 /**
+ * The NUMERIC address an access denotes, resolved through defs alone — a literal base, or
+ * `literal + literal` in either operand order — plus the access's own `off`. Null when the address
+ * does not reduce to a literal: a `gaddr` (ask {@link globalCellOf} instead), a parameter, a
+ * materialized base, anything carrying a runtime term.
+ *
+ * The caller that has one asks a question about the BOARD — "is this cell a hardware register" —
+ * so a null here must be read as "unknown", never as "ordinary memory".
+ */
+export function constAddressOf(defs: Map<Value, Op>, addr: Value, off: number): number | null {
+  const d = defs.get(addr);
+  if (d?.opcode === 'const') {
+    return (d.attrs.value as number) + off;
+  }
+  if (d?.opcode === 'add' && d.operands.length === 2) {
+    const a = defs.get(d.operands[0]);
+    const b = defs.get(d.operands[1]);
+    if (a?.opcode === 'const' && b?.opcode === 'const') {
+      return (a.attrs.value as number) + (b.attrs.value as number) + off;
+    }
+  }
+  return null;
+}
+
+/**
  * Are these two accesses through ONE base provably different byte cells — same base value, both at
  * a constant offset and width, ranges non-overlapping? The everyday struct interleave
  * `… = p->field_0; p->field_4 = …`, where the store cannot change what the load sees even though

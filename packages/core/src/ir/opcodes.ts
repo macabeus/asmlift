@@ -283,13 +283,32 @@ export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aloa
 
 /** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
  *  observable) or a memory read (it answers whichever stores ran before it). The question a pass
- *  asks before moving a computation to another point on the SAME path. */
+ *  asks before moving a computation to another point on the SAME path. `SPELLED_WHEN_DEAD_OPS`
+ *  below is this set under the name of a DIFFERENT question and shares its definition. */
 export const ORDER_SENSITIVE_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => {
     const sig = OPCODES[k] as OpSig;
     return sig.effects || sig.reads;
   }),
 );
+
+/** Ops the structurer must still SPELL when nothing consumes their result — an effect, or a memory
+ *  READ. Extensionally identical to `ORDER_SENSITIVE_OPS` and kept as its own name because its one
+ *  call site asks a different question: not "may this move" but "did the machine do something a
+ *  source statement has to stand for".
+ *
+ *  The read half is the entry worth arguing, because `reads` documents the OPPOSITE about C — a
+ *  load nobody reads is deletable, nothing observes it. That is the C claim. The COMPILER claim
+ *  points the other way: an optimizing compiler deletes every dead read it is ALLOWED to delete, so
+ *  one still in the target is evidence the source's access was `volatile`. Membership here only
+ *  says the structurer may not drop the op silently; whether a `volatile` can actually reach the
+ *  access is a second, ADDRESS-level question the call site asks separately
+ *  (structure.ts `volatileQualifiable`), and a read it answers no to is dropped as before.
+ *
+ *  Consumer: structure.ts's `sideEffects` walk. Derived rather than re-listed for the reason
+ *  `EFFECTFUL_OPS` gives above — three hand-written copies of that membership are how the models
+ *  drifted apart before, and this walk used to carry a fourth. */
+export const SPELLED_WHEN_DEAD_OPS: ReadonlySet<string> = ORDER_SENSITIVE_OPS;
 
 /** Ops that may not be RE-EVALUATED at another program point — order-sensitive, or trapping. The
  *  trap half is what separates this from `ORDER_SENSITIVE_OPS`: it only matters when the new point
