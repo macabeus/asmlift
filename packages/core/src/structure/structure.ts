@@ -4810,6 +4810,66 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const latchSub = (dw: DoWhileInfo): Map<Value, string> =>
     subFor(dw.header.params, successorTo(dw.latch, dw.header)!.args);
 
+  // THE LATCH IS POST-LOOP FOR EVERY INNER LOOP THAT RUNS BEFORE IT. A bottom-tested loop renders
+  // its latch — side effects, update copies, test — HERE, outside the body region, so none of it is
+  // under the substitution an inner loop's exit region installs (`withSub` in the self-loop and
+  // do-while emitters). Yet the latch runs after those inner loops exactly as the rest of their exit
+  // region does, and the inner do-while's own hazard check judged it that way (its `postLoop` holds
+  // every block outside the inner body). Read raw, an inner back-edge value is RE-DERIVED from the inner
+  // variable's name — which by then already holds that value — so the latch counts the last
+  // iteration twice: `a += gT[i][j] * 2` over a nest whose inner loop is one block emits
+  // `do { … v4 = v4 + (v0 << 1); … } while (…); v2 = v4 + (v0 << 1);` — a silent wrong answer that
+  // main's default candidate reaches on agbcc's own output (the `acc += a[i][j]` nest).
+  //
+  // So the latch reads such a value under the name its inner loop left it in: the back-edge
+  // substitution of each CHILD loop (`forest.parent`) that dominates the latch and does not contain
+  // it — a loop in one arm of an `if` cannot hand the latch a value, and a grandchild's substitution
+  // ends where its parent's exit region does. Dominating loops apply outermost first, so a later one
+  // wins, as the nested `withSub`s do. A test-at-top `while` installs no substitution (its
+  // latch-computed values never reach past its header exit), so it contributes nothing.
+  //
+  // NARROWER THAN THE EXIT REGION'S `withSub`, on purpose, in two ways — each keeps the latch on its
+  // old raw reading where the substitution is not the better one:
+  //   • only an UNNAMED value DEFINED INSIDE the child loop. A named value renders under its own
+  //     name, and one defined outside the loop (an entry value handed round the back edge unchanged)
+  //     re-derives from operands the loop never wrote, so its raw reading is already right;
+  //   • only while the name still HOLDS it. A name written between the child loop and the latch —
+  //     a block param of the exit region or of the latch itself, or a materialized def there — no
+  //     longer holds the loop's last value. The IR oracle found that one: substituting an entry value
+  //     `a1 - a1` by its inner name after the exit copy `v2 = v1` had rewritten it (generated seed
+  //     16501). This loop's own header is exempt: its params are written by the update copies
+  //     below, which read under this very substitution.
+  const latchInnerSub = (dw: DoWhileInfo): Map<Value, string> => {
+    const out = new Map<Value, string>();
+    const latchDoms = dom.get(dw.latch)!;
+    const kids = [...forest.byHeader.values()]
+      .filter((l) => forest.parent.get(l.header) === dw.header && !l.body.has(dw.latch) && latchDoms.has(l.header))
+      .sort((x, y) => dom.get(x.header)!.size - dom.get(y.header)!.size);
+    for (const l of kids) {
+      const self = loops.get(l.header);
+      const nested = doWhileLoops.get(l.header);
+      const s = self ? loopSub(self) : nested ? latchSub(nested) : null;
+      if (s === null) {
+        continue;
+      }
+      const rewritten = new Set<string>();
+      for (const [v, n] of varName) {
+        const d = defs.get(v);
+        const home = paramBlock.get(v) ?? (d !== undefined && materialize.has(d) ? opBlock.get(d) : undefined);
+        if (home !== undefined && home !== dw.header && dw.body.has(home) && !l.body.has(home)) {
+          rewritten.add(n);
+        }
+      }
+      for (const [v, n] of s) {
+        const d = defs.get(v);
+        if (!varName.has(v) && d !== undefined && l.body.has(opBlock.get(d)!) && !rewritten.has(n)) {
+          out.set(v, n);
+        }
+      }
+    }
+    return out;
+  };
+
   // Bottom-test `do-while`: the body runs header..latch (structured, with `b`'s do-while hook masked
   // via dwActive), then the latch's own side-effects + the loop update; the latch's cond_br test is the
   // do-while condition, read under `latchSub` (post-update the params hold their next value). Polarity:
@@ -4822,7 +4882,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // post-update name — one iteration off, silently. Same readsClobbered guard the early-exit
     // path applies; on a hazard, decline LOUD.
     const sub = latchSub(dw);
-    const updates = argAssigns(dw.latch, dw.header);
+    // The inner loops' post-loop substitution the latch reads under (`latchInnerSub`). Empty — and
+    // then every line below spells what it did before the substitution existed — unless an unnamed
+    // value an inner loop computed could reach the latch.
+    const innerSub = latchInnerSub(dw);
+    const updates = argAssigns(
+      dw.latch,
+      dw.header,
+      innerSub.size > 0 ? new Map([...(activeSub ?? []), ...innerSub]) : null,
+    );
     const updateWrites = loopWriteSet(updates, dw.body, dw.header);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
     // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
@@ -4930,10 +4998,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const body = [
       ...preUpdateCopies(dw.exit, exitArgs, sunk, dw.header),
       ...inner,
-      ...sideEffects(dw.latch),
+      ...(innerSub.size > 0 ? withSub(innerSub, () => sideEffects(dw.latch)) : sideEffects(dw.latch)),
       ...updates,
     ];
-    let cond = exprWith(sub)(lterm.operands[0]);
+    // The test reads this loop's own update under `sub`, and anything else an inner loop left under
+    // `innerSub` — the outer loop's own reading wins where a value is both. The test runs AFTER the
+    // update copies, so an inner name one of them really writes no longer holds the inner value, and
+    // that entry keeps the raw reading.
+    const writtenByUpdate = innerSub.size > 0 ? updateWriteSet(updates) : new Set<string>();
+    const condInner = [...innerSub].filter(([, n]) => !writtenByUpdate.has(n));
+    let cond = exprWith(condInner.length > 0 ? new Map([...condInner, ...sub]) : sub)(lterm.operands[0]);
     if (lterm.successors[1].block === dw.header) {
       cond = negateCond(cond);
     } // continue edge must be `taken`
