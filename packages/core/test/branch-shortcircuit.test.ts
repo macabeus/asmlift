@@ -5,7 +5,11 @@
 // The four orientation cases are the whole truth table (which of the head's edges leads to the
 // second condition × which of the second's edges rejoins the head's other successor), so each gets
 // a test. The refusals get one each too: every one of them is a way the fold would be WRONG, not a
-// missed opportunity, and a silently-relaxed guard is exactly what these pin down.
+// missed opportunity, and a silently-relaxed guard is exactly what these pin down. The exception is
+// the RE-READ admission's fidelity rules (`ARM_REREAD_GATES` with `sound: false`), which refuse
+// where re-deriving costs bytes; `loop-exit`'s, `moves-a-read`'s and `read-behind-effect`'s tests
+// also ablate the one rule and watch the fold go ahead, `edge-arg`'s and `slot-home`'s assert the
+// refusal alone.
 import { describe, expect, test } from 'vitest';
 
 import {
@@ -19,7 +23,8 @@ import {
 } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
-import { recognizeBranchShortCircuit, recognizeShortCircuit } from '../src/raise/shortcircuit';
+import { tallying, without } from '../src/l3/gates';
+import { ARM_REREAD_GATES, recognizeBranchShortCircuit, recognizeShortCircuit } from '../src/raise/shortcircuit';
 
 const blk = (ops: Op[], params: Value[] = []): Block => ({ params, ops });
 
@@ -109,6 +114,33 @@ function chain(opts: {
     blocks.splice(1, 0, blk([{ ...mkOp('br'), successors: [{ block: g, args: [] }] }]));
   }
   return { name: 'f', blocks, writeOrder: undefined, slotHomes: undefined };
+}
+
+/** `chain` whose second condition tests a byte READ, and whose other arm writes back through the
+ *  same address the value that read produced — `if (a || (p->f & 0x7F) == 0x7F) … else p->f = …`
+ *  as agbcc leaves it, one load feeding both. */
+function armReadsCondition(): { fn: Fn; arm: Block; load: Op; store: Op } {
+  let load: Op | undefined;
+  const fn = chain({
+    gOnTaken: false,
+    sharedOnGTaken: true,
+    gBody: (out) => {
+      const addr = mkValue(T.ptr(T.u(8)));
+      const v = mkValue(T.u(8));
+      const k = mkValue(T.unk(32));
+      load = mkOp('load', { operands: [addr], results: [v], attrs: { off: 0, width: 1, signed: false } });
+      return [
+        mkOp('const', { results: [addr], attrs: { value: 0x03001000 } }),
+        load,
+        mkOp('const', { results: [k], attrs: { value: 0x7f } }),
+        mkOp('icmp_eq', { operands: [v, k], results: [out] }),
+      ];
+    },
+  });
+  const arm = fn.blocks[3];
+  const store = mkOp('store', { operands: [load!.operands[0], load!.results[0]], attrs: { off: 0, width: 1 } });
+  arm.ops.unshift(store);
+  return { fn, arm, load: load!, store };
 }
 
 /** The connective a fold produced, or null when nothing fired. */
@@ -323,13 +355,225 @@ describe('refusals', () => {
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
   });
 
-  test('a value defined in the condition block that ESCAPES it is not folded', () => {
-    // The structurer would materialize it into a local, rendering the second condition's work as a
-    // statement BEFORE the `if` — unconditionally.
-    const fn = chain({ gOnTaken: false, sharedOnGTaken: true });
-    const escaping = fn.blocks[1].ops[1].results[0]; // the second condition value itself
-    fn.blocks[3].ops.unshift(mkOp('neg', { operands: [escaping], results: [mkValue(T.unk(32))] }));
+  test('a value the ARM re-reads is re-derived there, and the condition folds', () => {
+    // `if (a || (p->f & 0x7F) == 0x7F) … else { p->f = … }`: agbcc reads `p->f` once in the second
+    // test and carries the register into the arm. Refusing this splits the connective into a nest
+    // and duplicates the shared block into both negative branches (synthetic:ladidx2).
+    const { fn, arm, load, store } = armReadsCondition();
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(connective(fn)).toBe('logic_or');
+    verify(fn);
+    // the arm's own copy of the read, at its head, is what the arm's store now reads …
+    const copy = arm.ops.find((o) => o.opcode === 'load')!;
+    expect(copy).not.toBe(load);
+    expect(copy.attrs).toEqual(load.attrs);
+    expect(arm.ops.indexOf(copy)).toBeLessThan(arm.ops.indexOf(store));
+    expect(store.operands[1]).toBe(copy.results[0]);
+    // … and the original keeps its ONE use, the fused condition's operand
+    expect(fn.blocks[0].ops).toContain(load);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the arm has a second predecessor', () => {
+    // The copy would run on a path that never ran the original — a loop back into the arm reads
+    // memory the loop has since written.
+    const { fn, arm } = armReadsCondition();
+    fn.blocks.push(blk([{ ...mkOp('br'), successors: [{ block: arm, args: [] }] }]));
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+  });
+
+  test('REFUSED: a value the ARM carries on as an edge ARGUMENT', () => {
+    // `if (go) for (i = 0; i < n; …)`: the second test compares the register the loop then owns
+    // as its induction, so the value is a variable, not an expression the arm can re-read.
+    const { fn, arm, load, store } = armReadsCondition();
+    const loop = blk([mkOp('ret', { operands: [] })], [mkValue(T.u(8))]);
+    arm.ops.splice(arm.ops.indexOf(store), 1);
+    arm.ops.splice(-1, 1, { ...mkOp('br'), successors: [{ block: loop, args: [load.results[0]] }] });
+    fn.blocks.push(loop);
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the frame homed it', () => {
+    const { fn, load } = armReadsCondition();
+    fn.slotHomes = new Map([[load.results[0], new Set([4])]]);
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the arm is the entry block', () => {
+    // `predecessors()` does not model the entry edge, so an entry block whose one real predecessor
+    // is ^g passes the sole-predecessor test while the copy would also run on function entry.
+    const { fn, arm } = armReadsCondition();
+    fn.blocks.splice(fn.blocks.indexOf(arm), 1);
+    fn.blocks.unshift(arm);
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the condition block reads it TWICE', () => {
+    const { fn, load } = armReadsCondition();
+    const g = fn.blocks[1];
+    g.ops.splice(-1, 0, mkOp('neg', { operands: [load.results[0]], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('a PURE original only the arm read MOVES to the arm instead of staying behind dead', () => {
+    // An address the second test computed and only the arm uses: re-derived at every use whatever
+    // this does, so it moves rather than leaving a dead op behind in the head.
+    const { fn, arm } = armReadsCondition();
+    const g = fn.blocks[1];
+    const extra = mkOp('add', { operands: [g.ops[0].results[0], g.ops[2].results[0]], results: [mkValue(T.unk(32))] });
+    g.ops.splice(3, 0, extra);
+    arm.ops.unshift(mkOp('neg', { operands: [extra.results[0]], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    verify(fn);
+    expect(fn.blocks.flatMap((b) => b.ops)).not.toContain(extra);
+    expect(arm.ops.filter((o) => o.opcode === 'add')).toHaveLength(1);
+  });
+
+  test('REFUSED: a READ only the arm consumes would move under the second test', () => {
+    // `if (a) { v = p->f; if (b) use(v); }`: the target reads `p->f` on BOTH exits of `b`, before
+    // `b`'s reads. Moved into the arm it would run on one of them only, and after them.
+    const { fn, arm } = armReadsCondition();
+    const g = fn.blocks[1];
+    const extra = mkOp('load', {
+      operands: [g.ops[0].results[0]],
+      results: [mkValue(T.u(8))],
+      attrs: { off: 1, width: 1, signed: false },
+    });
+    g.ops.splice(1, 0, extra);
+    arm.ops.unshift(mkOp('neg', { operands: [extra.results[0]], results: [mkValue(T.unk(32))] }));
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(recognizeBranchShortCircuit(fn, { armReread: without(ARM_REREAD_GATES, 'moves-a-read') })).toBe(true);
+  });
+
+  // `read-behind-effect` is the one rule that reads the TARGET (`reloadsLocalReread`, agbcc's value):
+  // every test of it passes `AGBCC_RELOADS` except 'the rule reads the TARGET', which pins what the
+  // conjunct buys.
+  const AGBCC_RELOADS = { reloadsLocalReread: true } as const;
+  const call = () => mkOp('call', { operands: [], results: [mkValue(T.unk(32))], attrs: { target: 'fnB' } });
+  /** a store of the constant 5 to `base + off`, with the constant it stores */
+  const storeFive = (base: Value, off: number): Op[] => {
+    const k = mkValue(T.unk(32));
+    return [
+      mkOp('const', { results: [k], attrs: { value: 5 } }),
+      mkOp('store', { operands: [base, k], attrs: { off, width: 1 } }),
+    ];
+  };
+
+  test('REFUSED: a READ the arm holds across an effect is not re-derived', () => {
+    // `{ fnB(); sink(v); }`: analysis.ts cannot spell the copy inline past the call, so it becomes a
+    // local at the arm's head — a SECOND load agbcc does not merge — where the nest reads once.
+    const { fn, arm, store } = armReadsCondition();
+    arm.ops.splice(arm.ops.indexOf(store), 0, call());
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(
+      recognizeBranchShortCircuit(fn, { ...AGBCC_RELOADS, armReread: without(ARM_REREAD_GATES, 'read-behind-effect') }),
+    ).toBe(true);
+  });
+
+  test('a READ the arm uses at its first effect, and only there, is still re-derived', () => {
+    // `p->f = v` stores what it reads, so the reader is not "behind" itself. What is held
+    // across the effect is the reader AFTER it — here a store to ANOTHER cell of an unrelated base.
+    const { fn, arm, store } = armReadsCondition();
+    const other = mkValue(T.ptr(T.u(8)));
+    const later = mkOp('store', { operands: [other, store.operands[1]], attrs: { off: 2, width: 1 } });
+    arm.ops.splice(arm.ops.indexOf(store) + 1, 0, later);
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(false);
+    arm.ops.splice(arm.ops.indexOf(later), 1);
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(true);
+    verify(fn);
+  });
+
+  test("a store to a DISJOINT slot of the read's own base is not a barrier — analysis.ts inlines past it", () => {
+    // `{ p->x = 5; p->fl &= 0x80; }`: `disjointConstSlots` (ir/alias.ts) clears the store, so
+    // analysis.ts spells the copy inline and agbcc merges it into the test's register. Counting
+    // ANY effect costs `r->x = 5; r->fl &= 0x80;` its byte-match (8/22 against MATCH 0/18).
+    const { fn, arm, store, load } = armReadsCondition();
+    arm.ops.splice(arm.ops.indexOf(store), 0, ...storeFive(load.operands[0], 4));
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(true);
+    verify(fn);
+    // …the SAME cell is not disjoint, and neither is a cell of another base
+    for (const base of ['own', 'other'] as const) {
+      const { fn: f2, arm: a2, store: s2, load: l2 } = armReadsCondition();
+      const b = base === 'own' ? l2.operands[0] : mkValue(T.ptr(T.u(8)));
+      a2.ops.splice(a2.ops.indexOf(s2), 0, ...storeFive(b, 0));
+      expect(recognizeBranchShortCircuit(f2, AGBCC_RELOADS)).toBe(false);
+    }
+  });
+
+  test('a disjoint store still bars a read the arm renders TWICE — the multi-render rule has no exemption', () => {
+    // `{ p->x = 1; p->a = v; p->b = v; }` against the same arm with ONE reader.
+    for (const readers of [1, 2]) {
+      const { fn, arm, store, load } = armReadsCondition();
+      const at = (off: number, v: Value) =>
+        mkOp('store', { operands: [load.operands[0], v], attrs: { off, width: 1 } });
+      const uses = [5, 6].slice(0, readers).map((off) => at(off, load.results[0]));
+      arm.ops.splice(arm.ops.indexOf(store), 1, ...storeFive(load.operands[0], 4), ...uses);
+      expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(readers === 1);
+    }
+  });
+
+  test('an ADDRESS the copy re-derives carries no read, however it is spelled', () => {
+    // `{ p[i] &= 0x80; fnB(); p[i] = 1; }`: the copy holds the load AND the `add` that forms
+    // `p + i`, and the store after the call reads only the address and the index — no load.
+    // Seeded from every copied op, the rule refuses this where `p[5]` (no `add`) folds — the
+    // verdict flips on how the address is spelled (3/22 against MATCH 0/20).
+    const { fn, arm, store, load } = armReadsCondition();
+    const g = fn.blocks[1];
+    const addr = mkValue(T.ptr(T.u(8)));
+    const i = mkValue(T.unk(32));
+    g.ops.splice(
+      1,
+      0,
+      mkOp('const', { results: [i], attrs: { value: 3 } }),
+      mkOp('add', { operands: [load.operands[0], i], results: [addr] }),
+    );
+    load.operands = [addr];
+    store.operands = [addr, store.operands[1]];
+    arm.ops.splice(
+      arm.ops.indexOf(store) + 1,
+      0,
+      call(),
+      mkOp('store', { operands: [addr, i], attrs: { off: 0, width: 1 } }),
+    );
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(true);
+    verify(fn);
+  });
+
+  test('the rule reads the TARGET: where a local is ONE load, the held read is re-derived', () => {
+    // ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc_242_81 hold the local's register across the call
+    // (target.ts `reloadsLocalReread`), so analysis.ts's local IS the target's spelling there.
+    const { fn, arm, store } = armReadsCondition();
+    arm.ops.splice(arm.ops.indexOf(store), 0, call());
+    expect(recognizeBranchShortCircuit(fn, { reloadsLocalReread: false })).toBe(true);
+    verify(fn);
+  });
+
+  test('REFUSED: a value the ARM re-reads, when the arm LEAVES the loop', () => {
+    // A loop body's `if (a && b) { …; return; }`: fused whole into the header, the header's out-edge
+    // becomes this early-return arm and loop recovery takes it for the loop's exit.
+    const { fn } = armReadsCondition();
+    const [head, , shared] = fn.blocks;
+    shared.ops = [{ ...mkOp('br'), successors: [{ block: head, args: [] }] }];
+    fn.blocks.unshift(blk([{ ...mkOp('br'), successors: [{ block: head, args: [] }] }]));
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(recognizeBranchShortCircuit(fn, { armReread: without(ARM_REREAD_GATES, 'loop-exit') })).toBe(true);
+  });
+
+  test('the re-read refusals are REPORTED: a census names the rule that refused each site', () => {
+    const { fn, arm, store } = armReadsCondition();
+    arm.ops.splice(arm.ops.indexOf(store), 0, call());
+    const t = tallying(ARM_REREAD_GATES);
+    expect(recognizeBranchShortCircuit(fn, { ...AGBCC_RELOADS, armReread: t.gates })).toBe(false);
+    expect(t.refusals()).toEqual([['read-behind-effect', 1]]);
+    // nothing escapes → the table is never asked
+    const quiet = tallying(ARM_REREAD_GATES);
+    expect(
+      recognizeBranchShortCircuit(chain({ gOnTaken: false, sharedOnGTaken: true }), { armReread: quiet.gates }),
+    ).toBe(true);
+    expect(quiet.refusals()).toEqual([]);
   });
 
   test('a value defined in the condition block used TWICE is not folded', () => {
