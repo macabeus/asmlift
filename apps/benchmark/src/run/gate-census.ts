@@ -20,12 +20,13 @@
 // A subcommand has none of the three by construction, and `cli.ts`'s own header is binding here:
 // "Every path the harness offers is a subcommand here — there are no other executable scripts."
 //
-// WHY THE REGISTRY BELOW HAS ONE ENTRY. Fifteen passes in `packages/core/src` take their gate table
-// as an optional parameter, which is necessary and NOT sufficient: the census also needs a
-// CALLER-SIDE SEAM a process outside core can reach, and `unmergeJoins` has one only because
-// `rank-axes.ts` holds it in `PRE_FAN_PRODUCTS`, a mutable array of records. The other fourteen are
-// reached through static import bindings, which are read-only module-namespace properties —
-// measured, not argued:
+// WHY THE REGISTRY BELOW HAS TWO ENTRIES. Sixteen passes in `packages/core/src` take their gate
+// table as an optional parameter, which is necessary and NOT sufficient: the census also needs a
+// CALLER-SIDE SEAM a process outside core can reach. `unmergeJoins` has one because `rank-axes.ts`
+// holds it in `PRE_FAN_PRODUCTS`, a mutable array of records, and the branch short-circuit fold's
+// RE-READ admission has one because `raise/pre-recovery.ts` holds every raising pass in
+// `PRE_RECOVERY_PASSES`, another. The other fourteen are reached through static import bindings,
+// which are read-only module-namespace properties — measured, not argued:
 //
 //     import * as retsink from '@asmlift/core/raise/retsink';
 //     retsink.sinkReturns = () => false;
@@ -47,6 +48,8 @@ import {
   UNMERGE_VALUE_GATES,
   unmergeJoins,
 } from '@asmlift/core/l3/unmerge';
+import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
+import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
 import { PRE_FAN_PRODUCTS } from '@asmlift/core/rank-axes';
 
 import { scrubObjectHeader } from '../asm-scrub';
@@ -96,6 +99,28 @@ export const PASSES: Record<string, CensusablePass> = {
       product.apply = (s) => unmergeJoins(s, gates);
       return () => {
         product.apply = restore;
+      };
+    },
+  },
+  'arm-reread': {
+    // raise/shortcircuit.ts's `ARM_REREAD_GATES` — the branch fold's re-read admission. ONE table,
+    // asked only at a site where nothing cheaper refused (below `sameArgs` and the negatability
+    // check). The pass list runs once per LIFT, and `enumerateRanked` lifts a row more than once
+    // (the pin probe, then each lift variant), so a count here is per evaluation, as the footer
+    // says, and a site can be counted once per lift that reaches it.
+    tables: [['site', ARM_REREAD_GATES as readonly Gate<never>[]]],
+    install: (w) => {
+      // BY ID, never by index, for the reason the entry above gives.
+      const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'branch-shortcircuit');
+      if (!pass) {
+        throw new Error("no PRE_RECOVERY_PASSES entry 'branch-shortcircuit' — the pass's caller-side seam moved");
+      }
+      const restore = pass.run;
+      const armReread = w[0] as readonly Gate<ArmRereadSite>[];
+      pass.run = (fn, self, opts, target, lifted) =>
+        restore(fn, self, { ...opts, shortCircuit: { ...opts.shortCircuit, armReread } }, target, lifted);
+      return () => {
+        pass.run = restore;
       };
     },
   },
