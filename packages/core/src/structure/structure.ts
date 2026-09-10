@@ -3859,7 +3859,33 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  local it emits the cell qualified for its writes and plain for this read — a candidate that
    *  provably cannot reproduce the surviving `ldr`. That is a wasted candidate rather than a wrong
    *  one (the differ refuses it), and teaching that lever the read is a widening with its own
-   *  window census to pay for: see its header for the measurement such a change owes. */
+   *  window census to pay for: see its header for the measurement such a change owes.
+   *
+   *  TWO THINGS DELIBERATELY NOT DONE HERE, priced rather than left for a reader to rediscover.
+   *
+   *  1. THE LITERAL ARM IS A BACKWARDS DEFAULT AND ITS PREIMAGE IS NOT EMPTY. docs/level-tower.md
+   *     admits a default that reads the map backwards only when the backwards mapping is ITSELF a
+   *     function. "A surviving dead read implies the source said `volatile`" is not quite one: the
+   *     other preimage is a function whose `returnsVoid` fact is WRONG, so its return value
+   *     arrived here as a dead read. The second-use clause above removes the common shape of that
+   *     (a bare register accessor), leaving a function that both STORES to a device register and
+   *     reads one back — a DMA routine, not a getter — so the preimage is narrow but not proven
+   *     empty. The MAP arm has no such problem: `gStatus;` under `extern volatile u32 gStatus;`
+   *     compiles differently from its own absence, so the differ can referee it and the mapping
+   *     from map datum to spelling really is a function.
+   *     The clean fix is to move the LITERAL arm off the default and spell the read only in
+   *     candidates that also qualify it, paired the way `/livebase/volatile` already pairs. It is
+   *     declined here because it is not a comment change: the default would stop carrying the
+   *     statement, every device row's fan shape moves, `/volatile` has to compose with the new
+   *     token, and the target row's winner (`unsigned/livebase/volatile/raw-globals`) is on the
+   *     other side of that composition. That wants its own round and its own zero-flip gate over
+   *     BOTH tiers, not a remediation commit.
+   *  2. THE REFUSAL IS SILENT. When this returns false for a `load`, the machine performed a read
+   *     that no statement stands for and nothing records the decision — against this project's own
+   *     "instrument the refusal, never read it" rule. `structure()` has no diagnostic sink to
+   *     write into, so the fix is not free. What exists instead is the ADMISSION side's zero
+   *     point, `synthetic:dmareadback`, which fails loudly if the rule stops firing; counting the
+   *     refusals still means patching this function. */
   const unreadResult = (op: Op): boolean =>
     SPELLED_WHEN_DEAD_OPS.has(op.opcode) &&
     op.results.length > 0 &&
