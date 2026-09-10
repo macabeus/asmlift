@@ -41,7 +41,7 @@
 // back to if-recovery, and arms that do not linearize into one chain — two arms falling into the
 // same sibling, or a fall into the `default:` — refuse in `chainArms`, which answers null.
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
-import { CAST_WIDTHS, EFFECTFUL_OPS } from '../ir/opcodes';
+import { CAST_WIDTHS, EFFECTFUL_OPS, opSig } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import {
   BinOp,
@@ -3719,6 +3719,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
   };
 
+  /** Ops the `sideEffects` walk must SPELL even though nothing consumes their result — keyed on
+   *  the registry's own flags, so the next op to acquire one needs no edit here.
+   *
+   *  A memory READ is not in `EFFECTFUL_OPS`, deliberately: ir/opcodes.ts calls a load deletable
+   *  when dead, because nothing observes a read nobody reads. That is the C claim. The COMPILER
+   *  claim points the other way — an optimizing compiler deletes every dead read it is allowed to
+   *  delete, so one still in the target is evidence the source's access was `volatile`, and
+   *  dropping it deletes an instruction the machine executed.
+   *
+   *  The statement earns nothing by itself: an unqualified `p[2];` compiles to the same bytes as
+   *  no statement at all. What it does is put the access where a qualifier can reach it —
+   *  l3/volatileptr.ts's `/volatile` spellings, refereed by the differ. Unqualified it is inert,
+   *  never wrong. */
+  const unreadResult = (op: Op): boolean =>
+    (EFFECTFUL_OPS.has(op.opcode) || opSig(op.opcode)?.reads === true) &&
+    op.results.length > 0 &&
+    !useSitesOf.has(op.results[0]);
+
   const sideEffects = (b: Block): Stmt[] => {
     const out: Stmt[] = [];
     for (const op of b.ops) {
@@ -3777,17 +3795,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           ),
           value: expr(op.operands[2]),
         });
-      } else if (EFFECTFUL_OPS.has(op.opcode) && op.results.length && !useSitesOf.has(op.results[0])) {
-        // An effectful op whose result nobody reads is still an execution. `store`/`astore` have no
-        // result and were handled above, so what reaches here is `call` and `opaque` — and an
+      } else if (unreadResult(op)) {
+        // An op whose result nobody reads is still an execution. `store`/`astore` have no result and
+        // were handled above, so what reaches here is `call`, `opaque` and a memory READ — and an
         // `opaque` missing from this walk is an instruction the frontend could not model
         // disappearing with no diagnostic, which is the one thing this project refuses to do.
         //
-        // Keyed on EFFECTFUL_OPS rather than the two opcode names: the deciding property is "has an
-        // effect the result does not account for", which is what the flag already means, so the next
-        // op to acquire it needs no edit here. Statement, not expression — `expr` on the result
-        // routes through `lowerDef`, already where `opaque` becomes the gap, so this reuses the SAME
-        // degradation a live opaque gets rather than inventing a second way to be loud.
+        // Statement, not expression — `expr` on the result routes through `lowerDef`, already where
+        // `opaque` becomes the gap, so this reuses the SAME degradation a live opaque gets rather
+        // than inventing a second way to be loud.
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
       } else if (materialize.has(op) && !absorbedLoads.has(op)) {
         // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
