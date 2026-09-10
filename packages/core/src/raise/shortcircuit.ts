@@ -369,13 +369,13 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     computation into an unconditional one. Single-use-and-local is precisely the shape
 //     analysis.ts inlines into the connective's right operand, where C's own short-circuit
 //     re-guards it. This is what keeps a load in `b` from being hoisted across the guard in `a`.
-//   - a value defined in ^g is ALSO read past ^g, and a rule in `ARM_REREAD_GATES` (bottom of
-//     this file) refuses re-deriving it in the arm. A read past ^g is otherwise not a refusal: on
-//     verified IR it can only sit under the arm ^g's non-shared edge enters (^g dominates nothing
-//     else — the shared block is reached from ^h too), so the arm RE-DERIVES it
-//     (`armRereadCone`) and ^g keeps only its own use. Refusing every such read split the
-//     condition into a nest whose shared block the structurer duplicated into both negative
-//     branches, which is what `synthetic:ladder5` and `synthetic:ladidx2` measured. The two
+//   - a value defined in ^g is ALSO read past ^g, and a rule in `ARM_REREAD_GATES` refuses
+//     re-deriving it in the arm. A read past ^g is otherwise not a refusal: on verified IR it can
+//     only sit under the arm ^g's non-shared edge enters (^g dominates nothing else — the shared
+//     block is reached from ^h too), so the arm RE-DERIVES it (`armRereadCone`) and ^g keeps only
+//     its own use. Refusing every such read splits the condition into a nest whose shared block
+//     the structurer duplicates into both negative branches — `synthetic:ladder5` and
+//     `synthetic:ladidx2`. The two
 //     are different evidence: `ladidx2` is `if (a && (p->f & 0x7F) == 0x7F) { p->f &= 0x80; }`,
 //     which names `p->f` twice while agbcc reads it once and carries the register into the arm,
 //     so its copy is a LOAD; `ladder5`'s arm reuses an ADDRESS its test computed, a
@@ -608,12 +608,11 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         }
         // Every value ^g defines is consumed only by ^g itself, once, or re-derived in the arm —
         // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of
-        // the short circuit. Asked AFTER the two structural refusals above, so a census of
-        // `ARM_REREAD_GATES` counts only sites nothing cheaper had already refused: asked first,
-        // it credited `read-behind-effect` with void functions whose shared edges carry different
-        // dead `r0` values, which `sameArgs` refuses anyway. The verdict is a conjunction of pure
-        // tests, so the order moves no fold. And BEFORE tree ownership, so `onTreeOwned` keeps its
-        // meaning — the one thing in the way.
+        // the short circuit. Asked AFTER `sameArgs` and the negatability check, so a census of
+        // `ARM_REREAD_GATES` counts only sites nothing cheaper refuses — above `sameArgs` it would
+        // credit `read-behind-effect` with void functions whose shared edges carry different dead
+        // `r0` values. The verdict is a conjunction of pure tests, so the order moves no fold. And
+        // BEFORE tree ownership, so `onTreeOwned` keeps its meaning — the one thing in the way.
         const reread = armRereadCone(fn, g, otherEdge.block, preds, opts);
         if (!reread || !definedValuesStayLocal(fn, g, reread)) {
           continue;
@@ -1006,10 +1005,12 @@ function leavesALoop(fn: Fn, g: Block, arm: Block, preds: ReadonlyMap<Block, rea
   return false;
 }
 
-/** Whether analysis.ts would spell the arm's copy of a READ as a LOCAL rather than inline — asked
- *  with analysis.ts's OWN placement and barrier rules (structure/analysis.ts: `emitPos`, the
- *  single-render `isBarrier`, the multi-render `isWrite`), never a coarser copy of them, so the two
- *  levels read one rule. The copy sits at the arm's head, so every question is about the arm block.
+/** Whether analysis.ts would spell the arm's copy of a READ as a LOCAL rather than inline — a
+ *  MIRROR of analysis.ts's placement and barrier rules (structure/analysis.ts: `emitPos`, the
+ *  single-render `isBarrier`, the multi-render `isWrite`), not a coarser stand-in for them. It is
+ *  separate code, so the two can drift: the DIFFERENTIAL in the matching suite
+ *  (shortcircuit-branch.test.ts) is what holds them together. The copy sits at the arm's head, so
+ *  every question is about the arm block.
  *
  *  Only the copied READS are asked about. An address member of the cone (`add`, `gaddr`) re-derives
  *  at every use and carries nothing, however the address is spelled — so `p[i]` and `p[5]` get the
@@ -1094,10 +1095,9 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
 
 // ── THE RE-READ ADMISSION'S REFUSALS, AS DATA ─────────────────────────────────────────────────
 //
-// A table because its refusals had to be instrumented to be found — `definedValuesStayLocal`'s
-// escape clause by the round that built this admission, and every clause below by the review
-// rounds after it. Taken as an OPTIONAL parameter (`BranchShortCircuitOptions.armReread`), and
-// censused from outside core by `pnpm bench gates --pass arm-reread`, which swaps this pass's
+// A table so its refusals can be counted: taken as an OPTIONAL parameter
+// (`BranchShortCircuitOptions.armReread`), and censused from outside core by
+// `pnpm bench gates --pass arm-reread`, which swaps this pass's
 // entry in `PRE_RECOVERY_PASSES` (apps/benchmark/src/run/gate-census.ts). The table is asked only
 // at a site `sameArgs` and the negatability check have already passed, so a count is its own.
 //
@@ -1129,15 +1129,13 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
 // symbol map, both tiers (LBG and ProcessInputAndUpdateEntities default lift only): something
 // escapes ^g at a site on 10 rows. Against main the default source or the fan moves on 6 —
 // synthetic `ladder4`/`ladder5`/`ladidx1`/`ladidx2`, kleod `CountCollectedGems`, sa3
-// `EwramFree` — and on no other row; `nestinit` and `ucmp:mwcc_242_81` are refused here as they
-// were before the admission, and `CheckTileCollisionVertical` and
-// `TrySetCantSelectMoveBattleScript` are refused at every site and come out as main did. Before
-// `loop-exit`, `moves-a-read` and `read-behind-effect` existed, those two last rows moved too, and
-// each rule cost a probe outside the corpus a byte-match or a whole decompilation. Their prices
-// are on each rule. Scoping `read-behind-effect` to its compiler and asking it analysis.ts's own
-// question moved nothing in the corpus — default source and fan byte-identical on all 784
-// synthetic and 252 real rows, and the same verdict at every site — so what those two changes buy
-// is off the corpus, and the rule's comment says where.
+// `EwramFree` — and on no other row; `nestinit` and `ucmp:mwcc_242_81` are refused here and come
+// out as main did, and `CheckTileCollisionVertical` and `TrySetCantSelectMoveBattleScript` are
+// refused at every site and come out as main did too — held
+// there by `loop-exit`, `moves-a-read` and `read-behind-effect`, whose prices outside the corpus
+// are on each rule. `read-behind-effect`'s target scoping and its analysis.ts mirror move nothing
+// in the corpus — default source and fan byte-identical on all 784 synthetic and 252 real rows,
+// and the same verdict at every site — so what they buy is off the corpus, on the rule.
 export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
   {
     id: 'entry-arm',
@@ -1173,10 +1171,10 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
     // and the copy's result carries no home, so the local and its `[sp, #k]` traffic are spelled
     // away and the frame order `l3/slotorder.ts` reads loses that name — silently, the failure
     // `replaceAllUsesWith` (ir/core.ts) ships an equally inhabitant-less guard against. Those are
-    // the bytes it protects. NO INHABITANT in either tier or in any probe three rounds wrote, and
-    // stated rather than argued away: only Thumb stamps homes, and on agbcc a value spilled in ^g
-    // is one live across a call in the arm, which `read-behind-effect` refuses on its own unless
-    // the copy is a pure ADDRESS — the only shape where this rule alone would decide.
+    // the bytes it protects. NO INHABITANT in either tier or in any probe written against this
+    // table, and stated rather than argued away: only Thumb stamps homes, and on agbcc a value
+    // spilled in ^g is one live across a call in the arm, which `read-behind-effect` refuses on
+    // its own unless the copy is a pure ADDRESS — the only shape where this rule alone would decide.
     id: 'slot-home',
     why: 'the machine kept this value in a stack slot rather than re-deriving it',
     sound: false,
@@ -1188,11 +1186,11 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
     // loop header, whose out-edge is then this early-return arm, and loop recovery reads it as the
     // loop's exit and declines the latch's (`unrecovered back-edge`). The shape is not this
     // admission's — the same loop with an arm that re-reads nothing folds the same way and
-    // declines on main too — but this admission is what reached it: the synthetic
-    // CheckTileCollisionVertical shape went diff:11/57 → declined, and the real row's eight
-    // `/reread-globals` candidates all threw, which `bench run` does not report. Refusing the
-    // re-read at a loop exit keeps exactly the nest main produced there. No row this admission
-    // matches has its arm outside a loop ^g is in.
+    // declines on main too — but this admission is what reached it: a probe of kleod
+    // `CheckTileCollisionVertical`'s shape (not a corpus row) went diff:11/57 → declined, and the
+    // real row's eight `/reread-globals` candidates all threw, which `bench run` does not report.
+    // Refusing the re-read at a loop exit keeps exactly the nest main produced there. No row this
+    // admission matches has its arm outside a loop ^g is in.
     //
     // What it protects that no corpus row pins is the ordinary SEARCH LOOP: `for (i = 0; i < 8;
     // i++) { if (q[i] != 0 && (v = p[i]) > 5) { r[0] = v; return; } } fnB();` matches as the nest
@@ -1207,7 +1205,7 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
   {
     // `if (a) { v = p->f; if (b) use(v); }`: the target reads `p->f` on BOTH exits of `b`, before
     // `b`'s own reads; moved, it runs on one, after them. No row this admission matches moves
-    // anything (both rounds' census: every fire site's `drop` is empty), and moving the read cost
+    // anything (the census: every fire site's `drop` is empty), and moving the read cost
     // the probe `if (gA) { v = gP->f[5]; if (gQ == 3) sink(v); }` its MATCH (0/20 → 15/24) and
     // turned a device-register read into one on one path only. Moving a PURE original stays: it
     // re-derives at every use whatever this does.
@@ -1243,12 +1241,11 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
     //
     // WHICH copies analysis.ts materializes is asked with analysis.ts's own rules
     // (`readHeldAcrossEffect`): only the copied READS, never the address arithmetic beside them,
-    // and a store to a provably disjoint slot is no barrier. The first version counted ANY effect
-    // and seeded from every copied op, and that approximation had a price it did not state: 13
-    // agbcc probes it held at 3 to 8 points byte-match once it asks the real question — `r->x = 5;
-    // r->fl &= 0x80;`, `p[3] = 5; p[1] &= 0x80;`, `p[i] &= 0x80; fnB(); p[i] = 1;` among them — 8
-    // more score better, and none of 249 probes over five toolchains scores worse. What it still
-    // does not mirror is the RESIDUE above.
+    // and a store to a provably disjoint slot is no barrier. The coarser rule — ANY effect bars,
+    // seeded from every copied op — holds 13 agbcc probes at 3 to 8 points that byte-match under
+    // this one (`r->x = 5; r->fl &= 0x80;`, `p[3] = 5; p[1] &= 0x80;`, `p[i] &= 0x80; fnB(); p[i]
+    // = 1;` among them), scores 8 more worse, and scores none of 249 probes over five toolchains
+    // better. What this one does not mirror is the RESIDUE above.
     id: 'read-behind-effect',
     why: 'a re-read analysis.ts spells as a local costs a second load on a target whose compiler reloads one',
     sound: false,

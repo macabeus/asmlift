@@ -643,13 +643,15 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   `apps/benchmark/src/run/gate-census.ts`'s header).
 
   **What makes a pass censusable is a fact about its CALLER.** Sixteen passes in `packages/core/src`
-  take their table as a parameter; TWO of them can be censused, because `rank-axes.ts` and
-  `raise/pre-recovery.ts` hold their callers in mutable records (`PRE_FAN_PRODUCTS`,
-  `PRE_RECOVERY_PASSES` — `--pass unmerge` and `--pass arm-reread`), and the other fourteen are
-  reached through static imports, whose bindings are read-only (`retsink.sinkReturns = …` →
-  _"Cannot assign to read only property"_). So the cost of the next entry in that registry is a
-  seam, not a wrapper — and a pass that wants to be censusable should be given one when its caller
-  is written, which is cheap then and a redesign later. A RAISING pass has one already.
+  take their table as a parameter; FIVE of them can be censused, because `rank-axes.ts` and
+  `raise/pre-recovery.ts` hold their callers in mutable records — `/unmerge` in `PRE_FAN_PRODUCTS`,
+  and the branch short-circuit fold, `member-arrays`, `narrowlocal` and `paramwidth` in
+  `PRE_RECOVERY_PASSES` — and two are registered (`--pass unmerge`, `--pass arm-reread`). A pass
+  reached only through a static import has no seam — the binding is read-only
+  (`retsink.sinkReturns = …` → _"Cannot assign to read only property"_) — and `raise/retsink.ts` is
+  one: the seam is the record, not the directory. So for any other pass the cost of an entry in that
+  registry is a seam, not a wrapper — and a pass that wants to be censusable should be given one
+  when its caller is written, which is cheap then and a redesign later.
 
   **A census is FIRST REJECTIONS, which is not reach.** The other column is what an ablation MOVES,
   and the two disagree: of the six ablatable rules in `l3/unmerge.ts`, exactly one moves a row.

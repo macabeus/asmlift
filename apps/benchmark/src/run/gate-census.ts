@@ -20,22 +20,24 @@
 // A subcommand has none of the three by construction, and `cli.ts`'s own header is binding here:
 // "Every path the harness offers is a subcommand here — there are no other executable scripts."
 //
-// WHY THE REGISTRY BELOW HAS TWO ENTRIES. Sixteen passes in `packages/core/src` take their gate
+// WHAT PUTS A PASS IN THE REGISTRY BELOW. Sixteen passes in `packages/core/src` take their gate
 // table as an optional parameter, which is necessary and NOT sufficient: the census also needs a
-// CALLER-SIDE SEAM a process outside core can reach. `unmergeJoins` has one because `rank-axes.ts`
-// holds it in `PRE_FAN_PRODUCTS`, a mutable array of records, and the branch short-circuit fold's
-// RE-READ admission has one because `raise/pre-recovery.ts` holds every raising pass in
-// `PRE_RECOVERY_PASSES`, another. The other fourteen are reached through static import bindings,
-// which are read-only module-namespace properties — measured, not argued:
+// CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD holding the call. Five have
+// one — `unmergeJoins` in `rank-axes.ts`'s `PRE_FAN_PRODUCTS`, and four passes in
+// `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
+// `arm-reread`), `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a script outside
+// core swaps and the driver then calls. Being in `raise/` is not the seam — `raise/retsink.ts` is
+// not in that list — and a pass reached through a static import binding has none, because the
+// binding is a read-only module-namespace property — measured, not argued:
 //
 //     import * as retsink from '@asmlift/core/raise/retsink';
 //     retsink.sinkReturns = () => false;
 //     → TypeError: Cannot assign to read only property 'sinkReturns' of object '[object Module]'
 //
-// So a second entry costs whatever seam that pass's caller does not have yet, and the registry is
-// the place that will say so. `enumerateRanked` is deliberately the only driver: it is the same
-// entry `bench fan` and the runner use, so a census here counts the refusals the BENCHMARK'S
-// configuration produced rather than a rig's.
+// So the three unregistered passes with a seam cost an entry here, any other pass the seam its
+// caller does not have yet, and the registry is the place that will say so. `enumerateRanked` is
+// deliberately the only driver: it is the same entry `bench fan` and the runner use, so a census
+// here counts the refusals the BENCHMARK'S configuration produced rather than a rig's.
 import { enumerateRanked } from '@asmlift/cli/rank';
 import type { Gate } from '@asmlift/core/l3/gates';
 import { tallying } from '@asmlift/core/l3/gates';
@@ -110,7 +112,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // says, and a site can be counted once per lift that reaches it.
     tables: [['site', ARM_REREAD_GATES as readonly Gate<never>[]]],
     install: (w) => {
-      // BY ID, never by index, for the reason the entry above gives.
+      // BY ID, never by index, for the reason the `unmerge` entry gives.
       const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'branch-shortcircuit');
       if (!pass) {
         throw new Error("no PRE_RECOVERY_PASSES entry 'branch-shortcircuit' — the pass's caller-side seam moved");

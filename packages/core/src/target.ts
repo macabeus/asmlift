@@ -309,11 +309,13 @@ export interface TargetDescription {
     // local spelling, holding the register across the store and across the call. agbcc is the
     // odd one out of five, so the one agbcc-shaped claim that rested on it — raise/shortcircuit.ts's
     // `read-behind-effect`, "a copy analysis.ts spells as a local costs a load" — reads it here
-    // rather than running on every target, where on mwcc it refused two probes their byte-match.
+    // rather than running on every target — on mwcc it costs the probe named at PPC_MWCC's value
+    // its byte-match.
     // Read off the target by a raising pass (raise/pre-recovery.ts), not by the structurer.
     //
     // ABSENT ⇒ false: the refusal stands down, and a compiler opts IN on its own compiled pair. The
-    // four that measured false set it anyway, so absent means UNMEASURED rather than "no".
+    // three descriptions that measured false (four compilers) set it anyway, so absent means
+    // UNMEASURED rather than "no".
     reloadsLocalReread?: boolean;
   };
 }
@@ -406,8 +408,8 @@ export const MIPS_IDO: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
     switchAllowsNeqCase: false,
-    reloadsLocalReread: false, // MEASURED — the pair at the field compiles to one load of `p[1]`
-    // for every local spelling
+    // MEASURED — the pair at the field compiles to one load of `p[1]` for every local spelling.
+    reloadsLocalReread: false,
     // MEASURED `descending` (the earlier-declared spilled local takes the HIGHER offset) and NOT
     // SHIPPED. The probe is COMMITTED — `packages/core/test/corpus/probe-declrank.c` and its
     // reversed-declaration twin, with this compiler's objects beside them — and a test reads the

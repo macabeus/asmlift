@@ -143,11 +143,12 @@ Per commit:
   (`grep -n "export function tallying" packages/core/src/l3/gates.ts`) — `l3/unmerge.ts` is the
   worked example, and `pnpm bench gates --pass unmerge` is what reading it back looks like. The
   parameter is NECESSARY AND NOT SUFFICIENT: the census also needs a caller-side seam a process
-  outside core can reach, and fourteen of the sixteen passes that take a table today do not have one
-  (their callers are static imports, whose bindings are read-only). A RAISING pass already has one —
-  its record in `PRE_RECOVERY_PASSES` is mutable, which is how `--pass arm-reread` reaches the
-  branch short-circuit fold. Making a pass censusable is therefore a claim about its CALLER, not
-  about its table — `grep -n "WHY THE REGISTRY BELOW HAS TWO ENTRIES" apps/benchmark/src/run/gate-census.ts`.
+  outside core can reach — a mutable record holding the call, not a static import (whose bindings
+  are read-only). Five of the sixteen passes that take a table have one: `/unmerge` in
+  `PRE_FAN_PRODUCTS`, and every tabled pass in `PRE_RECOVERY_PASSES` (which is how `--pass
+  arm-reread` reaches the branch short-circuit fold) — not every pass in `raise/`. Making a pass
+  censusable is therefore a claim about its CALLER, not about its table —
+  `grep -n "WHAT PUTS A PASS IN THE REGISTRY" apps/benchmark/src/run/gate-census.ts`.
   A refusal that is a CONJUNCTION WITH BUY-BACKS cannot become a table at any price, and that
   decline is written down rather than re-derived
   (`grep -n "NOT CONVERTIBLE" packages/core/src/raise/const.ts`). Otherwise return a `refusals` map

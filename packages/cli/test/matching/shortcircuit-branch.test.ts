@@ -176,7 +176,7 @@ describe('a loop-exit connective folds, and the loop it un-declines stays recove
 // question about how analysis.ts spells it — inline, where agbcc merges it into the condition's
 // register, or as a local, which agbcc loads a second time. The first test is the compiler fact;
 // the rest are the two sides of the gate that rests on it. The positive ones fail with every
-// escape refused (main, before the admission); each nest fails with its own rule ablated
+// escape refused; each nest fails with its own rule ablated
 // (`read-behind-effect` the call and double use, `moves-a-read` the moved read, `loop-exit` the
 // search loop). The DIFFERENTIAL below is the property the rule exists for, run as a test.
 describe('an arm that re-reads what its second test loaded', () => {
@@ -232,7 +232,7 @@ describe('an arm that re-reads what its second test loaded', () => {
 
   test('a store to ANOTHER field of the same struct is no barrier, and the flat fold matches', () => {
     // analysis.ts inlines the copy past a provably disjoint store (`disjointConstSlots`), so agbcc
-    // merges it into the test's load. Counting every effect kept the nest here: 8/22.
+    // merges it into the test's load. Counting every effect keeps the nest here: 8/22.
     const b = best(
       'struct R { s32 x; u16 h; u8 fl; u8 k; };\n' +
         'void f(struct R *r, s32 a){ if (a && (r->fl & 0x7f) == 0x7f) { r->x = 5; r->fl &= 0x80; return; } fnB(); }',
@@ -243,8 +243,8 @@ describe('an arm that re-reads what its second test loaded', () => {
   });
 
   test('an INDEXED re-read folds like a constant-offset one — the address carries no read', () => {
-    // The copy re-derives `p + i` beside the load. Treating that `add` as a read refused this where
-    // `p[5]` folded (3/22).
+    // The copy re-derives `p + i` beside the load. Treating that `add` as a read refuses this where
+    // `p[5]` folds (3/22).
     const b = best(
       'void f(u8 *p, s32 i, s32 a){ if (a && (p[i] & 0x7f) == 0x7f) { p[i] &= 0x80; fnB(); p[i] = 1; return; } fnB(); }',
       { params: 3 },
@@ -394,7 +394,8 @@ describe('a local that re-reads the second test costs no load outside agbcc', ()
 
   test.runIf(ppcDockerGate('reread-mwcc'))('mwcc: a read held across a call folds flat, and the local matches', () => {
     // On agbcc this is the nest `read-behind-effect` keeps; on mwcc the rule stands down and the
-    // default lift spells `v0 = a0[3]; fnA(); a0[4] = v0;` — the target's own bytes (was 3/24).
+    // default lift spells `v0 = a0[3]; fnA(); a0[4] = v0;` — the target's own bytes (3/24 with the
+    // rule running here).
     const c =
       'extern void fnA(void); extern void fnB(void);\n' +
       'void f(u8 *p, s32 a){ if (a) { u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; } } fnB(); }';

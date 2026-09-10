@@ -7,7 +7,9 @@
 // a test. The refusals get one each too: every one of them is a way the fold would be WRONG, not a
 // missed opportunity, and a silently-relaxed guard is exactly what these pin down. The exception is
 // the RE-READ admission's fidelity rules (`ARM_REREAD_GATES` with `sound: false`), which refuse
-// where re-deriving costs bytes; their tests ablate the one rule and watch the fold go ahead.
+// where re-deriving costs bytes; `loop-exit`'s, `moves-a-read`'s and `read-behind-effect`'s tests
+// also ablate the one rule and watch the fold go ahead, `edge-arg`'s and `slot-home`'s assert the
+// refusal alone.
 import { describe, expect, test } from 'vitest';
 
 import {
@@ -354,9 +356,9 @@ describe('refusals', () => {
   });
 
   test('a value the ARM re-reads is re-derived there, and the condition folds', () => {
-    // `if (a || (p->f & 0x7F) != 0x7F) … else { p->f = … }`: gcc reads `p->f` once in the second
-    // test and carries the register into the arm. Refusing this split the connective into a nest
-    // and duplicated the shared block into both negative branches (synthetic:ladidx2).
+    // `if (a || (p->f & 0x7F) == 0x7F) … else { p->f = … }`: agbcc reads `p->f` once in the second
+    // test and carries the register into the arm. Refusing this splits the connective into a nest
+    // and duplicates the shared block into both negative branches (synthetic:ladidx2).
     const { fn, arm, load, store } = armReadsCondition();
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
     expect(connective(fn)).toBe('logic_or');
@@ -445,7 +447,8 @@ describe('refusals', () => {
   });
 
   // `read-behind-effect` is the one rule that reads the TARGET (`reloadsLocalReread`, agbcc's value):
-  // every test of it passes `AGBCC_RELOADS`, and the last one pins what the conjunct buys.
+  // every test of it passes `AGBCC_RELOADS` except 'the rule reads the TARGET', which pins what the
+  // conjunct buys.
   const AGBCC_RELOADS = { reloadsLocalReread: true } as const;
   const call = () => mkOp('call', { operands: [], results: [mkValue(T.unk(32))], attrs: { target: 'fnB' } });
   /** a store of the constant 5 to `base + off`, with the constant it stores */
@@ -470,7 +473,7 @@ describe('refusals', () => {
   });
 
   test('a READ the arm uses at its first effect, and only there, is still re-derived', () => {
-    // `p->f = v & …` stores what it reads, so the reader is not "behind" itself. What is held
+    // `p->f = v` stores what it reads, so the reader is not "behind" itself. What is held
     // across the effect is the reader AFTER it — here a store to ANOTHER cell of an unrelated base.
     const { fn, arm, store } = armReadsCondition();
     const other = mkValue(T.ptr(T.u(8)));
@@ -485,7 +488,7 @@ describe('refusals', () => {
   test("a store to a DISJOINT slot of the read's own base is not a barrier — analysis.ts inlines past it", () => {
     // `{ p->x = 5; p->fl &= 0x80; }`: `disjointConstSlots` (ir/alias.ts) clears the store, so
     // analysis.ts spells the copy inline and agbcc merges it into the test's register. Counting
-    // ANY effect cost `r->x = 5; r->fl &= 0x80;` its byte-match (8/22 → MATCH 0/18).
+    // ANY effect costs `r->x = 5; r->fl &= 0x80;` its byte-match (8/22 against MATCH 0/18).
     const { fn, arm, store, load } = armReadsCondition();
     arm.ops.splice(arm.ops.indexOf(store), 0, ...storeFive(load.operands[0], 4));
     expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(true);
@@ -513,9 +516,9 @@ describe('refusals', () => {
 
   test('an ADDRESS the copy re-derives carries no read, however it is spelled', () => {
     // `{ p[i] &= 0x80; fnB(); p[i] = 1; }`: the copy holds the load AND the `add` that forms
-    // `p + i`, and the store after the call reads only the address. Seeding from every copied op
-    // refused this where `p[5]` (no `add`) folded — the verdict flipped on how the address was
-    // spelled (3/22 → MATCH 0/20 once it does not).
+    // `p + i`, and the store after the call reads only the address and the index — no load.
+    // Seeded from every copied op, the rule refuses this where `p[5]` (no `add`) folds — the
+    // verdict flips on how the address is spelled (3/22 against MATCH 0/20).
     const { fn, arm, store, load } = armReadsCondition();
     const g = fn.blocks[1];
     const addr = mkValue(T.ptr(T.u(8)));
