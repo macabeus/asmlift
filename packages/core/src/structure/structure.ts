@@ -40,8 +40,9 @@
 // target language whose `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A
 // back to if-recovery, and arms that do not linearize into one chain — two arms falling into the
 // same sibling, or a fall into the `default:` — refuse in `chainArms`, which answers null.
+import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
-import { CAST_WIDTHS, EFFECTFUL_OPS } from '../ir/opcodes';
+import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, opSig } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import {
   BinOp,
@@ -1371,6 +1372,14 @@ export interface StructureOptions {
   // data. The provider already refuses to EMIT bitfield facts for a big-endian ELF; this is the
   // same boundary enforced on core's side, against a hand-built map that never went through it.
   littleEndian?: boolean;
+  // HARDWARE fact from TargetDescription.capabilities.deviceRegisters, threaded by
+  // `structureOptionsFor` like `littleEndian` above: the half-open byte window whose cells are
+  // hardware registers rather than objects a source declares. The structurer asks it the same
+  // question its four other readers ask — "would a source have spelled this address `volatile`" —
+  // so it may be approximate: it decides a SPELLING, not a memory model (that is
+  // `deviceMemoryWriters`, which no structurer rule reads). Used as a REFUSAL: absent, a dead read
+  // at a literal address is dropped.
+  deviceRegisters?: readonly [number, number];
   // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
   // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` axis, because the named
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
@@ -3719,6 +3728,132 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
   };
 
+  /** THE REFUSAL for the read half of `unreadResult`. TWO questions, and the statement is spelled
+   *  only where BOTH answer yes; the second is not implied by the first.
+   *
+   *   1. EVIDENCE — would a source plausibly have declared this access `volatile`? The answer has
+   *      to come from DATA: the target's declared device-register window
+   *      (`capabilities.deviceRegisters`) or the symbol map's own `volatile` on the named global.
+   *      `volatile` is a CORRECTNESS claim about an address, not a spelling preference, and
+   *      asserting one about ordinary RAM is a wrong answer rather than a wrong spelling.
+   *   2. REACHABILITY — will the spelling this access gets CARRY a qualifier, here or in some
+   *      candidate enumerated from this tree? The payoff of spelling a dead read is that a
+   *      qualifier can land on it and the differ can referee the pair; where none can, the
+   *      statement is a permanent bare deref in the DEFAULT source, which is what the playground
+   *      pins and what a decomp author copies. This question refuses far less than question 1:
+   *      `/volatile` qualifies an EWRAM or ROM address quite happily.
+   *
+   *  THE MAP ARM needs the read spelled through the global's own NAME, which is where the map's
+   *  qualifier lands — memAccess's two name-carrying arms for a global, the bare scalar
+   *  (`gStatus;`) and the declared struct MEMBER (`gState.ctl;`). A CAST spelling
+   *  (`((s32 *)&REG_DMA3SAD)[2]`) has thrown the qualifier away in the spelling itself, whatever
+   *  the declaration says. The member arm asks the CONTAINER's qualifier and not the member's own
+   *  (`SymbolStructField.volatile`), which looks backwards and is not: `memberQualsAllow` above
+   *  refuses to NAME a volatile member at all, so a `vu16` member is spelled `((s32 *)&gSym)[k]`
+   *  with nothing in the spelling for a lever to hold, while `volatile struct S gSym;` qualifies
+   *  every member and `gSym.ctl;` really is an observable read. Every other map spelling refuses —
+   *  `gPtr->member`, a bare-name array element, a multidimensional subscript — because
+   *  over-refusing costs a SPELLING and admitting wrongly costs an ANSWER, this file's standing
+   *  asymmetry.
+   *
+   *  THE LITERAL ARM needs the base value to have a use OTHER than this read: l3/volatileptr.ts
+   *  qualifies a pointer LOCAL, and l3/basecse.ts only mints that local for a base something else
+   *  also touches. A single-access read — `*(s32 *)0x04000200;`, the `REG_IF` acknowledge idiom,
+   *  and the shape a WRONG `returnsVoid` on a register accessor produces — has no local to qualify
+   *  and never will, however plainly its address is a device register. "Some other use" is
+   *  NECESSARY for that local, not sufficient; the gate states the necessary half.
+   *
+   *  ONLY `load` REACHES EITHER ARM. `aload` carries its index in `operands[1]` and has no `off`
+   *  attr at all, so both address queries would answer for the BARE BASE — `globalCellOf` resolves
+   *  a base and discards the index by construction (ir/alias.ts), `constAddressOf` sees the literal
+   *  with `off` defaulted to 0 — which admits `volatile s32 *p0 = (s32 *)0x04000000; p0[a0];`, a
+   *  qualified access at an address the declared window does not cover. The whitelist is by OPCODE
+   *  so a read op added later refuses until someone answers both questions for it.
+   *
+   *  THE ARMS DO NOT SHARE A POPULATION. With a symbol map the frontend spells a pool word as
+   *  `gaddr`, so `constAddressOf` returns null and the literal arm inhabits only `/raw-globals`,
+   *  which re-structures with NO map. The map arm is the default-source one, and a map-fed DMA
+   *  function spells no read at all — its wait-read is cast-spelled (see `BASECSE_GATES`'
+   *  `repeated-const-offset`, whose base local this refusal hands back). */
+  const volatileQualifiable = (op: Op): boolean => {
+    if (op.opcode !== 'load') {
+      return false;
+    }
+    const off = typeof op.attrs.off === 'number' ? op.attrs.off : 0;
+    const width = op.attrs.width as number;
+    const cell = globalCellOf(defs, op.operands[0], off);
+    if (cell) {
+      const si = symbols?.get(cell.name);
+      if (si === undefined) {
+        return false;
+      }
+      if (si.shape === 'struct') {
+        // the SAME find memAccess's struct arm makes, so the two cannot disagree about which
+        // accesses reach the `gSym.field` spelling this arm's qualifier rides on
+        const fld = symCtx
+          ?.fieldsOf(cell.name)
+          ?.find((f) => f.offset === cell.byte && f.size === width && !isArrayField(f) && !isBitfieldField(f));
+        return fld !== undefined && memberQualsAllow(fld, si.const, false) && si.volatile === true;
+      }
+      return cell.byte === 0 && scalarGlobals.has(cell.name) && si.volatile === true;
+    }
+    const window = opts.deviceRegisters;
+    if (!window) {
+      return false;
+    }
+    const addr = constAddressOf(defs, op.operands[0], off);
+    if (addr === null || addr < window[0] || addr >= window[1]) {
+      return false;
+    }
+    return (useSitesOf.get(op.operands[0]) ?? []).some((s) => s.op !== op);
+  };
+
+  /** Ops the `sideEffects` walk must SPELL even though nothing consumes their result — the
+   *  registry's own derived set (`SPELLED_WHEN_DEAD_OPS`), so the next op to acquire the property
+   *  needs no edit here, plus the address refusal above for the memory-read half.
+   *
+   *  A memory READ is not in `EFFECTFUL_OPS`, deliberately: ir/opcodes.ts calls a load deletable
+   *  when dead, because nothing observes a read nobody reads. That is the C claim. The COMPILER
+   *  claim points the other way — an optimizing compiler deletes every dead read it is allowed to
+   *  delete, so one still in the target is evidence the source's access was `volatile`, and
+   *  dropping it deletes an instruction the machine executed.
+   *
+   *  The statement earns nothing by itself: an unqualified `p[2];` compiles to the same bytes as
+   *  no statement at all (measured on agbcc, IDO and mwcc). What it does is put the access where a
+   *  qualifier can reach it — and `volatileQualifiable` is the condition under which one can.
+   *
+   *  WHICH LEVER REACHES IT, because "a qualifier" is two levers and only one of them does:
+   *  l3/volatileptr.ts's `/volatile` qualifies the pointer LOCAL the read is spelled through, and
+   *  that is the arm every match here rides. l3/volstore.ts's `/vol-store` mints `volatile` at an
+   *  inline cast STORE and never visits an `exprstmt`, so on a tree with no base local it emits the
+   *  cell qualified for its writes and plain for this read — a candidate that cannot reproduce the
+   *  surviving `ldr`. Wasted rather than wrong (the differ refuses it); teaching that lever the
+   *  read is a widening with its own window census to pay for, priced in its header.
+   *
+   *  TWO THINGS DELIBERATELY NOT DONE HERE, priced rather than left for a reader to rediscover.
+   *
+   *  1. THE LITERAL ARM IS A BACKWARDS DEFAULT AND ITS PREIMAGE IS NOT EMPTY. docs/level-tower.md
+   *     admits a default that reads the map backwards only when the backwards mapping is ITSELF a
+   *     function, and "a surviving dead read implies the source said `volatile`" is not quite one:
+   *     the other preimage is a function whose `returnsVoid` fact is WRONG, so its return value
+   *     arrived here as a dead read. The second-use clause removes the common shape of that (a bare
+   *     register accessor), leaving a function that both STORES to a device register and reads one
+   *     back — narrow, but not proven empty. The MAP arm has no such problem: `gStatus;` under
+   *     `extern volatile u32 gStatus;` compiles differently from its own absence, so the differ can
+   *     referee it. The clean fix — spell the read only in candidates that also qualify it, paired
+   *     the way `/livebase/volatile` already pairs — moves every device row's fan shape and wants
+   *     its own round and zero-flip gate over BOTH tiers.
+   *  2. THE REFUSAL IS SILENT. When this returns false for a `load`, the machine performed a read
+   *     that no statement stands for and nothing records the decision — against this project's own
+   *     "instrument the refusal" rule; `structure()` has no diagnostic sink to write into. What
+   *     exists instead is the ADMISSION side's zero point, `synthetic:dmareadback`, which fails
+   *     loudly if the rule stops firing. */
+  const unreadResult = (op: Op): boolean =>
+    SPELLED_WHEN_DEAD_OPS.has(op.opcode) &&
+    op.results.length > 0 &&
+    !useSitesOf.has(op.results[0]) &&
+    (opSig(op.opcode)?.reads !== true || volatileQualifiable(op));
+
   const sideEffects = (b: Block): Stmt[] => {
     const out: Stmt[] = [];
     for (const op of b.ops) {
@@ -3777,17 +3912,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           ),
           value: expr(op.operands[2]),
         });
-      } else if (EFFECTFUL_OPS.has(op.opcode) && op.results.length && !useSitesOf.has(op.results[0])) {
-        // An effectful op whose result nobody reads is still an execution. `store`/`astore` have no
-        // result and were handled above, so what reaches here is `call` and `opaque` — and an
+      } else if (unreadResult(op)) {
+        // An op whose result nobody reads is still an execution. `store`/`astore` have no result and
+        // were handled above, so what reaches here is `call`, `opaque` and a memory READ — and an
         // `opaque` missing from this walk is an instruction the frontend could not model
         // disappearing with no diagnostic, which is the one thing this project refuses to do.
         //
-        // Keyed on EFFECTFUL_OPS rather than the two opcode names: the deciding property is "has an
-        // effect the result does not account for", which is what the flag already means, so the next
-        // op to acquire it needs no edit here. Statement, not expression — `expr` on the result
-        // routes through `lowerDef`, already where `opaque` becomes the gap, so this reuses the SAME
-        // degradation a live opaque gets rather than inventing a second way to be loud.
+        // Statement, not expression — `expr` on the result routes through `lowerDef`, already where
+        // `opaque` becomes the gap, so this reuses the SAME degradation a live opaque gets rather
+        // than inventing a second way to be loud.
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
       } else if (materialize.has(op) && !absorbedLoads.has(op)) {
         // (an absorbed load's every consumer spells a named bitfield read — emitting its temp

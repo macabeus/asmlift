@@ -15,12 +15,14 @@
 //   • capabilities.flags → RESERVED, not yet read by any pass (PPC condition regs will).
 //   • capabilities.readOnlyAddressSinks → the Thumb frame-object audit: a frame address stored to
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
-//   • capabilities.deviceRegisters → four readers, and they ask ONE question — "would a source
+//   • capabilities.deviceRegisters → five readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
 //     approximate: the `/vol-store` lever's eligibility (l3/volstore.ts), rank.ts's volatility
 //     tie-break between two byte-identical spellings, the first half of `/unreduce`'s
-//     disjointness gate (l3/unreduce.ts), and the `/homesplit` pairing's refusal to leave a device
-//     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts).
+//     disjointness gate (l3/unreduce.ts), the `/homesplit` pairing's refusal to leave a device
+//     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), and
+//     the structurer's refusal to SPELL a dead memory read whose address no qualifier could ever
+//     reach (structure.ts `volatileQualifiable`, threaded through StructureOptions).
 //   • capabilities.deviceMemoryWriters → the MEMORY-MODEL question, which is a different one and
 //     may NOT be approximate: "can a write to this register make the DEVICE write ordinary
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
@@ -525,8 +527,9 @@ export const PPC_MWCC: TargetDescription = {
  *  are a SUPERSET of StructureOptions', not a bijection, and nothing may derive one from the other
  *  by enumerating keys. */
 export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean): StructureOptions {
-  // `littleEndian` is the one HARDWARE capability the structurer consumes (bitfield extract
-  // recognition is LSB-first); everything else is a compiler behavior.
+  // `littleEndian` and `deviceRegisters` are the HARDWARE capabilities the structurer consumes
+  // (bitfield extract recognition is LSB-first; the dead-read spelling refuses outside the device
+  // window); everything else is a compiler behavior.
   //
   // ONE FIELD IS NOT A STRAIGHT SPREAD, and this is where the difference belongs. A frame
   // direction has THREE states here — `ascending`, `descending`, and `'unknown'` meaning measured
@@ -538,6 +541,7 @@ export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean):
   return {
     returnsVoid,
     littleEndian: t.capabilities.endianness === 'little',
+    ...(t.capabilities.deviceRegisters ? { deviceRegisters: t.capabilities.deviceRegisters } : {}),
     ...behaviors,
     ...(spillSlotOrder === 'ascending' || spillSlotOrder === 'descending' ? { spillSlotOrder } : {}),
   };

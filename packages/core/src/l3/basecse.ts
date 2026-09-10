@@ -397,6 +397,25 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
     rejects: (c) => c.inLoop,
   },
   {
+    // A KNOWN COUNTEREXAMPLE, recorded here rather than fixed. `LIVEBASE_GATES` already names it —
+    // an MMIO wait or poll stores and re-reads ONE fixed offset through ONE register the whole
+    // time — so this gate rejects a base the target demonstrably held in a register, and the row
+    // it costs is carried by `/livebase`, which is this table minus the placement gates.
+    //
+    // NOT FIXED BY EXCLUDING A VALUELESS READ FROM THE CENSUS: that hides a real access to make
+    // the gate right for the wrong reason — the premise is falsified by the function's assembly,
+    // not by how the access is spelled. NOT FIXED BY EXEMPTING DEVICE-REGISTER BASES EITHER: that
+    // is the sound rule, and its blast radius is every MMIO row in the corpus against a gate this
+    // comment records was bought with a real match. It wants its own round and its own zero-flip
+    // gate.
+    //
+    // THE STRUCTURER'S DEAD-READ SPELLING (structure.ts `unreadResult`) INTERACTS, but not on the
+    // map-fed default: that spelling requires a qualifier to reach the access, a CAST spelling
+    // (`((s32 *)&REG_DMA3SAD)[2]`) carries none, and a map-fed DMA tree spells it exactly that
+    // way — so no statement is emitted there, offset 8 is touched once, and the base local
+    // survives. The inhabitant is the `/raw-globals` subtree, where the read IS spelled and this
+    // gate DOES demote; that subtree's own winner is a `/livebase` candidate, so nothing on the
+    // ranked path loses by it. Stated because the demotion is invisible from either file alone.
     id: 'repeated-const-offset',
     why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
     sound: false,

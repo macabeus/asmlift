@@ -5595,6 +5595,27 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { dmaback: { params: ['s32', 's32'], returnsVoid: true } },
   },
   {
+    // THE ZERO-POINT ROW for the structurer's dead-DEVICE-READ rule (structure.ts
+    // `volatileQualifiable`). Its neighbour `dmaback` carries the same `gDma[2];` read-back and
+    // does NOT exercise that rule: a dead read in the MIDDLE of a function is reaped by DCE long
+    // before the structurer walks it (`isDceSafe('load')` is true, correctly — nothing observes a
+    // read nobody reads). The rule's whole population is the read that is LAST, whose result is
+    // the suppressed phantom return value of a void function — analysis.ts drops the `ret` operand
+    // from the use registry, so it arrives at the walk unread. That is why this row's read is the
+    // final statement and why the loop is gone: without both, it tests a different thing.
+    // The rule's only other corpus inhabitant is a real-tier row in a local project checkout,
+    // which CI cannot run, so without this row nothing regress-detects the rule.
+    sym: 'dmareadback',
+    src:
+      'void dmareadback(s32 src, s32 dst, s32 ctl){\n' +
+      ' volatile u32 *d = (volatile u32 *)0x040000d4;\n' +
+      ' d[0] = src; d[1] = dst; d[2] = ctl; d[2]; }',
+    features: ['device-access', 'global'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmareadback(s32 src, s32 dst, s32 ctl);',
+    proto: { dmareadback: { params: ['s32', 's32', 's32'], returnsVoid: true } },
+  },
+  {
     sym: 'dmanest',
     src:
       'struct Bg { void *pTiles; void *pTilemap; };\n' +

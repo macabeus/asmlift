@@ -10,6 +10,7 @@ import {
   OPCODES,
   ORDER_SENSITIVE_OPS,
   REEVAL_UNSAFE_OPS,
+  SPELLED_WHEN_DEAD_OPS,
   isDceSafe,
 } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
@@ -185,8 +186,8 @@ test('composition: mwcc `!(x == 0)` folds through cntlzw-eq0 into a single `x !=
   verify(fn);
 });
 
-test('the four effect views over the registry name four different questions', () => {
-  // Each set answers one question about an op, and all four are derived from the signature flags
+test('the five effect views over the registry name five different questions', () => {
+  // Each set answers one question about an op, and all five are derived from the signature flags
   // rather than listed, so registering an opcode cannot leave one behind. Pinned because the
   // memberships OVERLAP, and the disagreements are the whole reason there is more than one set.
   expect([...EFFECTFUL_OPS].sort()).toEqual(['astore', 'call', 'opaque', 'store']);
@@ -213,6 +214,12 @@ test('the four effect views over the registry name four different questions', ()
   // on a path that skipped it is not — which is the only difference between the two sets.
   expect(ORDER_SENSITIVE_OPS.has('sdiv')).toBe(false);
   expect(REEVAL_UNSAFE_OPS.has('sdiv')).toBe(true);
+  // `SPELLED_WHEN_DEAD_OPS` asks "did the machine do something a source statement must stand for",
+  // a DIFFERENT question from "may this move" that today derives the same set. Pinned here rather
+  // than expressed as an alias, so a later registry change that makes them differ surfaces as a
+  // decision to make instead of following silently.
+  expect([...SPELLED_WHEN_DEAD_OPS].sort()).toEqual([...ORDER_SENSITIVE_OPS].sort());
+  expect(SPELLED_WHEN_DEAD_OPS).not.toBe(ORDER_SENSITIVE_OPS);
 });
 
 // ── an idiom that declares an operand order load-bearing ──────────────────────────────────────

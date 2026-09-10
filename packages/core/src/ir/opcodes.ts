@@ -237,11 +237,11 @@ export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries
 /** Ops with an observable side effect: the flag on the signature, derived rather than re-listed.
  *  `isDceSafe` asks the same question of the FLAG through `opSig` rather than of this set, so the
  *  two cannot disagree. The SET's own consumers are `HOIST_UNSAFE_OPS` below, structure.ts's
- *  `sideEffects` walk (an effectful op whose result nobody reads is still an execution),
+ *  block-purity tests (may this block be folded into a loop header, is this exit owned),
  *  analysis.ts's memory-write barrier, divpow2's bias block (which is DELETED rather than moved),
- *  and the idiom layer's de-sequencing guard (pattern/engine.ts). Three of them —  the
- *  `sideEffects` walk, the barrier and the bias block — each carried a hand-written copy of this
- *  membership, which is how the models drifted apart before. */
+ *  and the idiom layer's de-sequencing guard (pattern/engine.ts). Derived rather than re-listed
+ *  because three of those consumers each carried a hand-written copy of this membership, which is
+ *  how the models drifted apart. */
 export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
 );
@@ -283,8 +283,33 @@ export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aloa
 
 /** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
  *  observable) or a memory read (it answers whichever stores ran before it). The question a pass
- *  asks before moving a computation to another point on the SAME path. */
+ *  asks before moving a computation to another point on the SAME path. `SPELLED_WHEN_DEAD_OPS`
+ *  below asks a DIFFERENT question and derives, today, the same set. */
 export const ORDER_SENSITIVE_OPS: ReadonlySet<string> = new Set(
+  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
+    const sig = OPCODES[k] as OpSig;
+    return sig.effects || sig.reads;
+  }),
+);
+
+/** Ops the structurer must still SPELL when nothing consumes their result — an effect, or a memory
+ *  READ. Consumer: structure.ts's `sideEffects` walk.
+ *
+ *  The read half is the entry worth arguing, because `reads` documents the OPPOSITE about C — a
+ *  load nobody reads is deletable, nothing observes it. That is the C claim. The COMPILER claim
+ *  points the other way: an optimizing compiler deletes every dead read it is ALLOWED to delete, so
+ *  one still in the target is evidence the source's access was `volatile`. Membership here only
+ *  says the structurer may not drop the op silently; whether a `volatile` can actually reach the
+ *  access is a second, ADDRESS-level question the call site asks separately
+ *  (structure.ts `volatileQualifiable`), and a read it answers no to is dropped as before.
+ *
+ *  DERIVED FROM THE REGISTRY, not aliased to `ORDER_SENSITIVE_OPS`, even though the two are
+ *  extensionally identical today and `HOIST_UNSAFE_OPS` above does alias `EFFECTFUL_OPS`. An alias
+ *  makes two DIFFERENT questions incapable of ever differing, so the day one of them acquires an
+ *  opcode the other should not have, the edit lands on both silently. The identity is pinned by a
+ *  test instead (test/pattern.test.ts), where a future divergence surfaces as a decision to make
+ *  rather than a coupling nobody sees. */
+export const SPELLED_WHEN_DEAD_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => {
     const sig = OPCODES[k] as OpSig;
     return sig.effects || sig.reads;
