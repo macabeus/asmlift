@@ -154,3 +154,62 @@ describe('a loop-exit connective folds, and the loop it un-declines stays recove
     expect(best.source).not.toContain('ASMLIFT_ERROR');
   });
 });
+
+// The second test LOADS a value the arm reads again (raise/shortcircuit.ts `ARM_REREAD_GATES`). The
+// fold copies that read to the arm's head, and whether the copy compiles back to ONE load is a
+// question about how analysis.ts spells it — inline, where agbcc merges it into the condition's
+// register, or as a local, which agbcc loads a second time. The first test is the compiler fact;
+// the other four are the two sides of the gate that rests on it. The positive one fails with every
+// escape refused (main, before the admission: the nest scores 3); each of the three nests fails
+// with its own rule ablated (`read-behind-effect` the first two, `moves-a-read` the third).
+describe('an arm that re-reads what its second test loaded', () => {
+  const PROTOS = { fnB: { params: 0, returnsVoid: true }, sink: { params: 1, returnsVoid: true } };
+  const X = 'extern void fnB(void); extern void sink(s32);\n';
+  const best = (c: string, self: { params: number }) => {
+    const asm = compileTargetAsm(X + c);
+    return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+      prototypes: { f: { ...self, returnsVoid: true }, ...PROTOS },
+    }).best;
+  };
+
+  test('the compiler fact: an INLINE re-read is one load, a LOCAL is two', () => {
+    const loads = (arm: string) =>
+      compileTargetAsm(`void f(u8 *p, u8 *q, s32 a){ if (a && (p[1] & 0x7f) == 0x7f) { ${arm} } }`)
+        .split('\n')
+        .filter((l) => /ldrb\s+r\d+,\s*\[r\d+,\s*#0x1\]/.test(l)).length;
+    expect(loads('p[1] &= 0x80;')).toBe(1);
+    expect(loads('q[0] = 5; p[1] &= 0x80;')).toBe(1); // inline merges even past a store
+    expect(loads('{ u8 v = p[1]; p[2] = v; }')).toBe(2);
+    expect(loads('fnB(); p[2] = p[1];')).toBe(2);
+  });
+
+  test('re-derived inline, the ladder arm folds flat and matches — the nest scored 3', () => {
+    const b = best(
+      'void f(u8 *p, u8 *q, s32 a){ if (a && (p[1] & 0x7f) == 0x7f) { p[1] &= 0x80; q[0] = 5; return; } fnB(); }',
+      { params: 3 },
+    );
+    expect(b.score.match).toBe(true);
+    expect(b.source).toContain('&&');
+  });
+
+  test('a read the arm holds across a CALL keeps the nest, which matches', () => {
+    // Re-derived, the copy would be a local ahead of the call and a second load.
+    const b = best('void f(u8 *p, s32 a){ u8 v; if (a) { v = p[3]; if ((v & 0x7f) == 0x7f) { fnB(); sink(v); } } }', {
+      params: 2,
+    });
+    expect(b.score.match).toBe(true);
+  });
+
+  test('a read the arm uses TWICE keeps the nest, which matches', () => {
+    const b = best('void f(u8 *p, s32 a){ u8 v; if (a && ((v = p[3]) & 0x7f) == 0x7f) { sink(v); sink(v); } }', {
+      params: 2,
+    });
+    expect(b.score.match).toBe(true);
+  });
+
+  test('a read only the arm consumes is not moved under the second test, and matches', () => {
+    // The target reads p[5] before `b == 3`, on both of its exits.
+    const b = best('void f(u8 *p, s32 a, s32 b){ u8 v; if (a) { v = p[5]; if (b == 3) sink(v); } }', { params: 3 });
+    expect(b.score.match).toBe(true);
+  });
+});
