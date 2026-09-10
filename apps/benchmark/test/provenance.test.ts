@@ -5,7 +5,7 @@
 import type { BenchOutput } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
-import { codeDirtyFrom, codeDirtyPaths, combineProvenance } from '../src/provenance';
+import { codeDirtyFrom, codeDirtyPaths, combineProvenance, wentDirtyNotice } from '../src/provenance';
 import { checkTierProvenance } from '../src/report/merge';
 
 const tier = (asmlift?: { commit: string; dirty: boolean }): BenchOutput =>
@@ -103,5 +103,32 @@ describe('the run stamp survives the stitch', () => {
 
   test('a dirty ORCHESTRATOR sample still counts — this only ever adds evidence', () => {
     expect(combineProvenance([clean], { commit: 'aaaa', dirty: true })?.dirty).toBe(true);
+  });
+});
+
+// The DETECTIVE half. The merge refusal below is correct and 39 minutes late; the sample that
+// decides it is taken after every case, so a run that goes dirty is knowable within ~2 s — and one
+// round paid 2,420 s for measurement that had been worthless for 30 of its 40 minutes.
+describe('saying it out loud, at the moment it happens', () => {
+  test('the false -> true edge speaks, names the paths, and says the sample is sticky', () => {
+    const msg = wentDirtyNotice(false, true, ['packages/core/src/structure/structure.ts']);
+    expect(msg).toContain('THE TREE WENT DIRTY MID-RUN');
+    expect(msg).toContain('packages/core/src/structure/structure.ts');
+    expect(msg).toMatch(/STICKY/);
+    // The actionable half: reverting does not undo it, so the answer is to stop, not to fix.
+    expect(msg).toMatch(/STOP NOW/);
+    expect(msg).toContain('pnpm bench in-flight');
+  });
+
+  test('and NOTHING else does — 291 cases of a sticky true would bury the line that matters', () => {
+    expect(wentDirtyNotice(false, false, [])).toBeUndefined();
+    expect(wentDirtyNotice(true, true, ['a'])).toBeUndefined();
+  });
+
+  test('a long list is capped, and says how many it did not print', () => {
+    const msg = wentDirtyNotice(false, true, ['a', 'b', 'c', 'd', 'e', 'f', 'g']) ?? '';
+    expect(msg).toContain('in 7 path(s)');
+    expect(msg).toContain('…and 2 more');
+    expect(msg).not.toContain('  g');
   });
 });

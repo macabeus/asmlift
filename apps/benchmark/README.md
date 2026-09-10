@@ -171,6 +171,15 @@ run in ~2 min, a warm re-run in ~40 s):
 pnpm bench run                        # both tiers -> results/{synthetic,real}.json (intermediates)
 pnpm bench run --tier synthetic --only divc      # targeted subset
 pnpm bench run --serial               # in-process, for debugging (also how shard children run)
+pnpm bench in-flight                  # is a run measuring this worktree RIGHT NOW? exit 1 if so,
+                                      #   naming the record `bench run` writes while it works
+                                      #   (`/tmp/asmlift-bench-running-<uid>/<pid>.json`). Run it
+                                      #   before ANY phase that edits the tree: the provenance
+                                      #   sampler below is sticky, so one mid-run edit costs the
+                                      #   whole run. `bench run` reads the same register and
+                                      #   refuses a second run writing a tier file the live one is
+                                      #   writing, or a second FULL bench anywhere on this machine;
+                                      #   `--no-lock` is the sanctioned way past that
 pnpm bench:merge                      # = bench merge: tiers -> results/results.json, then publish
 pnpm bench publish                    # re-stage results.json into the web app alone
 pnpm bench:smoke                      # one trivial fn through every available toolchain

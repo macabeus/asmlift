@@ -277,7 +277,11 @@ on the corpus. A finding already triaged is not a new finding unless it falsifie
 ## Phase 6 — Audit the commentary you introduced
 
 Do this AFTER the adversarial rounds, never before: remediation rewrites code, and a comment
-written for the first version is the likeliest thing in the diff to have become false.
+written for the first version is the likeliest thing in the diff to have become false. And **not
+while a bench is in flight** — this phase rewrites files across the whole diff, the mid-run sampler
+is sticky, and a round paid 2,420 s for exactly this pair. **Run `pnpm bench in-flight` first**:
+exit 1 means a run is measuring this worktree, so wait for its `EXIT=` line before you touch a
+file.
 
 Inventory first — `git diff main HEAD`, added lines matching `^\+\s*(//|/\*|\*)`, counted per
 file. That number is the budget you are arguing about; core already runs ~31% comments.
@@ -349,6 +353,31 @@ phase whose other work does not depend on its answer, and read the log at the en
 until grep -q 'EXIT=' /tmp/<round>-bench.log; do sleep 30; done
 ```
 
+**What you keep working ON is constrained, and it is checkable.** `provenance.ts` samples git
+DURING the run and the sample is STICKY, so ONE edit — a comment audit, a `pnpm format`, an editor
+save, anywhere but the benchmark's own regenerated artifacts — stamps the whole run dirty and
+`bench:merge` throws the numbers away 39 minutes later. A round lost **2,420 s** to exactly that,
+auditing its comments beside its own gate bench. So a run in flight records itself, in
+`/tmp/asmlift-bench-running-<uid>/<pid>.json`. **Run `pnpm bench in-flight` before any phase that
+EDITS the tree, and read its exit code: 1 means a run is measuring this worktree — wait for its
+`EXIT=` line — and 0 means the tree is yours.** The work this background pattern is for is
+read-only: reading the diff, grepping the corpus, drafting the report. **The unit suites are NOT**
+— `packages/cli/test/offline/provenance.test.ts` writes an untracked `__provenance-probe__/` into
+`packages/` for the length of one test (it has to: it is asserting that the sampler can tell three
+dirty states apart), and a bench that samples inside that window is stamped dirty for good. Measured
+on this branch's own gate run. Run the suites before the bench or after it, not beside it. A
+run that was killed leaves its record behind and it reads STALE — that blocks nothing, and the next
+run sweeps it.
+
+**If you edit anyway, the run says so within ~2 s** — `[provenance] THE TREE WENT DIRTY MID-RUN`,
+on the run's own stderr, once, naming the paths. That line means the run is already lost: the
+sample is sticky and reverting does not undo it. Stop it, revert or commit, start it again.
+
+**`kill -TERM` does not stop a `bench run`** — measured: one sent SIGTERM 6 s in ran all 291 cases
+and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
+case, so no signal handler can run until it is done. `kill -9` is the stop that works, and the
+record it strands is stale.
+
 **Wait on a log marker, never on `pgrep -f "<pattern>"`** when the pattern also matches your own
 waiting shell — five waiter shells once deadlocked on each other for eight hours doing exactly
 that, long after the jobs they watched had finished.
@@ -356,7 +385,14 @@ that, long after the jobs they watched had finished.
 **Two full benches must never overlap on this machine.** It has 10 cores, the run fans 8 shards,
 and a ranked run takes `--jobs 6`; a bench measured **2704 s against a neighbour versus 1800 s
 solo**. Worse than slow: a shard killed by a neighbour writes a partial tier with **no error line**,
-and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line.
+and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line. **`bench run`
+enforces this**: the register is machine-wide, so a second FULL bench is refused while one is
+running in ANY worktree, and a second run in THIS worktree is refused when it writes a tier file
+the live one is writing. What is still allowed is the scoped dev loop — a `--tier synthetic --only
+<sym>` probe beside a background `--tier real`, here or beside a neighbour's full bench — because a
+15 s probe is not what fans 8 shards. If you have a real reason to measure anyway, `--no-lock` says
+so out loud and leaves every other record alone; **never `rm` a record you did not write**, which
+is the one move that silently unprotects someone else's run.
 
 ---
 

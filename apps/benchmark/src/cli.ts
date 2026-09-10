@@ -2,7 +2,12 @@
 // subcommand here — there are no other executable scripts.
 //
 //   pnpm bench run [--jobs N] [--tier synthetic|real|both] [--only s] [--project p]
-//                  [--serial] [--shard i/N] [--toolchain id]
+//                  [--serial] [--shard i/N] [--toolchain id] [--no-lock]
+//   pnpm bench in-flight                 # is a `bench run` measuring this worktree RIGHT NOW?
+//                                        # exit 1 if so, naming the record, its pid, argv and age.
+//                                        # Run it before ANY phase that edits the tree: the
+//                                        # provenance sampler is sticky, so one mid-run save costs
+//                                        # the whole run (see run/lock.ts)
 //   pnpm bench repro <sym|id> [--out <dir>] [--tool asmlift|m2c] [--run]
 //                                        # THE vehicle that reproduces one published row: writes
 //                                        # the row's own generated script with this machine's
@@ -73,8 +78,9 @@ import { RESULTS_DIR } from './config';
 import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
+import { acquireBenchLock, benchLockStatus } from './run/lock';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
-import { preflightRefusals } from './run/preflight';
+import { preflightRefusals, runIsWholeTier, runTakesTheBenchLock } from './run/preflight';
 import { parseShard, runCases } from './run/runner';
 import { smoke } from './run/smoke';
 import { verify } from './run/verify';
@@ -90,6 +96,11 @@ const { values: opts, positionals } = parseArgs({
     toolchain: { type: 'string' },
     shard: { type: 'string' },
     serial: { type: 'boolean', default: false },
+    // run only: the sanctioned way past the concurrent-run refusal (run/lock.ts). It skips the
+    // verdict AND the record, so this run is invisible to the next one — which is the price, said
+    // out loud on stderr. It exists so that the way past a refusal is not `rm`ing a record someone
+    // else's live run depends on.
+    'no-lock': { type: 'boolean', default: false },
     build: { type: 'boolean', default: false },
     out: { type: 'string' },
     'project-root': { type: 'string' },
@@ -171,16 +182,19 @@ switch (command) {
       );
       process.exit(2);
     }
-    // BEFORE anything that costs: the two conditions that make a run's numbers worthless are both
-    // decidable in under a second. See run/preflight.ts.
-    const preflight = preflightRefusals({
+    // BEFORE anything that costs: the conditions that make a run's numbers worthless — or that
+    // make starting it at all a mistake — are all decidable in under a second. ONE options object,
+    // read by every verdict and by the record below, because two hand-kept copies of it drift.
+    // See run/preflight.ts.
+    const runOpts = {
       tiers,
       only: opts.only,
       project: opts.project,
       toolchain: opts.toolchain,
       shard: opts.shard,
       serial: opts.serial,
-    });
+    };
+    const preflight = preflightRefusals(runOpts, { ignoreLock: opts['no-lock'] });
     for (const w of preflight.warnings) {
       console.error(`${w}\n`);
     }
@@ -188,9 +202,26 @@ switch (command) {
       console.error(preflight.refusals.join('\n\n'));
       process.exit(1);
     }
-    // Deliberately NOT folded into `preflightRefusals`: that function's two verdicts are each
-    // gated on a predicate (whole-tier / touches-real), while the m2c pin applies to EVERY run,
-    // shard children and `--only` included, and throws its own remediation line.
+    // Then record that this worktree is being measured, so the phases that EDIT it — and the next
+    // `bench run` on this machine — can tell. Taking the record is a WRITE and not a verdict,
+    // which is why it is here and the refusal is in preflight.ts; which invocations are exempt is
+    // that file's `runTakesTheBenchLock`.
+    if (runTakesTheBenchLock(runOpts)) {
+      if (opts['no-lock']) {
+        console.error(
+          '[bench lock] --no-lock: this run takes NO record, so nothing will stop an agent editing\n' +
+            '             the tree under it, and the next `bench run` cannot see it. You said so.\n',
+        );
+      } else {
+        acquireBenchLock(`bench ${process.argv.slice(2).join(' ')}`, {
+          tiers,
+          whole: runIsWholeTier(runOpts),
+        });
+      }
+    }
+    // Deliberately NOT folded into `preflightRefusals`: each of that function's verdicts is gated
+    // on a predicate (takes-a-record / whole-tier / touches-real), while the m2c pin applies to
+    // EVERY run, shard children and `--only` included, and throws its own remediation line.
     const { assertM2cPinned } = await import('./eval/m2c');
     assertM2cPinned();
     if (opts.serial) {
@@ -271,6 +302,14 @@ switch (command) {
       }
       await orchestrate({ jobs, tiers, only: opts.only, project: opts.project, toolchain: opts.toolchain });
     }
+    break;
+  }
+  case 'in-flight': {
+    // The read every tree-EDITING phase makes: is a bench measuring this worktree right now?
+    // Exits 1 while one is, naming the record. Not called `lock`, because it takes nothing and
+    // holds nothing — `bench run` is what writes a record, and a reader who typed a verb would
+    // reasonably expect this to reserve the tree for them. See run/lock.ts.
+    process.exit(benchLockStatus());
     break;
   }
   case 'repro': {
@@ -512,7 +551,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|repro|target|fan|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|in-flight|repro|target|fan|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }

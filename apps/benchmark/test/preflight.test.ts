@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import type { BenchLockState } from '../src/run/lock';
 import {
   CPP_TOOLCHAINS,
   LOCAL_ENV_FILE,
@@ -17,6 +18,7 @@ import {
   preflightRefusals,
   probeCpp,
   runIsWholeTier,
+  runTakesTheBenchLock,
   runUsesHostCpp,
 } from '../src/run/preflight';
 
@@ -193,6 +195,75 @@ describe('the whole preflight, against a real throwaway checkout', () => {
         r.includes('differs from HEAD'),
       ),
     ).toBe(false);
+  });
+});
+
+// The THIRD verdict, and the one whose answer changes while you read it: is another `bench run`
+// already measuring something? Tested here, through the injected `lockState`, and not by grepping
+// `cli.ts` for the call — a grep on source text passes for a file that no longer works and fails
+// for one that was correctly refactored. `bench-lock.test.ts` owns the register on disk; this owns
+// the wiring, which is the thing a future edit could quietly drop.
+describe('the concurrent-run verdict', () => {
+  const ok = () => ({ ok: true, how: 'ok' });
+  const MINE = '/tmp/pretend-worktree-a';
+  const THEIRS = '/tmp/pretend-worktree-b';
+
+  const live = (over: Partial<{ tiers: string[]; whole: boolean; root: string }> = {}): (() => BenchLockState) => {
+    const record = {
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      command: 'bench run',
+      tiers: ['synthetic'],
+      whole: true,
+      root: MINE,
+      ...over,
+    };
+    return () => ({ state: 'held', path: '/tmp/pretend-register', records: [record] });
+  };
+  const free = (): BenchLockState => ({ state: 'free', path: '/tmp/pretend-register' });
+
+  /** The verdicts of a run in MINE, with the register saying whatever the case says. */
+  const refusalsFor = (
+    opts: Parameters<typeof preflightRefusals>[0],
+    lockState: () => BenchLockState,
+    over: Parameters<typeof preflightRefusals>[1] = {},
+  ) => preflightRefusals(opts, { repoRoot: MINE, probe: ok, lockState, ...over }).refusals;
+
+  test('a second run on a tier the live one is writing is refused, here, before anything costs', () => {
+    const refusals = refusalsFor({ tiers: ['synthetic'] }, live());
+    expect(refusals.some((r) => r.includes('bench run REFUSED') && r.includes('results/synthetic.json'))).toBe(true);
+    expect(refusalsFor({ tiers: ['synthetic'] }, free)).toEqual([]);
+  });
+
+  test('the scoped dev loop on the OTHER tier is not refused', () => {
+    expect(refusalsFor({ tiers: ['real'], only: 'dmaback' }, live())).toEqual([]);
+  });
+
+  test('a second FULL bench is refused even from another worktree; a scoped probe is not', () => {
+    expect(refusalsFor({ tiers: ['real'] }, live({ root: THEIRS, tiers: ['real'] })).length).toBe(1);
+    expect(refusalsFor({ tiers: ['real'], only: 'dmaback' }, live({ root: THEIRS, tiers: ['real'] }))).toEqual([]);
+  });
+
+  test('a SHARD CHILD is exempt — eight of them would refuse each other', () => {
+    const child = { tiers: ['synthetic' as const], shard: '0/8', serial: true };
+    expect(runTakesTheBenchLock(child)).toBe(false);
+    expect(refusalsFor(child, live())).toEqual([]);
+  });
+
+  test('`--no-lock` is the sanctioned door past it, and past NOTHING else', () => {
+    // It exists so that the way past a wrong refusal is not `rm`ing a record a live run depends on.
+    // It must not also switch off the dirty-tree or `cpp` verdicts, which is what a blanket
+    // "skip the preflight" flag would have become.
+    expect(refusalsFor({ tiers: ['synthetic'] }, live(), { ignoreLock: true })).toEqual([]);
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-preflight-nolock-'));
+    execFileSync('git', ['-C', dir, 'init', '-q']);
+    writeFileSync(join(dir, '.envrc.probe'), 'export FOO=1\n');
+    const both = preflightRefusals(
+      { tiers: ['real'] },
+      { repoRoot: dir, probe: ok, lockState: live({ root: dir }), ignoreLock: true },
+    ).refusals;
+    expect(both.length).toBe(1);
+    expect(both[0]).toContain("working tree's code differs");
   });
 });
 

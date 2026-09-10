@@ -31,11 +31,16 @@ Key facts about the setup (verified 2026-08-05):
    "before" side is not what main published. `pnpm bench baseline <sym>` reads a single row straight
    from `origin/main`, and [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) is the
    rule for which of two numbers wins.
-3. Write the new sha to `apps/benchmark/M2C_COMMIT`; `git -C ../m2c checkout <NEW>`.
+3. Write the new sha to `apps/benchmark/M2C_COMMIT`; `git -C ../m2c checkout <NEW>`. **`pnpm bench in-flight`
+   first**: exit 1 means a bench is measuring this worktree, and any save — this file included —
+   stamps its whole run dirty, stickily. Wait for its `EXIT=` line.
 4. Smoke-test the new m2c under the local Python before the full run: `python3 m2c.py --help`
    (upstream occasionally breaks on newer Pythons; catch it in 2 seconds, not mid-run).
 5. `pnpm bench run` (background it), then `pnpm bench merge` — `run` only writes the per-tier
    files; `merge` produces `results.json` and republishes the web data. Both steps are required.
+   While that run is in flight the tree is not yours to edit: `pnpm bench in-flight` before you
+   touch a file, and if you edit anyway the run prints `[provenance] THE TREE WENT DIRTY MID-RUN`
+   within ~2 s — that means it is already lost, so stop it rather than finish it.
 
 ## Phase 2 — Attribute every moved row
 

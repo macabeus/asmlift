@@ -12,6 +12,8 @@
 // `report/merge.ts` refuses to merge a tier whose stamp disagrees with merge time. The two
 // samples together cover the whole window.
 //
+// AND IT SAYS SO AT THE TRANSITION, on the run's own stderr — see `wentDirtyNotice`.
+//
 // STICKY, and that is the point rather than an optimization: a mutation that appears and is
 // reverted mid-run must still be reported, so once a sample sees a dirty tree this process reports
 // dirty for the rest of its life. Sampling is rate-limited (`flush()` runs after every case, and
@@ -124,11 +126,51 @@ export function asmliftProvenance(): { commit: string; dirty: boolean } | undefi
     return sticky;
   }
   const status = spawnSync('git', ['-C', REPO_ROOT, 'status', '--porcelain'], { encoding: 'utf8' });
+  const wasDirty = sticky?.dirty ?? false;
   sticky = {
     commit: head.stdout.trim(),
-    dirty: (sticky?.dirty ?? false) || status.status !== 0 || codeDirtyFrom(status.stdout),
+    dirty: wasDirty || status.status !== 0 || codeDirtyFrom(status.stdout),
   };
+  const notice = wentDirtyNotice(wasDirty, sticky.dirty, status.status === 0 ? codeDirtyPaths(status.stdout) : []);
+  if (notice !== undefined) {
+    console.error(notice);
+  }
   return sticky;
+}
+
+/** SAY SO, at the transition, once.
+ *
+ *  The verdict this samples for is already correct without a word printed: `merge` refuses the
+ *  tier and `stale-check` refuses to publish it. What it is not is TIMELY — the round finds out at
+ *  `bench:merge`, and the incident that cost the most was 2,420 s of measurement that had already
+ *  been worthless for 30 of its 40 minutes. The sample that decides it is taken after every case,
+ *  so the loss is knowable within ~2 s and was simply never said aloud.
+ *
+ *  DETECTIVE, where `run/lock.ts` is preventive, and it does not replace it: the register only
+ *  works if whoever edits the tree asks first, while this fires whatever the cause — an agent that
+ *  never read a brief, an editor autosave, a neighbour worktree's `pnpm format` sweeping this one.
+ *  It fires in the SHARD CHILDREN too, which is where the samples with real resolution are taken:
+ *  `orchestrate.ts` spawns them with stderr `inherit`, so the line reaches the run's own log.
+ *
+ *  Sticky means this can only happen once per process, so there is no rate limit to add. */
+export function wentDirtyNotice(wasDirty: boolean, nowDirty: boolean, paths: readonly string[]): string | undefined {
+  // The EDGE, not the state: sticky means `nowDirty` stays true for the rest of the process, and a
+  // line per case for 291 cases would bury the one that says what happened.
+  if (wasDirty || !nowDirty) {
+    return undefined;
+  }
+  const shown = paths.slice(0, 5);
+  return [
+    '',
+    `[provenance] THE TREE WENT DIRTY MID-RUN, in ${paths.length || 'some'} path(s):`,
+    ...shown.map((p) => `  ${p}`),
+    ...(paths.length > shown.length ? [`  …and ${paths.length - shown.length} more`] : []),
+    'This sample is STICKY: every tier this process writes is now stamped dirty, `bench:merge`',
+    'will refuse it, and reverting the edit does not undo that. STOP NOW rather than at the end —',
+    'revert or commit, then start the run again. (`pnpm bench in-flight` before an edit is the',
+    'check that would have prevented this.)',
+    '',
+  ].join('\n');
 }
 
 /** The RUN's provenance for a tier that was STITCHED from shard part files.

@@ -173,6 +173,11 @@ exclusions) get written down for their own future family, not smuggled into this
 
 ## Phase 6 — Author the rows
 
+This phase writes files, and the mid-run provenance sampler counts every path but the benchmark's
+own regenerated artifacts — so **run `pnpm bench in-flight` first**: exit 1 means a bench is
+measuring this worktree and one save stamps its whole run dirty, stickily. Wait for that run's
+`EXIT=` line.
+
 One family, one block comment, modeled on the existing families in `dataset/synthetic.ts` (the
 uninit-local block is the reference): what each row isolates, which are controls, and an
 attribution line for every decline naming its first blocker. Constraints learned the hard way:
@@ -231,7 +236,9 @@ attribution line for every decline naming its first blocker. Constraints learned
    attribution signal, not your shell: the preflight has already ruled that out.**
 2. Expect the two tag-vocabulary tests to fail BETWEEN adding the tag and merging the artifacts;
    they must pass after. `npx vitest run`, `pnpm test:matching`, `pnpm typecheck`,
-   `pnpm lint`, `pnpm format` check.
+   `pnpm lint`, `pnpm format` check. **`pnpm format` is `prettier --write .`, a tree WRITE**, and
+   step 1 above is a bench you were told to background: `pnpm bench in-flight` first, exit 1 means
+   wait.
 3. Artifacts (`apps/benchmark/results/results.json`, both web copies) regenerated at the source
    commit's HEAD (`meta.asmlift.dirty` must be false) and committed separately — **after** your
    final rebase, as the last commit. A rebase rewrites the commit the artifact's stamp names, and
@@ -289,6 +296,31 @@ phase whose other work does not depend on its answer, and read the log at the en
 until grep -q 'EXIT=' /tmp/<round>-bench.log; do sleep 30; done
 ```
 
+**What you keep working ON is constrained, and it is checkable.** `provenance.ts` samples git
+DURING the run and the sample is STICKY, so ONE edit — a comment audit, a `pnpm format`, an editor
+save, anywhere but the benchmark's own regenerated artifacts — stamps the whole run dirty and
+`bench:merge` throws the numbers away 39 minutes later. A round lost **2,420 s** to exactly that,
+auditing its comments beside its own gate bench. So a run in flight records itself, in
+`/tmp/asmlift-bench-running-<uid>/<pid>.json`. **Run `pnpm bench in-flight` before any phase that
+EDITS the tree, and read its exit code: 1 means a run is measuring this worktree — wait for its
+`EXIT=` line — and 0 means the tree is yours.** The work this background pattern is for is
+read-only: reading the diff, grepping the corpus, drafting the report. **The unit suites are NOT**
+— `packages/cli/test/offline/provenance.test.ts` writes an untracked `__provenance-probe__/` into
+`packages/` for the length of one test (it has to: it is asserting that the sampler can tell three
+dirty states apart), and a bench that samples inside that window is stamped dirty for good. Measured
+on this branch's own gate run. Run the suites before the bench or after it, not beside it. A
+run that was killed leaves its record behind and it reads STALE — that blocks nothing, and the next
+run sweeps it.
+
+**If you edit anyway, the run says so within ~2 s** — `[provenance] THE TREE WENT DIRTY MID-RUN`,
+on the run's own stderr, once, naming the paths. That line means the run is already lost: the
+sample is sticky and reverting does not undo it. Stop it, revert or commit, start it again.
+
+**`kill -TERM` does not stop a `bench run`** — measured: one sent SIGTERM 6 s in ran all 291 cases
+and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
+case, so no signal handler can run until it is done. `kill -9` is the stop that works, and the
+record it strands is stale.
+
 **Wait on a log marker, never on `pgrep -f "<pattern>"`** when the pattern also matches your own
 waiting shell — five waiter shells once deadlocked on each other for eight hours doing exactly
 that, long after the jobs they watched had finished.
@@ -296,7 +328,14 @@ that, long after the jobs they watched had finished.
 **Two full benches must never overlap on this machine.** It has 10 cores, the run fans 8 shards,
 and a ranked run takes `--jobs 6`; a bench measured **2704 s against a neighbour versus 1800 s
 solo**. Worse than slow: a shard killed by a neighbour writes a partial tier with **no error line**,
-and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line.
+and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line. **`bench run`
+enforces this**: the register is machine-wide, so a second FULL bench is refused while one is
+running in ANY worktree, and a second run in THIS worktree is refused when it writes a tier file
+the live one is writing. What is still allowed is the scoped dev loop — a `--tier synthetic --only
+<sym>` probe beside a background `--tier real`, here or beside a neighbour's full bench — because a
+15 s probe is not what fans 8 shards. If you have a real reason to measure anyway, `--no-lock` says
+so out loud and leaves every other record alone; **never `rm` a record you did not write**, which
+is the one move that silently unprotects someone else's run.
 
 ---
 
