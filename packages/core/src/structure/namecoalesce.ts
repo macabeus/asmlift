@@ -52,10 +52,15 @@
 // still holds the value the iteration started with — `structure.ts` refuses to let a merge outside
 // the loop adopt it for exactly that reason (`carriesPreUpdate`), and refuses to let an inner
 // loop's variable adopt an enclosing one's, which the inner loop would then mutate every iteration.
-// `loop-escape` restates both over classes: a class holding a loop header's parameter may absorb
-// only values the loop's body contains. Two loops' variables always fail it — a nested pair because
-// the outer variable's home is outside the inner body, a disjoint pair in both directions — so the
-// enclosing-loop rule needs no gate of its own.
+// That second refusal has ONE exception there, `enclosingCarrierName`: a value the frontend's
+// write-order record shows crossing into the inner loop in the register it already had, and — its
+// `carriedByBothLoops` clause, this gate's premise stated per site — one that every outer back
+// edge hands back as a value the inner loop carries. So the walk can already hand this pass a class
+// holding BOTH headers' parameters; what it cannot hand it is a class the outer loop overwrites
+// behind the inner one's back. `loop-escape` restates both refusals over classes: a class holding
+// a loop header's parameter may absorb only values the loop's body contains. Two loops' variables
+// always fail it — a nested pair because the outer variable's home is outside the inner body, a
+// disjoint pair in both directions — so the enclosing-loop rule needs no gate of its own here.
 //
 // It is BLUNTER than the rule it restates: `carriesPreUpdate` branches on which emitter owns the
 // latch and names four shapes that are not the hazard, none of which this has. It IS load-bearing,
@@ -63,9 +68,9 @@
 // and regresses none (#55), and `nestedloop` is `int s = 0; … s += i*j`, one accumulator the pass
 // emits as two — but with it dropped, two generated functions COMPUTE SOMETHING ELSE: an inner
 // loop's variable adopts the enclosing loop's carrier and then overwrites it every iteration. Both
-// are frozen as literal IR in `namecoalesce.test.ts`, which asserts the escape copy the gate forces
-// on one side and its absence on the other. A byte score cannot see that failure, which is the
-// whole reason that fuzz exists. So the 12 rows are real and so is the hazard, and taking them
+// are frozen as literal IR in `test/loop-escape-witnesses.ts`, and `namecoalesce.test.ts` asserts
+// the escape copy the gate forces on one side and its absence on the other. A byte score cannot
+// see that failure, which is the whole reason that fuzz exists. So the 12 rows are real and so is the hazard, and taking them
 // still needs `carriesPreUpdate` lifted to name classes: the class-level closure, since a merge can
 // reach a loop variable's name through an edge that carried no loop variable at all.
 //

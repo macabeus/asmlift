@@ -9,7 +9,8 @@
 // The SSA generator and the tree interpreter below are the same three functions two differential
 // fuzzes need — `namecoalesce-fuzz` for the `/merge-names` axis and `carrier-name-fuzz` for the
 // naming walk's own admission table. They ask different questions of the same oracle: generate a
-// function, structure it two ways, interpret both, and compare what they observed.
+// function, structure it two ways, interpret both, and compare what they observed. `irTraceOf` is
+// the oracle for the question neither can ask — whether EVERY spelling is wrong the same way.
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
@@ -55,7 +56,7 @@ export function mulberry32(seed: number): () => number {
  *  arguments: a skip edge that lands inside a loop body from outside makes the region irreducible,
  *  and what depth 2 exists to reach is the value that is carried by BOTH loops — the accumulator a
  *  nested `for` writes, whose home is outside the inner loop it is nevertheless updated in. */
-export function generateSsaFn(seed: number, depth: 0 | 1 | 2): Fn {
+export function generateSsaFn(seed: number, depth: 0 | 1 | 2, readsOuter = false): Fn {
   const rnd = mulberry32(seed);
   const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
   const nBlocks = depth === 2 ? 6 + Math.floor(rnd() * 2) : 4 + Math.floor(rnd() * 3);
@@ -81,9 +82,18 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2): Fn {
   const loopHeader = depth === 1 ? 1 + Math.floor(rnd() * (nBlocks - 2)) : -1;
   // depth 2: ^bb1 outer header, ^bb2 inner header, ^bb3 inner latch, ^bb4 outer latch
   const innerHeader = depth === 2 ? 2 : -1;
+  // `readsOuter` (depth 2 only): the blocks inside the outer loop may also read what the OUTER
+  // header defined — its params and ops, which dominate them — so a value carried by the outer loop
+  // can still be live after the inner one ran. Not the tail, and not the inner header's values: a
+  // read of a loop header's param past its own loop is a shape the do-while emitter declines. Off by
+  // default, and then `avail` and the stream are exactly what they were — the fuzz arms state their
+  // measurements per SEED (`carrier-name-fuzz`'s 1472 and 1062), which a moved stream repoints
+  // silently. The IR witnesses in `loop-escape-witnesses.ts` are frozen precisely so they do not.
+  const outerDefs: Value[] = [];
   for (let i = 0; i < nBlocks; i++) {
     const b = blocks[i];
-    const avail = [...entryVals, ...b.params];
+    const insideOuter = readsOuter && depth === 2 && i > 1 && i <= innerHeader + 2;
+    const avail = [...entryVals, ...(insideOuter ? outerDefs : []), ...b.params];
     for (let k = 0; k < 1 + Math.floor(rnd() * 3); k++) {
       const r = mkValue(T.s(32));
       b.ops.push(
@@ -92,6 +102,9 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2): Fn {
           : mkOp(pick(['add', 'sub']), { operands: [pick(avail), pick(avail)], results: [r] }),
       );
       avail.push(r);
+    }
+    if (readsOuter && i === 1) {
+      outerDefs.push(...b.params, ...b.ops.flatMap((o) => o.results));
     }
     const argsFor = (t: Block): Value[] => t.params.map(() => pick(avail));
     if (i === nBlocks - 1) {
@@ -293,6 +306,72 @@ export const tracesDiffer = (r: { off: Event[]; on: Event[] }): boolean => {
     return e.args.some((a, k) => a !== UNDEF && f.args[k] !== UNDEF && a !== f.args[k]);
   });
 };
+
+/** The same observables as {@link traceOf}, read off the IR itself rather than a structured tree —
+ *  the oracle for a defect the structurer's OWN admit-nothing spelling also has. `traceOf` against
+ *  that reference compares one naming with another, so an EMISSION defect both share is invisible
+ *  to it: an inner loop's back-edge value re-derived at the enclosing loop's latch was wrong in
+ *  every spelling at once, and only this caught it. Same seeding, same deterministic call model,
+ *  same 32-bit wrap. The generator's vocabulary only; anything else throws, as does a run past the
+ *  step cap. */
+export function irTraceOf(fn: Fn, seed: number): Event[] {
+  const trace: Event[] = [];
+  const env = new Map<Value, number>();
+  fn.blocks[0].params.forEach((p, i) => env.set(p, ((seed >> (i * 3)) % 11) - 5));
+  let calls = 0;
+  let steps = 0;
+  const read = (x: Value): number => {
+    const n = env.get(x);
+    if (n === undefined) {
+      throw new Error('read of an undefined value');
+    }
+    return n;
+  };
+  let b: Block = fn.blocks[0];
+  for (;;) {
+    let next: { block: Block; args: Value[] } | undefined;
+    for (const op of b.ops) {
+      if (++steps > 20000) {
+        throw new Error('step cap');
+      }
+      const o = op.operands.map(read);
+      const r = op.results[0];
+      switch (op.opcode) {
+        case 'const':
+          env.set(r, op.attrs.value as number);
+          break;
+        case 'add':
+          env.set(r, (o[0] + o[1]) | 0);
+          break;
+        case 'sub':
+          env.set(r, (o[0] - o[1]) | 0);
+          break;
+        case 'icmp_slt':
+          env.set(r, o[0] < o[1] ? 1 : 0);
+          break;
+        case 'call':
+          trace.push({ fn: op.attrs.target as string, args: o });
+          calls++;
+          env.set(r, o.reduce((x, y) => x + y, calls) | 0);
+          break;
+        case 'ret':
+          trace.push({ fn: 'ret', args: o });
+          return trace;
+        case 'br':
+          next = op.successors[0];
+          break;
+        case 'cond_br':
+          next = o[0] !== 0 ? op.successors[0] : op.successors[1];
+          break;
+        default:
+          throw new Error(`the generator does not emit ${op.opcode}`);
+      }
+    }
+    const vals = next!.args.map(read);
+    next!.block.params.forEach((p, i) => env.set(p, vals[i]));
+    b = next!.block;
+  }
+}
 
 /** Hand the worker's event loop a turn, mid-sweep.
  *

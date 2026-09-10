@@ -1207,6 +1207,72 @@ export const CARRIER_NAME_GATES: readonly Gate<CarrierName>[] = [
   },
 ];
 
+/** A nested loop's header parameter offered its ENCLOSING loop's name, as
+ *  `ENCLOSING_CARRIER_GATES` judges it — the admission `enclosingCarrierName` makes before
+ *  `canTakeName` (`CARRIER_NAME_GATES`) is asked. `E` is the inner header's first forward
+ *  predecessor and `a` the argument `E` hands the parameter.
+ *
+ *  Lazy for the same reason `CarrierName` is: `carriedByBoth` walks the in-edges of both headers,
+ *  so it sits last and runs only when every cheaper rule admits. Every field is TOTAL — false when
+ *  `E` or `a` does not exist — so a test can drop any one gate and the rest still answer. */
+export interface EnclosingCarrier {
+  /** every forward predecessor of the inner header is the one block `E`, and `E` is not the header */
+  readonly oneForwardEntry: boolean;
+  /** `E` heads a loop whose body holds the inner header */
+  readonly entryEncloses: boolean;
+  /** `a` is one of `E`'s own parameters — `E`'s loop-carried value, which `E` does not compute */
+  readonly argIsEnclosingParam: boolean;
+  /** the frontend measured `E`, and `E` wrote nothing into the parameter's key */
+  readonly keyUnwritten: boolean;
+  /** the value is carried by BOTH loops (`carriedByBothLoops`). False whenever `entryEncloses` or
+   *  `argIsEnclosingParam` is, since it needs `E`'s loop and `a`'s slot in `E` — which is why no
+   *  fixture can separate those two from this one. Independent of `keyUnwritten`, which no part of
+   *  the walk consults */
+  readonly carriedByBoth: boolean;
+}
+
+/** `enclosingCarrierName`'s own admission. The argument for each rule is the block comment above
+ *  `enclosingCarrierName`; the ids are here so a refusal can be named and a rule dropped by a test.
+ *
+ *  ONE rule is sound, and it is the last. The four before it bound what the write-order record can
+ *  be EVIDENCE for — a refusal keeps the two-variable spelling, which is correct by construction —
+ *  so each is `sound: false`: dropping one spells a different, still-correct program (the fixtures
+ *  in `nested-carrier.test.ts` show what each keeps). `carried-by-one-loop` is the collision
+ *  `canTakeName` cannot see, and dropping it emits another program. */
+export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
+  {
+    id: 'one-forward-entry',
+    why: 'the record is per predecessor, so it cannot vouch for a second edge into the inner header',
+    sound: false,
+    rejects: (c) => !c.oneForwardEntry,
+  },
+  {
+    id: 'enclosing-header',
+    why: 'only the enclosing header itself has a record that can say the entry copy was not made',
+    sound: false,
+    rejects: (c) => !c.entryEncloses,
+  },
+  {
+    id: 'enclosing-param',
+    why: 'only a value the enclosing header did not compute can have reached the inner loop uncopied',
+    sound: false,
+    rejects: (c) => !c.argIsEnclosingParam,
+  },
+  {
+    id: 'key-written',
+    why: 'the enclosing header wrote the key (or was not measured): the source spelled the copy',
+    sound: false,
+    rejects: (c) => !c.keyUnwritten,
+  },
+  {
+    id: 'carried-by-one-loop',
+    why: 'a value the outer back edge replaces would be overwritten under a name the inner loop reads',
+    sound: true,
+    guardedBy: 'nested-carrier.test.ts: ablating carried-by-one-loop lets the outer update clobber the inner value',
+    rejects: (c) => !c.carriedByBoth,
+  },
+];
+
 // Structuring levers, threaded as DATA so a new one is a field here + its consumer, not a new
 // positional boolean widened across every call site:
 //   returnsVoid                    — from the function's own prototype (suppress phantom r0 return);
@@ -1564,6 +1630,9 @@ export interface StructureHooks {
    *  entry is sound, so this exists for the differential test that drops one and watches the
    *  emitted program change, never for a shipped ablation. */
   carrierNameGates?: readonly Gate<CarrierName>[];
+  /** `enclosingCarrierName`'s admission rules (`ENCLOSING_CARRIER_GATES`), ablatable the same way —
+   *  and, wrapped in `tallying`, the census of which rule refuses a nest. */
+  enclosingCarrierGates?: readonly Gate<EnclosingCarrier>[];
   /** Every branch-sense site this structuring reached, in emission order: the block index
    *  `StructureOptions.branchSenseFlipSites` names, whether the site is JOINED or divergent, and
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
@@ -2430,13 +2499,146 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const k = header!.params.indexOf(c);
     return !!back && k >= 0 && back.args[k] !== c && !back.args.includes(c);
   };
+  // A NESTED LOOP'S CARRIED VALUE KEEPS THE NAME ITS ENCLOSING LOOP GAVE IT. `p`, a param of the
+  // inner header, is entered straight from the enclosing loop's header `E` with `E`'s own param —
+  // an accumulator (or any loop-carried value) crossing into the inner loop. Minting `p` a fresh
+  // name spells `v3 = v1; do { … v3 … } while (…); v1 = v3;`, and on agbcc that pair is two `mov`s
+  // the target does not contain. Whether the source had ONE variable or TWO is what the frontend's
+  // write-order record answers: `E` wrote nothing into `p`'s key, so the machine carried the value
+  // into the inner loop in the register it already had — there is no copy to reproduce.
+  //
+  // THE NARROW FORM OF A PROXY THAT WAS MEASURED AND LOST. `target.ts`'s MIPS_GCC note records the
+  // wide form — adopt the entry value's name whenever the forward predecessor did not write the
+  // param's key — moving 36 of 736 synthetic rows for four matches lost net, because a predecessor
+  // that COMPUTES the initial value into the param's own register writes the key and still
+  // coalesces. Here the argument is `E`'s own parameter, which `E` does not compute: `E` can write
+  // `p`'s key only by moving that value into it, which is the copy the two-variable spelling spells.
+  // So in this scope the record answers the question exactly, and the measured reach is 4 rows over
+  // the 1,036 of the corpus, all four moved toward the target.
+  //
+  // The argument above is an agbcc one (two `mov`s). The rule has no compiler gate, and it reaches
+  // no corpus row on any other toolchain (0 of the MIPS and PPC rows change), so for those the claim
+  // is UNMEASURED rather than established.
+  //
+  // THE REFUSALS ARE A TABLE (`ENCLOSING_CARRIER_GATES`, in table order), and then `canTakeName`'s.
+  // `p` keeps the seeding below when:
+  //   • `one-forward-entry` / `enclosing-header`: `p` has more than one forward predecessor, or its
+  //     one forward predecessor is not the header of a loop that strictly encloses `p`'s header.
+  //     That is a limit of the DATUM, not of the hazard: the record is keyed by successor params,
+  //     and a single-predecessor block has none, so it cannot say whether a block between `E` and
+  //     the inner header made the copy. It is also what holds the rule to the unguarded,
+  //     constant-trip nest: nestacc1 with its inner bound `j < 7` made `j < n` is entered through
+  //     its guard and keeps both copies (measured, agbcc). The register-key identity the MIPS_GCC
+  //     note names (`frontend/ssa.ts` `phiKey`) is the datum that would lift it;
+  //   • `enclosing-param`: the argument is not one of `E`'s own params (it is not `E`'s
+  //     loop-carried value);
+  //   • `key-written`: the frontend did not measure `E`, or measured it WRITING `p`'s key — the
+  //     copy the source spelled, which the fresh name reproduces;
+  //   • `carried-by-one-loop`: the value is not carried by BOTH loops (`carriedByBothLoops`, below).
+  //     The one SOUND rule of the five; the four above bound the evidence, and dropping one spells
+  //     a different program that is still correct;
+  //   • `canTakeName` refuses. With the clause above, these are the guards against the collision
+  //     `enclosingNames` excludes wholesale: a value of `E` still read after the inner loop is
+  //     `carrier-live`, and an unnamed one re-derived from it there (the outer update
+  //     `(u8)(v0 + 1)`) is `re-derives`. `canTakeName` alone is NOT enough — it reads `varName`
+  //     only, and sharing the name reaches two readers that are not in it.
+  //
+  // THE VALUE MUST BE CARRIED BY BOTH LOOPS — the per-site form of `structure/namecoalesce.ts`'s
+  // `loop-escape` premise. Sharing the name hands it to more values than `p`: the inner back edge's
+  // argument takes it through `backArgName` (unconditionally, in `seedLoopParams`), and `E`'s own
+  // back-edge argument for `a`'s slot takes it as the outer loop's un-rotation alias. If the outer
+  // back edge hands `a`'s slot something the inner loop did not produce, the outer update copy
+  // overwrites the name the inner loop's value is read under, and a merge after the loop that
+  // adopts that value's `backArgName` reads the outer value instead. That is the frozen
+  // `INNER_CLOBBERS_OUTER` pair (`fz5104`, `fz6437`, in `test/loop-escape-witnesses.ts`, replayed
+  // against this rule by `nested-carrier.test.ts`): given ONE realistic record fact — `E`
+  // did not write `p`'s key, nestacc1's own shape — the rule without this clause emits both as a
+  // different program, and nothing throws. So every in-edge of `E` from inside its loop must hand
+  // `a`'s slot either `a` (then `a` is live across the inner loop, and `carrier-live` refuses), `p`
+  // (what the name holds when a test-at-top `while` exits from its header; after a bottom-tested
+  // loop it is a pre-update read, the inner emitter's own hazard and the same one whichever name
+  // `p` has), an inner back-edge argument for `p`, or a merge every in-edge of which hands it one of
+  // those. One level of merge, not a closure: a deeper chain refuses, which costs reach and never
+  // soundness.
+  const carriedByBothLoops = (p: Value, i: number, header: Block, E: Block, a: Value): boolean => {
+    const outer = forest.byHeader.get(E);
+    const inner = forest.byHeader.get(header);
+    if (!outer || !inner) {
+      return false;
+    }
+    const carried = new Set<Value>([a, p]);
+    for (const { pred, succ } of inEdgeRecords(preds, header)) {
+      if (inner.body.has(pred)) {
+        carried.add(succ.args[i]);
+      }
+    }
+    const k = E.params.indexOf(a);
+    if (k < 0) {
+      return false; // not `E`'s loop-carried value — `enclosing-param`'s question, asked again
+    }
+    let backEdges = 0;
+    for (const { pred, succ } of inEdgeRecords(preds, E)) {
+      if (!outer.body.has(pred)) {
+        continue;
+      }
+      backEdges++;
+      const r = succ.args[k];
+      if (carried.has(r)) {
+        continue;
+      }
+      const rb = paramBlock.get(r);
+      if (rb === undefined || rb === entry) {
+        return false;
+      }
+      const j = rb.params.indexOf(r);
+      let ins = 0;
+      for (const { succ: s } of inEdgeRecords(preds, rb)) {
+        ins++;
+        if (!carried.has(s.args[j])) {
+          return false;
+        }
+      }
+      if (ins === 0) {
+        return false;
+      }
+    }
+    return backEdges > 0;
+  };
+  const enclosingCarrierName = (
+    p: Value,
+    i: number,
+    header: Block,
+    forwardPreds: readonly Block[],
+  ): string | undefined => {
+    const [E] = forwardPreds;
+    const a = E === undefined ? undefined : successorTo(E, header)?.args[i];
+    const order = fn.writeOrder;
+    const refused = firstRejection(hooks.enclosingCarrierGates ?? ENCLOSING_CARRIER_GATES, {
+      oneForwardEntry: E !== undefined && E !== header && forwardPreds.every((fp) => fp === E),
+      get entryEncloses() {
+        return E !== undefined && forest.byHeader.get(E)?.body.has(header) === true;
+      },
+      get argIsEnclosingParam() {
+        return a !== undefined && E!.params.includes(a);
+      },
+      get keyUnwritten() {
+        return E !== undefined && order?.writes.has(E) === true && order.lastWrite.get(E)?.has(p) !== true;
+      },
+      get carriedByBoth() {
+        return E !== undefined && a !== undefined && carriedByBothLoops(p, i, header, E, a);
+      },
+    });
+    const nm = a === undefined ? undefined : varName.get(a);
+    return refused === null && nm !== undefined && canTakeName(p, header, nm) ? nm : undefined;
+  };
   // ONE seeding routine for self-loop and structured-loop headers. On a coalesceLoopInit target,
   // keep the induction variable in its entry (forward-edge) value's register — reproducing a
   // compiler that mutates the arg register across the loop instead of copying to a fresh local,
   // so the init copy vanishes. The loop mutates the adopted name every iteration — canTakeName
   // declines it when any value under it is still live at the header. `exclude` are names never to
-  // adopt (enclosing loops' induction vars — the cross-level collision below); every seeded
-  // param's name is ADDED to it, so sibling params can't collapse.
+  // adopt (enclosing loops' induction vars — the cross-level collision below) except through
+  // `enclosingCarrierName`, which measures the collision instead; every seeded param's name is
+  // ADDED to it, so sibling params can't collapse.
   const seedLoopParams = (
     header: Block,
     forwardPreds: Block[],
@@ -2455,6 +2657,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             }
           }
         }
+        name ??= enclosingCarrierName(p, i, header, forwardPreds);
         // A MATERIALIZED back-edge arg is this variable's in-place update (`add r4, r4, r0`
         // mutates the same register the param lives in) — adopt its name so the def assigns the
         // loop variable directly and the update copy elides. Sound only when every read of the
@@ -2531,7 +2734,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // loop (the outer latch reads it after). If the inner var is coalesced onto the outer var's name
   // (its init reads the outer var), the inner loop would MUTATE the outer variable — a silent
   // miscompile. Process OUTERMOST-first (so an enclosing loop is named first) and, per loop, exclude
-  // the names of every enclosing loop's header params from the coalescing candidates.
+  // the names of every enclosing loop's header params from the coalescing candidates — all but the
+  // one `enclosingCarrierName` hands over with the evidence and the `canTakeName` check above.
   // `enclosingNames(l)` = names of params of headers whose natural body strictly contains `l.header`.
   structuredLoops.sort((a, b) => b.body.size - a.body.size); // outermost first
   const enclosingNames = (l: { header: Block; body: Set<Block> }): Set<string> => {
@@ -4686,6 +4890,126 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const latchSub = (dw: DoWhileInfo): Map<Value, string> =>
     subFor(dw.header.params, successorTo(dw.latch, dw.header)!.args);
 
+  // THE LATCH IS POST-LOOP FOR EVERY INNER LOOP THAT RUNS BEFORE IT. A bottom-tested loop renders
+  // its latch — side effects, update copies, test — HERE, outside the body region, so none of it is
+  // under the substitution an inner loop's exit region installs (`withSub` in the self-loop and
+  // do-while emitters). Yet the latch runs after those inner loops exactly as the rest of their exit
+  // region does, and the inner do-while's own hazard check judged it that way (its `postLoop` holds
+  // every block outside the inner body). Read raw, an inner back-edge value is RE-DERIVED from the inner
+  // variable's name — which by then already holds that value — so the latch counts the last
+  // iteration twice: `a += gT[i][j] * 2` over a nest whose inner loop is one block emits
+  // `do { … v4 = v4 + (v0 << 1); … } while (…); v2 = v4 + (v0 << 1);` — a silent wrong answer that
+  // main's default candidate reaches on agbcc's own output (the `acc += a[i][j]` nest).
+  //
+  // So the latch reads such a value under the name its inner loop left it in: the back-edge
+  // substitution of every loop INSIDE this one that dominates the latch and does not contain it.
+  // Every depth, not only children: a grandchild's value reaches the latch raw whenever the loop
+  // between them does not carry it (`for i { for j { s = j; for k { s += …; } } gO[i] = s; }` —
+  // `latch-inner-sub.test.ts`'s `GRANDCHILD`, 64 of 64 inputs wrong when only children counted).
+  // Where that middle loop DOES carry it, both loops map the value to the one name the carrying
+  // shares, and the inner one wins. Dominating loops apply outermost first, so a later one wins, as
+  // the nested `withSub`s do. A test-at-top `while` installs no substitution (its latch-computed
+  // values never reach past its header exit), so it contributes nothing. Dominance is not a
+  // soundness term — a value of a loop that does not dominate the latch cannot be read there — it
+  // is what keeps the map EMPTY when no loop can hand the latch a value, and `emitDoWhile` then
+  // spells every line as it did before the map existed.
+  //
+  // NARROWER THAN THE EXIT REGION'S `withSub`, in two ways:
+  //   • only an UNNAMED value DEFINED INSIDE the inner loop. A named value renders under its own
+  //     name, and one defined outside the loop (an entry value handed round the back edge
+  //     unchanged) re-derives from operands the loop never wrote. The IR oracle found the second
+  //     (generated seed 16501, `fz16501`): substituting an entry value `a1 - a1` by its inner name
+  //     after the exit copy `v2 = v1` had rewritten it. That witness is held by EITHER narrowing
+  //     (measured, dropping one at a time); this one also keeps the refusal below from judging
+  //     values whose re-derivation the loop cannot have made stale;
+  //   • only while the name still HOLDS it. A name written between the inner loop and the latch —
+  //     a block param of the exit region, of an enclosing loop's header or of the latch itself, or
+  //     a materialized def there — no longer holds the loop's last value, unless what it wrote IS
+  //     that value (`aliasOf`: a merge every arm of which hands it the inner value,
+  //     `IDENTITY_MERGE`). This loop's own header is exempt: its params are written by the update
+  //     copies below, which read under this very substitution, and `enclosingCarrierName` hands
+  //     an inner value exactly that name (`LATCH_SUM`, measured).
+  //     Such an entry is not substituted, and then the latch re-derives it, which is right only if
+  //     the re-derivation reads no name written after the value was computed — the inner loop's own
+  //     and that stretch's. `unreadable` holds the ones for which it does: no spelling at the latch
+  //     is that value, and `emitDoWhile` declines LOUD if a latch reader needs one. `T2_MERGE` and
+  //     `T2_INVARIANT` in `latch-inner-sub.test.ts` are the two sides: a merge after the inner loop
+  //     that took the inner name, with an inner value the raw reading re-derives wrong (neither
+  //     reading is right) and right (the raw reading is). The refusal is per VALUE and per
+  //     stretch, not per name: an entry another loop's substitution still covers (a middle loop
+  //     that carries the grandchild's value under the name they share) is read through that one.
+  //
+  // `writtenAfter` is that set of names per entry, for the test's own refusal in `emitDoWhile`.
+  // Does `w` hold `v` — `v` itself, or a block param every in-edge of which hands it `v` (or such a
+  // param)? The write of a param like that stores what the name already held. A cycle of such
+  // params is `v` too, which is why a revisit answers yes.
+  const aliasOf = (w: Value, v: Value, seen: Set<Value>): boolean => {
+    if (w === v || seen.has(w)) {
+      return true;
+    }
+    seen.add(w);
+    const b = paramBlock.get(w);
+    if (b === undefined || b === entry) {
+      return false;
+    }
+    const k = b.params.indexOf(w);
+    const ins = [...inEdgeRecords(preds, b)];
+    return ins.length > 0 && ins.every(({ succ }) => aliasOf(succ.args[k], v, seen));
+  };
+  const latchInnerSub = (
+    dw: DoWhileInfo,
+  ): { sub: Map<Value, string>; unreadable: Set<Value>; writtenAfter: Map<Value, Set<string>> } => {
+    const out = new Map<Value, string>();
+    const refused = new Set<Value>();
+    const writtenAfter = new Map<Value, Set<string>>();
+    const latchDoms = dom.get(dw.latch)!;
+    const kids = [...forest.byHeader.values()]
+      .filter(
+        (l) => l.header !== dw.header && dw.body.has(l.header) && !l.body.has(dw.latch) && latchDoms.has(l.header),
+      )
+      .sort((x, y) => dom.get(x.header)!.size - dom.get(y.header)!.size);
+    for (const l of kids) {
+      const self = loops.get(l.header);
+      const nested = doWhileLoops.get(l.header);
+      const s = self ? loopSub(self) : nested ? latchSub(nested) : null;
+      if (s === null) {
+        continue;
+      }
+      const rewrittenBy = new Map<string, Value[]>();
+      const written = new Set<string>();
+      for (const [v, n] of varName) {
+        const d = defs.get(v);
+        const home = paramBlock.get(v) ?? (d !== undefined && materialize.has(d) ? opBlock.get(d) : undefined);
+        if (home === undefined || !dw.body.has(home) || home === dw.header) {
+          continue;
+        }
+        written.add(n);
+        if (!l.body.has(home)) {
+          rewrittenBy.set(n, [...(rewrittenBy.get(n) ?? []), v]);
+        }
+      }
+      for (const [v, n] of s) {
+        const d = defs.get(v);
+        if (varName.has(v) || d === undefined || !l.body.has(opBlock.get(d)!)) {
+          continue;
+        }
+        writtenAfter.set(v, written);
+        if (rewrittenBy.get(n)?.some((w) => !aliasOf(w, v, new Set())) === true) {
+          refused.add(v);
+        } else {
+          out.set(v, n);
+        }
+      }
+    }
+    const unreadable = new Set<Value>();
+    for (const v of refused) {
+      if (!out.has(v) && readsClobbered(v, out, writtenAfter.get(v)!)) {
+        unreadable.add(v);
+      }
+    }
+    return { sub: out, unreadable, writtenAfter };
+  };
+
   // Bottom-test `do-while`: the body runs header..latch (structured, with `b`'s do-while hook masked
   // via dwActive), then the latch's own side-effects + the loop update; the latch's cond_br test is the
   // do-while condition, read under `latchSub` (post-update the params hold their next value). Polarity:
@@ -4698,7 +5022,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // post-update name — one iteration off, silently. Same readsClobbered guard the early-exit
     // path applies; on a hazard, decline LOUD.
     const sub = latchSub(dw);
-    const updates = argAssigns(dw.latch, dw.header);
+    // The inner loops' post-loop substitution the latch reads under (`latchInnerSub`). Empty — and
+    // then every line below spells what it did before the substitution existed — unless an unnamed
+    // value an inner loop computed could reach the latch.
+    //
+    // The update copies take it MERGED with `activeSub`, because a map passed to `argAssigns`
+    // replaces the ambient `expr` it would otherwise render with: without the merge, a copy reading
+    // an ENCLOSING loop's post-loop value would re-derive it (`ACTIVE_SUB` in
+    // `latch-inner-sub.test.ts`). One thing a map changes that `expr` does not: identity elision
+    // consults it, so a copy that `activeSub` spells `n = n` is dropped rather than written. The
+    // two programs are the same, and it is left conditional so an empty `innerSub` keeps the line
+    // exactly as it was (the corpus census is byte-identical either side of this commit's parent).
+    const { sub: innerSub, unreadable, writtenAfter } = latchInnerSub(dw);
+    const latchMap = innerSub.size > 0 ? new Map([...(activeSub ?? []), ...innerSub]) : null;
+    const updates = argAssigns(dw.latch, dw.header, latchMap);
     const updateWrites = loopWriteSet(updates, dw.body, dw.header);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
     // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
@@ -4806,10 +5143,64 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const body = [
       ...preUpdateCopies(dw.exit, exitArgs, sunk, dw.header),
       ...inner,
-      ...sideEffects(dw.latch),
+      ...(innerSub.size > 0 ? withSub(innerSub, () => sideEffects(dw.latch)) : sideEffects(dw.latch)),
       ...updates,
     ];
-    let cond = exprWith(sub)(lterm.operands[0]);
+    // The test reads this loop's own update under `sub`, and anything else an inner loop left under
+    // `innerSub` — the outer loop's own reading wins where a value is both. The test runs AFTER the
+    // update copies, so an inner name one of them really writes no longer holds the inner value, and
+    // that entry keeps the raw reading — the same refusal `latchInnerSub` makes for a name written
+    // before the latch, with the update's writes added to what the re-derivation must not read.
+    const writtenByUpdate = innerSub.size > 0 ? updateWriteSet(updates) : new Set<string>();
+    const condInner = [...innerSub].filter(([, n]) => !writtenByUpdate.has(n));
+    const condMap = condInner.length > 0 ? new Map([...condInner, ...sub]) : sub;
+    // NEITHER READING IS THE VALUE — decline LOUD. An inner value whose name was rewritten before a
+    // latch reader runs is not substituted, and its re-derivation reads a name written after it
+    // was computed: the name holds something else and the re-derivation computes something else.
+    // Which readers these are is exactly what the lines above render under each map: the latch's
+    // side effects and update copies under `latchMap` (or the ambient `activeSub`), the test under
+    // `condMap`. Materialized and effectful ops are the side effects' roots; a pure op renders at
+    // its use, which is one of the other two roots or outside the latch.
+    const condUnreadable = new Set(unreadable);
+    for (const [v] of innerSub) {
+      if (!condMap.has(v) && readsClobbered(v, condMap, new Set([...writtenAfter.get(v)!, ...writtenByUpdate]))) {
+        condUnreadable.add(v);
+      }
+    }
+    if (condUnreadable.size > 0) {
+      const needs = (root: Value, stop: ReadonlyMap<Value, string> | null, targets: ReadonlySet<Value>): boolean => {
+        const seen = new Set<Value>();
+        const walk = (x: Value): boolean => {
+          if (seen.has(x) || stop?.has(x) === true || varName.has(x)) {
+            return false;
+          }
+          if (targets.has(x)) {
+            return true;
+          }
+          seen.add(x);
+          return defs.get(x)?.operands.some(walk) ?? false;
+        };
+        return walk(root);
+      };
+      const bodyMap = latchMap ?? activeSub;
+      const effectRoots = dw.latch.ops
+        .slice(0, -1)
+        .filter(
+          (op) => op.results.length === 0 || materialize.has(op) || EFFECTFUL_OPS.has(op.opcode) || unreadResult(op),
+        )
+        .flatMap((op) => op.operands);
+      const updateRoots = successorTo(dw.latch, dw.header)!.args;
+      if (
+        [...effectRoots, ...updateRoots].some((r) => needs(r, bodyMap, unreadable)) ||
+        needs(lterm.operands[0], condMap, condUnreadable)
+      ) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': a loop latch reads an inner loop's value whose name was rewritten ` +
+            `after the inner loop, and re-deriving it reads a name the inner loop wrote`,
+        );
+      }
+    }
+    let cond = exprWith(condMap)(lterm.operands[0]);
     if (lterm.successors[1].block === dw.header) {
       cond = negateCond(cond);
     } // continue edge must be `taken`
