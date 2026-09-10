@@ -7044,7 +7044,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //     here — #156's own G3 attribution named a file two levels up from the real one, and the
   //     rule this project keeps is to instrument or ablate, never to read and infer.
   //   • `nestacc1` (15) — same shape of answer with a much smaller fan: 4 candidates, every one
-  //     carrying the copy pair, best `unsigned/uns-cmp`.
+  //     carrying the copy pair, best `unsigned/uns-cmp`. CLOSED (15/38 -> MATCH) by
+  //     `enclosingCarrierName` (structure/structure.ts): two refusals in the loop seeding had to
+  //     lift together — the forward-edge adoption ran only under `coalesceLoopInit`, and
+  //     `enclosingNames` excluded the enclosing header's name — and the write-order record
+  //     decides it per site. `nestacc` went 34/64 -> 4/52 with it; its (34) above predates that.
   //   • `nestacc1`'s 15 is mostly NOT the apparatus it is spelled with: the same nest and
   //     accumulator over a bare `extern u8 gG2[8][8]` — no pointer, no struct, no map — scores 13
   //     of the 15. The pointer-into-struct spelling is kept for fidelity to the real function and
