@@ -7126,9 +7126,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // above are this family's; the same ablation also takes `sa3:numToASCII:agbcc` MATCH -> 8/31,
   // `synthetic:dmascope` MATCH -> 9/56, `synthetic:dmascope2` MATCH -> 13/33, `synthetic:joinsame`
   // MATCH -> 22/46 and `synthetic:joinsense` MATCH -> 18/46 (each measured alone, cache off, at
-  // `981bb0b9`). `sa3:numToASCII:agbcc` is the one that matters to a lever author and the one that
-  // was cited NOWHERE in the tree: it is real-tier, so it is what turns `pnpm bench regression`
-  // red in CI. Non-MATCH rows the ablation also worsens (so the axis is load-bearing well past
+  // `981bb0b9`). `sa3:numToASCII:agbcc` is the one that matters to a lever author: it is REAL-TIER
+  // — a shipped decomp's own function, not a probe written for this family — and it was cited
+  // NOWHERE in the tree, so nothing warned an author developing here that they could break it.
+  // (Every one of the twelve turns `pnpm bench regression` red, which is an OUTCOME gate over all
+  // tiers — `report/regression.ts`, "any match→non-match flip". The real one is the expensive one
+  // to discover, not the only one.) Non-MATCH rows the ablation also worsens (so the axis is load-bearing well past
   // this family): `synthetic:mergeldcast:gcc2.7.2kmc` 4/9 -> 5/9, and the real rows #172 measured.
   // `kleod:ProcessInputAndUpdateEntities:agbcc` carries the label and was NOT measured (~2700 s):
   // assume it at risk, not safe. Rows that carry `/unmerge` in their winning label and are
