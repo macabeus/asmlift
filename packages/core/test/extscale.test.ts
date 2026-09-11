@@ -205,6 +205,16 @@ describe('what nobody claimed goes back to the pair the frontend lifted', () => 
     expect(print(fn)).toBe(print(parse(lifted)));
   });
 
+  test('a scale whose amount changed after the fold is left alone rather than rebuilt from stale amounts', () => {
+    const fn = parse(lifted);
+    foldScaledExtensions(fn);
+    dce(fn);
+    const scale = fn.blocks[0].ops.find((o) => o.opcode === 'shl' && o.attrs.imm === 3)!;
+    scale.attrs = { imm: 2 };
+    expect(restoreUnclaimedScales(fn)).toBe(0);
+    expect(print(fn)).toMatch(/= shl %\d+ \{imm=2\}/);
+  });
+
   test('a scale whose extension paramwidth took is claimed, and stays folded', () => {
     // No body code ahead of the `shl` here, so the extension is a prologue one.
     const fn = parse(`fn f {

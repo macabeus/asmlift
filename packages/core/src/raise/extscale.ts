@@ -35,11 +35,11 @@
 // where its `shl` stood and the scale where the right shift stood: a prologue `lsl` yields a
 // prologue extension, which paramwidth's own gates then judge. Those gates keep a body cast wide
 // only when body code that READS a value comes first — `not-prologue` steps over materializations,
-// a pool-loaded address among them — which is why the next section exists. Placing both at the
-// right shift instead throws `pa`'s prologue evidence
-// away, so `pa` reads as `pb` and stays wide — measured on the benchmark's sa3 rows, which declare
-// `u8 bg` exactly so: `sa2__sub_8007858` 39/60 anchored against 44/61 at the right shift, and
-// `sa2__sub_8007958` 64/87 against 66/88.
+// a pool-loaded address among them — which is why the refusal list ends as it does. Placing both
+// at the right shift instead throws `pa`'s prologue evidence away, so `pa` reads as `pb` and stays
+// wide — measured on the benchmark's sa3 rows, which declare `u8 bg` exactly so:
+// `sa2__sub_8007858` 39/60 anchored against 44/61 at the right shift, and `sa2__sub_8007958` 64/87
+// against 66/88.
 //
 // The SIGNED form does not carry that evidence on agbcc: `void pd(s16 a, …) { … a * 2 … }` and its
 // wide twin `(s16)a * 2` compile to the SAME object, both halves at the use. That is paramwidth's
@@ -68,9 +68,8 @@
 //     comes before any pool load, symbol or numeric: 71 of the 73 narrow-declared parameters over
 //     the benchmark's agbcc references, and the other 2 (one row's `s8` pair) follow body code as
 //     well — that row's output does not move under this refusal. The order is read off the LIFTED
-//     function (`poolOrderOf`): `addrnum` hoists a
-//     duplicated address to the head of the entry block, and after it the position no longer says
-//     where the machine loaded it. Only the fused form is judged — a plain cast's pair is folded at
+//     function (`poolOrderOf`): `addrnum` hoists a duplicated address to the head of the entry
+//     block, and after it the position no longer says where the machine loaded it. Only the fused form is judged — a plain cast's pair is folded at
 //     its right half, so its lifted position is not its `lsl`'s. NOT caught: a NUMERIC pool word
 //     lifts to `const`, the same op a `movs` does, and paramwidth's own header says why a `movs`
 //     ahead of the pair decides nothing — so a body cast behind only a numeric pool load (`& 0xfff`
@@ -250,6 +249,13 @@ export function restoreUnclaimedScales(fn: Fn): number {
     for (const op of [...b.ops]) {
       const f = FOLDED.get(op);
       if (f === undefined || op.opcode !== 'shl' || op.operands[0] !== f.ext.results[0]) {
+        continue;
+      }
+      // The pair is rebuilt from the amounts RECORDED at the fold, so they must still be the ones
+      // the two ops carry: a pass that re-scaled the `shl` or re-widened the extension in place
+      // would make the recorded pair compute a different value. None does today; refuse, not guess.
+      const extended = f.ext.opcode === 'zext' || f.ext.opcode === 'sext';
+      if (!extended || f.ext.attrs.width !== 32 - f.l || op.attrs.imm !== f.l - f.r) {
         continue;
       }
       let shl = shls.get(f.ext);
