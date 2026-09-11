@@ -1693,35 +1693,40 @@ interface EarlyReturnArmDeps {
 function isRet(blk: Block): boolean {
   return blk.ops[blk.ops.length - 1]?.opcode === 'ret';
 }
+/** The `ret`s reachable from BOTH successors of `b` — the region `followEarlyReturns` keeps. Empty
+ *  when there is none, and when `b` does not branch two ways. `reachFrom` is forward reachability,
+ *  the start block excluded. */
+function sharedRetsOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>): Block[] {
+  const [s1, s2] = b.ops[b.ops.length - 1]?.opcode === 'cond_br' ? successorsOf(b) : [];
+  if (s1 === undefined || s2 === undefined || s1 === s2) {
+    return [];
+  }
+  const retsFrom = (x: Block): Block[] => [x, ...reachFrom(x)].filter(isRet);
+  const fromS2 = new Set(retsFrom(s2));
+  return retsFrom(s1).filter((r) => fromS2.has(r));
+}
 /** Is there an `if` whose arms reach no common block before EXIT but share a `ret` — the only shape
- *  `followEarlyReturns` changes? The shared-tail twin's enumeration gate (rank.ts); a superset, since
- *  it asks neither the loop nor the enclosing-region refusals. */
+ *  `followEarlyReturns` changes? The shared-tail twin's enumeration gate (rank.ts); a superset,
+ *  since it asks `sharedRetsOf` and none of the follow's three later refusals. */
 export function hasDivergentSharedRet(fn: Fn): boolean {
   const ipdom = postDominators(fn);
-  const retsFrom = (b: Block): Set<Block> => {
-    const out = new Set<Block>();
-    const seen = new Set<Block>();
-    const stack = [b];
-    while (stack.length) {
-      const x = stack.pop()!;
-      if (!seen.has(x)) {
-        seen.add(x);
-        if (isRet(x)) {
+  const reach = new Map<Block, Set<Block>>();
+  const reachFrom = (b: Block): Set<Block> => {
+    let out = reach.get(b);
+    if (out === undefined) {
+      out = new Set<Block>();
+      for (const stack = successorsOf(b); stack.length;) {
+        const x = stack.pop()!;
+        if (!out.has(x)) {
           out.add(x);
+          stack.push(...successorsOf(x));
         }
-        stack.push(...successorsOf(x));
       }
+      reach.set(b, out);
     }
     return out;
   };
-  return fn.blocks.some((b) => {
-    const [s1, s2] = b.ops[b.ops.length - 1].opcode === 'cond_br' ? successorsOf(b) : [];
-    if (!s1 || !s2 || s1 === s2 || ipdom.get(b) !== null) {
-      return false;
-    }
-    const r2 = retsFrom(s2);
-    return [...retsFrom(s1)].some((r) => r2.has(r));
-  });
+  return fn.blocks.some((b) => ipdom.get(b) === null && sharedRetsOf(b, reachFrom).length > 0);
 }
 /** does a path from `from` reach `to` without passing through `avoid`? */
 function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
@@ -1945,16 +1950,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // kept graph gives `b` no post-dominator but EXIT, and when the enclosing region's `stop` is
   // reachable from `b` without passing the follow — that path must reach `stop`, and structuring
   // the arms towards a different follow would emit `stop`'s region inside an arm. The caller asks
-  // only outside a loop body, where `clampToLoop` owns the in-loop question.
+  // only outside a loop body.
   const followsByShared = new Map<string, Map<Block, Block | null>>();
   const followOverReturns = (b: Block, stop: Block | null): Block | null => {
-    const [s1, s2] = successorsOf(b);
-    if (s1 === undefined || s2 === undefined || s1 === s2) {
-      return null;
-    }
-    const retsFrom = (x: Block): Block[] => [x, ...reachFrom(x)].filter(isRet);
-    const fromS2 = new Set(retsFrom(s2));
-    const shared = retsFrom(s1).filter((r) => fromS2.has(r));
+    const shared = sharedRetsOf(b, reachFrom);
     if (shared.length === 0) {
       return null;
     }
@@ -4831,7 +4830,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
 
     const cond = expr(term.operands[0]);
-    // null ⇒ the arms diverge (both reach EXIT) and no follow over early returns applies
+    // null ⇒ the arms diverge (both reach EXIT) and no follow over early returns applies. Asked
+    // outside loop bodies only: inside one, `clampToLoop` below owns the question. DEFENSIVE — no
+    // input it changes: ablated, the follow fires on no more of 40,000 generated functions (random
+    // structuring options, sunk and unsunk) and on no corpus row the twin reaches.
     const ipd = ipdom.get(b) ?? (followEarlyReturns && loopCtx === null ? followOverReturns(b, stop) : null);
     // Inside a loop body, a join OUTSIDE that body is not this `if`'s join: an arm that leaves the
     // loop `return`s and never comes back, so what is left reconverges at the loop's own

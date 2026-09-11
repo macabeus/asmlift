@@ -7,7 +7,7 @@
 //     the follow alone recovers it;
 //   - the arms cross-jumped into one `store; ret` (`synthetic:gcsetail`): the tail has to be copied
 //     back into the paths that branch to it before the follow can see them as early returns.
-// Every refusal has a positive control one fact away from it.
+// Each of the follow's three refusals is produced by a fixture of its own.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -19,7 +19,7 @@ import { sinkStoreTails } from '../src/raise/tailsink';
 import { enumerateCandidates } from '../src/rank';
 import { hasDivergentSharedRet, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
-import { count, irTraceOf } from './helpers';
+import { count, irTraceOf, traceOf } from './helpers';
 
 const emit = (fn: Fn, followEarlyReturns: boolean) =>
   cBackend.emit(structure(fn, { returnsVoid: true, followEarlyReturns }));
@@ -139,6 +139,82 @@ test("the enclosing region's follow is never emitted inside an arm", () => {
   );
   expect(follows).toEqual([0]);
   expect(count(on, '[1] = 9;')).toBe(1);
+});
+
+test('each divergent `if` gets the follow of its OWN shared `ret`s', () => {
+  // `^bb0`'s arms share `^bb7` and `^bb8`, so its follow is `^bb4`; `^bb4`'s share only `^bb8`, so
+  // its follow is `^bb8` — two deletion sets, where one function-wide set answers only the first.
+  const fn = parse(`fn k {
+^bb0(%0: s32, %1: s32, %2: s32, %3: s32):
+  %4: s32* = gaddr {sym="gQ"}
+  %5: s32 = const {value=0}
+  %6: u32 = icmp_slt %0, %5
+  cond_br %6, ^bb1(), ^bb2()
+^bb1():
+  %7: u32 = icmp_slt %1, %5
+  cond_br %7, ^bb3(), ^bb4()
+^bb2():
+  %8: s32 = call %0 {target="work"}
+  br ^bb4()
+^bb3():
+  %9: s32 = const {value=1}
+  store %4, %9 {off=4, width=4}
+  ret
+^bb4():
+  %10: u32 = icmp_slt %2, %5
+  cond_br %10, ^bb5(), ^bb6()
+^bb5():
+  %11: u32 = icmp_slt %3, %5
+  cond_br %11, ^bb7(), ^bb8()
+^bb6():
+  %12: s32 = call %2 {target="work"}
+  br ^bb8()
+^bb7():
+  %13: s32 = const {value=2}
+  store %4, %13 {off=4, width=4}
+  ret
+^bb8():
+  %14: s32 = const {value=3}
+  store %4, %14 {off=4, width=4}
+  ret
+}
+`);
+  verify(fn);
+  const follows: [number, number][] = [];
+  const tree = structure(
+    fn,
+    { returnsVoid: true, followEarlyReturns: true },
+    { onEarlyReturnFollow: (s) => follows.push([s.block, s.follow]) },
+  );
+  expect(follows).toEqual([
+    [0, 4],
+    [4, 8],
+  ]);
+  expect(count(cBackend.emit(tree), '[1] = 3;')).toBe(1);
+  expect([0, 9, 83, 511].map((r) => traceOf(tree, r))).toEqual([0, 9, 83, 511].map((r) => irTraceOf(fn, r)));
+});
+
+test('arms that share two `ret`s the kept graph cannot order have no follow', () => {
+  // Both sides of `^bb0` reach both `^bb5` and `^bb6`, so both are kept and only EXIT
+  // post-dominates `^bb0`: its arms stay divergent.
+  const fn = parse(
+    LEFT_RETURNING.replace(
+      '  %5: s32 = call %0 {target="work"}\n  br ^bb4()',
+      '  %5: u32 = icmp_slt %1, %0\n  cond_br %5, ^bb3(), ^bb4()',
+    ),
+  );
+  verify(fn);
+  expect(hasDivergentSharedRet(fn)).toBe(true);
+  const follows: number[] = [];
+  const on = cBackend.emit(
+    structure(
+      fn,
+      { returnsVoid: true, followEarlyReturns: true },
+      { onEarlyReturnFollow: (s) => follows.push(s.block) },
+    ),
+  );
+  expect(follows).toEqual([]);
+  expect(on).toBe(emit(fn, false));
 });
 
 test('a cross-jumped store tail is copied into every path that branches to it, and the follow keeps one', () => {
