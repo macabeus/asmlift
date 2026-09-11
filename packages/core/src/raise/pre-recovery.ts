@@ -18,6 +18,7 @@ import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
 import { recognizeDivPow2 } from './divpow2';
+import { foldScaledExtensions, foldsShiftPairCasts } from './extscale';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { recognizeMemberArrays } from './memberarrays';
@@ -71,8 +72,8 @@ export interface PreRecoveryPass {
 }
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
- *  address-numbering → const-materialize → magic-division → pow2-division → soft-division → array-legalize →
- *  struct-array → member-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads →
+ *  address-numbering → const-materialize → magic-division → pow2-division → soft-division →
+ *  scaled-extension → array-legalize → struct-array → member-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads →
  *  narrow-local → parameter-width. See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
@@ -101,6 +102,10 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // beside magicdiv so that a reader looking for division recovery finds both together.
   { id: 'divpow2', run: recognizeDivPow2, dce: true },
   { id: 'softdiv', run: (fn) => recognizeSoftDiv(fn), dce: false, gate: (t) => !t.capabilities.hwDivide },
+  // AFTER `const`, which folds a shift pair over a constant to the constant it computes, and BEFORE
+  // the three array recognizers, whose input this pass produces: `shl(ext(x), k)` is an element
+  // scale they legalize and the fused pair is not. `dce: true` — the `shl` a fold leaves readerless.
+  { id: 'extscale', run: foldScaledExtensions, dce: true, gate: foldsShiftPairCasts },
   { id: 'arrays', run: recognizeArrays, dce: true },
   // struct-arrays AFTER arrays (scalar stride==width shapes are claimed first — see the
   // discriminator note in raise/struct-arrays.ts) and BEFORE structs (an element's field
