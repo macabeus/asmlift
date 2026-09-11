@@ -142,6 +142,21 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   doubles every enumeration to referee a question with one answer, and a default where an axis
   belongs quietly degrades every function the differ would have rescued.
 
+  **A LEVER WHOSE SIGN IS BASE-DEPENDENT CAN NEVER BE A DEFAULT, and the measurement that says so
+  is a cross-base one, not a cross-row one.** The test above asks whether the asm underdetermines
+  the source; this is the case where the answer is _it depends on which tree you ask about_, and
+  the tree is itself something the fan is choosing. `/unmerge` (`l3/unmerge.ts`, enumerated by
+  `PRE_FAN_PRODUCTS` in `rank-axes.ts`) is the worked case: one axis, one row
+  (`kleod:CountCollectedGems:agbcc`), four bases, four signs — **+44, +24, −3, −17/352** — with the
+  axis untouched throughout, the sign flipping as the structurer's output changed under it
+  (#169 → #172 → #184/#185). No predicate the pass could evaluate decides that, because its value
+  is read off a base the pass does not yet have; enumeration is the only thing that can. Two
+  consequences worth carrying: a lever measured at **+44 on today's winner is not refuted** — that
+  one was the most expensive axis on its row for three rounds and is in its winning label now; and
+  the whole-FUNCTION delta such a measurement produces is honest only while the lever stays
+  enumerated. Convert any part of it to a per-function predicate and the per-site trap this project
+  has paid for three times is armed again.
+
   **A default may read the map BACKWARDS when the backwards mapping is ITSELF a function, the
   reach is measured, and being wrong then costs a SPELLING and not an answer — in that order.**
   `switchRequiresFrontLoadedTests` (`structure/switch-recover.ts`, PRE5) is the worked case, and it

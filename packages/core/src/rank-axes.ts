@@ -342,7 +342,20 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
  *
  *  A pre-fan product only ADDS candidates, so it cannot cost a match; its price is a second fan
  *  on every tree where the rewrite fires, which is why the table is not a place to put a lever
- *  that would compose perfectly well as a `respell`. */
+ *  that would compose perfectly well as a `respell`.
+ *
+ *  A SECOND, STRONGER GROUND, MEASURED AFTER THE FIRST: `/unmerge`'s SIGN IS A PROPERTY OF THE
+ *  BASE, NOT OF THE AXIS. One axis, one row (`kleod:CountCollectedGems:agbcc`), four bases, four
+ *  signs — +44 against the #172-era winner, +24 at #169's base, −3 at a grafted flat+no-copies
+ *  base, and −17/352 measured once #184 and #185 made that base real. Nothing about the tree
+ *  changed the axis; what changed was which tree the fan derives from, and the fan is itself
+ *  choosing that tree. So the mapping from a tree to "is the merged tail cheaper" is not a
+ *  function of anything a gate here could read, and no predicate this pass could evaluate settles
+ *  it. That is what enumeration is for, and it is a sharper statement of the tower's
+ *  default-vs-axis test than reach or licence: a lever whose sign is base-dependent can never be a
+ *  default. The corollary a future author needs more than the rule: MEASURING A LEVER AT +44 ON
+ *  TODAY'S WINNER DOES NOT REFUTE IT. `/unmerge` was the most expensive axis on that row for three
+ *  rounds and is in its winning label now, with no change to the axis at all. */
 export const PRE_FAN_PRODUCTS: typeof SHAPE_PRODUCTS = [{ suffix: '/unmerge', apply: unmergeJoins }];
 
 export const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
