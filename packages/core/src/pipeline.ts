@@ -261,7 +261,7 @@ export function raiseRecovered(
   self?: FnProto,
   pre: PreRecoveryOptions = {},
 ): void {
-  runPreRecovery(
+  const lifted = runPreRecovery(
     fn,
     target,
     (pass, result) => {
@@ -276,7 +276,15 @@ export function raiseRecovered(
   verify(fn);
   assertTypesRecovered(fn);
   hooks.afterRecover?.();
-  if (sinkReturns(fn, { hoistsConstArmSelect: target.compilerBehaviors.hoistsConstArmSelect })) {
+  // `lifted.mergeShapes` is the CFG as it ENTERED pre-recovery, and retsink's `pre-diamond` needs
+  // exactly that: `raise/shortcircuit.ts` manufactures two-armed diamonds out of condition trees the
+  // ROM never merged, and a diamond this pass reads at its own turn may be one of those.
+  if (
+    sinkReturns(fn, {
+      hoistsSingleSetArm: target.compilerBehaviors.hoistsSingleSetArm,
+      mergeShapes: lifted.mergeShapes,
+    })
+  ) {
     verify(fn);
     hooks.afterRetsink?.();
   }

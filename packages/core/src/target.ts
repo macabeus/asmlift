@@ -30,9 +30,8 @@
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
 //     Six exceptions are read off the target directly, their consumers not being the
 //     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers),
-//     `hoistsSingleSetArm` and `reloadsLocalReread` (raise/pre-recovery.ts, raising passes),
-//     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn) and
-//     `hoistsConstArmSelect` (raise/retsink.ts). The field names are a
+//     `hoistsSingleSetArm` and `reloadsLocalReread` (raise/pre-recovery.ts, raising passes) and
+//     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn). The field names are a
 //     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
@@ -153,37 +152,31 @@ export interface TargetDescription {
     switchAllowsNeqCase?: boolean;
     // The compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both
     // arms are ONE speculatable SET — gcc 2.x's `jump_optimize` (`gcc/jump.c:443-445`, guard at
-    // `:471-502`). The ONE reader is raise/narrowlocal.ts's `edge-extends`, which uses it
-    // BACKWARDS: a diamond this compiler would have collapsed and did not is evidence the source
-    // DECLARED the local narrow, because `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared
-    // assignment past one SET. Absent ⇒ false, and the clause never admits. `structureOptionsFor`
+    // `:471-502`). Absent ⇒ false, and every clause below never admits. `structureOptionsFor`
     // spreads it onto StructureOptions like every other field here, but NO structurer code reads
-    // it: its reader is a pre-recovery pass, threaded from `runPreRecovery`'s own `target`.
+    // it: both readers are raising passes, threaded from their driver's own `target`.
     //
-    // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored. NOT
-    // set on MIPS_GCC despite it being the same compiler family: nothing has measured the pair
-    // there, the clause reaches 0 of its benchmark rows, and `docs/level-tower.md`'s rule for an
-    // unmeasured per-compiler default is to claim nothing.
+    // TWO READERS, ONE FACT, BOTH READING IT BACKWARDS — and the second of them shipped for one
+    // round as a duplicate boolean (`hoistsConstArmSelect`), set on the same single target with the
+    // same value. That is a drift trap and nothing else: the next round to measure mwcc's
+    // `jump_optimize` would have set one and left the other false, with both comments still reading
+    // as authoritative. One field, because it is one guard.
+    //
+    //   • raise/narrowlocal.ts's `edge-extends`: a diamond this compiler would have collapsed and
+    //     did NOT is evidence the source DECLARED the local narrow, because `gcc/thumb.h:344`
+    //     PROMOTE_MODE expands a narrow-declared assignment past one SET.
+    //   • raise/retsink.ts's `compiler-hoists-single-set-arm`: a merge-variable select whose arms
+    //     this guard would have collapsed never comes back as a diamond, so a TARGET holding one
+    //     was written with early returns and its returns should be sunk.
+    //
+    // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored and
+    // where retsink's seven-function spelling pair was compiled and committed
+    // (`packages/core/test/corpus/agbcc-select-{merge,early}.s`). NOT set on MIPS_GCC despite it
+    // being the same compiler family: nothing has measured the pair there, the clause reaches 0 of
+    // its benchmark rows on either reader, and `docs/level-tower.md`'s rule for an unmeasured
+    // per-compiler default is to claim nothing. The evidence a future round needs is one run of
+    // `scripts/regen-select-spelling-probes.ts` retargeted at the compiler in question.
     hoistsSingleSetArm?: boolean;
-    // Given the MERGE-VARIABLE spelling of a two-armed select whose arms are BARE constants
-    // (`int v; if (c) v = K1; else v = K2; return v;`), the compiler HOISTS one constant above the
-    // compare and turns the other into a conditional skip, so it never re-emits the diamond — which
-    // means a target that HOLDS such a diamond was written with early returns. The ONE reader is
-    // raise/retsink.ts's `SELECT_GATES`, which uses it BACKWARDS: seeing the diamond, it concludes
-    // the source sank its returns. Absent ⇒ false, and that admission never fires; the short-circuit
-    // admissions beside it are unaffected, because their argument is about a SHARED ARM and not
-    // about this hoist. Like `hoistsSingleSetArm`, `structureOptionsFor` spreads it onto
-    // StructureOptions and no structurer code reads it: its reader is a raising pass, threaded from
-    // `decompile`'s own `target`.
-    //
-    // Set on agbcc, where the pair was compiled and committed
-    // (`packages/core/test/corpus/agbcc-select-{merge,early}.s`, four functions written each way).
-    // NOT set anywhere else — including MIPS_GCC, the same compiler family. Nothing has measured
-    // the pair on IDO, KMC GCC or mwcc; re-lifting all 1039 corpus rows shows the admission reaches
-    // no non-agbcc row, so claiming nothing costs nothing, and `docs/level-tower.md`'s rule for an
-    // unmeasured per-compiler default is to claim nothing. The evidence a future round needs is one
-    // run of `scripts/regen-select-spelling-probes.ts` retargeted at the compiler in question.
-    hoistsConstArmSelect?: boolean;
     // A subscript over a DECLARED ARRAY OBJECT expands its base ahead of the index, where every
     // pointer or cast base expands it last — so the instruction order in the target's own assembly
     // says which of the two the source wrote, and `raise/globalshape.ts` may derive an array shape
@@ -397,7 +390,6 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchArmsFollowLayout: true,
     switchRequiresFrontLoadedTests: true,
     hoistsSingleSetArm: true,
-    hoistsConstArmSelect: true,
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
     // agbcc: reload walks pseudos ascending handing each global-alloc loser a fresh slot, a user

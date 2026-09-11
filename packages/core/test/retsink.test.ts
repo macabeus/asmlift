@@ -23,8 +23,9 @@ import type { Value } from '../src/ir/core';
 import { firstTrivialPhi, simplifyTrivialPhis } from '../src/ir/simplify';
 import { type Gate, without } from '../src/l3/gates';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { mergeShapes } from '../src/raise/narrowlocal';
 import { FALL_IN_GATES, type FallInCandidate, SELECT_GATES, sinkReturns } from '../src/raise/retsink';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 /** A two-condition chain converging on a shared `return 0` arm, with a store between the
  *  conditions so the two are not fused into one `logic_and`. `.Lend` also keeps a `cond_br`
@@ -277,7 +278,7 @@ test('ablating the dispatch gate reads an `if` join, and a guarded switch, as fa
   const sinks = (sym: string, asm: string, gates?: readonly Gate<FallInCandidate>[]) => {
     const fn = frontendFor(ARMV4T_AGBCC).lift(sym, asm, ARMV4T_AGBCC, {});
     applyIdiomPatterns(fn, ARMV4T_AGBCC);
-    return sinkReturns(fn, { hoistsConstArmSelect: true }, gates ?? FALL_IN_GATES);
+    return sinkReturns(fn, { hoistsSingleSetArm: true, mergeShapes: mergeShapes(fn) }, gates ?? FALL_IN_GATES);
   };
   for (const [sym, asm] of [
     ['g0', IF_NO_ELSE],
@@ -299,7 +300,12 @@ const CONST_SELECT =
   '.L3:\n\tmov\tr0, #0x1\n' +
   '.L4:\n\tbx\tlr\n';
 
-/** The same diamond with COMPUTED arms — agbcc's `if (a > b) return a + b; return b - a;`. */
+/** The same diamond with ONE-OP COMPUTED arms — agbcc's `if (a > b) return a + b; return b - a;`.
+ *  One `add` / one `sub` is ONE speculatable SET, so `armIsOneSet` admits it and this IS sunk — the
+ *  committed `selcomp` pair (select-spelling.test.ts) is the evidence: agbcc hoists the `sub` above
+ *  the compare in the merge spelling, so a target holding the diamond was written with early
+ *  returns. The bespoke `constant-arms` clause this table used to carry refused it, on no compiled
+ *  evidence at all; nothing on the corpus inhabits the difference. */
 const COMPUTED_SELECT =
   'sel2:\n' +
   '\tcmp\tr0, r1\n\tble\t.L2\t@cond_branch\n' +
@@ -314,8 +320,9 @@ test('a single-condition diamond whose arms are CONSTANTS is sunk', () => {
   expect(out).not.toMatch(/return v\d+;/);
 });
 
-test('the constant-arm admission is silent on a compiler the hoist was never measured on', () => {
-  // `compilerBehaviors.hoistsConstArmSelect` is the fact's home (target.ts). Absent — every target
+test('the one-set-arm admission is silent on a compiler the hoist was never measured on', () => {
+  // `compilerBehaviors.hoistsSingleSetArm` is the fact's home (target.ts) — the SAME field
+  // `raise/narrowlocal.ts` reads, because it is the same `gcc/jump.c` guard. Absent — every target
   // but agbcc — and the admission never fires, whatever the shape. The rest of the pass is
   // compiler-independent and keeps working; only this one arm is conditioned.
   const lift = () => {
@@ -323,16 +330,69 @@ test('the constant-arm admission is silent on a compiler the hoist was never mea
     applyIdiomPatterns(fn, ARMV4T_AGBCC);
     return fn;
   };
-  expect(sinkReturns(lift(), { hoistsConstArmSelect: true })).toBe(true);
-  expect(sinkReturns(lift(), {})).toBe(false);
+  const shapes = (fn: Parameters<typeof sinkReturns>[0]) => ({ mergeShapes: mergeShapes(fn) });
+  const f1 = lift();
+  expect(sinkReturns(f1, { hoistsSingleSetArm: true, ...shapes(f1) })).toBe(true);
+  const f2 = lift();
+  expect(sinkReturns(f2, shapes(f2))).toBe(false);
   expect(sinkReturns(lift())).toBe(false);
   // …and ablating the clause is what puts it back, which is what makes the clause the reason.
-  expect(sinkReturns(lift(), {}, FALL_IN_GATES, without(SELECT_GATES, 'compiler-hoists-const-arms'))).toBe(true);
+  const f3 = lift();
+  expect(sinkReturns(f3, shapes(f3), FALL_IN_GATES, without(SELECT_GATES, 'compiler-hoists-single-set-arm'))).toBe(
+    true,
+  );
 });
 
-test('the same diamond with COMPUTED arms keeps its merge variable', () => {
+test('`pre-diamond`: a diamond absent from the pre-recovery map is refused', () => {
+  // THE TOWER'S OBLIGATION FOR A BACKWARDS DEFAULT, pinned. `raise/shortcircuit.ts` manufactures
+  // two-armed diamonds out of condition trees the ROM never merged, and it runs BEFORE this pass, so
+  // the shape is read from `PreRecoveryFacts.mergeShapes` — the CFG as it ENTERED pre-recovery —
+  // rather than off `fn` at this pass's turn.
+  //
+  // THE CORPUS SUPPLIES NO INHABITANT, so the divergence is built by hand, and the header says so:
+  // today a fused manufacture takes the short-circuit path (`fusedDiamond` is tested first in the
+  // same disjunction) and never reaches this table at all. What the clause buys is that the refusal
+  // is STATED rather than a coincidence of evaluation order — this file's own history is that
+  // hazard having fired once already.
+  const lift = () => {
+    const fn = frontendFor(ARMV4T_AGBCC).lift('sel', CONST_SELECT, ARMV4T_AGBCC, { sel: { params: 1 } });
+    applyIdiomPatterns(fn, ARMV4T_AGBCC);
+    return fn;
+  };
+  // The merge, as the map sees it: the block that is a diamond and is not the entry.
+  const live = lift();
+  const real = mergeShapes(live);
+  expect([...real.values()].filter((v) => v.diamond).length, 'the fixture has exactly one diamond').toBe(1);
+  expect(sinkReturns(live, { hoistsSingleSetArm: true, mergeShapes: real })).toBe(true);
+
+  // The SAME live CFG, with the map saying that merge was not a diamond before pre-recovery.
+  const manufactured = lift();
+  const stale = new Map([...mergeShapes(manufactured)].map(([b]) => [b, { diamond: false, hoistable: false }]));
+  expect(sinkReturns(manufactured, { hoistsSingleSetArm: true, mergeShapes: stale })).toBe(false);
+  const abl = lift();
+  expect(
+    sinkReturns(
+      abl,
+      {
+        hoistsSingleSetArm: true,
+        mergeShapes: new Map([...mergeShapes(abl)].map(([b]) => [b, { diamond: false, hoistable: false }])),
+      },
+      FALL_IN_GATES,
+      without(SELECT_GATES, 'pre-diamond'),
+    ),
+    '`pre-diamond` is what refused it',
+  ).toBe(true);
+
+  // NO MAP AT ALL is the refusing direction too — a caller that does not thread the facts gets no
+  // one-set-arm admission, rather than one judged on a shape nothing vouched for.
+  expect(sinkReturns(lift(), { hoistsSingleSetArm: true })).toBe(false);
+});
+
+test('a diamond whose arms are ONE COMPUTED SET is sunk too — `selcomp`, not just a constant', () => {
   const out = decompile('sel2', COMPUTED_SELECT, ARMV4T_AGBCC, { prototypes: { sel2: { params: 2 } } }).source;
-  expect(out).toMatch(/return v\d+;/);
+  expect(out).toContain('return a0 + a1;');
+  expect(out).toContain('return a1 - a0;');
+  expect(out).not.toMatch(/return v\d+;/);
 });
 
 /** A void diamond: the two arms store a constant and converge on a bare `bx lr`. There is no merge
@@ -368,12 +428,14 @@ const THREE_ARM =
   '.L4:\n\tmov\tr0, #0x2\n\tb\t.L5\n' +
   '.L5:\n\tbx\tlr\n';
 
-/** A diamond whose arms are BARE — the computation is hoisted into the head, so each arm does
- *  nothing but carry a value — and whose carried values are NOT constants. This is the shape
- *  `constant-arms` decides ALONE: `bare-arms` is satisfied, and only the value test refuses.
- *  `COMPUTED_SELECT` above is refused TWICE OVER (the `add`/`sub` sit in the arms, so dropping
- *  `constant-arms` leaves `bare-arms` refusing), which is why it cannot pin that clause. */
-const BARE_COMPUTED_SELECT =
+/** A diamond whose arms are EMPTY — the computation is hoisted into the head, so each arm does
+ *  nothing but carry a value. `gcc/jump.c:480` runs `single_set` on the arm's OWN insn and an arm
+ *  whose only insn is its jump has none, so `armIsOneSet` refuses it: the budget is EXACTLY one
+ *  result-producing op, not at most one. This is one of the three shapes the shared predicate judges
+ *  differently from the bespoke `constant-arms` + `bare-arms` pair it replaced (that pair admitted
+ *  it), and it is the only one of the three with a fixture, because the other two need a compiler.
+ *  No corpus row inhabits any of them, and all three differences are in the refusing direction. */
+const EMPTY_ARM_SELECT =
   'sel7:\n' +
   '\tadd\tr2, r0, r1\n\tsub\tr3, r1, r0\n' +
   '\tcmp\tr0, r1\n\tble\t.L2\t@cond_branch\n' +
@@ -381,11 +443,11 @@ const BARE_COMPUTED_SELECT =
   '.L2:\n\tmov\tr0, r3\n' +
   '.L3:\n\tbx\tlr\n';
 
-/** `CONST_SELECT` with a BODY in each arm — one store apiece. The arms still carry constants, so
- *  `constant-arms` is satisfied; what refuses it is `bare-arms`, because a body pins the constant
- *  below the compare and the merge-variable spelling then emits the diamond too. Five compiled
- *  shapes of this kind lose a byte-exact match when the clause is dropped
- *  (`packages/cli/test/matching/shortcircuit-retsink.test.ts`). */
+/** `CONST_SELECT` with a BODY in each arm — one store apiece. Two result-producing ops in each arm,
+ *  so `armIsOneSet` refuses: a body pins the constant below the compare and the merge-variable
+ *  spelling then emits the diamond too, differing only in ARM ORDER (`selbody`,
+ *  select-spelling.test.ts). Five compiled shapes of this kind lose a byte-exact match when the
+ *  clause is dropped (`packages/cli/test/matching/shortcircuit-retsink.test.ts`). */
 const BODIED_SELECT =
   'sel6:\n' +
   '\tcmp\tr0, #0x0\n\tbne\t.L3\t@cond_branch\n' +
@@ -393,12 +455,12 @@ const BODIED_SELECT =
   '.L3:\n\tmov\tr2, #0x1\n\tstr\tr2, [r1]\n\tmov\tr0, #0x1\n' +
   '.L4:\n\tbx\tlr\n';
 
-test('a constant-arm diamond whose arms have a BODY keeps its merge variable', () => {
+test('a one-set-arm diamond whose arms have a BODY keeps its merge variable', () => {
   const out = decompile('sel6', BODIED_SELECT, ARMV4T_AGBCC, { prototypes: { sel6: { params: 2 } } }).source;
   expect(out).toMatch(/return v\d+;/);
 });
 
-test('every constant-arm clause refuses a shape the two-armed evidence does not cover', () => {
+test('every one-set-arm clause refuses a shape the two-armed evidence does not cover', () => {
   const voidProto = { sel3: { returnsVoid: true, params: 2 } };
   const sinks = (sym: string, asm: string, sel = SELECT_GATES) => {
     const fn = frontendFor(ARMV4T_AGBCC).lift(
@@ -414,30 +476,82 @@ test('every constant-arm clause refuses a shape the two-armed evidence does not 
             : {},
     );
     applyIdiomPatterns(fn, ARMV4T_AGBCC);
-    return sinkReturns(fn, { hoistsConstArmSelect: true }, FALL_IN_GATES, sel);
+    return sinkReturns(fn, { hoistsSingleSetArm: true, mergeShapes: mergeShapes(fn) }, FALL_IN_GATES, sel);
   };
-  for (const [id, sym, asm] of [
-    ['constant-arms', 'sel7', BARE_COMPUTED_SELECT],
-    ['no-arrival-but-the-arms', 'sel4', GUARDED_CONST_SELECT],
-    ['two-arms-one-head', 'sel5', THREE_ARM],
-    ['bare-arms', 'sel6', BODIED_SELECT],
+  // ONE CLAUSE, ONE FIXTURE, where a fixture really does have one — a bodied arm is a diamond the
+  // ROM held, arrived at by two edges, carrying a value, and the ONLY thing wrong with it is the
+  // body.
+  expect(sinks('sel6', BODIED_SELECT), 'a bodied arm is refused').toBe(false);
+  expect(sinks('sel6', BODIED_SELECT, without(SELECT_GATES, 'arms-are-one-set'))).toBe(true);
+
+  // THE TWO SHAPE CLAUSES REFUSE THE SAME SHAPES, and neither ablation alone moves either fixture —
+  // the same subsumption the corpus shows, where `pre-diamond` and `no-arrival-but-the-arms`
+  // first-refuse the SAME two agbcc sites and only the table order decides which the census bills.
+  // `mergeArms` asks for EXACTLY two predecessors and a shared `cond_br` head; `two-arms-one-head`
+  // asks the second question of the `br` preds only, and `no-arrival-but-the-arms` the first. A
+  // third in-edge (`sel4`) and a three-armed ladder (`sel5`) each fail more than one of them.
+  // Asserting a single clause here would pin a number the next reorder silently invalidates.
+  for (const [sym, asm, ids] of [
+    ['sel4', GUARDED_CONST_SELECT, ['no-arrival-but-the-arms', 'pre-diamond']],
+    ['sel5', THREE_ARM, ['two-arms-one-head', 'pre-diamond']],
   ] as const) {
     expect(sinks(sym, asm), `${sym} is refused`).toBe(false);
-    expect(sinks(sym, asm, without(SELECT_GATES, id)), `${id} is what refuses ${sym}`).toBe(true);
+    for (const id of ids) {
+      expect(sinks(sym, asm, without(SELECT_GATES, id)), `${id} alone does not sink ${sym}`).toBe(false);
+    }
+    expect(
+      sinks(sym, asm, without(without(SELECT_GATES, ids[0]), ids[1])),
+      `${ids[0]} and ${ids[1]} together are what refuse ${sym}`,
+    ).toBe(true);
   }
-  // `COMPUTED_SELECT` is refused by BOTH value clauses — its `add`/`sub` live in the arms — so it
-  // pins neither on its own; it takes both ablations to sink it. That is the same subsumption the
-  // corpus shows (the pass header's per-clause ablation table).
-  expect(sinks('sel2', COMPUTED_SELECT, without(SELECT_GATES, 'constant-arms'))).toBe(false);
-  expect(
-    sinks('sel2', COMPUTED_SELECT, without(without(SELECT_GATES, 'constant-arms'), 'bare-arms')),
-    'the two value clauses together are what refuse a computed arm',
-  ).toBe(true);
-  // `a-value-is-returned` has NO fixture that reaches it, and this asserts exactly that rather
-  // than pretending otherwise. `VOID_SELECT`'s merge is refused one check EARLIER — the Thumb
+  // THE EMPTY ARM is refused by `arms-are-one-set` too, and it is the one shape where the shared
+  // `armIsOneSet` is NARROWER than the bespoke pair it replaced — that pair admitted it, because an
+  // arm holding nothing has no body and carries what the head computed. Ablating the clause is what
+  // sinks it, which is what makes the clause the reason.
+  expect(sinks('sel7', EMPTY_ARM_SELECT), 'an emptied arm is not one SET either').toBe(false);
+  expect(sinks('sel7', EMPTY_ARM_SELECT, without(SELECT_GATES, 'arms-are-one-set'))).toBe(true);
+  // `a-value-is-returned` has NO fixture in this tree that reaches it, and this asserts exactly that
+  // rather than pretending otherwise. `VOID_SELECT`'s merge is refused one check EARLIER — the Thumb
   // frontend hands even a void function `ret r0`, so its `ret` carries an operand that is not a
   // param of the merge — and the proof is that the EMPTY table refuses it too. An assertion that
-  // passes for any table pins nothing; this one says which table it passes for and why.
+  // passes for any table pins nothing; this one says which table it passes for and why. The clause
+  // IS reached on the corpus, by two agbcc rows named in the pass header, where `arms-are-one-set`
+  // subsumes it a step later.
   expect(sinks('sel3', VOID_SELECT, without(SELECT_GATES, 'a-value-is-returned'))).toBe(false);
   expect(sinks('sel3', VOID_SELECT, []), 'refused before the table, not by it').toBe(false);
+});
+
+test("the SELECT_GATES order is pinned, because the header's reach numbers are true of it alone", () => {
+  // THE FAILURE THIS EXISTS FOR, and it has already happened once here: the header carried "the
+  // pair, ablated together, decides 8" across the commit that moved the compiler clause into first
+  // position and made it 6 — a number right about the world and stale about the program, with
+  // nothing to catch it because the reach numbers live only in comments. A census attributes each
+  // site to the clause that FIRST refuses it, so every one of those numbers is a claim about THIS
+  // order. Change the list and re-measure the header's table; do not just update this array.
+  expect(SELECT_GATES.map((g) => g.id)).toEqual([
+    'two-arms-one-head',
+    'pre-diamond',
+    'no-arrival-but-the-arms',
+    'a-value-is-returned',
+    'arms-are-one-set',
+    'compiler-hoists-single-set-arm',
+  ]);
+  // LAST is the load-bearing half of the order. `target.ts` says this admission reaches no non-agbcc
+  // row; first, the clause collected 28 of the 74 corpus sites and a census read the opposite of
+  // that sentence, and it moved 0 rows either way.
+  expect(SELECT_GATES[SELECT_GATES.length - 1].id).toBe('compiler-hoists-single-set-arm');
+  // Every clause here trades BYTES, never correctness — see the pass header's FAILURE DIRECTION.
+  expect(SELECT_GATES.every((g) => g.sound === false)).toBe(true);
+});
+
+test('the hoist is ONE compilerBehaviors field, declared on agbcc alone', () => {
+  // The drift trap this closes: the admission shipped a second boolean (`hoistsConstArmSelect`) for
+  // the same `gcc/jump.c` guard `raise/narrowlocal.ts` already had a field for, set on the same
+  // single target with the same value. A round measuring another compiler's `jump_optimize` would
+  // have set one and left the other false. One guard, one field, two readers.
+  expect(ARMV4T_AGBCC.compilerBehaviors.hoistsSingleSetArm).toBe(true);
+  expect('hoistsConstArmSelect' in ARMV4T_AGBCC.compilerBehaviors).toBe(false);
+  for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+    expect(t.compilerBehaviors.hoistsSingleSetArm, `${t.id} has not measured the pair`).toBeUndefined();
+  }
 });

@@ -1626,15 +1626,38 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
   {
-    // THE CONSTANT-ARM RETURN DIAMOND (raise/retsink.ts `SELECT_GATES`). The capability that closed
+    // THE ONE-SET-ARM RETURN DIAMOND (raise/retsink.ts `SELECT_GATES`). The capability that closed
     // `kleod:IsSelectButtonPressed:agbcc` had no synthetic inhabitant at all, and the corpus's only
     // real one is that row; a rule with one row behind it cannot show whether it travels. Run on
     // ALL four toolchains deliberately: the admission is declared for agbcc alone
-    // (`compilerBehaviors.hoistsConstArmSelect`), so the IDO / KMC / mwcc columns of this row are
+    // (`compilerBehaviors.hoistsSingleSetArm`), so the IDO / KMC / mwcc columns of this row are
     // what would say if that ever stopped being true.
+    //
+    // TAGGED LIKE THE ROW IT GENERALISES. `kleod:IsSelectButtonPressed` carries
+    // `bool`/`branch`/`mask`/`global`; this one shipped as `compare`/`branch`, which put the
+    // capability's only two rows in no shared feature slice but `branch`. It returns a truth value
+    // (`bool`) and isolates a bit field with an AND mask (`mask`) by bench-schema's own definitions.
     sym: 'selconst',
     src: 'int selconst(int x){ if (x & 0x40) return 1; return 0; }',
-    features: ['compare', 'branch'],
+    features: ['bool', 'branch', 'mask'],
+    toolchains: ALL,
+  },
+  {
+    // ONE SYNTHETIC ROW IS THIN PINNING for a rule that travels, and these are the two shapes that
+    // would break first. `selhead` puts a BODY in the head rather than the arms — the arms stay one
+    // SET each, so the admission must still fire, and it is the case a predicate written on the arms
+    // alone would get wrong if it ever grew a "the head is bare" clause. `selloop` puts a LOOP ahead
+    // of the diamond, so the sink has to compose with another axis (`/indexed`) in the ranked fan
+    // rather than be the only lever the row needs.
+    sym: 'selhead',
+    src: 'int selhead(int x,int *p){ *p = x; if (x & 0x40) return 1; return 0; }',
+    features: ['bool', 'branch', 'mask', 'memory'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'selloop',
+    src: 'int selloop(int *p,int n){ int s=0,i; for(i=0;i<n;i++) s+=p[i]; if(s) return 1; return 0; }',
+    features: ['bool', 'branch', 'array'],
     toolchains: ALL,
   },
   {

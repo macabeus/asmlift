@@ -364,8 +364,22 @@ function mergeArms(preds: Map<Block, Block[]>, fn: Fn, blk: Block): [Block, Bloc
  *      is its jump has none.
  *
  *  Over-refusal here is free by construction: it returns the carrier to the wide-local-plus-cast
- *  spelling this pass emits without the clause. */
-function armIsOneSet(b: Block): boolean {
+ *  spelling this pass emits without the clause.
+ *
+ *  A SECOND READER, AND WHY THE PREDICATE IS SHARED RATHER THAN RE-DERIVED. `raise/retsink.ts`'s
+ *  `arms-are-one-set` asks this same question of the same optimizer for a different purpose: a
+ *  merge-variable select whose arms this guard would have collapsed never comes back as a diamond,
+ *  so a TARGET holding one was written with early returns. Compiled both ways with agbcc -O2
+ *  -mthumb and committed (`test/corpus/agbcc-select-{merge,early}.s`), the three bullets above hold
+ *  term for term in that direction too: `selcomp` (`v = a + b`, one SET) loses its diamond in the
+ *  merge spelling and keeps it in the early one; `selload` (`v = *p`) keeps a diamond in BOTH,
+ *  carrying no information; `selcomp3` (three ops) likewise. ONE DIFFERENCE IS WORTH NAMING: the
+ *  constant bullet's "refusing the foldable case costs nothing" is an argument about THIS pass's
+ *  fallback, and it does not transfer — `selk3` (`v = a + 3`) really is hoisted, so retsink's
+ *  refusal of it costs a candidate there rather than nothing. It still never costs an ANSWER (every
+ *  clause in that table is `sound: false`), so the shared conservative predicate is the right one
+ *  until a row asks for the cost model neither pass has. */
+export function armIsOneSet(b: Block): boolean {
   return (
     !b.ops.some((op) => REEVAL_UNSAFE_OPS.has(op.opcode)) && b.ops.filter((op) => op.results.length > 0).length === 1
   );

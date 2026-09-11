@@ -104,13 +104,15 @@ describe('F-CFG return-sinking: a BARE constant-arm diamond IS sunk', () => {
   });
 });
 
-describe('F-CFG return-sinking gate: a BODIED constant-arm diamond is NOT sunk (`bare-arms`)', () => {
+describe('F-CFG return-sinking gate: an arm that is NOT one SET is not sunk (`arms-are-one-set`)', () => {
   // THE REGRESSION THE FIRST CUT OF `SELECT_GATES` SHIPPED. The compiler fact behind the admission
-  // is a HOIST, and a hoist needs a bare arm: one `*p = 1` pins the constant below the compare, so
-  // the merge-variable spelling emits a diamond too and byte-matches as it stands. Sinking then
-  // trades a match for the same shape in the other ARM ORDER — recoverable only by `/flip-branch`,
-  // which this unranked path does not have. Every row below scored 0/byte-exact before the
-  // constant-arm admission existed, 5 or 6 with it and no `bare-arms` clause, and 0 again now.
+  // is gcc 2.x's one-speculatable-SET arm hoist (`gcc/jump.c:471-502`), and one `*p = 1` makes the
+  // arm two SETs, so the constant stays below the compare: the merge-variable spelling emits a
+  // diamond too and byte-matches as it stands. Sinking then trades a match for the same shape in the
+  // other ARM ORDER — recoverable only by `/flip-branch`, which this unranked path does not have.
+  // Every row below scored 0/byte-exact before the one-set-arm admission existed, 5 or 6 with it and
+  // no arm clause, and 0 again now. The predicate is `raise/narrowlocal.ts`'s shared `armIsOneSet`,
+  // and `packages/core/test/corpus/agbcc-select-{merge,early}.s` is the compiled pair behind it.
   test.each([
     ['selbody', 'int selbody(int x, int *p){ int v; if (x) { *p = 1; v = 5; } else { *p = 2; v = 3; } return v; }'],
     ['selonearm', 'int selonearm(int x, int *p){ int v; if (x) { *p = 1; v = 5; } else { v = 3; } return v; }'],

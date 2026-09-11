@@ -54,21 +54,67 @@ selpool:
 .Lfe3:
 	.size	 selpool,.Lfe3-selpool
 	.align	2, 0
+	.globl	selcomp
+	.type	 selcomp,function
+	.thumb_func
+selcomp:
+	sub	r3, r1, r2
+	cmp	r0, #0
+	beq	.L14	@cond_branch
+	add	r3, r1, r2
+.L14:
+	add	r0, r3, #0
+	bx	lr
+.Lfe4:
+	.size	 selcomp,.Lfe4-selcomp
+	.align	2, 0
 	.globl	selbody
 	.type	 selbody,function
 	.thumb_func
 selbody:
 	cmp	r0, #0
-	beq	.L14	@cond_branch
+	beq	.L17	@cond_branch
 	mov	r0, #0x1
 	str	r0, [r1]
 	mov	r0, #0x5
-	b	.L15
-.L14:
+	b	.L18
+.L17:
 	mov	r0, #0x2
 	str	r0, [r1]
 	mov	r0, #0x3
-.L15:
+.L18:
 	bx	lr
-.Lfe4:
-	.size	 selbody,.Lfe4-selbody
+.Lfe5:
+	.size	 selbody,.Lfe5-selbody
+	.align	2, 0
+	.globl	selcomp3
+	.type	 selcomp3,function
+	.thumb_func
+selcomp3:
+	cmp	r0, #0
+	beq	.L20	@cond_branch
+	add	r0, r1, r2
+	add	r0, r0, #0x7
+	b	.L21
+.L20:
+	sub	r0, r1, r2
+	sub	r0, r0, #0x7
+.L21:
+	bx	lr
+.Lfe6:
+	.size	 selcomp3,.Lfe6-selcomp3
+	.align	2, 0
+	.globl	selload
+	.type	 selload,function
+	.thumb_func
+selload:
+	cmp	r0, #0
+	beq	.L23	@cond_branch
+	ldr	r0, [r1]
+	b	.L24
+.L23:
+	ldr	r0, [r2]
+.L24:
+	bx	lr
+.Lfe7:
+	.size	 selload,.Lfe7-selload
