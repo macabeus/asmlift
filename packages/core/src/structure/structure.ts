@@ -4763,7 +4763,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // The fold's evidence where there is any, the function-wide boolean where there is not
     // (`senseFromFoldEvidence`). THREE stamps, and exactly ONE of the eight cells negates.
     //
-    //   onFall  isTaken  relayed  spelling   inhabitant (all four measured from their own asm)
+    //   onFall  isTaken  relayed  spelling   inhabitant (each measured from its own asm)
     //   ------  -------  -------  --------   --------------------------------------------------
     //   false   true     false    NEGATE     `synthetic:ifand_near` — the short-branch `&&`
     //   true    true     false    positive   `synthetic:ifor_near`  — the short-branch `||`
@@ -4776,12 +4776,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // branch's TAKEN successor, is the `||` fold. `scSharedOnFall` says which source arm it is:
     // true = the last test FELL INTO it, so under gcc's source-order layout it is the source's
     // `then`. A shared arm in the FALL slot leaves the source's `then` in the taken slot whatever
-    // the layout — the shared arm is where FAILING tests go — so the `&&` half is positive at both
-    // values of `scSharedOnFall` and the premise is only consulted where it decides something. That
-    // is what admits the CHAINED fold, `scSharedOnFall` false, whose inner fold left the head's
-    // taken edge pointing at the next test: the one-stamp reading NEGATED it, `synthetic:chainsense`
-    // is 4/44 there and MATCH here, and the inner-loop site of `kleod:CountCollectedGems:agbcc` is
-    // the real-row inhabitant (39/352 → 18/344).
+    // the layout — an `&&`'s shared arm is where its FAILING tests go — so the `&&` half is
+    // positive at both values of `scSharedOnFall` and the premise is only consulted where it
+    // decides something. That is what admits the CHAINED fold, `scSharedOnFall` false, whose inner
+    // fold left the head's taken edge pointing at the next test: reading the source arm alone
+    // NEGATES it, `synthetic:chainsense` is 4/44 that way and MATCH this way, and the inner-loop
+    // site of `kleod:CountCollectedGems:agbcc` is the real-row inhabitant (39/352 → 18/344).
     //
     // `scEdgeRelayed` is the LONG BRANCH, and it is the stamp that keeps the premise honest rather
     // than absorbing it. agbcc inverts a conditional it cannot reach in ±256 bytes, so the layout
@@ -4802,10 +4802,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // `rank.ts`'s per-site mask (`branchSenseFlipSites`, the `/sense-N` probe), which enumerates a
     // site both ways instead of picking. Do not read the table above as the mapping being a function.
     //
-    // CENSUS, re-derived here because the number this note used to carry (75/5/2) reproduced from
-    // nobody. Over all 1037 committed rows, lifting each row's own `targetAsm` at both `/connective`
-    // settings — stamped `cond_br`s at the PRODUCER, then this consumer's own reads at real
-    // two-armed sense sites, each summed over the two settings:
+    // CENSUS over the 1037 rows of the committed artifact — which predates `synthetic:ifor_far` and
+    // `synthetic:chainsense`, the two rows added for the cells below. Each row's own `targetAsm`
+    // lifted at both `/connective` settings: stamped `cond_br`s at the PRODUCER, then this
+    // consumer's own reads at real two-armed sense sites, each summed over the two settings:
     //
     //   stamped sites     `/connective` off: 82 taken-slot,  4 long-branch, 0 chained
     //                     `/connective` on:  85 taken-slot,  4 long-branch, 2 chained
@@ -4814,12 +4814,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // The chained cell has ZERO inhabitants with `/connective` off, so that half of the capability
     // is reachable only through the `/connective` lift variant — both real inhabitants and
     // `chainsense` carry it in their winner. And `scEdgeRelayed`'s own cell `(false,true,true)`
-    // carries 9 stamped sites at each setting and **0 consumer reads**: all 9 are MIPS rows
+    // carries 9 stamped sites at each setting and **0 consumer reads** there: all 9 are MIPS rows
     // (`ido7.1`/`gcc2.7.2kmc`, where no ±256 range exists and a relay means something else), and
-    // none is a two-armed sense site, so the corpus emits byte-identical C with the stamp and
-    // without it. That is this stamp's known over-reach — a PROXY firing where the structure it
-    // proxies is absent — priced at 0 today and worth re-censusing whenever a MIPS row starts
-    // reading it.
+    // none is a two-armed sense site, so those rows emit byte-identical C with the stamp and
+    // without it — the cell's one reader is `synthetic:ifor_far`, measured from its own asm. That
+    // MIPS firing is this stamp's known over-reach — a PROXY firing where the structure it proxies
+    // is absent — priced at 0 today and worth re-censusing whenever a MIPS row starts reading it.
     //
     // REFUSES unless ALL THREE stamps are present. DEFENSIVE — no input reaches it: the one producer
     // (raise/shortcircuit.ts) writes all three in a single object literal, and instrumenting this

@@ -315,10 +315,10 @@ describe('the four orientations', () => {
     //
     // `scSharedIsTaken` is the other half, the SUCCESSOR SLOT the shared arm landed in — `gIsFall`,
     // so `!gOnTaken` — and it is stamped for the consumer's benefit, not this pass's. It is pinned
-    // HERE because a producer that stopped agreeing with the slots built two lines below it would
-    // turn every chained and long-branch site's spelling over with nothing else in the tree
-    // noticing: the consumer's own tests hand-stamp their fixtures, and the rows that inhabit those
-    // layouts MATCH on other axes.
+    // HERE because a producer that stopped agreeing with the successor list it rides on would turn
+    // every chained and long-branch site's spelling over with nothing else in the tree noticing:
+    // the consumer's own tests hand-stamp their fixtures, and the rows that inhabit those layouts
+    // MATCH on other axes.
     for (const gOnTaken of [false, true]) {
       for (const sharedOnGTaken of [false, true]) {
         const fn = chain({ gOnTaken, sharedOnGTaken });

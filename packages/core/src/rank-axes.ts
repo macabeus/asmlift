@@ -302,7 +302,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // successor SLOT the shared arm landed in, and a shared arm in the FALL slot leaves the source's
   // `then` in the taken slot whichever way the last test went — so at a CHAINED fold, whose outer
   // `^g` is the head's taken edge, the site is positive and does not ask the premise at all
-  // (`synthetic:chainsense`, 4/44 on the one-stamp reading and MATCH on the two). The THIRD stamp
+  // (`synthetic:chainsense`, 4/44 when only the source arm is read, MATCH once the slot is). The THIRD stamp
   // is the long-branch trampoline, the layout where the premise is known to be false: it is the one
   // cell that is GUARDED rather than consulted, and without it the long `||` presents the same two
   // booleans as the short `&&` and is spelled its own dual (`synthetic:ifor_far`, the row added for
@@ -331,7 +331,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/site-sense',
     options: (on) => ({ senseFromFoldEvidence: on }),
     // ALL THREE stamps, which is the predicate the consumer admits a site on (structure.ts's
-    // `senseFromFoldEvidence` site default): one contract, not two spellings of it 4000 lines apart.
+    // `senseFromFoldEvidence` site default): one contract, not two spellings of it in two files.
     // The fold writes the three in one object literal, so this is the same set of functions today —
     // measured, 0 partially-stamped sites over the 1037 committed rows at both `/connective`
     // settings.

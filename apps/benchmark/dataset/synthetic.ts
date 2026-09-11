@@ -1275,8 +1275,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // guarding X and its De Morgan dual `!a || !b` guarding Y are the same program, and agbcc lays
   // the arms out in SOURCE order — so they are different bytes, and which one was written is
   // recorded in the branch senses. A decompiler therefore has to choose, and choosing wrong costs
-  // the whole function. The three rows are the two orientations, plus the distance that decides
-  // whether the shape is recognised at all.
+  // the whole function. The four functions are the two orientations at the two distances, and the
+  // distance decides whether the shape is recognised at all.
   //
   // `ifand_near` and `ifand_far` differ in ONE thing: whether the guarded arm fits inside a Thumb
   // conditional branch's ±256-byte reach. That one distance changes TWO things at once, and the
@@ -1302,16 +1302,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // So the gap is not "this shape is unrecoverable" but "one of the fold's two arms emits the
   // spelling the compiler did not" — and a row that could falsify the claim is worth more than a
   // third that restates it. What referees it on the RANKED path is `/flip-join`, which emits the
-  // other joined sense: all four rows match there, two of them on the axis.
+  // other joined sense: all four match, three of them carrying it — `ifand_near` is the one that
+  // matches at the default sense with no axis at all.
   //
-  // `ifor_far` was once DECLINED here on "measured, a `||` matches at BOTH distances", and the
-  // decline was wrong in the one way this family's own note warns about a dozen lines below: it is
-  // a SCORE rationale in the family whose score cannot referee an orientation. `/flip-join` is a
-  // per-FUNCTION lever, so it is right by luck on a one-site function and all four rows MATCH on it
-  // whatever the fold spelled. What the row is for is the STAMP PAIR it inhabits: measured, a long
-  // `||` stamps `(scSharedOnFall=false, scSharedIsTaken=true)` — the identical pair a short `&&`
-  // stamps — and wants the opposite spelling. It is the counterexample to any two-boolean reading
-  // of the orientation, and like `ifand_far` it is pinned by a test rather than by its number.
+  // `ifor_far` is the fourth corner, and its SCORE referees nothing, exactly as `ifand_far`'s does
+  // not: `/flip-join` is a per-FUNCTION lever, so on a one-site function it is right whichever way
+  // the fold spelled the site, and both long rows MATCH either way (`ifand_far` 0/140, `ifor_far`
+  // 0/139). What the row is for is the STAMP PAIR it inhabits: measured, a long `||` stamps
+  // `(scSharedOnFall=false, scSharedIsTaken=true)` — the identical pair a short `&&` stamps — and
+  // wants the opposite spelling. It is the counterexample to any two-boolean reading of the
+  // orientation, and like `ifand_far` it is pinned by a test rather than by its number.
   //
   // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
   //
@@ -1336,19 +1336,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // nothing to do with short circuits.
   //
   // The arm's CONTENT is filler and its SIZE is the feature, so the near arm is a literal PREFIX
-  // of the far one and all three share a signature. Two pointers, deliberately: a Thumb
+  // of the far one and all four share a signature. Two pointers, deliberately: a Thumb
   // `str Rd,[Rn,#N]` reaches offset 124, and a single array long enough to force the long branch
   // would spill past it into a pointer walk — a second recovery idiom riding along inside what is
   // supposed to be a one-variable control.
   //
-  // WHAT THESE ROWS MOVE, so the headline is not read as progress: the five rows added three
-  // asmlift matches and no m2c match. All three gained matches are synthetic rows authored for an
-  // asmlift-specific gap, one of them (`ifand_far`) scoring MATCH either way — a byte score cannot
-  // see the difference between the recovered `&&` and the tail-duplicated spelling agbcc
-  // cross-jumps back together, so a test pins that orientation, not this row; and every row reads
-  // `noncompile` for m2c on an unrelated pointer-spelling defect of its own. All five rows match
-  // on the ranked path, so `bench regression` holds every one — but only against a LOST match, and
-  // what these rows are really about is WHICH ORIENTATION won. That is
+  // WHAT THESE ROWS MOVE, so the headline is not read as progress: the six rows contribute six
+  // asmlift matches and no m2c match, every one of them a synthetic row authored for an
+  // asmlift-specific gap, and two of them (`ifand_far`, `ifor_far`) score MATCH either way — a byte
+  // score cannot see the difference between the recovered connective and the tail-duplicated
+  // spelling agbcc cross-jumps back together, so a test pins those orientations, not these rows;
+  // and every row reads `noncompile` for m2c on an unrelated pointer-spelling defect of its own.
+  // All six match on the ranked path, so `bench regression` holds every one — but only against a
+  // LOST match, and what these rows are really about is WHICH ORIENTATION won. That is
   // packages/cli/test/matching/shortcircuit-branch.test.ts, which asserts the connective itself
   // and runs with the benchmark refresh rather than on every PR.
   {
@@ -1385,15 +1385,14 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'int ifor_far(int,int,int*,int*);',
     note:
-      "the `||` at `ifand_far`'s distance, and the row the family declined until the fold's " +
-      'orientation evidence grew a third fact. The long branch INVERTS the last test, which moves ' +
+      "the `||` at `ifand_far`'s distance. The long branch INVERTS the last test, which moves " +
       'the shared arm to the other successor slot — so a long `||` stamps the same pair ' +
       '(`scSharedOnFall` false, `scSharedIsTaken` true) as a SHORT `&&` and wants the opposite ' +
-      'spelling. Two booleans cannot separate them; `scSharedLongBranch` is what does, and this ' +
-      "row is that stamp's only inhabitant (packages/core/test/site-sense.test.ts pins the " +
-      'quadrant). Like `ifand_far` its SCORE referees nothing — it MATCHes on `/flip-join` at ' +
-      'both distances, which is the older note this row corrects: that measurement was read as ' +
-      '"no gap here", and what it actually says is that the score cannot see this one. Nor does ' +
+      'spelling. Two booleans cannot separate them; the third stamp `scEdgeRelayed` is what does, ' +
+      'and this is the only row whose SPELLING that stamp decides — the corpus carries 9 other ' +
+      'stamped sites, all MIPS rows where no ±256-byte range exists and none is a sense site ' +
+      '(packages/core/test/site-sense.test.ts pins the cell). Like `ifand_far` its SCORE referees ' +
+      'nothing: it MATCHes on `/flip-join` whichever way the fold spelled the site. Nor does ' +
       'the FAN carry the axis here: measured, the row enumerates 4 candidates and no ' +
       '`/site-sense` at all, because at one site the axis re-spells what `/flip-join` already ' +
       'spelled and the tree dedup drops the duplicate. A named row the fan never enumerates is ' +

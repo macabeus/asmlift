@@ -490,7 +490,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // IT IS HALF THE CARRIER. Which SOURCE arm the shared block is only names the spelling once you
 // also know which SUCCESSOR SLOT it lands in here, and the slot is `gIsFall` — stamped beside it
 // as `scSharedIsTaken`. `gIsFall` false puts the shared arm in the FALL slot, which happens at the
-// long-branch layout AND at every CHAINED fold, since an inner fold leaves the head's taken edge
+// long-branch `&&` AND at every CHAINED fold, since an inner fold leaves the head's taken edge
 // pointing at the next test. There the source's `then` is in the taken slot however ^g reached the
 // shared block, so BOTH values of `scSharedOnFall` read POSITIVE — measured, not derived: the two
 // inhabited layouts stamp opposite `scSharedOnFall` (`synthetic:chainsense` false,
@@ -690,28 +690,28 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           //   ifand_far     a && b     true    false    true      a && b     ✅
           //   ifor_far      a || b     false   true     TRUE      its DUAL   ❌ without this stamp
           //
-          // `ifand_near` and `ifor_far` stamp the IDENTICAL pair and want OPPOSITE spellings, so
-          // two booleans cannot decide the site and the completeness the four-quadrant table used
-          // to claim was false. The relay is what separates them, and `synthetic:ifor_far` is its
-          // only inhabitant — the row exists for this stamp, because its SCORE cannot referee it
-          // (MATCH 0/139 on `/flip-join`, like `ifand_far`'s 0/140).
+          // `ifand_near` and `ifor_far` stamp the IDENTICAL pair and want OPPOSITE spellings, so no
+          // two of these booleans can decide the site. The relay is what separates them, and
+          // `synthetic:ifor_far` is the only row whose spelling it decides — the row exists for this
+          // stamp, because its SCORE cannot referee it (MATCH 0/139 on `/flip-join`, like
+          // `ifand_far`'s 0/140).
           //
           // A PROXY, and named as one: what decides the spelling is the branch INVERSION, and what
           // is observable here is the trampoline the inversion leaves. They coincide on every input
           // measured, and a relay arriving from some other cause at a taken-slot site would read as
           // an inversion that did not happen. The `&&` long branch relays the SHARED edge and the
-          // `||` long branch the OTHER one (measured above), which is why both are asked.
+          // `||` long branch the OTHER one — measured on `ifand_far` and `ifor_far`, and both
+          // layouts pinned in `test/branch-shortcircuit.test.ts` — which is why both are asked.
           //
           // POSITIONAL, unlike its two neighbours: `scSharedOnFall` and `scEdgeRelayed` name arms
           // and survive anything, while `scSharedIsTaken` names a SUCCESSOR SLOT of the very op it
           // rides on. THE INVARIANT IT NEEDS IS NOT "nothing assigns `.successors`" — something
           // does. It is that no pass between here and `structure` may REORDER a stamped `cond_br`'s
           // successor slots. Downstream of this fold `raiseRecovered` (pipeline.ts) runs
-          // `sinkReturns` and `foldEmptyLatches`, and `raise/latch.ts:112` is the one successor
-          // rewrite in `packages/core/src` — `op.successors[i] = { block: onward.block, … }`, which
-          // repoints a slot IN PLACE at its own index and therefore keeps the stamp true. (Grep it
-          // as `successors[i] =` / `successors.push|splice`; the `\.successors =` this note used to
-          // cite matches neither that line nor anything else.) `sinkReturns` only replaces `br`
+          // `sinkReturns` and `foldEmptyLatches`; `raise/latch.ts` holds the one successor rewrite in
+          // `packages/core/src` (grep `successors[i] =` / `successors.push|splice`) —
+          // `op.successors[i] = { block: onward.block, … }`, which repoints a slot IN PLACE at its
+          // own index and therefore keeps the stamp true. `sinkReturns` only replaces `br`
           // terminators. A pass that canonicalised a stamped `cond_br`'s edges would turn the
           // reading over with no refusal firing, and would have to re-stamp.
           ...mkOp('cond_br', {
