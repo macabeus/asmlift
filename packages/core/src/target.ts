@@ -30,7 +30,8 @@
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
 //     Five exceptions are read off the target directly, their consumers not being the
 //     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers),
-//     `hoistsSingleSetArm` and `reloadsLocalReread` (raise/pre-recovery.ts, raising passes) and
+//     `reloadsLocalReread` (raise/pre-recovery.ts), `hoistsSingleSetArm` (two raising passes —
+//     raise/narrowlocal.ts and raise/retsink.ts) and
 //     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn). The field names are a
 //     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
@@ -152,17 +153,29 @@ export interface TargetDescription {
     switchAllowsNeqCase?: boolean;
     // The compiler collapses `if (…) x = a; else x = b;` into `x = b; if (…) x = a;` when both
     // arms are ONE speculatable SET — gcc 2.x's `jump_optimize` (`gcc/jump.c:443-445`, guard at
-    // `:471-502`). The ONE reader is raise/narrowlocal.ts's `edge-extends`, which uses it
-    // BACKWARDS: a diamond this compiler would have collapsed and did not is evidence the source
-    // DECLARED the local narrow, because `gcc/thumb.h:344` PROMOTE_MODE expands a narrow-declared
-    // assignment past one SET. Absent ⇒ false, and the clause never admits. `structureOptionsFor`
+    // `:471-502`). Absent ⇒ false, and every clause below never admits. `structureOptionsFor`
     // spreads it onto StructureOptions like every other field here, but NO structurer code reads
-    // it: its reader is a pre-recovery pass, threaded from `runPreRecovery`'s own `target`.
+    // it: both readers are raising passes, threaded from their driver's own `target`.
     //
-    // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored. NOT
-    // set on MIPS_GCC despite it being the same compiler family: nothing has measured the pair
-    // there, the clause reaches 0 of its benchmark rows, and `docs/level-tower.md`'s rule for an
-    // unmeasured per-compiler default is to claim nothing.
+    // TWO READERS, ONE FACT, BOTH READING IT BACKWARDS. One field rather than one per reader,
+    // because a second boolean for the same guard lets a round that measures another compiler's
+    // `jump_optimize` set one and leave the other false, with both comments reading as
+    // authoritative.
+    //
+    //   • raise/narrowlocal.ts's `edge-extends`: a diamond this compiler would have collapsed and
+    //     did NOT is evidence the source DECLARED the local narrow, because `gcc/thumb.h:344`
+    //     PROMOTE_MODE expands a narrow-declared assignment past one SET.
+    //   • raise/retsink.ts's `compiler-hoists-single-set-arm`: a merge-variable select whose arms
+    //     this guard would have collapsed never comes back as a diamond, so a TARGET holding one
+    //     was written with early returns and its returns should be sunk.
+    //
+    // Set on agbcc, where the 2x2 in raise/narrowlocal.ts's header was compiled and scored and
+    // where retsink's seven-function spelling pair was compiled and committed
+    // (`packages/core/test/corpus/agbcc-select-{merge,early}.s`). NOT set on MIPS_GCC despite it
+    // being the same compiler family: nothing has measured the pair there, the clause reaches 0 of
+    // its benchmark rows on either reader, and `docs/level-tower.md`'s rule for an unmeasured
+    // per-compiler default is to claim nothing. The evidence a future round needs is one run of
+    // `scripts/regen-select-spelling-probes.ts` retargeted at the compiler in question.
     hoistsSingleSetArm?: boolean;
     // A subscript over a DECLARED ARRAY OBJECT expands its base ahead of the index, where every
     // pointer or cast base expands it last — so the instruction order in the target's own assembly

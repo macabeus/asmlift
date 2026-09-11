@@ -44,8 +44,9 @@ export interface PreRecoveryOptions {
  *  by then divpow2 has deleted a block, both short-circuit folds have rewritten edges, and the
  *  eight `dce: true` passes have changed op counts. So the driver reads it here and hands it down. */
 export interface PreRecoveryFacts {
-  /** the join shape of every block, for raise/narrowlocal.ts's `edge-extends`. Blocks a later pass
-   *  creates are absent, and absent reads as "no diamond" — the refusing direction. */
+  /** the join shape of every block, for raise/narrowlocal.ts's `edge-extends` and, downstream of
+   *  pre-recovery entirely, raise/retsink.ts's `pre-diamond`. Blocks a later pass creates are
+   *  absent, and absent reads as "no diamond" — the refusing direction, in both readers. */
   mergeShapes: Map<Block, MergeShape>;
 }
 
@@ -173,14 +174,20 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
 
 /** Run the pre-recovery passes in order. For each pass whose gate passes and that CHANGES the IR, run
  *  `dce` when the pass declares it, then invoke `afterPass(pass, result)` (the caller's verify/trace
- *  hook), if given. */
+ *  hook), if given.
+ *
+ *  RETURNS the facts it read, because a pass AFTER pre-recovery needs one of them too:
+ *  `raise/retsink.ts`'s `pre-diamond` asks whether a return merge was a diamond in the ROM, and
+ *  by its turn `raise/shortcircuit.ts` has manufactured diamonds that were not. The map is the
+ *  driver's to compute — it is the only place that sees `fn` before the first pass — so handing it
+ *  back is cheaper and truer than recomputing something later that cannot be recomputed. */
 export function runPreRecovery(
   fn: Fn,
   target: TargetDescription,
   afterPass?: (pass: PreRecoveryPass, result: number | boolean) => void,
   self?: FnProto,
   opts: PreRecoveryOptions = {},
-): void {
+): PreRecoveryFacts {
   const lifted: PreRecoveryFacts = { mergeShapes: mergeShapes(fn) };
   for (const pass of PRE_RECOVERY_PASSES) {
     if (pass.gate && !pass.gate(target)) {
@@ -194,4 +201,5 @@ export function runPreRecovery(
       afterPass?.(pass, result);
     }
   }
+  return lifted;
 }

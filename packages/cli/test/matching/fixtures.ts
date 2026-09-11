@@ -230,18 +230,19 @@ export const FIXTURES: DecompFixture[] = [
     note: 'compare — equality (icmp_eq)',
   },
   {
-    // NEGATIVE fixture. `!=` does not reduce to the clean if-assign form: asmlift emits an
-    // if/else with a temp, which is not how agbcc lowered it → score 4, no byte-match. This
-    // documents a real structuring gap AND guards the scorer's `match:false` reporting path.
-    // It still exercises the `icmp_ne` lowering: a mutation flipping it changes expectSource.
+    // NEGATIVE fixture, and what is left of it is the JOINED-BRANCH SENSE. The two constant arms
+    // are sunk into early returns (raise/retsink.ts), which is the shape agbcc emitted; the
+    // unranked primary then takes the inverted reading, and `if (a0 != 0) { return 5; } return 0;`
+    // is the one that is byte-identical — a difference the ranked fan carries and this path does
+    // not. Score 3, no byte-match. It guards the scorer's `match:false` reporting path, and still
+    // exercises the `icmp_ne` lowering: a mutation flipping it changes expectSource.
     symbol: 'neset',
     referenceC: 'int neset(int x){ if (x != 0) return 5; return x; }',
     expectSource:
-      's32 neset(s32 a0) {\n    s32 v0;\n    if (a0 == 0) {\n        v0 = 0;\n' +
-      '    } else {\n        v0 = 5;\n    }\n    return v0;\n}\n',
-    expectScore: 4,
+      's32 neset(s32 a0) {\n    if (a0 == 0) {\n        return 0;\n' + '    } else {\n        return 5;\n    }\n}\n',
+    expectScore: 3,
     expectMatch: false,
-    note: 'compare — inequality (icmp_ne): NEGATIVE, documents the if/else-with-temp gap',
+    note: 'compare — inequality (icmp_ne): NEGATIVE, documents the joined-branch-sense gap',
   },
   {
     symbol: 'orf',

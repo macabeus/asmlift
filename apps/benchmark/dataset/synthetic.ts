@@ -1626,6 +1626,46 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
   {
+    // THE ONE-SET-ARM RETURN DIAMOND (raise/retsink.ts `SELECT_GATES`). The capability that closed
+    // `kleod:IsSelectButtonPressed:agbcc` had no synthetic inhabitant at all, and the corpus's only
+    // real one is that row; a rule with one row behind it cannot show whether it travels. Run on
+    // ALL four toolchains deliberately: the admission is declared for agbcc alone
+    // (`compilerBehaviors.hoistsSingleSetArm`), so the IDO / KMC / mwcc columns of this row are
+    // what would say if that ever stopped being true.
+    //
+    // TAGGED LIKE THE ROW IT GENERALISES, so the capability's two rows share a feature slice wider
+    // than `branch`: `kleod:IsSelectButtonPressed` carries `bool`/`branch`/`mask`/`global`, and this
+    // one returns a truth value (`bool`) and isolates a bit field with an AND mask (`mask`) by
+    // bench-schema's own definitions. No `global` — the condition here is on a parameter.
+    sym: 'selconst',
+    src: 'int selconst(int x){ if (x & 0x40) return 1; return 0; }',
+    features: ['bool', 'branch', 'mask'],
+    toolchains: ALL,
+  },
+  {
+    // ONE SYNTHETIC ROW IS THIN PINNING for a rule that travels, and these are the two shapes that
+    // would break first. `selhead` puts a BODY in the head rather than the arms — the arms stay one
+    // SET each, so the admission must still fire, and it is the case a predicate written on the arms
+    // alone would get wrong if it ever grew a "the head is bare" clause. `selloop` puts a LOOP ahead
+    // of the diamond, so the sink has to compose with another axis in the ranked fan rather than be
+    // the only lever the row needs.
+    //
+    // Measured when added: `selhead` MATCH on all four (agbcc `unsigned/flip-branch`), `selloop`
+    // MATCH on agbcc as `signed/flip-branch/indexed` — the composition this row exists to pin. Its
+    // ido7.1 column DECLINES on a branch-likely `beqzl`, which is the frontend's own gap and one of
+    // 52 such declines already in this tier, not anything the select admission decides.
+    sym: 'selhead',
+    src: 'int selhead(int x,int *p){ *p = x; if (x & 0x40) return 1; return 0; }',
+    features: ['bool', 'branch', 'mask', 'memory'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'selloop',
+    src: 'int selloop(int *p,int n){ int s=0,i; for(i=0;i<n;i++) s+=p[i]; if(s) return 1; return 0; }',
+    features: ['bool', 'branch', 'array'],
+    toolchains: ALL,
+  },
+  {
     sym: 'clampu8',
     src: 'int clampu8(int x){ if(x<0)return 0; if(x>255)return 255; return x; }',
     features: ['compare', 'branch'],
