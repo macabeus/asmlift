@@ -487,6 +487,12 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // they did not, at constant branch range, because it reads the source's connective rather than
 // the range: an `&&` sends every failing test AWAY to the shared block, an `||` falls into it.
 //
+// IT IS HALF THE CARRIER. Which SOURCE arm the shared block is only names the spelling once you
+// also know which SUCCESSOR SLOT it lands in here, and the slot is `gIsFall` — stamped beside it
+// as `scSharedIsTaken`. `gIsFall` false puts it in the fall slot, which is the long-branch layout
+// AND every CHAINED fold, since an inner fold leaves the head's taken edge pointing at the next
+// test. Same source arm, opposite spelling; the reading is the two stamps' agreement.
+//
 // Every refusal falls through untouched — a miss, never a miscompile.
 /** Per-call options for `recognizeBranchShortCircuit` — the tree-ownership refusal's two ends. */
 export interface BranchShortCircuitOptions {
@@ -650,17 +656,13 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           // else X`, two different objects that fold to the same connective and the same successor
           // slots. Consumed at L3 by `StructureOptions.senseFromFoldEvidence`.
           //
-          // NOT `gIsFall`, which is beside it in this loop and reads the branch RANGE: measured
-          // over `synthetic:joinsense` (two sites, opposite source connectives) and
-          // `synthetic:mixsense` (four sites, two inverted) it is TRUE at every site of both, and
-          // this flag separates them.
-          //
-          // `scSharedIsTaken` is the OTHER half of the same question, and one is useless without
-          // it: `scSharedOnFall` says which SOURCE arm the shared block is, and this says which
-          // SUCCESSOR SLOT it lands in here — the slot order below, which is `gIsFall`. The source
-          // arm and the slot agree ⇒ the positive spelling; they disagree ⇒ the dual. A consumer
-          // reading `scSharedOnFall` alone is right only where every site is `gIsFall` true, which
-          // is the SHORT-branch, unchained layout.
+          // `gIsFall` is NOT that separator and is stamped for a different reason. It reads the
+          // branch RANGE: over `synthetic:joinsense` (two sites, opposite source connectives) and
+          // `synthetic:mixsense` (four sites, two inverted) it is TRUE at every site of both,
+          // where `scSharedOnFall` separates them. What it is, is the SLOT — the successor order
+          // below is `gIsFall`'s — so it says where the shared arm went, and `scSharedOnFall` says
+          // which source arm it is. Neither decides a spelling alone: they agree ⇒ the taken arm
+          // holds the source's `then`, the positive spelling; they disagree ⇒ the dual.
           ...mkOp('cond_br', {
             operands: [res],
             attrs: { scSharedOnFall: sharedEdge === gFall, scSharedIsTaken: gIsFall },
