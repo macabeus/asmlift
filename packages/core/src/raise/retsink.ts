@@ -11,13 +11,30 @@
 // merge. The structurer then emits early returns in each arm (it already duplicates a shared arm block),
 // which recompiles to the compiler's shared-return form. Purely structural: no new IR/AST vocabulary.
 //
-// GATE — only the SHORT-CIRCUIT shape, never a simple value-select. A single-condition select
-// (`c ? x : y`, and the branchless-compare idioms `clamp0`/`le0`/…) also converges two arms on a return
-// merge, but there the compiler emits the MERGE-VARIABLE form, which is what byte-matches — sinking it
-// would REGRESS those. The distinguishing signal is structural: a short-circuit chain converges on a
-// SHARED arm — the common early-exit reached from ≥2 CONDITIONS — whereas a simple diamond's arms are
-// each reached from one. So sink only when some branch-predecessor of the merge is ARRIVED at from
-// two places; every simple select stays a merge var.
+// GATE — the SHORT-CIRCUIT shape, plus the one single-condition shape a merge variable cannot spell.
+// A single-condition select (`c ? x : y`, and the branchless-compare idioms `clamp0`/`le0`/…) also
+// converges two arms on a return merge, and where its arms are COMPUTED the compiler emits the
+// MERGE-VARIABLE form, which is what byte-matches — sinking it would REGRESS those. The
+// distinguishing signal is structural: a short-circuit chain converges on a SHARED arm — the common
+// early-exit reached from ≥2 CONDITIONS — whereas a simple diamond's arms are each reached from one.
+// So sink when some branch-predecessor of the merge is ARRIVED at from two places.
+//
+// A CONSTANT-ARM DIAMOND IS THE EXCEPTION (`SELECT_GATES`), and it is a compiler fact rather than a
+// preference. Given `v = K1 … v = K2 … return v`, agbcc never emits that diamond back: a constant is
+// unconditionally cheap to materialise, so one arm is HOISTED above the compare and the other
+// becomes a conditional skip — `movs r0,#5; cmp r1,#0; bne .L; movs r0,#3; .L: bx lr`, four blocks
+// collapsed to two, with no unconditional branch to the merge at all. For the {0,1} pair it goes
+// further and folds branchlessly (`negs r0,r0; lsrs r0,r0,#31`), erasing the comparison too.
+// Measured on agbcc -O2 -mthumb over {0,1}, {1,0}, {5,3}, two 32-bit pool constants and a three-way
+// sign ladder: in every one the merge-variable spelling loses the diamond and the early-return
+// spelling keeps it. So where the TARGET holds that diamond, a merge variable is the spelling of
+// some other function, and sinking is the only candidate that can match
+// (`kleod:IsSelectButtonPressed:agbcc`).
+//
+// It stops at constants. Whether agbcc hoists a COMPUTED arm is agbcc's own cost question — a one-op
+// arm is hoisted (`v = a + b` / `v = b - a` becomes a `subs` above the compare), a three-op arm is
+// not — and this pass does not model that threshold. A computed arm is refused, which is what keeps
+// `maxi`/`mini`/`absdiff` on the merge-variable side, where they match.
 //
 // THE QUANTITY IS ARRIVALS, NOT PREDECESSORS. A FALL-THROUGH switch arm is the difference:
 // `case 2: r++; case 1: r++;` gives case 1's body two predecessors — the dispatch's `beq`, and
@@ -119,6 +136,58 @@ export const FALL_IN_GATES: readonly Gate<FallInCandidate>[] = [
   },
 ];
 
+/** A return merge offered to the CONSTANT-ARM admission of the header. Like `FallInCandidate` the
+ *  table is a value, so each clause can be dropped and the pass re-run on real input. */
+export interface SelectCandidate {
+  /** the unconditional-branch predecessors of the merge */
+  readonly brPreds: readonly Block[];
+  /** every predecessor of the merge, `brPreds` included */
+  readonly preds: readonly Block[];
+  /** the block both arms are reached from, when exactly one block reaches both by a `cond_br`
+   *  whose two successors ARE the arms — null when the shape is anything else */
+  readonly head: Block | null;
+  /** the ops defining the values the arms carry in, one per arm per returned operand; `undefined`
+   *  where the value has no defining op (a block parameter, or a live-in) */
+  readonly carried: readonly (Op | undefined)[];
+}
+
+export const SELECT_GATES: readonly Gate<SelectCandidate>[] = [
+  {
+    // The diamond itself: two distinct arms, each reached only from one head, and that head's
+    // `cond_br` choosing between exactly the two of them. A switch's shared return has neither —
+    // the arms run on into one another and the dispatch's tests reach it directly — so this
+    // admission never overlaps the fall-in machinery above.
+    id: 'two-arms-one-head',
+    why: 'both arms chosen by ONE `cond_br` and reached from nowhere else — the diamond itself',
+    sound: false,
+    rejects: (c) => c.head === null,
+  },
+  {
+    // `carried` is read off the two arms, so an arrival that is not an arm carries a value nothing
+    // here has judged. A guard branching onto the same `return` hands the merge whatever it was
+    // holding — not a constant — and the hoist argument is about ALL of a merge variable's
+    // assignments, not two of the three.
+    id: 'no-arrival-but-the-arms',
+    why: 'a third in-edge carries a value the constant test never saw',
+    sound: false,
+    rejects: (c) => c.preds.length !== c.brPreds.length,
+  },
+  {
+    // The claim is about a merge VARIABLE, and a void return has none: there is no value for agbcc
+    // to hoist above the compare, so nothing says it would not re-emit this shape.
+    id: 'a-value-is-returned',
+    why: 'a void return carries no merge variable, so the hoist the admission rests on cannot apply',
+    sound: false,
+    rejects: (c) => c.carried.length === 0,
+  },
+  {
+    id: 'constant-arms',
+    why: 'only a constant is unconditionally cheap enough that agbcc hoists it above the compare',
+    sound: false,
+    rejects: (c) => !c.carried.every((o) => o?.opcode === 'const'),
+  },
+];
+
 /** The two questions the fall-in clauses ask of the function's comparison-tree dispatches. */
 interface DispatchModel {
   /** Is this block part of the dispatch on `s` — either one of its tests, or an arm of one? */
@@ -194,11 +263,16 @@ function dispatchModel(fn: Fn, defs: Map<Value, Op>): DispatchModel {
   };
 }
 
-/** Tail-duplicate a return-only merge block into its unconditional-branch predecessors, but ONLY in the
- *  short-circuit shape (some branch-pred is shared, or the arms are selected by a fused connective).
- *  Returns whether anything changed. A "return-only" block is exactly one `ret` whose operands are all
- *  its own block-params, so each predecessor already carries the returned value as a successor arg. */
-export function sinkReturns(fn: Fn, gates: readonly Gate<FallInCandidate>[] = FALL_IN_GATES): boolean {
+/** Tail-duplicate a return-only merge block into its unconditional-branch predecessors, in the three
+ *  shapes the header argues for: a short-circuit chain visible in the CFG, one fused into a
+ *  connective, and a two-armed diamond whose arms carry constants. Returns whether anything changed.
+ *  A "return-only" block is exactly one `ret` whose operands are all its own block-params, so each
+ *  predecessor already carries the returned value as a successor arg. */
+export function sinkReturns(
+  fn: Fn,
+  gates: readonly Gate<FallInCandidate>[] = FALL_IN_GATES,
+  selectGates: readonly Gate<SelectCandidate>[] = SELECT_GATES,
+): boolean {
   let changed = false;
   const preds = predecessors(fn);
   const defs = defOpMap(fn);
@@ -275,7 +349,34 @@ export function sinkReturns(fn: Fn, gates: readonly Gate<FallInCandidate>[] = FA
     const fellInto = (q: Block, target: Block) =>
       firstRejection(gates, { q, target, dispatches: siblingArms(q, target).filter(ownedBy) }) === null;
     const arrivals = (p: Block) => (preds.get(p) ?? []).filter((q) => !fellInto(q, p)).length;
-    if (!brPreds.some((p) => arrivals(p) >= 2) && !fusedDiamond) {
+    // (c) CONSTANT-ARM DIAMOND — the header's compiler fact. `head` is the diamond read backwards:
+    // each arm's only predecessor is the same block, and that block's `cond_br` chooses between the
+    // two of them. `carried` is what each arm hands the merge, one entry per arm per returned
+    // operand, so a pair whose values come in by different edges is judged together.
+    const armsMeetAt = (): Block | null => {
+      const [x, y] = brPreds;
+      if (brPreds.length !== 2 || x === y) {
+        return null;
+      }
+      const [px, py] = [preds.get(x) ?? [], preds.get(y) ?? []];
+      if (px.length !== 1 || py.length !== 1 || px[0] !== py[0]) {
+        return null;
+      }
+      const t = terminator(px[0]);
+      const succs = t?.opcode === 'cond_br' ? t.successors.map((e) => e.block) : [];
+      return succs.length === 2 && succs.includes(x) && succs.includes(y) ? px[0] : null;
+    };
+    const constantSelect =
+      firstRejection(selectGates, {
+        brPreds,
+        preds: ps,
+        head: armsMeetAt(),
+        carried: brPreds.flatMap((p) => {
+          const args = p.ops[p.ops.length - 1].successors[0].args;
+          return ret.operands.map((o) => defs.get(args[m.params.indexOf(o)]));
+        }),
+      }) === null;
+    if (!brPreds.some((p) => arrivals(p) >= 2) && !fusedDiamond && !constantSelect) {
       continue;
     }
     for (const p of brPreds) {

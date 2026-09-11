@@ -12,6 +12,10 @@
 // counts ARRIVALS rather than predecessors: agbcc's fall-through switch gives case 1's body two
 // predecessors — the dispatch's `beq`, and case 2's body running on — which is a fall-IN, not a
 // chain. Sinking there tail-duplicates a switch's shared return into all five of its paths.
+//
+// The third admission is the CONSTANT-ARM diamond, and its fixtures come in pairs: `CONST_SELECT`
+// is the shape agbcc cannot re-emit from a merge variable, and `COMPUTED_SELECT` is the same
+// diamond one operand away from being the shape it can.
 import { expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
@@ -19,7 +23,7 @@ import type { Value } from '../src/ir/core';
 import { firstTrivialPhi, simplifyTrivialPhis } from '../src/ir/simplify';
 import { type Gate, without } from '../src/l3/gates';
 import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
-import { FALL_IN_GATES, type FallInCandidate, sinkReturns } from '../src/raise/retsink';
+import { FALL_IN_GATES, type FallInCandidate, SELECT_GATES, sinkReturns } from '../src/raise/retsink';
 import { ARMV4T_AGBCC } from '../src/target';
 
 /** A two-condition chain converging on a shared `return 0` arm, with a store between the
@@ -282,4 +286,84 @@ test('ablating the dispatch gate reads an `if` join, and a guarded switch, as fa
     expect(sinks(sym, asm)).toBe(true);
     expect(sinks(sym, asm, without(FALL_IN_GATES, 'one-dispatch-owning-the-merge'))).toBe(false);
   }
+});
+
+// ── the third admission arm: a CONSTANT-ARM diamond ──────────────────────────────────────────────
+
+/** `kleod:IsSelectButtonPressed`'s shape, with the global load that feeds the compare elided: one
+ *  condition, two arms, each a single `mov` of a constant, converging on a bare `bx lr`. */
+const CONST_SELECT =
+  'sel:\n' +
+  '\tcmp\tr0, #0x0\n\tbne\t.L3\t@cond_branch\n' +
+  '\tmov\tr0, #0x0\n\tb\t.L4\n' +
+  '.L3:\n\tmov\tr0, #0x1\n' +
+  '.L4:\n\tbx\tlr\n';
+
+/** The same diamond with COMPUTED arms — agbcc's `if (a > b) return a + b; return b - a;`. */
+const COMPUTED_SELECT =
+  'sel2:\n' +
+  '\tcmp\tr0, r1\n\tble\t.L2\t@cond_branch\n' +
+  '\tadd\tr0, r0, r1\n\tb\t.L3\n' +
+  '.L2:\n\tsub\tr0, r1, r0\n' +
+  '.L3:\n\tbx\tlr\n';
+
+test('a single-condition diamond whose arms are CONSTANTS is sunk', () => {
+  const out = decompile('sel', CONST_SELECT, ARMV4T_AGBCC, { prototypes: { sel: { params: 1 } } }).source;
+  expect(out).toContain('return 0;');
+  expect(out).toContain('return 1;');
+  expect(out).not.toMatch(/return v\d+;/);
+});
+
+test('the same diamond with COMPUTED arms keeps its merge variable', () => {
+  const out = decompile('sel2', COMPUTED_SELECT, ARMV4T_AGBCC, { prototypes: { sel2: { params: 2 } } }).source;
+  expect(out).toMatch(/return v\d+;/);
+});
+
+/** A void diamond: the two arms store a constant and converge on a bare `bx lr`. There is no merge
+ *  VARIABLE here, so the hoist the constant-arm admission rests on has nothing to say. */
+const VOID_SELECT =
+  'sel3:\n' +
+  '\tcmp\tr0, #0x0\n\tbne\t.L3\t@cond_branch\n' +
+  '\tmov\tr2, #0x0\n\tstr\tr2, [r1]\n\tb\t.L4\n' +
+  '.L3:\n\tmov\tr2, #0x1\n\tstr\tr2, [r1]\n' +
+  '.L4:\n\tbx\tlr\n';
+
+/** `CONST_SELECT` with a guard branching onto the same `bx lr`. The two arms still carry constants;
+ *  the guard carries whatever `r0` held, which is not one. */
+const GUARDED_CONST_SELECT =
+  'sel4:\n' +
+  '\tcmp\tr1, #0x0\n\tbeq\t.L4\t@cond_branch\n' +
+  '\tcmp\tr0, #0x0\n\tbne\t.L3\t@cond_branch\n' +
+  '\tmov\tr0, #0x0\n\tb\t.L4\n' +
+  '.L3:\n\tmov\tr0, #0x1\n' +
+  '.L4:\n\tbx\tlr\n';
+
+/** `synthetic:sign`'s own shape — THREE constant arms off two tests, so no one `cond_br` chooses
+ *  the pair. Whether agbcc re-emits a ladder this long from a merge variable is a question the
+ *  two-armed evidence does not answer, and the gate refuses rather than guess. */
+const THREE_ARM =
+  'sel5:\n' +
+  '\tcmp\tr0, #0x0\n\tble\t.L2\t@cond_branch\n\tmov\tr0, #0x1\n\tb\t.L5\n' +
+  '.L2:\n\tcmp\tr0, #0x0\n\tblt\t.L4\t@cond_branch\n\tmov\tr0, #0x0\n\tb\t.L5\n' +
+  '.L4:\n\tmov\tr0, #0x2\n\tb\t.L5\n' +
+  '.L5:\n\tbx\tlr\n';
+
+test('every constant-arm clause refuses a shape the two-armed evidence does not cover', () => {
+  const voidProto = { sel3: { returnsVoid: true, params: 2 } };
+  const sinks = (sym: string, asm: string, sel = SELECT_GATES) => {
+    const fn = frontendFor(ARMV4T_AGBCC).lift(sym, asm, ARMV4T_AGBCC, sym === 'sel3' ? voidProto : {});
+    applyIdiomPatterns(fn, ARMV4T_AGBCC);
+    return sinkReturns(fn, FALL_IN_GATES, sel);
+  };
+  for (const [id, sym, asm] of [
+    ['constant-arms', 'sel2', COMPUTED_SELECT],
+    ['no-arrival-but-the-arms', 'sel4', GUARDED_CONST_SELECT],
+    ['two-arms-one-head', 'sel5', THREE_ARM],
+  ] as const) {
+    expect(sinks(sym, asm), `${sym} is refused`).toBe(false);
+    expect(sinks(sym, asm, without(SELECT_GATES, id)), `${id} is what refuses ${sym}`).toBe(true);
+  }
+  // `a-value-is-returned` is the one clause no ablation moves on its own: a void merge takes no
+  // block parameter, so `sinkReturns` has already skipped it on the operands check above.
+  expect(sinks('sel3', VOID_SELECT, without(SELECT_GATES, 'a-value-is-returned'))).toBe(false);
 });
