@@ -61,6 +61,7 @@ import { type Prototypes, prototypesFromSymbols } from './proto';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
+import { sinkStoreTails } from './raise/tailsink';
 import {
   BASEFOLD_ADMISSIONS,
   type BaseAdmission,
@@ -83,8 +84,14 @@ import {
   bareGlobalSymbols,
   makeRefCollector,
 } from './rank-declare';
+import { hasDivergentSharedRet } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
+
+/** The shared-tail twins' labels (see their loop in `enumerateCandidates`): the follow alone, on the
+ *  fn as raised, and the follow after the store-tail sink. */
+const SHARED_RET_SUFFIX = '/shared-ret';
+const SHARED_TAIL_SUFFIX = '/shared-tail';
 
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
  *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
@@ -1705,193 +1712,269 @@ export function enumerateCandidates(
           opts.onLeverError?.(name + lv.suffix, firstLine(e));
           continue;
         }
-        // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
-        const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
-        const variantCands = svCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
-        // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
-        // refuses to let the axis unlock a function the primary declines, but it can only see its own
-        // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
-        // `/reread-globals/merge-names` candidate could ship where plain `/reread-globals` did not,
-        // which is the same trade one level up. `senseCands` puts each `mergeNames:false` sibling
-        // first, so the entry is always recorded before its merged twin is reached.
+        // THE SHARED-TAIL TWINS: the same raised fn, structured again with `followEarlyReturns`, in
+        // two passes after the primary one.
+        //   - `/shared-ret` is the follow ALONE, on the fn as raised. Some divergent `if` shares a
+        //     `ret` the compiler left in place (`synthetic:gcseinner`).
+        //   - `/shared-tail` is the follow after `sinkStoreTails` has rewritten the fn in place, which
+        //     is safe because `structure()` never mutates `fn`, so the earlier passes are done with it.
+        //     It is enumerated only where the sink changed something AND some divergent `if` of the
+        //     SUNK fn shares a `ret`. That is the sink's price gate: without it, a tail copied into
+        //     arms no `if` shares adds a twin spelling it in each — 204 synthetic candidates on 8
+        //     rows (`gcsedup`, `gcseinnerdup`, `armexpr`, `mergeu16`, `ladder4`, `ladder5`,
+        //     `ladidx2`, `revlad5s`), every one of them MATCH today.
+        // They are lift-variant twins rather than a structuring axis because the sink is an IR
+        // rewrite, and they run here rather than in pipeline.ts's spine because that costs no second
+        // lift. Neither is the default: the same IR comes from both sources (raise/tailsink.ts), and
+        // the follow alone as a default costs `synthetic:sw_fallguard:ido7.1` 13/19 → 19/23 and
+        // `synthetic:gcseflat:agbcc` 19/53 → 22/54.
+        //
+        // TWO BITS, NOT ONE, because the sink can DELETE the follow. A store tail that is itself the
+        // `ret` both sides of an `if` reach is copied into its `br` sources, and then no shared `ret`
+        // is left. `synthetic:gcsejoin:agbcc` is ordinary loop-free C of that shape, and it scored
+        // 7/37 while the follow was tried only behind the sink. No per-tail predicate on this IR picks
+        // between the two: refusing to sink a tail that is already a follow costs
+        // `synthetic:gcseflat:agbcc` 0/49 → 19/53 and `synthetic:gcsearms6:agbcc` 0/84 → 23/87, and
+        // those two need a tail that is BOTH. So the follow-alone candidate is enumerated wherever
+        // the fn as raised has a follow, sunk or not. Its price over the bundled twin is +76
+        // synthetic candidates, on those two rows, and +0 real: where the sink does not fire the
+        // `/shared-ret` pass is the old twin, and on every real row where it fires the fn as raised
+        // has no follow.
+        //
+        // EACH BIT IS PER LIFT VARIANT, not per site: the `/shared-tail` pass sinks every store tail
+        // and follows every divergent `if` at once, so a function with two sites gets the both-on
+        // candidate only. Counted over both tiers (`ProcessInputAndUpdateEntities` excepted), three
+        // functions carry two of something: `synthetic:maskchain:agbcc` two follow sites,
+        // `synthetic:gcsearms6:agbcc` two sunk tails — both MATCH — and
+        // `pokeemerald:SetMauvilleOldManLanguage:agbcc` two sunk tails after which no `if` shares a
+        // `ret`, so the price gate above refuses and its fan is unchanged. Every other function
+        // carries at most one of each.
+        //
+        // `droppedPrimary` is the PRIMARY pass's drops. Each twin pass reads it and keeps its own
+        // drops in a copy, so one twin's structuring failure never removes the other's candidate.
         const droppedPrimary = new Set<string>();
-        for (const s of variantCands) {
-          if (
-            STRUCTURING_AXES.some((ax) => ax.strip && s[ax.flag] && droppedPrimary.has(s.suffix.replace(ax.suffix, '')))
-          ) {
-            // A SKIPPED variant is recorded exactly like a dropped one, or the closure would not be
-            // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
-            // X/inplace/merge-names would find neither stripped key and run — shipping a
-            // double-lever candidate where its ancestor failed the boundary contracts.
-            droppedPrimary.add(s.suffix);
+        for (const pass of ['primary', 'follow', 'sink'] as const) {
+          if (pass === 'follow' && !hasDivergentSharedRet(fn)) {
             continue;
           }
-          // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
-          // senses structure the same recovered function without re-lifting.
-          let sfn: SFn;
-          try {
-            sfn = structureChecked(fn, {
-              ...svOpts,
-              ...(inferredSymbols.size ? { inferredSymbols } : {}),
-              ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
-              preserveDivergentBranchSense: s.sense,
-              negateJoinedBranchSense: s.join ? !defSense : defSense,
-              ...(s.flipSites ? { branchSenseFlipSites: s.flipSites } : {}),
-              anchorConstCopies: s.anchor,
-              anchorLoopEntryConsts: s.entry,
-              spellBitfieldMembers: s.bitfields,
-              spellPtrMemberElements: s.ptrElems,
-              spellDeclaredSubscripts: s.declRank,
-              ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
-            });
-          } catch (e) {
-            if (lv.suffix === '' && isBaseAxisPoint(s)) {
-              throw e; // the base lift's base axes keep their behavior: a failure aborts the row
-            }
-            // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
-            // up by stripping one axis at a time, and the stripped key can itself carry the other.
-            droppedPrimary.add(s.suffix);
-            // an anchored variant that fails structuring or its contracts is a dropped lever, never
-            // an aborted enumeration — same rule as respell below
-            opts.onLeverError?.(name + lv.suffix + s.suffix, firstLine(e));
-            continue;
-          }
-          // A TREE another axis point already spelled. `fanOut` reads the tree and this call's own
-          // constants, nothing that varies per axis point — its signature is the argument — so a
-          // repeated tree can only re-emit sources `seen` already holds: the candidate list, its
-          // order and its labels are exactly the ones the whole fan produces, reached without
-          // re-deriving forty passes. An axis is INERT on most functions (nothing to re-read, no
-          // bitfield member, no joined if), and an inert axis is a factor of two in the cross that
-          // changes nothing: on the klonoa checkout's `LoadBGTilemapData` under
-          // docs/ranked-repro.md's flags, 640 of 1024 axis points (62.5%) re-derive a tree an
-          // earlier one already emitted.
-          //
-          // Keyed on the JSON text, in a Set of STRINGS — a value comparison, so it can never
-          // merge two trees the way a hash could. Its one direction of error is a MISS (a
-          // differing key order re-runs a fan whose spellings then dedup as they do today), and
-          // the property that rules the other direction out — that the text determines the tree —
-          // is pinned by rank-tree-key.test.ts rather than assumed.
-          //
-          // The key therefore spans EVIDENCE fields too, `index.operandOff` among them, which
-          // `exprEquals` deliberately ignores (l3/ast.ts). The two are right to disagree: two
-          // trees identical but for that field denote the same cells, so a CSE may collapse them,
-          // and they admit different bases under `BASEFOLD_GATES`, so a fan may not. Dropping it
-          // from the key would be the direction the paragraph above rules out. It carries a
-          // DISPLACEMENT rather than a presence flag, so it can split two trees that print the
-          // same subscript off different addends — re-priced when it widened, over klonoa's
-          // `LoadBGTilemapData` under docs/ranked-repro.md's flags: 66816 candidates either way,
-          // and all 66816 `[score]` lines identical. It splits 0 keys, so the miss it can cause
-          // has no inhabitant.
-          const treeKey = JSON.stringify(sfn);
-          if (seenTrees.has(treeKey)) {
-            opts.onTreeDeduped?.();
-            continue;
-          }
-          seenTrees.add(treeKey);
-          // The row's OWN tree, so this is the one call whose backend refusal is the row's cause.
-          const primary = fanOut(sfn);
-          const spellings = primary.spellings;
-          if (primary.emit) {
-            lastEmitError = primary.emit.error;
-          }
-          // The PRE-FAN products (PRE_FAN_PRODUCTS, the fourth mechanism the POLICY note names):
-          // rewrite the TREE, then fan the whole re-spelling set over the result, so every lever
-          // below derives from the rewrite instead of composing onto it. The gate is the pass's
-          // own decline; the contracts are `respell`'s three, for `respell`'s reasons.
-          for (const pf of PRE_FAN_PRODUCTS) {
+          if (pass === 'sink') {
+            let sunk: boolean;
             try {
-              const made = pf.apply(sfn);
-              if (made === null) {
-                continue;
-              }
-              // The SAME tree dedup the primary above gets, and for the same reason: `fanOut` is a
-              // pure function of the tree, so re-fanning one already fanned buys nothing and makes
-              // the row's quoted fan cost a number that is partly duplicates. A SEPARATE set, not
-              // `seenTrees`: adding a rewritten tree there would let it skip a later PRIMARY tree
-              // that happens to equal it, and that primary's own pre-fan output — which nothing
-              // has computed — would go with it.
-              const madeKey = JSON.stringify(made);
-              if (seenPreFan.has(madeKey)) {
-                continue;
-              }
-              seenPreFan.add(madeKey);
-              assertResolved(made);
-              assertDerefsTyped(made);
-              assertLocalsWritten(made);
-              assertNoOrphanedLocals(sfn, made);
-              // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
-              // spelling, so it never becomes the row's stated cause: `FanResult.emit` is dropped
-              // here and only the primary call above records one.
-              //
-              // It is reported instead through `onLeverError` under `pf.suffix`, which is what
-              // `fanOut`'s second argument is for: a primary emit refusal does not THROW —
-              // `fanOut` returns it — so the `catch` below never sees it, and under the bare
-              // function name it would read as a refusal of the primary spelling while the lever's
-              // whole half of the fan was deleted.
-              const fanned = fanOut(made, pf.suffix).spellings;
-              for (const sp of fanned) {
-                spellings.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
+              sunk = sinkStoreTails(fn);
+              if (sunk) {
+                verify(fn);
               }
             } catch (e) {
-              opts.onLeverError?.(`${name}${pf.suffix}`, firstLine(e));
+              opts.onLeverError?.(name + lv.suffix + SHARED_TAIL_SUFFIX, firstLine(e));
+              break;
+            }
+            // Unsunk, this fn is the `/shared-ret` pass's again.
+            if (!sunk || !hasDivergentSharedRet(fn)) {
+              break;
             }
           }
-          for (const sp of spellings) {
-            const source = sp.source;
-            // Collapse a spelling that produced identical source (a function with no divergent `if`
-            // structures the same either way): no point scoring a duplicate spelling. Deduping the
-            // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
-            // scores identically, so it can never change `best` — and it keeps the candidate set to
-            // the genuinely distinct spellings.
-            //
-            // THE PUBLISHED LABEL IS THEREFORE NOT AN ATTRIBUTION, and every argument in this tree
-            // that counts winning labels is unsound to exactly that extent. The label kept is the
-            // FIRST route's; the later routes are discarded, silently and by design. Adding one
-            // roster row renamed 21 agbcc rows whose emitted source sets were byte-identical —
-            // a CANDIDATE-SET census (whole fan unchanged, some candidate relabelled), which is a
-            // different population from a WINNING-label census: over published winners the same
-            // row moved 5 labels, 2 of them renames.
-            //
-            // AND A LABEL CENSUS CANNOT EVEN SEPARATE A RENAME FROM A RESPELLING. Of those 5
-            // winners, THREE changed the source they publish — `synthetic:unfoldpark`
-            // (402 → 397 bytes, score 9 → 0), `kleod:ConfigureEntityBehavior` (3677 → 3993,
-            // 233 → 230) and `synthetic:livepark` (337 → 346, both MATCH) — while
-            // `synthetic:foldpark` and `kleod:DecompressDma` are byte-identical renames. The two
-            // look the same from here; only the emitted SOURCE tells them apart (`bench diff`
-            // publishes that field, `bench regression` does not).
-            //
-            // So "N rows win under this family" bounds nothing: a family can win zero labels and
-            // still be the only route to a source, and a family can win five and have introduced
-            // three. Price a family by ABLATING it and re-running the rows
-            // (LIVEBASE_BLOCK_GATES carries the recipe); a zero census is not a death certificate,
-            // and a nonzero one is not a mechanism.
-            // THE SEAM FIX IS BOOKED AND NOT BUILT: keep the losing producers on the surviving
-            // candidate (`label` plus an `alsoReachedBy: string[]`) and a census by mechanism
-            // becomes one. It is not free — every consumer that reads `label` as the derivation
-            // would have to say which it means, and the published `candidateLabel` must not
-            // change — so build it when a round needs the census, not before. Until then the only
-            // sound census is an ablation.
-            const dup = seen.get(source);
-            if (dup !== undefined) {
-              // The same TEXT, reached twice. `matchOnly` is a property of the DERIVATION and the
-              // published artifact is the text, so a spelling some sound route also produces is a
-              // proven one however the first route reached it — clear the flag rather than keeping
-              // whichever route the enumeration happened to walk first.
-              if (sp.matchOnly === undefined) {
-                delete dup.matchOnly;
-              }
+          const twin = pass !== 'primary';
+          const dropped = twin ? new Set(droppedPrimary) : droppedPrimary;
+          const vsuffix =
+            pass === 'follow'
+              ? lv.suffix + SHARED_RET_SUFFIX
+              : pass === 'sink'
+                ? lv.suffix + SHARED_TAIL_SUFFIX
+                : lv.suffix;
+          // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
+          const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
+          const variantCands = svCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
+          // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
+          // refuses to let the axis unlock a function the primary declines, but it can only see its own
+          // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
+          // `/reread-globals/merge-names` candidate could ship where plain `/reread-globals` did not,
+          // which is the same trade one level up. `senseCands` puts each `mergeNames:false` sibling
+          // first, so the entry is always recorded before its merged twin is reached.
+          //
+          // The shared-tail twins read the PRIMARY pass's set as well: neither `X/shared-ret` nor
+          // `X/shared-tail` ever ships where `X` was dropped. The follow and the sink each give the
+          // structurer a shape it can accept where the primary one declined — sound, but the same
+          // trade one level up again.
+          for (const s of variantCands) {
+            if (twin && droppedPrimary.has(s.suffix)) {
               continue;
             }
-            const made: Candidate = {
-              label: `${cand.label}${lv.suffix}${s.suffix}${sp.suffix}${sv.suffix}`,
-              source,
-              group: svIndex,
-              ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
-              ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
-              ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
-            };
-            seen.set(source, made);
-            out.push(made);
+            if (STRUCTURING_AXES.some((ax) => ax.strip && s[ax.flag] && dropped.has(s.suffix.replace(ax.suffix, '')))) {
+              // A SKIPPED variant is recorded exactly like a dropped one, or the closure would not be
+              // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
+              // X/inplace/merge-names would find neither stripped key and run — shipping a
+              // double-lever candidate where its ancestor failed the boundary contracts.
+              dropped.add(s.suffix);
+              continue;
+            }
+            // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
+            // senses structure the same recovered function without re-lifting.
+            let sfn: SFn;
+            try {
+              sfn = structureChecked(fn, {
+                ...svOpts,
+                ...(inferredSymbols.size ? { inferredSymbols } : {}),
+                ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
+                preserveDivergentBranchSense: s.sense,
+                negateJoinedBranchSense: s.join ? !defSense : defSense,
+                ...(s.flipSites ? { branchSenseFlipSites: s.flipSites } : {}),
+                anchorConstCopies: s.anchor,
+                anchorLoopEntryConsts: s.entry,
+                spellBitfieldMembers: s.bitfields,
+                spellPtrMemberElements: s.ptrElems,
+                spellDeclaredSubscripts: s.declRank,
+                ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
+                ...(twin ? { followEarlyReturns: true } : {}),
+              });
+            } catch (e) {
+              if (vsuffix === '' && isBaseAxisPoint(s)) {
+                throw e; // the base lift's base axes keep their behavior: a failure aborts the row
+              }
+              // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
+              // up by stripping one axis at a time, and the stripped key can itself carry the other.
+              dropped.add(s.suffix);
+              // an anchored variant that fails structuring or its contracts is a dropped lever, never
+              // an aborted enumeration — same rule as respell below
+              opts.onLeverError?.(name + vsuffix + s.suffix, firstLine(e));
+              continue;
+            }
+            // A TREE another axis point already spelled. `fanOut` reads the tree and this call's own
+            // constants, nothing that varies per axis point — its signature is the argument — so a
+            // repeated tree can only re-emit sources `seen` already holds: the candidate list, its
+            // order and its labels are exactly the ones the whole fan produces, reached without
+            // re-deriving forty passes. An axis is INERT on most functions (nothing to re-read, no
+            // bitfield member, no joined if), and an inert axis is a factor of two in the cross that
+            // changes nothing: on the klonoa checkout's `LoadBGTilemapData` under
+            // docs/ranked-repro.md's flags, 640 of 1024 axis points (62.5%) re-derive a tree an
+            // earlier one already emitted.
+            //
+            // Keyed on the JSON text, in a Set of STRINGS — a value comparison, so it can never
+            // merge two trees the way a hash could. Its one direction of error is a MISS (a
+            // differing key order re-runs a fan whose spellings then dedup as they do today), and
+            // the property that rules the other direction out — that the text determines the tree —
+            // is pinned by rank-tree-key.test.ts rather than assumed.
+            //
+            // The key therefore spans EVIDENCE fields too, `index.operandOff` among them, which
+            // `exprEquals` deliberately ignores (l3/ast.ts). The two are right to disagree: two
+            // trees identical but for that field denote the same cells, so a CSE may collapse them,
+            // and they admit different bases under `BASEFOLD_GATES`, so a fan may not. Dropping it
+            // from the key would be the direction the paragraph above rules out. It carries a
+            // DISPLACEMENT rather than a presence flag, so it can split two trees that print the
+            // same subscript off different addends — re-priced when it widened, over klonoa's
+            // `LoadBGTilemapData` under docs/ranked-repro.md's flags: 66816 candidates either way,
+            // and all 66816 `[score]` lines identical. It splits 0 keys, so the miss it can cause
+            // has no inhabitant.
+            const treeKey = JSON.stringify(sfn);
+            if (seenTrees.has(treeKey)) {
+              opts.onTreeDeduped?.();
+              continue;
+            }
+            seenTrees.add(treeKey);
+            // The row's OWN tree, so this is the one call whose backend refusal is the row's cause.
+            const primary = fanOut(sfn);
+            const spellings = primary.spellings;
+            if (primary.emit) {
+              lastEmitError = primary.emit.error;
+            }
+            // The PRE-FAN products (PRE_FAN_PRODUCTS, the fourth mechanism the POLICY note names):
+            // rewrite the TREE, then fan the whole re-spelling set over the result, so every lever
+            // below derives from the rewrite instead of composing onto it. The gate is the pass's
+            // own decline; the contracts are `respell`'s three, for `respell`'s reasons.
+            for (const pf of PRE_FAN_PRODUCTS) {
+              try {
+                const made = pf.apply(sfn);
+                if (made === null) {
+                  continue;
+                }
+                // The SAME tree dedup the primary above gets, and for the same reason: `fanOut` is a
+                // pure function of the tree, so re-fanning one already fanned buys nothing and makes
+                // the row's quoted fan cost a number that is partly duplicates. A SEPARATE set, not
+                // `seenTrees`: adding a rewritten tree there would let it skip a later PRIMARY tree
+                // that happens to equal it, and that primary's own pre-fan output — which nothing
+                // has computed — would go with it.
+                const madeKey = JSON.stringify(made);
+                if (seenPreFan.has(madeKey)) {
+                  continue;
+                }
+                seenPreFan.add(madeKey);
+                assertResolved(made);
+                assertDerefsTyped(made);
+                assertLocalsWritten(made);
+                assertNoOrphanedLocals(sfn, made);
+                // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
+                // spelling, so it never becomes the row's stated cause: `FanResult.emit` is dropped
+                // here and only the primary call above records one.
+                //
+                // It is reported instead through `onLeverError` under `pf.suffix`, which is what
+                // `fanOut`'s second argument is for: a primary emit refusal does not THROW —
+                // `fanOut` returns it — so the `catch` below never sees it, and under the bare
+                // function name it would read as a refusal of the primary spelling while the lever's
+                // whole half of the fan was deleted.
+                const fanned = fanOut(made, pf.suffix).spellings;
+                for (const sp of fanned) {
+                  spellings.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
+                }
+              } catch (e) {
+                opts.onLeverError?.(`${name}${pf.suffix}`, firstLine(e));
+              }
+            }
+            for (const sp of spellings) {
+              const source = sp.source;
+              // Collapse a spelling that produced identical source (a function with no divergent `if`
+              // structures the same either way): no point scoring a duplicate spelling. Deduping the
+              // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
+              // scores identically, so it can never change `best` — and it keeps the candidate set to
+              // the genuinely distinct spellings.
+              //
+              // THE PUBLISHED LABEL IS THEREFORE NOT AN ATTRIBUTION, and every argument in this tree
+              // that counts winning labels is unsound to exactly that extent. The label kept is the
+              // FIRST route's; the later routes are discarded, silently and by design. Adding one
+              // roster row renamed 21 agbcc rows whose emitted source sets were byte-identical —
+              // a CANDIDATE-SET census (whole fan unchanged, some candidate relabelled), which is a
+              // different population from a WINNING-label census: over published winners the same
+              // row moved 5 labels, 2 of them renames.
+              //
+              // AND A LABEL CENSUS CANNOT EVEN SEPARATE A RENAME FROM A RESPELLING. Of those 5
+              // winners, THREE changed the source they publish — `synthetic:unfoldpark`
+              // (402 → 397 bytes, score 9 → 0), `kleod:ConfigureEntityBehavior` (3677 → 3993,
+              // 233 → 230) and `synthetic:livepark` (337 → 346, both MATCH) — while
+              // `synthetic:foldpark` and `kleod:DecompressDma` are byte-identical renames. The two
+              // look the same from here; only the emitted SOURCE tells them apart (`bench diff`
+              // publishes that field, `bench regression` does not).
+              //
+              // So "N rows win under this family" bounds nothing: a family can win zero labels and
+              // still be the only route to a source, and a family can win five and have introduced
+              // three. Price a family by ABLATING it and re-running the rows
+              // (LIVEBASE_BLOCK_GATES carries the recipe); a zero census is not a death certificate,
+              // and a nonzero one is not a mechanism.
+              // THE SEAM FIX IS BOOKED AND NOT BUILT: keep the losing producers on the surviving
+              // candidate (`label` plus an `alsoReachedBy: string[]`) and a census by mechanism
+              // becomes one. It is not free — every consumer that reads `label` as the derivation
+              // would have to say which it means, and the published `candidateLabel` must not
+              // change — so build it when a round needs the census, not before. Until then the only
+              // sound census is an ablation.
+              const dup = seen.get(source);
+              if (dup !== undefined) {
+                // The same TEXT, reached twice. `matchOnly` is a property of the DERIVATION and the
+                // published artifact is the text, so a spelling some sound route also produces is a
+                // proven one however the first route reached it — clear the flag rather than keeping
+                // whichever route the enumeration happened to walk first.
+                if (sp.matchOnly === undefined) {
+                  delete dup.matchOnly;
+                }
+                continue;
+              }
+              const made: Candidate = {
+                label: `${cand.label}${vsuffix}${s.suffix}${sp.suffix}${sv.suffix}`,
+                source,
+                group: svIndex,
+                ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
+                ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
+                ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
+              };
+              seen.set(source, made);
+              out.push(made);
+            }
           }
         }
       }

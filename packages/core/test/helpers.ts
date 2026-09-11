@@ -166,6 +166,12 @@ export interface Event {
   args: Val[];
 }
 
+/** Where a global `name` lives, for both interpreters: a store's address is an observable, so the
+ *  IR's `gaddr` and the tree's `&name` have to agree on it. Word-aligned and far apart, so no
+ *  constant offset a fixture uses carries one symbol onto another. */
+export const symAddr = (name: string): number =>
+  (([...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) & 0xfff, 7) + 1) * 0x10000) | 0;
+
 /** Every observable the emitted tree produces, in execution order. Conditions are evaluated for
  *  REAL — a naming defect that changes one changes the PATH, which is a difference worth catching
  *  (it changed a loop's trip count once). Parameters are seeded, or every value is UNDEF and the
@@ -184,6 +190,17 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         return e.value;
       case 'bin': {
         const l = evalExpr(e.l);
+        if (e.op === '&&' || e.op === '||') {
+          // short-circuit: the right side runs only when the left does not decide it
+          if (l === UNDEF) {
+            return UNDEF;
+          }
+          if ((l !== 0) === (e.op === '||')) {
+            return e.op === '||' ? 1 : 0;
+          }
+          const rr = evalExpr(e.r);
+          return rr === UNDEF ? UNDEF : rr !== 0 ? 1 : 0;
+        }
         const r = evalExpr(e.r);
         if (l === UNDEF || r === UNDEF) return UNDEF;
         switch (e.op) {
@@ -215,10 +232,17 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         calls++;
         return args.some((a) => a === UNDEF) ? UNDEF : args.reduce((x: number, y) => x + (y as number), calls) | 0;
       }
-      case 'un':
-        return evalExpr(e.e) === UNDEF ? UNDEF : -(evalExpr(e.e) as number) | 0;
+      case 'un': {
+        const x = evalExpr(e.e);
+        if (x === UNDEF) {
+          return UNDEF;
+        }
+        return e.op === '!' ? (x === 0 ? 1 : 0) : e.op === '~' ? ~x : -x | 0;
+      }
       case 'cast':
         return evalExpr(e.e);
+      case 'addr':
+        return symAddr(e.name);
       default:
         throw new Error(`the generator does not emit ${e.k}`);
     }
@@ -242,6 +266,17 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         case 'exprstmt':
           evalExpr(s.value);
           break;
+        case 'store': {
+          // A store is observed as (address, value); only the `base[idx]` lvalue is modelled.
+          if (s.lval.k !== 'index') {
+            throw new Error(`unmodelled store lvalue ${s.lval.k}`);
+          }
+          const base = evalExpr(s.lval.base);
+          const idx = evalExpr(s.lval.idx);
+          const at = base === UNDEF || idx === UNDEF ? UNDEF : (base + idx * s.lval.width) | 0;
+          trace.push({ fn: 'store', args: [at, evalExpr(s.value)] });
+          break;
+        }
         case 'if': {
           const sig = truthy(s.cond) ? exec(s.then) : exec(s.else ?? []);
           if (sig !== 'none') return sig;
@@ -349,10 +384,31 @@ export function irTraceOf(fn: Fn, seed: number): Event[] {
         case 'icmp_slt':
           env.set(r, o[0] < o[1] ? 1 : 0);
           break;
+        // the comparisons a real Thumb lift of a fixture's `cmp` produces
+        case 'icmp_sge':
+          env.set(r, o[0] >= o[1] ? 1 : 0);
+          break;
+        case 'icmp_eq':
+          env.set(r, o[0] === o[1] ? 1 : 0);
+          break;
+        // raise's short-circuit recovery folds a condition tree into these; both operands are
+        // already computed values, so there is nothing to short-circuit
+        case 'logic_and':
+          env.set(r, o[0] !== 0 && o[1] !== 0 ? 1 : 0);
+          break;
+        case 'logic_or':
+          env.set(r, o[0] !== 0 || o[1] !== 0 ? 1 : 0);
+          break;
         case 'call':
           trace.push({ fn: op.attrs.target as string, args: o });
           calls++;
           env.set(r, o.reduce((x, y) => x + y, calls) | 0);
+          break;
+        case 'gaddr':
+          env.set(r, symAddr(op.attrs.sym as string));
+          break;
+        case 'store':
+          trace.push({ fn: 'store', args: [(o[0] + ((op.attrs.off as number | undefined) ?? 0)) | 0, o[1]] });
           break;
         case 'ret':
           trace.push({ fn: 'ret', args: o });

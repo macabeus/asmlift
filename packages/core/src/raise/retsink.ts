@@ -534,6 +534,8 @@ export function sinkReturns(
     return t?.opcode === 'br' && t.successors.length === 1 && t.successors[0].block === m;
   };
   for (const m of [...fn.blocks]) {
+    // RETURN-ONLY merges. A merged `store…; ret` is `raise/tailsink.ts`'s, and only as rank.ts's
+    // `/shared-tail` twin: its IR comes from both spellings.
     if (m.ops.length !== 1) {
       continue;
     }

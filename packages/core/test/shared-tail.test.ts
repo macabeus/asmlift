@@ -1,0 +1,441 @@
+// THE SHARED DEFAULT TAIL — `structure()`'s `followEarlyReturns` and `raise/tailsink.ts`, which
+// rank.ts enumerates as two twins: `/shared-ret` (the follow alone) and `/shared-tail` (the follow
+// after the sink).
+//
+// The source shape is one tail written ONCE, after an `if`, with every other path into a `ret`
+// an early `return;`. agbcc reaches it two ways, and each fixture below is one of them:
+//   - the compiler LEFT an arm returning on its own and shared the rest (`synthetic:gcseinner`):
+//     the follow alone recovers it;
+//   - the arms cross-jumped into one `store; ret` (`synthetic:gcsetail`): the tail has to be copied
+//     back into the paths that branch to it before the follow can see them as early returns.
+// A third shape is why the two are separate twins: a store tail that is ITSELF the follow, which the
+// sink deletes (`synthetic:gcsejoin`). Each of the follow's three refusals is produced by a fixture
+// of its own.
+import { expect, test } from 'vitest';
+
+import { cBackend } from '../src/backend/c';
+import { frontendFor } from '../src/frontend/registry';
+import type { Fn } from '../src/ir/core';
+import { parse } from '../src/ir/parse';
+import { print } from '../src/ir/print';
+import { verify } from '../src/ir/verify';
+import { raiseRecovered } from '../src/pipeline';
+import { sinkStoreTails } from '../src/raise/tailsink';
+import { enumerateCandidates } from '../src/rank';
+import { hasDivergentSharedRet, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
+import { count, irTraceOf, traceOf } from './helpers';
+
+const emit = (fn: Fn, followEarlyReturns: boolean) =>
+  cBackend.emit(structure(fn, { returnsVoid: true, followEarlyReturns }));
+
+/** `gcsetail` without its loop: `^bb4` is the path both sides of `^bb0` fall into, `^bb3` an arm
+ *  reached from the else side only, and both branch into the one store tail `^bb5`. */
+const CROSS_JUMPED = `fn f {
+^bb0(%0: s32, %1: s32):
+  %2: s32* = gaddr {sym="gQ"}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %0, %3
+  cond_br %4, ^bb1(), ^bb2()
+^bb1():
+  %5: s32 = call %0 {target="work"}
+  br ^bb4()
+^bb2():
+  %6: u32 = icmp_slt %1, %3
+  cond_br %6, ^bb3(), ^bb4()
+^bb3():
+  %7: s32 = const {value=7}
+  br ^bb5(%7)
+^bb4():
+  %8: s32 = const {value=9}
+  br ^bb5(%8)
+^bb5(%9: s32):
+  store %2, %9 {off=4, width=4}
+  ret
+}
+`;
+
+/** `gcseinner`'s shape: the arm `^bb3` keeps its OWN `ret`, and `^bb4` — reached from both sides —
+ *  is the tail the source wrote once. */
+const LEFT_RETURNING = `fn g {
+^bb0(%0: s32, %1: s32):
+  %2: s32* = gaddr {sym="gQ"}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_slt %0, %3
+  cond_br %4, ^bb1(), ^bb2()
+^bb1():
+  %5: s32 = call %0 {target="work"}
+  br ^bb4()
+^bb2():
+  %6: u32 = icmp_slt %1, %3
+  cond_br %6, ^bb3(), ^bb4()
+^bb3():
+  %7: s32 = const {value=7}
+  store %2, %7 {off=4, width=4}
+  ret
+^bb4():
+  %8: s32 = const {value=9}
+  store %2, %8 {off=4, width=4}
+  ret
+}
+`;
+
+test('a region both arms of a divergent `if` reach is its follow, and the other `ret` an early return', () => {
+  const fn = parse(LEFT_RETURNING);
+  verify(fn);
+  expect(hasDivergentSharedRet(fn)).toBe(true);
+  // Off, the arms diverge and the shared store is written in each; on, once, after the `if`.
+  expect(count(emit(fn, false), '[1] = 9;')).toBe(2);
+  const on = emit(fn, true);
+  expect(count(on, '[1] = 9;')).toBe(1);
+  expect(on).toMatch(/\[1\] = 7;\s+return;\s+}\s+} else {\s+work\(a0\);\s+}\s+\(\(s32 \*\)&gQ\)\[1\] = 9;/);
+});
+
+test('an `if` whose returning arms share nothing keeps them divergent', () => {
+  // `^bb3` and `^bb4` are each reached from ONE side, so no region is the follow.
+  const fn = parse(LEFT_RETURNING.replace('cond_br %6, ^bb3(), ^bb4()', 'br ^bb3()'));
+  verify(fn);
+  expect(hasDivergentSharedRet(fn)).toBe(false);
+  expect(emit(fn, true)).toBe(emit(fn, false));
+});
+
+test("the enclosing region's follow is never emitted inside an arm", () => {
+  // Inside the else side, `^bb2`'s arms share `^bb6` — but `^bb5` also reaches `^bb7`, the OUTER
+  // `if`'s follow, without passing `^bb6`. Taking `^bb6` as `^bb2`'s follow would structure that
+  // path into `^bb7` inside the arm; the refusal keeps `^bb7` once, after the outer `if`.
+  const fn = parse(`fn h {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32* = gaddr {sym="gQ"}
+  %4: s32 = const {value=0}
+  %5: u32 = icmp_slt %0, %4
+  cond_br %5, ^bb1(), ^bb2()
+^bb1():
+  %6: s32 = call %0 {target="work"}
+  br ^bb7()
+^bb2():
+  %7: u32 = icmp_slt %1, %4
+  cond_br %7, ^bb3(), ^bb4()
+^bb3():
+  %8: s32 = const {value=3}
+  br ^bb6(%8)
+^bb4():
+  %9: u32 = icmp_slt %2, %4
+  cond_br %9, ^bb5(), ^bb7()
+^bb5():
+  %10: s32 = const {value=4}
+  br ^bb6(%10)
+^bb6(%11: s32):
+  store %3, %11 {off=8, width=4}
+  ret
+^bb7():
+  %12: s32 = const {value=9}
+  store %3, %12 {off=4, width=4}
+  ret
+}
+`);
+  verify(fn);
+  const follows: number[] = [];
+  const on = cBackend.emit(
+    structure(
+      fn,
+      { returnsVoid: true, followEarlyReturns: true },
+      { onEarlyReturnFollow: (s) => follows.push(s.block) },
+    ),
+  );
+  expect(follows).toEqual([0]);
+  expect(count(on, '[1] = 9;')).toBe(1);
+});
+
+test('each divergent `if` gets the follow of its OWN shared `ret`s', () => {
+  // `^bb0`'s arms share `^bb7` and `^bb8`, so its follow is `^bb4`; `^bb4`'s share only `^bb8`, so
+  // its follow is `^bb8` — two deletion sets, where one function-wide set answers only the first.
+  const fn = parse(`fn k {
+^bb0(%0: s32, %1: s32, %2: s32, %3: s32):
+  %4: s32* = gaddr {sym="gQ"}
+  %5: s32 = const {value=0}
+  %6: u32 = icmp_slt %0, %5
+  cond_br %6, ^bb1(), ^bb2()
+^bb1():
+  %7: u32 = icmp_slt %1, %5
+  cond_br %7, ^bb3(), ^bb4()
+^bb2():
+  %8: s32 = call %0 {target="work"}
+  br ^bb4()
+^bb3():
+  %9: s32 = const {value=1}
+  store %4, %9 {off=4, width=4}
+  ret
+^bb4():
+  %10: u32 = icmp_slt %2, %5
+  cond_br %10, ^bb5(), ^bb6()
+^bb5():
+  %11: u32 = icmp_slt %3, %5
+  cond_br %11, ^bb7(), ^bb8()
+^bb6():
+  %12: s32 = call %2 {target="work"}
+  br ^bb8()
+^bb7():
+  %13: s32 = const {value=2}
+  store %4, %13 {off=4, width=4}
+  ret
+^bb8():
+  %14: s32 = const {value=3}
+  store %4, %14 {off=4, width=4}
+  ret
+}
+`);
+  verify(fn);
+  const follows: [number, number][] = [];
+  const tree = structure(
+    fn,
+    { returnsVoid: true, followEarlyReturns: true },
+    { onEarlyReturnFollow: (s) => follows.push([s.block, s.follow]) },
+  );
+  expect(follows).toEqual([
+    [0, 4],
+    [4, 8],
+  ]);
+  expect(count(cBackend.emit(tree), '[1] = 3;')).toBe(1);
+  expect([0, 9, 83, 511].map((r) => traceOf(tree, r))).toEqual([0, 9, 83, 511].map((r) => irTraceOf(fn, r)));
+});
+
+test('arms that share two `ret`s the kept graph cannot order have no follow', () => {
+  // Both sides of `^bb0` reach both `^bb5` and `^bb6`, so both are kept and only EXIT
+  // post-dominates `^bb0`: its arms stay divergent.
+  const fn = parse(
+    LEFT_RETURNING.replace(
+      '  %5: s32 = call %0 {target="work"}\n  br ^bb4()',
+      '  %5: u32 = icmp_slt %1, %0\n  cond_br %5, ^bb3(), ^bb4()',
+    ),
+  );
+  verify(fn);
+  expect(hasDivergentSharedRet(fn)).toBe(true);
+  const follows: number[] = [];
+  const on = cBackend.emit(
+    structure(
+      fn,
+      { returnsVoid: true, followEarlyReturns: true },
+      { onEarlyReturnFollow: (s) => follows.push(s.block) },
+    ),
+  );
+  expect(follows).toEqual([]);
+  expect(on).toBe(emit(fn, false));
+});
+
+test('a cross-jumped store tail is copied into every path that branches to it, and the follow keeps one', () => {
+  const fn = parse(CROSS_JUMPED);
+  verify(fn);
+  expect(sinkStoreTails(fn)).toBe(true);
+  verify(fn);
+  const ir = print(fn);
+  expect(ir).toContain('%7: s32 = const {value=7}\n  store %2, %7 {off=4, width=4}\n  ret');
+  expect(ir).toContain('%8: s32 = const {value=9}\n  store %2, %8 {off=4, width=4}\n  ret');
+  expect(ir).not.toContain('^bb5');
+  // `^bb4`'s copy is the `ret` both sides of `^bb0` reach, so the follow spells it once.
+  expect(count(emit(fn, true), '[1] = 9;')).toBe(1);
+});
+
+test('the two terms are one capability: sunk without the follow, the tail is written on every path', () => {
+  const fn = parse(CROSS_JUMPED);
+  expect(count(emit(fn, true), '[1] = v')).toBe(1); // unsunk: one merged store, whatever the option
+  sinkStoreTails(fn);
+  expect(count(emit(fn, false), '[1] = 9;')).toBe(2);
+  expect(count(emit(fn, true), '[1] = 9;')).toBe(1);
+});
+
+test('with no follow before the sink or after it, neither twin has anything to spell', () => {
+  // `gcsedup`'s shape: both sources hang off the inner `if`, and the outer one's other side
+  // returns on its own. No `ret` is reached from both sides of the outer `if`, before the sink or
+  // after it — each copy is reached from one side — so rank.ts's gates see no follow for either
+  // twin. (Where the fn AS RAISED has one, the `/shared-ret` twin runs whatever the sink leaves:
+  // the next test.)
+  const one = parse(
+    CROSS_JUMPED.replace('  %5: s32 = call %0 {target="work"}\n  br ^bb4()', '  br ^bb6()').replace(
+      '^bb5(%9: s32):',
+      '^bb6():\n  ret\n^bb5(%9: s32):',
+    ),
+  );
+  verify(one);
+  expect(hasDivergentSharedRet(one)).toBe(false);
+  expect(sinkStoreTails(one)).toBe(true);
+  verify(one);
+  expect(hasDivergentSharedRet(one)).toBe(false);
+});
+
+/** `LEFT_RETURNING` with the both-sides tail storing a PARAMETER: `^bb4` is now a store tail, and it
+ *  is already `^bb0`'s follow. */
+const LEFT_RETURNING_PARAM = LEFT_RETURNING.replace(
+  '^bb4():\n  %8: s32 = const {value=9}\n  store %2, %8 {off=4, width=4}',
+  '^bb4():\n  store %2, %1 {off=4, width=4}',
+);
+
+test('a store tail that is already the follow is deleted by the sink, so the follow is tried unsunk', () => {
+  // `gcsejoin`'s shape. The tail is the one `ret` both sides of `^bb0` reach, so the follow spells
+  // it once, after the `if`. The sink copies it into `^bb1`, its one `br` source, and keeps it for
+  // `^bb2`'s conditional edge: each is then reached from one side, and the follow is gone. That is
+  // why rank.ts tries the follow on the fn as raised, not only behind the sink.
+  const fn = parse(LEFT_RETURNING_PARAM);
+  verify(fn);
+  expect(hasDivergentSharedRet(fn)).toBe(true);
+  expect(count(emit(fn, true), '[1] = a1;')).toBe(1);
+  expect(sinkStoreTails(fn)).toBe(true);
+  verify(fn);
+  expect(hasDivergentSharedRet(fn)).toBe(false);
+  expect(count(emit(fn, true), '[1] = a1;')).toBe(2);
+});
+
+test('a conditional edge into the tail keeps it; every `br` source still gets its copy', () => {
+  // `^bb2` reaches the tail by its own `cond_br`. Splicing a copy over that terminator would drop
+  // its other successor — the one wrong program this rewrite can make — so the tail stays for it.
+  const armCond = parse(
+    CROSS_JUMPED.replace('cond_br %6, ^bb3(), ^bb4()', 'cond_br %6, ^bb5(%3), ^bb4()').replace(
+      '^bb3():\n  %7: s32 = const {value=7}\n  br ^bb5(%7)\n',
+      '',
+    ),
+  );
+  verify(armCond);
+  const want = [0, 9, 83, 511].map((r) => irTraceOf(armCond, r));
+  expect(sinkStoreTails(armCond)).toBe(true);
+  verify(armCond);
+  const ir = print(armCond);
+  expect(ir).toContain('cond_br %6, ^bb4(), ^bb3()'); // the tail, now `^bb4`, kept for the edge
+  expect(ir).toContain('^bb3():\n  %7: s32 = const {value=9}\n  store %2, %7 {off=4, width=4}\n  ret');
+  expect([0, 9, 83, 511].map((r) => irTraceOf(armCond, r))).toEqual(want);
+});
+
+test('an arm that branches into the tail through a pure forwarder gets its copy too', () => {
+  // `gcsefwd`'s shape: `^bb6` forwards to the tail, and the one-sided arm `^bb3` reaches it only
+  // through the forwarder, which the both-sides path `^bb4` also uses.
+  const fn = parse(
+    CROSS_JUMPED.replace('  br ^bb5(%7)', '  br ^bb6(%7)')
+      .replace('  br ^bb5(%8)', '  br ^bb6(%8)')
+      .replace('^bb5(%9: s32):', '^bb6(%10: s32):\n  br ^bb5(%10)\n^bb5(%9: s32):'),
+  );
+  verify(fn);
+  expect(sinkStoreTails(fn)).toBe(true);
+  verify(fn);
+  expect(print(fn)).toContain('%7: s32 = const {value=7}\n  store %2, %7 {off=4, width=4}\n  ret');
+  expect(count(emit(fn, true), '[1] = 9;')).toBe(1);
+});
+
+test('a CHAIN of forwarders is seen through, and every link it orphans is dropped', () => {
+  // `^bb3` reaches the tail through `^bb7` then `^bb6`, and `^bb4` through `^bb6` alone. Once both
+  // sources hold their copy, `^bb7` has no predecessor and `^bb6`'s only one is `^bb7`.
+  const fn = parse(
+    CROSS_JUMPED.replace('  br ^bb5(%7)', '  br ^bb7(%7)')
+      .replace('  br ^bb5(%8)', '  br ^bb6(%8)')
+      .replace('^bb5(%9: s32):', '^bb7(%11: s32):\n  br ^bb6(%11)\n^bb6(%10: s32):\n  br ^bb5(%10)\n^bb5(%9: s32):'),
+  );
+  verify(fn);
+  const want = [0, 9, 83, 511].map((r) => irTraceOf(fn, r));
+  expect(sinkStoreTails(fn)).toBe(true);
+  verify(fn);
+  expect(fn.blocks).toHaveLength(5);
+  expect([0, 9, 83, 511].map((r) => irTraceOf(fn, r))).toEqual(want);
+});
+
+// The rank.ts half, on hand-lifted Thumb bodies: `/shared-tail` is a DISTINCT source beside the
+// spellings it does not replace, which the fan keeps — the same IR can come from the duplicated
+// source (`gcsepre`/`gcsepredup` lift byte-identical), so only the differ decides.
+const P = { f: { params: 2, returnsVoid: true } };
+const THUMB_LEFT =
+  'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
+  '\tmov\tr3, #7\n\tstr\tr3, [r2, #4]\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n' +
+  '\tstr\tr3, [r2, #4]\n.L6:\n\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
+
+test('rank.ts enumerates `/shared-ret` where an arm the compiler left returning shares the rest', () => {
+  const cands = enumerateCandidates('f', THUMB_LEFT, ARMV4T_AGBCC, { prototypes: P });
+  const twin = cands.filter((c) => c.label.includes('/shared-ret'));
+  expect(twin.length).toBeGreaterThan(0);
+  expect(cands.filter((c) => c.label.includes('/shared-tail'))).toEqual([]); // nothing to sink
+  expect(twin.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
+  expect(cands.some((c) => c.label === 'unsigned' && count(c.source, ' = 9;') === 2)).toBe(true);
+});
+
+// The cross-jumped tail, which only the sink turns into early returns.
+const THUMB =
+  'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
+  '\tmov\tr3, #7\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n.L6:\n\tstr\tr3, [r2, #4]\n' +
+  '\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
+
+test('rank.ts enumerates `/shared-tail` on a cross-jumped tail, beside the unsunk spellings', () => {
+  const cands = enumerateCandidates('f', THUMB, ARMV4T_AGBCC, { prototypes: P });
+  const twin = cands.filter((c) => c.label.includes('/shared-tail'));
+  expect(twin.length).toBeGreaterThan(0);
+  expect(twin.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
+  expect(cands.some((c) => c.label === 'unsigned' && c.source.includes('[1] = v0;'))).toBe(true);
+  expect(cands.some((c) => c.label === 'unsigned/unmerge')).toBe(true);
+});
+
+// `THUMB_LEFT` with the both-sides tail storing the parameter `r1`: a store tail that is already the
+// follow, which the sink deletes (`gcsejoin`'s shape, the unit test above on a real lift).
+const THUMB_LEFT_PARAM =
+  'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
+  '\tmov\tr3, #7\n\tstr\tr3, [r2, #4]\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n' +
+  '\tstr\tr1, [r2, #4]\n.L6:\n\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
+
+test('where the sink deletes the follow, rank.ts still enumerates the follow alone', () => {
+  // A FAN-level assertion, because the fuzz compares semantics only and cannot see a lost
+  // candidate: a twin that tried the follow only behind the sink emits 0 spellings of the store
+  // once on this shape.
+  const errors: string[] = [];
+  const cands = enumerateCandidates('f', THUMB_LEFT_PARAM, ARMV4T_AGBCC, {
+    prototypes: P,
+    onLeverError: (l, e) => errors.push(`${l}: ${e}`),
+  });
+  const once = cands.filter((c) => count(c.source, '[1] = a1;') === 1);
+  expect(once.length).toBeGreaterThan(0);
+  expect(once.every((c) => c.label.includes('/shared-ret') && /= 7;\s+return;/.test(c.source))).toBe(true);
+  expect(cands.filter((c) => c.label.includes('/shared-tail'))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+// `THUMB` with a third arm, `.L7`, that keeps its own `ret`: the tail `.L6` is the follow before the
+// sink, and its copy in the join `.L5` is the follow after it (`gcseflat`'s shape), so both twins run.
+const THUMB_FLAT =
+  'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
+  '\tcmp\tr0, #5\n\tbeq\t.L7\n\tmov\tr3, #7\n\tb\t.L6\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n' +
+  '.L6:\n\tstr\tr3, [r2, #4]\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\tmov\tr3, #8\n\tstr\tr3, [r2, #4]\n' +
+  '\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
+
+test('where the fn as raised and the sunk fn both have a follow, both twins are enumerated', () => {
+  const cands = enumerateCandidates('f', THUMB_FLAT, ARMV4T_AGBCC, { prototypes: P });
+  const ret = cands.filter((c) => c.label.includes('/shared-ret'));
+  const tail = cands.filter((c) => c.label.includes('/shared-tail'));
+  expect(ret.length).toBeGreaterThan(0);
+  expect(tail.length).toBeGreaterThan(0);
+  // the follow alone keeps the merged store; after the sink, the arm `= 7` returns on its own
+  expect(ret.every((c) => /= 8;\s+return;/.test(c.source))).toBe(true);
+  expect(tail.every((c) => count(c.source, ' = 9;') === 1 && /= 7;\s+return;/.test(c.source))).toBe(true);
+});
+
+// A JUMP PAD in front of the tail: `.L4: b .L6` is the only way into the store, so after raise's
+// `simplifyTrivialPhis` the tail reads the FORWARDER's parameter directly, not one of its own.
+const THUMB_PAD =
+  'f:\n\tpush\t{lr}\n\tldr\tr2, .L9\n\tcmp\tr0, #0\n\tblt\t.L3\n\tcmp\tr1, #0\n\tbge\t.L5\n' +
+  '\tcmp\tr0, #5\n\tbeq\t.L7\n\tmov\tr3, #7\n\tb\t.L4\n.L3:\n\tstr\tr1, [r2, #8]\n.L5:\n\tmov\tr3, #9\n' +
+  '.L4:\n\tb\t.L6\n.L7:\n\tmov\tr3, #8\n\tstr\tr3, [r2, #4]\n\tpop\t{r0}\n\tbx\tr0\n' +
+  '.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n.L6:\n\tstr\tr3, [r2, #4]\n\tpop\t{r0}\n\tbx\tr0\n';
+
+test('a tail that reads a forwarder parameter is copied with the value each path carried', () => {
+  // On a REAL lift and raise, which is the only way to reach this shape: hand-built IR keeps the
+  // tail's own parameter. A copy that substitutes the tail's parameters alone reads the forwarder's,
+  // which the sweep then deletes: `verify` throws, and the whole `/shared-tail` twin goes with it.
+  const fn = frontendFor(ARMV4T_AGBCC).lift('f', THUMB_PAD, ARMV4T_AGBCC, P);
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, P.f, { shortCircuit: { foldTreeOwned: false } });
+  const tail = fn.blocks.find((b) => b.ops.length === 2 && b.ops[0].opcode === 'store' && b.ops[1].opcode === 'ret');
+  const pad = fn.blocks.find((b) => b.ops.length === 1 && b.ops[0].successors[0]?.block === tail);
+  expect(pad?.params).toContain(tail?.ops[0].operands[1]); // the shape: the tail reads the pad's param
+  const want = [0, 9, 83, 511].map((r) => irTraceOf(fn, r));
+  expect(sinkStoreTails(fn)).toBe(true);
+  verify(fn);
+  expect(fn.blocks).not.toContain(pad);
+  expect([0, 9, 83, 511].map((r) => irTraceOf(fn, r))).toEqual(want);
+  const errors: string[] = [];
+  const cands = enumerateCandidates('f', THUMB_PAD, ARMV4T_AGBCC, {
+    prototypes: P,
+    onLeverError: (l, e) => errors.push(`${l}: ${e}`),
+  });
+  expect(errors).toEqual([]);
+  expect(cands.some((c) => c.label.includes('/shared-tail') && count(c.source, ' = 9;') === 1)).toBe(true);
+});

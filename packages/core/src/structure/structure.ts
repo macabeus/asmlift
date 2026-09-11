@@ -1552,6 +1552,10 @@ export interface StructureOptions {
   // join's feed a NAME to adopt, and materialization is keyed on the defining `Op` — a parameter
   // has none, so there is nothing to key.
   freshParamMerge?: boolean;
+  // Give a DIVERGENT `if` — one whose arms reach no common block before EXIT — the follow its
+  // non-returning paths share: `followOverReturns` below. Absent, such an `if` keeps its arms
+  // divergent and a region both of them reach is emitted in each.
+  followEarlyReturns?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -1643,6 +1647,8 @@ export interface StructureHooks {
    *  which sense it actually emitted. The enumeration domain — a site only exists once structuring
    *  has decided both arms are real, so it cannot be computed ahead of the pass. */
   onBranchSenseSite?: (site: { block: number; ordinal: number; joined: boolean; negated: boolean }) => void;
+  /** Every divergent `if` `followEarlyReturns` gave a follow: the `if`'s block and the follow's. */
+  onEarlyReturnFollow?: (site: { block: number; follow: number }) => void;
 }
 
 /** A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
@@ -1671,6 +1677,7 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
       homeMergeFeeds: false,
       anchorConstCopies: false,
       anchorLoopEntryConsts: false,
+      followEarlyReturns: false,
     },
     hooks,
   );
@@ -1685,6 +1692,58 @@ interface EarlyReturnArmDeps {
 
 function isRet(blk: Block): boolean {
   return blk.ops[blk.ops.length - 1]?.opcode === 'ret';
+}
+/** The `ret`s reachable from BOTH successors of `b` — the region `followEarlyReturns` keeps. Empty
+ *  when there is none, and when `b` does not branch two ways. `reachFrom` is forward reachability,
+ *  the start block excluded. */
+function sharedRetsOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>): Block[] {
+  const [s1, s2] = b.ops[b.ops.length - 1]?.opcode === 'cond_br' ? successorsOf(b) : [];
+  if (s1 === undefined || s2 === undefined || s1 === s2) {
+    return [];
+  }
+  const retsFrom = (x: Block): Block[] => [x, ...reachFrom(x)].filter(isRet);
+  const fromS2 = new Set(retsFrom(s2));
+  return retsFrom(s1).filter((r) => fromS2.has(r));
+}
+/** Is there an `if` whose arms reach no common block before EXIT but share a `ret` — the only shape
+ *  `followEarlyReturns` changes? The enumeration gate of both shared-tail twins (rank.ts), asked of
+ *  the fn as raised and again of the sunk fn; a superset, since it asks `sharedRetsOf` and none of
+ *  the follow's three later refusals. */
+export function hasDivergentSharedRet(fn: Fn): boolean {
+  const ipdom = postDominators(fn);
+  const reach = new Map<Block, Set<Block>>();
+  const reachFrom = (b: Block): Set<Block> => {
+    let out = reach.get(b);
+    if (out === undefined) {
+      out = new Set<Block>();
+      for (const stack = successorsOf(b); stack.length;) {
+        const x = stack.pop()!;
+        if (!out.has(x)) {
+          out.add(x);
+          stack.push(...successorsOf(x));
+        }
+      }
+      reach.set(b, out);
+    }
+    return out;
+  };
+  return fn.blocks.some((b) => ipdom.get(b) === null && sharedRetsOf(b, reachFrom).length > 0);
+}
+/** does a path from `from` reach `to` without passing through `avoid`? */
+function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
+  const seen = new Set<Block>([avoid]);
+  const stack = successorsOf(from);
+  while (stack.length) {
+    const x = stack.pop()!;
+    if (x === to) {
+      return true;
+    }
+    if (!seen.has(x)) {
+      seen.add(x);
+      stack.push(...successorsOf(x));
+    }
+  }
+  return false;
 }
 // An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
 // every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
@@ -1789,6 +1848,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     freshParamMerge = false,
+    followEarlyReturns = false,
     onGap = 'strict',
     symbols: mapSymbols,
     inferredSymbols,
@@ -1837,7 +1897,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeLoopExprs ||
     homeDerivedReads ||
     homeMergeFeeds ||
-    anchorConstCopies
+    anchorConstCopies ||
+    followEarlyReturns
   ) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
@@ -1867,6 +1928,54 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       },
     },
   );
+
+  // THE FOLLOW OF A DIVERGENT `if`, over the paths that do not return early. Post-dominance gives
+  // such an `if` no join — its arms reach two different `ret`s, and EXIT is the only block on every
+  // path — so each arm is structured to its end and a region both arms reach is emitted in both.
+  // When the compiler emitted that region ONCE, the source can have written it once, after the
+  // `if`, with every other path into a `ret` an early `return;` — `synthetic:gcseinner`, where
+  // agbcc keeps the `fnA` arm's own `ret` and stores the default once. An option, enumerated as
+  // rank.ts's `/shared-ret` twin, and as its `/shared-tail` twin after the store-tail sink: as a
+  // default it costs rows, measured there.
+  //
+  // WHICH REGION: the `ret`s reachable from BOTH successors. Every block that cannot reach one of
+  // them is an early-return region and is deleted; the follow is `b`'s post-dominator over what is
+  // left. Sound for the same reason an ordinary follow is: every kept path from `b` passes it, and a
+  // deleted block reaches no kept `ret` and so never the follow, so each arm structures up to the
+  // follow or into a `return`. And no deleted region is reachable from both arms — its `ret` would
+  // then be one of the shared ones — so the rule duplicates nothing across the arms.
+  //
+  // PER `if`, never function-wide: the deletion set is a function of that `if`'s own shared `ret`s
+  // (memoized on them), because a nested `if` shares a different set, or none.
+  //
+  // REFUSES (keeping the divergent arms) when no `ret` is reachable from both successors, when the
+  // kept graph gives `b` no post-dominator but EXIT, and when the enclosing region's `stop` is
+  // reachable from `b` without passing the follow — that path must reach `stop`, and structuring
+  // the arms towards a different follow would emit `stop`'s region inside an arm. The caller asks
+  // only outside a loop body.
+  const followsByShared = new Map<string, Map<Block, Block | null>>();
+  const followOverReturns = (b: Block, stop: Block | null): Block | null => {
+    const shared = sharedRetsOf(b, reachFrom);
+    if (shared.length === 0) {
+      return null;
+    }
+    const key = shared
+      .map((r) => fn.blocks.indexOf(r))
+      .sort((x, y) => x - y)
+      .join(',');
+    let pd = followsByShared.get(key);
+    if (pd === undefined) {
+      const keep = new Set(fn.blocks.filter((x) => shared.some((r) => r === x || reachFrom(x).has(r))));
+      pd = postDominators(fn, keep);
+      followsByShared.set(key, pd);
+    }
+    const follow = pd.get(b) ?? null;
+    if (follow === null || (stop !== null && follow !== stop && reachesAvoiding(b, stop, follow))) {
+      return null;
+    }
+    hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(follow) });
+    return follow;
+  };
 
   // SCALAR-vs-AGGREGATE globals: a `gaddr` symbol accessed EXCLUSIVELY at offset 0 is a scalar
   // global → the bare name `gSym` (byte-exact, matches the source). A symbol accessed at any
@@ -4723,7 +4832,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
 
     const cond = expr(term.operands[0]);
-    const ipd = ipdom.get(b) ?? null; // null ⇒ the arms diverge (both reach EXIT), no join
+    // null ⇒ the arms diverge (both reach EXIT) and no follow over early returns applies. Asked
+    // outside loop bodies only: inside one, `clampToLoop` below owns the question. DEFENSIVE — no
+    // input it changes: ablated, the follow fires on no more of 40,000 generated functions (random
+    // structuring options, sunk and unsunk), and every row of both tiers enumerates a byte-identical
+    // label-and-source set (810 synthetic, 251 real, `ProcessInputAndUpdateEntities` excepted).
+    const ipd = ipdom.get(b) ?? (followEarlyReturns && loopCtx === null ? followOverReturns(b, stop) : null);
     // Inside a loop body, a join OUTSIDE that body is not this `if`'s join: an arm that leaves the
     // loop `return`s and never comes back, so what is left reconverges at the loop's own
     // continuation. Post-dominance cannot see that — agbcc/gcc merge every `return` into one
@@ -5748,22 +5862,24 @@ function* inEdgeRecords(preds: Map<Block, Block[]>, b: Block): Generator<{ pred:
   }
 }
 
-// Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it.
-function postDominators(fn: Fn): Map<Block, Block | null> {
-  const nodes: (Block | null)[] = [null, ...fn.blocks];
+// Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it. Over the
+// subgraph `keep` induces when given, every member of which must still reach a `ret` inside it.
+function postDominators(fn: Fn, keep?: ReadonlySet<Block>): Map<Block, Block | null> {
+  const blocks = keep ? fn.blocks.filter((b) => keep.has(b)) : fn.blocks;
+  const nodes: (Block | null)[] = [null, ...blocks];
   const succ = (b: Block): (Block | null)[] => {
     const term = b.ops[b.ops.length - 1];
-    return term.opcode === 'ret' ? [null] : successorsOf(b);
+    return term.opcode === 'ret' ? [null] : successorsOf(b).filter((s) => keep === undefined || keep.has(s));
   };
   const pdom = new Map<Block | null, Set<Block | null>>();
   pdom.set(null, new Set([null]));
-  for (const b of fn.blocks) {
+  for (const b of blocks) {
     pdom.set(b, new Set(nodes));
   }
   let changed = true;
   while (changed) {
     changed = false;
-    for (const b of fn.blocks) {
+    for (const b of blocks) {
       const ss = succ(b);
       let inter: Set<Block | null> | null = null;
       for (const s of ss) {
@@ -5788,7 +5904,7 @@ function postDominators(fn: Fn): Map<Block, Block | null> {
   }
   // ipdom(b) = the strict post-dom c with (strictPostDoms(b) \ {c}) ⊆ pdom(c)
   const ipdom = new Map<Block, Block | null>();
-  for (const b of fn.blocks) {
+  for (const b of blocks) {
     const strict = [...pdom.get(b)!].filter((c) => c !== b);
     let chosen: Block | null = null;
     for (const c of strict) {
