@@ -11,6 +11,7 @@ import { parse } from '@asmlift/core/ir/parse';
 import { T } from '@asmlift/core/ir/types';
 import type { Expr, SFn, Stmt } from '@asmlift/core/l3/ast';
 import { tallying } from '@asmlift/core/l3/gates';
+import { emptyScaleRecord } from '@asmlift/core/raise/extscale';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { PRE_FAN_PRODUCTS } from '@asmlift/core/rank-axes';
 import { ARMV4T_AGBCC, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
@@ -83,6 +84,7 @@ describe('the gate census seam', () => {
       entry().run(site(), undefined, {}, target, {
         mergeShapes: new Map(),
         poolOrder: { entryParams: new Set(), afterPoolLoad: new Set() },
+        scales: emptyScaleRecord(),
       });
     const pass = PASSES['arm-reread'];
     const wrapped = pass.tables.map(([, t]) => tallying(t));

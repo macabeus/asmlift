@@ -43,6 +43,15 @@
 // What that refusal protects is a function this pass never compiles: agbcc truncates at every
 // PROTOTYPED CALL SITE of a narrow-declared callee — `lsl/asr` ahead of the `bl`, two Thumb
 // instructions per site — so a wrong width here costs bytes the per-function differ cannot see.
+//
+// FUSED BEHIND A POOL LOAD. The prologue scan steps over a pool-loaded address, and a body cast
+// with nothing else ahead of it — `gB = gW[(u8)a]` is `ldr r2,=gB / ldr r1,=gW / lsl r0,#24 /
+// lsr r0,#22` — reaches it looking like a declaration once raise/extscale.ts has re-split the fused
+// pair. The fold knows where the machine put that `lsl` and records it (`ScaleRecord.behindPool`),
+// and `fused-behind-pool` reads the record: an unsigned declared parameter's `lsl` precedes every
+// pool load in the benchmark's agbcc references (extscale.ts's header has the census). Only the
+// fold's own extensions are judged this way; a plain cast's extension sits at its right shift,
+// where its position says nothing about its `lsl`'s.
 import { type Fn, type Op, type Value, replaceAllUsesWith, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, MATERIALIZING_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
@@ -63,6 +72,9 @@ export interface NarrowParamCandidate {
   uses: number;
   /** the width the caller's own prototype declares for this parameter, if it declares one */
   declared: number | undefined;
+  /** the extension is one raise/extscale.ts re-split from a fused pair whose `shl` the machine ran
+   *  behind a pool load — see FUSED BEHIND A POOL LOAD */
+  fusedBehindPool: boolean;
 }
 
 export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
@@ -108,6 +120,13 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
     guardedBy: 'param-width.test.ts: an extension behind a nullary call is body code',
     rejects: (c) => !c.inPrologue,
   },
+  {
+    id: 'fused-behind-pool',
+    why: 'a fused cast the machine ran after a pool load is body code the prologue scan steps over',
+    sound: true,
+    guardedBy: 'extscale.test.ts: a body cast behind nothing but a pool load keeps its parameter wide',
+    rejects: (c) => c.fusedBehindPool,
+  },
 ];
 
 /** How many times `v` is read anywhere in `fn` — op operands and branch arguments alike. */
@@ -125,12 +144,14 @@ function useCount(fn: Fn, v: Value): number {
 }
 
 /** Type an entry parameter at the width its prologue extension proves, and drop the extension.
- *  `self` is the prototype the caller supplied for THIS function, if any. Returns the number of
- *  parameters narrowed. */
+ *  `self` is the prototype the caller supplied for THIS function, if any; `fusedBehindPool` is
+ *  raise/extscale.ts's record of the extensions it re-split behind a pool load
+ *  (`ScaleRecord.behindPool`). Returns the number of parameters narrowed. */
 export function narrowEntryParams(
   fn: Fn,
   self?: FnProto,
   gates: readonly Gate<NarrowParamCandidate>[] = PARAM_WIDTH_GATES,
+  fusedBehindPool: ReadonlySet<Op> = new Set(),
 ): number {
   const entry = fn.blocks[0];
   const declared = Array.isArray(self?.params) ? self.params.map(declaredWidth) : [];
@@ -166,6 +187,7 @@ export function narrowEntryParams(
       inPrologue: prologue.has(op),
       uses: useCount(fn, p),
       declared: declared[entry.params.indexOf(p)],
+      fusedBehindPool: fusedBehindPool.has(op),
     };
     if (firstRejection(gates, c) !== null) {
       continue;

@@ -164,7 +164,7 @@ import type { SFn } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
-import { type PoolOrder, foldablePair, foldsShiftPairCasts, poolOrderOf } from './extscale';
+import { type ScaledExtension, foldablePairs, foldsShiftPairCasts } from './extscale';
 
 /** One additive term of an address residual: `v` scaled by `scale`, or a pure constant.
  *  `scaleOp` is the op that DID the scaling (a `shl`/`mul`, or the right shift of a fused cast —
@@ -631,9 +631,10 @@ function useIndex(fn: Fn): Map<Value, Op[]> {
  *
  *  `fused` is null where the target does not lower a cast to a shift pair, and the pair is then
  *  read as scale 1: on such a target the fold never runs, and a scale read here would license an
- *  element no pass legalizes. Where it is set, the pair is read exactly when the fold will take it
- *  (`foldablePair`) — the target gate and the body-cast refusal both, not just the shape. */
-function scaleOf(v: Value, defs: Map<Value, Op>, fused: PoolOrder | null): Term {
+ *  element no pass legalizes. Where it is set, it is the fold's own `foldablePairs`, so a pair is
+ *  read exactly when the fold will take it — the target gate and the sibling refusal both, not just
+ *  the shape. */
+function scaleOf(v: Value, defs: Map<Value, Op>, fused: Map<Op, ScaledExtension> | null): Term {
   const d = defs.get(v);
   const constOf = (x: Value): number | null => {
     const dx = defs.get(x);
@@ -652,8 +653,8 @@ function scaleOf(v: Value, defs: Map<Value, Op>, fused: PoolOrder | null): Term 
       ? { scale: 1 << k, v: d.operands[0], konst: 0, scaleOp: d }
       : { scale: 1, v, konst: 0, scaleOp: null };
   }
-  const pair = fused === null ? null : foldablePair(d, defs, fused);
-  if (d !== undefined && pair !== null && constOf(pair.src) === null) {
+  const pair = d === undefined ? undefined : fused?.get(d);
+  if (d !== undefined && pair !== undefined && constOf(pair.src) === null) {
     return { scale: 1 << pair.shift, v: pair.src, konst: 0, scaleOp: d };
   }
   if (d?.opcode === 'mul') {
@@ -673,7 +674,7 @@ function scaleOf(v: Value, defs: Map<Value, Op>, fused: PoolOrder | null): Term 
 /** The additive terms of a byte residual. Only `add` is opened: a `sub` at the top of the tree
  *  makes a term's sign depend on the walk, and a NEGATIVE stride is not an array subscript this
  *  spelling can express, so it refuses rather than dropping the sign. */
-function residualTerms(root: Value, defs: Map<Value, Op>, fused: PoolOrder | null): Term[] | null {
+function residualTerms(root: Value, defs: Map<Value, Op>, fused: Map<Op, ScaledExtension> | null): Term[] | null {
   const out: Term[] = [];
   const walk = (v: Value, depth: number): boolean => {
     if (depth > 16) {
@@ -725,7 +726,7 @@ function accessesBySymbol(
   interiorIsEvidence = false,
 ): Map<string, Access[] | { refusedBy: string }> {
   const defs = defOpMap(fn);
-  const fused = foldsShiftPairCasts(target) ? poolOrderOf(fn) : null;
+  const fused = foldsShiftPairCasts(target) ? foldablePairs(fn, defs) : null;
   const uses = useIndex(fn);
   const out = new Map<string, Access[] | { refusedBy: string }>();
   const refuse = (sym: string, id: string): void => void out.set(sym, { refusedBy: id });

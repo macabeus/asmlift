@@ -20,6 +20,8 @@ import { recognizeConsts } from './const';
 import { recognizeDivPow2 } from './divpow2';
 import {
   type PoolOrder,
+  type ScaleRecord,
+  emptyScaleRecord,
   foldScaledExtensions,
   foldsShiftPairCasts,
   poolOrderOf,
@@ -30,7 +32,7 @@ import { recognizeMagicDivision } from './magicdiv';
 import { recognizeMemberArrays } from './memberarrays';
 import { rerootNarrowReads } from './narrow';
 import { type MergeShape, mergeShapes, narrowBlockLocals } from './narrowlocal';
-import { narrowEntryParams } from './paramwidth';
+import { PARAM_WIDTH_GATES, narrowEntryParams } from './paramwidth';
 import { type BranchShortCircuitOptions, recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
@@ -56,9 +58,13 @@ export interface PreRecoveryFacts {
    *  absent, and absent reads as "no diamond" — the refusing direction, in both readers. */
   mergeShapes: Map<Block, MergeShape>;
   /** where the machine loaded each pool address relative to the entry block's other ops, for
-   *  raise/extscale.ts's body-cast refusal. Read HERE because `addrnum`, the first pass, hoists
-   *  duplicated addresses to the head of the entry block and that order is gone after it. */
+   *  raise/extscale.ts's behind-a-pool-load record. Read HERE because `addrnum`, the first pass,
+   *  hoists duplicated addresses to the head of the entry block and that order is gone after it. */
   poolOrder: PoolOrder;
+  /** THE ONE FACT A PASS WRITES rather than the lift: what raise/extscale.ts's fold made, for the
+   *  two passes after it that read it — paramwidth's `fused-behind-pool` gate and
+   *  `extscale-restore`. Empty until the fold runs. */
+  scales: ScaleRecord;
 }
 
 export interface PreRecoveryPass {
@@ -67,7 +73,9 @@ export interface PreRecoveryPass {
   /** run the recognizer; returns a truthy value (a change count, or `true`) iff it CHANGED the IR.
    *  `self` is the prototype the caller supplied for the function being raised — read only by
    *  parameter-width, which checks its inference against a declared width. `lifted` is the
-   *  pre-pass snapshot — read by narrow-local (its CFG) and scaled-extension (its entry order). */
+   *  pre-pass snapshot — read by narrow-local (its CFG) and scaled-extension (its entry order) —
+   *  plus the fold's record, which scaled-extension writes and parameter-width and
+   *  scaled-extension-restore read. */
   run: (
     fn: Fn,
     self: FnProto | undefined,
@@ -115,10 +123,11 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // AFTER `const`, which folds a shift pair over a constant to the constant it computes, and BEFORE
   // the three array recognizers, whose input this pass produces: `shl(ext(x), k)` is an element
   // scale they legalize and the fused pair is not. `dce: true` — the `shl` a fold leaves readerless.
-  // It reads `lifted.poolOrder`, the entry block's order before `addrnum` hoisted its addresses.
+  // It reads `lifted.poolOrder`, the entry block's order before `addrnum` hoisted its addresses,
+  // and writes `lifted.scales`.
   {
     id: 'extscale',
-    run: (fn, _self, _opts, _target, lifted) => foldScaledExtensions(fn, lifted.poolOrder),
+    run: (fn, _self, _opts, _target, lifted) => foldScaledExtensions(fn, lifted.poolOrder, lifted.scales),
     dce: true,
     gate: foldsShiftPairCasts,
   },
@@ -177,8 +186,8 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // The `target` argument is read by ONE conjunct of ONE gate — see raise/narrowlocal.ts's
   // `NarrowLocalOptions`. A whole-pass `gate` would be wrong: the pass's SOUND rules are claims
   // about C and run everywhere; only the join-shape evidence is a claim about gcc 2.x's optimizer.
-  // That same conjunct is why this is the one pass reading `lifted`: every pass above it can
-  // rewrite the CFG whose shape it judges.
+  // That same conjunct is why it reads `lifted.mergeShapes`: every pass above it can rewrite the
+  // CFG whose shape it judges.
   {
     id: 'narrowlocal',
     run: (fn, _self, _opts, target, lifted) =>
@@ -190,12 +199,21 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
       ),
     dce: false,
   },
-  { id: 'paramwidth', run: (fn, self) => narrowEntryParams(fn, self), dce: false },
+  {
+    id: 'paramwidth',
+    run: (fn, self, _opts, _target, lifted) => narrowEntryParams(fn, self, PARAM_WIDTH_GATES, lifted.scales.behindPool),
+    dce: false,
+  },
   // LAST, after every pass that can CLAIM what `extscale` exposed — the two width passes above take
   // an extension, the array recognizers a scale. What none of them took goes back to the pair the
   // frontend lifted (raise/extscale.ts, WHAT NOBODY CLAIMED). `dce: true` — the extension it leaves
   // readerless.
-  { id: 'extscale-restore', run: restoreUnclaimedScales, dce: true, gate: foldsShiftPairCasts },
+  {
+    id: 'extscale-restore',
+    run: (fn, _self, _opts, _target, lifted) => restoreUnclaimedScales(fn, lifted.scales),
+    dce: true,
+    gate: foldsShiftPairCasts,
+  },
 ];
 
 /** Run the pre-recovery passes in order. For each pass whose gate passes and that CHANGES the IR, run
@@ -214,7 +232,11 @@ export function runPreRecovery(
   self?: FnProto,
   opts: PreRecoveryOptions = {},
 ): PreRecoveryFacts {
-  const lifted: PreRecoveryFacts = { mergeShapes: mergeShapes(fn), poolOrder: poolOrderOf(fn) };
+  const lifted: PreRecoveryFacts = {
+    mergeShapes: mergeShapes(fn),
+    poolOrder: poolOrderOf(fn),
+    scales: emptyScaleRecord(),
+  };
   for (const pass of PRE_RECOVERY_PASSES) {
     if (pass.gate && !pass.gate(target)) {
       continue;

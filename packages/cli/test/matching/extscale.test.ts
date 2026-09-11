@@ -8,9 +8,9 @@
 // did NOT move it must keep the wide parameter. The signed case is the control where the machine
 // carries no such evidence: agbcc lowers `s16 a; a * 2` with both halves at the use, exactly like
 // `(s16)a * 2`, so the wide recovery reproduces it. The last case is a body cast behind nothing but
-// a pool load: folded, paramwidth read it as a declaration and lost the match, so the fold leaves an
-// entry parameter's pair that the machine ran behind a pool load as it lifted (`raw`) — and so do
-// the wide and signed cases, whose `gA` load comes first.
+// a pool load, which paramwidth's scan cannot tell from a prologue: the fold records the pair as
+// behind the pool load, paramwidth's `fused-behind-pool` keeps the parameter wide, and with nothing
+// claiming the scale it prints as lifted (`raw`) — as do the wide and signed cases.
 //
 // Toolchain-gated like the other agbcc tests (compileTargetAsm/scoreC use real agbcc).
 import { decompile } from '@asmlift/core/pipeline';
@@ -62,6 +62,50 @@ describe('scaled-extension fold — real agbcc, byte-exact, through decompile()'
       expect(res.source).toMatch(signature);
       expect(/<< (24|16)\)? >>/.test(res.source)).toBe(raw);
       const s = scoreC(DECLS + res.source, name, assembleTarget(asm));
+      if (!s.match) {
+        throw new Error(`${name}: objdiff ${s.score}\n${res.source}`);
+      }
+      expect(s.match).toBe(true);
+    });
+  }
+});
+
+// Where the fold's two refusals land, each spelled back to its own bytes. A same-sign sibling in
+// the block means the source wrote the shift itself (`t = a << 24`), so the fold leaves the pair as
+// lifted; an opposite-sign sibling is a second cast and folds. A body cast behind a pool load folds
+// too — the SCALE is sound and the table takes it — while paramwidth's `fused-behind-pool` keeps the
+// WIDTH wide, in both signs.
+const SIB_DECLS = 'extern u32 gB; extern u32 gW[];\n';
+
+describe('the fold beside a sibling, and behind a pool load — real agbcc, byte-exact', () => {
+  for (const { name, c, spelled, raw } of [
+    {
+      name: 'xsshared',
+      c: 'u32 xsshared(u32 a, u32 *p) { u32 t = a << 24; p[t >> 22] = 1; return t >> 24; }',
+      spelled: 'return (u8)a0;',
+      raw: true,
+    },
+    {
+      name: 'xsshared2',
+      c: 'void xsshared2(u32 a, u32 *p, u16 *q) { u32 t = a << 24; p[t >> 22] = 1; q[t >> 23] = 2; }',
+      spelled: 'void xsshared2(s32 a0',
+      raw: true,
+    },
+    {
+      name: 'xsopposite',
+      c: 'void xsopposite(u32 a, u32 *p) { p[(u8)a] = (s8)a; }',
+      spelled: '[(u8)a0] = (s8)a0',
+      raw: false,
+    },
+    { name: 'xspooltbl', c: 'void xspooltbl(u32 a) { gB = gW[(u8)a]; }', spelled: 'gW[(u8)a0]', raw: false },
+    { name: 'xspoolsgn', c: 'u32 xspoolsgn(s16 i) { return gW[i]; }', spelled: 'gW[(s16)a0]', raw: false },
+  ]) {
+    test(name, () => {
+      const asm = compileTargetAsm(SIB_DECLS + c);
+      const res = decompile(name, asm, ARMV4T_AGBCC, { prototypes: { [name]: { returnsVoid: c.startsWith('void') } } });
+      expect(res.source).toContain(spelled);
+      expect(/<< (24|16)\)? >>/.test(res.source)).toBe(raw);
+      const s = scoreC(SIB_DECLS + res.source, name, assembleTarget(asm));
       if (!s.match) {
         throw new Error(`${name}: objdiff ${s.score}\n${res.source}`);
       }

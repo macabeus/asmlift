@@ -220,16 +220,27 @@ describe('a cast fused with its scale is a scaling, ordered at its right shift',
     expect([...orderLicensedGlobals(lift('f', FUSED_ELEM_HOME), other)]).toEqual([]);
   });
 
-  test('…and not for a pair the fold refuses: an entry parameter shifted behind a pool load', () => {
-    // FUSED_BASE_FIRST with the pool load moved ahead of the `lsl` — a body cast, which the fold
-    // leaves raw, so the stride reader must not read a scale off it either.
+  test('…and not for a pair the fold refuses: a same-sign sibling in its block', () => {
+    // FUSED_BASE_FIRST plus a plain `lsr #24` off the same `lsl` — `t = i << 24; … t >> 23 … t >> 24`,
+    // which the fold leaves raw, so the stride reader must not read a scale off it either.
+    const sibling = thumb(
+      'f',
+      '\tlsl\tr0, r0, #0x18\n\tldr\tr1, .L3\n\tlsr\tr2, r0, #0x17\n\tadd\tr2, r2, r1\n\tldrh\tr2, [r2]\n' +
+        '\tlsr\tr0, r0, #0x18\n\tadd\tr0, r0, r2',
+      '.word\tgTbl',
+    );
+    expect(derive('f', sibling).size).toBe(0);
+    expect([...licensed('f', sibling)]).toEqual([]);
+  });
+
+  test('a body cast behind the pool load is read: the fold takes its scale, paramwidth refuses only its width', () => {
+    // FUSED_BASE_FIRST with the pool load moved ahead of the `lsl` — `gTbl[(u8)a]` over a wide `a`.
     const behind = thumb(
       'f',
       '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x17\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]',
       '.word\tgTbl',
     );
-    expect(derive('f', behind).size).toBe(0);
-    expect([...licensed('f', behind)]).toEqual([]);
+    expect(derive('f', behind).get('gTbl')).toMatchObject({ shape: 'array', elemSize: 2 });
   });
 });
 
