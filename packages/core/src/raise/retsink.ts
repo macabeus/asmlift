@@ -32,6 +32,13 @@
 // variable is the spelling of some other function, and sinking is the only candidate that can match
 // (`kleod:IsSelectButtonPressed:agbcc`).
 //
+// THAT IS A FACT ABOUT ONE COMPILER, so it has a per-compiler home rather than an `arch ==` branch:
+// `compilerBehaviors.hoistsConstArmSelect` (target.ts), threaded in as `RetSinkOptions` from
+// `decompile`'s own target, read by the `compiler-hoists-const-arms` clause. Set on agbcc and
+// nowhere else — this pass is ISA-neutral and runs for IDO, gcc2.7.2kmc and mwcc too, and nothing
+// has compiled the pair on any of them. The short-circuit admissions above take no such clause:
+// their argument is about a SHARED ARM in the CFG, not about a compiler's hoist.
+//
 // BARE IS LOAD-BEARING, and it is the clause this admission was first shipped without (`bare-arms`).
 // The hoist is what makes the merge-variable spelling unable to keep the diamond, and the hoist
 // needs the arm to hold nothing but the constant. Give either arm a BODY — one `*p = 1` is enough —
@@ -217,9 +224,27 @@ export interface SelectCandidate {
   /** what each arm computes BESIDES the constants it hands the merge and its own terminator —
    *  empty for a BARE arm, which is the only shape the hoist was measured on */
   readonly armBodies: readonly (readonly Op[])[];
+  /** whether THIS target's compiler is one the hoist was measured on
+   *  (`compilerBehaviors.hoistsConstArmSelect`) */
+  readonly targetHoists: boolean;
 }
 
 export const SELECT_GATES: readonly Gate<SelectCandidate>[] = [
+  {
+    // THE COMPILER THE ARGUMENT IS ABOUT. Every measurement behind this table is agbcc -O2
+    // -mthumb; nothing has compiled the pair on IDO, KMC GCC or mwcc. The rest of this file is
+    // ISA-neutral and runs for all four, so without this clause an agbcc cost model would decide a
+    // PowerPC function with nothing in the code saying so. It claims nothing instead
+    // (`target.ts hoistsConstArmSelect`, absent ⇒ false), which is free: re-lifting all 1039 corpus
+    // rows shows the admission reaches no non-agbcc row either way.
+    //
+    // FIRST in the table on purpose — a census of the clauses below should count sites where the
+    // question was live, and on three of the four toolchains it never is.
+    id: 'compiler-hoists-const-arms',
+    why: 'the hoist this admission reads backwards was measured on agbcc and declared nowhere else',
+    sound: false,
+    rejects: (c) => !c.targetHoists,
+  },
   {
     // The diamond itself: two distinct arms, each reached only from one head, and that head's
     // `cond_br` choosing between exactly the two of them. A FALL-THROUGH switch has neither — its
@@ -370,8 +395,16 @@ function dispatchModel(fn: Fn, defs: Map<Value, Op>): DispatchModel {
  *  connective, and a two-armed diamond whose arms carry constants. Returns whether anything changed.
  *  A "return-only" block is exactly one `ret` whose operands are all its own block-params, so each
  *  predecessor already carries the returned value as a successor arg. */
+/** The one COMPILER fact this pass reads, threaded from `decompile`'s own target the way
+ *  `raise/narrowlocal.ts`'s `hoistsSingleSetArm` is. Absent ⇒ the constant-arm admission never
+ *  fires; the short-circuit admissions are compiler-independent and unaffected. */
+export interface RetSinkOptions {
+  readonly hoistsConstArmSelect?: boolean;
+}
+
 export function sinkReturns(
   fn: Fn,
+  opts: RetSinkOptions = {},
   gates: readonly Gate<FallInCandidate>[] = FALL_IN_GATES,
   selectGates: readonly Gate<SelectCandidate>[] = SELECT_GATES,
 ): boolean {
@@ -489,6 +522,7 @@ export function sinkReturns(
           head: armsMeetAt(),
           carried: arms.flatMap((a) => a.carried),
           armBodies: arms.map((a) => a.body),
+          targetHoists: opts.hoistsConstArmSelect === true,
         }) === null
       );
     };

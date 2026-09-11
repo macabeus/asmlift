@@ -277,7 +277,7 @@ test('ablating the dispatch gate reads an `if` join, and a guarded switch, as fa
   const sinks = (sym: string, asm: string, gates?: readonly Gate<FallInCandidate>[]) => {
     const fn = frontendFor(ARMV4T_AGBCC).lift(sym, asm, ARMV4T_AGBCC, {});
     applyIdiomPatterns(fn, ARMV4T_AGBCC);
-    return sinkReturns(fn, gates ?? FALL_IN_GATES);
+    return sinkReturns(fn, { hoistsConstArmSelect: true }, gates ?? FALL_IN_GATES);
   };
   for (const [sym, asm] of [
     ['g0', IF_NO_ELSE],
@@ -312,6 +312,22 @@ test('a single-condition diamond whose arms are CONSTANTS is sunk', () => {
   expect(out).toContain('return 0;');
   expect(out).toContain('return 1;');
   expect(out).not.toMatch(/return v\d+;/);
+});
+
+test('the constant-arm admission is silent on a compiler the hoist was never measured on', () => {
+  // `compilerBehaviors.hoistsConstArmSelect` is the fact's home (target.ts). Absent — every target
+  // but agbcc — and the admission never fires, whatever the shape. The rest of the pass is
+  // compiler-independent and keeps working; only this one arm is conditioned.
+  const lift = () => {
+    const fn = frontendFor(ARMV4T_AGBCC).lift('sel', CONST_SELECT, ARMV4T_AGBCC, { sel: { params: 1 } });
+    applyIdiomPatterns(fn, ARMV4T_AGBCC);
+    return fn;
+  };
+  expect(sinkReturns(lift(), { hoistsConstArmSelect: true })).toBe(true);
+  expect(sinkReturns(lift(), {})).toBe(false);
+  expect(sinkReturns(lift())).toBe(false);
+  // …and ablating the clause is what puts it back, which is what makes the clause the reason.
+  expect(sinkReturns(lift(), {}, FALL_IN_GATES, without(SELECT_GATES, 'compiler-hoists-const-arms'))).toBe(true);
 });
 
 test('the same diamond with COMPUTED arms keeps its merge variable', () => {
@@ -398,7 +414,7 @@ test('every constant-arm clause refuses a shape the two-armed evidence does not 
             : {},
     );
     applyIdiomPatterns(fn, ARMV4T_AGBCC);
-    return sinkReturns(fn, FALL_IN_GATES, sel);
+    return sinkReturns(fn, { hoistsConstArmSelect: true }, FALL_IN_GATES, sel);
   };
   for (const [id, sym, asm] of [
     ['constant-arms', 'sel7', BARE_COMPUTED_SELECT],

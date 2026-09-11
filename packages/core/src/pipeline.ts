@@ -276,7 +276,7 @@ export function raiseRecovered(
   verify(fn);
   assertTypesRecovered(fn);
   hooks.afterRecover?.();
-  if (sinkReturns(fn)) {
+  if (sinkReturns(fn, { hoistsConstArmSelect: target.compilerBehaviors.hoistsConstArmSelect })) {
     verify(fn);
     hooks.afterRetsink?.();
   }

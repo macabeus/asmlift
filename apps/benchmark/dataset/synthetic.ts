@@ -1626,6 +1626,18 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
   {
+    // THE CONSTANT-ARM RETURN DIAMOND (raise/retsink.ts `SELECT_GATES`). The capability that closed
+    // `kleod:IsSelectButtonPressed:agbcc` had no synthetic inhabitant at all, and the corpus's only
+    // real one is that row; a rule with one row behind it cannot show whether it travels. Run on
+    // ALL four toolchains deliberately: the admission is declared for agbcc alone
+    // (`compilerBehaviors.hoistsConstArmSelect`), so the IDO / KMC / mwcc columns of this row are
+    // what would say if that ever stopped being true.
+    sym: 'selconst',
+    src: 'int selconst(int x){ if (x & 0x40) return 1; return 0; }',
+    features: ['compare', 'branch'],
+    toolchains: ALL,
+  },
+  {
     sym: 'clampu8',
     src: 'int clampu8(int x){ if(x<0)return 0; if(x>255)return 255; return x; }',
     features: ['compare', 'branch'],
