@@ -32,8 +32,10 @@
 // The declaration's extension starts in the prologue and only its SECOND half is merged into the
 // use; a cast in the body is lowered at the use, both halves together. So the extension is placed
 // where its `shl` stood and the scale where the right shift stood: a prologue `lsl` yields a
-// prologue extension, which paramwidth's own gates then judge — including `not-prologue`, which is
-// what keeps `pb` wide. Placing both at the right shift instead throws `pa`'s prologue evidence
+// prologue extension, which paramwidth's own gates then judge. Those gates keep a body cast wide
+// only when body code that READS a value comes first — `not-prologue` steps over materializations,
+// a pool-loaded address among them — which is why the next section exists. Placing both at the
+// right shift instead throws `pa`'s prologue evidence
 // away, so `pa` reads as `pb` and stays wide — measured on the benchmark's sa3 rows, which declare
 // `u8 bg` exactly so: `sa2__sub_8007858` 39/60 anchored against 44/61 at the right shift, and
 // `sa2__sub_8007958` 64/87 against 66/88.
@@ -53,6 +55,27 @@
 //   • the target is not one CAST_PATTERNS applies to. Same predicate, because the fused pair is
 //     that cast's lowering with a scale merged in: where `(u8)x` is not a shift pair (IDO and GCC
 //     `andi`), `(u8)x << k` is not one either, and a `sll; srl` there is some other arithmetic.
+//
+//   • THE BODY CAST BEHIND A POOL LOAD: the pair's `shl` reads an entry parameter and the machine
+//     ran it after a pool-loaded address. Compiled with this benchmark's agbcc, a body cast whose
+//     only predecessors are pool loads puts nothing between them and the pair that paramwidth's
+//     scan stops at, so folded it reads as a declaration:
+//
+//         void pc1(u32 a) { gB = (u32)&gT + (u8)a * 4; }     ldr r2,=gB / lsl r0,#24 / lsr r0,#22
+//
+//     narrowed to `u8 a0` (objdiff 2) where the raw pair is MATCH. A declared parameter's `lsl`
+//     comes before any pool load, symbol or numeric: 71 of the 73 narrow-declared parameters over
+//     the benchmark's agbcc references, and the other 2 (one row's `s8` pair) follow body code as
+//     well — that row's output does not move under this refusal. The order is read off the LIFTED
+//     function (`poolOrderOf`): `addrnum` hoists a
+//     duplicated address to the head of the entry block, and after it the position no longer says
+//     where the machine loaded it. Only the fused form is judged — a plain cast's pair is folded at
+//     its right half, so its lifted position is not its `lsl`'s. NOT caught: a NUMERIC pool word
+//     lifts to `const`, the same op a `movs` does, and paramwidth's own header says why a `movs`
+//     ahead of the pair decides nothing — so a body cast behind only a numeric pool load (`& 0xfff`
+//     over a wide parameter in a loop) still folds and still narrows. The refusal withholds the
+//     SCALE too, and raise/globalshape.ts's stride reader asks the same predicate
+//     (`foldablePair`), so no licence rests on a pair left raw.
 //
 // One extension per (shift, signedness): two scales read off one `shl` share it, and the `shl`
 // dies only when every reader was folded. A `shl` that keeps another reader leaves the parameter
@@ -100,10 +123,52 @@ export function scaledExtensionOf(op: Op | undefined, defs: Map<Value, Op>): Sca
 export const foldsShiftPairCasts = (target: TargetDescription): boolean =>
   CAST_PATTERNS.every((p) => patternApplies(p, target));
 
+/** Where the MACHINE put each entry-block op relative to its first pool-loaded address, read off a
+ *  function whose entry block is still in lifted order. See THE BODY CAST BEHIND A POOL LOAD. */
+export interface PoolOrder {
+  /** the function's parameters */
+  entryParams: ReadonlySet<Value>;
+  /** the entry block's ops that come after a `gaddr` */
+  afterPoolLoad: ReadonlySet<Op>;
+}
+
+/** Read {@link PoolOrder} off `fn`. Valid only BEFORE raise/gvn.ts's `addrnum` runs: that pass
+ *  hoists a duplicated address to the head of the entry block, after which a `gaddr`'s position no
+ *  longer says where the machine loaded it. The idiom patterns before it leave both a `gaddr` and a
+ *  fused pair's `shl` where they were — a plain cast's pair is folded at its right half, which is
+ *  why this fact is read for the FUSED form only. */
+export function poolOrderOf(fn: Fn): PoolOrder {
+  const entry = fn.blocks[0];
+  const afterPoolLoad = new Set<Op>();
+  let seen = false;
+  for (const op of entry?.ops ?? []) {
+    if (seen) {
+      afterPoolLoad.add(op);
+    }
+    seen ||= op.opcode === 'gaddr';
+  }
+  return { entryParams: new Set(entry?.params ?? []), afterPoolLoad };
+}
+
+/** The fused pair at `op` AS THE FOLD TAKES IT: the shape, minus an entry parameter's pair whose
+ *  `shl` the machine ran behind a pool load. The predicate the fold and raise/globalshape.ts's
+ *  stride reader share — a reader that took a pair the fold leaves raw would license an element
+ *  scale that no pass below legalizes. The TARGET half of the gate is the caller's: the pass list
+ *  gates the fold, and globalshape asks {@link foldsShiftPairCasts} before it reads. */
+export function foldablePair(op: Op | undefined, defs: Map<Value, Op>, order: PoolOrder): ScaledExtension | null {
+  const m = scaledExtensionOf(op, defs);
+  if (m === null || (order.entryParams.has(m.src) && order.afterPoolLoad.has(m.inner))) {
+    return null;
+  }
+  return m;
+}
+
 /** Rewrite every fused pair to `shl(ext(src), shift)`, the extension spliced in at the `shl`'s
  *  position and the scale at the right shift's. Returns the number of pairs folded; the `shl`s
- *  left without a reader are the pass driver's DCE. */
-export function foldScaledExtensions(fn: Fn): number {
+ *  left without a reader are the pass driver's DCE. `order` is the lifted-order fact the driver read
+ *  before `addrnum` (`PreRecoveryFacts.poolOrder`); the default reads it off `fn` itself, which is
+ *  right only while `fn`'s entry block is still in lifted order — a test's parsed IR. */
+export function foldScaledExtensions(fn: Fn, order: PoolOrder = poolOrderOf(fn)): number {
   const defs = defOpMap(fn);
   const blockOf = new Map<Op, Block>();
   for (const b of fn.blocks) {
@@ -115,7 +180,7 @@ export function foldScaledExtensions(fn: Fn): number {
   let folded = 0;
   for (const b of fn.blocks) {
     for (const op of [...b.ops]) {
-      const m = scaledExtensionOf(op, defs);
+      const m = foldablePair(op, defs, order);
       if (m === null) {
         continue;
       }

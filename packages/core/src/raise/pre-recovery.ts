@@ -18,7 +18,7 @@ import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
 import { recognizeDivPow2 } from './divpow2';
-import { foldScaledExtensions, foldsShiftPairCasts } from './extscale';
+import { type PoolOrder, foldScaledExtensions, foldsShiftPairCasts, poolOrderOf } from './extscale';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { recognizeMemberArrays } from './memberarrays';
@@ -49,6 +49,10 @@ export interface PreRecoveryFacts {
    *  pre-recovery entirely, raise/retsink.ts's `pre-diamond`. Blocks a later pass creates are
    *  absent, and absent reads as "no diamond" — the refusing direction, in both readers. */
   mergeShapes: Map<Block, MergeShape>;
+  /** where the machine loaded each pool address relative to the entry block's other ops, for
+   *  raise/extscale.ts's body-cast refusal. Read HERE because `addrnum`, the first pass, hoists
+   *  duplicated addresses to the head of the entry block and that order is gone after it. */
+  poolOrder: PoolOrder;
 }
 
 export interface PreRecoveryPass {
@@ -57,7 +61,7 @@ export interface PreRecoveryPass {
   /** run the recognizer; returns a truthy value (a change count, or `true`) iff it CHANGED the IR.
    *  `self` is the prototype the caller supplied for the function being raised — read only by
    *  parameter-width, which checks its inference against a declared width. `lifted` is the
-   *  pre-pass CFG snapshot — read only by narrow-local. */
+   *  pre-pass snapshot — read by narrow-local (its CFG) and scaled-extension (its entry order). */
   run: (
     fn: Fn,
     self: FnProto | undefined,
@@ -105,7 +109,13 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // AFTER `const`, which folds a shift pair over a constant to the constant it computes, and BEFORE
   // the three array recognizers, whose input this pass produces: `shl(ext(x), k)` is an element
   // scale they legalize and the fused pair is not. `dce: true` — the `shl` a fold leaves readerless.
-  { id: 'extscale', run: foldScaledExtensions, dce: true, gate: foldsShiftPairCasts },
+  // It reads `lifted.poolOrder`, the entry block's order before `addrnum` hoisted its addresses.
+  {
+    id: 'extscale',
+    run: (fn, _self, _opts, _target, lifted) => foldScaledExtensions(fn, lifted.poolOrder),
+    dce: true,
+    gate: foldsShiftPairCasts,
+  },
   { id: 'arrays', run: recognizeArrays, dce: true },
   // struct-arrays AFTER arrays (scalar stride==width shapes are claimed first — see the
   // discriminator note in raise/struct-arrays.ts) and BEFORE structs (an element's field
@@ -193,7 +203,7 @@ export function runPreRecovery(
   self?: FnProto,
   opts: PreRecoveryOptions = {},
 ): PreRecoveryFacts {
-  const lifted: PreRecoveryFacts = { mergeShapes: mergeShapes(fn) };
+  const lifted: PreRecoveryFacts = { mergeShapes: mergeShapes(fn), poolOrder: poolOrderOf(fn) };
   for (const pass of PRE_RECOVERY_PASSES) {
     if (pass.gate && !pass.gate(target)) {
       continue;

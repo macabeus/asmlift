@@ -79,7 +79,11 @@ describe('the gate census seam', () => {
           '^bb2():\n  ret\n^bb3():\n  %7: s32 = call {target="fnB"}\n  store %0, %4 {off=2, width=1}\n  ret\n}\n',
       );
     const entry = () => PRE_RECOVERY_PASSES.find((p) => p.id === 'branch-shortcircuit')!;
-    const run = (target: TargetDescription) => entry().run(site(), undefined, {}, target, { mergeShapes: new Map() });
+    const run = (target: TargetDescription) =>
+      entry().run(site(), undefined, {}, target, {
+        mergeShapes: new Map(),
+        poolOrder: { entryParams: new Set(), afterPoolLoad: new Set() },
+      });
     const pass = PASSES['arm-reread'];
     const wrapped = pass.tables.map(([, t]) => tallying(t));
     const before = entry().run;

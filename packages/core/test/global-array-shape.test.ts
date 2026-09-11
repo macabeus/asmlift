@@ -17,6 +17,7 @@ import { frontendFor } from '../src/frontend/registry';
 import { type Expr, type Stmt, exprChildren, stmtChildren, stmtExprs } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
+import { foldsShiftPairCasts } from '../src/raise/extscale';
 import {
   ADDRESS_GATES,
   ARRAY_SHAPE_GATES,
@@ -206,6 +207,29 @@ describe('a cast fused with its scale is a scaling, ordered at its right shift',
     expect([...licensed('f', FUSED_ELEM_HOME)]).toEqual(['gTbl']);
     expect([...licensed('f', FUSED_ELEM_INLINE)]).toEqual([]);
     expect(derive('f', FUSED_ELEM_HOME).size).toBe(0);
+  });
+
+  test('read only where raise/extscale.ts folds it: a target whose casts are not shift pairs reads scale 1', () => {
+    // The shape reader asks the fold's own gate. A target that opted into stride shapes but lowers
+    // `(u8)x` some other way never runs the fold, so a scale read here would license an element
+    // the IR below still spells as the raw pair, which no array pass legalizes.
+    const other = { ...ARMV4T_AGBCC, compiler: 'not-a-shift-pair-compiler' };
+    expect(other.compilerBehaviors.arrayShapeFromStride).toBe(true);
+    expect(foldsShiftPairCasts(other)).toBe(false);
+    expect(inferGlobalArrays(lift('f', FUSED_BASE_FIRST), other).size).toBe(0);
+    expect([...orderLicensedGlobals(lift('f', FUSED_ELEM_HOME), other)]).toEqual([]);
+  });
+
+  test('…and not for a pair the fold refuses: an entry parameter shifted behind a pool load', () => {
+    // FUSED_BASE_FIRST with the pool load moved ahead of the `lsl` — a body cast, which the fold
+    // leaves raw, so the stride reader must not read a scale off it either.
+    const behind = thumb(
+      'f',
+      '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x17\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]',
+      '.word\tgTbl',
+    );
+    expect(derive('f', behind).size).toBe(0);
+    expect([...licensed('f', behind)]).toEqual([]);
   });
 });
 

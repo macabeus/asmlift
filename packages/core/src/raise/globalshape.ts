@@ -164,7 +164,7 @@ import type { SFn } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
-import { scaledExtensionOf } from './extscale';
+import { type PoolOrder, foldablePair, foldsShiftPairCasts, poolOrderOf } from './extscale';
 
 /** One additive term of an address residual: `v` scaled by `scale`, or a pure constant.
  *  `scaleOp` is the op that DID the scaling (a `shl`/`mul`, or the right shift of a fused cast —
@@ -627,8 +627,13 @@ function useIndex(fn: Fn): Map<Value, Op[]> {
  *  raise/extscale.ts later folds it, off the same predicate, and its RIGHT shift is the scaling op:
  *  compiled, `gTbl[i]` over a `u8 i` is `lsl` / `ldr` / `lsr` and `((u16 *)gTbl)[i]` is `lsl` /
  *  `lsr` / `ldr`, so the right half is where the order fork shows. A constant under the pair keeps
- *  the scale-1 reading — `const` folds that pair to its value before anything spells it. */
-function scaleOf(v: Value, defs: Map<Value, Op>): Term {
+ *  the scale-1 reading — `const` folds that pair to its value before anything spells it.
+ *
+ *  `fused` is null where the target does not lower a cast to a shift pair, and the pair is then
+ *  read as scale 1: on such a target the fold never runs, and a scale read here would license an
+ *  element no pass legalizes. Where it is set, the pair is read exactly when the fold will take it
+ *  (`foldablePair`) — the target gate and the body-cast refusal both, not just the shape. */
+function scaleOf(v: Value, defs: Map<Value, Op>, fused: PoolOrder | null): Term {
   const d = defs.get(v);
   const constOf = (x: Value): number | null => {
     const dx = defs.get(x);
@@ -647,9 +652,9 @@ function scaleOf(v: Value, defs: Map<Value, Op>): Term {
       ? { scale: 1 << k, v: d.operands[0], konst: 0, scaleOp: d }
       : { scale: 1, v, konst: 0, scaleOp: null };
   }
-  const fused = scaledExtensionOf(d, defs);
-  if (d !== undefined && fused !== null && constOf(fused.src) === null) {
-    return { scale: 1 << fused.shift, v: fused.src, konst: 0, scaleOp: d };
+  const pair = fused === null ? null : foldablePair(d, defs, fused);
+  if (d !== undefined && pair !== null && constOf(pair.src) === null) {
+    return { scale: 1 << pair.shift, v: pair.src, konst: 0, scaleOp: d };
   }
   if (d?.opcode === 'mul') {
     for (const [a, b] of [
@@ -668,7 +673,7 @@ function scaleOf(v: Value, defs: Map<Value, Op>): Term {
 /** The additive terms of a byte residual. Only `add` is opened: a `sub` at the top of the tree
  *  makes a term's sign depend on the walk, and a NEGATIVE stride is not an array subscript this
  *  spelling can express, so it refuses rather than dropping the sign. */
-function residualTerms(root: Value, defs: Map<Value, Op>): Term[] | null {
+function residualTerms(root: Value, defs: Map<Value, Op>, fused: PoolOrder | null): Term[] | null {
   const out: Term[] = [];
   const walk = (v: Value, depth: number): boolean => {
     if (depth > 16) {
@@ -681,7 +686,7 @@ function residualTerms(root: Value, defs: Map<Value, Op>): Term[] | null {
     if (d?.opcode === 'add') {
       return walk(d.operands[0], depth + 1) && walk(d.operands[1], depth + 1);
     }
-    out.push(scaleOf(v, defs));
+    out.push(scaleOf(v, defs, fused));
     return true;
   };
   return walk(root, 0) ? out : null;
@@ -704,19 +709,23 @@ function residualTerms(root: Value, defs: Map<Value, Op>): Term[] | null {
  *  say in the type. */
 function accessesBySymbol(
   fn: Fn,
+  target: TargetDescription,
   gates: readonly Gate<AddressUse>[],
 ): Map<string, ElementAccess[] | { refusedBy: string }>;
 function accessesBySymbol(
   fn: Fn,
+  target: TargetDescription,
   gates: readonly Gate<AddressUse>[],
   interiorIsEvidence: true,
 ): Map<string, Access[] | { refusedBy: string }>;
 function accessesBySymbol(
   fn: Fn,
+  target: TargetDescription,
   gates: readonly Gate<AddressUse>[],
   interiorIsEvidence = false,
 ): Map<string, Access[] | { refusedBy: string }> {
   const defs = defOpMap(fn);
+  const fused = foldsShiftPairCasts(target) ? poolOrderOf(fn) : null;
   const uses = useIndex(fn);
   const out = new Map<string, Access[] | { refusedBy: string }>();
   const refuse = (sym: string, id: string): void => void out.set(sym, { refusedBy: id });
@@ -741,7 +750,7 @@ function accessesBySymbol(
       for (const u of gUses) {
         const isAdd = u.opcode === 'add';
         const other = isAdd ? (u.operands[0] === base ? u.operands[1] : u.operands[0]) : undefined;
-        const terms = other === undefined ? null : residualTerms(other, defs);
+        const terms = other === undefined ? null : residualTerms(other, defs, fused);
         const consumers = (isAdd ? (uses.get(u.results[0]) ?? []) : []).map((m) => {
           const isLoad = m.opcode === 'load' && m.operands[0] === u.results[0];
           const isStore = m.opcode === 'store' && m.operands[0] === u.results[0];
@@ -947,7 +956,7 @@ export function inferGlobalArrays(
     return out;
   }
   const pos = positions(fn);
-  for (const [sym, accs] of accessesBySymbol(fn, gates.address)) {
+  for (const [sym, accs] of accessesBySymbol(fn, target, gates.address)) {
     const si = Array.isArray(accs) ? shapeOf(accs, pos, gates.shape) : null;
     if (si !== null) {
       out.set(sym, si);
@@ -981,7 +990,7 @@ export function orderLicensedGlobals(
     return out;
   }
   const pos = positions(fn);
-  for (const [sym, accs] of accessesBySymbol(fn, gates.address, true)) {
+  for (const [sym, accs] of accessesBySymbol(fn, target, gates.address, true)) {
     if (Array.isArray(accs) && firstRejection(gates.shape, evidenceOf(accs, pos)) === null) {
       out.add(sym);
     }
@@ -1004,7 +1013,7 @@ export function arrayShapeRefusals(
     return out;
   }
   const pos = positions(fn);
-  for (const [sym, accs] of accessesBySymbol(fn, gates.address)) {
+  for (const [sym, accs] of accessesBySymbol(fn, target, gates.address)) {
     out.set(sym, Array.isArray(accs) ? firstRejection(gates.shape, evidenceOf(accs, pos)) : accs.refusedBy);
   }
   return out;

@@ -9,9 +9,11 @@
 //   agbcc-extscale-wide.s    void extscale(u32 a, u8 b) { gA |= 4; gB = (u32)&gT + (u8)a * 4; gC = b; }
 //   agbcc-extscale-table.s   void entrylookup(u8 idx) { u8 *flags = gFlags; const u8 *t = gTable;
 //                              const u8 *e = &t[(u32)idx * 8]; flags[0x11] = e[5]; flags[0x12] = e[6]; }
+//   agbcc-extscale-pool.s    void extscale(u32 a) { gB = (u32)&gT + (u8)a * 4; }
 // The first two differ ONLY in where the `lsl r0, r0, #0x18` sits — prologue against body — and
-// must reach different signatures. Toolchain-free: the round trip is the matching suite's
-// (packages/cli/test/matching/extscale.test.ts).
+// must reach different signatures. The third is a body cast with nothing but a pool load ahead of
+// it, the shape paramwidth's scan cannot tell from a prologue. Toolchain-free: the round trip is
+// the matching suite's (packages/cli/test/matching/extscale.test.ts).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -22,7 +24,7 @@ import { verify } from '../src/ir/verify';
 import { decompile } from '../src/pipeline';
 import { foldScaledExtensions, foldsShiftPairCasts } from '../src/raise/extscale';
 import { PRE_RECOVERY_PASSES } from '../src/raise/pre-recovery';
-import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 const fold = (ir: string) => {
   const fn = parse(ir);
@@ -129,8 +131,49 @@ describe('refusals — every other pair of shifts is left as it is', () => {
     const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'extscale')!;
     expect(pass.gate).toBe(foldsShiftPairCasts);
     expect(foldsShiftPairCasts(ARMV4T_AGBCC)).toBe(true);
-    // IDO zero-extends with `andi`, so a `sll; srl` there is not a cast's lowering
+    // Both MIPS compilers zero-extend with `andi`, so a `sll; srl` there is not a cast's lowering.
+    // MIPS gcc is where the gate has inhabitants: with it ablated, the fold fires on 6 of the
+    // benchmark's non-agbcc rows, all gcc2.7.2/gcc2.7.2kmc (`sll 16; sra 13` is a real shift pair
+    // there), and on none under IDO or mwcc.
+    expect(foldsShiftPairCasts(MIPS_GCC)).toBe(false);
     expect(foldsShiftPairCasts(MIPS_IDO)).toBe(false);
+    expect(foldsShiftPairCasts(PPC_MWCC)).toBe(false);
+  });
+});
+
+describe('the body cast behind a pool load — the order is read off the LIFTED entry block', () => {
+  const behind = (first: string, second: string) => `fn f {
+^bb0(%0: unk32):
+  ${first}
+  ${second}
+  %3: unk32 = shr_u %2 {imm=22}
+  %4: unk32 = add %3, %1
+  store %1, %4 {off=0, width=4}
+  ret
+}
+`;
+  const gaddr = '%1: unk32 = gaddr {sym="gB"}';
+
+  test("an entry parameter's pair whose `shl` follows a pool load is left as it is", () => {
+    expect(fold(behind(gaddr, '%2: unk32 = shl %0 {imm=24}')).n).toBe(0);
+  });
+
+  test('the same pair ahead of the pool load folds — the declared-parameter order', () => {
+    expect(fold(behind('%2: unk32 = shl %0 {imm=24}', gaddr)).n).toBe(1);
+  });
+
+  test('a pair over a BODY value folds wherever it sits — no width pass reads it', () => {
+    const { n } = fold(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = gaddr {sym="gB"}
+  %2: unk32 = load %1 {off=0, width=4, signed=false}
+  %3: unk32 = shl %2 {imm=24}
+  %4: unk32 = shr_u %3 {imm=22}
+  store %1, %4 {off=0, width=4}
+  ret
+}
+`);
+    expect(n).toBe(1);
   });
 });
 
@@ -143,9 +186,18 @@ describe('what the fold hands the passes below it', () => {
   });
 
   test('a cast in the body: both halves at the use, so the parameter stays wide', () => {
+    // `gA`'s pool load runs before the pair, so it is also left as lifted (the next describe).
     const src = source('extscale', 'agbcc-extscale-wide.s');
     expect(src).toMatch(/void extscale\([su]32 a0, u8 a1\)/);
-    expect(src).toContain('((u8)a0 << 2)');
+    expect(src).toContain('(a0 << 24) >> 22');
+  });
+
+  test('a body cast behind nothing but a pool load keeps its parameter wide', () => {
+    // paramwidth's scan steps over a pool-loaded address, so a folded pair here would read as a
+    // prologue extension and narrow `a` to `u8` — objdiff 2 where the raw pair is byte-exact.
+    const src = source('extscale', 'agbcc-extscale-pool.s');
+    expect(src).toMatch(/void extscale\([su]32 a0\)/);
+    expect(src).toContain('(a0 << 24) >> 22');
   });
 
   test('the element stride of a struct table indexed by a narrow parameter', () => {
