@@ -10,12 +10,15 @@
 // it is a COMPILER fact, so every case below is compiled and byte-scored rather than asserted over
 // hand-written IR. Two populations, and the file holds both:
 //
-//   - COMPUTED arms (`clamp0`, `sel`, `lor`) and BODIED arms (`selbody` and friends) keep the merge
-//     variable, because that is what byte-matches for them. Sinking would regress them.
-//   - BARE CONSTANT arms (`if (x & 0x40) return 1; return 0;`) cannot be spelled by a merge variable
-//     at all: agbcc hoists the constant above the compare and erases the diamond the target keeps.
-//     Those are sunk, and their match is won through the RANKED path, on `/flip-branch` — a sunk
-//     diamond has no join left, so the shipped joined-if default reads its sense inverted.
+//   - The CONTROLS, each refused by a DIFFERENT clause: `clamp0` and `sel` present no two-armed
+//     diamond at all (`two-arms-one-head`), `lor`'s merge has a third in-edge straight from the head
+//     (`no-arrival-but-the-arms`), and BODIED arms (`selbody` and friends) are not one SET
+//     (`arms-are-one-set`). Their merge-variable spelling is what byte-matches; sinking regresses it.
+//   - Arms that are ONE SPECULATABLE SET (`if (x & 0x40) return 1; return 0;`) cannot be spelled by
+//     a merge variable at all: agbcc hoists the arm above the compare and erases the diamond the
+//     target keeps. Those are sunk, and their match is won through the RANKED path, on
+//     `/flip-branch` — a sunk diamond has no join left, so the joined-if default reads its sense
+//     inverted.
 //
 // All scored byte-exact on agbcc.
 import { decompile } from '@asmlift/core/pipeline';
@@ -80,7 +83,7 @@ describe('F-CFG return-sinking gate: simple value-selects are NOT sunk (kept as 
   });
 });
 
-describe('F-CFG return-sinking: a BARE constant-arm diamond IS sunk', () => {
+describe('F-CFG return-sinking: a ONE-SET-ARM diamond IS sunk', () => {
   // The capability `kleod:IsSelectButtonPressed:agbcc` bought, measured on shapes the corpus does
   // not hold. Each of these scores 3 unranked and matches only through the fan, because the winning
   // candidate is `/flip-branch` in all four — a sunk diamond has no join for the joined-if default
@@ -105,14 +108,14 @@ describe('F-CFG return-sinking: a BARE constant-arm diamond IS sunk', () => {
 });
 
 describe('F-CFG return-sinking gate: an arm that is NOT one SET is not sunk (`arms-are-one-set`)', () => {
-  // THE REGRESSION THE FIRST CUT OF `SELECT_GATES` SHIPPED. The compiler fact behind the admission
-  // is gcc 2.x's one-speculatable-SET arm hoist (`gcc/jump.c:471-502`), and one `*p = 1` makes the
-  // arm two SETs, so the constant stays below the compare: the merge-variable spelling emits a
-  // diamond too and byte-matches as it stands. Sinking then trades a match for the same shape in the
-  // other ARM ORDER — recoverable only by `/flip-branch`, which this unranked path does not have.
-  // Every row below scored 0/byte-exact before the one-set-arm admission existed, 5 or 6 with it and
-  // no arm clause, and 0 again now. The predicate is `raise/narrowlocal.ts`'s shared `armIsOneSet`,
-  // and `packages/core/test/corpus/agbcc-select-{merge,early}.s` is the compiled pair behind it.
+  // WHAT `arms-are-one-set` BUYS, in matches. The compiler fact behind the admission is gcc 2.x's
+  // one-speculatable-SET arm hoist (`gcc/jump.c:471-502`), and one `*p = 1` makes the arm two SETs,
+  // so the value stays below the compare: the merge-variable spelling emits a diamond too and
+  // byte-matches as it stands. Sinking then trades a match for the same shape in the other ARM
+  // ORDER — recoverable only by `/flip-branch`, which this unranked path does not have. Every row
+  // below scores 0/byte-exact, and 5 or 6 with the clause ablated. The predicate is
+  // `raise/narrowlocal.ts`'s shared `armIsOneSet`, and
+  // `packages/core/test/corpus/agbcc-select-{merge,early}.s` is the compiled pair behind it.
   test.each([
     ['selbody', 'int selbody(int x, int *p){ int v; if (x) { *p = 1; v = 5; } else { *p = 2; v = 3; } return v; }'],
     ['selonearm', 'int selonearm(int x, int *p){ int v; if (x) { *p = 1; v = 5; } else { v = 3; } return v; }'],

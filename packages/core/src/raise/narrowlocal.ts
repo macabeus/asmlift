@@ -375,8 +375,10 @@ function mergeArms(preds: Map<Block, Block[]>, fn: Fn, blk: Block): [Block, Bloc
  *  merge spelling and keeps it in the early one; `selload` (`v = *p`) keeps a diamond in BOTH,
  *  carrying no information; `selcomp3` (three ops) likewise. ONE DIFFERENCE IS WORTH NAMING: the
  *  constant bullet's "refusing the foldable case costs nothing" is an argument about THIS pass's
- *  fallback, and it does not transfer — `selk3` (`v = a + 3`) really is hoisted, so retsink's
- *  refusal of it costs a candidate there rather than nothing. It still never costs an ANSWER (every
+ *  fallback, and it does not transfer — `selk3` (`v = a + 3`) is one `adds`, so `jump.c`'s own guard
+ *  counts one SET where this predicate counts two, and retsink's refusal of it costs a candidate
+ *  there rather than nothing. That divergence is argued from the optimizer rather than compiled:
+ *  `selk3` is deliberately outside the committed pair. It still never costs an ANSWER (every
  *  clause in that table is `sound: false`), so the shared conservative predicate is the right one
  *  until a row asks for the cost model neither pass has. */
 export function armIsOneSet(b: Block): boolean {

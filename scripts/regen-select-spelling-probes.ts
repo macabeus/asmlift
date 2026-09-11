@@ -2,10 +2,11 @@
 // `packages/core/test/select-spelling.test.ts`.
 //
 // WHY A SCRIPT AND NOT A NOTE. `SELECT_GATES` (raise/retsink.ts) is a COMPILER claim about two
-// SOURCE spellings of one function — that for a BARE constant-arm select agbcc hoists the constant
-// above the compare and loses the diamond, so only the early-return spelling can reproduce a target
-// that keeps one, and that giving either arm a BODY takes the hoist away and puts both spellings
-// back on the same shape. The repo's rule for a claim of that kind is to compile both and commit
+// SOURCE spellings of one function — that where both arms are ONE SPECULATABLE SET agbcc hoists an
+// arm above the compare and loses the diamond, so only the early-return spelling can reproduce a
+// target that keeps one, and that an arm which is NOT one SET (a body, three ops, a memory read)
+// takes the hoist away and puts both spellings back on the same shape. The repo's rule for a claim
+// of that kind is to compile both and commit
 // the objects rather than describe them: RE-READABLE IS NOT RE-MEASURABLE, the standard
 // `scripts/regen-switch-spelling-probes.ts` and `scripts/regen-declrank-probes.ts` already set.
 //

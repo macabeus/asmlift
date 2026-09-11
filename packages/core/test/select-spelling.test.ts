@@ -22,9 +22,9 @@
 //               the merge variable can spell the target after all. The two objects differ only in
 //               ARM ORDER. → do not sink (`arms-are-one-set`).
 //
-// `selcomp` is the case the deleted bespoke `constant-arms` clause refused and this one admits, and
-// `selload` is the one `REEVAL_UNSAFE_OPS` earns its place on — a load is ONE op and is NOT one
-// speculatable SET (`gcc/rtlanal.c:1770-1771`).
+// `selcomp` is the case a "both arms are constants" reading of the predicate would refuse and this
+// one admits, and `selload` is the one `REEVAL_UNSAFE_OPS` earns its place on — a load is ONE op and
+// is NOT one speculatable SET (`gcc/rtlanal.c:1770-1771`).
 //
 // Offline: reads committed text, runs no compiler.
 import { readFileSync } from 'node:fs';
@@ -70,7 +70,7 @@ describe('agbcc: a ONE-SET-arm select cannot be spelled with a merge variable', 
   });
 });
 
-describe('agbcc: an arm that is NOT one SET CAN be — the two spellings differ only in arm order', () => {
+describe('agbcc: an arm that is NOT one SET CAN be spelled with a merge variable — both spellings keep the diamond, differing only in arm order', () => {
   // The three refusals `arms-are-one-set` is committed FOR, one per reason `armIsOneSet` gives:
   // a body, more than one result-producing op, and an op `REEVAL_UNSAFE_OPS` calls unsafe.
   test.each(['selbody', 'selcomp3', 'selload'])('%s keeps its diamond in BOTH spellings', (sym) => {

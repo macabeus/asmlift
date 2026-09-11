@@ -28,9 +28,10 @@
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
 //     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
-//     Six exceptions are read off the target directly, their consumers not being the
+//     Five exceptions are read off the target directly, their consumers not being the
 //     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers),
-//     `hoistsSingleSetArm` and `reloadsLocalReread` (raise/pre-recovery.ts, raising passes) and
+//     `reloadsLocalReread` (raise/pre-recovery.ts), `hoistsSingleSetArm` (two raising passes —
+//     raise/narrowlocal.ts and raise/retsink.ts) and
 //     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn). The field names are a
 //     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
@@ -156,11 +157,10 @@ export interface TargetDescription {
     // spreads it onto StructureOptions like every other field here, but NO structurer code reads
     // it: both readers are raising passes, threaded from their driver's own `target`.
     //
-    // TWO READERS, ONE FACT, BOTH READING IT BACKWARDS — and the second of them shipped for one
-    // round as a duplicate boolean (`hoistsConstArmSelect`), set on the same single target with the
-    // same value. That is a drift trap and nothing else: the next round to measure mwcc's
-    // `jump_optimize` would have set one and left the other false, with both comments still reading
-    // as authoritative. One field, because it is one guard.
+    // TWO READERS, ONE FACT, BOTH READING IT BACKWARDS. One field rather than one per reader,
+    // because a second boolean for the same guard lets a round that measures another compiler's
+    // `jump_optimize` set one and leave the other false, with both comments reading as
+    // authoritative.
     //
     //   • raise/narrowlocal.ts's `edge-extends`: a diamond this compiler would have collapsed and
     //     did NOT is evidence the source DECLARED the local narrow, because `gcc/thumb.h:344`

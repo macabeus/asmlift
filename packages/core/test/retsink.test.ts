@@ -13,9 +13,9 @@
 // predecessors — the dispatch's `beq`, and case 2's body running on — which is a fall-IN, not a
 // chain. Sinking there tail-duplicates a switch's shared return into all five of its paths.
 //
-// The third admission is the CONSTANT-ARM diamond, and its fixtures come in pairs: `CONST_SELECT`
-// is the shape agbcc cannot re-emit from a merge variable, and `COMPUTED_SELECT` is the same
-// diamond one operand away from being the shape it can.
+// The third admission is the ONE-SET-ARM diamond. `CONST_SELECT` and `COMPUTED_SELECT` are both
+// inside it — constant arms and one-op computed arms alike are one speculatable SET — and the
+// fixtures that sit OUTSIDE it are the bodied, empty, three-armed and third-in-edge ones below.
 import { expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
@@ -304,8 +304,8 @@ const CONST_SELECT =
  *  One `add` / one `sub` is ONE speculatable SET, so `armIsOneSet` admits it and this IS sunk — the
  *  committed `selcomp` pair (select-spelling.test.ts) is the evidence: agbcc hoists the `sub` above
  *  the compare in the merge spelling, so a target holding the diamond was written with early
- *  returns. The bespoke `constant-arms` clause this table used to carry refused it, on no compiled
- *  evidence at all; nothing on the corpus inhabits the difference. */
+ *  returns. It is the fixture for the half of the predicate a "both arms are constants" reading
+ *  would miss. */
 const COMPUTED_SELECT =
   'sel2:\n' +
   '\tcmp\tr0, r1\n\tble\t.L2\t@cond_branch\n' +
@@ -416,11 +416,9 @@ const GUARDED_CONST_SELECT =
 
 /** `synthetic:sign`'s own shape — THREE constant arms off two tests, so no one `cond_br` chooses
  *  the pair. Whether agbcc re-emits a ladder this long from a merge variable is a question the
- *  two-armed evidence does not answer, and the gate refuses rather than guess. (The pass header
- *  used to claim a three-way sign ladder among its measured pairs; it is not, and the claim is
- *  gone. On real agbcc output `sign` reaches the table with THREE branch preds and is refused
- *  twice over — `two-arms-one-head` first, `constant-arms` once that is ablated — so neither
- *  ablation moves it on its own.) */
+ *  two-armed evidence does not answer, and the gate refuses rather than guess. On real agbcc output
+ *  `sign` reaches the table with THREE branch preds and is refused twice over — `two-arms-one-head`
+ *  first, `arms-are-one-set` once that is ablated — so neither ablation moves it on its own. */
 const THREE_ARM =
   'sel5:\n' +
   '\tcmp\tr0, #0x0\n\tble\t.L2\t@cond_branch\n\tmov\tr0, #0x1\n\tb\t.L5\n' +
@@ -431,10 +429,9 @@ const THREE_ARM =
 /** A diamond whose arms are EMPTY — the computation is hoisted into the head, so each arm does
  *  nothing but carry a value. `gcc/jump.c:480` runs `single_set` on the arm's OWN insn and an arm
  *  whose only insn is its jump has none, so `armIsOneSet` refuses it: the budget is EXACTLY one
- *  result-producing op, not at most one. This is one of the three shapes the shared predicate judges
- *  differently from the bespoke `constant-arms` + `bare-arms` pair it replaced (that pair admitted
- *  it), and it is the only one of the three with a fixture, because the other two need a compiler.
- *  No corpus row inhabits any of them, and all three differences are in the refusing direction. */
+ *  result-producing op, not at most one. It is the only one of the three shapes named in the pass
+ *  header as narrower-than-the-optimizer that a fixture can reach; the other two need a compiler. No
+ *  corpus row inhabits any of them, and all three are in the refusing direction. */
 const EMPTY_ARM_SELECT =
   'sel7:\n' +
   '\tadd\tr2, r0, r1\n\tsub\tr3, r1, r0\n' +
@@ -504,10 +501,9 @@ test('every one-set-arm clause refuses a shape the two-armed evidence does not c
       `${ids[0]} and ${ids[1]} together are what refuse ${sym}`,
     ).toBe(true);
   }
-  // THE EMPTY ARM is refused by `arms-are-one-set` too, and it is the one shape where the shared
-  // `armIsOneSet` is NARROWER than the bespoke pair it replaced — that pair admitted it, because an
-  // arm holding nothing has no body and carries what the head computed. Ablating the clause is what
-  // sinks it, which is what makes the clause the reason.
+  // THE EMPTY ARM is refused by `arms-are-one-set` too — the budget is EXACTLY one result-producing
+  // op, and an arm holding nothing has none. Ablating the clause is what sinks it, which is what
+  // makes the clause the reason.
   expect(sinks('sel7', EMPTY_ARM_SELECT), 'an emptied arm is not one SET either').toBe(false);
   expect(sinks('sel7', EMPTY_ARM_SELECT, without(SELECT_GATES, 'arms-are-one-set'))).toBe(true);
   // `a-value-is-returned` has NO fixture in this tree that reaches it, and this asserts exactly that
@@ -522,12 +518,10 @@ test('every one-set-arm clause refuses a shape the two-armed evidence does not c
 });
 
 test("the SELECT_GATES order is pinned, because the header's reach numbers are true of it alone", () => {
-  // THE FAILURE THIS EXISTS FOR, and it has already happened once here: the header carried "the
-  // pair, ablated together, decides 8" across the commit that moved the compiler clause into first
-  // position and made it 6 — a number right about the world and stale about the program, with
-  // nothing to catch it because the reach numbers live only in comments. A census attributes each
-  // site to the clause that FIRST refuses it, so every one of those numbers is a claim about THIS
-  // order. Change the list and re-measure the header's table; do not just update this array.
+  // THE FAILURE THIS EXISTS FOR: the header's per-clause reach numbers live only in comments, and a
+  // census attributes each site to the clause that FIRST refuses it — so every one of those numbers
+  // is a claim about THIS order and a reorder silently invalidates all of them. Change the list and
+  // re-measure the header's table; do not just update this array.
   expect(SELECT_GATES.map((g) => g.id)).toEqual([
     'two-arms-one-head',
     'pre-diamond',
@@ -537,18 +531,17 @@ test("the SELECT_GATES order is pinned, because the header's reach numbers are t
     'compiler-hoists-single-set-arm',
   ]);
   // LAST is the load-bearing half of the order. `target.ts` says this admission reaches no non-agbcc
-  // row; first, the clause collected 28 of the 74 corpus sites and a census read the opposite of
-  // that sentence, and it moved 0 rows either way.
+  // row; placed first, the clause collects 28 of the 74 corpus sites and a census then reads the
+  // opposite of that sentence — while moving 0 rows either way.
   expect(SELECT_GATES[SELECT_GATES.length - 1].id).toBe('compiler-hoists-single-set-arm');
   // Every clause here trades BYTES, never correctness — see the pass header's FAILURE DIRECTION.
   expect(SELECT_GATES.every((g) => g.sound === false)).toBe(true);
 });
 
 test('the hoist is ONE compilerBehaviors field, declared on agbcc alone', () => {
-  // The drift trap this closes: the admission shipped a second boolean (`hoistsConstArmSelect`) for
-  // the same `gcc/jump.c` guard `raise/narrowlocal.ts` already had a field for, set on the same
-  // single target with the same value. A round measuring another compiler's `jump_optimize` would
-  // have set one and left the other false. One guard, one field, two readers.
+  // ONE GUARD, ONE FIELD, TWO READERS. A second boolean for the same `gcc/jump.c` guard is a drift
+  // trap: a round measuring another compiler's `jump_optimize` would set one and leave the other
+  // false. `hoistsConstArmSelect` is the name that would be reached for, so it is named here.
   expect(ARMV4T_AGBCC.compilerBehaviors.hoistsSingleSetArm).toBe(true);
   expect('hoistsConstArmSelect' in ARMV4T_AGBCC.compilerBehaviors).toBe(false);
   for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {

@@ -1633,10 +1633,10 @@ export const SYNTHETIC: SynthSpec[] = [
     // (`compilerBehaviors.hoistsSingleSetArm`), so the IDO / KMC / mwcc columns of this row are
     // what would say if that ever stopped being true.
     //
-    // TAGGED LIKE THE ROW IT GENERALISES. `kleod:IsSelectButtonPressed` carries
-    // `bool`/`branch`/`mask`/`global`; this one shipped as `compare`/`branch`, which put the
-    // capability's only two rows in no shared feature slice but `branch`. It returns a truth value
-    // (`bool`) and isolates a bit field with an AND mask (`mask`) by bench-schema's own definitions.
+    // TAGGED LIKE THE ROW IT GENERALISES, so the capability's two rows share a feature slice wider
+    // than `branch`: `kleod:IsSelectButtonPressed` carries `bool`/`branch`/`mask`/`global`, and this
+    // one returns a truth value (`bool`) and isolates a bit field with an AND mask (`mask`) by
+    // bench-schema's own definitions. No `global` — the condition here is on a parameter.
     sym: 'selconst',
     src: 'int selconst(int x){ if (x & 0x40) return 1; return 0; }',
     features: ['bool', 'branch', 'mask'],
