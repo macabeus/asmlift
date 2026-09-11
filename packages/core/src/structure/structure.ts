@@ -1706,8 +1706,9 @@ function sharedRetsOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>): Bl
   return retsFrom(s1).filter((r) => fromS2.has(r));
 }
 /** Is there an `if` whose arms reach no common block before EXIT but share a `ret` — the only shape
- *  `followEarlyReturns` changes? The shared-tail twin's enumeration gate (rank.ts); a superset,
- *  since it asks `sharedRetsOf` and none of the follow's three later refusals. */
+ *  `followEarlyReturns` changes? The enumeration gate of both shared-tail twins (rank.ts), asked of
+ *  the fn as raised and again of the sunk fn; a superset, since it asks `sharedRetsOf` and none of
+ *  the follow's three later refusals. */
 export function hasDivergentSharedRet(fn: Fn): boolean {
   const ipdom = postDominators(fn);
   const reach = new Map<Block, Set<Block>>();
@@ -1934,7 +1935,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // When the compiler emitted that region ONCE, the source can have written it once, after the
   // `if`, with every other path into a `ret` an early `return;` — `synthetic:gcseinner`, where
   // agbcc keeps the `fnA` arm's own `ret` and stores the default once. An option, enumerated as
-  // rank.ts's `/shared-tail` twin: as a default it costs rows, measured there.
+  // rank.ts's `/shared-ret` twin, and as its `/shared-tail` twin after the store-tail sink: as a
+  // default it costs rows, measured there.
   //
   // WHICH REGION: the `ret`s reachable from BOTH successors. Every block that cannot reach one of
   // them is an early-return region and is deleted; the follow is `b`'s post-dominator over what is
@@ -4833,7 +4835,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // null ⇒ the arms diverge (both reach EXIT) and no follow over early returns applies. Asked
     // outside loop bodies only: inside one, `clampToLoop` below owns the question. DEFENSIVE — no
     // input it changes: ablated, the follow fires on no more of 40,000 generated functions (random
-    // structuring options, sunk and unsunk) and on no corpus row the twin reaches.
+    // structuring options, sunk and unsunk) and on no corpus row the twins reach.
     const ipd = ipdom.get(b) ?? (followEarlyReturns && loopCtx === null ? followOverReturns(b, stop) : null);
     // Inside a loop body, a join OUTSIDE that body is not this `if`'s join: an arm that leaves the
     // loop `return`s and never comes back, so what is left reconverges at the loop's own

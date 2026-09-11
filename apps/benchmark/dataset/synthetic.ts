@@ -7877,6 +7877,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //              the real function's seven. agbcc cross-jumps two of the loop-free arms into a
   //              second tail of their own. 29/89 (`unsigned/uns-cmp`); 0 of its 44 candidates
   //              share the tail, and the winner plus the shared-tail edit is 0/84. m2c 23/86.
+  //   gcsejoin   GAP for (ii) WHERE (i) DELETES IT, loop-free. The store after the join writes a
+  //              PARAMETER (`p[20] = a`), so the tail block is stores-only and the sink sees a tail
+  //              — but that tail is ALREADY the `ret` both sides of the outer `if` reach, and the
+  //              `fnA` arm keeps its own. Copying it into its `br` source leaves no shared `ret`, so
+  //              a follow enumerated only BEHIND the sink never runs: 7/37 (`unsigned`, 8
+  //              candidates, 0 twin) at `910fd416` and under a twin that bundles the two. With the
+  //              follow enumerated on the fn as raised as well it is MATCH (`unsigned/shared-ret`,
+  //              24 candidates). Its shape has no inhabitant among the other nine rows, which is why
+  //              they all MATCH under the bundled twin. m2c is `noncompile(1)` on its own output,
+  //              which spells the parameter store as `p->unk14 = a` against the `u8 *p` the ctx
+  //              declares ("request for member `unk14' in something not a structure or union").
   //
   // agbcc ONLY. The other columns were measured on `gcsetail`, `gcsedup`, `gcsepre`, `gcsepredup`
   // and `gcsearms`:
@@ -7886,8 +7897,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //   - `gcc2.7.2kmc`: both decompilers are `noncompile(1)` on all five rows. m2c's error is
   //     ``gP' undeclared`, so the declarations the map carries never reached that compile.
   //   - `gcc2.7.2`: the same, except that asmlift compiles `gcsetail` (32/42).
-  //   The MIPS noncompiles are undiagnosed, and they are not this family's link. The other five
-  //   rows vary the same bodies and were NOT measured off agbcc; they are pinned for the same reason.
+  //   The MIPS noncompiles are undiagnosed, and they are not this family's link. The other rows
+  //   vary the same bodies and were NOT measured off agbcc; they are pinned for the same reason.
   // Every one of those columns measures a different link.
   {
     sym: 'gcsetail',
@@ -8179,6 +8190,34 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void fnA(void); void fnB(void); void gcsearms6(void);',
     proto: {
       gcsearms6: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_SLOT_MAP,
+  },
+  {
+    sym: 'gcsejoin',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'struct Q { void (*prev)(void); void (*cur)(void); };\n' +
+      'extern struct Q gQ;\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'void gcsejoin(u8 *p, u8 a){\n' +
+      '  if ((gP->f[55] & 0x80) != 0) {\n' +
+      '    gP->f[1] = 7;\n' +
+      '  } else {\n' +
+      '    if (gP->f[8] == 0x7F) { gP->f[10] = 2; gQ.cur = fnA; return; }\n' +
+      '    gP->f[12] = 3;\n' +
+      '  }\n' +
+      '  p[20] = a;\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void gcsejoin(u8 *p, u8 a);',
+    proto: {
+      gcsejoin: { params: 2, returnsVoid: true },
       fnA: { params: 0, returnsVoid: true },
       fnB: { params: 0, returnsVoid: true },
     },

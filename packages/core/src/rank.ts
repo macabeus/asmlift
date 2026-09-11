@@ -88,7 +88,9 @@ import { hasDivergentSharedRet } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
-/** The shared-tail twin's label (see its loop in `enumerateCandidates`). */
+/** The shared-tail twins' labels (see their loop in `enumerateCandidates`): the follow alone, on the
+ *  fn as raised, and the follow after the store-tail sink. */
+const SHARED_RET_SUFFIX = '/shared-ret';
 const SHARED_TAIL_SUFFIX = '/shared-tail';
 
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
@@ -1710,27 +1712,48 @@ export function enumerateCandidates(
           opts.onLeverError?.(name + lv.suffix, firstLine(e));
           continue;
         }
-        // THE SHARED-TAIL TWIN (`/shared-tail`): the same raised fn, structured a second time with
-        // `followEarlyReturns`, after `sinkStoreTails` has rewritten it in place — safe because
-        // `structure()` never mutates `fn`, so the first pass is done with it. A lift variant's twin
-        // rather than a structuring axis because the sink is an IR rewrite, and one run here rather
-        // than in pipeline.ts's spine because that costs no second lift. Not the default: the same
-        // IR comes from both sources (raise/tailsink.ts), and the follow alone as a default costs
-        // `synthetic:sw_fallguard:ido7.1` 13/19 → 19/23 and `synthetic:gcseflat:agbcc` 19/53 → 22/54.
+        // THE SHARED-TAIL TWINS: the same raised fn, structured again with `followEarlyReturns`, in
+        // two passes after the primary one.
+        //   - `/shared-ret` is the follow ALONE, on the fn as raised. Some divergent `if` shares a
+        //     `ret` the compiler left in place (`synthetic:gcseinner`).
+        //   - `/shared-tail` is the follow after `sinkStoreTails` has rewritten the fn in place, which
+        //     is safe because `structure()` never mutates `fn`, so the earlier passes are done with it.
+        //     It is enumerated only where the sink changed something AND some divergent `if` of the
+        //     SUNK fn shares a `ret`. That is the sink's price gate: without it, a tail copied into
+        //     arms no `if` shares adds a twin spelling it in each, 204 synthetic candidates on 8 rows
+        //     (the `gcsedup`/`gcseinnerdup`/`armexpr`/`mergeu16` controls and four ladders).
+        // They are lift-variant twins rather than a structuring axis because the sink is an IR
+        // rewrite, and they run here rather than in pipeline.ts's spine because that costs no second
+        // lift. Neither is the default: the same IR comes from both sources (raise/tailsink.ts), and
+        // the follow alone as a default costs `synthetic:sw_fallguard:ido7.1` 13/19 → 19/23 and
+        // `synthetic:gcseflat:agbcc` 19/53 → 22/54.
         //
-        // Enumerated only where the follow can differ — some divergent `if` of the SUNK fn shares a
-        // `ret` — and that is the sink's only price gate: without it, a tail copied into arms no `if`
-        // shares adds a twin spelling it in each, 204 synthetic candidates on 8 rows (the
-        // `gcsedup`/`gcseinnerdup`/`armexpr`/`mergeu16` controls and four ladders).
+        // TWO BITS, NOT ONE, because the sink can DELETE the follow. A store tail that is itself the
+        // `ret` both sides of an `if` reach is copied into its `br` sources, and then no shared `ret`
+        // is left. `synthetic:gcsejoin:agbcc` is ordinary loop-free C of that shape, and it scored
+        // 7/37 while the follow was tried only behind the sink. No per-tail predicate on this IR picks
+        // between the two: refusing to sink a tail that is already a follow costs
+        // `synthetic:gcseflat:agbcc` 0/49 → 19/53 and `synthetic:gcsearms6:agbcc` 0/84 → 23/87, and
+        // those two need a tail that is BOTH. So the follow-alone candidate is enumerated wherever
+        // the fn as raised has a follow, sunk or not. Its price over the bundled twin is +76
+        // synthetic candidates, on those two rows, and +0 real: where the sink does not fire the
+        // `/shared-ret` pass is the old twin, and on every real row where it fires the fn as raised
+        // has no follow.
         //
-        // ONE BIT PER LIFT VARIANT, not per site: the twin sinks every store tail and follows every
-        // divergent `if` at once, so a function with two sites gets the both-on candidate only.
-        // Over the 21 rows the twin reaches on both tiers, one function carries two follow sites
-        // (`synthetic:maskchain:agbcc`) and one two sunk tails (`synthetic:gcsearms6:agbcc`), both
-        // MATCH; every other carries at most one of each.
+        // EACH BIT IS PER LIFT VARIANT, not per site: the `/shared-tail` pass sinks every store tail
+        // and follows every divergent `if` at once, so a function with two sites gets the both-on
+        // candidate only. Over the rows the twins reach on both tiers, one function carries two
+        // follow sites (`synthetic:maskchain:agbcc`) and one two sunk tails
+        // (`synthetic:gcsearms6:agbcc`), both MATCH; every other carries at most one of each.
+        //
+        // `droppedPrimary` is the PRIMARY pass's drops. Each twin pass reads it and keeps its own
+        // drops in a copy, so one twin's structuring failure never removes the other's candidate.
         const droppedPrimary = new Set<string>();
-        for (const twin of [false, true]) {
-          if (twin) {
+        for (const pass of ['primary', 'follow', 'sink'] as const) {
+          if (pass === 'follow' && !hasDivergentSharedRet(fn)) {
+            continue;
+          }
+          if (pass === 'sink') {
             let sunk: boolean;
             try {
               sunk = sinkStoreTails(fn);
@@ -1741,11 +1764,19 @@ export function enumerateCandidates(
               opts.onLeverError?.(name + lv.suffix + SHARED_TAIL_SUFFIX, firstLine(e));
               break;
             }
-            if (!hasDivergentSharedRet(fn)) {
+            // Unsunk, this fn is the `/shared-ret` pass's again.
+            if (!sunk || !hasDivergentSharedRet(fn)) {
               break;
             }
           }
-          const vsuffix = twin ? lv.suffix + SHARED_TAIL_SUFFIX : lv.suffix;
+          const twin = pass !== 'primary';
+          const dropped = twin ? new Set(droppedPrimary) : droppedPrimary;
+          const vsuffix =
+            pass === 'follow'
+              ? lv.suffix + SHARED_RET_SUFFIX
+              : pass === 'sink'
+                ? lv.suffix + SHARED_TAIL_SUFFIX
+                : lv.suffix;
           // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
           const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
           const variantCands = svCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
@@ -1756,23 +1787,20 @@ export function enumerateCandidates(
           // which is the same trade one level up. `senseCands` puts each `mergeNames:false` sibling
           // first, so the entry is always recorded before its merged twin is reached.
           //
-          // The shared-tail twin reads the UNSUNK pass's set as well: `X/shared-tail` never ships
-          // where `X` was dropped. The sink rewrites the IR into a shape the structurer can accept
-          // where the unsunk one declined — sound, but the same trade one level up again.
+          // The shared-tail twins read the PRIMARY pass's set as well: neither `X/shared-ret` nor
+          // `X/shared-tail` ever ships where `X` was dropped. The follow and the sink each give the
+          // structurer a shape it can accept where the primary one declined — sound, but the same
+          // trade one level up again.
           for (const s of variantCands) {
             if (twin && droppedPrimary.has(s.suffix)) {
               continue;
             }
-            if (
-              STRUCTURING_AXES.some(
-                (ax) => ax.strip && s[ax.flag] && droppedPrimary.has(s.suffix.replace(ax.suffix, '')),
-              )
-            ) {
+            if (STRUCTURING_AXES.some((ax) => ax.strip && s[ax.flag] && dropped.has(s.suffix.replace(ax.suffix, '')))) {
               // A SKIPPED variant is recorded exactly like a dropped one, or the closure would not be
               // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
               // X/inplace/merge-names would find neither stripped key and run — shipping a
               // double-lever candidate where its ancestor failed the boundary contracts.
-              droppedPrimary.add(s.suffix);
+              dropped.add(s.suffix);
               continue;
             }
             // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
@@ -1800,7 +1828,7 @@ export function enumerateCandidates(
               }
               // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
               // up by stripping one axis at a time, and the stripped key can itself carry the other.
-              droppedPrimary.add(s.suffix);
+              dropped.add(s.suffix);
               // an anchored variant that fails structuring or its contracts is a dropped lever, never
               // an aborted enumeration — same rule as respell below
               opts.onLeverError?.(name + vsuffix + s.suffix, firstLine(e));
