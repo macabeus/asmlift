@@ -12,14 +12,20 @@
 // shared store tail, directly or through a chain of pure forwarders or a join both sides may
 // reach, or keep a `ret` of their own — because a random CFG almost never shares a tail, and a
 // fuzz that never fires the path proves nothing. The firing counts are asserted, not just printed.
+//
+// A second arm runs the same functions through `raiseRecovered` first, because that is the fn
+// rank.ts hands the sink and raise reshapes it: a tail reached only through a forwarder reads the
+// forwarder's parameter. Hand-built IR never reaches that shape, and a sink that mishandled it threw
+// in `verify` on real Thumb while this first arm stayed green.
 import { expect, test, vi } from 'vitest';
 
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
-import { structureChecked } from '../src/pipeline';
+import { raiseRecovered, structureChecked } from '../src/pipeline';
 import { sinkStoreTails } from '../src/raise/tailsink';
-import { StructureError, structure } from '../src/structure/structure';
+import { StructureError, hasDivergentSharedRet, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
 import { BREATHE_EVERY, breathe, irTraceOf, mulberry32, traceOf } from './helpers';
 
 vi.setConfig({ testTimeout: 120_000 });
@@ -205,4 +211,79 @@ test('the sink and the follow change no observable, on the shapes they were buil
   expect(sunk).toBeGreaterThan(1500);
   expect(followed).toBeGreaterThan(8000);
   expect(sunkAndFollowed).toBeGreaterThan(1500);
+});
+
+/** A store tail — stores, then a void `ret` — that reads a block parameter of some OTHER non-entry
+ *  block: the shape only raise produces, by stripping the parameter of a tail whose one predecessor
+ *  is a forwarder, so that the tail reads the forwarder's. */
+const readsForeignParam = (fn: Fn): boolean =>
+  fn.blocks.some(
+    (b) =>
+      b.ops.length >= 2 &&
+      b.ops[b.ops.length - 1].opcode === 'ret' &&
+      b.ops.slice(0, -1).every((o) => o.opcode === 'store') &&
+      b.ops.some((o) => o.operands.some((v) => fn.blocks.some((x, i) => i > 0 && x !== b && x.params.includes(v)))),
+  );
+
+test('the same, on the fn the raise spine hands rank.ts', async () => {
+  // rank.ts sinks the RAISED fn, and raise reshapes what the generator built: a tail whose one
+  // predecessor is a forwarder loses its parameter and reads the forwarder's. Hand-built IR never
+  // reaches that, so this arm runs the generator's functions through `raiseRecovered` first, and
+  // takes the raised fn's own run as the oracle. The follow is asked where rank.ts asks it.
+  const SEEDS = 6000;
+  let foreign = 0;
+  let sunk = 0;
+  let foreignSunk = 0;
+  let followed = 0;
+  let sunkAndFollowed = 0;
+  let declined = 0;
+  for (let seed = 1; seed <= SEEDS; seed++) {
+    if (seed % BREATHE_EVERY === 0) {
+      await breathe();
+    }
+    const fn = generateSharedTailFn(seed);
+    raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 3, returnsVoid: true }, { shortCircuit: { foldTreeOwned: false } });
+    const want = RUNS.map((r) => irTraceOf(fn, r));
+    const run = (label: string): number => {
+      let fired = 0;
+      let tree;
+      try {
+        tree = structure(fn, { returnsVoid: true, followEarlyReturns: true }, { onEarlyReturnFollow: () => fired++ });
+      } catch (e) {
+        if (!(e instanceof StructureError)) {
+          throw e;
+        }
+        declined++;
+        return 0;
+      }
+      RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed} ${label}, run ${r}`).toEqual(want[i]));
+      const checked = structureChecked(fn, { returnsVoid: true, followEarlyReturns: true });
+      RUNS.forEach((r, i) => expect(traceOf(checked, r), `seed ${seed} ${label} checked, run ${r}`).toEqual(want[i]));
+      return fired;
+    };
+    if (hasDivergentSharedRet(fn)) {
+      followed += run('raised') > 0 ? 1 : 0;
+    }
+    const isForeign = readsForeignParam(fn);
+    foreign += isForeign ? 1 : 0;
+    if (sinkStoreTails(fn)) {
+      sunk++;
+      foreignSunk += isForeign ? 1 : 0;
+      verify(fn);
+      RUNS.forEach((r, i) => expect(irTraceOf(fn, r), `seed ${seed} raised+sunk, run ${r}`).toEqual(want[i]));
+      if (hasDivergentSharedRet(fn)) {
+        sunkAndFollowed += run('raised+sunk') > 0 ? 1 : 0;
+      }
+    }
+  }
+  // At authoring: 318 foreign-parameter tails, all sunk; sunk 4779, followed 2780, sunk+followed 1100,
+  // declined 0 — the floors below. With the copy substituting the tail's own parameters alone, seed
+  // 1 already throws in `verify`.
+  console.log(
+    `[shared-tail-fuzz raised] seeds=${SEEDS} foreignParamTail=${foreign} sunk=${sunk} sunkForeign=${foreignSunk} followed=${followed} sunk+followed=${sunkAndFollowed} declined=${declined}`,
+  );
+  expect(foreignSunk).toBeGreaterThan(150);
+  expect(sunk).toBeGreaterThan(2000);
+  expect(followed).toBeGreaterThan(1200);
+  expect(sunkAndFollowed).toBeGreaterThan(500);
 });

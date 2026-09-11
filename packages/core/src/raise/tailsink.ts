@@ -25,11 +25,16 @@
 // apart, so rank.ts enumerates this beside the unsunk lift and the differ referees.
 //
 // SOUND BY CONSTRUCTION: tail duplication. Each copy runs on exactly the paths that ran the tail,
-// immediately before the same `ret`, with the tail's parameters replaced by the arguments that
-// path carried; the stores' other operands dominate the tail and so every source of it. A copy
-// replaces a `br`, the source's only edge. A CONDITIONAL edge cannot carry one — splicing over it
-// would drop the branch's other successor — so the tail stays for the sources that reach it that
-// way; that restriction is the rewrite's own precondition, not a gate.
+// immediately before the same `ret`. A value the tail reads is one of two things. It is a block
+// parameter of the tail OR OF A FORWARDER on the way, and the copy takes the argument that path's
+// edge into that block carried. Or it is defined elsewhere, dominates the tail, and so dominates
+// every source of it. The forwarder's own parameter is not a corner: a tail whose only predecessor
+// is a forwarder loses its parameter to raise's `simplifyTrivialPhis` and reads the forwarder's
+// directly — a jump pad `.L4: b .L6` in front of the store does exactly that — and the forwarder is
+// swept once every source holds its copy. A copy replaces a `br`, the source's only edge. A
+// CONDITIONAL edge cannot carry one — splicing over it would drop the branch's other successor — so
+// the tail stays for the sources that reach it that way; that restriction is the rewrite's own
+// precondition, not a gate.
 //
 // NO GATE: which copy stays shared is the follow's question, and whether a sunk function is worth
 // a candidate is rank.ts's, asked with the follow's own predicate (`hasDivergentSharedRet`) rather
@@ -37,11 +42,12 @@
 import { type Block, type Fn, type Value, mkOp, predecessors, reachableBlocks, terminator } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 
-/** One edge that supplies the tail its arguments, composed through any forwarder between: `args`
- *  are the values the tail's parameters take on it. */
+/** One edge that supplies the tail its arguments. `resolve` sends a value the tail reads to the
+ *  value it has at the end of `from`: a parameter of the tail or of any forwarder between becomes
+ *  the argument this path's edge into that block carried, and anything else is left alone. */
 interface Source {
   readonly from: Block;
-  readonly args: readonly Value[];
+  readonly resolve: (v: Value) => Value;
 }
 
 /** A block whose ops are one or more `store`s and then a void `ret`. */
@@ -64,19 +70,26 @@ export function sinkStoreTails(fn: Fn): boolean {
       continue;
     }
     const preds = predecessors(fn);
-    // The sources, seen through pure forwarders. `argsOf` sends the args of an edge into the block
-    // being walked to the values the tail's parameters take on it.
+    // The sources, seen through pure forwarders. `resolve` sends a value the tail reads to the value
+    // it has on entry to the block being walked; each edge out of a predecessor composes one more
+    // step onto it — `to`'s own parameters, not only the tail's, because the tail may read a
+    // forwarder's parameter directly.
     const forwarders = new Set<Block>();
     const sources: Source[] = [];
     const conditional: Block[] = [];
-    const walk = (to: Block, argsOf: (edge: readonly Value[]) => readonly Value[]) => {
+    const walk = (to: Block, resolve: (v: Value) => Value) => {
       for (const p of preds.get(to) ?? []) {
         const t = terminator(p)!;
         if (t.opcode !== 'br') {
           conditional.push(p);
           continue;
         }
-        const args = argsOf(t.successors[0].args);
+        const edge = t.successors[0].args;
+        const through = (v: Value): Value => {
+          const w = resolve(v);
+          const i = to.params.indexOf(w);
+          return i >= 0 ? edge[i] : w;
+        };
         const isForwarder =
           p !== fn.blocks[0] &&
           p.ops.length === 1 &&
@@ -84,20 +97,19 @@ export function sinkStoreTails(fn: Fn): boolean {
           (preds.get(p) ?? []).every((q) => terminator(q)?.opcode === 'br');
         if (isForwarder) {
           forwarders.add(p);
-          walk(p, (inner) => args.map((a) => (p.params.includes(a) ? inner[p.params.indexOf(a)] : a)));
+          walk(p, through);
         } else {
-          sources.push({ from: p, args });
+          sources.push({ from: p, resolve: through });
         }
       }
     };
-    walk(tail, (edge) => edge);
+    walk(tail, (v) => v);
     if (sources.length === 0 || sources.length + conditional.length < 2) {
       continue;
     }
     const body = tail.ops.slice(0, -1);
     for (const src of sources) {
-      const sub = (v: Value) => (tail.params.includes(v) ? src.args[tail.params.indexOf(v)] : v);
-      const copies = body.map((o) => mkOp('store', { operands: o.operands.map(sub), attrs: { ...o.attrs } }));
+      const copies = body.map((o) => mkOp('store', { operands: o.operands.map(src.resolve), attrs: { ...o.attrs } }));
       src.from.ops.splice(src.from.ops.length - 1, 1, ...copies, mkOp('ret'));
     }
     // By REACHABILITY, not predecessor count: the tail (unless a conditional edge keeps it) and

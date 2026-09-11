@@ -190,6 +190,17 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         return e.value;
       case 'bin': {
         const l = evalExpr(e.l);
+        if (e.op === '&&' || e.op === '||') {
+          // short-circuit: the right side runs only when the left does not decide it
+          if (l === UNDEF) {
+            return UNDEF;
+          }
+          if ((l !== 0) === (e.op === '||')) {
+            return e.op === '||' ? 1 : 0;
+          }
+          const rr = evalExpr(e.r);
+          return rr === UNDEF ? UNDEF : rr !== 0 ? 1 : 0;
+        }
         const r = evalExpr(e.r);
         if (l === UNDEF || r === UNDEF) return UNDEF;
         switch (e.op) {
@@ -372,6 +383,21 @@ export function irTraceOf(fn: Fn, seed: number): Event[] {
           break;
         case 'icmp_slt':
           env.set(r, o[0] < o[1] ? 1 : 0);
+          break;
+        // the comparisons a real Thumb lift of a fixture's `cmp` produces
+        case 'icmp_sge':
+          env.set(r, o[0] >= o[1] ? 1 : 0);
+          break;
+        case 'icmp_eq':
+          env.set(r, o[0] === o[1] ? 1 : 0);
+          break;
+        // raise's short-circuit recovery folds a condition tree into these; both operands are
+        // already computed values, so there is nothing to short-circuit
+        case 'logic_and':
+          env.set(r, o[0] !== 0 && o[1] !== 0 ? 1 : 0);
+          break;
+        case 'logic_or':
+          env.set(r, o[0] !== 0 || o[1] !== 0 ? 1 : 0);
           break;
         case 'call':
           trace.push({ fn: op.attrs.target as string, args: o });
