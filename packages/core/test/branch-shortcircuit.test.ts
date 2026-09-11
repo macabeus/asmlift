@@ -300,18 +300,33 @@ describe('the four orientations', () => {
     // first two orientations, and it is the shared edge — not the connective — that says whether
     // the source's `then` arm is this branch's TAKEN successor. Read `sharedOnGTaken: false` as
     // "the last test FELL INTO the shared block", gcc's `||` layout.
+    //
+    // `scSharedIsTaken` is the other half, the SUCCESSOR SLOT the shared arm landed in — `gIsFall`,
+    // so `!gOnTaken` — and it is stamped for the consumer's benefit, not this pass's. It is pinned
+    // HERE because a producer that stopped agreeing with the slots built two lines below it would
+    // turn every chained and long-branch site's spelling over with nothing else in the tree
+    // noticing: the consumer's own tests hand-stamp their fixtures, and the rows that inhabit those
+    // layouts MATCH on other axes.
     for (const gOnTaken of [false, true]) {
       for (const sharedOnGTaken of [false, true]) {
         const fn = chain({ gOnTaken, sharedOnGTaken });
         expect(recognizeBranchShortCircuit(fn)).toBe(true);
-        expect(fn.blocks[0].ops.at(-1)!.attrs.scSharedOnFall).toBe(!sharedOnGTaken);
+        const fused = fn.blocks[0].ops.at(-1)!;
+        expect(fused.attrs.scSharedOnFall).toBe(!sharedOnGTaken);
+        expect(fused.attrs.scSharedIsTaken).toBe(!gOnTaken);
+        // …and the slot stamp IS the slot: the shared arm (the `ret` that returns the head's own
+        // value, `chain`'s only one-operand terminator) is successor 0 exactly when it is true.
+        const shared = fn.blocks.find((b) => b.ops.at(-1)!.opcode === 'ret' && b.ops.at(-1)!.operands.length === 1)!;
+        expect(fused.successors[0].block === shared).toBe(!gOnTaken);
       }
     }
-    // …and it survives the relay resolution, which is where the fold's own successor-identity
-    // test cannot see the shared block directly.
+    // …and both survive the relay resolution, which is where the fold's own successor-identity
+    // test cannot see the shared block directly — and where a resolved edge could decouple the
+    // stamped slot from `gIsFall` without any refusal firing.
     const relayed = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: true });
     expect(recognizeBranchShortCircuit(relayed)).toBe(true);
     expect(relayed.blocks[0].ops.at(-1)!.attrs.scSharedOnFall).toBe(true);
+    expect(relayed.blocks[0].ops.at(-1)!.attrs.scSharedIsTaken).toBe(false);
   });
 
   test('the surviving cond_br keeps the head’s unchanged successor slot', () => {
