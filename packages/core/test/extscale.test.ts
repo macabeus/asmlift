@@ -12,6 +12,8 @@
 //   agbcc-extscale-pool.s    void extscale(u32 a) { gB = (u32)&gT + (u8)a * 4; }
 //   agbcc-extscale-unclaimed.s  void extscale(u8 a, u8 b, u16 *p) { u32 i; a++;
 //                              for (i = 0; i < 5; i++) p[i] = (p[i] & 0xfff) | (b << 12); gB = a; }
+//   agbcc-extscale-numpool.s void extscale(u32 a, u16 *p) { u32 i;
+//                              for (i = 0; i < 5; i++) p[i] = (p[i] & 0xfff) | ((u8)a << 12); }
 // The first two differ ONLY in where the `lsl r0, r0, #0x18` sits — prologue against body — and
 // must reach different signatures. The third is a body cast with nothing but a pool load ahead of
 // it, the shape paramwidth's scan cannot tell from a prologue. Toolchain-free: the round trip is
@@ -282,6 +284,16 @@ describe('what the fold hands the passes below it', () => {
     const src = source('extscale', 'agbcc-extscale-pool.s');
     expect(src).toMatch(/void extscale\([su]32 a0\)/);
     expect(src).toContain('(a0 << 24) >> 22');
+  });
+
+  test('KNOWN GAP: a body cast behind only a NUMERIC pool word still narrows its parameter', () => {
+    // `mov r3,#0; ldr r5,=0xfff; lsl r0,#24; lsr r4,r0,#12` — the pool load comes first, as it does
+    // for every body cast in the references, but a numeric word lifts to `const`, the op a `movs`
+    // lifts to, and a `movs` ahead of the pair decides nothing (raise/paramwidth.ts's `pc` pair).
+    // So the refusal cannot see it: `u8 a0`, objdiff 7 against origin/main's wide 5. Flip this
+    // expectation when the frontend's pool words become distinguishable from immediates.
+    const src = source('extscale', 'agbcc-extscale-numpool.s');
+    expect(src).toContain('void extscale(u8 a0, u16 * a1)');
   });
 
   test('a fold nobody claims prints as the pair it replaced', () => {
