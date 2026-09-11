@@ -108,6 +108,30 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
     expect(mixed[1]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: false }))[1]);
   });
 
+  test('the LONG-BRANCH quadrant is positive — `synthetic:ifand_far`’s spelling, which no score pins', () => {
+    // `[true, false]`: the shared arm was FALLEN INTO and landed in the FALL slot. Under the
+    // source-order premise that pair cannot happen — a fallen-into arm is the source's `then`, and
+    // the `then` is not what an `&&` fold puts in the fall slot — so reaching it means the premise's
+    // layout assumption is the thing that failed: agbcc inverted the last test over a long branch
+    // and laid the `else` arm first. The source's `then` is still in the taken slot, so the site is
+    // POSITIVE, exactly as at the chained quadrant below it.
+    //
+    // Measured, not assumed: `synthetic:ifand_far` (`if (a && b) {64 stores} else {…}`) stamps
+    // exactly this pair at its single fold, and lifting its own asm with the axis on spells
+    // `a0 != 0 && a1 != 0` — the source. The `foldEvidence !== sharedIsTaken` reading spelled the
+    // dual there, `a0 == 0 || a1 == 0`, and nothing in the corpus could see it: the row MATCHES on
+    // `/flip-join` with or without this axis.
+    const ifs = (src: string) => src.split('\n').filter((l) => l.includes('if ('));
+    const both = ifs(emit(stamped([true, false], [false, false]), { senseFromFoldEvidence: true }));
+    const positive = ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: false }));
+    expect(both[0]).toBe(positive[0]); // long branch
+    expect(both[1]).toBe(positive[1]); // chained fold
+    // …and the TAKEN-slot quadrants still split, which is the half the one-stamp reading had right.
+    const taken = ifs(emit(stamped([true, true], [false, true]), { senseFromFoldEvidence: true }));
+    expect(taken[0]).toBe(positive[0]);
+    expect(taken[1]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: true }))[1]);
+  });
+
   test('REFUSES a half-stamped site — the slot alone is not evidence', () => {
     // `scSharedIsTaken` without `scSharedOnFall` says where the shared block went and nothing about
     // which arm the source wrote there. The site keeps its boolean rather than guessing.

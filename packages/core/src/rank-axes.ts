@@ -284,19 +284,24 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // `/site-sense` — spell a folded short-circuit `if` from the FOLD'S own orientation evidence
   // rather than from the per-function branch-sense boolean (structure.ts senseFromFoldEvidence,
   // raise/shortcircuit.ts `scSharedOnFall` + `scSharedIsTaken`). The two sense booleans are per
-  // FUNCTION, so a
-  // function whose `if`s were written in opposite senses reaches neither spelling: over
+  // FUNCTION, so a function whose `if`s were written in opposite senses reaches neither spelling: over
   // `synthetic:mixsense`'s four divergent ladder sites the whole 2^4 per-site enumeration scores
   // 10 at the source's own mixed configuration against 20 and 27 for the two the booleans reach,
   // and `synthetic:joinsense` MATCHES at a mix the booleans cannot spell.
   //
   // WHY IT IS AN AXIS AND NOT THE DEFAULT. The reading rests on gcc laying a condition's arms out
-  // in SOURCE ORDER, so that a shared block the last test FELL INTO is the source's `then`. That
-  // is a claim about one compiler's layout, and the differ is what referees it per row. What it is
-  // NO LONGER resting on is the short-branch layout: the fold stamps the successor SLOT the shared
-  // arm landed in as well, so the layouts that put it in the FALL slot — a long branch, and a
-  // CHAINED fold, whose outer `^g` is the head's taken edge — read the same way as the rest
-  // (`synthetic:chainsense`, 4/44 on the one-stamp reading and MATCH on the two).
+  // in SOURCE ORDER, so that a shared block the last test FELL INTO is the source's `then`. That is
+  // a claim about one compiler's layout, and the differ is what referees it per row — the long
+  // branch is the layout that BREAKS it, gcc inverting the last test and laying the `else` arm
+  // first (`synthetic:ifand_far`, whose score cannot referee anything: it MATCHES on `/flip-join`
+  // either way, so its spelling is pinned by test/site-sense.test.ts instead).
+  //
+  // The premise is only ever consulted where it decides something. The fold also stamps the
+  // successor SLOT the shared arm landed in, and a shared arm in the FALL slot leaves the source's
+  // `then` in the taken slot whichever way the last test went — so at a CHAINED fold, whose outer
+  // `^g` is the head's taken edge, the site is positive and does not ask the premise at all
+  // (`synthetic:chainsense`, 4/44 on the one-stamp reading and MATCH on the two), and so is the
+  // long branch, which is how the premise's one counterexample stops mattering.
   //
   // Gated on this variant's own fully-raised fn carrying a stamped branch at all, for
   // `/copy-defpos`'s reason one entry up: the `/connective` lift axis and the symbol variants each
@@ -313,7 +318,15 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'siteSense',
     suffix: '/site-sense',
     options: (on) => ({ senseFromFoldEvidence: on }),
-    variantGate: (fn) => fn.blocks.some((b) => b.ops.some((op) => typeof op.attrs.scSharedOnFall === 'boolean')),
+    // BOTH stamps, which is the predicate the consumer admits a site on (structure.ts's
+    // `senseFromFoldEvidence` site default): one contract, not two spellings of it 4000 lines apart.
+    // The fold writes the pair in one object literal, so this is the same set of functions today.
+    variantGate: (fn) =>
+      fn.blocks.some((b) =>
+        b.ops.some(
+          (op) => typeof op.attrs.scSharedOnFall === 'boolean' && typeof op.attrs.scSharedIsTaken === 'boolean',
+        ),
+      ),
     strip: false,
   },
 ];

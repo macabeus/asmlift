@@ -489,9 +489,14 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //
 // IT IS HALF THE CARRIER. Which SOURCE arm the shared block is only names the spelling once you
 // also know which SUCCESSOR SLOT it lands in here, and the slot is `gIsFall` — stamped beside it
-// as `scSharedIsTaken`. `gIsFall` false puts it in the fall slot, which is the long-branch layout
-// AND every CHAINED fold, since an inner fold leaves the head's taken edge pointing at the next
-// test. Same source arm, opposite spelling; the reading is the two stamps' agreement.
+// as `scSharedIsTaken`. `gIsFall` false puts the shared arm in the FALL slot, which happens at the
+// long-branch layout AND at every CHAINED fold, since an inner fold leaves the head's taken edge
+// pointing at the next test. There the source's `then` is in the taken slot however ^g reached the
+// shared block, so BOTH values of `scSharedOnFall` read POSITIVE — measured, not derived: the two
+// inhabited layouts stamp opposite `scSharedOnFall` (`synthetic:chainsense` false,
+// `synthetic:ifand_far` true) and want the same spelling, because the long branch is exactly the
+// layout that falsifies the source-order premise ON that stamp. The quadrant table the consumer
+// reads is `structure.ts`'s `senseFromFoldEvidence` site default.
 //
 // Every refusal falls through untouched — a miss, never a miscompile.
 /** Per-call options for `recognizeBranchShortCircuit` — the tree-ownership refusal's two ends. */
@@ -660,9 +665,17 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           // branch RANGE: over `synthetic:joinsense` (two sites, opposite source connectives) and
           // `synthetic:mixsense` (four sites, two inverted) it is TRUE at every site of both,
           // where `scSharedOnFall` separates them. What it is, is the SLOT — the successor order
-          // below is `gIsFall`'s — so it says where the shared arm went, and `scSharedOnFall` says
-          // which source arm it is. Neither decides a spelling alone: they agree ⇒ the taken arm
-          // holds the source's `then`, the positive spelling; they disagree ⇒ the dual.
+          // below is `gIsFall`'s — so `scSharedIsTaken` says where the shared arm went and
+          // `scSharedOnFall` says which source arm it is. The shared arm in the FALL slot means the
+          // taken slot holds the source's `then` whatever `scSharedOnFall` reads, so only the TAKEN
+          // quadrants can negate; `structure.ts` owns that table and the layout premise under it.
+          //
+          // POSITIONAL, unlike its neighbour: `scSharedOnFall` names an arm and survives anything,
+          // while this one names a SUCCESSOR SLOT of the very op it rides on. Nothing between here
+          // and `structure` assigns `.successors` (grepped: no `.successors =` in packages/core/src;
+          // the passes in between are narrow/narrowlocal/paramwidth), so the invariant holds today —
+          // but a pass that canonicalised a stamped `cond_br`'s edges would turn the reading over
+          // with no refusal firing, and would have to re-stamp.
           ...mkOp('cond_br', {
             operands: [res],
             attrs: { scSharedOnFall: sharedEdge === gFall, scSharedIsTaken: gIsFall },

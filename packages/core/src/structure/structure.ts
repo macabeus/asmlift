@@ -1323,8 +1323,9 @@ export interface StructureOptions {
    *  fused branch with two facts about the arm both tests reach: `scSharedOnFall` — whether it was
    *  FALLEN INTO rather than branched to, and so, since gcc lays a condition's arms out in source
    *  order, whether it is the source's `then` — and `scSharedIsTaken`, which successor slot it
-   *  landed in here. The site takes the positive spelling where the two AGREE. Per SITE, which is
-   *  the point: the booleans are per function, and a function whose `if`s were written in opposite
+   *  landed in here. The site NEGATES in one quadrant only: the shared arm in the TAKEN slot having
+   *  been branched to, i.e. the taken slot holding the source's `else`. Per SITE, which is the
+   *  point: the booleans are per function, and a function whose `if`s were written in opposite
    *  senses has no right value for either.
    *
    *  A site the fold did not touch carries neither stamp and keeps its boolean, so this changes
@@ -4757,17 +4758,40 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // inverts branch canonicalization sets the boolean false and gets the positive form.
     const senseSite = thenS.length > 0 && elseS.length > 0;
     // The fold's evidence where there is any, the function-wide boolean where there is not
-    // (`senseFromFoldEvidence`). Two stamps, and the answer is the DISAGREEMENT between them:
-    // `scSharedOnFall` true = the last test fell INTO the arm both tests reach, so that arm is the
-    // source's `then`; `scSharedIsTaken` true = that same arm is this branch's TAKEN successor.
-    // They agree ⇒ the taken arm already holds the source's `then`, the positive spelling.
-    // REFUSES unless BOTH are present: either alone decides nothing, and a site the fold never
-    // touched carries neither and keeps its function-wide boolean.
+    // (`senseFromFoldEvidence`). Two stamps, and exactly ONE of the four quadrants negates.
+    //
+    // `scSharedIsTaken` TRUE — the arm both tests reach is this branch's taken successor, the `||`
+    // fold — is the whole of the old one-stamp reading and is unchanged: `scSharedOnFall` true = the
+    // last test FELL INTO that arm, so under gcc's source-order layout it is the source's `then` and
+    // the taken slot already holds it (positive); false = it was branched to, so it is the `else`
+    // sitting in the taken slot, and the site NEGATES.
+    //
+    // `scSharedIsTaken` FALSE — the `&&` fold, shared arm in the FALL slot — is POSITIVE at BOTH
+    // values of `scSharedOnFall`, and that is what the second stamp buys. The shared arm is where
+    // FAILING tests go, so it is the source's `else` whatever the layout, leaving the source's
+    // `then` in the taken slot. Two layouts reach here and the corpus has both:
+    //   - a CHAINED fold, `scSharedOnFall` false, where the inner fold left the head's taken edge
+    //     pointing at the next test. The one-stamp reading NEGATED it; `synthetic:chainsense` is
+    //     4/44 there and MATCH here, and the inner-loop site of `kleod:CountCollectedGems:agbcc` is
+    //     the real-row inhabitant (39/352 → 18/344).
+    //   - a LONG branch, `scSharedOnFall` true, where agbcc inverts the last test and lays the
+    //     `else` arm FIRST so that ^g falls into it. The stamp is a CFG fact and stays true; what
+    //     the inversion broke is the source-order premise ON it, so the fallen-into arm is the
+    //     `else` here and reading the quadrant positive is reading that premise as inverted — which
+    //     it is. `synthetic:ifand_far` is the measured inhabitant and it is pinned by
+    //     test/site-sense.test.ts, never by its score: it MATCHES on `/flip-join` either way.
+    // Measured over every committed row's own asm at both `/connective` settings: 75 sites in the
+    // taken-slot quadrants, 5 long-branch, 2 chained.
+    //
+    // REFUSES unless BOTH stamps are present. DEFENSIVE — no input reaches it: the one producer
+    // (raise/shortcircuit.ts) writes both in a single object literal, and instrumenting this read
+    // over that same corpus counts 0 half-stamped sites. A site the fold never touched carries
+    // neither and keeps its function-wide boolean.
     const foldEvidence = term.attrs.scSharedOnFall;
     const sharedIsTaken = term.attrs.scSharedIsTaken;
     const siteDefault =
       senseFromFoldEvidence && typeof foldEvidence === 'boolean' && typeof sharedIsTaken === 'boolean'
-        ? foldEvidence !== sharedIsTaken
+        ? sharedIsTaken && !foldEvidence
         : ipd === null
           ? preserveDivergentBranchSense
           : negateJoinedBranchSense;
