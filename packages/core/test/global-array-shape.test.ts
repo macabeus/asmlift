@@ -17,6 +17,7 @@ import { frontendFor } from '../src/frontend/registry';
 import { type Expr, type Stmt, exprChildren, stmtChildren, stmtExprs } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
+import { foldsShiftPairCasts } from '../src/raise/extscale';
 import {
   ADDRESS_GATES,
   ARRAY_SHAPE_GATES,
@@ -154,6 +155,92 @@ describe('the order of the pool load licenses the bare array subscript', () => {
     const b = decompile('f', INDEX_FIRST, ARMV4T_AGBCC, {});
     expect(a.ir.raw).not.toEqual(b.ir.raw);
     expect(a.ir.recovered).toEqual(b.ir.recovered);
+  });
+});
+
+// ── the same fork through a NARROW index, where agbcc fuses the cast with the scale ──────────
+// Compiled through this benchmark's agbcc, `extern u16 gTbl[]` read by a `u8 i`: the index's
+// extension and its ×2 are ONE shift pair, `lsl #24` / `lsr #23`, and the fork shows at the right
+// half — the pool load lands before it for the array and after it for the cast.
+
+// `u32 f(u8 i) { return gTbl[i]; }`
+const FUSED_BASE_FIRST = thumb(
+  'f',
+  '\tlsl\tr0, r0, #0x18\n\tldr\tr1, .L3\n\tlsr\tr0, r0, #0x17\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]',
+  '.word\tgTbl',
+);
+// `u32 f(u8 i) { return ((u16 *)gTbl)[i]; }`
+const FUSED_INDEX_FIRST = thumb(
+  'f',
+  '\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x17\n\tldr\tr1, .L3\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]',
+  '.word\tgTbl',
+);
+// `struct E { u8 a[5]; u8 b; u8 c; u8 d; };`, `u8 gOut`, a `u8 i`, and the element read 5 bytes
+// in: through a pointer LOCAL `struct E *p = (struct E *)gTbl; gOut = p[i].b;` (HOME), and inline
+// `gOut = ((struct E *)gTbl)[i].b;` (INLINE) — kleod's `GetEntityLookupData` shape, one table.
+const FUSED_ELEM_HOME = thumb(
+  'f',
+  '\tlsl\tr0, r0, #0x18\n\tldr\tr1, .L3\n\tldr\tr2, .L3+0x4\n\tlsr\tr0, r0, #0x15\n\tadd\tr0, r0, r1\n' +
+    '\tldrb\tr0, [r0, #0x5]\n\tstrb\tr0, [r2]',
+  '.word\tgTbl\n\t.word\tgOut',
+);
+const FUSED_ELEM_INLINE = thumb(
+  'f',
+  '\tlsl\tr0, r0, #0x18\n\tldr\tr2, .L3\n\tlsr\tr0, r0, #0x15\n\tldr\tr1, .L3+0x4\n\tadd\tr0, r0, r1\n' +
+    '\tldrb\tr0, [r0, #0x5]\n\tstrb\tr0, [r2]',
+  '.word\tgOut\n\t.word\tgTbl',
+);
+
+describe('a cast fused with its scale is a scaling, ordered at its right shift', () => {
+  test('base-first: the shape is derived and the access spells `gTbl[a0]`', () => {
+    expect(derive('f', FUSED_BASE_FIRST).get('gTbl')).toMatchObject({ shape: 'array', elemSize: 2 });
+    expect(sourceOf('f', FUSED_BASE_FIRST)).toContain('gTbl[a0]');
+    expect(sourceOf('f', FUSED_BASE_FIRST)).not.toContain('&gTbl');
+  });
+
+  test('index-first: nothing is derived and the cast spelling stands', () => {
+    expect(derive('f', FUSED_INDEX_FIRST).size).toBe(0);
+    expect(sourceOf('f', FUSED_INDEX_FIRST)).toContain('((u16 *)&gTbl)[a0]');
+  });
+
+  test('a struct element read inside it: licensed for a home on the HOME order only, never declared', () => {
+    expect([...licensed('f', FUSED_ELEM_HOME)]).toEqual(['gTbl']);
+    expect([...licensed('f', FUSED_ELEM_INLINE)]).toEqual([]);
+    expect(derive('f', FUSED_ELEM_HOME).size).toBe(0);
+  });
+
+  test('read only where raise/extscale.ts folds it: a target whose casts are not shift pairs reads scale 1', () => {
+    // The shape reader asks the fold's own gate. A target that opted into stride shapes but lowers
+    // `(u8)x` some other way never runs the fold, so a scale read here would license an element
+    // the IR below still spells as the raw pair, which no array pass legalizes.
+    const other = { ...ARMV4T_AGBCC, compiler: 'not-a-shift-pair-compiler' };
+    expect(other.compilerBehaviors.arrayShapeFromStride).toBe(true);
+    expect(foldsShiftPairCasts(other)).toBe(false);
+    expect(inferGlobalArrays(lift('f', FUSED_BASE_FIRST), other).size).toBe(0);
+    expect([...orderLicensedGlobals(lift('f', FUSED_ELEM_HOME), other)]).toEqual([]);
+  });
+
+  test('…and not for a pair the fold refuses: a same-sign sibling in its block', () => {
+    // FUSED_BASE_FIRST plus a plain `lsr #24` off the same `lsl` — `t = i << 24; … t >> 23 … t >> 24`,
+    // which the fold leaves raw, so the stride reader must not read a scale off it either.
+    const sibling = thumb(
+      'f',
+      '\tlsl\tr0, r0, #0x18\n\tldr\tr1, .L3\n\tlsr\tr2, r0, #0x17\n\tadd\tr2, r2, r1\n\tldrh\tr2, [r2]\n' +
+        '\tlsr\tr0, r0, #0x18\n\tadd\tr0, r0, r2',
+      '.word\tgTbl',
+    );
+    expect(derive('f', sibling).size).toBe(0);
+    expect([...licensed('f', sibling)]).toEqual([]);
+  });
+
+  test('a body cast behind the pool load is read: the fold takes its scale, paramwidth refuses only its width', () => {
+    // FUSED_BASE_FIRST with the pool load moved ahead of the `lsl` — `gTbl[(u8)a]` over a wide `a`.
+    const behind = thumb(
+      'f',
+      '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x17\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]',
+      '.word\tgTbl',
+    );
+    expect(derive('f', behind).get('gTbl')).toMatchObject({ shape: 'array', elemSize: 2 });
   });
 });
 
