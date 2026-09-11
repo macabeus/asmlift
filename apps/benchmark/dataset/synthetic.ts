@@ -1275,8 +1275,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // guarding X and its De Morgan dual `!a || !b` guarding Y are the same program, and agbcc lays
   // the arms out in SOURCE order — so they are different bytes, and which one was written is
   // recorded in the branch senses. A decompiler therefore has to choose, and choosing wrong costs
-  // the whole function. The three rows are the two orientations, plus the distance that decides
-  // whether the shape is recognised at all.
+  // the whole function. The four functions are the two orientations at the two distances, and the
+  // distance decides whether the shape is recognised at all.
   //
   // `ifand_near` and `ifand_far` differ in ONE thing: whether the guarded arm fits inside a Thumb
   // conditional branch's ±256-byte reach. That one distance changes TWO things at once, and the
@@ -1302,8 +1302,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // So the gap is not "this shape is unrecoverable" but "one of the fold's two arms emits the
   // spelling the compiler did not" — and a row that could falsify the claim is worth more than a
   // third that restates it. What referees it on the RANKED path is `/flip-join`, which emits the
-  // other joined sense: all three rows match there, two of them on the axis. There is deliberately
-  // no `ifor_far`: measured, a `||` matches at BOTH distances.
+  // other joined sense: all four match, three of them carrying it — `ifand_near` is the one that
+  // matches at the default sense with no axis at all.
+  //
+  // `ifor_far` is the fourth corner, and its SCORE referees nothing, exactly as `ifand_far`'s does
+  // not: `/flip-join` is a per-FUNCTION lever, so on a one-site function it is right whichever way
+  // the fold spelled the site, and both long rows MATCH either way (`ifand_far` 0/140, `ifor_far`
+  // 0/139). What the row is for is the STAMP PAIR it inhabits: measured, a long `||` stamps
+  // `(scSharedOnFall=false, scSharedIsTaken=true)` — the identical pair a short `&&` stamps — and
+  // wants the opposite spelling. It is the counterexample to any two-boolean reading of the
+  // orientation, and like `ifand_far` it is pinned by a test rather than by its number.
   //
   // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
   //
@@ -1328,19 +1336,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // nothing to do with short circuits.
   //
   // The arm's CONTENT is filler and its SIZE is the feature, so the near arm is a literal PREFIX
-  // of the far one and all three share a signature. Two pointers, deliberately: a Thumb
+  // of the far one and all four share a signature. Two pointers, deliberately: a Thumb
   // `str Rd,[Rn,#N]` reaches offset 124, and a single array long enough to force the long branch
   // would spill past it into a pointer walk — a second recovery idiom riding along inside what is
   // supposed to be a one-variable control.
   //
-  // WHAT THESE ROWS MOVE, so the headline is not read as progress: the five rows added three
-  // asmlift matches and no m2c match. All three gained matches are synthetic rows authored for an
-  // asmlift-specific gap, one of them (`ifand_far`) scoring MATCH either way — a byte score cannot
-  // see the difference between the recovered `&&` and the tail-duplicated spelling agbcc
-  // cross-jumps back together, so a test pins that orientation, not this row; and every row reads
-  // `noncompile` for m2c on an unrelated pointer-spelling defect of its own. All five rows match
-  // on the ranked path, so `bench regression` holds every one — but only against a LOST match, and
-  // what these rows are really about is WHICH ORIENTATION won. That is
+  // WHAT THESE ROWS MOVE, so the headline is not read as progress: the six rows contribute six
+  // asmlift matches and no m2c match, every one of them a synthetic row authored for an
+  // asmlift-specific gap, and two of them (`ifand_far`, `ifor_far`) score MATCH either way — a byte
+  // score cannot see the difference between the recovered connective and the tail-duplicated
+  // spelling agbcc cross-jumps back together, so a test pins those orientations, not these rows;
+  // and every row reads `noncompile` for m2c on an unrelated pointer-spelling defect of its own.
+  // All six match on the ranked path, so `bench regression` holds every one — but only against a
+  // LOST match, and what these rows are really about is WHICH ORIENTATION won. That is
   // packages/cli/test/matching/shortcircuit-branch.test.ts, which asserts the connective itself
   // and runs with the benchmark refresh rather than on every PR.
   {
@@ -1369,6 +1377,26 @@ export const SYNTHETIC: SynthSpec[] = [
       'un-folded spelling tail-duplicates the else arm and agbcc cross-jumps the copies back ' +
       'together, so this row read MATCH before the shape was recovered too — what the orientation ' +
       'is pinned by is a test, not this number',
+  },
+  {
+    sym: 'ifor_far',
+    src: 'int ifor_far(int a, int b, int *p, int *q){ if (a || b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; p[2] = 5; q[2] = 6; p[3] = 7; q[3] = 8; p[4] = 9; q[4] = 10; p[5] = 11; q[5] = 12; p[6] = 13; q[6] = 14; p[7] = 15; q[7] = 16; p[8] = 17; q[8] = 18; p[9] = 19; q[9] = 20; p[10] = 21; q[10] = 22; p[11] = 23; q[11] = 24; p[12] = 25; q[12] = 26; p[13] = 27; q[13] = 28; p[14] = 29; q[14] = 30; p[15] = 31; q[15] = 32; p[16] = 33; q[16] = 34; p[17] = 35; q[17] = 36; p[18] = 37; q[18] = 38; p[19] = 39; q[19] = 40; p[20] = 41; q[20] = 42; p[21] = 43; q[21] = 44; p[22] = 45; q[22] = 46; p[23] = 47; q[23] = 48; p[24] = 49; q[24] = 50; p[25] = 51; q[25] = 52; p[26] = 53; q[26] = 54; p[27] = 55; q[27] = 56; p[28] = 57; q[28] = 58; p[29] = 59; q[29] = 60; p[30] = 61; q[30] = 62; p[31] = 63; q[31] = 64; } else { p[0] = -1; } return p[1]; }',
+    features: ['branch'],
+    toolchains: ['agbcc'],
+    ctx: 'int ifor_far(int,int,int*,int*);',
+    note:
+      "the `||` at `ifand_far`'s distance. The long branch INVERTS the last test, which moves " +
+      'the shared arm to the other successor slot — so a long `||` stamps the same pair ' +
+      '(`scSharedOnFall` false, `scSharedIsTaken` true) as a SHORT `&&` and wants the opposite ' +
+      'spelling. Two booleans cannot separate them; the third stamp `scEdgeRelayed` is what does, ' +
+      'and this is the only row whose SPELLING that stamp decides — the corpus carries 9 other ' +
+      'stamped sites, all MIPS rows where no ±256-byte range exists and none is a sense site ' +
+      '(packages/core/test/site-sense.test.ts pins the cell). Like `ifand_far` its SCORE referees ' +
+      'nothing: it MATCHes on `/flip-join` whichever way the fold spelled the site. Nor does ' +
+      'the FAN carry the axis here: measured, the row enumerates 4 candidates and no ' +
+      '`/site-sense` at all, because at one site the axis re-spells what `/flip-join` already ' +
+      'spelled and the tree dedup drops the duplicate. A named row the fan never enumerates is ' +
+      'worth saying out loud',
   },
   {
     sym: 'ifor_near',
@@ -6919,6 +6947,31 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void joinsame(void);',
     proto: { joinsame: { returnsVoid: true } },
+  },
+  {
+    // C3 of `kleod:CountCollectedGems:agbcc`'s second decomposition (#172): the site-sense reading
+    // itself, on a CHAINED condition. Both `if`s here are written in the SAME positive sense, so
+    // this is not `joinsense`'s mix and no value of `negateJoinedBranchSense` is being defeated by
+    // one. The second condition is `(a == K1 || a == K2) && b == K3`, which folds TWICE: the outer
+    // fold's `^g` is the head's TAKEN edge rather than its fall, so the arm both tests reach lands
+    // in the FALL successor slot. A reading that consults only WHICH SOURCE ARM is shared
+    // (`scSharedOnFall`) negates a site already spelled the source's way. The first `if` is the
+    // unchained control — one fold, shared arm in the taken slot — where that reading is right.
+    // 4/44 on the one-stamp reading, MATCH once the fold also stamps the SLOT.
+    sym: 'chainsense',
+    src:
+      'extern u8 gGrid[5][7];\n' +
+      'extern s32 gOut; extern s32 gOut2; extern s32 gOut3;\n' +
+      'void chainsense(void){\n' +
+      '  if ((gGrid[0][0] & 0x80) != 0 && (gGrid[1][0] & 0x7F) == 0x7F) { gOut = 1; } else { gOut = 2; }\n' +
+      '  if ((gGrid[2][0] == 3 || gGrid[2][0] == 5) && (gGrid[3][0] & 0x7F) == 100) { gOut2 = 3; }\n' +
+      '  else { gOut2 = 4; }\n' +
+      '  gOut3 = 5;\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void chainsense(void);',
+    proto: { chainsense: { returnsVoid: true } },
   },
 
   // ── THE ELSE-LADDER ARM CLIFF, and the nested-loop accumulator copy (attr2/CountCollectedGems) ─
