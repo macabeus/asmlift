@@ -1713,11 +1713,21 @@ export function enumerateCandidates(
         // THE SHARED-TAIL TWIN (`/shared-tail`): the same raised fn, structured a second time with
         // `followEarlyReturns`, after `sinkStoreTails` has rewritten it in place — safe because
         // `structure()` never mutates `fn`, so the first pass is done with it. A lift variant's twin
-        // rather than a structuring axis because the sink is an IR rewrite. Not the default: the
-        // same IR comes from both sources (raise/tailsink.ts), and the follow alone as a default
-        // costs `synthetic:sw_fallguard:ido7.1` 13/19 → 19/23 and `synthetic:gcseflat:agbcc`
-        // 19/53 → 22/54. Enumerated only where it can differ: the sink fired, or some divergent
-        // `if` shares a `ret`.
+        // rather than a structuring axis because the sink is an IR rewrite, and one run here rather
+        // than in pipeline.ts's spine because that costs no second lift. Not the default: the same
+        // IR comes from both sources (raise/tailsink.ts), and the follow alone as a default costs
+        // `synthetic:sw_fallguard:ido7.1` 13/19 → 19/23 and `synthetic:gcseflat:agbcc` 19/53 → 22/54.
+        //
+        // Enumerated only where the follow can differ — some divergent `if` of the SUNK fn shares a
+        // `ret` — and that is the sink's only price gate: without it, a tail copied into arms no `if`
+        // shares adds a twin spelling it in each, 204 synthetic candidates on 8 rows (the
+        // `gcsedup`/`gcseinnerdup`/`armexpr`/`mergeu16` controls and four ladders).
+        //
+        // ONE BIT PER LIFT VARIANT, not per site: the twin sinks every store tail and follows every
+        // divergent `if` at once, so a function with two sites gets the both-on candidate only.
+        // Over the 21 rows the twin reaches on both tiers, one function carries two follow sites
+        // (`synthetic:maskchain:agbcc`) and one two sunk tails (`synthetic:gcsearms6:agbcc`), both
+        // MATCH; every other carries at most one of each.
         for (const twin of [false, true]) {
           if (twin) {
             let sunk: boolean;
@@ -1730,7 +1740,7 @@ export function enumerateCandidates(
               opts.onLeverError?.(name + lv.suffix + SHARED_TAIL_SUFFIX, firstLine(e));
               break;
             }
-            if (!sunk && !hasDivergentSharedRet(fn)) {
+            if (!hasDivergentSharedRet(fn)) {
               break;
             }
           }

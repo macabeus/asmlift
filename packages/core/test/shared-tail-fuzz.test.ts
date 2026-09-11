@@ -5,17 +5,19 @@
 // the follow turns fall-through into early `return;`s. That is the change that can be byte-closer
 // and semantically wrong at once, and no naming fuzz can see it — each compares one spelling with
 // another. So the oracle is the IR itself: the run of the lifted function (`irTraceOf`) against
-// the run of the IR after the sink, and against the run of each structured tree (`traceOf`).
+// the run of the IR after the sink, and against the run of each structured tree (`traceOf`), both
+// `structure()`'s and `structureChecked`'s after its committed L3 rewrites.
 //
 // The generator builds the family's shapes on purpose — a decision tree whose leaves branch into a
-// shared store tail, directly or through a pure forwarder or a join both sides may reach, or keep a
-// `ret` of their own — because a random CFG almost never shares a tail, and a fuzz that never
-// fires the path proves nothing. The firing counts are asserted, not just printed.
+// shared store tail, directly or through a chain of pure forwarders or a join both sides may
+// reach, or keep a `ret` of their own — because a random CFG almost never shares a tail, and a
+// fuzz that never fires the path proves nothing. The firing counts are asserted, not just printed.
 import { expect, test, vi } from 'vitest';
 
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
+import { structureChecked } from '../src/pipeline';
 import { sinkStoreTails } from '../src/raise/tailsink';
 import { StructureError, structure } from '../src/structure/structure';
 import { BREATHE_EVERY, breathe, irTraceOf, mulberry32, traceOf } from './helpers';
@@ -49,19 +51,21 @@ function generateSharedTailFn(seed: number): Fn {
   const store = (b: Block, value: Value, off: number) =>
     b.ops.push(mkOp('store', { operands: [gq, value], attrs: { off, width: 4 } }));
 
-  // The shared store tail, an optional pure forwarder into it, and up to two joins either side of
-  // the top `if` may fall into.
+  // The shared store tail, a chain of up to two pure forwarders into it, and up to two joins either
+  // side of the top `if` may fall into.
   const tail = block(1);
   store(tail, tail.params[0], 4);
   if (rnd() < 0.3) {
     store(tail, pick(params), 8);
   }
   tail.ops.push(mkOp('ret'));
-  const fwd = rnd() < 0.4 ? block(1) : undefined;
-  if (fwd) {
-    br(fwd, tail, [fwd.params[0]]);
+  const entries = [tail];
+  for (let i = 0, n = rnd() < 0.4 ? (rnd() < 0.5 ? 1 : 2) : 0; i < n; i++) {
+    const f = block(1);
+    br(f, entries[entries.length - 1], [f.params[0]]);
+    entries.push(f);
   }
-  const into = (b: Block, value: Value) => br(b, fwd && rnd() < 0.5 ? fwd : tail, [value]);
+  const into = (b: Block, value: Value) => br(b, pick(entries), [value]);
   const joins: Block[] = [];
   for (let i = 0, n = Math.floor(rnd() * 3); i < n; i++) {
     const j = block();
@@ -178,6 +182,9 @@ test('the sink and the follow change no observable, on the shapes they were buil
         return 0;
       }
       RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed}, run ${r}`).toEqual(want[i]));
+      // and after the committed L3 rewrites (tail-merge, dead stores, base locals) and contracts
+      const checked = structureChecked(fn, { returnsVoid: true, followEarlyReturns: true });
+      RUNS.forEach((r, i) => expect(traceOf(checked, r), `seed ${seed} checked, run ${r}`).toEqual(want[i]));
       return fired;
     };
     // The follow alone, on the lifted function.
@@ -191,7 +198,7 @@ test('the sink and the follow change no observable, on the shapes they were buil
       sunkAndFollowed += run(fn) > 0 ? 1 : 0;
     }
   }
-  // At authoring: sunk 1842, followed 9466, sunk+followed 1834, declined 0 — the floors below.
+  // At authoring: sunk 15866, followed 9391, sunk+followed 3662, declined 0 — the floors below.
   console.log(
     `[shared-tail-fuzz] seeds=${SEEDS} sunk=${sunk} followed=${followed} sunk+followed=${sunkAndFollowed} declined=${declined}`,
   );
