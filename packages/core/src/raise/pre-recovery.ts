@@ -57,7 +57,7 @@ export interface PreRecoveryFacts {
    *  pre-recovery entirely, raise/retsink.ts's `pre-diamond`. Blocks a later pass creates are
    *  absent, and absent reads as "no diamond" — the refusing direction, in both readers. */
   mergeShapes: Map<Block, MergeShape>;
-  /** where the machine loaded each pool address relative to the entry block's other ops, for
+  /** which entry-block ops the machine ran after its first pool-loaded address, for
    *  raise/extscale.ts's behind-a-pool-load record. Read HERE because `addrnum`, the first pass,
    *  hoists duplicated addresses to the head of the entry block and that order is gone after it. */
   poolOrder: PoolOrder;
@@ -91,8 +91,9 @@ export interface PreRecoveryPass {
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → soft-division →
- *  scaled-extension → array-legalize → struct-array → member-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads →
- *  narrow-local → parameter-width → scaled-extension-restore. See each recognizer's file for the rationale. */
+ *  scaled-extension → array-legalize → struct-array → member-array → struct-pointer → short-circuit →
+ *  branch-short-circuit → narrow-reads → narrow-local → parameter-width → scaled-extension-restore.
+ *  See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
   // would otherwise have to reason around, and it can only shrink the value graph.
@@ -175,12 +176,12 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // loop variable's next value, and both short-circuit folds above rewrite the very edges it reads.
   // `dce: false` — the rewrite orphans nothing, since the operand it drops keeps its other use.
   { id: 'narrow', run: rerootNarrowReads, dce: false },
-  // The two WIDTH passes, last of the recognizers and in either order relative to each other: each only DELETES an
-  // extension and retypes the parameter that fed it, so every recognizer above sees the shape it
-  // was written against and neither can match a shape the other creates. They are disjoint by
-  // construction — `narrowlocal` refuses an entry parameter, `paramwidth` reads only entry
-  // parameters — and `narrowlocal` cannot take an extension `narrow` above wants either, since a
-  // parameter carrying BOTH a `zext` and a `sext` has two readers and is refused.
+  // The two WIDTH passes, last of the recognizers and in either order relative to each other: each
+  // only DELETES an extension and retypes the parameter that fed it, so every recognizer above sees
+  // the shape it was written against and neither can match a shape the other creates. They are
+  // disjoint by construction — `narrowlocal` refuses an entry parameter, `paramwidth` reads only
+  // entry parameters — and `narrowlocal` cannot take an extension `narrow` above wants either, since
+  // a parameter carrying BOTH a `zext` and a `sext` has two readers and is refused.
   // `dce: false` on both — the extension each drops is spliced out in place, and its result has no
   // other reader.
   // The `target` argument is read by ONE conjunct of ONE gate — see raise/narrowlocal.ts's

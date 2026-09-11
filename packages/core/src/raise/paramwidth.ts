@@ -122,7 +122,7 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
   },
   {
     id: 'fused-behind-pool',
-    why: 'a fused cast the machine ran after a pool load is body code the prologue scan steps over',
+    why: 'a fused cast behind a pool load is body code if unsigned, and either width is the same object if signed',
     sound: true,
     guardedBy: 'extscale.test.ts: a body cast behind nothing but a pool load keeps its parameter wide',
     rejects: (c) => c.fusedBehindPool,

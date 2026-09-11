@@ -623,17 +623,14 @@ function useIndex(fn: Fn): Map<Value, Op[]> {
  *  whole term constant instead (`const << 2` is a displacement, not a subscript).
  *
  *  …and a narrowing cast FUSED with its scale, `shr(shl(x, 24), 21)` — `(u8)x << 3` after agbcc's
- *  combiner merged the pair's right half into the scale. It is read here the way
- *  raise/extscale.ts later folds it, off the same predicate, and its RIGHT shift is the scaling op:
+ *  combiner merged the pair's right half into the scale. Its RIGHT shift is the scaling op:
  *  compiled, `gTbl[i]` over a `u8 i` is `lsl` / `ldr` / `lsr` and `((u16 *)gTbl)[i]` is `lsl` /
  *  `lsr` / `ldr`, so the right half is where the order fork shows. A constant under the pair keeps
  *  the scale-1 reading — `const` folds that pair to its value before anything spells it.
  *
- *  `fused` is null where the target does not lower a cast to a shift pair, and the pair is then
- *  read as scale 1: on such a target the fold never runs, and a scale read here would license an
- *  element no pass legalizes. Where it is set, it is the fold's own `foldablePairs`, so a pair is
- *  read exactly when the fold will take it — the target gate and the sibling refusal both, not just
- *  the shape. */
+ *  `fused` is raise/extscale.ts's own `foldablePairs`, or null where the target keeps the fold off,
+ *  so a pair is read as a scale exactly when the fold will take it: a scale read anywhere else would
+ *  license an element no pass legalizes. */
 function scaleOf(v: Value, defs: Map<Value, Op>, fused: Map<Op, ScaledExtension> | null): Term {
   const d = defs.get(v);
   const constOf = (x: Value): number | null => {

@@ -38,14 +38,14 @@
 // a pool-loaded address among them — which is why the fold records a pair it finds behind one
 // (THE BODY CAST BEHIND A POOL LOAD, below). Placing both at the right shift instead throws `pa`'s
 // prologue evidence away, so `pa` reads as `pb` and stays wide — measured on the benchmark's sa3
-// rows, which declare `u8 bg` exactly so:
+// rows whose first parameter is a declared `u8` scaled this way:
 // `sa2__sub_8007858` 39/60 anchored against 44/61 at the right shift, and `sa2__sub_8007958` 64/87
 // against 66/88.
 //
 // The SIGNED form does not carry that evidence on agbcc: `void pd(s16 a, …) { … a * 2 … }` and its
-// wide twin `(s16)a * 2` compile to the SAME object, both halves at the use. That is paramwidth's
-// existing ambiguity (its header's `pc` pair), not a new one — the placement rule is the same
-// either way, and where the pair sits the judgement is paramwidth's.
+// wide twin `(s16)a * 2` compile to the SAME object, both halves at the use — the ambiguity of
+// paramwidth's `pc` pair — so the placement rule is the same either way, and where the pair sits the
+// judgement is paramwidth's.
 //
 // REFUSES — the pair is left as it is — when:
 //   • `R >= L`. `R == L` is the plain cast, which CAST_PATTERNS already folded; `R > L` keeps
@@ -88,18 +88,15 @@
 // narrowed to `u8 a0` (objdiff 2) where the raw pair is MATCH. An UNSIGNED declared parameter's
 // `lsl` comes before any pool load, symbol or numeric: all 44 over the benchmark's agbcc
 // references. A signed one need not (27 before, 2 after): the signed form carries no placement
-// evidence (above), and its narrow and wide spellings compile to the same object. So what the
-// record refuses is the WIDTH, as raise/paramwidth.ts's `fused-behind-pool`, and the SCALE stays
+// evidence (above), and its narrow and wide spellings compile to the same object. So only the
+// WIDTH is refused, by raise/paramwidth.ts's `fused-behind-pool` reading the record; the SCALE stays
 // for the array passes: `gB = gW[(u8)a]` is objdiff 2 as the raw pair and byte-exact as
 // `gW[(u8)a0]`, and sa3's `DemoPlayAlloc` (`gDemoRecordings[demoIndex]` over an `s16`) is spelled
 // as the subscript it is.
-// The order is read off the LIFTED function (`poolOrderOf`): `addrnum` hoists a duplicated address
-// to the head of the entry block, and after it the position no longer says where the machine loaded
-// it. Only the fused form is judged — a plain cast's pair is folded at its right half, so its lifted
-// position is not its `lsl`'s. NOT caught: a NUMERIC pool word lifts to `const`, the same op a
-// `movs` does, and paramwidth's own header says why a `movs` ahead of the pair decides nothing — so
-// a body cast behind only a numeric pool load (`& 0xfff` over a wide parameter in a loop) still
-// narrows.
+// The order is read off the LIFTED function (`poolOrderOf`, which says why). NOT caught: a NUMERIC
+// pool word lifts to `const`, the same op a `movs` does, and paramwidth's own header says why a
+// `movs` ahead of the pair decides nothing — so a body cast behind only a numeric pool load
+// (`& 0xfff` over a wide parameter in a loop) still narrows.
 //
 // One extension per (`shl`, signedness): two folded scales of one sign off one `shl` — in two
 // blocks, `sub_8010184`'s shape — share it, and opposite signs get one each. The `shl` dies when
@@ -120,9 +117,9 @@
 // has both signs. Over the 55 corpus functions the fold fires on, scored on the benchmark's own
 // path, restoring moves four scores — `SetWorldMapTilePalette` 59/91 → 54/93 and sa3
 // `UnpackSaveSector` 347 → 346 better, sa3 `ClearSave` 189 → 191 and `CompleteSave` 185 → 187
-// worse, all four back to what they scored before the fold existed (and sa3 `ValidateSave`'s
-// denominator, 213/378 → 213/379). A spelling with both signs is the differ's to referee
-// (a ranked axis), and none is built; the default is the one that asserts nothing the lift did not.
+// worse, all four to what the lift alone scores (and sa3 `ValidateSave`'s denominator, 213/378 →
+// 213/379). A spelling with both signs is the differ's to referee (a ranked axis), and none is
+// built; the default is the one that asserts nothing the lift did not.
 import { type Block, type Fn, type Op, type Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { CAST_WIDTHS } from '../ir/opcodes';
 import { CAST_PATTERNS, patternApplies } from '../pattern/engine';
@@ -142,8 +139,8 @@ export interface ScaledExtension {
   inner: Op;
 }
 
-/** The fused pair rooted at `op`, or null for any shape the header's refusal list names. The ONE
- *  reading of it: the fold below and raise/globalshape.ts's stride reader both ask here. */
+/** The fused pair's SHAPE rooted at `op`, or null — the header's refusals on the amounts and the
+ *  two-register form. The sibling refusal is {@link foldablePairs}', the target's the caller's. */
 export function scaledExtensionOf(op: Op | undefined, defs: Map<Value, Op>): ScaledExtension | null {
   if (!op || (op.opcode !== 'shr_u' && op.opcode !== 'shr_s') || op.operands.length !== 1) {
     return null;

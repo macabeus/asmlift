@@ -70,11 +70,12 @@ describe('scaled-extension fold — real agbcc, byte-exact, through decompile()'
   }
 });
 
-// Where the fold's two refusals land, each spelled back to its own bytes. A same-sign sibling in
-// the block means the source wrote the shift itself (`t = a << 24`), so the fold leaves the pair as
-// lifted; an opposite-sign sibling is a second cast and folds. A body cast behind a pool load folds
-// too — the SCALE is sound and the table takes it — while paramwidth's `fused-behind-pool` keeps the
-// WIDTH wide, in both signs.
+// The fold's sibling refusal and paramwidth's `fused-behind-pool`, each spelled back to its own
+// bytes. A same-sign sibling in the block means the source wrote the shift itself (`t = a << 24`),
+// so the fold leaves the pair as lifted; an opposite-sign sibling is a second cast and folds. A pair
+// behind a pool load folds too — the SCALE is sound and the table takes it — while
+// `fused-behind-pool` keeps the WIDTH wide: over a body cast, and over a declared `s16` whose `lsl`
+// agbcc scheduled there.
 const SIB_DECLS = 'extern u32 gB; extern u32 gW[];\n';
 
 describe('the fold beside a sibling, and behind a pool load — real agbcc, byte-exact', () => {

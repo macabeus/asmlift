@@ -357,7 +357,8 @@ describe('what the fold hands the passes below it', () => {
   });
 
   test('a cast in the body: both halves at the use, so the parameter stays wide', () => {
-    // `gA`'s pool load runs before the pair, so it is also left as lifted (the next describe).
+    // The fold takes the pair, but `not-prologue` refuses its extension and no array pass takes the
+    // scale, so the restore prints the pair the frontend lifted.
     const src = source('extscale', 'agbcc-extscale-wide.s');
     expect(src).toMatch(/void extscale\([su]32 a0, u8 a1\)/);
     expect(src).toContain('(a0 << 24) >> 22');
@@ -373,12 +374,11 @@ describe('what the fold hands the passes below it', () => {
   });
 
   test('KNOWN GAP: a body cast behind only a NUMERIC pool word still narrows its parameter', () => {
-    // `mov r3,#0; ldr r5,=0xfff; lsl r0,#24; lsr r4,r0,#12` — the pool load comes first, as it does
-    // for every body cast in the references, but a numeric word lifts to `const`, the op a `movs`
-    // lifts to, and a `movs` ahead of the pair decides nothing (raise/paramwidth.ts's `pc` pair).
-    // So the fold records nothing: `u8 a0`, objdiff 7 against origin/main's wide 5, and the ranked
-    // winner 2 against origin/main's MATCH. Flip this expectation when the frontend's pool words
-    // become distinguishable from immediates.
+    // `mov r3,#0; ldr r5,=0xfff; lsl r0,#24; lsr r4,r0,#12` — the pool load comes first, but a
+    // numeric word lifts to `const`, the op a `movs` lifts to, and a `movs` ahead of the pair decides
+    // nothing (raise/paramwidth.ts's `pc` pair). So the fold records nothing: `u8 a0` scores objdiff 7
+    // where the wide lift scores 5, and the ranked winner 2 where it is MATCH with the fold off. Flip
+    // this expectation when the frontend's pool words become distinguishable from immediates.
     const src = source('extscale', 'agbcc-extscale-numpool.s');
     expect(src).toContain('void extscale(u8 a0, u16 * a1)');
   });
