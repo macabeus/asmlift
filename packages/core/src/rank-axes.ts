@@ -344,18 +344,53 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
  *  on every tree where the rewrite fires, which is why the table is not a place to put a lever
  *  that would compose perfectly well as a `respell`.
  *
- *  A SECOND, STRONGER GROUND, MEASURED AFTER THE FIRST: `/unmerge`'s SIGN IS A PROPERTY OF THE
- *  BASE, NOT OF THE AXIS. One axis, one row (`kleod:CountCollectedGems:agbcc`), four bases, four
- *  signs — +44 against the #172-era winner, +24 at #169's base, −3 at a grafted flat+no-copies
- *  base, and −17/352 measured once #184 and #185 made that base real. Nothing about the tree
- *  changed the axis; what changed was which tree the fan derives from, and the fan is itself
- *  choosing that tree. So the mapping from a tree to "is the merged tail cheaper" is not a
- *  function of anything a gate here could read, and no predicate this pass could evaluate settles
- *  it. That is what enumeration is for, and it is a sharper statement of the tower's
- *  default-vs-axis test than reach or licence: a lever whose sign is base-dependent can never be a
- *  default. The corollary a future author needs more than the rule: MEASURING A LEVER AT +44 ON
- *  TODAY'S WINNER DOES NOT REFUTE IT. `/unmerge` was the most expensive axis on that row for three
- *  rounds and is in its winning label now, with no change to the axis at all. */
+ *  NOT A SECOND ADMISSION GROUND — the bar above is still WHERE the rewrite is applied, and sign
+ *  base-dependence discriminates nothing (every axis in this file has a base-dependent price). What
+ *  follows is why the lever is ENUMERATED at all, which is the question one table up, and it is
+ *  filed here because this is where its reader stands. `/unmerge`'S SIGN IS A PROPERTY OF THE BASE,
+ *  NOT OF THE AXIS. One axis, one row (`kleod:CountCollectedGems:agbcc`), with the axis untouched
+ *  throughout — two MEASUREMENTS and three GRAFTS, kept apart because a graft is a lower bound with
+ *  an unreliable sign AND magnitude, which this very axis then demonstrated:
+ *
+ *    MEASURED  +44   against the #172-era winner (three routes: the fan's own candidate, a graft,
+ *                    a recompile)
+ *    MEASURED  +24   at #169's base
+ *    GRAFT      +2   at a flat ladder
+ *    GRAFT      −3   at flat + no-copies — #172 published this as the prediction for THIS round;
+ *                    the build delivered −17, an under-read of 5.7×
+ *    GRAFT      +4   at flat + no-copies + connective — the rung a connective round makes real, and
+ *                    the ONLY one where the sign goes back POSITIVE at a base strictly CLOSER to
+ *                    the reference. Quote it: it says the "−17, in the winning label" state below
+ *                    may not survive the next rung, and a law that drops it is the omission its own
+ *                    reader pays for.
+ *    MEASURED  −17/352  once #184 and #185 made the flat+no-copies base real
+ *
+ *  Six numbers, two signs. Nothing about the tree changed the axis; what changed was which tree the
+ *  fan derives from, and the fan is itself choosing that tree. So the mapping from a tree to "is the
+ *  merged tail cheaper" is not a function of anything a gate here could read, and no predicate this
+ *  pass could evaluate settles it. That is what enumeration is for. The corollary a future author
+ *  needs more than the rule: MEASURING A LEVER AT +44 ON TODAY'S WINNER DOES NOT REFUTE IT.
+ *  `/unmerge` was the most expensive axis on that row for three rounds and is in its winning label
+ *  now, with no change to the axis at all.
+ *
+ *  WHAT ENUMERATION BUYS AND WHAT IT DOES NOT. It buys the whole-function delta above being honest
+ *  — the differ picks, so the number cannot be WRONG. It buys no REACH: `unmergeJoins` rewrites
+ *  every site clearing its gates and returns one tree, so the fan carries TWO points, all-merged
+ *  and all-un-merged, never 2^k, and a function wanting site A un-merged and site B merged has no
+ *  candidate. Measured, not assumed (`bench gates --pass unmerge` over the synthetic agbcc tier,
+ *  counting successful sites per call): k = 1 on 23 of the 25 firing rows and on
+ *  `kleod:CountCollectedGems:agbcc` itself, k = 2 on `synthetic:joinsame` and
+ *  `synthetic:joinsense` — both MATCH, so the refusal costs nothing today. State it as PR #120
+ *  states its own: a price, never an immunity.
+ *
+ *  WHAT BREAKS IF THIS TABLE IS EMPTIED, so an author editing here is not measuring it again:
+ *  twelve MATCH rows fall, `sa3:numToASCII:agbcc` (REAL-TIER) among them, plus
+ *  `synthetic:dmascope`, `synthetic:dmascope2`, `synthetic:joinsame`, `synthetic:joinsense`,
+ *  `synthetic:armcb`, `synthetic:armcb2`, `synthetic:ladder4`, `synthetic:ladder5`,
+ *  `synthetic:ladidx1`, `synthetic:ladidx2`, `synthetic:revlad5s`. `bench regression` is an
+ *  OUTCOME gate over all tiers, so every one of them turns it red — but `benchmark.yml` is
+ *  `workflow_dispatch`, manual, with no cron, so nothing runs that gate on a PR. The scores and the
+ *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block. */
 export const PRE_FAN_PRODUCTS: typeof SHAPE_PRODUCTS = [{ suffix: '/unmerge', apply: unmergeJoins }];
 
 export const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [

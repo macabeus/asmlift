@@ -7105,15 +7105,30 @@ export const SYNTHETIC: SynthSpec[] = [
   // block once had it backwards: the axis FIRING duplicates the merged join statement back into
   // the arms, so a `/unmerge` winner spells the store PER ARM; REFUSING leaves the structurer's
   // merged tail (`l3/unmerge.ts`'s own REFUSES list). The real row's published winner emits
-  // `p0[1] = &UpdateWorldMapNodeAnim;` at ten separate arm sites, and its `refSource` writes
-  // `gCallbackQueue.current[1] = UpdateWorldMapNodeAnim;` once per arm — per-arm on both sides,
-  // which is why firing PAYS here.
+  // `p0[1] = &UpdateWorldMapNodeAnim;` at SEVEN separate arm sites (nine `p0[1] = &…` stores in
+  // all, the other two `&GameplayMainLoop`), and its `refSource` writes
+  // `gCallbackQueue.current[1] = UpdateWorldMapNodeAnim;` seven times, once per arm — per-arm on
+  // both sides, which is why firing PAYS here. (Two earlier passes of this file, and the review
+  // that checked them, all published "ten arm sites" without counting; `python3` over
+  // `results/results.json` says 7 and 9. The DIRECTION is what the paragraph is for and it is
+  // unaffected — count before you carry a number into the sentence that has to survive.)
   //
-  // AND THE WHOLE-ROW NUMBER IS LEGITIMATE ONLY BECAUSE THIS IS AN AXIS. −17/352 is a
-  // per-FUNCTION delta over a function with several candidate merge sites; it is not a per-site
-  // claim and does not need to be, because the axis is ENUMERATED rather than DECIDED. A future
-  // author who converts any part of this into a per-function predicate loses that immunity —
-  // [joined-branch-sense-decidable] is the standing record of what that costs.
+  // AND THE WHOLE-ROW NUMBER IS AN AXIS'S NUMBER, WHICH BUYS LESS THAN "ENUMERATED, THEREFORE
+  // IMMUNE". −17/352 is a per-FUNCTION delta, and enumeration means the differ picks rather than a
+  // predicate guessing — so the number cannot be WRONG. What it is not is per-site REACH, and an
+  // earlier draft of this paragraph claimed the immunity covered both. `unmergeJoins`
+  // (`l3/unmerge.ts`, the `list`/`rewrite` walk) rewrites EVERY site that clears its gates and
+  // returns one `SFn | null`, and `rank.ts` calls it once per structured tree — so the fan carries
+  // TWO points, all-merged and all-un-merged, never 2^k. A function wanting site A un-merged and
+  // site B merged has no candidate anywhere in the fan. Priced rather than asserted, by counting
+  // successful `unmergeAt` returns per call (`bench gates --pass unmerge`, whole synthetic agbcc
+  // tier, plus `bench fan kleod:CountCollectedGems:agbcc --enumerate`): k = 1 on 23 of the 25
+  // firing rows AND on the real row (576 calls, `sites=1` every one), k = 2 on `synthetic:joinsame`
+  // and `synthetic:joinsense`. So the refusal is real and inhabited at k = 2, its cost today is
+  // ZERO — both k = 2 rows MATCH, and the real row's k = 1 means the mixed partition is no part of
+  // its 39/352 — and the honest statement is PR #120's, a stated price rather than an immunity.
+  // Converting any of this to a per-function PREDICATE is the separate and worse move that
+  // [joined-branch-sense-decidable] records.
   //
   // On the ladder rows it is in the winning label throughout, and FLATTENING THE LADDER WIDENED
   // WHAT DEPENDS ON IT. Same ablation, same cache-off re-run, all at `981bb0b9`: `ladder4`
@@ -7122,23 +7137,50 @@ export const SYNTHETIC: SynthSpec[] = [
   // only `ladcall5`, `swladder` and `calad` are INERT. `ladidx2` measured exactly INERT (36 both
   // ways) while the ladder still duplicated an arm [pre-#184] and is load-bearing now.
   //
-  // THE FULL BLAST RADIUS IS TWELVE MATCH ROWS, NOT SEVEN, AND ONE OF THEM IS REAL-TIER. The seven
-  // above are this family's; the same ablation also takes `sa3:numToASCII:agbcc` MATCH -> 8/31,
+  // THE FULL BLAST RADIUS IS TWELVE MATCH ROWS, NOT SEVEN, AND ONE OF THEM IS REAL-TIER. Only
+  // FIVE of the seven above belong to this family (`ladder4`, `ladder5`, `ladidx1`, `ladidx2`,
+  // `revlad5s`) — `armcb` and `armcb2` are `l3/unmerge.ts`'s own rows and are cited there
+  // (`:22`, `:525`), while `ladcall5`, which IS one of this block's nine, is INERT. Read the
+  // sentence as "how much coverage this block buys" and the answer is five, not seven. The same
+  // ablation also takes `sa3:numToASCII:agbcc` MATCH -> 8/31,
   // `synthetic:dmascope` MATCH -> 9/56, `synthetic:dmascope2` MATCH -> 13/33, `synthetic:joinsame`
   // MATCH -> 22/46 and `synthetic:joinsense` MATCH -> 18/46 (each measured alone, cache off, at
   // `981bb0b9`). `sa3:numToASCII:agbcc` is the one that matters to a lever author: it is REAL-TIER
-  // — a shipped decomp's own function, not a probe written for this family — and it was cited
-  // NOWHERE in the tree, so nothing warned an author developing here that they could break it.
+  // — a shipped decomp's own function, not a probe written for this family — and until this block
+  // named it, it was cited NOWHERE, so nothing warned an author developing here that they could
+  // break it. Naming it here is enough: `dataset-symmetry.test.ts` ("the dataset cites only
+  // benchmark rows that exist") pins every `project:sym` in this tree against `results.json`, in
+  // the same CI step as `citations.test.ts` — verified by renaming this citation and watching that
+  // suite go red, which is also why it should NOT be added to `citations.test.ts`'s `SCANNED`.
   // (Every one of the twelve turns `pnpm bench regression` red, which is an OUTCOME gate over all
-  // tiers — `report/regression.ts`, "any match→non-match flip". The real one is the expensive one
-  // to discover, not the only one.) Non-MATCH rows the ablation also worsens (so the axis is load-bearing well past
-  // this family): `synthetic:mergeldcast:gcc2.7.2kmc` 4/9 -> 5/9, and the real rows #172 measured.
-  // `kleod:ProcessInputAndUpdateEntities:agbcc` carries the label and was NOT measured (~2700 s):
-  // assume it at risk, not safe. Rows that carry `/unmerge` in their winning label and are
-  // nevertheless INERT under the ablation — `armshare`, `readshare`, `mergeloop`, `mergecast`,
-  // `mergecastu`, `mergeu16`, `mergenarrow` — are the reason the label is a PRE-CHECK and not the
-  // evidence: `applyShapes` builds it from members that FIRED, and the dedup only collapses
-  // candidates with identical source, so a label can carry an axis whose sibling merely TIES.
+  // tiers — `report/regression.ts`, "any match→non-match flip" — but `benchmark.yml` is
+  // `workflow_dispatch` with no cron, so that gate runs when a human dispatches the benchmark, not
+  // on a PR. The real row is the expensive one to discover, not the only one.) A non-MATCH row the ablation also worsens, so the axis is
+  // load-bearing past this family: `synthetic:mergeldcast:gcc2.7.2kmc` 4/9 -> 5/9. That figure and
+  // the five real non-MATCH rows that also worsen — `kleod:EntityItemDrop`,
+  // `kleod:UpdateWorldMapNodeTile`, `sa3:GetInput`, `sa3:sa2__sub_8083504`,
+  // `marioparty3:func_800600C0_60CC0`, all five carrying `/unmerge` in their published label —
+  // come from THIS BRANCH'S REVIEW at `981bb0b9`, not from #172: `gh pr view 172` names none of the
+  // five and no `mergeldcast`. An earlier draft here credited them to #172, which is the
+  // [conjunctive-rows-two-sided] trap in miniature — a correct fact filed under a source that does
+  // not contain it, sending the next reader where the numbers are not. This remediation did not
+  // re-measure them. `kleod:ProcessInputAndUpdateEntities:agbcc` carries the label and was NOT
+  // measured either (~2700 s): assume it at risk, not safe.
+  //
+  // Rows that carry `/unmerge` in their winning label and are nevertheless INERT under the
+  // ablation — `armshare`, `readshare`, `mergeloop`, `mergecast`, `mergecastu`, `mergeu16`,
+  // `mergenarrow` — are why the label is a PRE-CHECK and not the evidence. The mechanism is NOT
+  // `applyShapes` (never called on the pre-fan path — its two call sites, `rank.ts:951` and `:988`,
+  // are `SHAPE_SUBSETS`; the `/unmerge` label is built inline at `rank.ts:1801-1836`) and NOT the
+  // source dedup (the primary fan's spellings are pushed FIRST, so an identical source keeps the
+  // PRIMARY label and never surfaces as a carrier). Measured on `synthetic:armshare:agbcc`, cache
+  // off, one row each way: base MATCH 0/26 label `unsigned/unmerge`, ablated MATCH 0/26 label
+  // `unsigned` — SAME SCORE, DIFFERENT SOURCE (the carrier spells `*(s32 *)50345024 = v1 << 3;` per
+  // arm, the ablated winner hoists `v2`/`v3` and stores once after the join). So a carrier is a
+  // DISTINCT spelling that ties on score and wins on `compareScored`'s within-tie quality keys
+  // (`rank.ts:2010-2021`: group, `deviceVolatile`, `castCount`, `lineCount`, enumeration order) —
+  // which makes these rows outcome-inert but NOT publication-inert: the axis changes the C they
+  // ship, the `bench diff` source-byte field this project has already paid for twice (#112/#113).
   // The cheap route is `grep`ping `candidateLabel` in `results/results.json` (27 rows carry it, 18
   // of them MATCH); the ablation is what decides which of those 18 actually depend on it.
   //

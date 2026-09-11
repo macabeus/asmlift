@@ -15,7 +15,15 @@ import { describe, expect, it } from 'vitest';
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 
 /** Trees whose prose may cite rows. The benchmark's own sources are excluded — they manipulate row
- *  ids as data, so a `project:sym` there is code. */
+ *  ids as data, so a `project:sym` there is code.
+ *
+ *  EXCLUDED IS NOT UNGUARDED, and a review round concluded otherwise: `apps/benchmark/dataset` — the
+ *  attribution blocks, where a `/unmerge` blast-radius list names twelve rows an ablation flips —
+ *  is pinned by `dataset-symmetry.test.ts`'s "the dataset cites only benchmark rows that exist",
+ *  same regex, same `results.json`, same CI step (`vitest run apps/benchmark/test`), and over a
+ *  WIDER file set than this one (`.ts` + `.json`, minus vendored `tu/`). Proved by renaming one
+ *  citation there and watching that suite go red, not by reading. So do not add `dataset` here: it
+ *  would be a second assertion of one convention, which is the drift this file exists to prevent. */
 const SCANNED = ['packages/core/src', 'packages/core/test', 'packages/cli/src', 'packages/cli/test', 'docs'];
 
 const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {

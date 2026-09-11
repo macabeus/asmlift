@@ -142,20 +142,11 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   doubles every enumeration to referee a question with one answer, and a default where an axis
   belongs quietly degrades every function the differ would have rescued.
 
-  **A LEVER WHOSE SIGN IS BASE-DEPENDENT CAN NEVER BE A DEFAULT, and the measurement that says so
-  is a cross-base one, not a cross-row one.** The test above asks whether the asm underdetermines
-  the source; this is the case where the answer is _it depends on which tree you ask about_, and
-  the tree is itself something the fan is choosing. `/unmerge` (`l3/unmerge.ts`, enumerated by
-  `PRE_FAN_PRODUCTS` in `rank-axes.ts`) is the worked case: one axis, one row
-  (`kleod:CountCollectedGems:agbcc`), four bases, four signs — **+44, +24, −3, −17/352** — with the
-  axis untouched throughout, the sign flipping as the structurer's output changed under it
-  (#169 → #172 → #184/#185). No predicate the pass could evaluate decides that, because its value
-  is read off a base the pass does not yet have; enumeration is the only thing that can. Two
-  consequences worth carrying: a lever measured at **+44 on today's winner is not refuted** — that
-  one was the most expensive axis on its row for three rounds and is in its winning label now; and
-  the whole-FUNCTION delta such a measurement produces is honest only while the lever stays
-  enumerated. Convert any part of it to a per-function predicate and the per-site trap this project
-  has paid for three times is armed again.
+  A lever whose SIGN is base-dependent also cannot be a default, but that is not a test you can run
+  here: settling it needs two bases and therefore two rounds, where the criterion above is one you
+  apply before building. It is really a rule about reading a PRICE, so it lives with the other
+  pricing rules below — see **AN AXIS'S PRICE IS ONLY VALID AT THE BASE IT WAS TAKEN AT**, which
+  carries `/unmerge`'s six numbers and says which three are grafts.
 
   **A default may read the map BACKWARDS when the backwards mapping is ITSELF a function, the
   reach is measured, and being wrong then costs a SPELLING and not an answer — in that order.**
@@ -226,6 +217,26 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   the shapes the substitution cannot reach have no row demanding them, take the axis when one
   appears — and name the fork in the lever's header, because otherwise the gap left behind reads as
   an oversight rather than as the price of the mechanism.
+
+  **AN AXIS'S PRICE IS ONLY VALID AT THE BASE IT WAS TAKEN AT — the #161 dating rule, generalised
+  from counts to prices.** A number here is a delta between two candidate sets, and a round that
+  changes the structurer changes both sets; so an axis measured as expensive is not refuted, it is
+  dated. `/unmerge` (`l3/unmerge.ts`, enumerated by `PRE_FAN_PRODUCTS` in `rank-axes.ts`) is the
+  worked case — one axis, one row (`kleod:CountCollectedGems:agbcc`), the axis untouched throughout,
+  **+44** against the #172-era winner and **+24** at #169's base, both MEASURED, then **−17/352**
+  once #184 and #185 flattened the ladder and dropped the accumulator copies. It was the most
+  expensive axis on that row for three rounds and is in its winning label now. Three more points
+  exist and are GRAFTS, kept labelled because this chain's standing lesson is that a graft is a lower
+  bound whose sign and magnitude both mislead: **+2** at a flat ladder, **−3** at flat+no-copies —
+  #172 published that one as this round's prediction and the build delivered −17, under-read by
+  5.7× — and **+4** at flat+no-copies+connective, the only point where the sign goes back POSITIVE
+  at a base strictly closer to the reference, which is to say the −17 may not survive the next rung
+  either. Two consequences: **a lever measured expensive on today's winner is not refuted**, and a
+  lever whose sign is base-dependent can never be a per-compiler default, because its value is read
+  off a base no predicate in the pass has. The delta such a measurement produces is a whole-FUNCTION
+  one, and enumeration is what makes that honest — it buys no per-SITE reach, and saying otherwise is
+  the trap this project has paid for three times wearing its opposite face; `PRE_FAN_PRODUCTS`' own
+  header in `rank-axes.ts` prices that refusal with a measured k.
 
   **The corollary a "shrink the fan" round wants, and it is that round's whole answer: an axis's own
   LICENCE cannot prune it for CPU.** Skipping an axis wherever a predicate proves it cannot fire is
