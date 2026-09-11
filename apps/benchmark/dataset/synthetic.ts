@@ -1647,8 +1647,13 @@ export const SYNTHETIC: SynthSpec[] = [
     // would break first. `selhead` puts a BODY in the head rather than the arms — the arms stay one
     // SET each, so the admission must still fire, and it is the case a predicate written on the arms
     // alone would get wrong if it ever grew a "the head is bare" clause. `selloop` puts a LOOP ahead
-    // of the diamond, so the sink has to compose with another axis (`/indexed`) in the ranked fan
-    // rather than be the only lever the row needs.
+    // of the diamond, so the sink has to compose with another axis in the ranked fan rather than be
+    // the only lever the row needs.
+    //
+    // Measured when added: `selhead` MATCH on all four (agbcc `unsigned/flip-branch`), `selloop`
+    // MATCH on agbcc as `signed/flip-branch/indexed` — the composition this row exists to pin. Its
+    // ido7.1 column DECLINES on a branch-likely `beqzl`, which is the frontend's own gap and one of
+    // 52 such declines already in this tier, not anything the select admission decides.
     sym: 'selhead',
     src: 'int selhead(int x,int *p){ *p = x; if (x & 0x40) return 1; return 0; }',
     features: ['bool', 'branch', 'mask', 'memory'],

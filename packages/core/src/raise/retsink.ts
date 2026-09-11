@@ -134,14 +134,18 @@
 // bodied ones above, and they are what `packages/cli/test/matching` pins.
 //
 // REACH: ONE corpus row. Re-lifting all 1039 rows against `origin/main` changes the emitted source
-// of `kleod:IsSelectButtonPressed:agbcc` and of nothing else. FAILURE DIRECTION: a wrong admission
-// costs a SPELLING and never an answer — the transform is a tail duplication, every arm keeps the
-// value it carried — which is why every clause here is `sound: false`.
+// of `kleod:IsSelectButtonPressed:agbcc` and of nothing else. That is one inhabitant because the
+// corpus has one, not because the rule is shaped to it: `synthetic:selconst`, `selhead` (a body in
+// the HEAD, arms still one SET each) and `selloop` (a loop ahead of the diamond) are MATCH on agbcc
+// as well, the last of them composing with another axis. FAILURE DIRECTION: a wrong admission costs
+// a SPELLING and never an answer — the transform is a tail duplication, every arm keeps the value it
+// carried — which is why every clause here is `sound: false`.
 //
-// SINKING IS NECESSARY, NOT SUFFICIENT: `/flip-branch` was necessary on 4 of the 4 inhabitants
-// measured (`if (x & 0x40) return 1; return 0;` and its inverse, `if (x > 3) return 5; return 3;`,
-// `if (x == 0) return 1; return 0;`). Unranked, all four score 3 and none matches; the target row's
-// own label moved `unsigned` → `unsigned/flip-branch`. The mechanism is structural rather than a
+// SINKING IS NECESSARY, NOT SUFFICIENT: `/flip-branch` was necessary on every inhabitant measured —
+// the 4 shapes the admission was built on (`if (x & 0x40) return 1; return 0;` and its inverse,
+// `if (x > 3) return 5; return 3;`, `if (x == 0) return 1; return 0;`), and the three synthetic rows
+// above (`selloop`'s winning label is `signed/flip-branch/indexed`). Unranked, all four of the first
+// score 3 and none matches; the target row's own label moved `unsigned` → `unsigned/flip-branch`. The mechanism is structural rather than a
 // property of the sample: a sunk diamond has NO JOIN left, so the shipped joined-if default (the
 // layout reading) does not cover it, and for a constant-arm diamond agbcc puts the source's taken
 // arm in the FAR block, which makes the layout reading systematically inverted. "Both arms return a
