@@ -8,9 +8,10 @@
 //     lsr  r0, r0, #0x15        %2 = shr_u %1 {imm=21}      == zext8(x) << 3
 //
 // Exactly: `(x << L) >>u R` for `0 < R < L` keeps x's low `32 - L` bits and lands them at bit
-// `L - R`, which is `zext(x, 32 - L) << (L - R)`; `>>s` is the same with `sext`. Unfolded, the pair
-// prints as `x << 24 >> 21`, which reproduces the same two instructions — so the fold is not a byte
-// fix by itself. What it buys is the two facts the raw pair hides from every pass below:
+// `L - R`, which is `zext(x, 32 - L) << (L - R)`; `>>s` is the same with `sext`. What the fold buys
+// is the two facts the raw pair hides from every pass below — and ONLY those: the spelling it
+// prints when neither is claimed is not byte-neutral, so that spelling never ships (WHAT NOBODY
+// CLAIMED, below):
 //
 //   • THE WIDTH. A declared `u8 idx` is extended in the prologue, and that extension is what
 //     raise/paramwidth.ts reads to type the parameter. When the extension is fused, the prologue
@@ -81,6 +82,24 @@
 // dies only when every reader was folded. A `shl` that keeps another reader leaves the parameter
 // with two readers, which paramwidth's `raw-reader` refuses — the width stays unclaimed rather
 // than guessed.
+//
+// WHAT NOBODY CLAIMED goes back (`restoreUnclaimedScales`, the last pre-recovery pass). An
+// extension no width pass took and a scale no array pass took print as `(u8)a1 << 12`, and that is
+// NOT the same object as the lifted `a1 << 24 >> 12`: straight-line they compile alike (the `pb`
+// pair above), but kleod's `SetWorldMapTilePalette` — two `u8` parameters, the first used in agbcc's
+// shifted domain so paramwidth's scan stops at its `shl` and refuses the second's extension — scores
+// 54/93 with the raw pair and 59/91 with the cast, the loop's r4/r6 allocation swapped. So every
+// scale the fold made that still reads its extension is rewritten in place to the pair it replaced;
+// what survives the pass is exactly what a consumer claimed, and everywhere else the output is the
+// one the lift alone produces.
+//
+// That is a choice of DEFAULT, not a finding that the raw spelling is better: the unclaimed cast
+// has both signs. Over the 55 corpus functions the fold fires on, scored on the benchmark's own
+// path, restoring moves four scores — `SetWorldMapTilePalette` 59/91 → 54/93 and sa3
+// `UnpackSaveSector` 347 → 346 better, sa3 `ClearSave` 189 → 191 and `CompleteSave` 185 → 187
+// worse, all four back to what they scored before the fold existed (and sa3 `ValidateSave`'s
+// denominator, 213/378 → 213/379). A spelling with both signs is the differ's to referee
+// (a ranked axis), and none is built; the default is the one that asserts nothing the lift did not.
 import { type Block, type Fn, type Op, type Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { CAST_WIDTHS } from '../ir/opcodes';
 import { CAST_PATTERNS, patternApplies } from '../pattern/engine';
@@ -163,6 +182,11 @@ export function foldablePair(op: Op | undefined, defs: Map<Value, Op>, order: Po
   return m;
 }
 
+/** Every scale the fold made, with the extension it reads and the pair it replaced — what
+ *  {@link restoreUnclaimedScales} needs to put that pair back. WEAK, and keyed by op identity: an
+ *  entry lives exactly as long as the IR holding its op, so a second function's fold never sees it. */
+const FOLDED = new WeakMap<Op, { ext: Op; l: number; r: number }>();
+
 /** Rewrite every fused pair to `shl(ext(src), shift)`, the extension spliced in at the `shl`'s
  *  position and the scale at the right shift's. Returns the number of pairs folded; the `shl`s
  *  left without a reader are the pass driver's DCE. `order` is the lifted-order fact the driver read
@@ -203,8 +227,48 @@ export function foldScaledExtensions(fn: Fn, order: PoolOrder = poolOrderOf(fn))
       });
       b.ops.splice(b.ops.indexOf(op), 1, scaled);
       replaceAllUsesWith(fn, op.results[0], scaled.results[0]);
+      FOLDED.set(scaled, { ext, l: 32 - m.width, r: 32 - m.width - m.shift });
       folded++;
     }
   }
   return folded;
+}
+
+/** Put back the machine's own pair wherever no pass below claimed what the fold exposed. Returns
+ *  the number of scales restored; an extension left without a reader is the driver's DCE.
+ *
+ *  A scale is CLAIMED when it no longer reads the fold's extension — raise/paramwidth.ts or
+ *  raise/narrowlocal.ts retyped the value and dropped the extension, so the scale now reads that
+ *  value — or when it is gone, legalized into an element index by raise/arrays.ts or
+ *  raise/struct-arrays.ts. Anything else still reads the extension, and is rewritten in place (same
+ *  result value, same position) to `shr(shl(src, L), R)`, with the `shl` where the extension stood:
+ *  the ops the frontend lifted, in the order it lifted them. */
+export function restoreUnclaimedScales(fn: Fn): number {
+  const shls = new Map<Op, Op>();
+  let restored = 0;
+  for (const b of fn.blocks) {
+    for (const op of [...b.ops]) {
+      const f = FOLDED.get(op);
+      if (f === undefined || op.opcode !== 'shl' || op.operands[0] !== f.ext.results[0]) {
+        continue;
+      }
+      let shl = shls.get(f.ext);
+      if (shl === undefined) {
+        const home = fn.blocks.find((x) => x.ops.includes(f.ext))!;
+        shl = mkOp('shl', {
+          operands: [f.ext.operands[0]],
+          results: [mkValue(f.ext.results[0].type)],
+          attrs: { imm: f.l },
+        });
+        home.ops.splice(home.ops.indexOf(f.ext), 0, shl);
+        shls.set(f.ext, shl);
+      }
+      op.opcode = f.ext.opcode === 'sext' ? 'shr_s' : 'shr_u';
+      op.operands = [shl.results[0]];
+      op.attrs = { imm: f.r };
+      FOLDED.delete(op);
+      restored++;
+    }
+  }
+  return restored;
 }

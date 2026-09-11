@@ -18,7 +18,13 @@ import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
 import { recognizeDivPow2 } from './divpow2';
-import { type PoolOrder, foldScaledExtensions, foldsShiftPairCasts, poolOrderOf } from './extscale';
+import {
+  type PoolOrder,
+  foldScaledExtensions,
+  foldsShiftPairCasts,
+  poolOrderOf,
+  restoreUnclaimedScales,
+} from './extscale';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { recognizeMemberArrays } from './memberarrays';
@@ -78,7 +84,7 @@ export interface PreRecoveryPass {
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → soft-division →
  *  scaled-extension → array-legalize → struct-array → member-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads →
- *  narrow-local → parameter-width. See each recognizer's file for the rationale. */
+ *  narrow-local → parameter-width → scaled-extension-restore. See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
   // would otherwise have to reason around, and it can only shrink the value graph.
@@ -160,7 +166,7 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // loop variable's next value, and both short-circuit folds above rewrite the very edges it reads.
   // `dce: false` — the rewrite orphans nothing, since the operand it drops keeps its other use.
   { id: 'narrow', run: rerootNarrowReads, dce: false },
-  // The two WIDTH passes, last and in either order relative to each other: each only DELETES an
+  // The two WIDTH passes, last of the recognizers and in either order relative to each other: each only DELETES an
   // extension and retypes the parameter that fed it, so every recognizer above sees the shape it
   // was written against and neither can match a shape the other creates. They are disjoint by
   // construction — `narrowlocal` refuses an entry parameter, `paramwidth` reads only entry
@@ -185,6 +191,11 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     dce: false,
   },
   { id: 'paramwidth', run: (fn, self) => narrowEntryParams(fn, self), dce: false },
+  // LAST, after every pass that can CLAIM what `extscale` exposed — the two width passes above take
+  // an extension, the array recognizers a scale. What none of them took goes back to the pair the
+  // frontend lifted (raise/extscale.ts, WHAT NOBODY CLAIMED). `dce: true` — the extension it leaves
+  // readerless.
+  { id: 'extscale-restore', run: restoreUnclaimedScales, dce: true, gate: foldsShiftPairCasts },
 ];
 
 /** Run the pre-recovery passes in order. For each pass whose gate passes and that CHANGES the IR, run

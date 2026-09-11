@@ -10,6 +10,8 @@
 //   agbcc-extscale-table.s   void entrylookup(u8 idx) { u8 *flags = gFlags; const u8 *t = gTable;
 //                              const u8 *e = &t[(u32)idx * 8]; flags[0x11] = e[5]; flags[0x12] = e[6]; }
 //   agbcc-extscale-pool.s    void extscale(u32 a) { gB = (u32)&gT + (u8)a * 4; }
+//   agbcc-extscale-unclaimed.s  void extscale(u8 a, u8 b, u16 *p) { u32 i; a++;
+//                              for (i = 0; i < 5; i++) p[i] = (p[i] & 0xfff) | (b << 12); gB = a; }
 // The first two differ ONLY in where the `lsl r0, r0, #0x18` sits — prologue against body — and
 // must reach different signatures. The third is a body cast with nothing but a pool load ahead of
 // it, the shape paramwidth's scan cannot tell from a prologue. Toolchain-free: the round trip is
@@ -21,8 +23,11 @@ import { describe, expect, test } from 'vitest';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
+import { dce } from '../src/pattern/engine';
 import { decompile } from '../src/pipeline';
-import { foldScaledExtensions, foldsShiftPairCasts } from '../src/raise/extscale';
+import { recognizeArrays } from '../src/raise/arrays';
+import { foldScaledExtensions, foldsShiftPairCasts, restoreUnclaimedScales } from '../src/raise/extscale';
+import { narrowEntryParams } from '../src/raise/paramwidth';
 import { PRE_RECOVERY_PASSES } from '../src/raise/pre-recovery';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
@@ -177,6 +182,75 @@ describe('the body cast behind a pool load — the order is read off the LIFTED 
   });
 });
 
+describe('what nobody claimed goes back to the pair the frontend lifted', () => {
+  const lifted = `fn f {
+^bb0(%0: unk32, %1: s32*):
+  %2: unk32 = const {value=1}
+  store %1, %2 {off=0, width=4}
+  %3: unk32 = shl %0 {imm=24}
+  %4: unk32 = shr_u %3 {imm=21}
+  store %1, %4 {off=4, width=4}
+  ret
+}
+`;
+
+  test('an unclaimed scale is rewritten to its pair, in place, and the IR is the lifted IR again', () => {
+    const fn = parse(lifted);
+    expect(foldScaledExtensions(fn)).toBe(1);
+    dce(fn);
+    expect(print(fn)).toContain('zext');
+    expect(restoreUnclaimedScales(fn)).toBe(1);
+    dce(fn);
+    verify(fn);
+    expect(print(fn)).toBe(print(parse(lifted)));
+  });
+
+  test('a scale whose extension paramwidth took is claimed, and stays folded', () => {
+    // No body code ahead of the `shl` here, so the extension is a prologue one.
+    const fn = parse(`fn f {
+^bb0(%0: unk32, %1: s32*):
+  %2: unk32 = shl %0 {imm=24}
+  %3: unk32 = shr_u %2 {imm=21}
+  store %1, %3 {off=4, width=4}
+  ret
+}
+`);
+    foldScaledExtensions(fn);
+    dce(fn);
+    expect(narrowEntryParams(fn)).toBe(1);
+    expect(restoreUnclaimedScales(fn)).toBe(0);
+    expect(print(fn)).toMatch(/= shl %0 \{imm=3\}/);
+  });
+
+  test('a scale an array recognizer legalized is claimed; its twin nobody took is restored', () => {
+    // One `shl`, two scales: `<< 2` indexes a word table (arrays.ts takes it), `<< 3` is stored as
+    // a value. The shared extension stays for the index, and the value gets its pair back.
+    const fn = parse(`fn f {
+^bb0(%0: unk32, %1: s32*, %2: unk32):
+  %3: unk32 = shl %2 {imm=24}
+  %4: unk32 = shr_u %3 {imm=22}
+  %5: unk32 = add %0, %4
+  %6: unk32 = load %5 {off=0, width=4, signed=false}
+  store %1, %6 {off=0, width=4}
+  %7: unk32 = shr_u %3 {imm=21}
+  store %1, %7 {off=4, width=4}
+  ret
+}
+`);
+    expect(foldScaledExtensions(fn)).toBe(2);
+    dce(fn);
+    expect(recognizeArrays(fn)).toBe(1);
+    dce(fn);
+    expect(restoreUnclaimedScales(fn)).toBe(1);
+    dce(fn);
+    verify(fn);
+    const ir = print(fn);
+    expect(ir).toMatch(/= aload %0, %\d+ \{elemSize=4/);
+    expect(ir).toContain('= zext %2 {width=8}');
+    expect(ir).toMatch(/= shr_u %\d+ \{imm=21\}/);
+  });
+});
+
 describe('what the fold hands the passes below it', () => {
   test('a declared narrow parameter: its prologue `lsl` now reads as the extension it is', () => {
     // …and the scan no longer stops at it, so the SECOND parameter's width is recovered too.
@@ -198,6 +272,15 @@ describe('what the fold hands the passes below it', () => {
     const src = source('extscale', 'agbcc-extscale-pool.s');
     expect(src).toMatch(/void extscale\([su]32 a0\)/);
     expect(src).toContain('(a0 << 24) >> 22');
+  });
+
+  test('a fold nobody claims prints as the pair it replaced', () => {
+    // kleod's `SetWorldMapTilePalette` prologue: `a` is incremented in agbcc's shifted domain, so
+    // paramwidth's scan stops at its `shl` and refuses `b`'s extension as body code. Nothing else
+    // reads `b`'s scale, and the cast spelling that would print is not the lifted pair's object.
+    const src = source('extscale', 'agbcc-extscale-unclaimed.s');
+    expect(src).toContain('(a1 << 24) >> 12');
+    expect(src).not.toContain('(u8)a1');
   });
 
   test('the element stride of a struct table indexed by a narrow parameter', () => {
