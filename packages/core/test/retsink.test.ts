@@ -340,7 +340,11 @@ const GUARDED_CONST_SELECT =
 
 /** `synthetic:sign`'s own shape — THREE constant arms off two tests, so no one `cond_br` chooses
  *  the pair. Whether agbcc re-emits a ladder this long from a merge variable is a question the
- *  two-armed evidence does not answer, and the gate refuses rather than guess. */
+ *  two-armed evidence does not answer, and the gate refuses rather than guess. (The pass header
+ *  used to claim a three-way sign ladder among its measured pairs; it is not, and the claim is
+ *  gone. On real agbcc output `sign` reaches the table with THREE branch preds and is refused
+ *  twice over — `two-arms-one-head` first, `constant-arms` once that is ablated — so neither
+ *  ablation moves it on its own.) */
 const THREE_ARM =
   'sel5:\n' +
   '\tcmp\tr0, #0x0\n\tble\t.L2\t@cond_branch\n\tmov\tr0, #0x1\n\tb\t.L5\n' +
@@ -348,22 +352,76 @@ const THREE_ARM =
   '.L4:\n\tmov\tr0, #0x2\n\tb\t.L5\n' +
   '.L5:\n\tbx\tlr\n';
 
+/** A diamond whose arms are BARE — the computation is hoisted into the head, so each arm does
+ *  nothing but carry a value — and whose carried values are NOT constants. This is the shape
+ *  `constant-arms` decides ALONE: `bare-arms` is satisfied, and only the value test refuses.
+ *  `COMPUTED_SELECT` above is refused TWICE OVER (the `add`/`sub` sit in the arms, so dropping
+ *  `constant-arms` leaves `bare-arms` refusing), which is why it cannot pin that clause. */
+const BARE_COMPUTED_SELECT =
+  'sel7:\n' +
+  '\tadd\tr2, r0, r1\n\tsub\tr3, r1, r0\n' +
+  '\tcmp\tr0, r1\n\tble\t.L2\t@cond_branch\n' +
+  '\tmov\tr0, r2\n\tb\t.L3\n' +
+  '.L2:\n\tmov\tr0, r3\n' +
+  '.L3:\n\tbx\tlr\n';
+
+/** `CONST_SELECT` with a BODY in each arm — one store apiece. The arms still carry constants, so
+ *  `constant-arms` is satisfied; what refuses it is `bare-arms`, because a body pins the constant
+ *  below the compare and the merge-variable spelling then emits the diamond too. Five compiled
+ *  shapes of this kind lose a byte-exact match when the clause is dropped
+ *  (`packages/cli/test/matching/shortcircuit-retsink.test.ts`). */
+const BODIED_SELECT =
+  'sel6:\n' +
+  '\tcmp\tr0, #0x0\n\tbne\t.L3\t@cond_branch\n' +
+  '\tmov\tr2, #0x2\n\tstr\tr2, [r1]\n\tmov\tr0, #0x0\n\tb\t.L4\n' +
+  '.L3:\n\tmov\tr2, #0x1\n\tstr\tr2, [r1]\n\tmov\tr0, #0x1\n' +
+  '.L4:\n\tbx\tlr\n';
+
+test('a constant-arm diamond whose arms have a BODY keeps its merge variable', () => {
+  const out = decompile('sel6', BODIED_SELECT, ARMV4T_AGBCC, { prototypes: { sel6: { params: 2 } } }).source;
+  expect(out).toMatch(/return v\d+;/);
+});
+
 test('every constant-arm clause refuses a shape the two-armed evidence does not cover', () => {
   const voidProto = { sel3: { returnsVoid: true, params: 2 } };
   const sinks = (sym: string, asm: string, sel = SELECT_GATES) => {
-    const fn = frontendFor(ARMV4T_AGBCC).lift(sym, asm, ARMV4T_AGBCC, sym === 'sel3' ? voidProto : {});
+    const fn = frontendFor(ARMV4T_AGBCC).lift(
+      sym,
+      asm,
+      ARMV4T_AGBCC,
+      sym === 'sel3'
+        ? voidProto
+        : sym === 'sel6'
+          ? { sel6: { params: 2 } }
+          : sym === 'sel7'
+            ? { sel7: { params: 2 } }
+            : {},
+    );
     applyIdiomPatterns(fn, ARMV4T_AGBCC);
     return sinkReturns(fn, FALL_IN_GATES, sel);
   };
   for (const [id, sym, asm] of [
-    ['constant-arms', 'sel2', COMPUTED_SELECT],
+    ['constant-arms', 'sel7', BARE_COMPUTED_SELECT],
     ['no-arrival-but-the-arms', 'sel4', GUARDED_CONST_SELECT],
     ['two-arms-one-head', 'sel5', THREE_ARM],
+    ['bare-arms', 'sel6', BODIED_SELECT],
   ] as const) {
     expect(sinks(sym, asm), `${sym} is refused`).toBe(false);
     expect(sinks(sym, asm, without(SELECT_GATES, id)), `${id} is what refuses ${sym}`).toBe(true);
   }
-  // `a-value-is-returned` is the one clause no ablation moves on its own: a void merge takes no
-  // block parameter, so `sinkReturns` has already skipped it on the operands check above.
+  // `COMPUTED_SELECT` is refused by BOTH value clauses — its `add`/`sub` live in the arms — so it
+  // pins neither on its own; it takes both ablations to sink it. That is the same subsumption the
+  // corpus shows (the pass header's per-clause ablation table).
+  expect(sinks('sel2', COMPUTED_SELECT, without(SELECT_GATES, 'constant-arms'))).toBe(false);
+  expect(
+    sinks('sel2', COMPUTED_SELECT, without(without(SELECT_GATES, 'constant-arms'), 'bare-arms')),
+    'the two value clauses together are what refuse a computed arm',
+  ).toBe(true);
+  // `a-value-is-returned` has NO fixture that reaches it, and this asserts exactly that rather
+  // than pretending otherwise. `VOID_SELECT`'s merge is refused one check EARLIER — the Thumb
+  // frontend hands even a void function `ret r0`, so its `ret` carries an operand that is not a
+  // param of the merge — and the proof is that the EMPTY table refuses it too. An assertion that
+  // passes for any table pins nothing; this one says which table it passes for and why.
   expect(sinks('sel3', VOID_SELECT, without(SELECT_GATES, 'a-value-is-returned'))).toBe(false);
+  expect(sinks('sel3', VOID_SELECT, []), 'refused before the table, not by it').toBe(false);
 });
