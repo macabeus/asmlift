@@ -7636,71 +7636,129 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['global', 'array', 'mask', 'value-home'],
     toolchains: ['agbcc'],
   },
-  // ── THE SHARED DEFAULT TAIL AFTER A LOOP (attr3/CountCollectedGems) ─────────────────────────
+  // ── THE SHARED DEFAULT TAIL (attr3/CountCollectedGems) ──────────────────────────────────────
   // The THIRD attribution round on `kleod:CountCollectedGems:agbcc`, at the 18/344 the C1a, C2 and
-  // C3 builds (#184, #185, #187) left it at. Two rows: one gap, one control. Every number below
-  // was measured at `2bd229a` (#188) and is current as of that commit.
+  // C3 builds (#184, #185, #187) left it at. Five rows: three gaps, two controls. Every number
+  // below was measured at `2bd229a` (#188).
   //
-  // THE 18 ARE ONE GAP, and a byte-exact ablation says so rather than a reading of the diff. All 18
-  // rows sit in the else-ladder's first three arms (their tails, plus two register rows at the third
-  // arm's entry), and every candidate in the fan spells the ladders' shared default store
-  // (`gCallbackQueue.current[1] = GameplayMainLoop`) TWICE — once in each innermost `else` — where
-  // the source writes each arm as `store; return;` and the default store ONCE, after both ladders.
-  // Rewriting only that (the arms get `return;`, the two copies become one trailing store) in the
-  // fan's own `…/uns-cmp/site-sense/unmerge/offmember` candidate takes it from 40/358 to 0/344,
-  // byte-exact. The same edit leaves the published winner (`…/unmerge/livebase`, 18/344) at 18/344:
-  // under `/livebase` the edit is inert. Applied to all 2880 `/unmerge` candidates in the fan (the
-  // graft path first reproduced all 2880 of the fan's own scores), 2 reach MATCH and both carry
-  // `/offmember` without `/livebase`; under `/livebase` (576 rewritten) none does, and the
-  // `((s32 *)&gCallbackQueue)[1]` spelling gets to 5/344. Every one of those other terms is already
-  // a ranked axis. The shared-tail spelling is in 0 of the 5952 candidates: NO REACH.
+  // THE RESIDUAL IS A CONJUNCTION, shown by a byte-exact ablation rather than by reading the diff.
+  // All 5952 candidates in the fan write the ladders' shared default store
+  // (`gCallbackQueue.current[1] = GameplayMainLoop`) TWICE, once in each innermost `else`. The
+  // source writes each arm as `store; return;` and the default store ONCE, after both ladders. No
+  // candidate spells it the source's way, so this is NO REACH. Rewriting only that in the fan's
+  // `…/uns-cmp/site-sense/unmerge/offmember` candidate takes it from 40/358 to 0/344, byte-exact.
+  // The same rewrite leaves the published winner (`…/unmerge/livebase`) at 18/344. So the winner's
+  // 18 differing rows are NOT the tail's rows. They sit in the else-ladder's first three arms: arm
+  // tails, branch targets, pool words and two register rows. The residual is {the shared tail} AND
+  // {`/offmember` in place of `/livebase`}, and only the first term is missing from the fan. The
+  // rewrite is a regex. It applied to 1440 of the fan's 2880 `/unmerge` candidates: the
+  // `/site-sense` half, which spells the arm first. After it, 2 of those candidates reach MATCH,
+  // and both are `/offmember` without `/livebase`. None of the 384 rewritten `/livebase` candidates
+  // reaches MATCH (best 18/344). 132 of them do change: 104 get better, 24 get worse, and 4 change
+  // only in denominator. "The edit is inert under `/livebase`" is true of the winner, not the axis.
   //
-  // THE COMPILER FACT, from agbcc's own `.gcse` dump rather than from the asm. gcse.c's PRE pass
-  // runs at -O2 (`gcse_main` calls `one_pre_gcse_pass` whenever `optimize_size` is off). Written the
-  // source's way, with the default store after the join and a loop before it on one side, PRE finds
-  // the store's base address (`&gQ` here) partially redundant and INSERTS it at the end of BOTH of
-  // the join's predecessors (`PRE/HOIST: end of bb 1 … end of bb 4, copying expression 15`). The
-  // base then reaches the join in one register from both sides, and the arm's store merges into the
-  // one tail store. Written asmlift's way, with the default store duplicated into each `else`, no
-  // join computes anything. PRE only lifts the loop side's own post-loop loads into that loop's
-  // preheader (`end of bb 1`, twice), and every path keeps a store of its own. Remove the loop and
-  // PRE creates nothing in either spelling (`0 insns created` both ways) and the objects are
-  // byte-identical. The real function's dump agrees: its source spelling gets two more
-  // `&gCallbackQueue` insertions (ends of bb 36 and 37) than its duplicated twin, and the other four
-  // insertions are the same in both. Over pairs compiled both ways, all 18 with a loop before the
-  // join give different objects, and all 15 loop-free ones give byte-identical objects (one or two
-  // ladders, 1-4 arms a side, with and without the real function's `gC` bit-field bodies). That is
-  // why the loop-free ladder rows above (`armcb`, `ladder4`, `ladidx1`) are not affected by it.
+  // #172's OTHER TWO CLASSES carry 0 rows at this base: C1b (33 rows at maxScore 387, "register-
+  // pressure fallout of C1a") and C4 (11 at 387, "`u8` locals + `for` form"). The 0/344 candidate
+  // above declares its counters `u32` and writes its loops as `do`/`while`. Its frame, its `sl`
+  // global base and its pool shape all match the target's.
   //
-  // WHERE asmlift STOPS, instrumented and not read off the source: the lifted IR of both the real
-  // function and `gcsetail` ends in a merged `store, ret` block with ≥2 `br` predecessors (4 in the
-  // real function, 2 here). `sinkReturns` (raise/retsink.ts) tail-duplicates only RETURN-ONLY
-  // merges and passes over this one at its first test (`m.ops.length !== 1`). The structurer then
-  // duplicates the default block into both arms. Nothing downstream proposes the other spelling.
+  // THE COMPILER FACT is a SAMPLE, not a law. Take the row's own pair: `gcsetail` against the same
+  // function with the default store duplicated. agbcc's `.gcse` dump shows gcse.c's PRE pass, which
+  // runs at -O2 whenever `optimize_size` is off. PRE finds the store's base address partially
+  // redundant and INSERTS it at the end of both of the join's predecessors (`PRE/HOIST: end of bb
+  // 1 … end of bb 4, copying expression 15`), so the arm's store merges into the one tail store.
+  // With `-fno-gcse` the pair compiles byte-identical. The real function's dump agrees: its source
+  // spelling gets two more `&gCallbackQueue` insertions (ends of bb 36 and 37) than its duplicated
+  // twin. But a loop before the join is neither necessary nor sufficient. Here are 10 pairs
+  // compiled at the benchmark's flags, varying only the loop side's body:
+  //   - the row's `for` over `gP->f[i]`, alone or plus one more store: DIFFER at -O2, identical
+  //     under `-fno-gcse`.
+  //   - three byte stores (a register swap) or one `gQ.prev = fnA` (block layout): DIFFER with NO
+  //     loop, and still DIFFER under `-fno-gcse`, so a second, non-PRE mechanism exists.
+  //   - a call before the loop, a call inside it, one or two byte stores, a call, or an empty side:
+  //     IDENTICAL.
+  // A loop BEFORE the `if`, dominating both sides (`gcsepre`), also DIFFERS. So a gate on "a loop
+  // before the join" is unsound twice over: it misses both the loop-free divergences and `gcsepre`.
   //
-  //   gcsetail   THE ROW. A loop on one side, one `store; return;` arm on the other, the default
-  //              store once after the join. 15/44 (`unsigned/uns-cmp/unmerge`); 0 of its 36
-  //              candidates share the tail. The winner with only the shared-tail edit applied
-  //              compiles to the target's object byte for byte. m2c 13/41: it shares the default
-  //              BLOCK through a `goto` into the else and stores a merged `void (*)()` local.
-  //   gcsedup    THE CONTROL: the same function written the way asmlift writes it, default store
-  //              duplicated into both arms. MATCH. Its winning source is `gcsetail`'s winning source
-  //              up to where the `return;` lands, so a rewrite that reads the lifted C cannot tell
-  //              the two apart. Only the IR can, where this row's tail is a bare `ret` (instrumented,
-  //              as above). Emitting the shared-tail spelling here costs 18/44 (grafted), so a lever
-  //              that fires on the C shape turns this MATCH into a miss. m2c 14/45.
+  // WHERE asmlift STOPS, instrumented: the lifted IR of the real function and of all three gap
+  // rows ends in a merged `store, ret` block with ≥2 `br` predecessors. `sinkReturns`
+  // (raise/retsink.ts) tail-duplicates only RETURN-ONLY merges, so it skips this one at its first
+  // test (`m.ops.length !== 1`). The structurer then duplicates the default block into both arms.
   //
-  // THE LEVER THIS ROW GATES (a PREDICTION, not measured by a build): sink a merged `store; ret`
-  // tail into the arms that reach it directly, and leave it in place for the join that falls into
-  // it. Built alone, it should take `kleod:CountCollectedGems:agbcc` from 18/344 to MATCH through
-  // the `…/unmerge/offmember` sibling the graft reached. `pnpm bench run --tier real --only
-  // CountCollectedGems` falsifies it. A graft is a bound, not a promise: the edit is worth
-  // nothing to the winner and takes its sibling from 40/358 to 0/344.
+  // THE IR CANNOT DECIDE IT, and that is why `gcsepredup` exists. `gcsepre` and `gcsepredup`
+  // compile to different objects (an r4/r5 swap of the two globals' bases), but their lifted IR is
+  // byte-identical, so asmlift emits byte-identical C for both. One target needs the shared tail
+  // and the other does not, so any DEFAULT keyed on the IR loses one of the two. `gcsedup` cannot
+  // catch that, because its own IR tail is a bare `ret`.
   //
-  // agbcc ONLY, and the other columns were measured before that was decided: `ido7.1` DECLINES
-  // both rows on a branch-likely `beqzl` (the frontend's gap, unrelated to this one), and
-  // `gcc2.7.2kmc` has both decompilers at `noncompile(1)` on both rows. On either of them the row
-  // would measure a different link. `mwcc_242_81` was not smoked, so it is not listed.
+  // THE LEVER THESE ROWS GATE is one RANKED structuring axis with three parts. Every number here
+  // comes from a throwaway review prototype that was never committed, and the build must
+  // re-measure all of them:
+  //   (i)   sink a merged `store…; ret` tail into its single-predecessor `br` arms, and keep it for
+  //         the predecessor that is itself a join (≥2 preds);
+  //   (ii)  compute the `if`'s follow with the sunk arms deleted. Without this the arms end in
+  //         `ret`, the outer `if` has no post-dominator, and the structurer copies the tail back
+  //         into both arms: the same double store, minus the merge temp;
+  //   (iii) before (i), thread a pure parameter forwarder into the tail (`^bb34(v): br ^bb35(v)` in
+  //         the real function).
+  // CountCollectedGems scores 18/344 without (ii) and 11/344 without (iii). With all three it
+  // reaches 0/344, a MATCH, under `…/uns-cmp/offmember`, and `/unmerge`, `/site-sense` and
+  // `/livebase` all leave the label. No synthetic row lifts with a forwarder, so on them (iii)
+  // never fires. `gcsetail` and `gcsepre` are unchanged without (ii) and MATCH with it, under
+  // `unsigned/uns-cmp`. `gcsearms` goes 18/63 → 26/66 without (ii), so (i) alone is WORSE there,
+  // and it MATCHes with (ii). Applied as a DEFAULT, the lever takes `gcsepredup` from MATCH to
+  // 5/45, and on CountCollectedGems it cuts the fan from 5952 to 1800.
+  // DO NOT BREAK, each one measured: `gcsedup` and `gcsepredup` above. As a default, `armexpr` →
+  // 37/40, `maskchain` → 37/69 and `mergeu16` → 2/13 once (i) drops its join requirement.
+  // `mergenarrow` → 2/15, `mergeldcast` → 4/10 and `mergepool` → 1/16 (the shared tail grafted
+  // onto their winners) if the tail is kept for a NON-join predecessor, which the join clause
+  // never does. The ladder
+  // rows (`armcb`, `armcb2`, `ladder4`, `ladidx1`, `ladidx2`) stay MATCH under every form measured.
+  // The decision is made per merge and per predecessor. A per-function axis boolean decides every
+  // store-tail merge in the function at once. Every inhabitant measured here lifts with exactly
+  // one such merge, the real function included.
+  //
+  // THE BOUNDARY. These shapes were measured and got NO row: the lever that closes
+  // CountCollectedGems does not reach them, and no real row has been attributed to them.
+  //   - Loop-free, with the kept predecessor not a join. The three-byte-store body scores 6/31.
+  //     Grafting the shared tail onto its winner matches, and onto its duplicated twin's
+  //     (identical) winner costs 6/31. The `gQ.prev = fnA` body scores asmlift 8/29 against
+  //     m2c's MATCH, and 0/28 grafted. The prototype leaves both untouched in every mode.
+  //   - A lifted IR with a SECOND `ret` block, i.e. an arm that keeps its own `store; ret`, or a
+  //     second tail. A second arm (storing a third callee) in `gcsetail`'s else-ladder gives
+  //     19/53, and 20/54 under the default. Three multi-arm variants of `gcsearms`, each with two
+  //     or more arms on the loop-free side, get worse under the default.
+  //   - The forwarder of (iii). None of 8 synthetic multi-arm shapes lifts with one, so the real
+  //     function is its only inhabitant, and (iii) is gated on it alone.
+  //
+  //   gcsetail   GAP. A loop on one side, one `store; return;` arm on the other, and the default
+  //              store once after the join. 15/44 (`unsigned/uns-cmp/unmerge`; `/unmerge` plays no
+  //              part in the gap and goes inert under the lever). 0 of its 36 candidates share
+  //              the tail. The winner plus only the shared-tail edit compiles to the target byte
+  //              for byte. m2c 13/41: it shares the default BLOCK through a `goto` into the else
+  //              and stores a merged `void (*)()` local.
+  //   gcsedup    CONTROL: `gcsetail` written the way asmlift writes it. MATCH. Its winning C is
+  //              `gcsetail`'s except for where the `return;` lands, and its IR tail is a bare
+  //              `ret`. So it guards against a rewrite keyed on the lifted C: the shared tail costs
+  //              18/44 here, grafted. m2c 14/45.
+  //   gcsepre    GAP: the loop BEFORE the `if`, one arm on each side. 5/45 (`…/uns-cmp/unmerge`);
+  //              0 of its 40 candidates share the tail. m2c 12/47.
+  //   gcsepredup CONTROL: `gcsepre` with the default duplicated. MATCH, with the same IR and the
+  //              same C as `gcsepre`, and a DEFAULT drops it to 5/45. m2c 16/47.
+  //   gcsearms   GAP: three arms, two of them after the loop, and one join kept. 18/63
+  //              (`unsigned/uns-cmp`); 0 of its 36 candidates share the tail. m2c 8/59. It is
+  //              the closest synthetic to the real function's seven arms that lifts without a
+  //              forwarder.
+  //
+  // agbcc ONLY. The other columns were measured, on all five rows, before that was decided:
+  //   - `ido7.1`: asmlift DECLINES on a branch-likely `beqzl`, the frontend's own gap.
+  //   - `mwcc_242_81`: asmlift DECLINES on an SDA-relative `0(0)` base, and m2c noncompiles on
+  //     `NULL`.
+  //   - `gcc2.7.2kmc`: both decompilers are `noncompile(1)` on all five rows. m2c's error is
+  //     ``gP' undeclared`, so the declarations the map carries never reached that compile.
+  //   - `gcc2.7.2`: the same, except that asmlift compiles `gcsetail` (32/42).
+  //   The MIPS noncompiles are undiagnosed, and they are not this family's link.
+  // Every one of those columns measures a different link.
   {
     sym: 'gcsetail',
     src:
@@ -7752,6 +7810,93 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void fnA(void); void fnB(void); void gcsedup(void);',
     proto: {
       gcsedup: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_SLOT_MAP,
+  },
+  {
+    sym: 'gcsepre',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'struct Q { void (*prev)(void); void (*cur)(void); };\n' +
+      'extern struct Q gQ;\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'void gcsepre(void){\n' +
+      '  u8 i;\n' +
+      '  for (i = 0; i < 5; i++) gP->f[i] = 0;\n' +
+      '  if ((gP->f[55] & 0x80) != 0) {\n' +
+      '    if (gP->f[9] == 0x7F) { gQ.cur = fnA; return; }\n' +
+      '  } else {\n' +
+      '    if (gP->f[8] == 0x7F) { gQ.cur = fnA; return; }\n' +
+      '  }\n' +
+      '  gQ.cur = fnB;\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void gcsepre(void);',
+    proto: {
+      gcsepre: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_SLOT_MAP,
+  },
+  {
+    sym: 'gcsepredup',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'struct Q { void (*prev)(void); void (*cur)(void); };\n' +
+      'extern struct Q gQ;\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'void gcsepredup(void){\n' +
+      '  u8 i;\n' +
+      '  for (i = 0; i < 5; i++) gP->f[i] = 0;\n' +
+      '  if ((gP->f[55] & 0x80) != 0) {\n' +
+      '    if (gP->f[9] == 0x7F) { gQ.cur = fnA; } else { gQ.cur = fnB; }\n' +
+      '  } else {\n' +
+      '    if (gP->f[8] == 0x7F) { gQ.cur = fnA; } else { gQ.cur = fnB; }\n' +
+      '  }\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void gcsepredup(void);',
+    proto: {
+      gcsepredup: { returnsVoid: true },
+      fnA: { params: 0, returnsVoid: true },
+      fnB: { params: 0, returnsVoid: true },
+    },
+    symbols: PROBE_SLOT_MAP,
+  },
+  {
+    sym: 'gcsearms',
+    src:
+      'extern void fnA(void);\n' +
+      'extern void fnB(void);\n' +
+      'struct Q { void (*prev)(void); void (*cur)(void); };\n' +
+      'extern struct Q gQ;\n' +
+      'struct Slots { u8 f[64]; };\n' +
+      'extern struct Slots *gP;\n' +
+      'void gcsearms(void){\n' +
+      '  u8 i;\n' +
+      '  if ((gP->f[55] & 0x80) != 0) {\n' +
+      '    for (i = 0; i < 5; i++) gP->f[i] = 0;\n' +
+      '    if (gP->f[9] == 0x7F) { gP->f[10] = 1; gQ.cur = fnA; return; }\n' +
+      '    else if (gP->f[11] == 0x7F) { gP->f[10] = 2; gQ.cur = fnA; return; }\n' +
+      '  } else {\n' +
+      '    if (gP->f[8] == 0x7F) { gP->f[10] = 3; gQ.cur = fnA; return; }\n' +
+      '  }\n' +
+      '  gQ.cur = fnB;\n' +
+      '}',
+    features: ['global', 'pointer', 'struct', 'array', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    ctx: 'void fnA(void); void fnB(void); void gcsearms(void);',
+    proto: {
+      gcsearms: { returnsVoid: true },
       fnA: { params: 0, returnsVoid: true },
       fnB: { params: 0, returnsVoid: true },
     },
