@@ -7101,28 +7101,28 @@ export const SYNTHETIC: SynthSpec[] = [
   // wins on price. It is downstream of the ladder and cannot be attributed on its own, which is why
   // no row here carries it as its subject.
   //
-  // WHICH DIRECTION `/unmerge` IS, because the label alone does not say and one sentence of this
-  // block once had it backwards: the axis FIRING duplicates the merged join statement back into
+  // WHICH DIRECTION `/unmerge` IS, because the label alone does not say: the axis FIRING
+  // duplicates the merged join statement back into
   // the arms, so a `/unmerge` winner spells the store PER ARM; REFUSING leaves the structurer's
   // merged tail (`l3/unmerge.ts`'s own REFUSES list). The real row's published winner emits
   // `p0[1] = &UpdateWorldMapNodeAnim;` at SEVEN separate arm sites (nine `p0[1] = &…` stores in
   // all, the other two `&GameplayMainLoop`), and its `refSource` writes
   // `gCallbackQueue.current[1] = UpdateWorldMapNodeAnim;` seven times, once per arm — per-arm on
-  // both sides, which is why firing PAYS here. (Two earlier passes of this file, and the review
-  // that checked them, all published "ten arm sites" without counting; `python3` over
-  // `results/results.json` says 7 and 9. The DIRECTION is what the paragraph is for and it is
-  // unaffected — count before you carry a number into the sentence that has to survive.)
+  // both sides, which is why firing PAYS here. (Both counts are `python3` over
+  // `results/results.json`, not a reading of the C.)
   //
   // AND THE WHOLE-ROW NUMBER IS AN AXIS'S NUMBER, WHICH BUYS LESS THAN "ENUMERATED, THEREFORE
   // IMMUNE". −17/352 is a per-FUNCTION delta, and enumeration means the differ picks rather than a
-  // predicate guessing — so the number cannot be WRONG. What it is not is per-site REACH, and an
-  // earlier draft of this paragraph claimed the immunity covered both. `unmergeJoins`
+  // predicate guessing — so the number cannot be WRONG. What it is NOT is per-site REACH.
+  // `unmergeJoins`
   // (`l3/unmerge.ts`, the `list`/`rewrite` walk) rewrites EVERY site that clears its gates and
   // returns one `SFn | null`, and `rank.ts` calls it once per structured tree — so the fan carries
   // TWO points, all-merged and all-un-merged, never 2^k. A function wanting site A un-merged and
   // site B merged has no candidate anywhere in the fan. Priced rather than asserted, by counting
-  // successful `unmergeAt` returns per call (`bench gates --pass unmerge`, whole synthetic agbcc
-  // tier, plus `bench fan kleod:CountCollectedGems:agbcc --enumerate`): k = 1 on 23 of the 25
+  // `unmergeAt`'s SUCCESSFUL returns per call under an instrumented `unmergeJoins` — a temporary
+  // print, because `bench gates --pass unmerge` tallies each rule's REFUSALS and never a success —
+  // over the whole synthetic agbcc tier and `bench fan kleod:CountCollectedGems:agbcc
+  // --enumerate`: k = 1 on 23 of the 25
   // firing rows AND on the real row (576 calls, `sites=1` every one), k = 2 on `synthetic:joinsame`
   // and `synthetic:joinsense`. So the refusal is real and inhabited at k = 2, its cost today is
   // ZERO — both k = 2 rows MATCH, and the real row's k = 1 means the mixed partition is no part of
@@ -7140,7 +7140,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // THE FULL BLAST RADIUS IS TWELVE MATCH ROWS, NOT SEVEN, AND ONE OF THEM IS REAL-TIER. Only
   // FIVE of the seven above belong to this family (`ladder4`, `ladder5`, `ladidx1`, `ladidx2`,
   // `revlad5s`) — `armcb` and `armcb2` are `l3/unmerge.ts`'s own rows and are cited there
-  // (`:22`, `:525`), while `ladcall5`, which IS one of this block's nine, is INERT. Read the
+  // (`armcb2` at `:22`, `armcb` at `:525`), while `ladcall5`, which IS one of this block's nine,
+  // is INERT. Read the
   // sentence as "how much coverage this block buys" and the answer is five, not seven. The same
   // ablation also takes `sa3:numToASCII:agbcc` MATCH -> 8/31,
   // `synthetic:dmascope` MATCH -> 9/56, `synthetic:dmascope2` MATCH -> 13/33, `synthetic:joinsame`
@@ -7160,11 +7161,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // the five real non-MATCH rows that also worsen — `kleod:EntityItemDrop`,
   // `kleod:UpdateWorldMapNodeTile`, `sa3:GetInput`, `sa3:sa2__sub_8083504`,
   // `marioparty3:func_800600C0_60CC0`, all five carrying `/unmerge` in their published label —
-  // come from THIS BRANCH'S REVIEW at `981bb0b9`, not from #172: `gh pr view 172` names none of the
-  // five and no `mergeldcast`. An earlier draft here credited them to #172, which is the
-  // [conjunctive-rows-two-sided] trap in miniature — a correct fact filed under a source that does
-  // not contain it, sending the next reader where the numbers are not. This remediation did not
-  // re-measure them. `kleod:ProcessInputAndUpdateEntities:agbcc` carries the label and was NOT
+  // were measured at `981bb0b9` and are NOT in #172, which names none of the five and no
+  // `mergeldcast`; quote them from here, not from that PR. They have not been re-measured since. `kleod:ProcessInputAndUpdateEntities:agbcc` carries the label and was NOT
   // measured either (~2700 s): assume it at risk, not safe.
   //
   // Rows that carry `/unmerge` in their winning label and are nevertheless INERT under the
@@ -7259,9 +7257,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //     tail — the axis FIRES in the winning label, which is the direction that duplicates the
   //     join back into the arms — and `/unmerge` is worth −17/352 to it (the paragraph above). So
   //     the class is not independent, and it is no longer ungated either — ablating `/unmerge`
-  //     moves the real row 39/352 -> 56/352 and takes TWELVE MATCH rows out of MATCH, seven of
-  //     them here and one of them real-tier (`sa3:numToASCII:agbcc`), which is the standard this
-  //     family is built on.
+  //     moves the real row 39/352 -> 56/352 and takes TWELVE MATCH rows out of MATCH, FIVE of
+  //     them here and one of them real-tier (`sa3:numToASCII:agbcc`) — the blast radius above has
+  //     the twelve and says which five — which is the standard this family is built on.
   //
   // ALL NINE ARE agbcc-ONLY, on the same terms as the family above: each was smoked alone
   // (`ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc

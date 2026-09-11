@@ -346,9 +346,8 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
  *
  *  NOT A SECOND ADMISSION GROUND — the bar above is still WHERE the rewrite is applied, and sign
  *  base-dependence discriminates nothing (every axis in this file has a base-dependent price). What
- *  follows is why the lever is ENUMERATED at all, which is the question one table up, and it is
- *  filed here because this is where its reader stands. `/unmerge`'S SIGN IS A PROPERTY OF THE BASE,
- *  NOT OF THE AXIS. One axis, one row (`kleod:CountCollectedGems:agbcc`), with the axis untouched
+ *  follows is why the lever is ENUMERATED at all. `/unmerge`'S SIGN IS A PROPERTY OF THE BASE, NOT
+ *  OF THE AXIS. One axis, one row (`kleod:CountCollectedGems:agbcc`), with the axis untouched
  *  throughout — two MEASUREMENTS and three GRAFTS, kept apart because a graft is a lower bound with
  *  an unreliable sign AND magnitude, which this very axis then demonstrated:
  *
@@ -360,9 +359,8 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
  *                    the build delivered −17, an under-read of 5.7×
  *    GRAFT      +4   at flat + no-copies + connective — the rung a connective round makes real, and
  *                    the ONLY one where the sign goes back POSITIVE at a base strictly CLOSER to
- *                    the reference. Quote it: it says the "−17, in the winning label" state below
- *                    may not survive the next rung, and a law that drops it is the omission its own
- *                    reader pays for.
+ *                    the reference. Quote it with the rest: it says the "−17, in the winning label"
+ *                    state below may not survive the next rung.
  *    MEASURED  −17/352  once #184 and #185 made the flat+no-copies base real
  *
  *  Six numbers, two signs. Nothing about the tree changed the axis; what changed was which tree the
@@ -377,8 +375,9 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
  *  — the differ picks, so the number cannot be WRONG. It buys no REACH: `unmergeJoins` rewrites
  *  every site clearing its gates and returns one tree, so the fan carries TWO points, all-merged
  *  and all-un-merged, never 2^k, and a function wanting site A un-merged and site B merged has no
- *  candidate. Measured, not assumed (`bench gates --pass unmerge` over the synthetic agbcc tier,
- *  counting successful sites per call): k = 1 on 23 of the 25 firing rows and on
+ *  candidate. Measured, not assumed — `unmergeAt`'s SUCCESSFUL returns counted per call under an
+ *  instrumented `unmergeJoins` (`bench gates --pass unmerge` tallies each rule's REFUSALS and never
+ *  a success), over the synthetic agbcc tier: k = 1 on 23 of the 25 firing rows and on
  *  `kleod:CountCollectedGems:agbcc` itself, k = 2 on `synthetic:joinsame` and
  *  `synthetic:joinsense` — both MATCH, so the refusal costs nothing today. State it as PR #120
  *  states its own: a price, never an immunity.
