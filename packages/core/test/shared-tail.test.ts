@@ -376,7 +376,8 @@ const THUMB_LEFT_PARAM =
 
 test('where the sink deletes the follow, rank.ts still enumerates the follow alone', () => {
   // A FAN-level assertion, because the fuzz compares semantics only and cannot see a lost
-  // candidate: with the follow tried only behind the sink, this fan had 0 spellings of the store once.
+  // candidate: a twin that tried the follow only behind the sink emits 0 spellings of the store
+  // once on this shape.
   const errors: string[] = [];
   const cands = enumerateCandidates('f', THUMB_LEFT_PARAM, ARMV4T_AGBCC, {
     prototypes: P,
@@ -418,8 +419,8 @@ const THUMB_PAD =
 
 test('a tail that reads a forwarder parameter is copied with the value each path carried', () => {
   // On a REAL lift and raise, which is the only way to reach this shape: hand-built IR keeps the
-  // tail's own parameter. A copy that substituted the tail's parameters alone read the forwarder's,
-  // which the sweep then deleted — `verify` threw, and the whole `/shared-tail` twin went with it.
+  // tail's own parameter. A copy that substitutes the tail's parameters alone reads the forwarder's,
+  // which the sweep then deletes: `verify` throws, and the whole `/shared-tail` twin goes with it.
   const fn = frontendFor(ARMV4T_AGBCC).lift('f', THUMB_PAD, ARMV4T_AGBCC, P);
   raiseRecovered(fn, ARMV4T_AGBCC, {}, P.f, { shortCircuit: { foldTreeOwned: false } });
   const tail = fn.blocks.find((b) => b.ops.length === 2 && b.ops[0].opcode === 'store' && b.ops[1].opcode === 'ret');

@@ -15,8 +15,9 @@
 //
 // A second arm runs the same functions through `raiseRecovered` first, because that is the fn
 // rank.ts hands the sink and raise reshapes it: a tail reached only through a forwarder reads the
-// forwarder's parameter. Hand-built IR never reaches that shape, and a sink that mishandled it threw
-// in `verify` on real Thumb while this first arm stayed green.
+// forwarder's parameter. Hand-built IR never reaches that shape, and a sink that substitutes the
+// tail's own parameters alone throws in `verify` on a real Thumb lift while this first arm stays
+// green.
 import { expect, test, vi } from 'vitest';
 
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
@@ -204,7 +205,9 @@ test('the sink and the follow change no observable, on the shapes they were buil
       sunkAndFollowed += run(fn) > 0 ? 1 : 0;
     }
   }
-  // At authoring: sunk 15866, followed 9391, sunk+followed 3662, declined 0 — the floors below.
+  // The sweep is not vacuous. At 20000 seeds it sinks 15866 functions, follows 9391 and does both
+  // on 3662, declining none; the floors sit well under all three, so a generator tweak cannot turn
+  // this green by quietly generating nothing the transform touches.
   console.log(
     `[shared-tail-fuzz] seeds=${SEEDS} sunk=${sunk} followed=${followed} sunk+followed=${sunkAndFollowed} declined=${declined}`,
   );
@@ -276,9 +279,10 @@ test('the same, on the fn the raise spine hands rank.ts', async () => {
       }
     }
   }
-  // At authoring: 318 foreign-parameter tails, all sunk; sunk 4779, followed 2780, sunk+followed 1100,
-  // declined 0 — the floors below. With the copy substituting the tail's own parameters alone, seed
-  // 1 already throws in `verify`.
+  // The shape this arm exists for really occurs: 318 of the raised functions carry a foreign-
+  // parameter tail and all 318 are sunk (sunk 4779, followed 2780, both 1100, declined 0), which is
+  // what the first floor holds. With the copy substituting the tail's own parameters alone, seed 1
+  // already throws in `verify`.
   console.log(
     `[shared-tail-fuzz raised] seeds=${SEEDS} foreignParamTail=${foreign} sunk=${sunk} sunkForeign=${foreignSunk} followed=${followed} sunk+followed=${sunkAndFollowed} declined=${declined}`,
   );

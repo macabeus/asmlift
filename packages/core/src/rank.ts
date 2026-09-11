@@ -1720,8 +1720,9 @@ export function enumerateCandidates(
         //     is safe because `structure()` never mutates `fn`, so the earlier passes are done with it.
         //     It is enumerated only where the sink changed something AND some divergent `if` of the
         //     SUNK fn shares a `ret`. That is the sink's price gate: without it, a tail copied into
-        //     arms no `if` shares adds a twin spelling it in each, 204 synthetic candidates on 8 rows
-        //     (the `gcsedup`/`gcseinnerdup`/`armexpr`/`mergeu16` controls and four ladders).
+        //     arms no `if` shares adds a twin spelling it in each — 204 synthetic candidates on 8
+        //     rows (`gcsedup`, `gcseinnerdup`, `armexpr`, `mergeu16`, `ladder4`, `ladder5`,
+        //     `ladidx2`, `revlad5s`), every one of them MATCH today.
         // They are lift-variant twins rather than a structuring axis because the sink is an IR
         // rewrite, and they run here rather than in pipeline.ts's spine because that costs no second
         // lift. Neither is the default: the same IR comes from both sources (raise/tailsink.ts), and
@@ -1742,9 +1743,12 @@ export function enumerateCandidates(
         //
         // EACH BIT IS PER LIFT VARIANT, not per site: the `/shared-tail` pass sinks every store tail
         // and follows every divergent `if` at once, so a function with two sites gets the both-on
-        // candidate only. Over the rows the twins reach on both tiers, one function carries two
-        // follow sites (`synthetic:maskchain:agbcc`) and one two sunk tails
-        // (`synthetic:gcsearms6:agbcc`), both MATCH; every other carries at most one of each.
+        // candidate only. Counted over both tiers (`ProcessInputAndUpdateEntities` excepted), three
+        // functions carry two of something: `synthetic:maskchain:agbcc` two follow sites,
+        // `synthetic:gcsearms6:agbcc` two sunk tails — both MATCH — and
+        // `pokeemerald:SetMauvilleOldManLanguage:agbcc` two sunk tails after which no `if` shares a
+        // `ret`, so the price gate above refuses and its fan is unchanged. Every other function
+        // carries at most one of each.
         //
         // `droppedPrimary` is the PRIMARY pass's drops. Each twin pass reads it and keeps its own
         // drops in a copy, so one twin's structuring failure never removes the other's candidate.

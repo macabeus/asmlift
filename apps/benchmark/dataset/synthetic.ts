@@ -7647,8 +7647,8 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // ── THE SHARED DEFAULT TAIL (attr3/CountCollectedGems) ──────────────────────────────────────
   // The THIRD attribution round on `kleod:CountCollectedGems:agbcc`, at the 18/344 the C1a, C2 and
-  // C3 builds (#184, #185, #187) left it at. Ten rows: seven gaps, three controls. Every number
-  // below was measured at `2bd229a` (#188) plus this family's rows.
+  // C3 builds (#184, #185, #187) left it at, and the build that CLOSED it. Eleven rows: eight
+  // gaps, all MATCH, and three controls.
   //
   // THE CAPABILITY, in one line: spell a tail the compiler shares ONCE, after the `if`, and write
   // every other path into it as an early `return;`. The rest of this comment is evidence for that
@@ -7664,7 +7664,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // differing rows are where the else-ladder's arms 1–3 reach the tail store: each of those arms
   // loads `&gCallbackQueue` itself and branches past the shared base reload. That is 3 per-arm
   // loads the winner lacks, 3 branch targets, 3 pool words, the pool shifts that follow, and 2
-  // register rows. Those three arms are exactly the ones the forwarder of part (iii) below
+  // register rows. Those three arms are exactly the ones the pure forwarder in front of the tail
   // separates from the rest, and the C tail spelling cannot produce them while `/livebase` holds
   // the base in a local. The residual is {the shared tail} AND {`/offmember` in place of
   // `/livebase`}, and only the first term is missing from the fan. The rewrite is a regex. It
@@ -7709,185 +7709,153 @@ export const SYNTHETIC: SynthSpec[] = [
   // has one `br` and one `cond_br` predecessor and nothing is merged. `gcseflat` has one arm of
   // each kind. `gcsearms6` has a SECOND merged tail: two loop-free arms cross-jumped into their
   // own `store; store; ret`. Those three lift with one bare `ret`: their separate `ret`s are
-  // `sinkReturns`' tail-duplicates. In every spelling each path ends in a `ret`, the outer `if`
-  // has no post-dominator, and the structurer copies the default store into both arms.
+  // `sinkReturns`' tail-duplicates. In every spelling each path ends in a `ret` and the outer `if`
+  // has no post-dominator, so WITHOUT a follow over the early-returning paths the structurer copies
+  // the default store into both arms.
   //
   // THE IR CANNOT DECIDE IT, and that is why `gcsepredup` exists. `gcsepre` and `gcsepredup`
   // compile to different objects (an r4/r5 swap of the two globals' bases), but their lifted IR is
   // byte-identical, so asmlift emits byte-identical C for both. One target needs the shared tail
   // and the other does not, so any DEFAULT keyed on the IR loses one of the two. `gcsedup` cannot
-  // catch that, and why depends on the stage. At `sinkReturns`' input its IR tail is a bare `ret`.
-  // After `sinkReturns`, where the prototype's (i) ran, it has a merged `store; ret` whose two `br`
-  // predecessors are both single-predecessor arms, so what keeps (i) off it there is the join
-  // clause, not the shape of the IR.
+  // catch that: no `ret` of its own is reached from both sides of the outer `if`, before the sink
+  // or after it, so both twins' gates are false there and its fan carries neither. `gcsepredup`
+  // carries the sunk twin and is the row that scores the trade.
   //
-  // THE BUILD. Every number in this section comes from an uncommitted prototype or from tree edits
-  // of candidates the fan already emits, so the build must re-measure all of it. Two routes reach
-  // the capability. They sit at different LEVELS, and each one's price is a bound, not a count.
+  // THE BUILD, MEASURED. ROUTE A SHIPPED, at the IR level: a store-tail sink
+  // (`raise/tailsink.ts`) and a follow over the paths that do not return early
+  // (`StructureOptions.followEarlyReturns`), which rank.ts enumerates as two lift-variant twins —
+  // `/shared-ret`, the follow on the fn as raised, and `/shared-tail`, the follow after the sink.
+  // All eleven rows below MATCH. #189's third step, threading a pure parameter forwarder into the
+  // tail, was NOT needed: the sink's source walk sees through `^f(v): br ^t(v)` by construction,
+  // and `gcsefwd` and CountCollectedGems MATCH with no threading step.
   //
-  // ROUTE A, at the IR level, is a LIFT VARIANT. It cannot be a `StructuringAxis` (core
-  // rank-axes.ts): those re-run `structure()` over the same raised function and cannot toggle a
-  // raise pass. A lift variant re-lifts, the way `/connective` does in core's rank.ts. It has three
-  // parts, listed in the order to build them:
-  //   (ii)  THE CORE: compute each `if`'s follow over the paths that do not return, i.e. a post-
-  //         dominator with the early-returning REGIONS deleted. The `clampToLoop` comment in
-  //         structure/structure.ts already names this gap. It must cover the arms the compiler
-  //         itself left returning, not only the ones (i) sinks. Measured by marking blocks by hand:
-  //         `gcseinner` MATCHes when the whole region that can only reach the arm's `ret` is
-  //         deleted. It stays at 21/55 when only the `ret` block is deleted, and it drops to 27/59
-  //         when the OTHER `ret` is marked, so the choice has a sign. The predicted rule is not
-  //         built: the follow is the `ret` region reached from BOTH successors of the `if`, and
-  //         every other `ret` region is an early return. That rule is per `if`. The prototype
-  //         instead edited the function-global `postDominators` with one deletion set, which is
-  //         safe only because every inhabitant has a single nest. Together with (i), the same
-  //         hand-marking rule MATCHes `gcsearms6`, whose early-return region ends in a merged
-  //         tail of its own.
-  //   (i)   AN ADAPTER from the cross-jumped spelling to the other one. Sink a merged tail whose
-  //         body is stores only, ending in a void `ret`, into its single-predecessor `br` arms,
-  //         and keep it for the predecessor that is the `if`'s fallthrough. The prototype
-  //         recognised the fallthrough as "a predecessor that is itself a join (≥2 preds)". That is
-  //         a PROXY, and on `gcseinnerdup` it fires backwards: there the ARM's predecessor is the
-  //         inner `if`/`else` join and the fallthrough has one predecessor. As a default the
-  //         prototype takes that row from MATCH to 16/57. State the decision structurally. On the
-  //         pre pair no IR rule can decide it, which is why (i) must be ranked.
-  //   (iii) Thread a pure parameter forwarder into the tail (`^bb34(v): br ^bb35(v)` in the real
-  //         function). It is needed only because the prototype's (i) admits `br` arms that point
-  //         straight at the tail. A reachability predicate would see through the forwarder by
-  //         construction. That is a prediction, so check whether your (i) needs (iii) before
-  //         building it.
-  // ROUTE B, at L3, is a re-spelling: a `PRE_FAN_PRODUCTS` entry beside `/unmerge` (core
-  // rank-axes.ts). In tail position it hoists one leaf statement S out of the `if` and ends every
-  // other leaf path with `return;`. Tree edits of candidates the fan already emits reach every
-  // inhabitant: `gcsetail` MATCH, `gcsepre` 0/45, `gcsearms` 0/59, `gcseinner` 0/50, `gcseflat`
-  // 0/49, `gcsefwd` 0/85, `gcsearms6` 0/84, and CountCollectedGems 0/344 (the regex rewrite
-  // above). It needs no (iii), no post-dominator change, and no stamp that crosses levels. Its own
-  // per-site choice is S, and that choice has a sign too. Hoisting the MAJORITY leaf value on
-  // `gcsearms` (`fnA` at three leaves, `fnB` at two) gives 27/66, worse than today's 18/63. So S
-  // must come either from a structure-time stamp (the value on the in-edge from the predecessor
-  // reached from both sides; a stamp needs a test where it is produced) or from enumerating k
-  // values (k = 2 on every inhabitant).
-  // THE PRICE, as bounds on CountCollectedGems. Route A as a ranked variant costs at most 5952 +
-  // 1800 = 7752 candidates (+30 %); 1800 is the fan with the prototype on, enumerated. Route B
-  // costs at most +2880, one per `/unmerge` tree, and that number is inferred, not enumerated.
+  // ROUTE B WAS REJECTED, and the claim that recommended it is REFUTED. An L3 `PRE_FAN_PRODUCTS`
+  // re-spelling that hoists one leaf statement out of the `if` does NOT reach every inhabitant: on
+  // `gcseflat` and `gcsearms6` the `fnB` default is carried by ONE merge temp read at TWO join
+  // sites, `/unmerge`'s totality refuses, and no tree the fan emits has the duplicated leaves to
+  // hoist from. The 0/49 and 0/84 credited to Route B on those two rows were hand grafts that also
+  // un-merged that temp. Enumerated, Route B costs +5760 candidates on CountCollectedGems (k = 2:
+  // `UpdateWorldMapNodeAnim` ×7 and `GameplayMainLoop` ×2 both end ≥2 leaves), 1.8× what shipped.
+  // And nothing at L3 decides WHICH leaf is the default: on `gcsearms` `fnA` ends three leaves and
+  // `fnB` two, both in both top-level arms, and the tree has lost that the `fnB` copies were one IR
+  // block. The IR has not — it is the source reached from both successors — which is why the sink
+  // substitutes edge arguments before any merge temp exists.
   //
-  // THE PROTOTYPE'S NUMBERS (route A, applied as a DEFAULT). CountCollectedGems scores 18/344
-  // without (ii) and 11/344 without (iii). With all three it reaches 0/344, a MATCH, under
-  // `…/uns-cmp/offmember`, and `/unmerge`, `/site-sense` and `/livebase` all leave the label.
-  // `gcsetail` and `gcsepre` are unchanged without (ii) and MATCH with it, under
-  // `unsigned/uns-cmp`. `gcsearms` goes 18/63 → 26/66 without (ii) and MATCHes with it. That
-  // 26/66 is a DEFAULT-mode number: a ranked build keeps today's 18/63 candidate in the fan, so it
-  // cannot publish 26/66 (a prediction by construction). `gcsefwd` stays at 30/96 without (ii)
-  // and at 30/96 without (iii), and MATCHes with all three, which makes it the synthetic gate for
-  // (iii). `gcseinner` is NO REACH for the prototype: it stays at 21/55 and (i) never fires,
-  // because there is no merged `store; ret` to sink. `gcseflat` goes 19/53 → 20/54. (i) sinks the
-  // cross-jumped arm, the prototype's (ii) ignores the arm that returns on its own, and the
-  // structurer copies the default back into that arm. With that arm marked as well, `gcseflat`
-  // MATCHes; marked without (i) it is 20/54, so it needs both parts. `gcsearms6` is the same
-  // story with a sign trap in it: 29/89 today, 37/97 with (i) whether or not the prototype's
-  // (ii) runs, 23/87 with only its second tail's region marked, and MATCH with (i) and that mark
-  // together. So as a default, (i) plus a NARROW (ii) is worse than nothing there. Also as a
-  // default, the prototype takes `gcsepredup` from MATCH to 5/45 and `gcseinnerdup` from MATCH to
-  // 16/57, and it cuts CountCollectedGems' fan from 5952 to 1800.
+  // THE PRICE, enumerated. CountCollectedGems 5952 → 9192 (+3240: +1440 on the base lift's twins
+  // and +1800 on `/connective`'s, which the winner needs; #189's "≤ +1800" priced one variant, not
+  // the cross). Real +5078 over 7 rows and concentrated — `CheckWorldCompletion` 840 → 2520 buys
+  // one point. Synthetic 7330 → 7782. `ProcessInputAndUpdateEntities`, which is 97% of the real
+  // tier's wall clock, enumerates a byte-identical fan, so the tier's clock does not move.
   //
-  // BUILD ORDER, and the sign traps on it:
-  //   1. (ii), general and per `if`, gated by `gcseinner`, and by `gcseflat` and `gcsearms6`
-  //      together with (i). Predicted INERT on `gcsetail`, `gcsepre`, `gcsearms`, `gcsefwd` and
-  //      CountCollectedGems: at the prototype's stage each lifts with exactly one `ret` block, so
-  //      (ii) has nothing to delete until (i) runs. For the same reason only `gcseinner`,
-  //      `gcseflat` and `gcsearms6` can tell a narrow (ii), keyed on (i)'s output, from the
-  //      general one. Whether (ii) can be a DEFAULT is OPEN. It turns on whether agbcc ever lifts
-  //      a duplicated source into `gcseinner`'s IR. To falsify it, build (ii) as a default and run
-  //      `bench run --tier synthetic --toolchain agbcc`, counting MATCH losses, plus `--tier real
-  //      --only` on the reach set.
-  //   2. (i) as a ranked variant, NEVER before (ii): without (ii), (i) is inert on `gcsetail`,
-  //      `gcsepre` and CountCollectedGems and, as a default, worse on `gcsearms`.
-  //   3. (iii), only if step 2's predicate needs it on `gcsefwd` and CountCollectedGems.
-  // Route B replaces all three steps, not step 2 alone: its tree edits reach every inhabitant with
-  // no (ii) and no (iii).
-  // The per-`if` choice in (ii) and the per-predecessor choice in (i) are made per SITE, inside
-  // the variant's on point. A single boolean decides every store-tail merge in the function at
-  // once. At the structurer the real function and every inhabitant but two have exactly one such
-  // merge: `gcseinner` has none, and `gcsearms6` has two, only one of them (i)'s. The other is an
-  // early-return region for (ii).
+  // NEITHER TWIN CAN BE A DEFAULT, and the two halves fail differently. The follow as a default
+  // costs `sw_fallguard:ido7.1` 13/19 → 19/23 and `gcseflat` 19/53 → 22/54 (`findfirst:agbcc`
+  // 12/25 → 10/25 gains). The sink as a default takes `gcsepredup` MATCH → 5/45 and `gcseinnerdup`
+  // MATCH → 16/57 — the paragraph above, from the other side: their IR is the gap rows' IR.
+  // Ranked, `gcsepredup`'s fan carries 20 `/shared-tail` candidates and the un-sunk spelling still
+  // wins, which is the control doing its work rather than a gate refusing the shape.
   //
-  // DO NOT BREAK, each one measured: `gcsedup`, `gcsepredup` and `gcseinnerdup` above. As a
-  // default, `armexpr` → 37/40, `maskchain` → 37/69 and `mergeu16` → 2/13 once (i) drops its join
-  // requirement. `mergenarrow` → 2/15, `mergeldcast` → 4/10 and `mergepool` → 1/16 (the shared
-  // tail grafted onto their winners) if the tail is kept for a NON-join predecessor. The
-  // prototype never touches those three: none has a join predecessor, and none has a store-only
-  // tail (`sext`/`zext` precede the store, and `mergeldcast` returns a value). The ladder rows
-  // (`armcb`, `armcb2`, `ladder4`, `ladidx1`, `ladidx2`) stay MATCH under every form measured.
+  // TWO TWINS, NOT ONE, because the sink can DELETE the follow: a store tail that is itself the
+  // `ret` both sides of the `if` reach is copied into its `br` sources and no shared `ret` is left.
+  // `gcsejoin` is that shape and scored 7/37 while the follow was tried only behind the sink. No
+  // per-tail predicate on this IR picks between them — refusing to sink a tail that is already a
+  // follow costs `gcseflat` 19/53 and `gcsearms6` 23/87, and both need a tail that is BOTH — so the
+  // follow is enumerated on the fn as raised as well, at +76 candidates on exactly those two rows
+  // (`gcseflat` +32, `gcsearms6` +44) and +0 real.
+  //
+  // PER SITE, with inhabitants. The follow's deletion set is keyed on each `if`'s own shared-`ret`
+  // set, not on one function-wide set: `maskchain` carries two follow sites and `gcsearms6` two
+  // sunk tails, both MATCH, and a function-wide memo fails `shared-tail.test.ts`'s two-`if` test.
+  //
+  // DO NOT BREAK, and all fourteen MATCH as shipped: `gcsedup`, `gcsepredup` and `gcseinnerdup`
+  // above; `armexpr`, `maskchain` and `mergeu16`, which a sink that copied a tail into arms no `if`
+  // shares takes to 37/40, 37/69 and 2/13; `mergenarrow`, `mergeldcast` and `mergepool`, which a
+  // tail kept for the wrong path takes to 2/15, 4/10 and 1/16. Those last three are out of the
+  // rewrite's reach by shape — none has a store-only tail (`sext`/`zext` precede the store, and
+  // `mergeldcast` returns a value) — and their fans carry no twin. `maskchain`'s does, 32 of 64,
+  // and it MATCHes on a non-twin candidate. The ladder rows (`armcb`, `armcb2`, `ladder4`,
+  // `ladidx1`, `ladidx2`) MATCH under every form measured.
   //
   // THE BOUNDARY. These shapes were measured and got NO row:
-  //   - Loop-free, with the kept predecessor not a join. The three-byte-store body scores 6/31.
-  //     Grafting the shared tail onto its winner matches, and onto its duplicated twin's
-  //     (identical) winner costs 6/31. The `gQ.prev = fnA` body scores asmlift 8/29 against
-  //     m2c's MATCH, and 0/28 grafted. The prototype leaves both untouched in every mode.
+  //   - Loop-free, with the kept path not a join. The three-byte-store body scores 6/31. Grafting
+  //     the shared tail onto its winner matches, and onto its duplicated twin's (identical) winner
+  //     costs 6/31. The `gQ.prev = fnA` body scores asmlift 8/29 against m2c's MATCH, and 0/28
+  //     grafted. Neither was re-measured against the shipped twins: build the row to move them.
   //   - Low-pressure shapes with a SECOND `ret` block. Three `gcsearms` variants with two or more
-  //     arms on the loop-free side get WORSE under the prototype as a default (25/77 → 31/78,
-  //     17/68 → 29/71, 29/89 → 37/97). All three MATCH with (i) plus their other `ret` region
-  //     marked by the both-sides rule, so they are inhabitants of the general (ii), not a separate
-  //     gap. The third is booked as `gcsearms6`. The first two keep an arm's own `ret`, which
-  //     `gcseflat` already gates. Four CountCollectedGems-like low-pressure variants (e.g.
-  //     30/162 → 54/169) were not measured with marks, so for them this is a prediction.
-  //   - Two controls that gate nothing. `gcseflat`'s duplicated twin MATCHes today and under the
-  //     prototype. `gcsefwd`'s MATCHes in all five prototype modes.
+  //     arms on the loop-free side MATCH under the sink plus the both-sides follow, so they are
+  //     inhabitants of the same rule rather than a separate gap. The third is booked as
+  //     `gcsearms6`; the first two keep an arm's own `ret`, which `gcseflat` already gates. Four
+  //     CountCollectedGems-like low-pressure variants were never hand-marked, so that they are
+  //     inhabitants too is a PREDICTION — falsify it by building one and scoring its fan.
+  //   - Three duplicated twins that gate nothing: `gcseflat`'s and `gcsefwd`'s MATCH under every
+  //     form measured, and `gcsejoin`'s lifts with no shared `ret` at all, so it enumerates no twin
+  //     either way.
   //   - Why `gcsefwd` subtracts. Summing (`a += gP->f[i]`) gives the same forwarder, but both
   //     twins then keep a 4-row residual: the operand order of the add (`adds r0, r6, r0` in the
   //     target). That is a commutative operand-order gap, not this family's. With three
-  //     accumulators instead of four there is no forwarder at all (30/82, and 32/82 as a default),
-  //     so register pressure is what produces it, on one ablation.
+  //     accumulators instead of four there is no forwarder at all (30/82), so register pressure is
+  //     what produces it, on one ablation.
   //
-  //   gcsetail   GAP. A loop on one side, one `store; return;` arm on the other, and the default
-  //              store once after the join. 15/44 (`unsigned/uns-cmp/unmerge`; `/unmerge` plays no
-  //              part in the gap and goes inert under the lever). 0 of its 36 candidates share
-  //              the tail. The winner plus only the shared-tail edit compiles to the target byte
-  //              for byte. m2c 13/41: it shares the default BLOCK through a `goto` into the else
-  //              and stores a merged `void (*)()` local.
-  //   gcsedup    CONTROL: `gcsetail` written the way asmlift writes it. MATCH. Its winning C is
-  //              `gcsetail`'s except for where the `return;` lands. So it guards against a
-  //              rewrite keyed on the lifted C: the shared tail costs 18/44 here, grafted.
-  //              m2c 14/45.
-  //   gcsepre    GAP: the loop BEFORE the `if`, one arm on each side. 5/45 (`…/uns-cmp/unmerge`);
-  //              0 of its 40 candidates share the tail. m2c 12/47.
-  //   gcsepredup CONTROL: `gcsepre` with the default duplicated. MATCH, with the same IR and the
-  //              same C as `gcsepre`, and a DEFAULT drops it to 5/45. m2c 16/47.
-  //   gcsearms   GAP: three arms, two of them after the loop, and one join kept. 18/63
-  //              (`unsigned/uns-cmp`); 0 of its 36 candidates share the tail. m2c 8/59.
-  //   gcseinner  GAP for (ii): `gcsetail` with an inner `if`/`else` in the arm. agbcc does NOT
-  //              cross-jump it, so the arm keeps its own `ret` and (i) has nothing to sink. 21/55
-  //              (`unsigned/uns-cmp/unmerge`); 0 of its 76 candidates share the tail, and the
-  //              winner plus the shared-tail edit is 0/50. m2c 13/51.
-  //   gcseinnerdup CONTROL: `gcseinner` with the default duplicated. MATCH, and the shared tail
-  //              grafted onto its winner costs 23/55. Its IR IS cross-jumped (instrumented), with
-  //              the arm's predecessor a join, so the prototype's join clause inverts the roles
-  //              (MATCH → 16/57 as a default). m2c 14/52.
-  //   gcseflat   GAP for (i) and (ii) together: two arms in the else-ladder, storing `fnA` and
-  //              `fnC`. One is cross-jumped into the tail and the other keeps its own `ret`. 19/53
-  //              (`unsigned/uns-cmp`); 0 of its 32 candidates share the tail, and the winner plus
-  //              the shared-tail edit is 0/49. m2c 13/51 with `PROBE_SLOTFNC_MAP`.
-  //   gcsefwd    GAP for (iii): four `u8` accumulators live across the loop, two arms on each
+  //   gcsetail   A loop on one side, one `store; return;` arm on the other, and the default store
+  //              once after the join. Was 15/44 with 0 of its 36 candidates sharing the tail;
+  //              CLOSED: **MATCH** on `unsigned/shared-tail/uns-cmp`, fan 36 → 52 (16 twin).
+  //              m2c 13/41: it shares the default BLOCK through a `goto` into the else and stores
+  //              a merged `void (*)()` local.
+  //   gcsedup    CONTROL: `gcsetail` written the way asmlift writes it. MATCH on
+  //              `unsigned/uns-cmp/unmerge`, fan 64 and no twin — neither twin's gate fires, since
+  //              no `ret` is reached from both sides of its outer `if`. It guards against a rewrite
+  //              keyed on the lifted C: the shared tail costs 18/44 here, grafted. m2c 14/45.
+  //   gcsepre    The loop BEFORE the `if`, one arm on each side. Was 5/45 with 0 of its 40
+  //              candidates sharing the tail; CLOSED: **MATCH** on `unsigned/shared-tail/uns-cmp`,
+  //              fan 40 → 60 (20 twin). m2c 12/47.
+  //   gcsepredup CONTROL: `gcsepre` with the default duplicated. MATCH on
+  //              `unsigned/uns-cmp/unmerge`, with the same IR and the same C as `gcsepre`. The
+  //              sunk twin IS in its fan — 20 of 60 — and loses on score; as a DEFAULT it would
+  //              take the row to 5/45. That pair is why the sink is ranked. m2c 16/47.
+  //   gcsearms   Three arms, two of them after the loop, and one join kept. Was 18/63 with 0 of
+  //              its 36 candidates sharing the tail; CLOSED: **MATCH** on
+  //              `unsigned/shared-tail/uns-cmp`, fan 36 → 68 (32 twin). m2c 8/59.
+  //   gcseinner  THE FOLLOW ALONE: `gcsetail` with an inner `if`/`else` in the arm. agbcc does NOT
+  //              cross-jump it, so the arm keeps its own `ret` and the sink has nothing to copy.
+  //              Was 21/55 with 0 of its 76 candidates sharing the tail; CLOSED: **MATCH** on
+  //              `unsigned/shared-ret/uns-cmp/unmerge`, fan 76 → 114 (38 `/shared-ret`, 0
+  //              `/shared-tail`). m2c 13/51.
+  //   gcseinnerdup CONTROL: `gcseinner` with the default duplicated. MATCH on
+  //              `unsigned/uns-cmp/unmerge`, fan 76 and no twin, and the shared tail grafted onto
+  //              its winner costs 23/55. Its IR IS cross-jumped (instrumented), which is why a
+  //              sink run as a DEFAULT takes it to 16/57. m2c 14/52.
+  //   gcseflat   BOTH TERMS: two arms in the else-ladder, storing `fnA` and `fnC`. One is
+  //              cross-jumped into the tail and the other keeps its own `ret`, so its tail is both
+  //              a follow and a sink target. Was 19/53 with 0 of its 32 candidates sharing the
+  //              tail; CLOSED: **MATCH** on `unsigned/shared-tail/uns-cmp`, fan 32 → 96, the one
+  //              row besides `gcsearms6` carrying both twins (32 each). m2c 13/51 with
+  //              `PROBE_SLOTFNC_MAP`.
+  //   gcsefwd    THE FORWARDER: four `u8` accumulators live across the loop, two arms on each
   //              side. The target reaches the tail store through a base reload (`mov r1, ip`) that
   //              the loop-side arms branch to and the else-side arms skip, and it lifts as a
-  //              forwarder. 30/96 (`unsigned/reread-globals/uns-cmp/unmerge`); 0 of its 108
-  //              candidates share the tail, and the winner plus the shared-tail edit is 0/85. m2c
-  //              is `noncompile(1)` on its own output, which indexes `gP` as `*(gP + (i + 5))`
-  //              against the `struct Slots` the ctx declares ("invalid operands to binary -").
-  //   gcsearms6  GAP for (i) and (ii) together: three arms on each side, the closest synthetic to
+  //              forwarder. Was 30/96 with 0 of its 108 candidates sharing the tail; CLOSED:
+  //              **MATCH** on `unsigned/shared-tail/reread-globals/uns-cmp`, fan 108 → 204 (96
+  //              twin), with no threading step — the sink's source walk sees through the
+  //              forwarder. m2c is `noncompile(1)` on its own output, which indexes `gP` as
+  //              `*(gP + (i + 5))` against the `struct Slots` the ctx declares ("invalid operands
+  //              to binary -").
+  //   gcsearms6  BOTH TERMS, and TWO sunk tails: three arms on each side, the closest synthetic to
   //              the real function's seven. agbcc cross-jumps two of the loop-free arms into a
-  //              second tail of their own. 29/89 (`unsigned/uns-cmp`); 0 of its 44 candidates
-  //              share the tail, and the winner plus the shared-tail edit is 0/84. m2c 23/86.
-  //   gcsejoin   GAP for (ii) WHERE (i) DELETES IT, loop-free. The store after the join writes a
+  //              second tail of their own. Was 29/89 with 0 of its 44 candidates sharing the tail;
+  //              CLOSED: **MATCH** on `unsigned/shared-tail/uns-cmp`, fan 44 → 120 (32
+  //              `/shared-tail`, 44 `/shared-ret`). m2c 23/86.
+  //   gcsejoin   THE FOLLOW THE SINK DELETES, loop-free. The store after the join writes a
   //              PARAMETER (`p[20] = a`), so the tail block is stores-only and the sink sees a tail
   //              — but that tail is ALREADY the `ret` both sides of the outer `if` reach, and the
-  //              `fnA` arm keeps its own. Copying it into its `br` source leaves no shared `ret`, so
-  //              a follow enumerated only BEHIND the sink never runs: 7/37 (`unsigned`, 8
-  //              candidates, 0 twin) at `910fd416` and under a twin that bundles the two. With the
-  //              follow enumerated on the fn as raised as well it is MATCH (`unsigned/shared-ret`,
-  //              24 candidates). Its shape has no inhabitant among the other nine rows, which is why
-  //              they all MATCH under the bundled twin. m2c is `noncompile(1)` on its own output,
-  //              which spells the parameter store as `p->unk14 = a` against the `u8 *p` the ctx
-  //              declares ("request for member `unk14' in something not a structure or union").
+  //              `fnA` arm keeps its own. Copying it into its `br` source leaves no shared `ret`,
+  //              so a follow enumerated only BEHIND the sink never runs: it was 7/37 (8 candidates,
+  //              0 twin) both before this family's build and under a twin that bundled the follow
+  //              behind the sink. CLOSED by
+  //              enumerating the follow on the fn as raised too: **MATCH** on
+  //              `unsigned/shared-ret`, fan 24 (16 twin). No other row has this shape, which is
+  //              why the other ten MATCH under the bundled twin as well. m2c is `noncompile(1)` on
+  //              its own output, which spells the parameter store as `p->unk14 = a` against the
+  //              `u8 *p` the ctx declares ("request for member `unk14' in something not a
+  //              structure or union").
   //
   // agbcc ONLY. The other columns were measured on `gcsetail`, `gcsedup`, `gcsepre`, `gcsepredup`
   // and `gcsearms`:

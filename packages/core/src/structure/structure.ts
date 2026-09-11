@@ -4835,7 +4835,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // null ⇒ the arms diverge (both reach EXIT) and no follow over early returns applies. Asked
     // outside loop bodies only: inside one, `clampToLoop` below owns the question. DEFENSIVE — no
     // input it changes: ablated, the follow fires on no more of 40,000 generated functions (random
-    // structuring options, sunk and unsunk) and on no corpus row the twins reach.
+    // structuring options, sunk and unsunk), and every row of both tiers enumerates a byte-identical
+    // label-and-source set (810 synthetic, 251 real, `ProcessInputAndUpdateEntities` excepted).
     const ipd = ipdom.get(b) ?? (followEarlyReturns && loopCtx === null ? followOverReturns(b, stop) : null);
     // Inside a loop body, a join OUTSIDE that body is not this `if`'s join: an arm that leaves the
     // loop `return`s and never comes back, so what is left reconverges at the loop's own
