@@ -164,10 +164,12 @@ import type { SFn } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
+import { scaledExtensionOf } from './extscale';
 
 /** One additive term of an address residual: `v` scaled by `scale`, or a pure constant.
- *  `scaleOp` is the op that DID the scaling (a `shl`/`mul`), which is what carries the position
- *  the order licence reads; a term at scale 1 has none. */
+ *  `scaleOp` is the op that DID the scaling (a `shl`/`mul`, or the right shift of a fused cast —
+ *  see `scaleOf`), which is what carries the position the order licence reads; a term at scale 1
+ *  has none. */
 interface Term {
   scale: number;
   /** null ⇒ a constant term, whose value is `konst` */
@@ -618,7 +620,14 @@ function useIndex(fn: Fn): Map<Value, Op[]> {
 }
 
 /** `x * K` / `x << k` read as a scale, or scale 1 for anything else. A CONSTANT operand makes the
- *  whole term constant instead (`const << 2` is a displacement, not a subscript). */
+ *  whole term constant instead (`const << 2` is a displacement, not a subscript).
+ *
+ *  …and a narrowing cast FUSED with its scale, `shr(shl(x, 24), 21)` — `(u8)x << 3` after agbcc's
+ *  combiner merged the pair's right half into the scale. It is read here the way
+ *  raise/extscale.ts later folds it, off the same predicate, and its RIGHT shift is the scaling op:
+ *  compiled, `gTbl[i]` over a `u8 i` is `lsl` / `ldr` / `lsr` and `((u16 *)gTbl)[i]` is `lsl` /
+ *  `lsr` / `ldr`, so the right half is where the order fork shows. A constant under the pair keeps
+ *  the scale-1 reading — `const` folds that pair to its value before anything spells it. */
 function scaleOf(v: Value, defs: Map<Value, Op>): Term {
   const d = defs.get(v);
   const constOf = (x: Value): number | null => {
@@ -637,6 +646,10 @@ function scaleOf(v: Value, defs: Map<Value, Op>): Term {
     return k > 0 && k < 31
       ? { scale: 1 << k, v: d.operands[0], konst: 0, scaleOp: d }
       : { scale: 1, v, konst: 0, scaleOp: null };
+  }
+  const fused = scaledExtensionOf(d, defs);
+  if (d !== undefined && fused !== null && constOf(fused.src) === null) {
+    return { scale: 1 << fused.shift, v: fused.src, konst: 0, scaleOp: d };
   }
   if (d?.opcode === 'mul') {
     for (const [a, b] of [

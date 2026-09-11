@@ -157,6 +157,58 @@ describe('the order of the pool load licenses the bare array subscript', () => {
   });
 });
 
+// ── the same fork through a NARROW index, where agbcc fuses the cast with the scale ──────────
+// Compiled through this benchmark's agbcc, `extern u16 gTbl[]` read by a `u8 i`: the index's
+// extension and its ×2 are ONE shift pair, `lsl #24` / `lsr #23`, and the fork shows at the right
+// half — the pool load lands before it for the array and after it for the cast.
+
+// `u32 f(u8 i) { return gTbl[i]; }`
+const FUSED_BASE_FIRST = thumb(
+  'f',
+  '\tlsl\tr0, r0, #0x18\n\tldr\tr1, .L3\n\tlsr\tr0, r0, #0x17\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]',
+  '.word\tgTbl',
+);
+// `u32 f(u8 i) { return ((u16 *)gTbl)[i]; }`
+const FUSED_INDEX_FIRST = thumb(
+  'f',
+  '\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x17\n\tldr\tr1, .L3\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]',
+  '.word\tgTbl',
+);
+// `struct E { u8 a[5]; u8 b; u8 c; u8 d; };`, `u8 gOut`, a `u8 i`, and the element read 5 bytes
+// in: through a pointer LOCAL `struct E *p = (struct E *)gTbl; gOut = p[i].b;` (HOME), and inline
+// `gOut = ((struct E *)gTbl)[i].b;` (INLINE) — kleod's `GetEntityLookupData` shape, one table.
+const FUSED_ELEM_HOME = thumb(
+  'f',
+  '\tlsl\tr0, r0, #0x18\n\tldr\tr1, .L3\n\tldr\tr2, .L3+0x4\n\tlsr\tr0, r0, #0x15\n\tadd\tr0, r0, r1\n' +
+    '\tldrb\tr0, [r0, #0x5]\n\tstrb\tr0, [r2]',
+  '.word\tgTbl\n\t.word\tgOut',
+);
+const FUSED_ELEM_INLINE = thumb(
+  'f',
+  '\tlsl\tr0, r0, #0x18\n\tldr\tr2, .L3\n\tlsr\tr0, r0, #0x15\n\tldr\tr1, .L3+0x4\n\tadd\tr0, r0, r1\n' +
+    '\tldrb\tr0, [r0, #0x5]\n\tstrb\tr0, [r2]',
+  '.word\tgOut\n\t.word\tgTbl',
+);
+
+describe('a cast fused with its scale is a scaling, ordered at its right shift', () => {
+  test('base-first: the shape is derived and the access spells `gTbl[a0]`', () => {
+    expect(derive('f', FUSED_BASE_FIRST).get('gTbl')).toMatchObject({ shape: 'array', elemSize: 2 });
+    expect(sourceOf('f', FUSED_BASE_FIRST)).toContain('gTbl[a0]');
+    expect(sourceOf('f', FUSED_BASE_FIRST)).not.toContain('&gTbl');
+  });
+
+  test('index-first: nothing is derived and the cast spelling stands', () => {
+    expect(derive('f', FUSED_INDEX_FIRST).size).toBe(0);
+    expect(sourceOf('f', FUSED_INDEX_FIRST)).toContain('((u16 *)&gTbl)[a0]');
+  });
+
+  test('a struct element read inside it: licensed for a home on the HOME order only, never declared', () => {
+    expect([...licensed('f', FUSED_ELEM_HOME)]).toEqual(['gTbl']);
+    expect([...licensed('f', FUSED_ELEM_INLINE)]).toEqual([]);
+    expect(derive('f', FUSED_ELEM_HOME).size).toBe(0);
+  });
+});
+
 // ── the constant term: which SIDE of the address it sits on ──────────────────────────────────
 
 // `extern u8 gTbl[]; return gTbl[i + 1];` — a bare `.word gTbl` plus a RUNTIME add. At width 1
