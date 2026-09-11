@@ -7043,7 +7043,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //     structure; the structure itself comes from one structuring decision upstream of the fan.
   //     Naming the site that makes it is the LEVER THIS ROW GATES and is deliberately NOT claimed
   //     here — #156's own G3 attribution named a file two levels up from the real one, and the
-  //     rule this project keeps is to instrument or ablate, never to read and infer.
+  //     rule this project keeps is to instrument or ablate, never to read and infer. BOTH CLOSED
+  //     (41 -> MATCH, 36 -> MATCH) by the arm re-read in `raise/shortcircuit.ts`, which is that
+  //     site: the fold refused whenever the second test's block defined a value the arm read past
+  //     it, so the connective split into a nest and the structurer duplicated the next arm into
+  //     both negative branches. The (41) and (36) above predate it.
   //   • `nestacc1` (15) — same shape of answer with a much smaller fan: 4 candidates, every one
   //     carrying the copy pair, best `unsigned/uns-cmp`. CLOSED (15/38 -> MATCH) by
   //     `enclosingCarrierName` (structure/structure.ts): two refusals in the loop seeding had to
@@ -7057,22 +7061,29 @@ export const SYNTHETIC: SynthSpec[] = [
   //   • `ladder4`, `ladidx1`, `ladcall5`, `flatacc`, `revlad5s`, `revacc1` — controls, MATCH,
   //     nothing to attribute.
   //
-  // WHAT `/unmerge` DOES HERE, because the round was sent to test it. On the REAL row, adding
-  // `/unmerge` to the winning label COSTS +44 — the winner's own `/unmerge` sibling scores 215
-  // against the winner's 171, measured on THIS tree and recompiled twice. The sign is
-  // BASE-DEPENDENT: the same axis is −3 at the `BC` rung and +4 at `BCG`, and #169 published +24
-  // against a third base. The best `/unmerge`-carrying candidate anywhere in the 5952-candidate
-  // fan is 192, still above 171. On the SIX ladder rows here it is in the winning label and PAYS
-  // ON FOUR. Ablated by emptying `PRE_FAN_PRODUCTS` (packages/core/src/rank-axes.ts) and
-  // re-running with `ASMLIFT_CANDCACHE=0`: `ladder5` 41 -> 76, `ladder4` MATCH -> 25,
-  // `ladidx1` MATCH -> 10, `revlad5s` MATCH -> 37; `ladidx2` (36 both ways) and `ladcall5`
-  // (MATCH both ways) are exactly INERT. THREE OF THE FOUR MATCH CONTROLS DEPEND ON IT —
-  // `ladder4`, `ladidx1` and `revlad5s`, with only `ladcall5` independent — so a ladder-flattening
-  // lever that disturbs `/unmerge` regresses four of these rows. `/unmerge` is therefore neither
-  // missing nor mis-ranked; where the ladder duplicates an arm, the duplicated copies must
-  // re-materialise their own pool operands and the merged spelling wins on price. It is downstream
-  // of the ladder and cannot be attributed on its own, which is why no row here carries it as its
-  // subject.
+  // WHAT `/unmerge` DOES HERE. ITS SIGN IS A PROPERTY OF THE BASE, NOT OF THE AXIS, and the base
+  // has since moved twice. Against the 171-era winner the axis COST +44 (that winner's own
+  // `/unmerge` sibling scored 215, and the best `/unmerge`-carrying candidate in the fan was 192);
+  // #169 published +24 against a third base. With the ladder flat (`arm-reread`) and the
+  // accumulator copies gone (`enclosingCarrierName`) it PAYS −17 on the real row and is in the
+  // WINNING label — `unsigned/connective/defsite/loop-entry/flip-join/reread-globals/derived-home/
+  // merge-home/uns-cmp/site-sense/unmerge/livebase`, 39/352. Two independent routes agree, both at
+  // `d6b21ba`: `pnpm bench fan kleod:CountCollectedGems:agbcc --force` (5952 scored, 0 dropped)
+  // gives best-WITH 39/352 against best-WITHOUT 56/352, the two labels differing only in the
+  // trailing home axis; and emptying `PRE_FAN_PRODUCTS` (packages/core/src/rank-axes.ts), then
+  // `ASMLIFT_CANDCACHE=0 pnpm bench run --tier real --only CountCollectedGems`, lands the row on
+  // that same 56/352. So the axis is neither missing nor mis-ranked: where the ladder duplicates an
+  // arm, the duplicated copies must re-materialise their own pool operands and the merged spelling
+  // wins on price. It is downstream of the ladder and cannot be attributed on its own, which is why
+  // no row here carries it as its subject.
+  //
+  // On the ladder rows it is in the winning label throughout, and FLATTENING THE LADDER WIDENED
+  // WHAT DEPENDS ON IT. Same ablation, same cache-off re-run: `ladder4` MATCH -> 25, `ladder5`
+  // MATCH -> 38, `ladidx1` MATCH -> 10, `ladidx2` MATCH -> 11, `revlad5s` MATCH -> 37, `armcb`
+  // MATCH -> 32, `armcb2` MATCH -> 18; only `ladcall5`, `swladder` and `calad` are INERT.
+  // `ladidx2` measured exactly INERT (36 both ways) while the ladder still duplicated an arm and is
+  // load-bearing now, so a lever that disturbs `/unmerge` regresses SEVEN rows here plus 17 on the
+  // real row.
   //
   // WHAT EACH MAP BUYS, MEASURED (`symbols:` deleted, re-run, cache off):
   //   PROBE_SLOTC_MAP  ladder4 MATCH->27 · ladder5 41->77 · revlad5s MATCH->45 — LOAD-BEARING,
@@ -7129,14 +7140,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //     APART they move −3 (`u8` locals alone) and +23 (`for` form alone): a conjunctive pair, the
   //     two-sided shape this project has been caught by before. It gets no row because no lever is
   //     named for it, not because there is nothing to gate.
-  //   • the 16-row per-arm-store class is G6's, and it has NO GATING ROW TODAY. `armcb`/`armcb2`
-  //     carry the capability but both MATCH (verified on this tree), and by the standard this
-  //     family is built on — a row counts as coverage only if it MOVES when the capability moves
-  //     — a green row gates nothing. PREDICTION, not measured: the class is blocked behind the
-  //     ladder rows above, its spelling only reachable once the ladder stops duplicating an arm.
-  //     Falsify it by re-running the real row's `/unmerge` probe once a ladder lever lands — if
-  //     `kleod:CountCollectedGems:agbcc` still refuses the merged tail with the ladder flat, the
-  //     class is independent and wants its own row.
+  //   • the 16-row per-arm-store class is G6's, and it wanted no row of its own. It was recorded
+  //     here as a PREDICTION — blocked behind the ladder rows above, its spelling reachable only
+  //     once the ladder stops duplicating an arm — with the falsifier being the real row's
+  //     `/unmerge` probe re-run after a ladder lever lands. That probe has now run at `d6b21ba`
+  //     and the prediction HELD: with the ladder flat the real row selects the merged tail, and
+  //     `/unmerge` is worth −17 to it (the paragraph above). So the class is not independent, and
+  //     it is no longer ungated either — ablating `/unmerge` moves the real row 39 -> 56 and takes
+  //     seven rows here out of MATCH, which is the standard this family is built on.
   //
   // ALL NINE ARE agbcc-ONLY, on the same terms as the family above: each was smoked alone
   // (`ASMLIFT_CANDCACHE=0 pnpm bench run --tier synthetic --only <sym> --toolchain agbcc
