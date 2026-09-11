@@ -1302,8 +1302,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // So the gap is not "this shape is unrecoverable" but "one of the fold's two arms emits the
   // spelling the compiler did not" — and a row that could falsify the claim is worth more than a
   // third that restates it. What referees it on the RANKED path is `/flip-join`, which emits the
-  // other joined sense: all three rows match there, two of them on the axis. There is deliberately
-  // no `ifor_far`: measured, a `||` matches at BOTH distances.
+  // other joined sense: all four rows match there, two of them on the axis.
+  //
+  // `ifor_far` was once DECLINED here on "measured, a `||` matches at BOTH distances", and the
+  // decline was wrong in the one way this family's own note warns about a dozen lines below: it is
+  // a SCORE rationale in the family whose score cannot referee an orientation. `/flip-join` is a
+  // per-FUNCTION lever, so it is right by luck on a one-site function and all four rows MATCH on it
+  // whatever the fold spelled. What the row is for is the STAMP PAIR it inhabits: measured, a long
+  // `||` stamps `(scSharedOnFall=false, scSharedIsTaken=true)` — the identical pair a short `&&`
+  // stamps — and wants the opposite spelling. It is the counterexample to any two-boolean reading
+  // of the orientation, and like `ifand_far` it is pinned by a test rather than by its number.
   //
   // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
   //
@@ -1369,6 +1377,27 @@ export const SYNTHETIC: SynthSpec[] = [
       'un-folded spelling tail-duplicates the else arm and agbcc cross-jumps the copies back ' +
       'together, so this row read MATCH before the shape was recovered too — what the orientation ' +
       'is pinned by is a test, not this number',
+  },
+  {
+    sym: 'ifor_far',
+    src: 'int ifor_far(int a, int b, int *p, int *q){ if (a || b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; p[2] = 5; q[2] = 6; p[3] = 7; q[3] = 8; p[4] = 9; q[4] = 10; p[5] = 11; q[5] = 12; p[6] = 13; q[6] = 14; p[7] = 15; q[7] = 16; p[8] = 17; q[8] = 18; p[9] = 19; q[9] = 20; p[10] = 21; q[10] = 22; p[11] = 23; q[11] = 24; p[12] = 25; q[12] = 26; p[13] = 27; q[13] = 28; p[14] = 29; q[14] = 30; p[15] = 31; q[15] = 32; p[16] = 33; q[16] = 34; p[17] = 35; q[17] = 36; p[18] = 37; q[18] = 38; p[19] = 39; q[19] = 40; p[20] = 41; q[20] = 42; p[21] = 43; q[21] = 44; p[22] = 45; q[22] = 46; p[23] = 47; q[23] = 48; p[24] = 49; q[24] = 50; p[25] = 51; q[25] = 52; p[26] = 53; q[26] = 54; p[27] = 55; q[27] = 56; p[28] = 57; q[28] = 58; p[29] = 59; q[29] = 60; p[30] = 61; q[30] = 62; p[31] = 63; q[31] = 64; } else { p[0] = -1; } return p[1]; }',
+    features: ['branch'],
+    toolchains: ['agbcc'],
+    ctx: 'int ifor_far(int,int,int*,int*);',
+    note:
+      "the `||` at `ifand_far`'s distance, and the row the family declined until the fold's " +
+      'orientation evidence grew a third fact. The long branch INVERTS the last test, which moves ' +
+      'the shared arm to the other successor slot — so a long `||` stamps the same pair ' +
+      '(`scSharedOnFall` false, `scSharedIsTaken` true) as a SHORT `&&` and wants the opposite ' +
+      'spelling. Two booleans cannot separate them; `scSharedLongBranch` is what does, and this ' +
+      "row is that stamp's only inhabitant (packages/core/test/site-sense.test.ts pins the " +
+      'quadrant). Like `ifand_far` its SCORE referees nothing — it MATCHes on `/flip-join` at ' +
+      'both distances, which is the older note this row corrects: that measurement was read as ' +
+      '"no gap here", and what it actually says is that the score cannot see this one. Nor does ' +
+      'the FAN carry the axis here: measured, the row enumerates 4 candidates and no ' +
+      '`/site-sense` at all, because at one site the axis re-spells what `/flip-join` already ' +
+      'spelled and the tree dedup drops the duplicate. A named row the fan never enumerates is ' +
+      'worth saying out loud',
   },
   {
     sym: 'ifor_near',

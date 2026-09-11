@@ -42,10 +42,11 @@ const TWOJOINED = `fn twojoined {
 `;
 
 /** Parse TWOJOINED and stamp each `cond_br` with the fold orientation the caller names: which
- *  SOURCE arm the shared block is (`scSharedOnFall`) and which SUCCESSOR SLOT it landed in
- *  (`scSharedIsTaken`, the fold's `gIsFall`). A bare boolean is the short-branch, unchained layout
- *  — shared in the TAKEN slot — which is every site of the rows the axis shipped on. */
-function stamped(...shared: (boolean | undefined | [onFall: boolean, isTaken: boolean])[]): Fn {
+ *  SOURCE arm the shared block is (`scSharedOnFall`), which SUCCESSOR SLOT it landed in
+ *  (`scSharedIsTaken`, the fold's `gIsFall`), and whether a long-branch trampoline sat on either
+ *  edge (`scEdgeRelayed`). A bare boolean is the short-branch, unchained layout — shared in the
+ *  TAKEN slot, no relay — which is every site of the rows the axis shipped on. */
+function stamped(...shared: (boolean | undefined | [onFall: boolean, isTaken: boolean, relayed?: boolean])[]): Fn {
   const fn = parse(TWOJOINED);
   verify(fn);
   recoverTypes(fn);
@@ -55,9 +56,10 @@ function stamped(...shared: (boolean | undefined | [onFall: boolean, isTaken: bo
     if (t.opcode === 'cond_br') {
       const v = shared[i++];
       if (v !== undefined) {
-        const [onFall, isTaken] = typeof v === 'boolean' ? [v, true] : v;
+        const [onFall, isTaken, relayed] = typeof v === 'boolean' ? [v, true, false] : v;
         t.attrs.scSharedOnFall = onFall;
         t.attrs.scSharedIsTaken = isTaken;
+        t.attrs.scEdgeRelayed = relayed ?? false;
       }
     }
   }
@@ -108,7 +110,7 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
     expect(mixed[1]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: false }))[1]);
   });
 
-  test('the LONG-BRANCH quadrant is positive — `synthetic:ifand_far`’s spelling, which no score pins', () => {
+  test('the LONG-BRANCH `&&` cell is positive — `synthetic:ifand_far`’s spelling, which no score pins', () => {
     // `[true, false]`: the shared arm was FALLEN INTO and landed in the FALL slot. Under the
     // source-order premise that pair cannot happen — a fallen-into arm is the source's `then`, and
     // the `then` is not what an `&&` fold puts in the fall slot — so reaching it means the premise's
@@ -121,6 +123,14 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
     // `a0 != 0 && a1 != 0` — the source. The `foldEvidence !== sharedIsTaken` reading spelled the
     // dual there, `a0 == 0 || a1 == 0`, and nothing in the corpus could see it: the row MATCHES on
     // `/flip-join` with or without this axis.
+    //
+    // POSITIVE IS NOT UNIVERSALLY RIGHT HERE, and one committed row says so: the two long-branch
+    // sites of `kleod:CheckWorldCompletion:agbcc` want OPPOSITE spellings against its own
+    // `refSource` — positive at the `(x & 0x80) != 0 && (y & 0x7F) != 0x7F` guard, negated at the
+    // three-`return 1` ladder below it. This asserts the better of two constants, not a decided
+    // cell; the row is 45/191 with the same winner either way, so nothing in the corpus referees
+    // it. What would decide it is a site fact the fold does not carry — or the per-site
+    // `/sense-N` mask, which does not have to pick.
     const ifs = (src: string) => src.split('\n').filter((l) => l.includes('if ('));
     const both = ifs(emit(stamped([true, false], [false, false]), { senseFromFoldEvidence: true }));
     const positive = ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: false }));
@@ -132,13 +142,41 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
     expect(taken[1]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: true }))[1]);
   });
 
-  test('REFUSES a half-stamped site — the slot alone is not evidence', () => {
+  test('the LONG-BRANCH `||` cell is positive too — the pair the short `&&` also stamps', () => {
+    // `[false, true, true]`: shared arm branched to, landed in the TAKEN slot, and a trampoline on
+    // one of the edges. Site 1 is that; site 2 is the SAME two booleans without the relay, i.e. the
+    // short-branch `&&`. They must come out OPPOSITE, which is the whole reason the third stamp
+    // exists — two booleans put these two sites in one cell.
+    //
+    // Measured on the rows, each lifted from its own compiled asm: `synthetic:ifor_far`
+    // (`if (a || b) {64 stores} else {…}`) stamps `false/true/relayed` and, with the axis on,
+    // spells `a0 != 0 || a1 != 0` — its source. Without the relay stamp it spelled the dual,
+    // `a0 == 0 && a1 == 0`, and no score could see that either: the row MATCHes 0/139 on
+    // `/flip-join` exactly as `ifand_far` does at 0/140. `synthetic:ifand_near` stamps
+    // `false/true/not relayed` and wants the negated spelling.
+    const ifs = (src: string) => src.split('\n').filter((l) => l.includes('if ('));
+    const mixed = ifs(emit(stamped([false, true, true], [false, true, false]), { senseFromFoldEvidence: true }));
+    expect(mixed[0]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: false }))[0]);
+    expect(mixed[1]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: true }))[1]);
+  });
+
+  test('REFUSES a partially-stamped site — the slot alone is not evidence', () => {
     // `scSharedIsTaken` without `scSharedOnFall` says where the shared block went and nothing about
-    // which arm the source wrote there. The site keeps its boolean rather than guessing.
+    // which arm the source wrote there. The site keeps its boolean rather than guessing. Same for a
+    // site carrying the two old stamps and not the relay: a reader that defaulted the missing one
+    // to `false` would spell every long `||` as its dual, which is the defect this stamp closed.
     const half = parse(TWOJOINED);
     verify(half);
     recoverTypes(half);
     half.blocks[0].ops[half.blocks[0].ops.length - 1].attrs.scSharedIsTaken = false;
     expect(emit(half, { senseFromFoldEvidence: true })).toBe(emit(stamped(undefined, undefined), {}));
+
+    const noRelay = parse(TWOJOINED);
+    verify(noRelay);
+    recoverTypes(noRelay);
+    const t = noRelay.blocks[0].ops[noRelay.blocks[0].ops.length - 1];
+    t.attrs.scSharedOnFall = false;
+    t.attrs.scSharedIsTaken = true;
+    expect(emit(noRelay, { senseFromFoldEvidence: true })).toBe(emit(stamped(undefined, undefined), {}));
   });
 });

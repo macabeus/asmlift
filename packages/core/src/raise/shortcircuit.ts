@@ -495,8 +495,15 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // shared block, so BOTH values of `scSharedOnFall` read POSITIVE — measured, not derived: the two
 // inhabited layouts stamp opposite `scSharedOnFall` (`synthetic:chainsense` false,
 // `synthetic:ifand_far` true) and want the same spelling, because the long branch is exactly the
-// layout that falsifies the source-order premise ON that stamp. The quadrant table the consumer
-// reads is `structure.ts`'s `senseFromFoldEvidence` site default.
+// layout that falsifies the source-order premise ON that stamp.
+//
+// AND THAT IS STILL NOT ALL OF IT, because the long branch INVERTS the last test and so moves the
+// shared arm between slots: a long `||` puts it back in the TAKEN slot and stamps the pair a short
+// `&&` stamps (`synthetic:ifor_far` against `synthetic:ifand_near`, measured from their own asm),
+// while wanting the opposite spelling. The third stamp is `scEdgeRelayed`, the trampoline the
+// inversion leaves on one of the two edges — see its own note at the stamp. The table the consumer
+// reads is `structure.ts`'s `senseFromFoldEvidence` site default, and one of its cells is
+// undecided by all three facts (`kleod:CheckWorldCompletion:agbcc`, two sites, opposite senses).
 //
 // Every refusal falls through untouched — a miss, never a miscompile.
 /** Per-call options for `recognizeBranchShortCircuit` — the tree-ownership refusal's two ends. */
@@ -670,15 +677,50 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           // taken slot holds the source's `then` whatever `scSharedOnFall` reads, so only the TAKEN
           // quadrants can negate; `structure.ts` owns that table and the layout premise under it.
           //
-          // POSITIONAL, unlike its neighbour: `scSharedOnFall` names an arm and survives anything,
-          // while this one names a SUCCESSOR SLOT of the very op it rides on. Nothing between here
-          // and `structure` assigns `.successors` (grepped: no `.successors =` in packages/core/src;
-          // the passes in between are narrow/narrowlocal/paramwidth), so the invariant holds today —
-          // but a pass that canonicalised a stamped `cond_br`'s edges would turn the reading over
-          // with no refusal firing, and would have to re-stamp.
+          // `scEdgeRelayed` — the THIRD fact, and the only one of the three that is neither the
+          // source's connective nor a slot. It says a long-branch TRAMPOLINE sat on one of this
+          // fold's two edges: agbcc inverts a conditional it cannot reach in ±256 bytes and leaves
+          // a `br`-only block behind, which is exactly the inversion that breaks `scSharedOnFall`'s
+          // source-order premise. Measured on the four orientation rows, lifted from their own
+          // compiled asm (`ONLY=synthetic:<row>:agbcc` through the probe in the round's ledger):
+          //
+          //   row           source     onFall  isTaken  relayed   /site-sense spells
+          //   ifand_near    a && b     false   true     false     a && b     ✅
+          //   ifor_near     a || b     true    true     false     a || b     ✅
+          //   ifand_far     a && b     true    false    true      a && b     ✅
+          //   ifor_far      a || b     false   true     TRUE      its DUAL   ❌ without this stamp
+          //
+          // `ifand_near` and `ifor_far` stamp the IDENTICAL pair and want OPPOSITE spellings, so
+          // two booleans cannot decide the site and the completeness the four-quadrant table used
+          // to claim was false. The relay is what separates them, and `synthetic:ifor_far` is its
+          // only inhabitant — the row exists for this stamp, because its SCORE cannot referee it
+          // (MATCH 0/139 on `/flip-join`, like `ifand_far`'s 0/140).
+          //
+          // A PROXY, and named as one: what decides the spelling is the branch INVERSION, and what
+          // is observable here is the trampoline the inversion leaves. They coincide on every input
+          // measured, and a relay arriving from some other cause at a taken-slot site would read as
+          // an inversion that did not happen. The `&&` long branch relays the SHARED edge and the
+          // `||` long branch the OTHER one (measured above), which is why both are asked.
+          //
+          // POSITIONAL, unlike its two neighbours: `scSharedOnFall` and `scEdgeRelayed` name arms
+          // and survive anything, while `scSharedIsTaken` names a SUCCESSOR SLOT of the very op it
+          // rides on. THE INVARIANT IT NEEDS IS NOT "nothing assigns `.successors`" — something
+          // does. It is that no pass between here and `structure` may REORDER a stamped `cond_br`'s
+          // successor slots. Downstream of this fold `raiseRecovered` (pipeline.ts) runs
+          // `sinkReturns` and `foldEmptyLatches`, and `raise/latch.ts:112` is the one successor
+          // rewrite in `packages/core/src` — `op.successors[i] = { block: onward.block, … }`, which
+          // repoints a slot IN PLACE at its own index and therefore keeps the stamp true. (Grep it
+          // as `successors[i] =` / `successors.push|splice`; the `\.successors =` this note used to
+          // cite matches neither that line nor anything else.) `sinkReturns` only replaces `br`
+          // terminators. A pass that canonicalised a stamped `cond_br`'s edges would turn the
+          // reading over with no refusal firing, and would have to re-stamp.
           ...mkOp('cond_br', {
             operands: [res],
-            attrs: { scSharedOnFall: sharedEdge === gFall, scSharedIsTaken: gIsFall },
+            attrs: {
+              scSharedOnFall: sharedEdge === gFall,
+              scSharedIsTaken: gIsFall,
+              scEdgeRelayed: throughRelay || forwardingTarget(otherEdge.block) !== otherEdge.block,
+            },
           }),
           successors: gIsFall
             ? [

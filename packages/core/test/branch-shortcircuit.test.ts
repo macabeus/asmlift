@@ -58,6 +58,10 @@ function chain(opts: {
    *  when a Thumb conditional cannot reach its target and the real branch is emitted separately.
    *  `true` is one relay per edge; a number builds a chain that deep. */
   trampolines?: boolean | number;
+  /** The same, on the OTHER edge instead — the mirror layout, and the one the corpus reaches
+   *  through a long `||` (`synthetic:ifor_far`) rather than a long `&&`. Both are the inversion
+   *  `scEdgeRelayed` reports, so the stamp has to see either. */
+  otherTrampoline?: boolean;
 }): Fn {
   // `shared` RETURNS a value the head defines. That is what makes a half-dropped relay chain
   // observable: an unreachable block still branching here collapses this block's dominator set, and
@@ -80,6 +84,14 @@ function chain(opts: {
     return head;
   };
   const other = blk([mkOp('ret', { operands: [] })]);
+  const otherEdge = (): { block: Block; args: Value[] } => {
+    if (!opts.otherTrampoline) {
+      return { block: other, args: [] };
+    }
+    const t = blk([{ ...mkOp('br'), successors: [{ block: other, args: [] }] }]);
+    trampolines.push(t);
+    return { block: t, args: [] };
+  };
   const c2 = mkValue(T.unk(32));
   const gBody = opts.gBody ? opts.gBody(c2) : cmp(c2);
   const g = blk(
@@ -88,8 +100,8 @@ function chain(opts: {
       {
         ...mkOp('cond_br', { operands: [c2] }),
         successors: opts.sharedOnGTaken
-          ? [toShared(opts.sharedArgsFromG ?? []), { block: other, args: [] }]
-          : [{ block: other, args: [] }, toShared(opts.sharedArgsFromG ?? [])],
+          ? [toShared(opts.sharedArgsFromG ?? []), otherEdge()]
+          : [otherEdge(), toShared(opts.sharedArgsFromG ?? [])],
       },
     ],
     opts.gParams ?? [],
@@ -314,19 +326,36 @@ describe('the four orientations', () => {
         const fused = fn.blocks[0].ops.at(-1)!;
         expect(fused.attrs.scSharedOnFall).toBe(!sharedOnGTaken);
         expect(fused.attrs.scSharedIsTaken).toBe(!gOnTaken);
+        expect(fused.attrs.scEdgeRelayed).toBe(false);
         // …and the slot stamp IS the slot: the shared arm (the `ret` that returns the head's own
         // value, `chain`'s only one-operand terminator) is successor 0 exactly when it is true.
         const shared = fn.blocks.find((b) => b.ops.at(-1)!.opcode === 'ret' && b.ops.at(-1)!.operands.length === 1)!;
         expect(fused.successors[0].block === shared).toBe(!gOnTaken);
       }
     }
-    // …and both survive the relay resolution, which is where the fold's own successor-identity
+    // …and all three survive the relay resolution, which is where the fold's own successor-identity
     // test cannot see the shared block directly — and where a resolved edge could decouple the
-    // stamped slot from `gIsFall` without any refusal firing.
+    // stamped slot from `gIsFall` without any refusal firing. The slot is asserted here too, not
+    // only in the direct case: a resolved edge is the one input that could move it.
     const relayed = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: true });
     expect(recognizeBranchShortCircuit(relayed)).toBe(true);
-    expect(relayed.blocks[0].ops.at(-1)!.attrs.scSharedOnFall).toBe(true);
-    expect(relayed.blocks[0].ops.at(-1)!.attrs.scSharedIsTaken).toBe(false);
+    const rFused = relayed.blocks[0].ops.at(-1)!;
+    expect(rFused.attrs.scSharedOnFall).toBe(true);
+    expect(rFused.attrs.scSharedIsTaken).toBe(false);
+    expect(rFused.attrs.scEdgeRelayed).toBe(true);
+    const rShared = relayed.blocks.find((b) => b.ops.at(-1)!.opcode === 'ret' && b.ops.at(-1)!.operands.length === 1)!;
+    // `isTaken` false ⇒ the shared arm is slot 1 — through the relay the fold deliberately keeps,
+    // which is why the slot claim has to be read the way `structure` reads an edge.
+    expect(forwardingTargetOf(rFused.successors[1].block)).toBe(rShared);
+    // …and the MIRROR: the trampoline on the OTHER edge, which is what a long `||` leaves. Same two
+    // booleans as an unrelayed `&&` site (`false/true`), so this stamp is the only thing that tells
+    // the consumer the layout premise was inverted here.
+    const mirror = chain({ gOnTaken: false, sharedOnGTaken: true, otherTrampoline: true });
+    expect(recognizeBranchShortCircuit(mirror)).toBe(true);
+    const mFused = mirror.blocks[0].ops.at(-1)!;
+    expect(mFused.attrs.scSharedOnFall).toBe(false);
+    expect(mFused.attrs.scSharedIsTaken).toBe(true);
+    expect(mFused.attrs.scEdgeRelayed).toBe(true);
   });
 
   test('the surviving cond_br keeps the head’s unchanged successor slot', () => {

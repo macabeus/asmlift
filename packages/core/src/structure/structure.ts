@@ -1320,18 +1320,21 @@ export interface StructureOptions {
   negateJoinedBranchSense?: boolean;
   /** Spell a branch-sense site from the SHORT-CIRCUIT FOLD'S own orientation evidence, where the
    *  fold left some, instead of from the two booleans above. `raise/shortcircuit.ts` stamps the
-   *  fused branch with two facts about the arm both tests reach: `scSharedOnFall` — whether it was
-   *  FALLEN INTO rather than branched to, and so, since gcc lays a condition's arms out in source
-   *  order, whether it is the source's `then` — and `scSharedIsTaken`, which successor slot it
-   *  landed in here. The site NEGATES in one quadrant only: the shared arm in the TAKEN slot having
-   *  been branched to, i.e. the taken slot holding the source's `else`. Per SITE, which is the
-   *  point: the booleans are per function, and a function whose `if`s were written in opposite
-   *  senses has no right value for either.
+   *  fused branch with three facts: `scSharedOnFall` — whether the arm both tests reach was FALLEN
+   *  INTO rather than branched to, and so, since gcc lays a condition's arms out in source order,
+   *  whether it is the source's `then` — `scSharedIsTaken`, which successor slot that arm landed in
+   *  here, and `scEdgeRelayed`, whether a long-branch trampoline sat on either edge, which is the
+   *  layout where the source-order premise is inverted and therefore must not be consulted. The
+   *  site NEGATES in one cell only: the shared arm in the TAKEN slot, branched to, no relay — the
+   *  taken slot holding the source's `else`. Per SITE, which is the point: the booleans are per
+   *  function, and a function whose `if`s were written in opposite senses has no right value for
+   *  either.
    *
-   *  A site the fold did not touch carries neither stamp and keeps its boolean, so this changes
-   *  nothing on a function with no short-circuit chain. rank.ts's `/site-sense` axis; it is an AXIS
-   *  and not a default because the source-order premise under `scSharedOnFall` is a claim about
-   *  gcc's layout that the differ referees per row. */
+   *  A site the fold did not touch carries no stamp and keeps its boolean, so this changes nothing
+   *  on a function with no short-circuit chain. rank.ts's `/site-sense` axis; it is an AXIS and not
+   *  a default because the source-order premise under `scSharedOnFall` is a claim about gcc's
+   *  layout that the differ referees per row — and because one cell of the table is genuinely
+   *  undecided by these three facts (see the census at the read). */
   senseFromFoldEvidence?: boolean;
   /** PER-SITE override of whatever decided a site's sense — the boolean, or `senseFromFoldEvidence`
    *  where that is on: the ORDINALS of the branch-sense sites to spell the OTHER way round. A
@@ -4758,40 +4761,79 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // inverts branch canonicalization sets the boolean false and gets the positive form.
     const senseSite = thenS.length > 0 && elseS.length > 0;
     // The fold's evidence where there is any, the function-wide boolean where there is not
-    // (`senseFromFoldEvidence`). Two stamps, and exactly ONE of the four quadrants negates.
+    // (`senseFromFoldEvidence`). THREE stamps, and exactly ONE of the eight cells negates.
     //
-    // `scSharedIsTaken` TRUE — the arm both tests reach is this branch's taken successor, the `||`
-    // fold — is the whole of the old one-stamp reading and is unchanged: `scSharedOnFall` true = the
-    // last test FELL INTO that arm, so under gcc's source-order layout it is the source's `then` and
-    // the taken slot already holds it (positive); false = it was branched to, so it is the `else`
-    // sitting in the taken slot, and the site NEGATES.
+    //   onFall  isTaken  relayed  spelling   inhabitant (all four measured from their own asm)
+    //   ------  -------  -------  --------   --------------------------------------------------
+    //   false   true     false    NEGATE     `synthetic:ifand_near` — the short-branch `&&`
+    //   true    true     false    positive   `synthetic:ifor_near`  — the short-branch `||`
+    //   true    false    true     positive   `synthetic:ifand_far`  — the long-branch `&&`
+    //   false   true     TRUE     positive   `synthetic:ifor_far`   — the long-branch `||`
+    //   false   false    false    positive   `synthetic:chainsense`, the chained fold
+    //   (the other three cells are uninhabited over the committed corpus at both settings)
     //
-    // `scSharedIsTaken` FALSE — the `&&` fold, shared arm in the FALL slot — is POSITIVE at BOTH
-    // values of `scSharedOnFall`, and that is what the second stamp buys. The shared arm is where
-    // FAILING tests go, so it is the source's `else` whatever the layout, leaving the source's
-    // `then` in the taken slot. Two layouts reach here and the corpus has both:
-    //   - a CHAINED fold, `scSharedOnFall` false, where the inner fold left the head's taken edge
-    //     pointing at the next test. The one-stamp reading NEGATED it; `synthetic:chainsense` is
-    //     4/44 there and MATCH here, and the inner-loop site of `kleod:CountCollectedGems:agbcc` is
-    //     the real-row inhabitant (39/352 → 18/344).
-    //   - a LONG branch, `scSharedOnFall` true, where agbcc inverts the last test and lays the
-    //     `else` arm FIRST so that ^g falls into it. The stamp is a CFG fact and stays true; what
-    //     the inversion broke is the source-order premise ON it, so the fallen-into arm is the
-    //     `else` here and reading the quadrant positive is reading that premise as inverted — which
-    //     it is. `synthetic:ifand_far` is the measured inhabitant and it is pinned by
-    //     test/site-sense.test.ts, never by its score: it MATCHES on `/flip-join` either way.
-    // Measured over every committed row's own asm at both `/connective` settings: 75 sites in the
-    // taken-slot quadrants, 5 long-branch, 2 chained.
+    // `scSharedIsTaken` says where the shared arm went — TRUE, the arm both tests reach is this
+    // branch's TAKEN successor, is the `||` fold. `scSharedOnFall` says which source arm it is:
+    // true = the last test FELL INTO it, so under gcc's source-order layout it is the source's
+    // `then`. A shared arm in the FALL slot leaves the source's `then` in the taken slot whatever
+    // the layout — the shared arm is where FAILING tests go — so the `&&` half is positive at both
+    // values of `scSharedOnFall` and the premise is only consulted where it decides something. That
+    // is what admits the CHAINED fold, `scSharedOnFall` false, whose inner fold left the head's
+    // taken edge pointing at the next test: the one-stamp reading NEGATED it, `synthetic:chainsense`
+    // is 4/44 there and MATCH here, and the inner-loop site of `kleod:CountCollectedGems:agbcc` is
+    // the real-row inhabitant (39/352 → 18/344).
     //
-    // REFUSES unless BOTH stamps are present. DEFENSIVE — no input reaches it: the one producer
-    // (raise/shortcircuit.ts) writes both in a single object literal, and instrumenting this read
-    // over that same corpus counts 0 half-stamped sites. A site the fold never touched carries
-    // neither and keeps its function-wide boolean.
+    // `scEdgeRelayed` is the LONG BRANCH, and it is the stamp that keeps the premise honest rather
+    // than absorbing it. agbcc inverts a conditional it cannot reach in ±256 bytes, so the layout
+    // claim `scSharedOnFall` rests on is simply false there — and the inversion moves the shared arm
+    // to the OTHER successor slot, which is why it is not confined to one quadrant. Measured: the
+    // long `||` (`ifor_far`) stamps the IDENTICAL pair as the short `&&` (`ifand_near`), false/true,
+    // and wants the opposite spelling. Two booleans cannot separate them; without this one the
+    // reading spells `ifor_far` as its own dual. Both long rows are pinned by test/site-sense.test.ts
+    // and by nothing else: each MATCHes on `/flip-join` whatever the fold spelled (0/140 and 0/139).
+    //
+    // WHAT IS STILL UNDECIDED, and it is a cell of this table rather than a hole beside it: at
+    // `(onFall=true, isTaken=false)` the corpus holds a function with TWO sites of OPPOSITE source
+    // sense — `kleod:CheckWorldCompletion:agbcc`, whose own `refSource` wants the positive spelling
+    // at one and the negated one at the other. No CONSTANT is right for that cell; this table's
+    // `positive` is right at one of the two and wrong at the other, and the row scores 45/191 with
+    // the same winner either way because `/site-sense` is not its winner. If the cell is ever to be
+    // decided it needs a SITE fact the fold does not carry yet; if it cannot be, the honest shape is
+    // `rank.ts`'s per-site mask (`branchSenseFlipSites`, the `/sense-N` probe), which enumerates a
+    // site both ways instead of picking. Do not read the table above as the mapping being a function.
+    //
+    // CENSUS, re-derived here because the number this note used to carry (75/5/2) reproduced from
+    // nobody. Over all 1037 committed rows, lifting each row's own `targetAsm` at both `/connective`
+    // settings — stamped `cond_br`s at the PRODUCER, then this consumer's own reads at real
+    // two-armed sense sites, each summed over the two settings:
+    //
+    //   stamped sites     `/connective` off: 82 taken-slot,  4 long-branch, 0 chained
+    //                     `/connective` on:  85 taken-slot,  4 long-branch, 2 chained
+    //   consumer reads    99 taken-slot, 8 long-branch, 2 chained
+    //
+    // The chained cell has ZERO inhabitants with `/connective` off, so that half of the capability
+    // is reachable only through the `/connective` lift variant — both real inhabitants and
+    // `chainsense` carry it in their winner. And `scEdgeRelayed`'s own cell `(false,true,true)`
+    // carries 9 stamped sites at each setting and **0 consumer reads**: all 9 are MIPS rows
+    // (`ido7.1`/`gcc2.7.2kmc`, where no ±256 range exists and a relay means something else), and
+    // none is a two-armed sense site, so the corpus emits byte-identical C with the stamp and
+    // without it. That is this stamp's known over-reach — a PROXY firing where the structure it
+    // proxies is absent — priced at 0 today and worth re-censusing whenever a MIPS row starts
+    // reading it.
+    //
+    // REFUSES unless ALL THREE stamps are present. DEFENSIVE — no input reaches it: the one producer
+    // (raise/shortcircuit.ts) writes all three in a single object literal, and instrumenting this
+    // read over that same corpus counts 0 partially-stamped sites. A site the fold never touched
+    // carries none and keeps its function-wide boolean.
     const foldEvidence = term.attrs.scSharedOnFall;
     const sharedIsTaken = term.attrs.scSharedIsTaken;
+    const edgeRelayed = term.attrs.scEdgeRelayed;
     const siteDefault =
-      senseFromFoldEvidence && typeof foldEvidence === 'boolean' && typeof sharedIsTaken === 'boolean'
-        ? sharedIsTaken && !foldEvidence
+      senseFromFoldEvidence &&
+      typeof foldEvidence === 'boolean' &&
+      typeof sharedIsTaken === 'boolean' &&
+      typeof edgeRelayed === 'boolean'
+        ? sharedIsTaken && !foldEvidence && !edgeRelayed
         : ipd === null
           ? preserveDivergentBranchSense
           : negateJoinedBranchSense;
