@@ -6920,6 +6920,31 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void joinsame(void);',
     proto: { joinsame: { returnsVoid: true } },
   },
+  {
+    // C3 of `kleod:CountCollectedGems:agbcc`'s second decomposition (#172): the site-sense reading
+    // itself, on a CHAINED condition. Both `if`s here are written in the SAME positive sense, so
+    // this is not `joinsense`'s mix and no value of `negateJoinedBranchSense` is being defeated by
+    // one. The second condition is `(a == K1 || a == K2) && b == K3`, which folds TWICE: the outer
+    // fold's `^g` is the head's TAKEN edge rather than its fall, so the arm both tests reach lands
+    // in the FALL successor slot. A reading that consults only WHICH SOURCE ARM is shared
+    // (`scSharedOnFall`) negates a site already spelled the source's way. The first `if` is the
+    // unchained control — one fold, shared arm in the taken slot — where that reading is right.
+    // 4/44 on the one-stamp reading, MATCH once the fold also stamps the SLOT.
+    sym: 'chainsense',
+    src:
+      'extern u8 gGrid[5][7];\n' +
+      'extern s32 gOut; extern s32 gOut2; extern s32 gOut3;\n' +
+      'void chainsense(void){\n' +
+      '  if ((gGrid[0][0] & 0x80) != 0 && (gGrid[1][0] & 0x7F) == 0x7F) { gOut = 1; } else { gOut = 2; }\n' +
+      '  if ((gGrid[2][0] == 3 || gGrid[2][0] == 5) && (gGrid[3][0] & 0x7F) == 100) { gOut2 = 3; }\n' +
+      '  else { gOut2 = 4; }\n' +
+      '  gOut3 = 5;\n' +
+      '}',
+    features: ['array', 'global', 'branch', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void chainsense(void);',
+    proto: { chainsense: { returnsVoid: true } },
+  },
 
   // ── THE ELSE-LADDER ARM CLIFF, and the nested-loop accumulator copy (attr2/CountCollectedGems) ─
   // The SECOND attribution round on `kleod:CountCollectedGems:agbcc`. The first one (#156)
