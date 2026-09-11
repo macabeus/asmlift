@@ -7686,7 +7686,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // 1 … end of bb 4, copying expression 15`), so the arm's store merges into the one tail store.
   // With `-fno-gcse` the pair compiles byte-identical. The real function's dump agrees: its source
   // spelling gets two more `&gCallbackQueue` insertions (ends of bb 36 and 37) than its duplicated
-  // twin. The four later pairs (`gcseinner`, `gcseflat`, `gcsefwd` and `gcsearms6`, each against
+  // twin. Four more pairs (`gcseinner`, `gcseflat`, `gcsefwd` and `gcsearms6`, each against
   // its duplicated twin) behave the same way: they DIFFER at -O2 and are identical under
   // `-fno-gcse` up to label numbers. But a loop before the join is neither necessary nor
   // sufficient. Here are 10 pairs compiled at the benchmark's flags, varying only the loop side's
@@ -7700,7 +7700,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // A loop BEFORE the `if`, dominating both sides (`gcsepre`), also DIFFERS. So a gate on "a loop
   // before the join" is unsound twice over: it misses both the loop-free divergences and `gcsepre`.
   //
-  // WHERE asmlift STOPS, instrumented. agbcc's shared-tail source reaches the lifted IR in two
+  // WHERE asmlift STOPS, instrumented. agbcc's shared-tail source reaches the structurer in two
   // spellings. CROSS-JUMPED: the real function, `gcsetail`, `gcsepre`, `gcsearms` and `gcsefwd` end
   // in one merged `store; ret` block with ≥2 `br` predecessors, behind a pure forwarder block in
   // the real function and in `gcsefwd`. `sinkReturns` (raise/retsink.ts) tail-duplicates only
@@ -7708,8 +7708,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // CROSS-JUMPED: `gcseinner`'s arm keeps its own `store; store; ret`, so the default's `ret` block
   // has one `br` and one `cond_br` predecessor and nothing is merged. `gcseflat` has one arm of
   // each kind. `gcsearms6` has a SECOND merged tail: two loop-free arms cross-jumped into their
-  // own `store; store; ret`. In every spelling each path ends in a `ret`, the outer `if` has no
-  // post-dominator, and the structurer copies the default store into both arms.
+  // own `store; store; ret`. Those three lift with one bare `ret`: their separate `ret`s are
+  // `sinkReturns`' tail-duplicates. In every spelling each path ends in a `ret`, the outer `if`
+  // has no post-dominator, and the structurer copies the default store into both arms.
   //
   // THE IR CANNOT DECIDE IT, and that is why `gcsepredup` exists. `gcsepre` and `gcsepredup`
   // compile to different objects (an r4/r5 swap of the two globals' bases), but their lifted IR is
@@ -7720,10 +7721,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // predecessors are both single-predecessor arms, so what keeps (i) off it there is the join
   // clause, not the shape of the IR.
   //
-  // THE BUILD. Every number in this section comes from a throwaway review prototype or from tree
-  // edits of candidates the fan already emits. Nothing here was committed, and the build must
-  // re-measure all of it. Two routes reach the capability. They sit at different LEVELS, and each
-  // one's price is a bound, not a count.
+  // THE BUILD. Every number in this section comes from an uncommitted prototype or from tree edits
+  // of candidates the fan already emits, so the build must re-measure all of it. Two routes reach
+  // the capability. They sit at different LEVELS, and each one's price is a bound, not a count.
   //
   // ROUTE A, at the IR level, is a LIFT VARIANT. It cannot be a `StructuringAxis` (core
   // rank-axes.ts): those re-run `structure()` over the same raised function and cannot toggle a
@@ -7799,14 +7799,16 @@ export const SYNTHETIC: SynthSpec[] = [
   //      a duplicated source into `gcseinner`'s IR. To falsify it, build (ii) as a default and run
   //      `bench run --tier synthetic --toolchain agbcc`, counting MATCH losses, plus `--tier real
   //      --only` on the reach set.
-  //   2. (i) as a ranked variant, or route B. NEVER before (ii): without (ii), (i) is inert on
-  //      `gcsetail`, `gcsepre` and CountCollectedGems and, as a default, worse on `gcsearms`.
+  //   2. (i) as a ranked variant, NEVER before (ii): without (ii), (i) is inert on `gcsetail`,
+  //      `gcsepre` and CountCollectedGems and, as a default, worse on `gcsearms`.
   //   3. (iii), only if step 2's predicate needs it on `gcsefwd` and CountCollectedGems.
+  // Route B replaces all three steps, not step 2 alone: its tree edits reach every inhabitant with
+  // no (ii) and no (iii).
   // The per-`if` choice in (ii) and the per-predecessor choice in (i) are made per SITE, inside
   // the variant's on point. A single boolean decides every store-tail merge in the function at
-  // once. Every inhabitant but one lifts with exactly one such merge, the real function included.
-  // `gcsearms6` lifts with two, and only one of them is (i)'s: the other is an early-return region
-  // for (ii).
+  // once. At the structurer the real function and every inhabitant but two have exactly one such
+  // merge: `gcseinner` has none, and `gcsearms6` has two, only one of them (i)'s. The other is an
+  // early-return region for (ii).
   //
   // DO NOT BREAK, each one measured: `gcsedup`, `gcsepredup` and `gcseinnerdup` above. As a
   // default, `armexpr` → 37/40, `maskchain` → 37/69 and `mergeu16` → 2/13 once (i) drops its join
@@ -7826,8 +7828,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //     17/68 → 29/71, 29/89 → 37/97). All three MATCH with (i) plus their other `ret` region
   //     marked by the both-sides rule, so they are inhabitants of the general (ii), not a separate
   //     gap. The third is booked as `gcsearms6`. The first two keep an arm's own `ret`, which
-  //     `gcseflat` already gates. Four CountCollectedGems-like low-pressure variants from review
-  //     (e.g. 30/162 → 54/169) were not measured with marks, so for them this is a prediction.
+  //     `gcseflat` already gates. Four CountCollectedGems-like low-pressure variants (e.g.
+  //     30/162 → 54/169) were not measured with marks, so for them this is a prediction.
   //   - Two controls that gate nothing. `gcseflat`'s duplicated twin MATCHes today and under the
   //     prototype. `gcsefwd`'s MATCHes in all five prototype modes.
   //   - Why `gcsefwd` subtracts. Summing (`a += gP->f[i]`) gives the same forwarder, but both
@@ -7876,15 +7878,16 @@ export const SYNTHETIC: SynthSpec[] = [
   //              second tail of their own. 29/89 (`unsigned/uns-cmp`); 0 of its 44 candidates
   //              share the tail, and the winner plus the shared-tail edit is 0/84. m2c 23/86.
   //
-  // agbcc ONLY. The other columns were measured on the first five rows before that was decided:
+  // agbcc ONLY. The other columns were measured on `gcsetail`, `gcsedup`, `gcsepre`, `gcsepredup`
+  // and `gcsearms`:
   //   - `ido7.1`: asmlift DECLINES on a branch-likely `beqzl`, the frontend's own gap.
   //   - `mwcc_242_81`: asmlift DECLINES on an SDA-relative `0(0)` base, and m2c noncompiles on
   //     `NULL`.
   //   - `gcc2.7.2kmc`: both decompilers are `noncompile(1)` on all five rows. m2c's error is
   //     ``gP' undeclared`, so the declarations the map carries never reached that compile.
   //   - `gcc2.7.2`: the same, except that asmlift compiles `gcsetail` (32/42).
-  //   The MIPS noncompiles are undiagnosed, and they are not this family's link. The five later
-  //   rows vary the same bodies and were NOT smoked off agbcc; they are pinned for the same reason.
+  //   The MIPS noncompiles are undiagnosed, and they are not this family's link. The other five
+  //   rows vary the same bodies and were NOT measured off agbcc; they are pinned for the same reason.
   // Every one of those columns measures a different link.
   {
     sym: 'gcsetail',
