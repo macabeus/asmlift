@@ -1728,6 +1728,7 @@ export function enumerateCandidates(
         // Over the 21 rows the twin reaches on both tiers, one function carries two follow sites
         // (`synthetic:maskchain:agbcc`) and one two sunk tails (`synthetic:gcsearms6:agbcc`), both
         // MATCH; every other carries at most one of each.
+        const droppedPrimary = new Set<string>();
         for (const twin of [false, true]) {
           if (twin) {
             let sunk: boolean;
@@ -1754,8 +1755,14 @@ export function enumerateCandidates(
           // `/reread-globals/merge-names` candidate could ship where plain `/reread-globals` did not,
           // which is the same trade one level up. `senseCands` puts each `mergeNames:false` sibling
           // first, so the entry is always recorded before its merged twin is reached.
-          const droppedPrimary = new Set<string>();
+          //
+          // The shared-tail twin reads the UNSUNK pass's set as well: `X/shared-tail` never ships
+          // where `X` was dropped. The sink rewrites the IR into a shape the structurer can accept
+          // where the unsunk one declined — sound, but the same trade one level up again.
           for (const s of variantCands) {
+            if (twin && droppedPrimary.has(s.suffix)) {
+              continue;
+            }
             if (
               STRUCTURING_AXES.some(
                 (ax) => ax.strip && s[ax.flag] && droppedPrimary.has(s.suffix.replace(ax.suffix, '')),
