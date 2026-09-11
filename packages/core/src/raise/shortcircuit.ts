@@ -654,7 +654,17 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           // over `synthetic:joinsense` (two sites, opposite source connectives) and
           // `synthetic:mixsense` (four sites, two inverted) it is TRUE at every site of both, and
           // this flag separates them.
-          ...mkOp('cond_br', { operands: [res], attrs: { scSharedOnFall: sharedEdge === gFall } }),
+          //
+          // `scSharedIsTaken` is the OTHER half of the same question, and one is useless without
+          // it: `scSharedOnFall` says which SOURCE arm the shared block is, and this says which
+          // SUCCESSOR SLOT it lands in here — the slot order below, which is `gIsFall`. The source
+          // arm and the slot agree ⇒ the positive spelling; they disagree ⇒ the dual. A consumer
+          // reading `scSharedOnFall` alone is right only where every site is `gIsFall` true, which
+          // is the SHORT-branch, unchained layout.
+          ...mkOp('cond_br', {
+            operands: [res],
+            attrs: { scSharedOnFall: sharedEdge === gFall, scSharedIsTaken: gIsFall },
+          }),
           successors: gIsFall
             ? [
                 { block: sharedEdge.block, args: [...sharedEdge.args] },

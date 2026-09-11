@@ -1320,16 +1320,17 @@ export interface StructureOptions {
   negateJoinedBranchSense?: boolean;
   /** Spell a branch-sense site from the SHORT-CIRCUIT FOLD'S own orientation evidence, where the
    *  fold left some, instead of from the two booleans above. `raise/shortcircuit.ts` stamps the
-   *  fused branch with `scSharedOnFall` — whether the arm both tests reach was FALLEN INTO rather
-   *  than branched to — and gcc lays a condition's arms out in source order, so a fallen-into
-   *  shared block is the source's `then` and the site takes the positive spelling. Per SITE, which
-   *  is the point: the booleans are per function, and a function whose `if`s were written in
-   *  opposite senses has no right value for either.
+   *  fused branch with two facts about the arm both tests reach: `scSharedOnFall` — whether it was
+   *  FALLEN INTO rather than branched to, and so, since gcc lays a condition's arms out in source
+   *  order, whether it is the source's `then` — and `scSharedIsTaken`, which successor slot it
+   *  landed in here. The site takes the positive spelling where the two AGREE. Per SITE, which is
+   *  the point: the booleans are per function, and a function whose `if`s were written in opposite
+   *  senses has no right value for either.
    *
-   *  A site the fold did not touch has no evidence and keeps its boolean, so this changes nothing
-   *  on a function with no short-circuit chain. rank.ts's `/site-sense` axis; it is an AXIS and
-   *  not a default because the reading is derived for the SHORT-branch layout and only measured
-   *  for the long-branch one — the differ referees it per row. */
+   *  A site the fold did not touch carries neither stamp and keeps its boolean, so this changes
+   *  nothing on a function with no short-circuit chain. rank.ts's `/site-sense` axis; it is an AXIS
+   *  and not a default because the source-order premise under `scSharedOnFall` is a claim about
+   *  gcc's layout that the differ referees per row. */
   senseFromFoldEvidence?: boolean;
   /** PER-SITE override of whatever decided a site's sense — the boolean, or `senseFromFoldEvidence`
    *  where that is on: the ORDINALS of the branch-sense sites to spell the OTHER way round. A
@@ -4756,13 +4757,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // inverts branch canonicalization sets the boolean false and gets the positive form.
     const senseSite = thenS.length > 0 && elseS.length > 0;
     // The fold's evidence where there is any, the function-wide boolean where there is not
-    // (`senseFromFoldEvidence`). `scSharedOnFall` true = the last test fell INTO the arm both
-    // tests reach, so that arm is the source's `then` and it is already this branch's TAKEN
-    // successor — the positive spelling, no negation.
+    // (`senseFromFoldEvidence`). Two stamps, and the answer is the DISAGREEMENT between them:
+    // `scSharedOnFall` true = the last test fell INTO the arm both tests reach, so that arm is the
+    // source's `then`; `scSharedIsTaken` true = that same arm is this branch's TAKEN successor.
+    // They agree ⇒ the taken arm already holds the source's `then`, the positive spelling.
+    // REFUSES unless BOTH are present: either alone decides nothing, and a site the fold never
+    // touched carries neither and keeps its function-wide boolean.
     const foldEvidence = term.attrs.scSharedOnFall;
+    const sharedIsTaken = term.attrs.scSharedIsTaken;
     const siteDefault =
-      senseFromFoldEvidence && typeof foldEvidence === 'boolean'
-        ? !foldEvidence
+      senseFromFoldEvidence && typeof foldEvidence === 'boolean' && typeof sharedIsTaken === 'boolean'
+        ? foldEvidence !== sharedIsTaken
         : ipd === null
           ? preserveDivergentBranchSense
           : negateJoinedBranchSense;

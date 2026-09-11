@@ -41,8 +41,11 @@ const TWOJOINED = `fn twojoined {
 }
 `;
 
-/** Parse TWOJOINED and stamp each `cond_br` with the fold orientation the caller names. */
-function stamped(...shared: (boolean | undefined)[]): Fn {
+/** Parse TWOJOINED and stamp each `cond_br` with the fold orientation the caller names: which
+ *  SOURCE arm the shared block is (`scSharedOnFall`) and which SUCCESSOR SLOT it landed in
+ *  (`scSharedIsTaken`, the fold's `gIsFall`). A bare boolean is the short-branch, unchained layout
+ *  — shared in the TAKEN slot — which is every site of the rows the axis shipped on. */
+function stamped(...shared: (boolean | undefined | [onFall: boolean, isTaken: boolean])[]): Fn {
   const fn = parse(TWOJOINED);
   verify(fn);
   recoverTypes(fn);
@@ -52,7 +55,9 @@ function stamped(...shared: (boolean | undefined)[]): Fn {
     if (t.opcode === 'cond_br') {
       const v = shared[i++];
       if (v !== undefined) {
-        t.attrs.scSharedOnFall = v;
+        const [onFall, isTaken] = typeof v === 'boolean' ? [v, true] : v;
+        t.attrs.scSharedOnFall = onFall;
+        t.attrs.scSharedIsTaken = isTaken;
       }
     }
   }
@@ -89,5 +94,27 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
     expect(emit(stamped(false, undefined), { senseFromFoldEvidence: true })).toBe(
       emit(stamped(undefined, undefined), {}),
     );
+  });
+
+  test('the SLOT stamp inverts the reading — one source arm, two layouts', () => {
+    // Same `scSharedOnFall` at both sites, opposite `scSharedIsTaken`: the shared block is the
+    // source's `else` either way, but at the second site it is the FALL successor, so the taken
+    // arm already holds the source's `then` and no negation is owed. One stamp cannot express
+    // that pair, which is what the chained fold (`(a || b) && c`, whose outer `^g` is the head's
+    // TAKEN edge) and the long-branch layout both produce.
+    const ifs = (src: string) => src.split('\n').filter((l) => l.includes('if ('));
+    const mixed = ifs(emit(stamped([false, true], [false, false]), { senseFromFoldEvidence: true }));
+    expect(mixed[0]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: true }))[0]);
+    expect(mixed[1]).toBe(ifs(emit(stamped(undefined, undefined), { negateJoinedBranchSense: false }))[1]);
+  });
+
+  test('REFUSES a half-stamped site — the slot alone is not evidence', () => {
+    // `scSharedIsTaken` without `scSharedOnFall` says where the shared block went and nothing about
+    // which arm the source wrote there. The site keeps its boolean rather than guessing.
+    const half = parse(TWOJOINED);
+    verify(half);
+    recoverTypes(half);
+    half.blocks[0].ops[half.blocks[0].ops.length - 1].attrs.scSharedIsTaken = false;
+    expect(emit(half, { senseFromFoldEvidence: true })).toBe(emit(stamped(undefined, undefined), {}));
   });
 });
