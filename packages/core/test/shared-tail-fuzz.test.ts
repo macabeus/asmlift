@@ -1,10 +1,11 @@
-// The irTraceOf differential behind the SHARED DEFAULT TAIL — structure()'s `followEarlyReturns`,
-// rank.ts's `/shared-tail` twin.
+// The irTraceOf differential behind the SHARED DEFAULT TAIL — `raise/tailsink.ts` and structure()'s
+// `followEarlyReturns`, the two terms of rank.ts's `/shared-tail` twin.
 //
-// The follow turns fall-through into early `return;`s, moving effects between control-flow paths.
-// That is the change that can be byte-closer and semantically wrong at once, and no naming fuzz
-// can see it — each compares one spelling with another. So the oracle is the IR itself: the run of
-// the lifted function (`irTraceOf`) against the run of each structured tree (`traceOf`).
+// Both move effects between control-flow paths: the sink copies a store tail into the arms, and
+// the follow turns fall-through into early `return;`s. That is the change that can be byte-closer
+// and semantically wrong at once, and no naming fuzz can see it — each compares one spelling with
+// another. So the oracle is the IR itself: the run of the lifted function (`irTraceOf`) against
+// the run of the IR after the sink, and against the run of each structured tree (`traceOf`).
 //
 // The generator builds the family's shapes on purpose — a decision tree whose leaves branch into a
 // shared store tail, directly or through a pure forwarder or a join both sides may reach, or keep a
@@ -15,6 +16,7 @@ import { expect, test, vi } from 'vitest';
 import { type Block, type Fn, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
+import { sinkStoreTails } from '../src/raise/tailsink';
 import { StructureError, structure } from '../src/structure/structure';
 import { BREATHE_EVERY, breathe, irTraceOf, mulberry32, traceOf } from './helpers';
 
@@ -150,9 +152,11 @@ function generateSharedTailFn(seed: number): Fn {
  *  `< -2 / 0 / 2` tests take both sides. */
 const RUNS = [0, 9, 83, 511, 4095, 1234, 3001];
 
-test('the follow changes no observable, on the shapes it was built for', async () => {
+test('the sink and the follow change no observable, on the shapes they were built for', async () => {
   const SEEDS = 20000;
+  let sunk = 0;
   let followed = 0;
+  let sunkAndFollowed = 0;
   let declined = 0;
   for (let seed = 1; seed <= SEEDS; seed++) {
     if (seed % BREATHE_EVERY === 0) {
@@ -176,9 +180,22 @@ test('the follow changes no observable, on the shapes it was built for', async (
       RUNS.forEach((r, i) => expect(traceOf(tree, r), `seed ${seed}, run ${r}`).toEqual(want[i]));
       return fired;
     };
+    // The follow alone, on the lifted function.
     followed += run(lifted) > 0 ? 1 : 0;
+    // The sink, then the follow.
+    const fn = generateSharedTailFn(seed);
+    if (sinkStoreTails(fn)) {
+      sunk++;
+      verify(fn);
+      RUNS.forEach((r, i) => expect(irTraceOf(fn, r), `seed ${seed} sunk, run ${r}`).toEqual(want[i]));
+      sunkAndFollowed += run(fn) > 0 ? 1 : 0;
+    }
   }
-  // At authoring: followed 9466, declined 0 — the floor below.
-  console.log(`[shared-tail-fuzz] seeds=${SEEDS} followed=${followed} declined=${declined}`);
+  // At authoring: sunk 1842, followed 9466, sunk+followed 1834, declined 0 — the floors below.
+  console.log(
+    `[shared-tail-fuzz] seeds=${SEEDS} sunk=${sunk} followed=${followed} sunk+followed=${sunkAndFollowed} declined=${declined}`,
+  );
+  expect(sunk).toBeGreaterThan(1500);
   expect(followed).toBeGreaterThan(8000);
+  expect(sunkAndFollowed).toBeGreaterThan(1500);
 });

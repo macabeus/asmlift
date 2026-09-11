@@ -61,6 +61,7 @@ import { type Prototypes, prototypesFromSymbols } from './proto';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
+import { sinkStoreTails } from './raise/tailsink';
 import {
   BASEFOLD_ADMISSIONS,
   type BaseAdmission,
@@ -1710,13 +1711,28 @@ export function enumerateCandidates(
           continue;
         }
         // THE SHARED-TAIL TWIN (`/shared-tail`): the same raised fn, structured a second time with
-        // `followEarlyReturns` — safe because `structure()` never mutates `fn`. A twin, not the
-        // default: as a default it costs `synthetic:sw_fallguard:ido7.1` 13/19 → 19/23 and
-        // `synthetic:gcseflat:agbcc` 19/53 → 22/54. Enumerated only where it can differ: some
-        // divergent `if` shares a `ret`.
+        // `followEarlyReturns`, after `sinkStoreTails` has rewritten it in place — safe because
+        // `structure()` never mutates `fn`, so the first pass is done with it. A lift variant's twin
+        // rather than a structuring axis because the sink is an IR rewrite. Not the default: the
+        // same IR comes from both sources (raise/tailsink.ts), and the follow alone as a default
+        // costs `synthetic:sw_fallguard:ido7.1` 13/19 → 19/23 and `synthetic:gcseflat:agbcc`
+        // 19/53 → 22/54. Enumerated only where it can differ: the sink fired, or some divergent
+        // `if` shares a `ret`.
         for (const twin of [false, true]) {
-          if (twin && !hasDivergentSharedRet(fn)) {
-            break;
+          if (twin) {
+            let sunk: boolean;
+            try {
+              sunk = sinkStoreTails(fn);
+              if (sunk) {
+                verify(fn);
+              }
+            } catch (e) {
+              opts.onLeverError?.(name + lv.suffix + SHARED_TAIL_SUFFIX, firstLine(e));
+              break;
+            }
+            if (!sunk && !hasDivergentSharedRet(fn)) {
+              break;
+            }
           }
           const vsuffix = twin ? lv.suffix + SHARED_TAIL_SUFFIX : lv.suffix;
           // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
