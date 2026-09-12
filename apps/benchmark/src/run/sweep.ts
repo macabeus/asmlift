@@ -28,48 +28,25 @@
 // deliberately wider than a row — `--asm-dir` sweeps a tree of `.s`/`.inc` files under the same
 // record shape and the same diff.
 //
-// WHAT IT COSTS. `time`d on THIS COMMAND (not on a probe of its parts), on this machine
-// 2026-09-12, alone, `ASMLIFT_CANDCACHE` default, over all 1,062 available rows:
+// WHAT IT COSTS is `docs/bench-cost.md` §1, dated and re-measured there and nowhere else — a
+// second copy of that table drifts, and this header's did. The SHAPE of the price is the part that
+// belongs here:
 //
-//   | what                                                 | rows  | wall    |
-//   |------------------------------------------------------|-------|---------|
-//   | lift, 2 arms, warm target builds — ONE side          | 1,062 | 60.4 s  |
-//   | lift, 2 arms, every target built (BENCH_CACHE=0)     | 1,062 | 176.9 s |
-//   | `--repeat 2` (the determinism gate)                  | 1,062 | 123.7 s |
-//   | `--fan`, 1 arm, the one over-limit row excluded      | 1,061 | 436.8 s |
-//   | `--base <ref>`, BOTH sides — the flag this exists for | 1,062 | 232 s   |
-//   | `--base-dir <tree> --tier real`, both sides          |   252 | 75.7 s  |
-//
-// An earlier table here priced the warm row at 28.8 s, which was a standalone probe's build+lift
-// loop and NOT this command: `time pnpm bench sweep` is 59.0 / 61.8 / 62.8 s across three runs on
-// two worktrees, and `docs/bench-cost.md` had it right. A header table is read as the command's
-// price, so it states the command's price.
-//
-// AND THE PRICE OF THIS COMMAND IS THE `--base` ROW, not the first one: a sweep with no base
-// compares nothing. Four whole-corpus measurements, 2026-09-12: `--base HEAD` against a base tree
-// provisioned and swept hours earlier is 234.1 s (this tree 60.4 s, base tree 173.3 s), and
-// `--base 5c440d38` — `git worktree add` + `pnpm install` + the sweep — is 231.7 s (this tree
-// 59.9 s, base tree 169.0 s). So the base side is ~170 s EVERY time and does not amortize, which
-// the earlier "its first target builds are cold" reading of the same number got wrong: that same
-// base tree sweeping ITSELF, in its own process, is 58.3 s, and the real tier's base side is
-// 40.0 s against a head side of 35.2 s with not one cache file written. The gap is in the corpus's
-// other 810 rows and is NOT understood; it is quoted here as a measured wall clock and nothing
-// more. Budget ~4 minutes for a whole-corpus `--base`, and prefer `--tier`/`--project` when the
-// question is scoped — a real-tier A/B is 75.7 s.
-//
-// Both sides are also cold in a FRESH round worktree, where the head side pays its own ~170 s of
-// target builds too: 337 s measured that way (wave-2 review, 2026-09-12).
-//
-// The split still matters more than the totals: of the cold run, ~116 s is BUILDING the scoring
-// targets and ~2.3 s is the 1,346 lifts (probe `price2.mts`, 2026-09-12). Lifting the whole corpus
-// is free; everything else is the harness getting the row's own configuration in front of it. That
-// is why the default is lift-only and `--fan` is a flag: enumeration is ~120× the lift and is where
-// a corpus sweep stops being cheap.
+//   - the price of this command is the `--base` row, not the one-side row: a sweep with no base
+//     compares nothing, and the base side does NOT amortize — the same provisioned base tree costs
+//     the same ~170 s on its second comparison as on its first, while that tree sweeping ITSELF in
+//     its own process is 58.3 s. Where the difference goes is NOT understood (it is not target
+//     builds: on the real tier the base side is 40.0 s against a head side of 35.2 s with not one
+//     cache file written). Scope with `--tier`/`--project` when the question is scoped.
+//   - of a cold whole-corpus run, ~116 s is BUILDING the scoring targets and ~2.3 s is the 1,346
+//     lifts. Lifting the whole corpus is free; everything else is the harness getting the row's own
+//     configuration in front of it. That is why the default is lift-only and `--fan` is a flag:
+//     enumeration is ~120× the lift and is where a corpus sweep stops being cheap.
 //
 // WHAT IT DOES NOT DO. It never compiles a candidate and never scores one, so it cannot tell you
-// whether a row MATCHES — that is `bench run`, at ~2,040 s. It tells you which rows your branch
-// SPELLS differently, which is the question a round asks twenty times before it asks the other one
-// once.
+// whether a row MATCHES — that is `bench run` (`docs/bench-cost.md` §1). It tells you which rows
+// your branch SPELLS differently, which is the question a round asks twenty times before it asks
+// the other one once.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -114,8 +91,9 @@ export interface SweepRecord {
    *  change to what gets scored first, and `--repeat` exists to tell a reorder from a flake. */
   fanHash?: string;
   /** `--fan` only: the first line of what enumeration threw. Not an error — `enumerateRanked` has
-   *  no annotate mode, so every row that publishes `declined` throws here (234 of 1,060 at
-   *  bd7ad596), and the census must count them rather than stop at the first one. */
+   *  no annotate mode, so every row that publishes `declined` throws here (234 of the 1,062 rows
+   *  the artifact carries at bd7ad596), and the census must count them rather than stop at the
+   *  first one. */
   fanThrew?: string;
   /** why this row produced nothing: `toolchain` (unavailable), `build` (target build failed),
    *  `fan-limit` (bigger than `SWEEP_FAN_LIMIT`, see below) */
@@ -254,14 +232,14 @@ export const SWEEP_FAN_LIMIT = 20000;
  *  count and is enumerated — the guard protects against the known giants, and says so. */
 export function recordedFans(): { fans: Map<string, number>; unreadable?: string; path?: string; rows?: number } {
   const path = join(RESULTS_DIR, 'results.json');
-  // NO ARTIFACT AT ALL is the documented pre-guard behavior: a checkout that has never published
+  // NO ARTIFACT AT ALL is this guard's documented open case: a checkout that has never published
   // one prices no row, every row enumerates, and the header says so. AN ARTIFACT THAT WILL NOT
-  // PARSE is a different thing and must not read as the same one — a truncated file mid-`bench
-  // merge`, or a shape change, used to empty the map inside a bare `catch {}` and turn the guard
-  // off with NO OUTPUT AT ALL. Reproduced by deleting the top-level `results` key: `--fan --only
-  // ProcessInputAndUpdateEntities` printed nothing and was still enumerating 77,760 spellings at
-  // 120 s, against 0.3 s to refuse with the artifact intact. A guard that disappears without a word
-  // is worse than no guard, so the caller refuses instead.
+  // PARSE must not read as the same thing — a truncated file mid-`bench merge`, or a shape change.
+  // Swallowing that into an empty map turns the guard off with NO OUTPUT AT ALL: measured by
+  // deleting the top-level `results` key, `--fan --only ProcessInputAndUpdateEntities` printed
+  // nothing and was still enumerating 77,760 spellings at 120 s, against 0.3 s to refuse with the
+  // artifact intact. A guard that disappears without a word is worse than no guard, so the caller
+  // refuses instead.
   if (!existsSync(path)) {
     return { fans: new Map() };
   }
@@ -378,9 +356,9 @@ function provisionBase(ref: string): { dir: string } | { error: string } {
     note(`asmlift: [sweep] provisioned base worktree ${dir} at ${sha.out.trim().slice(0, 12)} (${ref})`);
   }
   // THE FLOOR IS CHECKED BEFORE THE INSTALL, because it reads files out of the checkout and needs
-  // no `node_modules`: a ref below the floor used to pay a `pnpm install` and only then be told it
-  // could never have been swept. Same rule as the base-ref resolution below — take the refusal
-  // before anything is paid for.
+  // no `node_modules`: otherwise a ref below the floor pays a whole `pnpm install` and is only then
+  // told it could never have been swept. Same rule as the base-ref resolution below — take the
+  // refusal before anything is paid for.
   const old = moduleFloorRefusal(dir);
   if (old !== undefined) {
     return { error: old };
@@ -401,25 +379,24 @@ function provisionBase(ref: string): { dir: string } | { error: string } {
 /** Is this tree one THIS driver can sweep — and if not, which part of it is missing?
  *
  *  HOW FAR BACK `--base` REACHES, as a sentence instead of a raw `ERR_MODULE_NOT_FOUND` stack out
- *  of `tsx`'s resolver, and BEFORE the head sweep is paid for (the same rule the base-ref
- *  resolution above restored). The driver loads NINE modules from the tree under test and they are
- *  the harness's internals, which move: the newest by creation date is
- *  `apps/benchmark/src/asm-scrub.ts` (85f81116, 2026-09-09), so that commit is the floor —
- *  `packages/core/src/symbols.ts` (ed33699c, 2026-08-02) is the next one down. Against `2bb1cde6`
- *  (2026-08-22) the failure arrived as an unhandled stack and the word `ERR_MODULE_NOT_FOUND`,
- *  which is failure mode #1 of the hand rigs this command replaces.
+ *  of `tsx`'s resolver, and BEFORE the head sweep is paid for. The driver loads the NINE modules of
+ *  `TREE_MODULES` from the tree under test and they are the harness's internals, which move: the
+ *  newest by creation date is `apps/benchmark/src/asm-scrub.ts` (85f81116, 2026-09-09), so that
+ *  commit is the floor — `packages/core/src/symbols.ts` (ed33699c, 2026-08-02) is the next one
+ *  down, and the other seven date to 3b82f953 (2026-07-21). Against `2bb1cde6` (2026-08-22) the
+ *  failure arrives as an unhandled stack and the word `ERR_MODULE_NOT_FOUND`, which is failure mode
+ *  #1 of the hand rigs this command replaces.
  *
  *  WHAT IT CANNOT CATCH, said out loud: a module that still EXISTS with a CHANGED SIGNATURE.
- *  `rankOptionsFor`'s parameter list moved at 85f81116 and again at 3b82f953, and a base on the
- *  other side of such a change lifts with DIFFERENT OPTIONS rather than with none — which is what
- *  each record's `opts` digest makes visible instead of silent.
+ *  `rankOptionsFor`'s parameter list changed at ed33699c (it gained the symbol map) and again at
+ *  85f81116, and a base on the other side of such a change lifts with DIFFERENT OPTIONS rather than
+ *  with none — which is what each record's `opts` digest makes visible instead of silent.
  *
- *  AND THAT COMPENSATING CONTROL IS ONLY AS GOOD AS THE DIGEST. It was claimed here while
- *  `optsDigest` still rendered every `Map` as `{}`, so the one signature change it was offered
- *  against — a `rankOptionsFor` that builds a DIFFERENT symbol map rather than dropping the key —
- *  was invisible to this check AND to `opts`. See `canon` in sweep-driver.ts: the sentence above
- *  became true when that was fixed, and stops being true again for any option shape `canon` cannot
- *  render. */
+ *  AND THAT COMPENSATING CONTROL IS ONLY AS GOOD AS THE DIGEST: it holds for exactly the option
+ *  shapes `canon` in sweep-driver.ts can render, and ed33699c's own change — a `rankOptionsFor`
+ *  that builds a DIFFERENT symbol map rather than dropping the key — is one a digest that cannot
+ *  see inside a `Map` reports as unchanged. Read that header before trusting this against a new
+ *  option shape. */
 function moduleFloorRefusal(dir: string): string | undefined {
   const missing = TREE_MODULES.filter((p) => !existsSync(join(dir, p)));
   if (missing.length > 0) {
@@ -494,8 +471,8 @@ export function sweepRefusal(o: SweepOptions): string | undefined {
     return '--asm-project belongs to --asm-dir alone (a dataset row carries its own symbol map).';
   }
   if (o.asmDir !== undefined && o.toolchain !== undefined && !(o.toolchain in TOOLCHAINS)) {
-    // Refused HERE rather than thrown from inside the driver: an unknown toolchain used to arrive
-    // as a raw node stack on exit 1, which is this command's "rows moved" code.
+    // Refused HERE rather than left to throw from inside the driver, where an unknown toolchain
+    // arrives as a raw node stack on exit 1 — this command's "rows moved" code.
     return `unknown --toolchain ${JSON.stringify(o.toolchain)} — have: ${Object.keys(TOOLCHAINS).join(', ')}`;
   }
   if (o.asmDir !== undefined && !existsSync(o.asmDir)) {
@@ -518,8 +495,8 @@ export function sweepRefusal(o: SweepOptions): string | undefined {
     return '--arms selected nothing';
   }
   if (new Set(o.arms).size !== o.arms.length) {
-    // The duplicate collapses in `compareSweeps`' Map, so `--arms harness,harness` lifted twice and
-    // reported one record — accepted-then-ignored, the class every other pair here is refused for.
+    // The duplicate collapses in `compareSweeps`' Map, so `--arms harness,harness` lifts twice and
+    // reports one record — accepted-then-ignored, the class every other pair here is refused for.
     return `--arms names ${o.arms.join(',')} — each arm at most once`;
   }
   return undefined;
@@ -606,20 +583,19 @@ export function fanGuard(
       over[id] = n;
     }
   }
-  // AN ARTIFACT THAT PRICES NONE OF THE SELECTION IS UNREADABLE, not "no giants here". This is
-  // where the first version of the guard still failed OPEN and SILENTLY one level below the JSON
-  // error it had learned to catch: with `results: []` — a shard that wrote no rows, or a checkout
-  // mid-`bench merge` — the loop added nothing, nothing was over the limit, and `--fan --only
-  // ProcessInputAndUpdateEntities` printed NOTHING and was still enumerating 77,760 spellings when
-  // it was killed at 25 s, against 0.9 s to refuse with the artifact intact. Renaming the
-  // `asmlift` key on all 1,062 results — the schema move this guard's own comment names as its
-  // trigger — did the same at 30 s. The count is SELECTION-SCOPED and not corpus-wide, because a
-  // whole-corpus artifact that prices no `kleod` row bounds a `--project kleod --fan` run exactly
-  // as little as an empty one does.
+  // AN ARTIFACT THAT PRICES NONE OF THE SELECTION IS UNREADABLE, not "no giants here" — the case
+  // that fails OPEN and SILENTLY one level below the JSON error above. With `results: []` — a shard
+  // that wrote no rows, or a checkout mid-`bench merge` — the loop adds nothing and nothing is over
+  // the limit: measured that way, `--fan --only ProcessInputAndUpdateEntities` printed NOTHING and
+  // was still enumerating 77,760 spellings when it was killed at 25 s, against 0.9 s to refuse with
+  // the artifact intact. Renaming the `asmlift` key on all 1,062 results — the schema move this
+  // guard's own comment names as its trigger — did the same at 30 s. The count is SELECTION-SCOPED
+  // and not corpus-wide, because a whole-corpus artifact that prices no `kleod` row bounds a
+  // `--project kleod --fan` run exactly as little as an empty one does.
   //
   // THE PRICE, said out loud: a selection of rows the artifact does not carry — a dataset row this
-  // branch ADDS — now refuses where it used to enumerate. That is the right default for a flag
-  // whose population contains five-hour functions, and `--force` is one word.
+  // branch ADDS — is refused rather than enumerated. That is the right default for a flag whose
+  // population contains five-hour functions, and `--force` is one word.
   if (path !== undefined && priced === 0) {
     return {
       over: {},
@@ -698,12 +674,12 @@ export async function sweep(o: SweepOptions): Promise<number> {
     );
   }
 
-  // THE BASE TREE IS RESOLVED BEFORE THE HEAD SWEEP IS PAID FOR. Measured on the way in: with the
-  // resolution left where it reads naturally — after the head side, just before it is needed —
-  // `bench sweep --base no/such/ref` printed `1062 row(s) ... 59.6 s` and THEN "git cannot resolve
-  // that ref". A refusal a minute after the mistake is a refusal the reader has already stopped
-  // watching for, and `run/fan.ts` states the same rule about its own `optionRefusal`: take the
-  // refusal before anything is paid for.
+  // THE BASE TREE IS RESOLVED BEFORE THE HEAD SWEEP IS PAID FOR, and not where it reads naturally
+  // — after the head side, just before it is needed. Measured there, `bench sweep --base
+  // no/such/ref` printed `1062 row(s) ... 59.6 s` and THEN "git cannot resolve that ref". A refusal
+  // a minute after the mistake is a refusal the reader has already stopped watching for, and
+  // `run/fan.ts` states the same rule about its own `optionRefusal`: take the refusal before
+  // anything is paid for.
   let baseTree: string | undefined;
   if (o.baseDir !== undefined) {
     // RESOLVED, because the driver is loaded as `import(`${root}/apps/...`)` and a bare relative
@@ -755,11 +731,11 @@ export async function sweep(o: SweepOptions): Promise<number> {
   }
 
   if (o.repeat !== undefined) {
-    // DETERMINISM. Five breakers rebuilt this check by hand in six rounds and every one of them
-    // reported 0 disagreements — which is the result worth having cheaply rather than the result
-    // worth skipping. Alternating direction is the point: a pass that carries state between rows
-    // (a module-level cache, a counter) disagrees under REORDERING and not under repetition, and
-    // a repeat-only check is blind to exactly that.
+    // DETERMINISM, which every hand rig that asked this question answered with 0 disagreements —
+    // the result worth having cheaply rather than the result worth skipping. Alternating direction
+    // is the point: a pass that carries state between rows (a module-level cache, a counter)
+    // disagrees under REORDERING and not under repetition, and a repeat-only check is blind to
+    // exactly that.
     let disagreed = 0;
     for (let i = 1; i < o.repeat; i++) {
       const again = await collect(REPO_ROOT, { ...sel, reverse: i % 2 === 1 } as SweepSelection);

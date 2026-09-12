@@ -17,9 +17,9 @@
 //
 // The CI mirror gate (`vitest run apps/benchmark/test`) runs where no compiler is available, so
 // nothing here builds a target. That is why the PRODUCER is pinned through the pure functions
-// `collect` is assembled from (`armsFor`, `optsDigest`) rather than by calling `collect`: a
-// reviewer collapsed the two arms onto one key and all 40 files / 1,128 tests of this suite stayed
-// green, because every assertion was on hand-built records.
+// `collect` is assembled from (`armsFor`, `optsDigest`) rather than by calling `collect`: every
+// assertion on a hand-built record is blind to what the producer actually emits, so a sweep that
+// collapsed its two arms onto one key would pass a suite made only of those.
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -192,13 +192,12 @@ describe('the record carries its INPUT, not only its output', () => {
   });
 
   it('digests a symbol MAP by its contents — the shape `rankOptionsFor` actually returns', () => {
-    // THE DEFECT THIS PINS, and it survived the first version of the `opts` field because the test
-    // written for it passed a PLAIN OBJECT where the producer supplies a `Map`:
-    // `JSON.stringify(new Map(...))` is `{}`, so `opts.symbols` (`SymbolMap = Map<number,
-    // SymbolInfo[]>`) and `AsmData`'s two maps — the real tier's whole vendored input — digested
-    // identically no matter what was in them. Renaming all 1,784 symbols in
-    // `dataset/real/tu/kleod/symbols.json.gz` and no line of `packages/` then moved 25 records
-    // reading `src`/`len` ALONE, which is verbatim the sentence `asm`/`opts` were added to prevent.
+    // THE DEFECT THIS PINS, and the reason the input is a `Map` and not the plain object a test
+    // reaches for: `JSON.stringify(new Map(...))` is `{}`, so `opts.symbols` (`SymbolMap =
+    // Map<number, SymbolInfo[]>`) and `AsmData`'s two maps — the real tier's whole vendored input —
+    // digest identically no matter what is in them. Measured that way, renaming all 1,784 symbols
+    // in `dataset/real/tu/kleod/symbols.json.gz` and no line of `packages/` moved 25 records
+    // reading `src`/`len` ALONE, which is verbatim the sentence `asm`/`opts` exist to prevent.
     // A test whose input is not a shape the producer emits pins nothing.
     const mapA = new Map<number, unknown>([[0x1000, [{ name: 'gFoo' }]]]);
     const mapB = new Map<number, unknown>([[0x2000, [{ name: 'gCompletelyDifferent' }]]]);
@@ -237,7 +236,7 @@ describe('the record carries its INPUT, not only its output', () => {
 
   it('renders a container the same way whether or not it was digested before', () => {
     // The serializer caches on container IDENTITY (a project's symbol map is one object digested
-    // once per row per arm — serializing it every time costs +27% on the real tier). A cache that
+    // once per row per arm; `serialized`'s header carries what that A/B measured). A cache that
     // returned a different string on the second call would make a record's `opts` depend on where
     // it sat in the corpus, which is the one thing `--repeat` cannot tell from a real move.
     const m = new Map([[1, { a: [1, 2, 3] }]]);

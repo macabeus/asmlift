@@ -31,11 +31,11 @@
 //                                        # THE CORPUS A/B: re-lift every row in this tree and in
 //                                        # another one, map-ful and map-less, and print the rows
 //                                        # whose emitted C (or enumerated fan, with --fan) differs.
-//                                        # Compile-free: ~60 s over 1,062 rows warm for ONE side,
-//                                        # ~232 s for the --base A/B that lifts both, against a
-//                                        # ~2,040 s `bench run` — so it answers "did my branch
-//                                        # change anything" many times per round, and scoped with
-//                                        # --tier/--project it is seconds. --repeat asks
+//                                        # Compile-free: about a minute over 1,062 rows for ONE
+//                                        # side and twice that for the --base A/B, against a full
+//                                        # `bench run` (docs/bench-cost.md §1) — so it answers "did
+//                                        # my branch change anything" many times per round, and
+//                                        # scoped with --tier/--project it is seconds. --repeat asks
 //                                        # the same question of this tree against ITSELF
 //                                        # (determinism). Exit 1 when anything moved, like `diff`;
 //                                        # exit 2 when a row could not be lifted here at all
@@ -519,12 +519,12 @@ switch (command) {
     //       [--asm-dir d --toolchain t] [--allow-unmeasured]
     //
     // The corpus A/B twenty agents hand-built. CORPUS-WIDE and affordable for the same reason
-    // `bench gates` is and `bench fan` is not: nothing here is COMPILED. Lifting all 1,062
-    // available rows in both arms is ~60 s warm (`time`d on this command, seven runs), and the
-    // A/B the flag exists for — `--base <ref>`, which lifts the corpus TWICE — is ~232 s, every
-    // time and not only the first. `--fan` adds enumeration and is 436.8 s, which is why it is a
-    // flag. Scope it with `--tier`/`--project`/`--only` when the question is scoped: a real-tier
-    // `--base-dir` A/B is 75.7 s. run/sweep.ts's header carries the measured table.
+    // `bench gates` is and `bench fan` is not: nothing here is COMPILED — all 1,062 available rows
+    // lift in both arms in about a minute. `--base <ref>` lifts the corpus TWICE and pays that
+    // twice over, every time and not only the first; `--fan` adds enumeration and is several times
+    // the lift, which is why it is a flag. Scope it with `--tier`/`--project`/`--only` when the
+    // question is scoped. The figures are dated rows of `docs/bench-cost.md` §1 and live only
+    // there; run/sweep.ts's header carries the SHAPE of the price.
     const { sweep } = await import('./run/sweep');
     process.exit(
       await sweep({

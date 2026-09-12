@@ -70,12 +70,13 @@ const firstLine = (e: unknown): string =>
 
 /** Serialization of ONE `Map`/`Set`/typed array, cached on the container's identity.
  *
- *  WHY: a project's vendored symbol map is one object of ~1,800 entries and the sweep digests it
- *  once per row per arm — 42 kleod records over one map. A/B'd here on the real tier's 504 records,
- *  two runs each: the `JSON.stringify` digest this replaces is 31.7 / 31.9 s, serializing the
- *  containers every time is 43.7 / 43.6 s (+37%), and caching on identity is 35.2 / 35.0 s (+10%)
- *  and catches the same perturbations, because the expensive containers are dataset-owned and
- *  shared. The cache buys back 8.5 s of the 11.9 s the correctness costs.
+ *  WHY: a project's vendored symbol map is ONE object shared by all 42 of that project's rows —
+ *  1,784 entries for kleod, 41,016 for pokeemerald — and the sweep digests it once per row per arm.
+ *  A/B'd on the real tier's 504 records, two runs each: a plain `JSON.stringify` digest is
+ *  31.7 / 31.9 s, serializing the containers every time is 43.7 / 43.6 s (+37%), and caching on
+ *  identity is 35.2 / 35.0 s (+10%) and catches the same perturbations, because the expensive
+ *  containers are dataset-owned and shared. The cache buys back 8.5 s of the 11.9 s the correctness
+ *  costs.
  *
  *  THE ASSUMPTION, said out loud: a container is not MUTATED between two digests of it inside one
  *  sweep process. The corpus is built once per process and `rankOptionsFor` only reads it; a
@@ -166,8 +167,9 @@ export const stable = (v: unknown): string => canon(v, new Set());
  *  line naming `src` alone says the decompiler did. This is the field `report/diff.ts` watches per
  *  side for the same reason (MEMORY #112/#113: label unchanged while the program changed).
  *
- *  WHAT IT CAN SEE is decided by `canon` above, and the first version of this function could not
- *  see a `Map` — read that header before trusting this digest with a new option shape. */
+ *  WHAT IT CAN SEE is decided entirely by `canon` above — a container it cannot render inside
+ *  digests the same whatever it holds, so read that header before trusting this digest with a new
+ *  option shape. */
 export function optsDigest(opts: Record<string, unknown>): string {
   const seen = new Set<object>();
   return sha(
@@ -201,10 +203,11 @@ export const ARMS = ['harness', 'nomap'] as const;
  *  record set, and a row that GAINS a map between two revisions then shows as a move in the
  *  `harness` arm rather than as a record appearing out of nowhere).
  *
- *  ABLATED, which is why it is exported and tested: collapsing this to `key: 'nomap'` makes the
+ *  ABLATED, which is why it is exported and pinned: collapsing this to `key: 'nomap'` makes the
  *  sweep blind to every symbol-map change — half of what the two arms exist for, and the half that
- *  covers most naming and global-recovery work — and the whole `apps/benchmark/test` suite stayed
- *  green (40 files / 1,128 tests) when a reviewer did exactly that. `optsFor` is called once per
+ *  covers most naming and global-recovery work. Nothing else in `apps/benchmark/test` fails on that
+ *  edit; the one test that does is `sweep.test.ts`'s, so keep the ablation in mind before relaxing
+ *  it (`const key = 'nomap'` → 1 failed of 1,152, 2026-09-12). `optsFor` is called once per
  *  distinct computation, never once per arm. */
 export function armsFor(
   arms: readonly string[],
@@ -248,8 +251,8 @@ async function treeModules(root: string) {
   return { synthetic, real, manifests, scrub, evalAsmlift, pipeline, rank, symbols, toolchains };
 }
 
-/** Recursively, every `.s`/`.inc` under `dir` — the shape the hand rigs used to sweep a project's
- *  `asm/matchings` and `asm/nonmatchings` trees, which are the functions that are NOT rows. */
+/** Recursively, every `.s`/`.inc` under `dir` — the shape that sweeps a project's `asm/matchings`
+ *  and `asm/nonmatchings` trees, which are the functions that are NOT rows. */
 export function asmFilesUnder(dir: string): string[] {
   const out: string[] = [];
   const walk = (d: string): void => {
