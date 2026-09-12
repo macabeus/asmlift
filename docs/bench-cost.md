@@ -173,7 +173,7 @@ sample is sticky and reverting does not undo it. Stop it, revert or commit, star
 
 ### Stopping one
 
-**`kill -TERM` does not stop a `bench run`** — measured: one sent SIGTERM 6 s in ran all 291 cases
+**`kill -TERM` does not stop a `bench run`** — measured 2026-09-10: one sent SIGTERM 6 s in ran all 291 cases
 and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
 case, so no signal handler can run until it is done, and `lock.ts` has no handlers by design for
 the same reason.

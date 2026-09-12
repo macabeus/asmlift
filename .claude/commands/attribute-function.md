@@ -38,7 +38,8 @@ Three docs carry what this command shares with `/match-function`, and it does no
    [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md). `/match-function` opens with
    the same step, so correct the rule in that doc and not here.
 
-   **This step usually ENDS the baseline question**: ~2.6 s, no bench, every matching row listed,
+   **This step usually ENDS the baseline question**: seconds, no bench (priced in
+   `docs/bench-cost.md` §1), every matching row listed,
    and each row's price printed as `fan=N rank=Ns`. Record the outcome verbatim for both
    decompilers — **the whole `diff:N/M`, never the `N` alone**.
 
@@ -49,7 +50,9 @@ Three docs carry what this command shares with `/match-function`, and it does no
    `NOT CURRENT` (name the commits you re-measured across); it exited 1 (no row — the target is
    measured outside the harness); **your own branch or worktree touches a scoring path**, in which
    case `CURRENT` is a statement about `origin/main` and not about you (`baseline` reads
-   `<artifact commit>..origin/main` and never your `HEAD`, index or working tree); or you are
+   `<artifact commit>..origin/main` and never your `HEAD`, index or working tree — and that doc
+   gives the two-line command that ANSWERS it, pathspec derived from `SCORING_PATHS`, because a bare
+   `git status` counts a stray untracked file as a reason to re-measure); or you are
    claiming a MOVE and need the before/after pair from one command. Otherwise do not re-derive a
    `CURRENT` baseline "to be sure": four agents in one chain did, at 450–471 s each.
 2. Reproduce outside the harness with **the row's own generated script**: `pnpm bench repro $1
@@ -72,8 +75,8 @@ Three docs carry what this command shares with `/match-function`, and it does no
    about this list, so read it. Its `[ranked]` line carries the same `synthesized` count and
    `[asmlift source <sha>]` stamp as the vehicles above, so it is quotable in the same way.
    `--enumerate` lists the same candidates' LABELS without compiling anything — no scores, because
-   nothing was compiled (**115 candidates/s**, measured 2026-09-12 as 9,192 labels in 80.2 s, so a
-   huge fan takes half an hour to list: that is a big fan, not a hang). It still serves
+   nothing was compiled — the rate, and what a huge fan therefore costs to merely LIST, is a row of
+   `docs/bench-cost.md` §1; a long enumeration is a big fan, not a hang. It still serves
    `--show <label>`, though not `--show best`: nothing has been scored, so there is no winner to
    name. A fan over 2,000 is refused unless you pass `--force`, and the refusal quotes what
    `--force` would cost on THIS row — **but that refusal is not free**: it is checked after the

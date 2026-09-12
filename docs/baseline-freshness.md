@@ -69,17 +69,41 @@ still your number_. Measured 2026-09-12 at `3a4fd60f`: with a scoring-path file 
 worktree, `pnpm bench baseline CountCollectedGems` printed `CURRENT — nothing since 8599234d changes
 what it measures` unchanged. So there is a **fourth** case in which the round runs the row:
 
-- `git diff --name-only origin/main...HEAD -- $(scoring paths)` or `git status --porcelain` is
-  non-empty for a scoring path ⇒ the artifact answers about main, not about your tree. Re-measure
-  the row on your own branch before you quote it as yours.
+- **your own tree changes a SCORING path** ⇒ the artifact answers about main, not about your tree.
+  Re-measure the row on your own branch before you quote it as yours.
 
-The two path lists behind that split are `paths` and `measures` in
+That case is a command, not a judgement call. Run it, in the repo root:
+
+```sh
+scoring_paths() {
+  sed -n '/^export const SCORING_PATHS = \[/,/^\];/p' apps/benchmark/src/provenance.ts \
+    | grep -oE "'[^']+'" | tr -d "'"
+}
+git diff --name-only origin/main...HEAD -- $(scoring_paths)   # what your branch COMMITTED
+git status --porcelain              -- $(scoring_paths)       # and what it has not committed yet
+```
+
+Any output from either ⇒ case 4. Both empty ⇒ the published number is still yours to quote.
+Verified 2026-09-12: both empty on a docs-only branch, and `git status --porcelain -- $(…)` prints
+`?? packages/core/src/<file>` the moment a scoring path is touched. The pathspec is
+DERIVED from `SCORING_PATHS` rather than typed out, so it cannot drift from the export, and
+`apps/benchmark/test/command-files.test.ts` fails if that `sed` stops finding the literal.
+
+**The filter is the whole point, and the reason not to fall back to a bare `git status
+--porcelain`.** That has no path filter: six untracked `.bin` files sitting in the user's checkout —
+none of them a scoring path — are enough to read as case 4 and order a re-measure that this corpus
+prices between a couple of minutes and half an hour for one row (`docs/bench-cost.md` §3). The whole
+reason this section exists is that four agents in one chain paid for a `CURRENT` row; a check that
+fires on a stray `.bin` reintroduces the same bill through the other door.
+
+The two path lists behind the split are `paths` and `measures` in
 `scripts/check-artifact-provenance.sh`, exported to TypeScript as `MEASURED_PATHS` and
 `SCORING_PATHS` and held equal to the script by `apps/benchmark/test/fidelity-provenance.test.ts`.
-**Do not hand-copy either list into a prompt, a doc or a shell one-liner.** Two copies drift and the
-drift is only ever found by a gate that should have fired; and in this repo's shell (zsh, which does
-not word-split `$VAR`) a pathspec built in a variable silently collapses to one path that matches
-nothing, printing the empty output that means "go ahead".
+**Do not hand-copy either list into a prompt, a doc or a shell one-liner** — derive it, as above.
+Two copies drift and the drift is only ever found by a gate that should have fired; and a pathspec
+built in a `$VAR` silently collapses to one path that matches nothing (zsh does not word-split a
+parameter expansion; it DOES split a `$(…)` substitution, which is why the form above works and the
+`VAR=…; git … -- $VAR` form does not), printing the empty output that means "go ahead".
 
 Against your own `bench run`, **trust the run**. And do not try to date the artifact by
 `meta.asmlift.commit`: main squash-merges, so that sha is a branch commit main does not contain, it
@@ -101,7 +125,8 @@ checkouts (`apps/benchmark/checkouts/`) by itself; a checkout you already have i
 pointing `ASMLIFT_PROJ_<PROJECT>` at it, or as a sibling of the workspace — in that precedence, which
 `apps/benchmark/src/cases/manifests.ts` owns. Everything else local goes in
 `.local/` or `.envrc.local` — both gitignored, and both exist because **an untracked file makes a
-run stamp itself dirty and `bench:merge` refuses the tier**, which has cost ~2,350 s twice.
+run stamp itself dirty and `bench:merge` refuses the tier**, which cost ~2,350 s twice in the
+window to 2026-09-09. What a voided tier costs you today is `docs/bench-cost.md` §1, and it grows.
 
 `bench run`'s preflight catches half of that at second 0, and the other half is yours:
 

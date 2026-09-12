@@ -75,7 +75,8 @@ Check whether you have to instrument at all, in this order:
 
 **Do not write your own census script.** The three hazards that made it a subcommand are recorded
 at `grep -n "WHY A SUBCOMMAND AND NOT A DOCUMENTED SCRIPT" apps/benchmark/src/run/gate-census.ts`,
-and one of them stamps your next `bench run` DIRTY after 2,000 s.
+and one of them stamps your next `bench run` DIRTY after 2,000 s (the incident is of 2026-09-09;
+what a voided tier costs you today is `docs/bench-cost.md` §1).
 
 ## 4. NO REACH is not LOSES is not DOES NOT COMPOSE
 

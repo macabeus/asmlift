@@ -233,7 +233,8 @@ Two things it can do that nothing else can:
 the field, or the row never ranked there). And this run enumerates 32; the series starts here.`
   Three are ANSWERS and print beside the count; a ref nothing can
   read is a bad ARGUMENT, so it goes to stderr, is refused **before the row is built** (diagnosing
-  it after a ~46 s enumeration is the worst order) and **exits 2**: `bench fan <row> --base X && …`
+  it after a ~46 s enumeration — the figure this row showed on 2026-09-12 — is the worst order) and
+  **exits 2**: `bench fan <row> --base X && …`
   must not read success from a run that compared nothing.
 
   **And whether the base's own number is still the base's answer.** The artifact committed on
@@ -330,7 +331,11 @@ So a candidate your change makes asmlift emit that names a project type or globa
 `gEntityArray`, a `struct`) **noncompiles here and would have been scored by the harness**: the fan
 size, and therefore the `[ranked]` line, can differ from the harness's at the same commit. The
 vehicle is faithful to the row as published, and drifts from the harness exactly as your change
-starts working. Confirm a moved row with `pnpm bench run --tier real --only <sym>` (30–90 s).
+starts working. Confirm a moved row with `pnpm bench run --tier real --only <sym>`, whose cost is
+the ROW's own and spans three orders of magnitude across this tier — ask `pnpm bench baseline <sym>`
+for that row's `rank=` before you launch it (`docs/bench-cost.md` §1 and §3). This line used to
+price it at "30–90 s", which is under the artifact's own figure for the most expensive real row by
+more than an order of magnitude.
 
 And on an **unscored** row it is not "the rung this row stopped at" at all: only `match`/`nonmatch`
 rows have a source that pins a rung, so for anything `declined`/`noncompile`/`failed` the caller
@@ -386,7 +391,8 @@ is the part to carry forward: it is enumerated only on a function whose raised I
 the synthetic tier a lift-only census finds **34 rows carrying such a branch** (of 770; 130 rows the
 census's own bare lift could not raise are outside that count), and `LoadBGTilemapData` is one of
 them — one folded branch. **So the LBG numbers above are again stale by up to 2x, and this round did
-not re-measure them**: the ranked run costs 1500–8000 s and no gap in this chain needs it, so what
+not re-measure them**: a ranked run at that scale is HARD-RULE forbidden and priced in
+`docs/bench-cost.md` §1, and no gap in this chain needs it, so what
 is recorded here is the GATE firing, not a fan.
 
 Two consequences, and they are cheap:
@@ -826,7 +832,8 @@ find nothing to disagree with and go green having audited nothing.
   thread waiting on subprocesses. Of the work charged at all (1443.4s), the compiles are **87%**.
 
   Both figures move with the machine, and by a lot. The same command on the same commit, sharing
-  the box with a full `pnpm bench run`, read `wall 426.3s · compile 2175.1s · score 211.2s` —
+  the box with a full `pnpm bench run`, read `wall 426.3s · compile 2175.1s · score 211.2s` (both
+  profiles recorded 2026-08-24; neither is a price to budget with, which is the point) —
   same 26880 candidates, same 0 dropped, same 395, same winner. Only the shares travel; re-time on
   your own log, and say what else the machine was doing.
 

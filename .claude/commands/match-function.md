@@ -36,7 +36,8 @@ a rule spelled twice is a rule with two chances to be lost:
    [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md). `/attribute-function` opens
    with the same step, so correct the rule in that doc and not here.
 
-   **This step usually ENDS the baseline question.** It costs ~2.6 s, runs no bench, prints EVERY
+   **This step usually ENDS the baseline question.** It costs seconds and runs no bench at all
+   (`docs/bench-cost.md` §1 prices it), prints EVERY
    row whose symbol matches (so it disambiguates for you), and since #192 prints each row's price
    as `fan=N rank=Ns`. Record what it prints verbatim: the asmlift outcome, m2c's, and the whole
    `N/M` — never the `N` alone (`docs/measurement-discipline.md` §5).
@@ -52,7 +53,9 @@ a rule spelled twice is a rule with two chances to be lost:
    - **your own branch or worktree touches a scoring path** — `baseline` reads only
      `<artifact commit>..origin/main`, never your `HEAD`, index or working tree, so `CURRENT` is a
      statement about main and not about you. From this command's first capability commit onward you
-     are in this case;
+     are in this case. **Do not eyeball this and do not run a bare `git status`** — the doc gives a
+     two-line command whose pathspec is derived from `SCORING_PATHS`, and an unfiltered status makes
+     a stray untracked `.bin` order you a re-measure;
    - you are about to claim a MOVE, in which case the before/after pair must come from the same
      command.
 
@@ -120,9 +123,10 @@ symbol map), so it is comparable with the published row rather than with a check
 - `--enumerate` lists the fan without compiling anything and still serves `--show <label>`. Use it
   to answer "did my new lever produce a candidate at all" — a label that is absent was never
   enumerated, and a lever that THREW prints as `[lever] … threw (no candidate from it)`, which a
-  `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely:
-  **115 candidates/s** (measured 2026-09-12: 9,192 labels in 80.2 s), so the biggest fans take
-  half an hour to merely list. A long enumeration is a big fan, not a hang.
+  `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely — the
+  rate and what the biggest fans therefore cost to merely LIST are in `docs/bench-cost.md` §1, and
+  that rate is the figure §2 shows moving fastest of all. A long enumeration is a big fan, not a
+  hang.
 - `--base <ref>` prints one line — this tree's enumeration against the count that ref's artifact
   recorded for the same row: `[fan-diff] <row>: 5952 → 11904 (2.00×) vs origin/main`. **That is the
   multiplier a round is asked to report before it merges an axis**, and it costs an enumeration
@@ -136,16 +140,17 @@ symbol map), so it is comparable with the published row rather than with a check
   refused rather than eaten.
 
 A fan over 2,000 candidates is refused rather than scored (`--force` overrides): that is a compile
-each, and the refusal quotes the row's own price at its own TIER'S measured rate — 60 ms/candidate
-synthetic, 85 ms real, because a real candidate escalates through up to three preludes where a
-synthetic one is a single small one. **Ask `pnpm bench baseline <sym>` for the fan before you type
-`--force`**: it prints `fan=N rank=Ns` off the artifact in ~2.6 s, and those fans move fast —
-`kleod:CountCollectedGems:agbcc` was 5,952 when this paragraph was written and is 9,192 as
-measured on 2026-09-12. `LoadBGTilemapData`'s 225,792 is over five hours to score and ~33 minutes
-to `--enumerate`; **never start the scored run** (`docs/bench-cost.md` §1). **And the 2,000 guard is
-not a cheap shield**: it is tested on `cands.length` AFTER the enumeration (`fan.ts:914`, read
-2026-09-12), so a bare `pnpm bench fan` on a row that size pays the whole ~33 min of enumeration and
-only then refuses.
+each, and the refusal quotes the row's own price at its own TIER'S measured per-candidate rate,
+which is higher on a real row than a synthetic one because a real candidate escalates through up to
+three preludes where a synthetic one is a single small prelude. Both rates are rows of
+`docs/bench-cost.md` §1. **Ask `pnpm bench baseline <sym>` for the fan before you type `--force`**:
+it prints `fan=N rank=Ns` off the artifact in seconds, and those fans move fast —
+`kleod:CountCollectedGems:agbcc` was 5,952 when this paragraph was written and had grown to 9,192
+by 2026-09-12. `LoadBGTilemapData`'s 225,792 is HARD-RULE forbidden to score and expensive even to
+`--enumerate`; **never start the scored run** (`docs/bench-cost.md` §1 prices both). **And the 2,000
+guard is not a cheap shield**: it is tested on `cands.length` AFTER the enumeration (`fan.ts:914`,
+read 2026-09-12), so a bare `pnpm bench fan` on a row that size pays the whole enumeration and only
+then refuses.
 
 **A declined or noncompile row has NO fan, and the command says so** (`asmlift: [fan] no fan …`,
 exit 2) rather than crashing: enumeration throws on the same gap the row declines on, and on a
@@ -342,7 +347,8 @@ on the corpus. A finding already triaged is not a new finding unless it falsifie
 Do this AFTER the adversarial rounds, never before: remediation rewrites code, and a comment
 written for the first version is the likeliest thing in the diff to have become false. And **not
 while a bench is in flight** — this phase rewrites files across the whole diff, the mid-run sampler
-is sticky, and a round paid 2,420 s for exactly this pair. **Run `pnpm bench in-flight` first**:
+is sticky, and a round has paid for a whole voided real tier on exactly this pair
+(`docs/bench-cost.md` §5). **Run `pnpm bench in-flight` first**:
 exit 1 means a run is measuring this worktree, so wait for its `EXIT=` line before you touch a
 file.
 
@@ -381,7 +387,9 @@ this phase is the only pass they get.
   load-bearing.
 - Push the branch (this project's convention is commit + push on a finished goal).
 - Then **`scripts/pr-wait.sh <pr>`**, never a human — `docs/measurement-discipline.md` §8 has
-  its four exit codes and why a pending check is not a failed one.
+  its exit codes and why a pending check is not a failed one. Read that table; never carry a count
+  of it in your head — the round that WIDENED it wrote the old count into this sentence in the
+  same commit, and the count is the smallest possible copy of a list.
 
 ## Cost discipline
 

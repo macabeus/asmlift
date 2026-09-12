@@ -17,8 +17,11 @@
 //      when somebody actually paid for the run this table prices, which is exactly who can cheaply
 //      re-date it, and which never reddens a PR that ran no bench.
 //   4. A RETYPED COST. `~34 min` for a full bench was retyped into three places under `.claude/`
-//      the moment the doc was written. When it becomes 45, two of the three drift. A full-bench
-//      wall clock is therefore illegal inside a prompt — link the table, do not copy a cell out.
+//      the moment the doc was written. When it becomes 45, two of the three drift. A figure §1
+//      states is therefore illegal inside a prompt — ANY of them, dated or not, because the first
+//      remediation of the round that wrote this rule immediately put five freshly-dated figures
+//      back into the two prompts. Link the table; do not copy a cell out. The banned set is read
+//      out of §1 itself, so there is no second list to drift.
 //   5. A LINK THAT DOES NOT RESOLVE. The prompts delegate half their content to `docs/`; a link
 //      that 404s sends the agent back to inference.
 //   6. A GHOST SUBCOMMAND. #192 changed four `pnpm bench` commands and no prompt was updated; the
@@ -26,9 +29,28 @@
 //   7. A PATH INTO THE USER'S FROZEN CHECKOUT. The workflow brief generator handed its agents
 //      `${REPO}/.claude/...`; 16 of 21 spec reads across rounds #183-#188 landed on text tens of
 //      commits stale. A ref (`git show origin/main:<path>`) cannot go stale; a path there always can.
+//   8. A COUNT OF A LIST THE SPEC LINKS. A round widened `pr-wait.sh`'s exit-code table from four
+//      rows to six and, in the SAME commit, wrote "its four exit codes" into a prompt — the defect
+//      it had just diagnosed, now with the doc's authority behind it. A count is the smallest
+//      possible copy of a list. (This is the structural cost of defect 1's gate: its only
+//      enforceable remedy for shared text is "make the two files differ", and it cannot tell
+//      move-to-doc from reword. The rewording is where the divergence entered.)
+//   9. A DERIVABLE FIGURE LEFT AS PROSE. `docs/bench-cost.md` §3 is five fields of
+//      `results/results.json` hand-typed, and the fan `9192` appears in five files while being one
+//      integer in a committed JSON file. A `sed` that rewrote §3 to `99,999 s over 3` left the
+//      suite green.
 //
-// It cannot check that an instruction is TRUE — only a command run can. What it holds is the shape
-// that lets one file be the place a correction lands.
+// WHAT IT STILL CANNOT DECIDE, so that nobody reads more into a green run than is there:
+//   - It cannot check that an instruction is TRUE. Only a command run can.
+//   - The recency gate tests "a date near the row is within N days of `meta.generatedAt`", which
+//     cannot tell a RE-MEASURED row from a RE-STAMPED one: `sed -i 's/<old date>/<today>/'` passes
+//     it. What it buys is that somebody must look at every row on every published run. For the
+//     five §3 figures the artifact check above closes it properly; for §1's three tier wall clocks
+//     there is no mechanical close short of recording per-tier seconds into `meta`, and that edit
+//     is in `MEASURED_PATHS` and owes a full bench.
+//   - Outside `.claude/commands/**` the rule is still "dated or deferred", and a date in a dated
+//     LOG is not checked for freshness — a historical incident is not a stale price, and no
+//     measured threshold separates them.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -36,7 +58,10 @@ import { describe, expect, it } from 'vitest';
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 const COMMANDS_DIR = join(ROOT, '.claude', 'commands');
 const WORKFLOWS_DIR = join(ROOT, '.claude', 'workflows');
-const BENCH_COST_DOC = join(ROOT, 'docs', 'bench-cost.md');
+const DOCS_DIR = join(ROOT, 'docs');
+const BENCH_COST_DOC = join(DOCS_DIR, 'bench-cost.md');
+const DISCIPLINE_DOC = join(DOCS_DIR, 'measurement-discipline.md');
+const ARTIFACT = join(ROOT, 'apps', 'benchmark', 'results', 'results.json');
 
 /** The two prompts that drive a measured round. `dogfood-klonoa.md` and `update-m2c.md` are not in
  *  the duplication pair: they describe different workflows and share no phase structure. They ARE
@@ -45,12 +70,26 @@ const BENCH_COST_DOC = join(ROOT, 'docs', 'bench-cost.md');
 const PAIR = ['match-function.md', 'attribute-function.md'];
 
 /** The frontmatter plus the "Target function" preamble — identical by design in every command file,
- *  and the one place sharing text is the point rather than a drift hazard. Measured: the shared run
- *  there is 7 lines, so 10 clears it with room for a line being added. */
-const PREAMBLE_LINES = 10;
+ *  and the one place sharing text is the point rather than a drift hazard. Measured across all six
+ *  command-file pairs: the longest shared run anywhere is the 7-line frontmatter of THIS pair, so 8
+ *  clears it by exactly one line. It was 10, which left 3 lines of pure blind spot — a duplicated
+ *  instruction placed there was invisible. */
+const PREAMBLE_LINES = 8;
 
 const commandFiles = () => readdirSync(COMMANDS_DIR).filter((f) => f.endsWith('.md'));
+/** The brief GENERATORS. `.js` was the only extension matched until a wave-2 mutation renamed the
+ *  one file to `.mjs` and the `${REPO}` describe silently went from one test to zero — green, with
+ *  the exact line that sent 16 of 21 spec reads to the frozen checkout put back. Every loop over a
+ *  directory in this file now has a canary asserting it found something. */
+const briefGenerators = () => readdirSync(WORKFLOWS_DIR).filter((f) => /\.(m|c)?js$/.test(f));
+const docFiles = () =>
+  readdirSync(DOCS_DIR)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => join(DOCS_DIR, f));
 const read = (f: string) => readFileSync(join(COMMANDS_DIR, f), 'utf8').split('\n');
+/** One cell of a markdown table row. `row.split('|')` puts the leading `|` before index 1, so cell
+ *  1 is the command, 2 the cost and 3 the provenance. */
+const cellOf = (row: string, n: number) => row.split('|')[n] ?? '';
 const substantive = (l: string) => l.trim().length > 20;
 
 /** The longest run of consecutive identical lines (ignoring indentation) shared by two files,
@@ -98,6 +137,10 @@ describe('the two round prompts do not duplicate an instruction', () => {
   });
 
   it('every command file links the two shared docs', () => {
+    expect(
+      commandFiles().length,
+      'no command files found — the directory moved and this suite went blind',
+    ).toBeGreaterThanOrEqual(4);
     for (const f of commandFiles()) {
       const text = read(f).join('\n');
       for (const doc of ['docs/bench-cost.md', 'docs/measurement-discipline.md']) {
@@ -135,34 +178,54 @@ describe('every link in a command file resolves', () => {
   }
 });
 
-describe('docs/bench-cost.md', () => {
-  /** The rows of "## 1. The table". Read inside the `it`s, not at describe scope: against a tree
-   *  without the doc, a describe-scope `readFileSync` throws an ENOENT stack and vitest reports
-   *  "no tests" — red, but with every diagnosis this suite exists to print unreachable. */
-  function tableRows() {
-    if (!existsSync(BENCH_COST_DOC)) {
-      return { missing: true as const, rows: [] as string[] };
-    }
-    const lines = readFileSync(BENCH_COST_DOC, 'utf8').split('\n');
-    const start = lines.findIndex((l) => /^##\s+1\./.test(l));
-    if (start === -1) {
-      return { missing: false as const, rows: [] as string[] };
-    }
-    const end = lines.findIndex((l, i) => i > start && /^##\s/.test(l));
-    const rows = lines
-      .slice(start, end === -1 ? lines.length : end)
-      .filter((l) => l.startsWith('|') && !/^\|\s*-+/.test(l) && !/\|\s*command\s*\|/i.test(l));
-    return { missing: false as const, rows };
+/** The rows of "## 1. The table". Read inside the `it`s, not at describe scope: against a tree
+ *  without the doc, a describe-scope `readFileSync` throws an ENOENT stack and vitest reports
+ *  "no tests" — red, but with every diagnosis this suite exists to print unreachable. */
+function tableRows() {
+  if (!existsSync(BENCH_COST_DOC)) {
+    return { missing: true as const, rows: [] as string[] };
   }
+  const lines = readFileSync(BENCH_COST_DOC, 'utf8').split('\n');
+  const start = lines.findIndex((l) => /^##\s+1\./.test(l));
+  if (start === -1) {
+    return { missing: false as const, rows: [] as string[] };
+  }
+  const end = lines.findIndex((l, i) => i > start && /^##\s/.test(l));
+  const rows = lines
+    .slice(start, end === -1 ? lines.length : end)
+    .filter((l) => l.startsWith('|') && !/^\|\s*-+/.test(l) && !/\|\s*command\s*\|/i.test(l));
+  return { missing: false as const, rows };
+}
+
+describe('docs/bench-cost.md', () => {
+  // Not global: `RegExp.test` on a `/g` literal carries `lastIndex` between calls and would skip
+  // every second dated row.
+  const DATE = /\b20\d\d-\d\d-\d\d\b/;
+  const datesIn = (s: string) => [...s.matchAll(/\b20\d\d-\d\d-\d\d\b/g)].map((m) => Date.parse(m[0]));
+
+  /** `NOT re-measured` skipped BOTH the dating test and the freshness test, anywhere in a row, with
+   *  no bound and no other condition — so `s/the 2026-09-12 ship run/NOT re-measured; the ship run/`
+   *  exempted the full-bench wall clock forever, in one edit, and the suite stayed green. The escape
+   *  now belongs to the rows this repo is FORBIDDEN to measure: HARD RULE 1's LoadBGTilemapData
+   *  ranked run, whose fan `fan.ts` prices at over five hours. Anything else must carry a date. */
+  const UNMEASURABLE = /LoadBGTilemapData/;
+  const honestlyHistorical = (row: string) => row.includes('NOT re-measured') && UNMEASURABLE.test(cellOf(row, 1));
+  const escapeAbused = (row: string) => row.includes('NOT re-measured') && !UNMEASURABLE.test(cellOf(row, 1));
 
   it('dates every figure in the cost table', () => {
     const { missing, rows } = tableRows();
     expect(missing, 'docs/bench-cost.md is gone — the prompts link it and it is the only cost table').toBe(false);
     expect(rows.length, 'no table rows found under "## 1." — the section moved or was renamed').toBeGreaterThan(5);
-    const undated = rows.filter((l) => !/\b20\d\d-\d\d-\d\d\b/.test(l) && !l.includes('NOT re-measured'));
+    const undated = rows.filter((l) => !DATE.test(l) && !honestlyHistorical(l));
     expect(
       undated,
-      'a cost with no measured date reads as current forever — add the date, or mark it "NOT re-measured"',
+      'a cost with no measured date reads as current forever — add the date, or, if HARD RULE 1 forbids ' +
+        'measuring the row at all, mark it "NOT re-measured"',
+    ).toEqual([]);
+    expect(
+      rows.filter(escapeAbused),
+      'the "NOT re-measured" escape is for the rows this repo may not measure (the LoadBGTilemapData ' +
+        'ranked run). On any other row it is an undated figure with a licence — date it instead.',
     ).toEqual([]);
   });
 
@@ -179,16 +242,22 @@ describe('docs/bench-cost.md', () => {
     if (missing) {
       return;
     } // the test above is the one that reports this
-    const meta = JSON.parse(readFileSync(join(ROOT, 'apps', 'benchmark', 'results', 'results.json'), 'utf8'));
+    const meta = JSON.parse(readFileSync(ARTIFACT, 'utf8'));
     const artifactAt = Date.parse(meta.meta.generatedAt);
     expect(Number.isFinite(artifactAt), 'results.json has no parseable meta.generatedAt').toBe(true);
 
     const stale: string[] = [];
     for (const row of rows) {
-      if (row.includes('NOT re-measured')) {
+      if (honestlyHistorical(row)) {
         continue;
-      } // an honestly labelled historical figure
-      const dates = [...row.matchAll(/\b20\d\d-\d\d-\d\d\b/g)].map((m) => Date.parse(m[0]));
+      } // a figure HARD RULE 1 forbids re-taking; the dating test owns the abuse of this escape
+      // THE FIGURE'S OWN CELL DECIDES. `Math.max` over the whole row let a figure dated eight
+      // months stale ride a fresh date in the neighbouring provenance cell — and §1's rows
+      // routinely carry several (the `--tier real` row cites four). So: if the COST cell carries a
+      // date, that date is the figure's date and nothing else in the row can rescue it. Only when
+      // the cost cell is dateless — today, every row — does the rest of the row answer.
+      const inCostCell = datesIn(cellOf(row, 2));
+      const dates = inCostCell.length > 0 ? inCostCell : datesIn(row);
       if (dates.length === 0) {
         continue;
       } // the dating test above owns that case
@@ -207,6 +276,53 @@ describe('docs/bench-cost.md', () => {
         `cannot, delete the row rather than let it read as current.`,
     ).toEqual([]);
   });
+
+  /** §3 IS DERIVABLE, AND WAS HAND-TYPED. Every figure in "Answer the cost question without running
+   *  a bench" is a field of the committed artifact — `rankSeconds` and `candidateCount`, summed by
+   *  tier — and `tableRows()` scopes to `## 1.`, so nothing looked at them. `sed
+   *  's/2,668 s over 155/99,999 s over 3/'` left the suite green, and the fan `9192` is hand-typed
+   *  in five places while being one integer in a JSON file. The repo's own rule is that a pass may
+   *  be half-converted to a table provided the residue is NAMED: the residue here is the three
+   *  wall clocks in §1's first rows, which come from run logs and not from the artifact (`meta`
+   *  carries `generatedAt`, `counts`, `toolchains` and the two commits, and no duration). */
+  it('§3 quotes the artifact it says it is summed out of', () => {
+    if (!existsSync(BENCH_COST_DOC)) {
+      return;
+    } // the dating test reports a missing doc
+    const doc = readFileSync(BENCH_COST_DOC, 'utf8').split('\n');
+    const start = doc.findIndex((l) => /^##\s+3\./.test(l));
+    expect(start, 'docs/bench-cost.md has no "## 3." — the section moved or was renamed').toBeGreaterThan(-1);
+    const end = doc.findIndex((l, i) => i > start && /^##\s/.test(l));
+    const text = doc.slice(start, end === -1 ? doc.length : end).join(' ');
+
+    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8'));
+    const ranked = (tier: string) =>
+      artifact.results.filter((r: { tier: string; asmlift?: { rankSeconds?: number } }) => {
+        return r.tier === tier && typeof r.asmlift?.rankSeconds === 'number';
+      });
+    const sum = (rows: { asmlift: { rankSeconds: number } }[]) => rows.reduce((a, r) => a + r.asmlift.rankSeconds, 0);
+    const row = (id: string) => artifact.results.find((r: { id: string }) => r.id === id);
+    const group = (n: number) => Math.round(n).toLocaleString('en-US');
+
+    const real = ranked('real');
+    const synthetic = ranked('synthetic');
+    const piue = row('kleod:ProcessInputAndUpdateEntities:agbcc');
+    const ccg = row('kleod:CountCollectedGems:agbcc');
+
+    const expected = [
+      `${group(sum(real))} s over ${real.length}`,
+      `${group(sum(synthetic))} s over ${synthetic.length}`,
+      `${group(piue.asmlift.rankSeconds)} s`,
+      `${Math.round((piue.asmlift.rankSeconds / sum(real)) * 100)}% of the tier`,
+      `fan=${ccg.asmlift.candidateCount} rank=${ccg.asmlift.rankSeconds.toFixed(1)}s`,
+    ];
+    const missing = expected.filter((e) => !text.includes(e));
+    expect(
+      missing,
+      `docs/bench-cost.md §3 disagrees with apps/benchmark/results/results.json. Every figure there is ` +
+        `derived from the artifact, so re-read it rather than re-typing it — expected: ${expected.join(' · ')}`,
+    ).toEqual([]);
+  });
 });
 
 /** Everything under `.claude/` an agent or a brief author reads: the four command files, the
@@ -220,7 +336,7 @@ function claudeFiles(): string[] {
       continue;
     }
     for (const e of readdirSync(dir, { withFileTypes: true })) {
-      if (e.isFile() && /\.(md|js)$/.test(e.name)) {
+      if (e.isFile() && /\.(md|(m|c)?js)$/.test(e.name)) {
         out.push(join(dir, e.name));
       }
     }
@@ -242,21 +358,104 @@ function claudeFiles(): string[] {
 const AMOUNT = String.raw`(?:\b(?:~|about |over |under )?\d[\d,.]*|\b(?:half an|one|two|three|four|five|six|seven|eight|nine|ten)\s)\s*`;
 const UNIT = String.raw`(?:s|sec|secs|second|seconds|min|mins|minute|minutes|h|hr|hrs|hour|hours|ms)\b`;
 const COMMAND = String.raw`(?:pnpm |npx )?(?:bench[: ](?:run|merge|fan|gates|baseline|repro|target|diff|regression|setup|fidelity|smoke|verify|publish|vendor|stale-check|in-flight)|full bench|ranked run|ranked enumeration|vitest|test:matching|test:offline)`;
-const BENCH_COST = new RegExp(`${COMMAND}[^\\n]{0,140}?${AMOUNT}${UNIT}`, 'i');
 
-/** The full-bench wall clock specifically — the figure that has now gone stale TWICE (the ledger's
- *  "~5 minutes" and the prompts' "~1800 s"), and the one the round's own remediation immediately
- *  retyped into three prompts. */
-const FULL_BENCH_COST =
-  /(?:pnpm bench run|pnpm bench:merge|full bench|full `?pnpm bench run`?)[^\n]{0,140}?\b(?:~|about )?\d[\d,.]*\s*(?:s|sec|seconds|min|minutes|h|hours)\b/i;
+/** BOTH ORDERS. The first version required the COMMAND token to come FIRST on the line, and English
+ *  does not: "Budget ~34 min for a full `pnpm bench run`" passed while "A full `pnpm bench run`
+ *  takes ~34 min" — the same claim, clauses swapped — failed. Every cost sentence a writer reaches
+ *  for naturally was the half that escaped. */
+const BENCH_COST = new RegExp(
+  `(?:${COMMAND}[^\\n]{0,140}?${AMOUNT}${UNIT})|(?:${AMOUNT}${UNIT}[^\\n]{0,140}?${COMMAND})`,
+  'i',
+);
 
-describe('no undated bench cost under .claude/', () => {
-  it('every wall-clock claim about a bench command carries a date or defers to docs/bench-cost.md', () => {
+describe('a harness cost is written in one place', () => {
+  /** THE PROMPTS MAY NOT CARRY A FIGURE AT ALL. The rule used to be "date it or defer", and the
+   *  first remediation of this very round then wrote five freshly-dated figures into the two
+   *  prompts — `115 candidates/s`, `9,192 labels`, `80.2 s`, `~2.6 s`, `29 s` — including the fan
+   *  count §2 proves moves fastest of all (5,952 -> 9,192 inside one window). A date does not stop
+   *  a copy drifting; only not having a copy does. So inside `.claude/commands/**` the deferral is
+   *  the whole legal spelling: name the command, link `docs/bench-cost.md`, quote nothing.
+   *
+   *  This is exactly the rule the prompts already STATE ("Do not retype one of those numbers
+   *  here") and did not enforce. */
+  it('no command file quotes a harness wall clock — the prompts defer, they do not copy', () => {
+    const copies: string[] = [];
+    for (const f of commandFiles()) {
+      read(f).forEach((line, i) => {
+        if (BENCH_COST.test(line)) {
+          copies.push(`${f}:${i + 1}  ${line.trim().slice(0, 80)}`);
+        }
+      });
+    }
+    expect(
+      copies,
+      'a harness cost inside a prompt is a copy of a docs/bench-cost.md cell and drifts the day the table ' +
+        'is re-measured — say "a full `pnpm bench run` is the expensive one (docs/bench-cost.md §1)" and let ' +
+        'the reader follow the link. The table is the only place a figure lives.',
+    ).toEqual([]);
+  });
+
+  /** …AND NOT A CELL OF §1 ANYWHERE IN THE FILE, on any line, however it is worded. The rule above
+   *  needs the command and the figure on one line; the five figures the first remediation of this
+   *  round wrote into the two prompts — `115 candidates/s`, `9,192 labels`, `80.2 s`, `~2.6 s`,
+   *  `29 s` — mostly sit a line away from the command they price, and a date does not stop a copy
+   *  drifting. So the banned set is DERIVED from §1's own cost cells: whatever number the table
+   *  currently states, no prompt may state it. One list, no second copy to drift.
+   *
+   *  Widening the sentence rule to paragraph scope was tried instead and MEASURED to over-fire: 16
+   *  hits across the four prompts, 5 of them not cost claims at all (an incident narrative's "not
+   *  finished after 2h", the provenance notice's "within ~2 s", two toolchain remarks), and with
+   *  the paragraph joined into one window, 4 of 6 hits spanned unrelated list items tens of lines
+   *  apart. There is no threshold there; there is an exact list here. */
+  const figure = /(\d[\d,.]*)\s*(ms|s|sec|secs|min|mins|minute|minutes|h|hr|hrs|hour|hours)\b/gi;
+  const normalize = (text: string) =>
+    [...text.matchAll(figure)].map((m) => `${m[1].replace(/[.,]$/, '')} ${m[2].toLowerCase()}`);
+
+  it('no command file states a figure docs/bench-cost.md §1 already states', () => {
+    const { rows } = tableRows();
+    const priced = new Set(rows.flatMap((r) => normalize(cellOf(r, 2))));
+    expect(priced.size, 'no figures parsed out of §1’s cost column — the table shape changed').toBeGreaterThan(5);
+
+    const copies: string[] = [];
+    for (const f of commandFiles()) {
+      read(f).forEach((line, i) => {
+        for (const fig of normalize(line)) {
+          if (priced.has(fig)) {
+            copies.push(`${f}:${i + 1}  "${fig}"  ${line.trim().slice(0, 70)}`);
+          }
+        }
+      });
+    }
+    expect(
+      copies,
+      'a prompt states a figure that is a cell of docs/bench-cost.md §1. That is the retyped-cost defect ' +
+        'by definition: the table moves and the copy does not. Name the command and link the table.',
+    ).toEqual([]);
+  });
+
+  /** `docs/` was outside every cost assertion, and the whole point of the round was to move the
+   *  cost prose OUT of the prompts and INTO `docs/` — so the guard was pointed away from where the
+   *  round had just put its material. Measured at the time: 17 cost lines across `docs/*.md`, six
+   *  undated, two of them live contradictions of the table this round declared canonical
+   *  (`ranked-repro.md` priced a `--only` confirm run at 30-90 s for a row the artifact records at
+   *  1,840 s). `docs/bench-cost.md` §1 is excluded here because the two tests above own it. */
+  function bench_cost_section_1(file: string): [number, number] {
+    if (file !== BENCH_COST_DOC) {
+      return [-1, -1];
+    }
+    const lines = readFileSync(file, 'utf8').split('\n');
+    const start = lines.findIndex((l) => /^##\s+1\./.test(l));
+    const end = lines.findIndex((l, i) => i > start && /^##\s/.test(l));
+    return [start, end === -1 ? lines.length : end];
+  }
+
+  it('every wall-clock claim in docs/ or a workflow brief carries a date or defers to docs/bench-cost.md', () => {
     const undated: string[] = [];
-    for (const file of claudeFiles()) {
+    for (const file of [...claudeFiles().filter((f) => !f.startsWith(COMMANDS_DIR)), ...docFiles()]) {
+      const [s1from, s1to] = bench_cost_section_1(file);
       const lines = readFileSync(file, 'utf8').split('\n');
       lines.forEach((line, i) => {
-        if (!BENCH_COST.test(line)) {
+        if (!BENCH_COST.test(line) || (i >= s1from && i < s1to)) {
           return;
         }
         // The date may sit anywhere in the same PARAGRAPH — the contiguous run of non-blank lines
@@ -281,23 +480,6 @@ describe('no undated bench cost under .claude/', () => {
     expect(
       undated,
       'a bench cost with no measured date beside it reads as current forever — date it, or point at docs/bench-cost.md',
-    ).toEqual([]);
-  });
-
-  it('no prompt retypes the full-bench wall clock', () => {
-    const copies: string[] = [];
-    for (const f of commandFiles()) {
-      read(f).forEach((line, i) => {
-        if (FULL_BENCH_COST.test(line)) {
-          copies.push(`${f}:${i + 1}  ${line.trim().slice(0, 80)}`);
-        }
-      });
-    }
-    expect(
-      copies,
-      'a full-bench wall clock inside a prompt is a copy of a docs/bench-cost.md cell and drifts the ' +
-        'day the table is re-measured — say "a full `pnpm bench run` is the expensive one (docs/bench-cost.md §1)" ' +
-        'and let the reader follow the link. (The ledger may keep its struck-through historical number; a prompt may not.)',
     ).toEqual([]);
   });
 });
@@ -354,8 +536,18 @@ describe('the workflow brief generator sends nobody to the frozen checkout', () 
    *  bench cost that had already been corrected on main. A `${REPO}/<path>` handed to an agent as a
    *  READ path is therefore a stale read; `git -C ${REPO} show origin/main:<path>` is not, and the
    *  SUPERVISOR — which gets no worktree of its own — has no other way to read the current spec. */
-  const rooted = /\$\{REPO\}\/[A-Za-z_.]/;
-  for (const file of readdirSync(WORKFLOWS_DIR).filter((f) => f.endsWith('.js'))) {
+  const rooted = /\$\{REPO\}\/[A-Za-z_.]|\bjoin\(\s*REPO\s*,|\bresolve\(\s*REPO\s*,/;
+
+  it('found a brief generator to check', () => {
+    expect(
+      briefGenerators(),
+      'no brief generator found in .claude/workflows — a per-file loop with no files is a green, EMPTY ' +
+        'describe. `git mv meta-optimizer-loop.js …mjs` took this suite from 14 tests to 13, all passing, ' +
+        'with the frozen-checkout path restored to the file.',
+    ).not.toEqual([]);
+  });
+
+  for (const file of briefGenerators()) {
     it(file, () => {
       const hits: string[] = [];
       readFileSync(join(WORKFLOWS_DIR, file), 'utf8')
@@ -373,4 +565,87 @@ describe('the workflow brief generator sends nobody to the frozen checkout', () 
       ).toEqual([]);
     });
   }
+});
+
+describe('a spec does not state a cardinality for a list it links', () => {
+  /** A round diagnosed "a round handed a SHORT VERSION of the `pr-wait.sh` exit codes has no
+   *  reading for the two that mean STOP WAITING", widened §8 from four rows to six — and in the
+   *  SAME commit wrote "`docs/measurement-discipline.md` §8 has its FOUR exit codes" into a prompt,
+   *  now with the doc's authority behind it. That is the structural cost of the duplication gate:
+   *  its only enforceable remedy for shared text is "make the two files differ", and it cannot tell
+   *  move-to-doc from reword. A count is the smallest possible copy of a list, and it goes stale
+   *  the first time the list grows. Link the list; do not count it. */
+  it('no command file counts the exit codes of a script it links', () => {
+    const counted: string[] = [];
+    const CARDINALITY = /\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:\w+\s+){0,2}exit codes?\b/i;
+    for (const f of commandFiles()) {
+      read(f).forEach((line, i) => {
+        if (CARDINALITY.test(line)) {
+          counted.push(`${f}:${i + 1}  ${line.trim().slice(0, 80)}`);
+        }
+      });
+    }
+    expect(
+      counted,
+      'a prompt states how many exit codes the linked doc lists. It was four, the doc grew to six in the ' +
+        'commit that wrote the sentence, and nothing noticed. Say "its exit codes" and let the table be the list.',
+    ).toEqual([]);
+  });
+
+  /** …and the table itself is checked against the script, both ways, so the doc cannot be the thing
+   *  that goes short either. */
+  it('docs/measurement-discipline.md §8 lists exactly the codes pr-wait.sh exits with', () => {
+    const script = readFileSync(join(ROOT, 'scripts', 'pr-wait.sh'), 'utf8');
+    // `^\s*exit N` — a STATEMENT. The script's header block also discusses `gh`'s own documented
+    // codes in prose, and those are not codes `pr-wait.sh` returns.
+    const codes = new Set([...script.matchAll(/^[ \t]*exit ([0-9]+)/gm)].map((m) => m[1]));
+    expect(codes.size, 'no `exit N` statements found in scripts/pr-wait.sh — the parse broke').toBeGreaterThan(3);
+
+    const doc = readFileSync(DISCIPLINE_DOC, 'utf8').split('\n');
+    const start = doc.findIndex((l) => /^##\s+8\./.test(l));
+    expect(start, 'docs/measurement-discipline.md has no "## 8." — the section moved or was renamed').toBeGreaterThan(
+      -1,
+    );
+    const end = doc.findIndex((l, i) => i > start && /^##\s/.test(l));
+    const documented = new Set(
+      doc
+        .slice(start, end === -1 ? doc.length : end)
+        .map((l) => /^\|\s*([0-9]+)\s*\|/.exec(l)?.[1])
+        .filter((c): c is string => c !== undefined),
+    );
+    const byNumber = (a: string, b: string) => Number(a) - Number(b);
+    expect(
+      [...documented].sort(byNumber),
+      'docs/measurement-discipline.md §8 and scripts/pr-wait.sh disagree about the exit codes. The script ' +
+        'is the authority; a round handed a short version has no reading for the codes that mean stop waiting.',
+    ).toEqual([...codes].sort(byNumber));
+  });
+});
+
+describe('the fourth Phase-0 case is a command a round can run', () => {
+  /** `docs/baseline-freshness.md` told a round to check `git diff --name-only origin/main...HEAD --
+   *  $(scoring paths)`, which is a PROSE PLACEHOLDER — no command, env var or flag prints that
+   *  list — and then banned hand-copying it six lines later. The only runnable form it left was
+   *  `git status --porcelain`, which has no path filter: six untracked `.bin` files in the user's
+   *  own checkout put a round in case 4 and order a re-measure priced, on this corpus, between
+   *  142 s and 1,840 s. The doc now gives a one-liner that DERIVES the list from the export, and
+   *  this is the gate that the derivation still finds it. */
+  it('the SCORING_PATHS literal is extractable in the shape docs/baseline-freshness.md extracts it', async () => {
+    const src = readFileSync(join(ROOT, 'apps', 'benchmark', 'src', 'provenance.ts'), 'utf8').split('\n');
+    const start = src.findIndex((l) => /^export const SCORING_PATHS = \[/.test(l));
+    const end = src.findIndex((l, i) => i > start && /^\];/.test(l));
+    expect(
+      start,
+      'no `export const SCORING_PATHS = [` in provenance.ts — the doc one-liner extracts nothing',
+    ).toBeGreaterThan(-1);
+    const extracted = src
+      .slice(start, end === -1 ? src.length : end)
+      .flatMap((l) => [...l.matchAll(/'([^']+)'/g)].map((m) => m[1]));
+    const { SCORING_PATHS } = await import('../src/provenance');
+    expect(
+      extracted,
+      'the `sed`/`grep` derivation docs/baseline-freshness.md §3 hands a round no longer yields SCORING_PATHS. ' +
+        'Fix the doc rather than let it print a pathspec that matches nothing — in zsh that reads as "go ahead".',
+    ).toEqual(SCORING_PATHS);
+  });
 });
