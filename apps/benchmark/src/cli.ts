@@ -24,6 +24,17 @@
 //                                        # (on a declined row, the count that LEFT), and --asm
 //                                        # prices a .s that is not a row, no scoring. --toolchain
 //                                        # belongs to --asm alone: a row names its own in its id
+//   pnpm bench sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p]
+//                    [--arms harness,nomap] [--fan] [--force] [--repeat N]
+//                    [--json <f>] [--compare <a> <b>] [--asm-dir <d> --toolchain <id>]
+//                                        # THE CORPUS A/B: re-lift every row in this tree and in
+//                                        # another one, map-ful and map-less, and print the rows
+//                                        # whose emitted C (or enumerated fan, with --fan) differs.
+//                                        # Compile-free: 28.8 s over 1,062 rows warm against a
+//                                        # ~2,040 s `bench run`, so it answers "did my branch
+//                                        # change anything" twenty times per round. --repeat asks
+//                                        # the same question of this tree against ITSELF
+//                                        # (determinism). Exit 1 when anything moved, like `diff`
 //   pnpm bench gates --pass <id> [--only <row>] [--toolchain id]
 //                                        # the per-id REFUSAL CENSUS of an l3/gates.ts table, off a
 //                                        # real enumeration: which rule refused, how many times, in
@@ -129,6 +140,20 @@ const { values: opts, positionals } = parseArgs({
     asm: { type: 'string' },
     // gates only: which tabled pass to census (see run/gate-census.ts's registry).
     pass: { type: 'string' },
+    // sweep only: the corpus-wide differential re-lift (run/sweep.ts). `--base`/`--base-dir` name
+    // the OTHER tree; `--arms` which configurations to lift each row in; `--fan` adds enumeration
+    // (120x the lift); `--repeat` asks this tree whether it agrees with itself; `--json` and
+    // `--compare` split a comparison into two runs that need not happen on the same machine.
+    // `--asm-dir` swaps dataset rows for a tree of raw `.s`/`.inc` files, which is the corpus the
+    // hand-built rigs swept that `bench fan` cannot reach.
+    'base-dir': { type: 'string' },
+    arms: { type: 'string', default: 'harness,nomap' },
+    fan: { type: 'boolean', default: false },
+    repeat: { type: 'string' },
+    json: { type: 'string' },
+    compare: { type: 'string', multiple: true },
+    'asm-dir': { type: 'string' },
+    'asm-project': { type: 'string' },
   },
 });
 
@@ -474,6 +499,35 @@ switch (command) {
     process.exit(fan(rowId, fanOpts));
     break;
   }
+  case 'sweep': {
+    // sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p] [--arms a,b]
+    //       [--fan] [--force] [--repeat N] [--json f] [--compare a b] [--asm-dir d --toolchain t]
+    //
+    // The corpus A/B twenty agents hand-built. CORPUS-WIDE and affordable for the same reason
+    // `bench gates` is and `bench fan` is not: nothing here is COMPILED. Lifting all 1,062
+    // available rows in both arms is 28.8 s warm; `--fan` adds enumeration and is 277.4 s, which
+    // is why it is a flag. run/sweep.ts's header carries the measured table.
+    const { sweep } = await import('./run/sweep');
+    process.exit(
+      await sweep({
+        tiers,
+        ...(opts.only !== undefined ? { only: opts.only } : {}),
+        ...(opts.project !== undefined ? { project: opts.project } : {}),
+        arms: opts.arms.split(',').filter((a) => a !== ''),
+        fan: opts.fan,
+        force: opts.force,
+        ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),
+        ...(opts.json !== undefined ? { json: opts.json } : {}),
+        ...(opts.compare !== undefined ? { compare: opts.compare } : {}),
+        ...(opts.base !== undefined ? { base: opts.base } : {}),
+        ...(opts['base-dir'] !== undefined ? { baseDir: opts['base-dir'] } : {}),
+        ...(opts['asm-dir'] !== undefined ? { asmDir: opts['asm-dir'] } : {}),
+        ...(opts.toolchain !== undefined ? { toolchain: opts.toolchain } : {}),
+        ...(opts['asm-project'] !== undefined ? { asmProject: opts['asm-project'] } : {}),
+      }),
+    );
+    break;
+  }
   case 'gates': {
     // gates --pass <id> [--only <row>] [--toolchain id] — the refusal census of a tabled pass.
     // CORPUS-WIDE by default and that is affordable, unlike `fan`: nothing is COMPILED here, the
@@ -585,7 +639,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|in-flight|repro|target|fan|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|in-flight|repro|target|fan|sweep|gates|setup|fidelity|merge|publish|baseline|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }
