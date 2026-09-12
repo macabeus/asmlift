@@ -666,8 +666,8 @@ function memAccess(
   // fold destroyed it). It rides beside `operandOff` because both are facts about how the address
   // was computed rather than about which cell it names, and both are lost at L3 otherwise.
   //
-  // `off === 0` IS A NARROWING, AND ONE SIDE OF IT IS WHAT THE REPRO SHOWED. What the repro
-  // shows is a base value used as an address at TWO offsets — `ldr r3,=X; strh [r3]; adds r3,#2;
+  // `off === 0` IS A NARROWING, AND ONE SIDE OF IT IS WHAT THE ASM SHOWS. That side is a base
+  // value used as an address at TWO offsets — `ldr r3,=X; strh [r3]; adds r3,#2;
   // strh [r3]; strh [r3,#2]`, where the third access carries `{adv 2, off 2}`. Stamping that one
   // makes `l3/advance.ts` spell a second `p = p + 1;` where the target performed no second `add`:
   // the distance still lands (the displacement was folded into the cell address, so
@@ -678,9 +678,9 @@ function memAccess(
   // WHAT IT IS NOT is "a non-zero `off` says this access was reached by a displacement RATHER THAN
   // by the advance", which is false wherever ONE displacement rides EVERY member —
   // `ldr r3,=X; strh [r3,#4]; adds r3,#2; strh [r3,#4]` is a real chain at X+4 and X+6, and this
-  // term refuses it (probe: both index nodes arrive `{off 4, adv undefined}` and `advancedBases`
-  // declines; the same tree with the pre-`8f5a5764` stamp admits and emits the correct two-member
-  // chain). The discriminating fact is the one the repro had — the same base VALUE used at more
+  // term refuses it — both index nodes arrive `{off 4, adv undefined}` and `advancedBases`
+  // declines, pinned by test/advance.test.ts's `one displacement on BOTH members is a real chain,
+  // and the stamp rule declines it`. The discriminating fact is the same base VALUE used at more
   // than one `off`, where only the smallest is the link — not `off` alone, and reaching it takes a
   // per-value census of address offsets this seam does not have.
   //

@@ -8197,21 +8197,23 @@ export const SYNTHETIC: SynthSpec[] = [
   // and it survives only because the pointee is `volatile`. asmlift's `/advance` lever
   // (l3/advance.ts) reads the lift's own `add` and spells it back.
   //
-  // IT EXISTS BECAUSE IT IS THE ONLY ROW THAT IS ONLY THIS. `pnpm bench sweep --fan --base
-  // origin/main` puts the lever's whole reach at FIVE rows (10 records, 2,114 identical, 0 rows
-  // whose default spelling moved): `kleod:StreamCmd_SetWindowRegs` 16 -> 18,
-  // `kleod:SetupBG3WindowOverlay` 1024 -> 1072, `synthetic:dma_fill_uninit` 66 -> 90, and
-  // `synthetic:offhi_split`/`offhi_fused` 12 -> 20 each. Every one of those carries something else
-  // the lever does not own — a DMA block, an uninitialised slot, a fused offset — so a regression
-  // in the advance alone would surface there as one term of a conjunction. This row is the shape
-  // with nothing else in it.
+  // IT EXISTS BECAUSE IT IS THE ONLY PRE-EXISTING ROW THAT WOULD BE ONLY THIS — and none is.
+  // `pnpm bench sweep --fan --base origin/main` (2026-09-12: 10 record(s) moved, 0 base-only,
+  // 2 head-only, 2114 identical, and not one row whose DEFAULT spelling moved) reaches five rows
+  // that already existed — `kleod:StreamCmd_SetWindowRegs` fan 16 -> 17 map-ful and 10 -> 11
+  // map-less, `kleod:SetupBG3WindowOverlay` 1024 -> 1048 and 720 -> 744,
+  // `synthetic:dma_fill_uninit` 66 -> 78, `synthetic:offhi_split` and `offhi_fused` 12 -> 16 each
+  // — plus this row, which is the head-only pair. Every one of the five carries something else the
+  // lever does not own (a DMA block, an uninitialised slot, a fused offset), so a regression in the
+  // advance alone would surface there as one term of a conjunction. This row is the shape with
+  // nothing else in it.
   //
-  // …AND ONE OF THOSE FIVE CANNOT SCORE AT ALL. `kleod:SetupBG3WindowOverlay:agbcc` is a
-  // `noncompile` row for a reason that predates this lever: every one of its 1,072 candidates is
+  // …AND ONE OF THE FIVE CANNOT SCORE AT ALL. `kleod:SetupBG3WindowOverlay:agbcc` is a
+  // `noncompile` row for a reason this lever does not touch: every one of its 1,048 candidates is
   // `[dropped] agbcc failed: too many arguments to function 'm4aSoundVSyncOff'`, a declaration the
-  // row's own context gets wrong (re-checked 2026-09-12 with `bench fan`, which prints the 1,072
-  // drops and no ranking). It prices the lever's REACH and buys nothing else: the +48 candidates
-  // there are 48 more compiles of a translation unit that cannot compile.
+  // row's own context gets wrong (`pnpm bench fan kleod:SetupBG3WindowOverlay:agbcc`, 2026-09-12,
+  // prints the 1,048 drops and no ranking). It prices the lever's REACH and buys nothing else: the
+  // +24 candidates there are 24 more compiles of a translation unit that cannot compile.
   {
     sym: 'volwalk',
     src:

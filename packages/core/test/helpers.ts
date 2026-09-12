@@ -239,9 +239,8 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
   sfn.params.forEach((p, i) => env.set(p.name, ((seed >> (i * 3)) % 11) - 5));
   // POINTER ARITHMETIC IS SCALED, because C's is: `p = p + 1` on a `u16 *` moves TWO bytes, and a
   // byte-wise reading of it reports a FALSE DIFFERENCE against the IR's own `add %p, 2` on every
-  // tree `l3/advance.ts` produces — which is why that pass shipped with no differential at all.
-  // The scale comes off the DECLARATION, so nothing is scaled unless the tree declares the local a
-  // pointer; a tree with no pointer local (every fuzz above) evaluates exactly as before.
+  // tree `l3/advance.ts` produces. The scale comes off the DECLARATION, so nothing is scaled unless
+  // the tree declares the local a pointer; a tree with no pointer local evaluates exactly as before.
   const ptrScale = new Map<string, number>();
   for (const l of sfn.locals) {
     const t = l.type as { kind: string; to?: { kind: string; width?: number; size?: number } };

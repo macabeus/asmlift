@@ -1483,19 +1483,26 @@ export function enumerateCandidates(
     // the only target that reaches the stamp (the corpus census below), and the day a second one
     // does, `compilerBehaviors` is where this belongs rather than a label.
     //
-    // THE PLAIN LABEL IS GATED ON THE COMPILER BEHAVIOUR IT IS INERT UNDER, which is the third
-    // option the two earlier waves did not consider — they argued deleting it against keeping it,
-    // and `foldsConstAddrOffset` two hundred lines above is the shipped precedent for neither.
-    // agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four compiled
-    // corners in test/advance.test.ts's header), so the plain spelling is byte-identical to the
-    // indexed one this roster already offers, and it is measured inert on every row that reaches
-    // it — `/advance` 15/23 against this row's 0/22 match, and it LOSES outright on the other four
-    // (`offhi_split` 33/64 vs 12/61 · `offhi_fused` 31/63 vs 0/58 · `dma_fill_uninit` 76/114 vs
-    // 0/103 · `volwalk` 5/7 vs 0/7, all `bench fan`, 2026-09-12). ABSENT ⇒ FALSY ⇒ THE LABEL
-    // SHIPS, so every compiler whose pair nobody has compiled keeps exactly the coverage it had:
-    // a compiler that does not fold `p = p + 1; *p` back would score the spelling apart, and that
-    // is the case the label exists for. `/advance/volatile` is not gated — `volatile` is what bars
-    // the fold, and that product is this row's match.
+    // THE PLAIN LABEL IS GATED ON THE COMPILER BEHAVIOUR IT IS INERT UNDER — a label keyed on a
+    // `compilerBehaviors` flag, as `foldsConstAddrOffset` keys `/offmember` above, but with the
+    // POLARITY REVERSED: that flag admits a label where the compiler folds, this one withholds
+    // one. agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four
+    // compiled corners in test/advance.test.ts's header), so the plain spelling is byte-identical
+    // to the indexed one this roster already offers, and it never wins on a row that reaches it:
+    // `/advance` 15/23
+    // against this row's 0/22 match, and it LOSES outright on the other four — `offhi_split`
+    // 33/64 vs 12/61 · `offhi_fused` 31/63 vs 0/58 · `dma_fill_uninit` 76/114 vs 0/103 ·
+    // `volwalk` 5/7 vs 0/7 (2026-09-12).
+    //
+    // THOSE `/advance` HALVES ARE NOT REPRODUCIBLE BY A BARE `bench fan`, because this withhold is
+    // what removes them from every agbcc fan. The falsifying command is the ablation: flip
+    // `foldsPointerAdvance` to `false` in target.ts and re-run `pnpm bench fan <sym>` on the five
+    // rows — the plain label reappears at the scores above, or these numbers are wrong.
+    //
+    // ABSENT ⇒ FALSY ⇒ THE LABEL SHIPS, so every compiler whose pair nobody has compiled keeps
+    // exactly the coverage it had: a compiler that does not fold `p = p + 1; *p` back would score
+    // the spelling apart, and that is the case the label exists for. `/advance/volatile` is not
+    // gated — `volatile` is what bars the fold, and that product is this row's match.
     //
     // NO `/vol-store` PRODUCT. That lever pins a store whose WHOLE ADDRESS is a device constant,
     // and this one has just replaced those constants with a local — so on the shape `/advance`
@@ -1512,13 +1519,13 @@ export function enumerateCandidates(
     // `/advance` inherits: where `structureChecked` has already hoisted the chain's pool word, the
     // members arrive as a `var` base and this pass enumerates nothing at all.
     //
-    // AND IT IS MAP-LESS ONLY, which is what caps its reach at five rows: with a symbol map the
-    // pool word promotes to `&REG_WININ` and `l3/address.ts`'s `cellAddress` answers null, so every
+    // AND IT IS MAP-LESS ONLY, which is what caps its reach: with a symbol map the pool word
+    // promotes to `&REG_WININ` and `l3/address.ts`'s `cellAddress` answers null, so every
     // `/advance` candidate on this row carries `/raw-globals` (`bench fan
-    // kleod:StreamCmd_SetWindowRegs:agbcc --enumerate`, 18 candidates, the two advanced ones both
-    // `/raw-globals`). A capability that reads a CONST address does not survive the symbol-map
-    // direction unless `cellAddress` learns the promoted form; test/advance.test.ts's footer is
-    // where that is written down at the pass.
+    // kleod:StreamCmd_SetWindowRegs:agbcc --enumerate`, 2026-09-12: 17 candidates, the one
+    // advanced candidate `unsigned/advance/volatile/raw-globals`). A capability that reads a CONST
+    // address does not survive the symbol-map direction unless `cellAddress` learns the promoted
+    // form; test/advance.test.ts records that at the row it exists for.
     const advance = (): SFn | null => survives(sfn, advancedBases(sfn));
     if (!target.compilerBehaviors.foldsPointerAdvance) {
       respell('/advance', advance);

@@ -13,10 +13,10 @@
 // WHY IT IS A CANDIDATE. Against the INDEXED spelling of the same minted local the advance buys
 // nothing: agbcc folds `p = p + 1; *p` straight back into `strh [r3, #2]`, byte for byte the
 // subscript's own object. What makes it visible is the CONJUNCTION with a `volatile` pointee,
-// which bars that fold and leaves the `add` the target records. Both halves were compiled against
-// `kleod:StreamCmd_SetWindowRegs`'s target object before this pass was written; the four corners
-// are in test/advance.test.ts's header. So this pass emits a spelling and `compareScored`
-// referees; nothing here claims the source wrote it.
+// which bars that fold and leaves the `add` the target records. Both halves are compiled against
+// `kleod:StreamCmd_SetWindowRegs`'s target object; the four corners are in test/advance.test.ts's
+// header. So this pass emits a spelling and `compareScored` referees; nothing here claims the
+// source wrote it.
 //
 // SOUNDNESS IS ADDRESS EQUALITY. `p` is freshly minted and assigned by nothing else, so at each
 // member's access it holds `A0 + Σ steps so far` — that member's own absolute address — PROVIDED
@@ -31,9 +31,8 @@
 // second access at a member's address — a twin at the top level, or one inside an arm or a loop
 // body — is re-spelled `*p` at a point where `p` does not hold that address. The two rules that
 // refuse those shapes (`member-second-site`, `member-nested-site`, and their head twins) are
-// therefore SOUND, not narrowing. Removing `member-nested-site` and fuzzing 49,528 chains against
-// a pointer-aware memory-trace oracle moves 3,664 addresses (the wave-1 breaker's `fuzz2.mts`);
-// the shape is pinned here by `an access at a chain address inside a loop is not re-spelled`.
+// therefore SOUND, not narrowing, and the shape is pinned by test/advance.test.ts's `an access at
+// a chain address inside a loop is not re-spelled`.
 //
 // SCOPE (decline over approximate) is `ADVANCE_HEAD_GATES` and `ADVANCE_MEMBER_GATES` below — as
 // tables rather than an `||` chain, so `sound` costs a `guardedBy` and every rule is ablated
@@ -42,7 +41,7 @@
 // answers `no censusable pass "advance"`, and structurally must, because this pass is reached
 // through a static import binding in rank.ts rather than through a mutable caller-side record
 // (run/gate-census.ts's header, which measures the `TypeError` a module-namespace write raises).
-// The census below was therefore taken BY HAND; the recipe is two lines and in the header.
+// The firing census below was therefore taken by hand, with the recipe it states.
 //
 // FIVE OF THE TWELVE ARE NARROWING rather than soundness and each says which it is. Three are
 // judgements about what the asm shows (`head-already-advanced`, `member-negative-step`,
@@ -51,8 +50,8 @@
 // spell a correct reinterpret cast; one, `member-element-grid`, is a LOUD refusal — ablated it
 // emits `p0 = p0 + 0.5;`, which is not C. Dropping `member-no-evidence` alone leaves the emitted
 // step `undefined / width` = `NaN`, refused downstream only by the two arithmetic rules'
-// comparisons against it (`NaN % w !== 0`, `NaN !== addr`) — an accident when it was unwritten,
-// pinned now by the battery's `noncompile` verdicts for both.
+// comparisons against it (`NaN % w !== 0`, `NaN !== addr`); the battery's `noncompile` verdicts
+// for both are what hold that.
 //
 // HOW OFTEN EACH FIRES, over the whole corpus — `bench sweep --fan`, both arms, 2,126 records,
 // instrumented on `firstRejection` (2026-09-12), which is HAND INSTRUMENTATION and reproduced by
@@ -76,8 +75,10 @@
 //   • IT IS MAP-LESS ONLY. Every member is reached through `cellAddress`, which answers null once
 //     a symbol map promotes the pool word to `&REG_WININ` — so with a map this pass enumerates
 //     nothing, and every `/advance` candidate the corpus carries is a `/raw-globals` one. That is
-//     what caps the lever at five rows, and it is the question to ask of it the day the symbol-map
-//     direction lands: this capability survives only if `cellAddress` learns the promoted form.
+//     what caps the lever at the six rows `bench sweep --fan --base origin/main` names
+//     (apps/benchmark/dataset/synthetic.ts, at `volwalk`), and it is the question to ask of it the
+//     day the symbol-map direction lands: this capability survives only if `cellAddress` learns
+//     the promoted form.
 import { type IrType, scalarTypeForAccess } from '../ir/types';
 import { cellAddress } from './address';
 import { type Expr, type SFn, type Stmt, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
@@ -244,17 +245,14 @@ function collectSites(body: readonly Stmt[]): { sites: Site[]; nestedAddrs: Set<
  *
  *  A NON-MEMBER SITE BETWEEN TWO MEMBERS DOES NOT END THE CHAIN. `p` is freshly minted, so an
  *  access that does not touch it cannot move it — and the clientele is MMIO setup code, where one
- *  `REG_BLDCNT = y;` between two window writes is the ordinary case. The rule used to be
- *  POSITIONAL (the head was the site immediately before the first stamped one, and the walk
- *  stopped at the first site that failed a gate), which declined that shape for no soundness
- *  reason; a `var`-based store between the same two members was admitted, which no reader could
- *  predict. Ambiguity is resolved greedily in statement order: where two later sites would both
- *  extend the chain, the earlier one does.
+ *  `REG_BLDCNT = y;` between two window writes is the ordinary case. So the head is chosen by the
+ *  head table rather than by position, and the walk scans every later site rather than stopping at
+ *  the first one a gate refuses. Ambiguity is resolved greedily in statement order: where two later
+ *  sites would both extend the chain, the earlier one does.
  *
- *  PRICED AT ZERO. `bench sweep --fan --base 9e393db5`, both arms: 0 records moved, 2,126
- *  identical. The shape this admits — MMIO writes with an unrelated const-addressed access between
- *  two members — has no inhabitant in the corpus either, so this is a rule the file can now state
- *  truthfully rather than reach the corpus can show. */
+ *  THE TOLERANCE HAS NO CORPUS INHABITANT. MMIO writes with an unrelated const-addressed access
+ *  between two members appear nowhere in the corpus, so this is a rule the file can state
+ *  truthfully rather than reach a sweep can show. */
 function chainOf(sites: readonly Site[], nestedAddrs: ReadonlySet<number>, gates: AdvanceGates): Site[] | null {
   const head = gates.head ?? ADVANCE_HEAD_GATES;
   const member = gates.member ?? ADVANCE_MEMBER_GATES;
@@ -358,18 +356,17 @@ export function advancedBases(sfn: SFn, gates: AdvanceGates = {}): SFn | null {
   // `prepend` for `l3/nearbase.ts`'s reason and a second one this pass owns: the init MATERIALISES
   // the register the chain advances, and the target's own instruction order is what says where the
   // pool word was loaded. Putting it in first-use order instead moves it below whatever else the
-  // function loads first, which on the row this pass was built for swaps the two pool words and
-  // costs the match (measured: variant A vs variant C in test/advance.test.ts's header).
+  // function loads first, which on `kleod:StreamCmd_SetWindowRegs` swaps the two pool words and
+  // costs the match; test/advance.test.ts's `the base init leads` pins the emitted order.
   //
   // AND NO `/advance/sinkinit` TWIN, unlike `/nearbase`, which ships one for exactly this choice —
   // not because the choice is better determined here (the generator cannot see the target either
   // way) but because the twin CANNOT EXIST. `sinkInitsToFirstUse` sinks an init only when
   // `localMentions` counts ONE assignment to its local ("or the move would cross the other write",
   // l3/hoist.ts), and an advance IS a second assignment to this one — so the sink declines on every
-  // tree this pass produces, by construction rather than by row. Measured both ways: registering
-  // `/advance/sinkinit` and re-ranking `kleod:StreamCmd_SetWindowRegs:agbcc` leaves the fan at 18
-  // candidates with `--enumerate` listing only `/advance` and `/advance/volatile`, and the sink
-  // returns null on the advanced tree in-process. The `prepend` choice above is therefore the only
+  // tree this pass produces, by construction rather than by row: the sink returns null on the
+  // advanced tree, and registering `/advance/sinkinit` adds no label to
+  // `kleod:StreamCmd_SetWindowRegs:agbcc`'s fan. The `prepend` choice above is therefore the only
   // placement this lever HAS, which is a stronger reason to record the compile behind it.
   const { body: placed } = placeBaseLocals({ ...sfn, locals, body }, [init], 'prepend');
   return { ...sfn, locals, body: placed };

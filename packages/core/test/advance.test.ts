@@ -111,8 +111,8 @@ test('a displacement off an advanced register is not another link in the chain',
   expect(out).toContain('[1] = a0;');
 });
 
-// …and the OTHER side of that term, pinned as the narrowing it is rather than left to be
-// rediscovered: where ONE displacement rides EVERY member the chain is real and this refuses it.
+// …and the OTHER side of that term, which is a NARROWING: where ONE displacement rides EVERY
+// member the chain is real and this refuses it.
 // `structure.ts`'s `off === 0` is a per-ACCESS test, and what would decide the question is a
 // per-VALUE one (the same base used at more than one `off`). Priced at 0 corpus inhabitants —
 // 4,361 stamps over 1,063 rows, every one at `off === 0` — so the capability is recorded here and
@@ -207,8 +207,10 @@ test('members of different widths decline', () => {
   ).toBeNull();
 });
 
-// The two NARROWING rules (`head-already-advanced`, `member-negative-step`), each pinned on the
-// shape it excludes and each of which the pass would still be address-correct without.
+// ── the COLLECTION boundary, which is not a gate ──────────────────────────────────────────────
+// `collectSites` records only accesses reached once per execution of a top-level statement, so a
+// chain that lives entirely inside a loop or an arm produces no sites to chain at all. These three
+// decline with NO rule load-bearing: ablating each of the twelve one at a time still declines.
 test('an advanced access inside a loop declines', () => {
   const loop: Stmt = { k: 'while', cond: { k: 'var', name: 'a' }, body: [...PAIR] };
   expect(advancedBases(fnWith([loop]))).toBeNull();
@@ -219,13 +221,17 @@ test('an advanced access inside an arm declines', () => {
   expect(advancedBases(fnWith([arm]))).toBeNull();
 });
 
-// …and the pair that the strictly-increasing statement rule does NOT already refuse: one member
-// per arm, at two different top-level statements. This is the case the nesting rule alone decides.
+// …and one member per arm, at two different top-level statements — where the strictly-increasing
+// statement rule would admit, and the collection boundary still refuses because neither access is
+// top-level.
 test('a chain split across two arms declines', () => {
   const armed = (s: Stmt): Stmt => ({ k: 'if', cond: { k: 'var', name: 'a' }, then: [s], else: [] });
   expect(advancedBases(fnWith(PAIR.map(armed)))).toBeNull();
 });
 
+// ── the two NARROWING rules that ARE load-bearing on their own shape ──────────────────────────
+// Ablating either one admits the chain below, and the pass would still be address-correct: these
+// are judgements about what the asm shows, not soundness.
 test('a NEGATIVE step declines', () => {
   const down = [storeTo(cell(0x0400004a)), storeTo(cell(0x04000048, 2, { baseAdvanced: -2 }))];
   expect(advancedBases(fnWith(down))).toBeNull();
@@ -275,8 +281,7 @@ test('members of different signedness decline', () => {
 
 // A non-member access BETWEEN two members does NOT end the chain: `p` is freshly minted, so a
 // store that does not touch it cannot move it, and one `REG_BLDCNT = y;` between two window writes
-// is the ordinary MMIO shape. (Before the head rule was made address-based this declined, while
-// the same store through a `var` base was admitted.)
+// is the ordinary MMIO shape.
 test('an unrelated const-addressed access between two members keeps the chain', () => {
   const out = cBackend.emit(advancedBases(fnWith([PAIR[0], storeTo(cell(0x04000050)), PAIR[1]]))!);
   expect(count(out, '*p0 = a;')).toBe(2);
@@ -292,10 +297,10 @@ test('two accesses in ONE statement are not a chain', () => {
 // ── the differential: the same STORES, at the same addresses ─────────────────────────────────
 // The battery above reads the emitted TEXT. This reads what the tree DOES: `traceOf` observes each
 // store as (address, value), so the re-spelled tree must be indistinguishable from the one the
-// structurer produced — which is the whole soundness claim, checked rather than argued. It could
-// not be asked before this round: `traceOf` evaluated `p0 = p0 + 1` as ONE BYTE, so every tree this
-// pass emits reported a false difference. The scale now comes off the declaration (test/helpers.ts),
-// and the sensitivity check below is the ablation that must still be caught.
+// structurer produced — which is the whole soundness claim, checked rather than argued. It rests on
+// `traceOf` scaling pointer arithmetic off the DECLARATION (test/helpers.ts): read byte-wise,
+// `p0 = p0 + 1` would report a false difference on every tree this pass emits. The sensitivity
+// check below is the ablation that must still be caught.
 test('the advanced tree observes the same stores as the tree it re-spells', () => {
   const plain = fnWith([...PAIR]);
   const advanced = advancedBases(plain)!;
@@ -322,9 +327,9 @@ test('the advanced tree observes the same stores as the tree it re-spells', () =
 // AND EACH FIXTURE CARRIES WHAT THE ABLATED PASS EMITS, which is the half `not.toBeNull()` cannot
 // see: admission is true of a soundness rule and of a narrowing rule alike, so a battery that
 // asserts only admission cannot referee `sound` — the flag `l3/gates.ts`'s `ablateHeuristic`
-// consumes, and the one this file's own `member-signedness` carried WRONGLY for a whole round
-// (ablated, that gate emits `*(s16 *)p0`, which is address- AND value-correct, and agbcc compiles
-// it). The `verdict` below is checked against `gate.sound`, so the two cannot drift again.
+// consumes. `member-signedness` is the case that shows the difference: ablated it emits
+// `*(s16 *)p0`, which is address- AND value-correct and which agbcc compiles, so it is `narrowing`
+// and not `wrong`. The `verdict` below is checked against `gate.sound`, so the two cannot drift.
 type Verdict =
   /** a silently WRONG address — the only thing `sound: true` may mean */
   | 'wrong'
@@ -497,7 +502,7 @@ const swrCandidates = (target: typeof ARMV4T_AGBCC): { label: string; source: st
 test('the row enumerates the advanced spelling, qualified', () => {
   const qualified = swrCandidates(ARMV4T_AGBCC).find((c) => c.label.endsWith('/advance/volatile'));
   expect(qualified).toBeDefined();
-  // The byte-exact spelling, compiled against the row's target object before this pass existed.
+  // The byte-exact spelling, compiled against the row's own target object.
   expect(qualified!.source).toMatch(/volatile u16 \* p0;/);
   expect(qualified!.source).toMatch(/p0 = \(u16 \*\)67108936;/);
   expect(qualified!.source).toMatch(/p0 = p0 \+ 1;/);
