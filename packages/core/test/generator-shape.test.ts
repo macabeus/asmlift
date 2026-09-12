@@ -10,6 +10,14 @@
 // So the generator's own reach is a test. The numbers below are floors measured on this stream, not
 // targets: they exist so that a change to the generator that quietly stops producing a shape
 // reddens here rather than turning a sibling fuzz into a green no-op.
+//
+// REACH IS NOT COVERAGE, and this file reports the larger of the two numbers. `structured` counts
+// the seeds that produce a tree at all; how many any ASSERTION is then made about is the `judged`
+// count the fuzz arms pin, and at depth 3 that is 647 of 4,000 — 5.3x below the 3,449 asserted
+// here, because the tree interpreter's step cap eats 2,802 of them. Cite 647, not 3,449, for what
+// the multi-child sweeps actually judge. Nor does reaching a rule witness it: all three
+// `latchInnerSub` child rules are reached on every depth-3 seed and are byte-inert under mutation
+// (`helpers.ts`'s generator docblock carries the measurement).
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -51,7 +59,8 @@ test('depth 2 reaches a loop inside a loop', () => {
 // The shape depth 3 exists for. `latchInnerSub` filters a do-while's child loops and then applies
 // their back-edge substitutions IN AN ORDER; with one child, the filter has nothing to exclude and
 // the order is not an order. Depth 2 produces exactly one child on every seed that structures
-// (measured: 4,000 calls with one child, 0 with two). Depth 3 produces two on every one of them.
+// (measured: 4,000 calls with one child, 0 with two). Depth 3 produces two on every one of them —
+// which is reach, and reach only: see this file's header.
 test('depth 3 reaches a do-while with SEVERAL child loops', () => {
   const { structured, loops } = census(3, 3);
   expect(structured).toBeGreaterThan(3000); // measured 3,449 of 4,000

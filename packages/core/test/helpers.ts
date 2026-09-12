@@ -61,8 +61,22 @@ export function mulberry32(seed: number): () => number {
  *  children. Depth 2 gives a do-while exactly one child loop, so every rule in `latchInnerSub` that
  *  is about WHICH children count — the filter that drops a child containing the latch, the filter
  *  that drops one that does not dominate it, and the ORDER the surviving children are applied in —
- *  has no inhabitant to be wrong about, and each can be deleted with the whole core suite green.
- *  Measured before this shape existed: 2 calls of 187,117 reached a two-child latch.
+ *  never sees a second child. Measured before this shape existed: 2 calls of 187,117 reached a
+ *  two-child latch; with it, 4,000 of 4,000.
+ *
+ *  WHAT THAT REACH BOUGHT, AND WHAT IT DID NOT. This shape was built because all three rules could
+ *  be deleted with the whole core suite green, and REACHING them did not change that: each is still
+ *  deletable with the suite green. The reason is not a missing assertion — it is that on every
+ *  shape this generator builds the three rules are INERT. Mutated one at a time (drop the
+ *  latch-containment filter; drop the dominance filter; reverse the `.sort()`) and the emitted C
+ *  hashed over 4,000 seeds at depth 2 AND depth 3: byte-identical, 16,000 functions, all three.
+ *  They are NO-OPS here, not unwitnessed rules, and the inhabitant each would need is named:
+ *  containment needs a child holding the latch, which is an overlapping pair the recognizer refuses
+ *  earlier; dominance needs the non-dominating child to CARRY a value the latch reads, where C only
+ *  offers it map entries nothing reads; the order needs two children mapping the SAME value, which
+ *  is a dominating CHAIN (a grandchild), not the siblings below. Wiring an inner latch's own value
+ *  round its back edge was built and reverted: it raises the substitution's occupancy, still moves
+ *  0 bytes under all three mutants, and turns two fuzz arms red on wrong answers of its own.
  *
  *  The skeleton, fixed (11 blocks), with ops and edge arguments random as at depth 2:
  *
@@ -74,10 +88,9 @@ export function mulberry32(seed: number): () => number {
  *                        └──────────── bb9 outer latch ◀───┘ ─▶ bb10 tail
  *
  *  A and B are siblings that both dominate the outer latch — two children, in a fixed textual
- *  order, so reversing the order the substitutions apply in is observable. C is inside ONE ARM of a
- *  branch, so it reaches the latch on some paths and does not dominate it — the inhabitant of the
- *  dominance filter. No child contains the latch; that filter's inhabitant needs an irreducible
- *  shape this generator does not build, and it stays named rather than reached. */
+ *  order. C is inside ONE ARM of a branch, so it reaches the latch on some paths and does not
+ *  dominate it: the dominance filter fires on it on every seed (ablated, `kids` goes from 2 to 3 on
+ *  4,000 of 4,000), which is REACH and, per the paragraph above, not an observable difference. */
 export function generateSsaFn(seed: number, depth: 0 | 1 | 2 | 3, readsOuter = false): Fn {
   const rnd = mulberry32(seed);
   const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
