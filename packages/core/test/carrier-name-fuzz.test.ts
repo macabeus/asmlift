@@ -23,7 +23,16 @@ import type { SFn } from '../src/l3/ast';
 import { type Gate, without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, type CarrierName, structure } from '../src/structure/structure';
-import { BREATHE_EVERY, type Event, breathe, generateSsaFn, irTraceOf, traceOf, tracesDiffer } from './helpers';
+import {
+  BREATHE_EVERY,
+  type Event,
+  IR_RESIDUAL_SEEDS,
+  breathe,
+  generateSsaFn,
+  irTraceOf,
+  traceOf,
+  tracesDiffer,
+} from './helpers';
 
 // Same load sensitivity as the sibling fuzz: solo these run in a couple of seconds, and under a
 // full parallel suite the 5 s default times out on machine load rather than on a defect.
@@ -104,20 +113,10 @@ function spellings(
   }
 }
 
-// WHAT THE IR ORACLE STILL DISAGREES WITH, per depth, on the SHIPPED spelling — a ratchet, not a
-// clean bill. Each residual is a real emission defect this round measured and did not fix, and the
-// number is here so that the next one cannot be added silently:
-//
-//   • a call INLINED AT ITS USE beside another call, which renders the two in the opposite order
-//     (`fz399`: `if ((s32)f1(a1) < (s32)f0(a1))` for an IR that calls f0 first);
-//   • a call whose value reaches a merge, rendered as the edge copy INSIDE one arm, so an
-//     unconditional execution becomes a conditional one (`fz27`'s `%8`, the `branchArgFed` case);
-//   • a call rendered at two positions, so it executes twice.
-//
-// They are counts and not a frozen seed list on purpose: a seed list would have to be re-derived
-// every time the generator's stream moves, and the stream moving is not the regression this
-// guards against.
-const IR_RESIDUAL: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 48, 1: 31, 2: 6, 3: 5 };
+// WHAT THE IR ORACLE STILL DISAGREES WITH is `IR_RESIDUAL_SEEDS` in `helpers.ts`, shared with
+// `namecoalesce-fuzz` — a LIST of seeds rather than a count, and one quantity rather than a copy per
+// file. Its docblock carries the three defects behind it and the measurement that folded the two
+// copies together.
 
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
 // a seed declines or runs the tree interpreter past its step cap, and everything below then skips
@@ -127,11 +126,21 @@ const IR_RESIDUAL: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 48, 1: 31, 2: 
 // already — the `unreadResult` fix this file's second arm was written for moved depth 2 from 1,560
 // to 1,556, four seeds that left with no record.
 //
-// THESE NUMBERS ARE THIS FILE'S, not a shared quantity. `namecoalesce-fuzz` sweeps the same
-// generator and judges 2,508 at depth 1 against this file's 2,502, because its `spellings`
-// structures TWICE and loses a seed either spelling declines on. The two files' residuals being
-// equal at every depth is a coincidence of two populations, not one measurement — do not fold
-// either constant into the other. Verified deterministic forward and in reversed seed order at
+// THESE NUMBERS ARE THIS FILE'S, not a shared quantity, and THIS FILE IS THE OUTLIER. It judges
+// 2,502 at depth 1 where `namecoalesce-fuzz` judges 2,508 — six FEWER, not six more — and the cause
+// is the REFERENCE table above, not the sibling. `ADMIT_NOTHING` declines on 6 seeds the shipped
+// spelling structures (291, 1089, 1489, 1724, 3021, 3923, each `unrecovered back-edge into block
+// #k`), and `spellings` needs both, so those six leave here and stay there. Instrumented per depth:
+// declines are 1,337 for `ADMIT_NOTHING` against 1,349 for the shipped spelling, and there is no
+// seed this file judges that `namecoalesce-fuzz` does not (onlyC = 0 at all four depths).
+//
+// The sibling's extra `structure()` call costs it NOTHING, which the earlier version of this comment
+// had backwards in both mechanism and sign: `coalesceMergeNames` declines on exactly the set the
+// shipped spelling does — 1,349/1,349 at depth 1, 224/224 at depth 2, 551/551 at depth 3.
+//
+// RE-DERIVE, don't reason: classify every seed by which of `structure(fn, {}, {carrierNameGates:
+// ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
+// whether `traceOf`/`irTraceOf` cap. Verified deterministic forward and in reversed seed order at
 // every depth, and `bad` is the identical seed list both ways.
 const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2502, 2: 1556, 3: 647 };
 
@@ -170,10 +179,10 @@ describe.each([
       if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
     }
     expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
-    // EXACT, not a ceiling: `<=` lets a change that fixes N defects and adds N stay green, and the
-    // ceilings are tight today (measured 48/31/6/5, declared 48/31/6/5). A fix is meant to move a
-    // number here.
-    expect(bad.length, `first disagreeing seed: ${bad[0] ?? '-'}`).toBe(IR_RESIDUAL[depth]);
+    // THE SEEDS, not how many. A count — `<= 48` or `toBe(48)` alike — is green on a change that
+    // fixes one defect and adds another, which is the hole the count was adopted to close. A fix is
+    // meant to shorten this list, and a swap is meant to redden it.
+    expect(bad).toEqual(IR_RESIDUAL_SEEDS[depth]);
   });
 });
 
@@ -232,7 +241,11 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
   // this arm needs BOTH the measured and the unmeasured spelling, and loses a seed either one
   // declines on.
   expect(judged, 'the measured arm judges the population it measured').toBe(1088);
-  expect(adopted).toBeGreaterThan(0); // the rule fired: a seed whose spelling the record changed
+  // PINNED, not floored, for the same reason `judged` is. `adopted` is the FIRING counter — the
+  // thing that stops the `bad.filter(...)` arm below being green over nothing — so a floor of 1 is
+  // exactly the vacuity the pin above exists to refuse: a change that took `enclosingCarrierName`
+  // from 252 firings to 1 would leave both arms green, with `judged` still at 1,088 vouching for it.
+  expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(252);
   expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
 

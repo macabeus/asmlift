@@ -50,10 +50,16 @@ const census = (depth: 0 | 1 | 2 | 3, want: number): { structured: number; loops
   return { structured, loops };
 };
 
+// PINNED, not floored, and that is the point of the file. The consumers one level downstream pin
+// `judged` to the unit; a producer asserted at `> 3000` against a measured 3,776 has 13% of slack in
+// which the generator can quietly stop building a shape while every sibling fuzz stays green with a
+// smaller population — the exact vacuity this file exists to refuse, held to a looser bar at the
+// place it is PRODUCED than at the place it is read. Re-derive by running this file: the assertion
+// message carries the number.
 test('depth 2 reaches a loop inside a loop', () => {
   const { structured, loops } = census(2, 2);
-  expect(structured).toBeGreaterThan(3000); // measured 3,776
-  expect(loops).toBeGreaterThan(2000); // measured 3,776
+  expect(structured, 'seeds that structure at depth 2').toBe(3776);
+  expect(loops, 'of those, seeds emitting >= 2 bottom-tested loops').toBe(3776);
 });
 
 // The shape depth 3 exists for. `latchInnerSub` filters a do-while's child loops and then applies
@@ -63,6 +69,6 @@ test('depth 2 reaches a loop inside a loop', () => {
 // which is reach, and reach only: see this file's header.
 test('depth 3 reaches a do-while with SEVERAL child loops', () => {
   const { structured, loops } = census(3, 3);
-  expect(structured).toBeGreaterThan(3000); // measured 3,449 of 4,000
-  expect(loops).toBeGreaterThan(3000); // measured 3,449 — every seed that structures at all
+  expect(structured, 'seeds that structure at depth 3').toBe(3449);
+  expect(loops, 'of those, seeds emitting >= 3 bottom-tested loops — every one').toBe(3449);
 });

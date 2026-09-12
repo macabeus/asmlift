@@ -383,6 +383,44 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
   return trace;
 }
 
+/** THE SEEDS whose emitted tree still disagrees with its own IR, per depth — a ratchet, not a clean
+ *  bill. Each one is a real emission defect this round measured and did not fix:
+ *
+ *    • a call INLINED AT ITS USE beside another call, which renders the two in the opposite order
+ *      (`fz399`: `if ((s32)f1(a1) < (s32)f0(a1))` for an IR that calls f0 first);
+ *    • a call whose value reaches a merge, rendered as the edge copy INSIDE one arm, so an
+ *      unconditional execution becomes a conditional one (`fz27`'s `%8`, the `branchArgFed` case);
+ *    • a call rendered at two positions, so it executes twice.
+ *
+ *  ONE QUANTITY, TWO READERS, and that was declined once on a measurement that had not been taken.
+ *  Both naming fuzzes kept their own copy, because "the residuals being equal at every depth is a
+ *  coincidence of two populations, not one quantity". Instrumented, it is not a coincidence: the two
+ *  files' failing-seed lists are IDENTICAL seed for seed at all four depths. They have to be — the
+ *  residual is an EMISSION defect of the SHIPPED spelling, which both files structure, and each
+ *  file's axis varies only a naming choice on top of it. The populations do differ (2,502 vs 2,508
+ *  at depth 1), for a reason each file's `JUDGED` now states correctly; the DEFECTS do not.
+ *
+ *  A LIST, NOT A COUNT, which is strictly better than both the shipped design and the declined one.
+ *  `toBe(48)` was adopted to close "a change that fixes N defects and adds N stays green" and does
+ *  not close it: 48 is as green on a swapped pair as `<= 48` is. And a count is what makes a shared
+ *  constant dangerous — a file whose population quietly loses a bad seed goes SILENT on a count and
+ *  LOUD on a list. The stated cost of a list ("re-derived every time the generator's stream moves")
+ *  is already paid: `JUDGED` is exact per depth in both files, so a stream move re-derives eight
+ *  numbers regardless. Re-derive with the probe in each file's `JUDGED` docblock. */
+export const IR_RESIDUAL_SEEDS: Readonly<Record<0 | 1 | 2 | 3, readonly number[]>> = {
+  0: [
+    27, 84, 226, 299, 399, 420, 425, 463, 661, 715, 862, 1036, 1073, 1147, 1248, 1279, 1330, 1367, 1464, 1543, 1612,
+    1656, 1778, 1781, 1794, 1902, 1938, 1962, 2046, 2178, 2267, 2318, 2493, 2546, 2608, 2758, 2927, 2979, 3021, 3047,
+    3072, 3151, 3162, 3334, 3669, 3719, 3798, 3977,
+  ],
+  1: [
+    76, 84, 253, 299, 354, 420, 421, 435, 497, 601, 612, 899, 940, 967, 1155, 1239, 1330, 1475, 1543, 1610, 1950, 1959,
+    1970, 2006, 2270, 2912, 2965, 3274, 3324, 3392, 3956,
+  ],
+  2: [659, 1853, 2176, 3324, 3928, 3943],
+  3: [1130, 1354, 1841, 2836, 3249],
+};
+
 // A position where EITHER side is UNDEF constrains nothing: the original read a local no path had
 // assigned, so both spellings are ill-defined there rather than one being wrong. Everything else —
 // a different callee, a different argument, a different trace LENGTH (which is what a changed trip
@@ -406,7 +444,25 @@ export const tracesDiffer = (r: { off: Event[]; on: Event[] }): boolean => {
  *  to it: an inner loop's back-edge value re-derived at the enclosing loop's latch was wrong in
  *  every spelling at once, and only this caught it. Same seeding, same deterministic call model,
  *  same 32-bit wrap. The generator's vocabulary only; anything else throws, as does a run past the
- *  step cap. */
+ *  step cap.
+ *
+ *  AN ORACLE FOR THE SYNTHETIC GENERATOR'S VOCABULARY, and calling it more than that would be a
+ *  claim it cannot meet. It models 14 of the IR's 48 registered opcodes (`const`, `add`, `sub`,
+ *  `icmp_slt`, `icmp_sge`, `icmp_eq`, `logic_and`, `logic_or`, `call`, `gaddr`, `store`, `ret`,
+ *  `br`, `cond_br`) — exactly what `generateSsaFn` emits. Measured on this repo's own agbcc corpus,
+ *  re-parsed from each function's recovered IR dump: 24 of the 30 `test/corpus` functions round-trip
+ *  the dump at all and this judges 2 of those 24. Blockers, by function: `load` 8, `shl` 6, `icmp_ne`
+ *  3, `aload` 1, `mul` 1, `smod` 1, `icmp_uge` 1, `undef` 1.
+ *
+ *  SO NO BENCHMARK ROW, RANKED CANDIDATE OR WINNER IS JUDGED BY THIS TODAY — the readers are the two
+ *  naming fuzzes, `generator-shape`, `dead-effect` and `loop-shape-refusals`, all of which feed it
+ *  the same generator. That is named debt, not a design: the arithmetic and comparison blockers are
+ *  one `case` each, `load`/`aload` want a memory model that `store` half-implies, and the place a
+ *  real-row assertion belongs is `apps/benchmark/src/eval/asmlift.ts`, which already holds both the
+ *  lifted `Fn` and the structured tree. `undef` is NOT one `case`: {@link traceOf} models it as a
+ *  poison value that {@link tracesDiffer} then excuses, and this interpreter's env is plain numbers
+ *  — giving it a wrong `undef` would make the oracle lie rather than decline, which is worse than
+ *  the asymmetry. */
 export function irTraceOf(fn: Fn, seed: number): Event[] {
   const trace: Event[] = [];
   const env = new Map<Value, number>();
