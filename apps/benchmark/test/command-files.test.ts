@@ -39,6 +39,14 @@
 //      `results/results.json` in prose, and `CountCollectedGems`'s fan is hand-typed in several
 //      files while being one integer in that same committed JSON. §3 is checked against the
 //      artifact rather than read; nothing before checked it at all.
+//  10. A STOP-HERE PRECEDENT WITH NO EVIDENCE BEHIND IT. A precedent that asks for MORE work is
+//      self-correcting — the round measures, and a wrong precedent costs time. One that tells the
+//      agent to STOP is not: acting on it means not measuring, so the claim is never re-tested and
+//      its reason is never checked. The unmatchable-quirk bullet named a row and linked nothing;
+//      the round sent to re-test it found the classification right and the stated reason too weak
+//      to decide the case, and re-derived the verdict from the compiler. A `docs/` link is the
+//      weakest thing that closes it, and the two checks around it do the rest: `citations.test.ts`
+//      holds the linked page's rows to still existing, the link check below refuses a 404.
 //
 // WHAT IT STILL CANNOT DECIDE, so that nobody reads more into a green run than is there:
 //   - It cannot check that an instruction is TRUE. Only a command run can.
@@ -145,6 +153,35 @@ describe('the two round prompts do not duplicate an instruction', () => {
         expect(text, `${f} does not link ${doc} — the laws and the costs are shared by every round`).toContain(doc);
       }
     }
+  });
+});
+
+describe('a precedent that ENDS a round is linked to its evidence', () => {
+  // Blocks are blank-line separated, so a bullet LIST is one block: a link anywhere in the list
+  // that carries the stop satisfies it. That is deliberate — the unit an agent reads is the
+  // outcome list, not the line.
+  const STOPS = /\bstop\b/;
+  const PRECEDENT = /\bprecedent\b/i;
+  const DOC_LINK = /docs\/[\w.-]+\.md/;
+
+  it('every stop-here precedent in a command file links a docs/ page', () => {
+    const unbacked: string[] = [];
+    for (const f of commandFiles()) {
+      const lines = read(f);
+      let start = 0;
+      for (let i = 0; i <= lines.length; i++) {
+        if (i < lines.length && lines[i].trim() !== '') {
+          continue;
+        }
+        const block = lines.slice(start, i);
+        const text = block.join(' ');
+        if (PRECEDENT.test(text) && STOPS.test(text) && !DOC_LINK.test(text)) {
+          unbacked.push(`${f}:${start + 1}: ${block[0].trim().slice(0, 70)}`);
+        }
+        start = i + 1;
+      }
+    }
+    expect(unbacked, `stop-here precedent with no evidence link: ${unbacked.join(' | ')}`).toEqual([]);
   });
 });
 
