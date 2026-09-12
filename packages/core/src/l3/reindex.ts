@@ -367,17 +367,18 @@ function reindexExpr(e: Expr, walk: WalkLoop, iv: string): Expr | null {
         ? { k: 'var', name: iv }
         : { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: e.idx };
     // NOTE: this rebuilds the node from parts, so any field not named here is DROPPED — and the
-    // `index` node has exactly four optional ones (ast.ts): `lead`, `baseElem`, `operandOff`,
-    // `baseOrdered`. `lead` is declined above (the deref side); it cannot arrive on the base side
-    // either, since `walk.base` is a local pointer and structuring only ever puts `lead` on an
-    // array GLOBAL's own name. Dropping the other three is right rather than merely harmless:
-    // `baseElem` states the element type of a base the C type walk cannot type, and the rebuilt
-    // base is `{k:'var', name: walk.base}` — a LOCAL pointer, whose declared type the walk reads
-    // straight out of the print env, so a statement about the base it replaced would describe a
-    // different base and the walk answers without one; `baseOrdered` is stamped per SYMBOL on an
-    // order-licensed GLOBAL, which a local var base never is; and `operandOff`'s readers
+    // `index` node has exactly five optional ones (ast.ts): `lead`, `baseElem`, `operandOff`,
+    // `baseOrdered`, `baseAdvanced`. `lead` is declined above (the deref side); it cannot arrive on
+    // the base side either, since `walk.base` is a local pointer and structuring only ever puts
+    // `lead` on an array GLOBAL's own name. Dropping the other four is right rather than merely
+    // harmless: `baseElem` states the element type of a base the C type walk cannot type, and the
+    // rebuilt base is `{k:'var', name: walk.base}` — a LOCAL pointer, whose declared type the walk
+    // reads straight out of the print env, so a statement about the base it replaced would describe
+    // a different base and the walk answers without one; `baseOrdered` is stamped per SYMBOL on an
+    // order-licensed GLOBAL, which a local var base never is; `operandOff`'s readers
     // (l3/basecse.ts, l3/offmember.ts) ask about a CONSTANT subscript, which the rewritten
-    // `i`/`i + k` index never is.
+    // `i`/`i + k` index never is; and `baseAdvanced` describes an address the machine reached from
+    // a CONSTANT one, which a walk pointer's is not.
     return { k: 'index', base: { k: 'var', name: walk.base }, idx, width: e.width, signed: e.signed };
   }
   let failed = false;

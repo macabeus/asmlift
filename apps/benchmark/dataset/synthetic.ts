@@ -8191,6 +8191,30 @@ export const SYNTHETIC: SynthSpec[] = [
     },
     symbols: PROBE_SLOT_MAP,
   },
+  // THE ADVANCED DEVICE REGISTER — a pointer the source MOVED between two writes, which the target
+  // records as `ldr r2,=X; strh [r2]; add r2,#2; strh [r2]`. The `add` is the whole row: it is the
+  // only thing separating this source from `reg[1] = b`, which agbcc compiles to `strh [r2, #2]`,
+  // and it survives only because the pointee is `volatile`. asmlift's `/advance` lever
+  // (l3/advance.ts) reads the lift's own `add` and spells it back.
+  //
+  // IT EXISTS BECAUSE IT IS THE ONLY ROW THAT IS ONLY THIS. `pnpm bench sweep --fan --base
+  // origin/main` puts the lever's whole reach at FIVE rows (10 records, 2,114 identical, 0 rows
+  // whose default spelling moved): `kleod:StreamCmd_SetWindowRegs` 16 -> 18,
+  // `kleod:SetupBG3WindowOverlay` 1024 -> 1072, `synthetic:dma_fill_uninit` 66 -> 90, and
+  // `synthetic:offhi_split`/`offhi_fused` 12 -> 20 each. Every one of those carries something else
+  // the lever does not own — a DMA block, an uninitialised slot, a fused offset — so a regression
+  // in the advance alone would surface there as one term of a conjunction. This row is the shape
+  // with nothing else in it.
+  {
+    sym: 'volwalk',
+    src:
+      '#define REG_WININ (*(volatile u16 *)0x04000048)\n' +
+      'void volwalk(s32 a, s32 b){ volatile u16 *reg = &REG_WININ; *reg = a; reg++; *reg = b; }',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'void volwalk(s32 a, s32 b);',
+    proto: { volwalk: { params: ['s32', 's32'], returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

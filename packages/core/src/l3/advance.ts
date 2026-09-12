@@ -37,8 +37,9 @@
 //   • every member shares the first's `width` and `signed`, and every step is a multiple of that
 //     width — the minted local is a `T *` and the advance is `p = p + step / width`, so a step off
 //     the element grid has no spelling here.
-// Three more NARROW IT RATHER THAN MAKE IT SOUND, and each is here because nothing on the corpus
-// inhabits the shape it excludes:
+// Three more NARROW IT RATHER THAN MAKE IT SOUND. Each is UNWITNESSED — no corpus row has been
+// shown to inhabit the shape it excludes, and none was instrumented to say how often it fires —
+// so each is named as debt here rather than defended as a rule:
 //   • an access inside an arm or a loop body is not admitted as a member (its address joins the
 //     second-site set instead). Placed at the top level the advance would still be address-
 //     correct — a conditionally reached `*p` beside an unconditional `p = p + 1` is a spelling no
@@ -160,7 +161,8 @@ export function advancedBases(sfn: SFn): SFn | null {
   // computed, and this spelling is the answer to that question rather than another instance of it.
   const rewrite = (e: Expr): Expr => {
     const m = mapExprChildren(e, rewrite);
-    if (m.k === 'index' && cellAddress(m) !== null && members.has(cellAddress(m)!)) {
+    const addr = m.k === 'index' ? cellAddress(m) : null;
+    if (m.k === 'index' && addr !== null && members.has(addr)) {
       return { k: 'index', base: { k: 'var', name }, idx: { k: 'const', value: 0 }, width: m.width, signed: m.signed };
     }
     return m;
