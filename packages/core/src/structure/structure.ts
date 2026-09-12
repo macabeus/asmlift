@@ -661,7 +661,7 @@ function memAccess(
   // carried is already inside `baseExpr` — and folding them into one subscript below
   // (`idxVal + off / width`) is what makes the two indistinguishable at L3, so the displacement
   // is recorded before the fold destroys it (see the `operandOff` note in l3/ast.ts).
-  // …and the SECOND evidence field this seam carries: the byte step by which the machine advanced
+  // …and the second evidence field this function carries: the byte step by which the machine advanced
   // an address register to reach this access (raise/const.ts `advancedBy`, recorded before its own
   // fold destroyed it). It rides beside `operandOff` because both are facts about how the address
   // was computed rather than about which cell it names, and both are lost at L3 otherwise.

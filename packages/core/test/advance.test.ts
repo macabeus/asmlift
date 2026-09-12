@@ -8,15 +8,17 @@
 //     evidence field);
 //   • `l3/advance.ts` reads it and offers the one C spelling that reproduces the `add`.
 //
-// WHY THE SPELLING IS A CANDIDATE AND NOT A DEFAULT, compiled through the benchmark's own agbcc
-// command rather than reasoned about. Against `kleod:StreamCmd_SetWindowRegs`'s target object:
-//   `volatile u16 *p = (volatile u16 *)0x04000048; *p = a; p++; *p = b;`  → byte-exact
-//   the same with `p[1]` instead of `p++`                                 → `strh [r3, #2]`, no add
-//   the same without `volatile`                                           → `strh [r3, #2]`, no add
+// WHY THE SPELLING IS A CANDIDATE AND NOT A DEFAULT — THE FOUR CORNERS, each compiled through the
+// benchmark's own agbcc command against `kleod:StreamCmd_SetWindowRegs`'s target object rather than
+// reasoned about. The base local is `u16 *p = (u16 *)0x04000048`, qualified or not:
+//   volatile  ×  `*p = a; p++; *p = b;`   → byte-exact with the target
+//   volatile  ×  `*p = a; p[1] = b;`      → `strh [r3, #2]`, no add
+//   plain     ×  `*p = a; p++; *p = b;`   → `strh [r3, #2]`, no add
+//   plain     ×  `*p = a; p[1] = b;`      → `strh [r3, #2]`, no add
 // So the advance is INERT wherever the pointee is not volatile — agbcc folds it straight back into
-// the memory operand — and it is the `volatile` × advance CONJUNCTION that reproduces the target.
-// Neither half is worth a default: the subscript spelling is right for every access the compiler
-// did fold, which is nearly all of them.
+// the memory operand — and only the CONJUNCTION reproduces the target. Neither half is worth a
+// default: the subscript spelling is right for every access the compiler did fold, which is nearly
+// all of them.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
