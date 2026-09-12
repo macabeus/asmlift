@@ -288,17 +288,42 @@ describe('compareFans', () => {
     expect(r).toMatchObject({ compared: 0, unrecorded: 1, baseTotal: 0, freshTotal: 0 });
   });
 
-  // …and a row this run DECLINED never ranked, so it has no fan to compare. Counting it as 0 would
-  // publish a fan collapse for a row nobody enumerated.
-  test('a row the fresh run never ranked is skipped, not counted as zero', () => {
+  // …and a row this run DECLINED never ranked, so it has no fan to COMPARE. Counting it as a move
+  // to 0 would publish a fan collapse for a row nobody enumerated — but it is not silence either:
+  // the count the base recorded left the corpus, and `vanished` is where it is said.
+  test('a row the fresh run never ranked is not compared — it is recorded as vanished', () => {
     const r = compareFans(out(row('a', { candidateCount: 96 })), out(row('a', { outcome: 'declined' })));
     expect(r).toMatchObject({ compared: 0, unrecorded: 0, changed: [] });
+    expect(r.vanished).toEqual([{ id: 'a', from: 96, to: 0 }]);
+  });
+
+  // THE FAN THAT LEFT. With no counter for this direction the surviving rows are summed alone, so
+  // the biggest fan in the corpus can walk out under a clean `1.00×` over a silently smaller row
+  // set — the section's own subject, invisible in the section.
+  test('a vanished fan does not read as a perfect 1.00×', () => {
+    const r = compareFans(
+      out(row('big', { candidateCount: 50000 }), row('a', { candidateCount: 100 })),
+      out(row('big', { outcome: 'declined' }), row('a', { candidateCount: 100 })),
+    );
+    expect(r).toMatchObject({ compared: 1, baseTotal: 100, freshTotal: 100, changed: [] });
+    expect(r.vanished).toEqual([{ id: 'big', from: 50000, to: 0 }]);
+    const lines = fanLines(r, 'origin/main', 1);
+    expect(lines.some((l) => l.includes('big: 50000 → none'))).toBe(true);
+    expect(lines.at(-1)).toContain('1 counted at origin/main did not rank here');
   });
 });
 
 describe('the fan section', () => {
   const rep = (over: Partial<FanReport> = {}): FanReport =>
-    ({ changed: [], compared: 2, unrecorded: 0, baseTotal: 60000, freshTotal: 225984, ...over }) as FanReport;
+    ({
+      changed: [],
+      compared: 2,
+      unrecorded: 0,
+      vanished: [],
+      baseTotal: 60000,
+      freshTotal: 225984,
+      ...over,
+    }) as FanReport;
 
   test('prints the multiplier, which is the number a round reports before merge', () => {
     const lines = fanLines(rep({ changed: [{ id: 'b', from: 59904, to: 225792 }] }), 'origin/main', 900);
@@ -313,6 +338,21 @@ describe('the fan section', () => {
     expect(out).toHaveLength(1);
     expect(out[0]).toContain('NOT COMPARABLE');
     expect(out[0]).toContain('900 row(s)');
+  });
+
+  // THE OPPOSITE CAUSE OF THE SAME `compared === 0`: the base counted, and this run ranked none of
+  // those rows — a phase-1 gate declining the corpus. Blaming the base for "predating the field"
+  // there is a false cause printed on exactly the run whose fan line a reader would trust.
+  test('a fresh run that ranked nothing says the series is ending, not starting', () => {
+    const r = compareFans(
+      out(row('a', { candidateCount: 100 }), row('b', { candidateCount: 200 })),
+      out(row('a', { outcome: 'declined' }), row('b', { outcome: 'declined' })),
+    );
+    const lines = fanLines(r, 'origin/main', 0);
+    expect(lines.at(-1)).toContain('NOT COMPARABLE');
+    expect(lines.at(-1)).toContain('2 stopped ranking, 300 candidate(s) gone');
+    expect(lines.at(-1)).toContain('ENDS here');
+    expect(lines.some((l) => l.includes('predates the field'))).toBe(false);
   });
 
   // An axis that touches 600 rows must not bury the totals line under 600 lines.

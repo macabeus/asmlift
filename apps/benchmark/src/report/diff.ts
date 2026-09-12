@@ -213,8 +213,15 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
  *  noticed for three weeks. Folding it in would also paint every scored row red the first time a
  *  run is compared against an artifact that predates the field.
  *
- *  Rows are compared only where BOTH sides recorded a count. `unrecorded` is how many the base
- *  could not answer for, so a thin comparison says so instead of reading as a quiet one. */
+ *  Rows are compared only where BOTH sides recorded a count, and the two ways that can fail are
+ *  counted SEPARATELY, because they are opposite facts about opposite sides. `unrecorded` is the
+ *  BASE's side: it could not answer, so the series starts here. `vanished` is the FRESH side — a
+ *  row the base counted that this run never ranked at all (it declined, or it failed).
+ *
+ *  That second direction used to be a bare `continue`, and it is the one the section exists for:
+ *  a branch that stopped ranking a 50,000-candidate row printed `total 100 → 100 (1.00×)` over a
+ *  silently smaller row set, which reads as perfect neutrality on the run where the largest fan in
+ *  the corpus left it. A fan that VANISHED is a fan move. */
 export interface FanChange {
   id: string;
   from: number;
@@ -224,6 +231,8 @@ export interface FanReport {
   changed: FanChange[]; // biggest absolute move first
   compared: number; // rows where both sides recorded a count
   unrecorded: number; // rows the fresh run counted and the base did not
+  /** rows the base counted that this run did not rank, with the count that left; `to` is 0 */
+  vanished: FanChange[];
   baseTotal: number; // summed over the compared rows only — a total over a moving row set is not a series
   freshTotal: number;
 }
@@ -231,6 +240,7 @@ export interface FanReport {
 export function compareFans(base: BenchOutput, fresh: BenchOutput): FanReport {
   const freshById = byId(fresh);
   const changed: FanChange[] = [];
+  const vanished: FanChange[] = [];
   let compared = 0;
   let unrecorded = 0;
   let baseTotal = 0;
@@ -243,7 +253,12 @@ export function compareFans(base: BenchOutput, fresh: BenchOutput): FanReport {
     const from = was.asmlift.candidateCount;
     const to = now.asmlift.candidateCount;
     if (to === undefined) {
-      continue; // this run never ranked the row (declined/failed) — no fan to compare
+      // This run never ranked the row (declined/failed). Not comparable — but NOT nothing: if the
+      // base counted it, that fan left the corpus and the reader is told which and how much.
+      if (from !== undefined) {
+        vanished.push({ id: was.id, from, to: 0 });
+      }
+      continue;
     }
     if (from === undefined) {
       unrecorded++;
@@ -257,7 +272,8 @@ export function compareFans(base: BenchOutput, fresh: BenchOutput): FanReport {
     }
   }
   changed.sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
-  return { changed, compared, unrecorded, baseTotal, freshTotal };
+  vanished.sort((a, b) => b.from - a.from);
+  return { changed, compared, unrecorded, vanished, baseTotal, freshTotal };
 }
 
 /** `59904 → 225792 (3.77×)`. The multiplier is the number a round is asked to report before merge,
@@ -269,9 +285,34 @@ export const fanMove = (from: number, to: number): string =>
  *  plus the total; an axis that touches 600 rows must not bury the totals line under 600 lines. */
 export const FAN_ROWS_SHOWN = 15;
 
-/** The fan section, as lines. Pure — `diffGate` prints them. */
+/** The rows whose fan LEFT — named, biggest first, under the same cap as the movers. Written as
+ *  `50000 → none` rather than `→ 0`: zero is a count and this is the absence of one. */
+const vanishedLines = (r: FanReport, base: string): string[] => {
+  const shown = r.vanished.slice(0, FAN_ROWS_SHOWN);
+  const lines = shown.map((c) => `FAN     ${c.id}: ${c.from} → none — counted at ${base}, not ranked here`);
+  if (r.vanished.length > shown.length) {
+    lines.push(`FAN     …and ${r.vanished.length - shown.length} more row(s) stopped ranking`);
+  }
+  return lines;
+};
+
+/** The fan section, as lines. Pure — `diffGate` prints them.
+ *
+ *  `compared === 0` has TWO causes and they are opposite facts, so it has two sentences. The base
+ *  recorded nothing ⇒ the series starts here. The base recorded counts and this run ranked none of
+ *  those rows ⇒ the series is ENDING, which is a phase-1 gate declining the corpus and precisely
+ *  the run whose fan line a reader would otherwise take on trust. Reporting the first reason for
+ *  the second case states a false cause on the one run that most needs a true one. */
 export function fanLines(r: FanReport, base: string, freshCounted: number): string[] {
   if (r.compared === 0) {
+    if (r.vanished.length > 0) {
+      return [
+        ...vanishedLines(r, base),
+        `fan vs ${base}: NOT COMPARABLE — not one row counted at ${base} ranked in this run ` +
+          `(${r.vanished.length} stopped ranking, ${r.vanished.reduce((n, c) => n + c.from, 0)} candidate(s) ` +
+          `gone). This run counted ${freshCounted} row(s); the series ENDS here, it does not start.`,
+      ];
+    }
     return [
       `fan vs ${base}: NOT COMPARABLE — no row at ${base} records a candidate count (that artifact ` +
         `predates the field). This run counted ${freshCounted} row(s); the series starts here.`,
@@ -282,10 +323,12 @@ export function fanLines(r: FanReport, base: string, freshCounted: number): stri
   if (r.changed.length > shown.length) {
     lines.push(`FAN     …and ${r.changed.length - shown.length} more row(s) moved`);
   }
+  lines.push(...vanishedLines(r, base));
   lines.push(
     `fan vs ${base}: ${r.changed.length} row(s) moved, total ${fanMove(r.baseTotal, r.freshTotal)} ` +
       `over ${r.compared} comparable row(s)` +
-      (r.unrecorded > 0 ? ` — ${r.unrecorded} more counted here and not at ${base}` : ''),
+      (r.unrecorded > 0 ? ` — ${r.unrecorded} more counted here and not at ${base}` : '') +
+      (r.vanished.length > 0 ? ` — ${r.vanished.length} counted at ${base} did not rank here` : ''),
   );
   return lines;
 }
