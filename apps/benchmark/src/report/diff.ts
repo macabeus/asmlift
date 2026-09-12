@@ -229,22 +229,46 @@ export interface FanChange {
   from: number;
   to: number;
 }
-export interface FanReport {
-  changed: FanChange[]; // biggest absolute move first
-  compared: number; // rows where both sides recorded a count
-  unrecorded: number; // rows the fresh run counted and the base did not
-  /** rows the base counted that this run did not rank, with the count that left; `to` is 0 */
-  vanished: FanChange[];
-  baseTotal: number; // summed over the compared rows only — a total over a moving row set is not a series
+
+/** THE ROW-SET BOOKKEEPING BOTH SECTIONS NEED, in ONE place — because they are the same walk over
+ *  the same two artifacts differing only in which per-row number they pick, and they have already
+ *  drifted apart once INSIDE A SINGLE WAVE: the fan loop was taught that a row leaving the corpus
+ *  is a move, and the cost loop, written eleven commits later, was born with the bare `continue`
+ *  the fan loop had just had removed. A second copy of a rule is a second chance to lose it.
+ *
+ *  Three populations, and they are three different facts:
+ *
+ *  - `pairs` — both sides answered. The only rows a total or a multiplier may be computed over.
+ *  - `vanished` — the BASE answered and this run did not (the row declined, or failed). The
+ *    number that LEFT, named, because a total silently taken over a smaller row set is the
+ *    `1.00×` that reads as neutrality.
+ *  - `appeared` — this run answered and the base did not, whether because the base's artifact
+ *    predates the field or because the row did not exist there. Both spell "counted here, not at
+ *    the base", which is what the summary clause says; they are one population because there is
+ *    one sentence.
+ *
+ *  A row absent from the FRESH run entirely (a skipped toolchain, a partial tier) is none of
+ *  these — `compareMeasurements` reports it as `REMOVED`, and counting it here would publish a
+ *  vanished fan for a row nobody tried to rank. */
+export interface PairReport {
+  pairs: FanChange[];
+  compared: number;
+  vanished: FanChange[]; // `to` is 0: zero is a count, this is the absence of one
+  appeared: FanChange[]; // `from` is 0, same reading
+  baseTotal: number; // over `pairs` only — a total over a moving row set is not a series
   freshTotal: number;
 }
 
-export function compareFans(base: BenchOutput, fresh: BenchOutput): FanReport {
+export function comparePerRow(
+  base: BenchOutput,
+  fresh: BenchOutput,
+  pick: (r: FunctionResult) => number | undefined,
+): PairReport {
   const freshById = byId(fresh);
-  const changed: FanChange[] = [];
+  const baseIds = new Set(base.results.map((r) => r.id));
+  const pairs: FanChange[] = [];
   const vanished: FanChange[] = [];
-  let compared = 0;
-  let unrecorded = 0;
+  const appeared: FanChange[] = [];
   let baseTotal = 0;
   let freshTotal = 0;
   for (const was of base.results) {
@@ -252,30 +276,51 @@ export function compareFans(base: BenchOutput, fresh: BenchOutput): FanReport {
     if (now === undefined) {
       continue;
     }
-    const from = was.asmlift.candidateCount;
-    const to = now.asmlift.candidateCount;
+    const from = pick(was);
+    const to = pick(now);
     if (to === undefined) {
-      // This run never ranked the row (declined/failed). Not comparable — but NOT nothing: if the
-      // base counted it, that fan left the corpus and the reader is told which and how much.
       if (from !== undefined) {
         vanished.push({ id: was.id, from, to: 0 });
       }
       continue;
     }
     if (from === undefined) {
-      unrecorded++;
+      appeared.push({ id: was.id, from: 0, to });
       continue;
     }
-    compared++;
+    pairs.push({ id: was.id, from, to });
     baseTotal += from;
     freshTotal += to;
-    if (from !== to) {
-      changed.push({ id: was.id, from, to });
+  }
+  // The rows the BRANCH ADDED. The loop above walks the base's rows, so a row that exists only in
+  // the fresh run was in neither population — and the summary's denominator (`freshCounted`) was
+  // computed over ALL fresh rows, so the "N more counted here" clause under-reported on exactly
+  // the rounds that add benchmark rows.
+  for (const now of fresh.results) {
+    if (!baseIds.has(now.id)) {
+      const to = pick(now);
+      if (to !== undefined) {
+        appeared.push({ id: now.id, from: 0, to });
+      }
     }
   }
-  changed.sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
-  vanished.sort((a, b) => b.from - a.from);
-  return { changed, compared, unrecorded, vanished, baseTotal, freshTotal };
+  const bigger = (a: FanChange, b: FanChange): number => Math.abs(b.to - b.from) - Math.abs(a.to - a.from);
+  vanished.sort(bigger);
+  appeared.sort(bigger);
+  return { pairs, compared: pairs.length, vanished, appeared, baseTotal, freshTotal };
+}
+
+export interface FanReport extends PairReport {
+  changed: FanChange[]; // biggest absolute move first
+  unrecorded: number; // rows the fresh run counted and the base did not
+}
+
+export function compareFans(base: BenchOutput, fresh: BenchOutput): FanReport {
+  const r = comparePerRow(base, fresh, (x) => x.asmlift.candidateCount);
+  const changed = r.pairs
+    .filter((c) => c.from !== c.to)
+    .sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
+  return { ...r, changed, unrecorded: r.appeared.length };
 }
 
 /** `59904 → 225792 (3.77×)`. The multiplier is the number a round is asked to report before merge,
@@ -307,6 +352,17 @@ const vanishedLines = (r: FanReport, base: string): string[] => {
  *  the second case states a false cause on the one run that most needs a true one. */
 export function fanLines(r: FanReport, base: string, freshCounted: number): string[] {
   if (r.compared === 0) {
+    // NEITHER SIDE COUNTED ANYTHING. `vanished` is empty (the base recorded nothing that could
+    // leave) and so is this run's own tally — a corpus where every row declined or failed,
+    // compared against an artifact that predates the field. "The series starts here" is then a
+    // false conclusion in the same sentence as the `0` that refutes it: nothing started.
+    if (r.vanished.length === 0 && freshCounted === 0) {
+      return [
+        `fan vs ${base}: NOT COMPARABLE — no row at ${base} records a candidate count (that artifact ` +
+          `predates the field) and this run counted none either: not one row ranked. There is no ` +
+          `series here to start or continue — find out why nothing ranked first.`,
+      ];
+    }
     if (r.vanished.length > 0) {
       return [
         ...vanishedLines(r, base),
@@ -342,6 +398,14 @@ export function fanLines(r: FanReport, base: string, freshCounted: number): stri
  *  looked at it. This is what it was recorded FOR — "the real tier rose 6.0× in 21 days on an
  *  unchanged corpus", asked of two artifacts instead of two transcripts.
  *
+ *  BUT NOT RETROSPECTIVELY, and that is a property of the gate rather than of the field. `diffGate`
+ *  returns 2 at `notRegenerated` unless a LIVE run's `results.json` is on disk, so this comparison
+ *  is always ONE COMMITTED ARTIFACT against the run on this machine right now. "Did THIS round
+ *  move it" is answerable; "what did the 21 days between these two tags do" is not, from here —
+ *  two historical artifacts never meet. The field is recorded on every row either way, so that
+ *  question stays answerable later by a reader that takes two refs (`readCommitted` already takes
+ *  one); it is simply not this one.
+ *
  *  WALL CLOCK, AND SAID SO. It is measured under up to eight parallel shards on a machine that may
  *  also be running another round, and it moves ~5× with whether the candidate cache was warm — a
  *  state the artifact does NOT record (the per-shard `[candcache] <mode> {…}` line does, and
@@ -360,45 +424,48 @@ export interface CostChange {
   from: number;
   to: number;
 }
-export interface CostReport {
+export type CostReport = PairReport & {
   moved: CostChange[]; // over both floors, biggest absolute second-move first
-  compared: number; // rows where both sides recorded seconds
-  baseTotal: number;
-  freshTotal: number;
-}
+};
 
 export function compareCost(base: BenchOutput, fresh: BenchOutput): CostReport {
-  const freshById = byId(fresh);
-  const moved: CostChange[] = [];
-  let compared = 0;
-  let baseTotal = 0;
-  let freshTotal = 0;
-  for (const was of base.results) {
-    const now = freshById.get(was.id);
-    const from = was.asmlift.rankSeconds;
-    const to = now?.asmlift.rankSeconds;
-    if (from === undefined || to === undefined) {
-      continue;
-    }
-    compared++;
-    baseTotal += from;
-    freshTotal += to;
-    const ratio = from > 0 ? to / from : Infinity;
-    if (Math.abs(to - from) >= COST_ROW_FLOOR_S && (ratio >= COST_ROW_FLOOR_X || ratio <= 1 / COST_ROW_FLOOR_X)) {
-      moved.push({ id: was.id, from, to });
-    }
-  }
-  moved.sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
-  return { moved, compared, baseTotal, freshTotal };
+  const r = comparePerRow(base, fresh, (x) => x.asmlift.rankSeconds);
+  const moved = r.pairs
+    .filter(({ from, to }) => {
+      const ratio = from > 0 ? to / from : Infinity;
+      return Math.abs(to - from) >= COST_ROW_FLOOR_S && (ratio >= COST_ROW_FLOOR_X || ratio <= 1 / COST_ROW_FLOOR_X);
+    })
+    .sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
+  return { ...r, moved };
 }
 
 const secs = (n: number): string => `${n.toFixed(1)}s`;
 
+/** `— 1 row(s) at origin/main (1654.0s) did not rank here`. The seconds, not just the count: the
+ *  row-set clause exists because the tier total is over a MOVING row set, and "1 row" does not
+ *  tell a reader whether the thing that left was a 0.4 s synthetic or the 1,654 s tail that IS the
+ *  real tier. `vanished` and `appeared` seconds are deliberately NOT in `baseTotal`/`freshTotal`:
+ *  adding them would make the totals comparable-looking and wrong. */
+const rowSetClause = (rows: CostChange[], seconds: (c: CostChange) => number, tail: string): string =>
+  rows.length === 0 ? '' : ` — ${rows.length} row(s) (${secs(rows.reduce((n, c) => n + seconds(c), 0))}) ${tail}`;
+
 /** The cost section, as lines. Pure — `diffGate` prints them. Silent when the base recorded no
- *  seconds: a series cannot start and report a move in the same run. */
+ *  seconds AND nothing left: a series cannot start and report a move in the same run.
+ *
+ *  NOT silent when rows VANISHED, though `compared` is 0: a run where every row the base timed
+ *  stopped ranking is the run whose cost line matters most, and printing nothing there is the
+ *  silence the fan section above was fixed for. */
 export function costLines(r: CostReport, base: string): string[] {
   if (r.compared === 0) {
-    return [];
+    if (r.vanished.length === 0) {
+      return [];
+    }
+    return [
+      `cost vs ${base}: NOT COMPARABLE — not one row timed at ${base} ranked in this run` +
+        rowSetClause(r.vanished, (c) => c.from, `left the comparison`) +
+        rowSetClause(r.appeared, (c) => c.to, `ranked here and not at ${base}`) +
+        `. There is no ranked pass to compare, only one that stopped.`,
+    ];
   }
   const shown = r.moved.slice(0, COST_ROWS_SHOWN);
   const lines = shown.map(
@@ -409,10 +476,18 @@ export function costLines(r: CostReport, base: string): string[] {
       `COST    …and ${r.moved.length - shown.length} more row(s) over ${COST_ROW_FLOOR_S}s and ${COST_ROW_FLOOR_X}×`,
     );
   }
+  // THE ROW SET THE TOTAL IS OVER, in the same sentence as the total. Without it a 1,654 s row
+  // that stopped ranking leaves BOTH totals and the line whose entire job is "did this round make
+  // the bench more expensive" reads `1.00×` — the exact defect the fan section above was fixed
+  // for, reproduced in the same wave. The inverse (the corpus's most expensive row STARTS ranking)
+  // reads `1.00×` too, and is what `appeared` names.
   lines.push(
     `cost vs ${base}: ranked pass ${secs(r.baseTotal)} → ${secs(r.freshTotal)}` +
       (r.baseTotal > 0 ? ` (${(r.freshTotal / r.baseTotal).toFixed(2)}×)` : '') +
-      ` over ${r.compared} row(s) — WALL CLOCK under parallel shards, and ~5× with the candidate ` +
+      ` over ${r.compared} row(s)` +
+      rowSetClause(r.vanished, (c) => c.from, `at ${base} did not rank here`) +
+      rowSetClause(r.appeared, (c) => c.to, `ranked here and not at ${base}`) +
+      ` — WALL CLOCK under parallel shards, and ~5× with the candidate ` +
       `cache; read it beside the fan above, not on its own.`,
   );
   return lines;

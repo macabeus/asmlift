@@ -392,6 +392,64 @@ describe('the fan section', () => {
     expect(costLines(compareCost(out(row('a')), out(row('a', { rankSeconds: 9 }))), 'origin/main')).toEqual([]);
   });
 
+  // THE DEFECT THE FAN SECTION WAS FIXED FOR, REPRODUCED IN THE COST SECTION IN THE SAME WAVE. A
+  // row that stops ranking leaves BOTH totals, so the line whose entire job is "did this round make
+  // the bench more expensive" printed `1.00×` on the run where 1,654 s — the real tier's whole tail
+  // — walked out of the corpus. The row set the total is over belongs in the total's own sentence.
+  test('a ranked pass that lost its most expensive row does not read as 1.00×', () => {
+    const r = compareCost(
+      out(row('big', { rankSeconds: 1654 }), row('a', { rankSeconds: 40 })),
+      out(row('big', { outcome: 'declined' }), row('a', { rankSeconds: 40 })),
+    );
+    expect(r.vanished).toEqual([{ id: 'big', from: 1654, to: 0 }]);
+    const line = costLines(r, 'origin/main').at(-1);
+    expect(line).toContain('(1.00×) over 1 row(s)');
+    expect(line).toContain('1 row(s) (1654.0s) at origin/main did not rank here');
+  });
+
+  // THE INVERSE, which had no counter at all: the corpus's most expensive row STARTS ranking, and
+  // the total is again over a different row set in each direction.
+  test('a row that started ranking is named too, not folded into a clean total', () => {
+    const r = compareCost(
+      out(row('big'), row('a', { rankSeconds: 40 })),
+      out(row('big', { rankSeconds: 1654 }), row('a', { rankSeconds: 40 })),
+    );
+    expect(costLines(r, 'origin/main').at(-1)).toContain('1 row(s) (1654.0s) ranked here and not at origin/main');
+  });
+
+  // …and the `compared === 0` fork: every row the base timed stopped ranking. Silence there is the
+  // same silence, on the run that most needs a sentence.
+  test('a cost comparison with nothing left to compare says so rather than printing nothing', () => {
+    const r = compareCost(out(row('a', { rankSeconds: 300 })), out(row('a', { outcome: 'declined' })));
+    const lines = costLines(r, 'origin/main');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('NOT COMPARABLE');
+    expect(lines[0]).toContain('1 row(s) (300.0s) left the comparison');
+  });
+
+  // MIXED DENOMINATORS. The walk is over the BASE's rows, so a row the branch ADDED that ranked was
+  // in neither population — while `freshCounted` was computed over ALL fresh rows. The "N more
+  // counted here" clause therefore under-reported on exactly the rounds that add benchmark rows.
+  test('a row the branch added and ranked is counted as counted-here', () => {
+    const r = compareFans(
+      out(row('a', { candidateCount: 10 })),
+      out(row('a', { candidateCount: 10 }), row('new', { candidateCount: 96 })),
+    );
+    expect(r.unrecorded).toBe(1);
+    expect(fanLines(r, 'origin/main', 2).at(-1)).toContain('1 more counted here and not at origin/main');
+  });
+
+  // BOTH SIDES EMPTY. `vanished` is empty (the base recorded nothing that could leave) and this run
+  // counted nothing either — so "the series starts here" is a false conclusion in the same sentence
+  // as the `0` that refutes it.
+  test('neither side counting anything is not a series starting', () => {
+    const r = compareFans(out(row('a')), out(row('a', { outcome: 'declined' })));
+    const lines = fanLines(r, 'origin/main', 0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('not one row ranked');
+    expect(lines[0]).not.toContain('series starts here');
+  });
+
   // An axis that touches 600 rows must not bury the totals line under 600 lines.
   test('caps the named rows and says how many more moved', () => {
     const changed = Array.from({ length: FAN_ROWS_SHOWN + 3 }, (_, i) => ({ id: `r${i}`, from: 10, to: 20 + i }));
