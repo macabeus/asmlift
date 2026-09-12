@@ -409,8 +409,10 @@ launch anything long. What this command leans on:
   does the same for the whole enumerated candidate set, which is the arm an axis actually moves —
   a corpus whose DEFAULT spelling is unchanged can still have had its fan doubled, and that is the
   multiplier this command asks you to report. `--repeat N` asks the same of this tree against
-  itself. Prices in `docs/bench-cost.md` §1, and §3 carries the measured example of the two arms
-  disagreeing;
+  itself. Read its exit code as `diff`'s with one addition: 1 = something moved, 2 = it did NOT
+  answer — an empty selection, or a row this shell could not lift at all (trap #6). And a moved
+  line that opens `asm …` or `opts …` says the row's INPUT moved, not the decompiler. Prices in
+  `docs/bench-cost.md` §1, and §3 carries the measured example of the two arms disagreeing;
 - background the long ones, wait on a bounded marker-AND-log-growth condition, keep only
   READ-ONLY work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree;
 - `kill -TERM` does not stop a bench, `kill -9` orphans its shards, and two full benches must never
