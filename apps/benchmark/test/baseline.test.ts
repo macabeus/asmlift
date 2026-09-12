@@ -68,4 +68,22 @@ describe('formatRow', () => {
   test('both halves of the fraction are printed', () => {
     expect(formatRow(rows[0])).toContain('171/387');
   });
+
+  // THE TWO COST FIELDS, in the reader that already exists. They are published on every ranked row
+  // and were readable only through a NEW lookup that re-implements the ref read — and does it
+  // WITHOUT the CURRENT / NOT CURRENT verdict this command stamps, which is this repo's own answer
+  // to quoting a stale artifact number.
+  test('a ranked row shows the fan it cost and the seconds it took', () => {
+    const ranked = row('p:f:agbcc', 'f', {
+      asmlift: { outcome: 'nonmatch', score: 1, maxScore: 2, candidateCount: 5952, rankSeconds: 518.42 },
+    } as unknown as Partial<FunctionResult>);
+    expect(formatRow(ranked)).toContain('fan=5952 rank=518.4s');
+  });
+
+  // …and a row that never ranked records neither, so it stays one line rather than growing two
+  // empty fields. Absent is the honest answer: `fan=0` would read as "this row enumerates nothing".
+  test('a row that never ranked grows no cost fields', () => {
+    expect(formatRow(rows[1])).not.toContain('fan=');
+    expect(formatRow(rows[1])).not.toContain('rank=');
+  });
 });

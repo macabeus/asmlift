@@ -13,11 +13,30 @@ import { join } from 'node:path';
 import { RESULTS_DIR } from '../config';
 import { readCommitted, scrub } from './committed';
 
-const rowKey = (r: FunctionResult): string =>
+/** One decompiler's side of a row as this file COMPARES it: whole, minus what a re-run re-mints
+ *  for reasons that are not the measurement.
+ *
+ *  `rankSeconds` is dropped for the same reason the scratch paths are scrubbed, and it is the
+ *  sharper case: it is wall clock, so it differs on EVERY row of EVERY run — machine load, docker,
+ *  and ~5× between a cold and a warm candidate cache. Left in, this file would answer `stale`
+ *  unconditionally and stop being a question at all. `candidateCount` STAYS: enumeration is a
+ *  deterministic cross over axes, so a fan that moved is a real change and exactly the one this
+ *  artifact started recording in order to stop losing.
+ *
+ *  DELETED rather than blanked, so an artifact that predates the field still compares equal to a
+ *  fresh run that carries it. */
+const comparable = (d: FunctionResult['asmlift']): Record<string, unknown> => {
+  const { rankSeconds: _rankSeconds, ...rest } = d;
+  return { ...rest, source: scrub(d.source) };
+};
+
+/** Exported for the test: which fields this file compares is the whole of its verdict, and a
+ *  nondeterministic one added to a row would turn `fresh` into an answer it can never give. */
+export const rowKey = (r: FunctionResult): string =>
   JSON.stringify({
     ...r,
-    asmlift: { ...r.asmlift, source: scrub(r.asmlift.source) },
-    m2c: { ...r.m2c, source: scrub(r.m2c.source) },
+    asmlift: comparable(r.asmlift),
+    m2c: comparable(r.m2c),
     targetAsm: scrub(r.targetAsm),
     refSource: r.refSource,
   });

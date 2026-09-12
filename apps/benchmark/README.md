@@ -193,9 +193,22 @@ pnpm bench fan <sym|id>               # every CANDIDATE the harness ranked for O
                                       #   [dropped]/[withheld] lists, the `[ranked]` line.
                                       #   `--enumerate` lists the fan without compiling anything,
                                       #   `--show <label>` prints one candidate's C, `--force`
-                                      #   scores a fan over 2,000. Neighbour of `bench repro`:
-                                      #   that one re-runs the row's PUBLISHED script, this one
-                                      #   opens the ranking the script's one line summarises
+                                      #   scores a fan over 2,000, `--base <ref>` prints the fan
+                                      #   MULTIPLIER against what that artifact recorded for the
+                                      #   same row -- and on a declined row, the count that LEFT.
+                                      #   Neighbour of `bench repro`: that one re-runs the row's
+                                      #   PUBLISHED script, this one opens the ranking the
+                                      #   script's one line summarises
+pnpm bench fan <sym> --asm <f.s> --toolchain <id>
+                                      # ...or price a function that is NOT a row at all: one `.s`,
+                                      #   one toolchain, ENUMERATION ONLY (scoring needs a target
+                                      #   object, which a bare `.s` does not carry). Runnable on
+                                      #   any corpus file:
+                                      #     pnpm bench fan gcd \
+                                      #       --asm packages/core/test/corpus/ido-gcd.asm \
+                                      #       --toolchain ido7.1        # -> 4 candidates
+                                      #   `--toolchain` means nothing WITHOUT `--asm` and is
+                                      #   refused there: a row names its toolchain in its own id
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
 pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row --
                                            #   TWICE: once against `--base`, then again over the

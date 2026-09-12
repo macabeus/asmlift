@@ -9,6 +9,7 @@ import type { MatchScore } from '@asmlift/cli/score';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
+import { NoScorableCandidateError } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 
 import { cachedExtractAsmData } from '../cache';
@@ -90,6 +91,35 @@ export function asmliftFan(
   return decompileRanked(sym, asm, tc.targetDesc, obj, opts);
 }
 
+/** HOW BIG THIS ROW'S FAN WAS — every spelling enumeration emitted.
+ *
+ *  `rankBy` (core rank.ts) puts each enumerated candidate into EXACTLY ONE of its three lists:
+ *  scored, dropped (the scorer threw) or withheld (it scored and was refused publication). So the
+ *  fan is their sum, and `candidates.length` alone is not it — on
+ *  `kleod:ProcessInputAndUpdateEntities:agbcc` the refused half is 51,840 spellings.
+ *
+ *  Free: three lengths off an object the ranked pass already returned. */
+export function fanSize(r: { candidates: unknown[]; dropped: unknown[]; withheld: unknown[] }): number {
+  return r.candidates.length + r.dropped.length + r.withheld.length;
+}
+
+/** …and the fan of a row whose ranking THREW, which is where the artifact's `noncompile` rows come
+ *  from. `rankBy` throws `NoScorableCandidateError` when every spelling was refused, carrying both
+ *  refusal lists — so the fan is known there, and a row whose WHOLE fan failed would otherwise be
+ *  exactly the row with no price recorded.
+ *
+ *  `undefined` for anything else, deliberately. The same `catch` also sees scorer infrastructure
+ *  errors, and a 0 published there would read as "this row enumerates nothing" — a claim about the
+ *  row, where the truth is that nobody counted. */
+export function fanSizeOfError(e: unknown): number | undefined {
+  return e instanceof NoScorableCandidateError ? e.dropped.length + e.withheld.length : undefined;
+}
+
+/** Wall seconds since `t0`, at the resolution a cost is read at. Two decimals: the fastest rows
+ *  rank in tens of milliseconds and a whole-second field would publish `0` for most of the
+ *  synthetic tier. */
+const secondsSince = (t0: number): number => Number(((Date.now() - t0) / 1000).toFixed(2));
+
 // asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous levers
 // (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the
 // winner — single-shot `decompile` would under-score what asmlift can match. decompileRanked
@@ -147,6 +177,10 @@ export function runAsmlift(
   }
 
   // Phase 2 — rank candidates (compile + objdiff-score each) and take the differ-picked best.
+  // CLOCKED, from here: this is the ranked pass and nothing else — not the target build, not the
+  // phase-1 annotate, not m2c. The runner's per-row `(12.3s)` log line is the whole row and is
+  // published nowhere; this is the part that scales with the fan.
+  const rankT0 = Date.now();
   try {
     const ranked = asmliftFan(tc, sym, asm, obj, opts);
     const best = ranked.best;
@@ -159,6 +193,11 @@ export function runAsmlift(
       // exact tree the winning source was emitted from (post-DCE value refs only; call targets
       // excluded). A raw-globals winner names nothing ⇒ the honest empty list.
       candidateLabel: best.label,
+      // …and WHAT THE FAN COST, which is the row's own share of what a `bench run` spends. The
+      // count is every spelling enumerated (the two refusal lists below are the rest of it); the
+      // seconds are this machine's price for that count, cache state included.
+      candidateCount: fanSize(ranked),
+      rankSeconds: secondsSince(rankT0),
       // Spellings that FAILED TO BUILD. rankBy drops them so a broken sibling cannot sink a
       // candidate that compiles — but dropping them SILENTLY published a clean win over a
       // hidden failure, which is exactly what a scoring harness must not do.
@@ -181,10 +220,16 @@ export function runAsmlift(
     // compile failure (a real emitter defect — core's assertDerefsTyped guards the deref
     // family), but this also catches scorer infrastructure errors; the diagnostics say which.
     const msg = (e as Error).message ?? String(e);
+    // The seconds were spent whichever throw this is, so they are recorded either way; the COUNT
+    // is recorded only when the error actually carries the fan (`fanSizeOfError`), which is the
+    // every-spelling-refused case and not a scorer that died.
+    const fan = fanSizeOfError(e);
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'noncompile',
+      ...(fan === undefined ? {} : { candidateCount: fan }),
+      rankSeconds: secondsSince(rankT0),
       source: annotated,
       score: null,
       maxScore: null,

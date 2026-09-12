@@ -3,7 +3,16 @@
 import type { BenchOutput, DecompilerResult, FunctionResult, Outcome } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
-import { compareMeasurements, notRegenerated } from '../src/report/diff';
+import {
+  FAN_ROWS_SHOWN,
+  type FanReport,
+  compareCost,
+  compareFans,
+  compareMeasurements,
+  costLines,
+  fanLines,
+  notRegenerated,
+} from '../src/report/diff';
 
 const res = (over: Partial<DecompilerResult> = {}): DecompilerResult =>
   ({
@@ -243,5 +252,208 @@ describe('the rows a branch added, compared against the branch own artifact', ()
     const fresh = out(row('a', { score: 99 }), row('b', { score: 0, outcome: 'match' as Outcome }));
     expect(compareMeasurements(base, fresh).changed.map((c) => c.id)).toEqual(['a']);
     expect(compareMeasurements(addedRows(base, self), fresh).changed).toEqual([]);
+  });
+});
+
+// THE FAN, which is a COST and not a claim. It is reported beside the verdict and never inside it:
+// a round can multiply the confirming gate's own price by four and move no published number — a
+// real tier going 274 s → 1,654 s over an unchanged corpus moves nothing this gate watches.
+describe('compareFans', () => {
+  test('names the rows whose fan moved, biggest absolute move first', () => {
+    const r = compareFans(
+      out(row('a', { candidateCount: 96 }), row('b', { candidateCount: 59904 })),
+      out(row('a', { candidateCount: 192 }), row('b', { candidateCount: 225792 })),
+    );
+    expect(r.changed).toEqual([
+      { id: 'b', from: 59904, to: 225792 },
+      { id: 'a', from: 96, to: 192 },
+    ]);
+    expect([r.baseTotal, r.freshTotal, r.compared]).toEqual([60000, 225984, 2]);
+  });
+
+  // The cost question is not the neutrality question: a fan that held is silence here, and a
+  // published field that moved is not this section's business.
+  test('an unchanged fan moves nothing, whatever the row`s score did', () => {
+    const r = compareFans(
+      out(row('a', { candidateCount: 96, score: 3 })),
+      out(row('a', { candidateCount: 96, score: 9 })),
+    );
+    expect(r.changed).toEqual([]);
+    expect(r.compared).toBe(1);
+  });
+
+  // The transition: `origin/main`'s artifact predates the field, and reading `undefined → 96` as a
+  // move would report the whole corpus on the first comparison after this lands.
+  test('a base row with no recorded count is not a move — it is an unanswerable comparison', () => {
+    const r = compareFans(out(row('a')), out(row('a', { candidateCount: 96 })));
+    expect(r.changed).toEqual([]);
+    expect(r).toMatchObject({ compared: 0, unrecorded: 1, baseTotal: 0, freshTotal: 0 });
+  });
+
+  // …and a row this run DECLINED never ranked, so it has no fan to COMPARE. Counting it as a move
+  // to 0 would publish a fan collapse for a row nobody enumerated — but it is not silence either:
+  // the count the base recorded left the corpus, and `vanished` is where it is said.
+  test('a row the fresh run never ranked is not compared — it is recorded as vanished', () => {
+    const r = compareFans(out(row('a', { candidateCount: 96 })), out(row('a', { outcome: 'declined' })));
+    expect(r).toMatchObject({ compared: 0, unrecorded: 0, changed: [] });
+    expect(r.vanished).toEqual([{ id: 'a', from: 96, to: 0 }]);
+  });
+
+  // THE FAN THAT LEFT. With no counter for this direction the surviving rows are summed alone, so
+  // the biggest fan in the corpus can walk out under a clean `1.00×` over a silently smaller row
+  // set — the section's own subject, invisible in the section.
+  test('a vanished fan does not read as a perfect 1.00×', () => {
+    const r = compareFans(
+      out(row('big', { candidateCount: 50000 }), row('a', { candidateCount: 100 })),
+      out(row('big', { outcome: 'declined' }), row('a', { candidateCount: 100 })),
+    );
+    expect(r).toMatchObject({ compared: 1, baseTotal: 100, freshTotal: 100, changed: [] });
+    expect(r.vanished).toEqual([{ id: 'big', from: 50000, to: 0 }]);
+    const lines = fanLines(r, 'origin/main', 1);
+    expect(lines.some((l) => l.includes('big: 50000 → none'))).toBe(true);
+    expect(lines.at(-1)).toContain('1 counted at origin/main did not rank here');
+  });
+});
+
+describe('the fan section', () => {
+  const rep = (over: Partial<FanReport> = {}): FanReport =>
+    ({
+      changed: [],
+      compared: 2,
+      unrecorded: 0,
+      vanished: [],
+      baseTotal: 60000,
+      freshTotal: 225984,
+      ...over,
+    }) as FanReport;
+
+  test('prints the multiplier, which is the number a round reports before merge', () => {
+    const lines = fanLines(rep({ changed: [{ id: 'b', from: 59904, to: 225792 }] }), 'origin/main', 900);
+    expect(lines[0]).toBe('FAN     b: 59904 → 225792 (3.77×)');
+    expect(lines.at(-1)).toContain('total 60000 → 225984 (3.77×) over 2 comparable row(s)');
+  });
+
+  // A base that records nothing must say so. A silent `0 row(s) moved` over 0 comparable rows is
+  // the shape of a green line that measured nothing — the vacuity this file already guards twice.
+  test('says NOT COMPARABLE against an artifact that predates the field', () => {
+    const out = fanLines(rep({ compared: 0, unrecorded: 900, baseTotal: 0, freshTotal: 0 }), 'origin/main', 900);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('NOT COMPARABLE');
+    expect(out[0]).toContain('900 row(s)');
+  });
+
+  // THE OPPOSITE CAUSE OF THE SAME `compared === 0`: the base counted, and this run ranked none of
+  // those rows — a phase-1 gate declining the corpus. Blaming the base for "predating the field"
+  // there is a false cause printed on exactly the run whose fan line a reader would trust.
+  test('a fresh run that ranked nothing says the series is ending, not starting', () => {
+    const r = compareFans(
+      out(row('a', { candidateCount: 100 }), row('b', { candidateCount: 200 })),
+      out(row('a', { outcome: 'declined' }), row('b', { outcome: 'declined' })),
+    );
+    const lines = fanLines(r, 'origin/main', 0);
+    expect(lines.at(-1)).toContain('NOT COMPARABLE');
+    expect(lines.at(-1)).toContain('2 stopped ranking, 300 candidate(s) gone');
+    expect(lines.at(-1)).toContain('ENDS here');
+    expect(lines.some((l) => l.includes('predates the field'))).toBe(false);
+  });
+
+  // A COST SECTION, because a recorded number nothing reads is bookkeeping — and because "did the
+  // real tier get 6.0× more expensive" is a question two artifacts answer and two transcripts do not.
+  test('names a row whose ranking cost moved, over both floors, and totals the tier', () => {
+    const r = compareCost(
+      out(row('a', { rankSeconds: 100 }), row('quiet', { rankSeconds: 20 })),
+      out(row('a', { rankSeconds: 400 }), row('quiet', { rankSeconds: 21 })),
+    );
+    expect(r.moved).toEqual([{ id: 'a', from: 100, to: 400 }]);
+    const lines = costLines(r, 'origin/main');
+    expect(lines[0]).toBe('COST    a: 100.0s → 400.0s (4.00×)');
+    expect(lines.at(-1)).toContain('ranked pass 120.0s → 421.0s (3.51×) over 2 row(s)');
+    expect(lines.at(-1)).toContain('WALL CLOCK');
+  });
+
+  // Wall clock under eight parallel shards on a machine that may be running another round: a
+  // section that names ten rows on every run is a section a reader learns to skip.
+  test('a run that only moved by the machine names no row', () => {
+    const r = compareCost(out(row('a', { rankSeconds: 100 })), out(row('a', { rankSeconds: 108 })));
+    expect(r.moved).toEqual([]);
+    expect(costLines(r, 'origin/main')).toHaveLength(1);
+  });
+
+  // A big RATIO on a tiny row is the machine too (0.2s → 0.6s is three times nothing), and a big
+  // ABSOLUTE move on a huge row can be noise — both floors, or neither means anything.
+  test('a 3× on a row that ranks in under a second is under the seconds floor', () => {
+    expect(compareCost(out(row('a', { rankSeconds: 0.2 })), out(row('a', { rankSeconds: 0.6 }))).moved).toEqual([]);
+  });
+
+  // An artifact that predates the field: silence, not a vacuous `0.0s → 0.0s (1.00×)` that reads
+  // as a measured neutrality.
+  test('says nothing at all when the base recorded no seconds', () => {
+    expect(costLines(compareCost(out(row('a')), out(row('a', { rankSeconds: 9 }))), 'origin/main')).toEqual([]);
+  });
+
+  // THE FAN SECTION'S ROW-SET DEFECT, ASKED OF THE COST SECTION. A row that stops ranking leaves
+  // BOTH totals, so the line whose entire job is "did this round make the bench more expensive"
+  // reads `1.00×` on the run where 1,654 s — the real tier's whole tail — walks out of the corpus.
+  // The row set the total is over belongs in the total's own sentence.
+  test('a ranked pass that lost its most expensive row does not read as 1.00×', () => {
+    const r = compareCost(
+      out(row('big', { rankSeconds: 1654 }), row('a', { rankSeconds: 40 })),
+      out(row('big', { outcome: 'declined' }), row('a', { rankSeconds: 40 })),
+    );
+    expect(r.vanished).toEqual([{ id: 'big', from: 1654, to: 0 }]);
+    const line = costLines(r, 'origin/main').at(-1);
+    expect(line).toContain('(1.00×) over 1 row(s)');
+    expect(line).toContain('1 row(s) (1654.0s) at origin/main did not rank here');
+  });
+
+  // THE INVERSE, which had no counter at all: the corpus's most expensive row STARTS ranking, and
+  // the total is again over a different row set in each direction.
+  test('a row that started ranking is named too, not folded into a clean total', () => {
+    const r = compareCost(
+      out(row('big'), row('a', { rankSeconds: 40 })),
+      out(row('big', { rankSeconds: 1654 }), row('a', { rankSeconds: 40 })),
+    );
+    expect(costLines(r, 'origin/main').at(-1)).toContain('1 row(s) (1654.0s) ranked here and not at origin/main');
+  });
+
+  // …and the `compared === 0` fork: every row the base timed stopped ranking. Silence there is the
+  // same silence, on the run that most needs a sentence.
+  test('a cost comparison with nothing left to compare says so rather than printing nothing', () => {
+    const r = compareCost(out(row('a', { rankSeconds: 300 })), out(row('a', { outcome: 'declined' })));
+    const lines = costLines(r, 'origin/main');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('NOT COMPARABLE');
+    expect(lines[0]).toContain('1 row(s) (300.0s) left the comparison');
+  });
+
+  // MIXED DENOMINATORS. The walk is over the BASE's rows, so a row the branch ADDED that ranked is
+  // in neither population — while `freshCounted` is over ALL fresh rows. Unpaired, the "N more
+  // counted here" clause under-reports on exactly the rounds that add benchmark rows.
+  test('a row the branch added and ranked is counted as counted-here', () => {
+    const r = compareFans(
+      out(row('a', { candidateCount: 10 })),
+      out(row('a', { candidateCount: 10 }), row('new', { candidateCount: 96 })),
+    );
+    expect(r.unrecorded).toBe(1);
+    expect(fanLines(r, 'origin/main', 2).at(-1)).toContain('1 more counted here and not at origin/main');
+  });
+
+  // BOTH SIDES EMPTY. `vanished` is empty (the base recorded nothing that could leave) and this run
+  // counted nothing either — so "the series starts here" is a false conclusion in the same sentence
+  // as the `0` that refutes it.
+  test('neither side counting anything is not a series starting', () => {
+    const r = compareFans(out(row('a')), out(row('a', { outcome: 'declined' })));
+    const lines = fanLines(r, 'origin/main', 0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('not one row ranked');
+    expect(lines[0]).not.toContain('series starts here');
+  });
+
+  // An axis that touches 600 rows must not bury the totals line under 600 lines.
+  test('caps the named rows and says how many more moved', () => {
+    const changed = Array.from({ length: FAN_ROWS_SHOWN + 3 }, (_, i) => ({ id: `r${i}`, from: 10, to: 20 + i }));
+    const lines = fanLines(rep({ changed }), 'origin/main', 900);
+    expect(lines.filter((l) => l.startsWith('FAN     r'))).toHaveLength(FAN_ROWS_SHOWN);
+    expect(lines.some((l) => l.includes('and 3 more row(s) moved'))).toBe(true);
   });
 });

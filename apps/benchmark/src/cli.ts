@@ -14,11 +14,16 @@
 //                                        # paths filled in, under the gitignored .local/repro/,
 //                                        # and with --run executes it and reports `[ranked]`
 //   pnpm bench target <id> --out <dir>   # repro-script pre-step: target object + decomp.yaml
-//   pnpm bench fan <row> [--show <label>] [--enumerate] [--force]
+//   pnpm bench fan <row> [--show <label>] [--enumerate] [--force] [--base <ref>]
+//   pnpm bench fan <sym> --asm <file.s> --toolchain <id>
 //                                        # ONE row's whole candidate fan — every spelling's label
 //                                        # and score, not just the winner's — in the harness's own
 //                                        # configuration; --show prints a candidate's SOURCE and
-//                                        # --enumerate lists the fan without compiling anything
+//                                        # --enumerate lists the fan without compiling anything;
+//                                        # --base <ref> adds the fan multiplier vs that artifact
+//                                        # (on a declined row, the count that LEFT), and --asm
+//                                        # prices a .s that is not a row, no scoring. --toolchain
+//                                        # belongs to --asm alone: a row names its own in its id
 //   pnpm bench gates --pass <id> [--only <row>] [--toolchain id]
 //                                        # the per-id REFUSAL CENSUS of an l3/gates.ts table, off a
 //                                        # real enumeration: which rule refused, how many times, in
@@ -115,10 +120,13 @@ const { values: opts, positionals } = parseArgs({
     tool: { type: 'string' },
     run: { type: 'boolean', default: false },
     // fan only: which candidate's source to print, listing the fan without compiling it, and the
-    // override for the fan-size refusal.
+    // override for the fan-size refusal. `--asm` swaps the dataset row for a raw `.s` file (with
+    // `--toolchain` for the target and the positional read as the SYMBOL); the fan-vs-a-base
+    // comparison rides on the `--base` flag above rather than a second word for one ref.
     show: { type: 'string' },
     enumerate: { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
+    asm: { type: 'string' },
     // gates only: which tabled pass to census (see run/gate-census.ts's registry).
     pass: { type: 'string' },
   },
@@ -421,23 +429,49 @@ switch (command) {
     break;
   }
   case 'fan': {
-    // fan <row> [--show <label>] [--enumerate] [--force] — print the ranked candidate fan the
-    // harness computes for this row and then discards (run/fan.ts). ROW-SCOPED by construction,
-    // and that is the point rather than an omission: a tier-wide form would write tens of
-    // thousands of sources to answer a question that is always about one function.
+    // fan <row> [--show <label>] [--enumerate] [--force] [--base <ref>] — print the ranked
+    // candidate fan the harness computes for this row and then discards (run/fan.ts). ROW-SCOPED
+    // by construction, and that is the point rather than an omission: a tier-wide form would write
+    // tens of thousands of sources to answer a question that is always about one function.
+    //
+    // `--base <ref>` adds one line: this row's fan against the count the artifact at that ref
+    // recorded — the multiplier a round reports before merging an axis, without a bench run.
+    //
+    // `--asm <file.s> --toolchain <id>` swaps the row for a raw `.s`, and then the positional is
+    // the SYMBOL rather than a row id. Enumeration only: scoring needs a target object, which is
+    // exactly what a row carries and a bare `.s` does not.
     const rowId = positionals[1];
+    const usage =
+      'usage: pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force] [--base <ref>]\n' +
+      '   or: pnpm bench fan <sym> --asm <file.s> --toolchain <id> [--show <label>]';
     if (!rowId) {
-      console.error('usage: pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force]');
+      console.error(usage);
       process.exit(2);
     }
-    const { fan } = await import('./run/fan');
-    process.exit(
-      fan(rowId, {
-        ...(opts.show ? { show: opts.show } : {}),
-        enumerateOnly: opts.enumerate,
-        force: opts.force,
-      }),
-    );
+    const { fan, fanOfAsm } = await import('./run/fan');
+    // `!== undefined` and not truthiness: `--base=` parses as the EMPTY STRING, and dropping it
+    // ran the whole command with no comparison at exit 0 — the same silence the refusals here
+    // exist to end. An empty ref reaches `readCommitted` and is refused there, by name.
+    //
+    // `toolchain`/`asmPath` go to BOTH paths, and only so `optionRefusal` can see the pair:
+    // `--toolchain` without `--asm` was accepted and ignored, pricing whichever toolchain the row
+    // id resolved to.
+    const fanOpts = {
+      ...(opts.show ? { show: opts.show } : {}),
+      ...(opts.base !== undefined ? { base: opts.base } : {}),
+      ...(opts.toolchain !== undefined ? { toolchain: opts.toolchain } : {}),
+      ...(opts.asm !== undefined ? { asmPath: opts.asm } : {}),
+      enumerateOnly: opts.enumerate,
+      force: opts.force,
+    };
+    if (opts.asm) {
+      if (!opts.toolchain) {
+        console.error(`--asm needs --toolchain: a .s file does not say which target lifted it.\n${usage}`);
+        process.exit(2);
+      }
+      process.exit(fanOfAsm(rowId, opts.asm, opts.toolchain, fanOpts));
+    }
+    process.exit(fan(rowId, fanOpts));
     break;
   }
   case 'gates': {

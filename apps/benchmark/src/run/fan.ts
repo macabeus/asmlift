@@ -22,6 +22,7 @@
 // The line shapes are deliberately the CLI's (`asmlift: [score] …`, `[dropped]`, `[withheld]`,
 // `[ranked]`), so docs/ranked-repro.md's comparison recipe — `grep -F '[score]'` over two runs —
 // works across the two commands without a second recipe to keep in step.
+import type { BenchOutput } from '@asmlift/bench-schema';
 import { declaredBlock } from '@asmlift/cli/declare';
 import { isDecline } from '@asmlift/cli/decline';
 import { bakedBuild, sampleSourceTree, sourceStamp } from '@asmlift/cli/provenance';
@@ -32,12 +33,17 @@ import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Candidate, DroppedCandidate, WithheldCandidate } from '@asmlift/core/rank';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
+import { readFileSync } from 'node:fs';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { realCases } from '../cases/real';
 import { syntheticCases } from '../cases/synthetic';
 import type { Case } from '../cases/types';
-import { asmliftFan, rankOptionsFor } from '../eval/asmlift';
+import { asmliftFan, fanSize, fanSizeOfError, rankOptionsFor } from '../eval/asmlift';
+import { commitsSinceArtifact } from '../report/baseline';
+import { readCommitted } from '../report/committed';
+import { fanMove } from '../report/diff';
+import { TOOLCHAINS, type Toolchain } from '../toolchains';
 
 /** How many candidates this command will COMPILE before refusing without `--force`.
  *
@@ -101,12 +107,236 @@ export function estimatedScoreTime(n: number, tier: Case['tier']): string {
 export interface FanOptions {
   /** print this candidate's SOURCE (its label, or `best`) after the table */
   show?: string;
+  /** COMPARE this row's fan against the count the artifact at this ref recorded for it — the
+   *  fan multiplier a round is asked to report before it merges an axis. Spelled `--base` rather
+   *  than a second word for "which committed artifact to compare against": `diff`, `regression`,
+   *  `baseline` and `stale-check` all already take it, and two names for one ref is how the two
+   *  spellings come to mean different things. */
+  base?: string;
   /** List the fan without compiling anything. Cheap against the scoring pass and not free:
    *  5,952 labels took 50 s wall here (`kleod:CountCollectedGems:agbcc`, target build included),
    *  so the biggest fans take minutes to merely list. */
   enumerateOnly?: boolean;
   /** score a fan larger than FAN_SCORE_LIMIT anyway */
   force?: boolean;
+  /** What the user typed for `--toolchain` and `--asm`. Carried here ONLY so `optionRefusal` can
+   *  see the pair: the row path takes its toolchain from the row id and never reads either, which
+   *  is the whole reason the refusal exists. */
+  toolchain?: string;
+  asmPath?: string;
+}
+
+/** THE FAN MULTIPLIER, against what the artifact at `base` recorded for this same row — one line,
+ *  and the number a round that ships an axis is asked to report before it merges.
+ *
+ *  It is a comparison of THIS TREE's enumeration against a RECORDED one, which is sound only
+ *  because both are the same call: the run wrote `candidateCount` out of `rankOptionsFor`'s
+ *  options, and this command enumerates under those same options for the same row id. A fan
+ *  enumerated under options assembled a second time is a fan of a different configuration —
+ *  docs/ranked-repro.md documents a 112,896-vs-135,936 spread from exactly that.
+ *
+ *  Every way the comparison cannot be made is a SENTENCE rather than a silence, because the
+ *  answer this returns is the one a round pastes: an artifact that predates the field, a row the
+ *  base never had, a ref nothing can read, and THIS RUN having no fan at all are four different
+ *  facts and only one of them is about the fan moving.
+ *
+ *  That fourth one is `now === undefined`, and it is the comparison a round needs MOST: a DECLINED
+ *  row (234 of 1,062) throws before any enumeration, and `attribute-function.md` sends rounds to
+ *  exactly those rows. "The artifact at origin/main recorded 26,880 for this row and this run has
+ *  no fan" is `compareFans`'s `vanished` at single-row resolution.
+ *
+ *  Pure — the caller prints it — and it takes the base artifact rather than reading it, so the
+ *  refusals are testable without a checkout to compare against. */
+export function fanDiffLine(
+  rowId: string,
+  now: number | undefined,
+  base: string,
+  committed: BenchOutput | { error: string },
+): string {
+  // What THIS run has to offer, as a clause, because each sentence below has to end with it and
+  // "this run enumerates undefined" is the kind of line that gets pasted into a PR body.
+  const here =
+    now === undefined ? `this run has no fan at all (the reason is on the lines above)` : `this run enumerates ${now}`;
+  if ('error' in committed) {
+    return `asmlift: [fan-diff] cannot read the artifact at ${base}: ${committed.error.split('\n')[0]}`;
+  }
+  const was = committed.results.find((r) => r.id === rowId);
+  if (was === undefined) {
+    return (
+      `asmlift: [fan-diff] ${rowId} is not in the artifact at ${base} — this row was added since, so ` +
+      `there is no earlier fan to compare. And ${here}.`
+    );
+  }
+  const from = was.asmlift.candidateCount;
+  if (from === undefined) {
+    return (
+      `asmlift: [fan-diff] the artifact at ${base} records no candidate count for ${rowId} ` +
+      `(it predates the field, or the row never ranked there). And ${here}${now === undefined ? '' : '; the series starts here'}.`
+    );
+  }
+  if (now === undefined) {
+    return (
+      `asmlift: [fan-diff] the artifact at ${base} records ${from} candidate(s) for ${rowId} and ` +
+      `${here} — that fan LEFT, it did not shrink to zero. Close the gap above, or read the ` +
+      `${from} as what this row used to cost.`
+    );
+  }
+  return `asmlift: [fan-diff] ${rowId}: ${fanMove(from, now)} vs ${base}`;
+}
+
+/** IS THE BASE'S OWN NUMBER STILL THE BASE'S ANSWER — the verdict `bench baseline` stamps on every
+ *  number it prints, asked here of the one field it does not print.
+ *
+ *  The hazard is specific to a MULTIPLIER and it is not the same as a stale score. The artifact
+ *  committed on `origin/main` was generated by the tree at ITS OWN commit; `origin/main` has moved
+ *  since. So a branch reading `26880 → 59904 (2.25×) vs origin/main` may be reading a move that is
+ *  ALREADY on origin/main and none of its own — the commits between the artifact and the ref are
+ *  exactly the ones that could have done it. `commitsSinceArtifact` splits them the way the
+ *  baseline reader does, and only the SCORING half can change a fan (the fan is enumerated by
+ *  `packages/core` + `cli/rank`, which is what `SCORING_PATHS` names).
+ *
+ *  Pure, and takes the split rather than shelling out, for the same reason `fanDiffLine` takes the
+ *  artifact. `undefined` when there is nothing to warn about. */
+export function fanBaseStaleNote(base: string, since: { at?: string; scoring: string[] }): string | undefined {
+  if (since.at === undefined) {
+    return `asmlift: [fan-diff] cannot date the artifact on ${base} (git declined) — whether any of the move above was already on ${base} is unverified`;
+  }
+  if (since.scoring.length === 0) {
+    return undefined;
+  }
+  return (
+    `asmlift: [fan-diff] the artifact on ${base} was committed at ${since.at.slice(0, 8)} and ` +
+    `${since.scoring.length} commit(s) on ${base} since then change what the fan is (${since.scoring
+      .slice(0, 3)
+      .map((c) => c.split(' ')[0])
+      .join(', ')}${since.scoring.length > 3 ? ', …' : ''}) — part of the move above may already be ` +
+    `on ${base} and none of this branch's doing.`
+  );
+}
+
+/** IS THIS SYMBOL EVEN IN THIS FILE — asked of the raw text, and answered as a fact about the
+ *  text rather than as a claim about which label is a function.
+ *
+ *  The Thumb frontend REFUSES a name that is not a function label when the file holds two or more
+ *  functions ("not a function label in this asm (functions present: …)"). On a ONE-function file
+ *  it deliberately does the opposite: it treats the name as an intentional rename and lifts that
+ *  one function under it — which is the klonoa workflow (`sub_0800D188:` in the split, the name
+ *  you are decompiling it under on the command line), so refusing it here would break the very
+ *  case `--asm` exists for. What it must not do is stay SILENT: a typo'd symbol then prices
+ *  whatever function the file holds, under a name that exists nowhere, and exits 0 with a
+ *  confident count.
+ *
+ *  TWO POPULATIONS, because a name can be in the file and still be the wrong thing to type. A
+ *  klonoa split declares ONE function (`thumb_func_start sub_0800D188`) and then defines dozens of
+ *  BRANCH labels (`_0800D192:`); an objdump dump declares its function in a `0000 <sym>:` header
+ *  and has no plain labels at all. So:
+ *
+ *  - `declared` — names something in the file says is a FUNCTION, and every one of these spellings
+ *    already exists elsewhere in the repo rather than being invented here: the objdump header and
+ *    Splat's `glabel` are `detect.ts`'s own two regexes, `.globl` is its third, and the
+ *    `*_func_start` macros are the splitter's. No new rule about which label is a function.
+ *  - `other` — a plain `name:` definition that nothing declares. A branch label, usually.
+ *
+ *  OBJDUMP TEXT IS PARSED AS OBJDUMP: four of the five toolchains `--asm` accepts are fed objdump
+ *  output (which is why `scrubObjectHeader` runs two lines before the call), and there a plain
+ *  `name:` match is never a label. Read flatly, `corpus.o:  file format elf32-tradbigmips` yields
+ *  `corpus.o` and the instruction OFFSET column `   c:\tmove…` yields `c`, so `bench fan gcd --asm
+ *  ido-gcd.asm` — the RIGHT symbol, sitting in the file's own `00000000 <gcd>:` header — would be
+ *  told the file defines `corpus.o, c`. A warning that cries wolf on four toolchains of five
+ *  trains rounds to ignore it on the fifth, where it is right. One header match is enough to know
+ *  the dialect. */
+export interface AsmLabels {
+  /** names the file DECLARES as functions, in file order */
+  declared: string[];
+  /** plain `name:` definitions nothing declares — branch labels, mostly */
+  other: string[];
+}
+
+export function definedLabels(asm: string): AsmLabels {
+  const declared = new Set<string>();
+  const other = new Set<string>();
+  // objdump's symbol header (`0000ab34 <sym>:`) — `detect.ts`'s first regex. Its presence is also
+  // the dialect test: objdump has no plain source labels, only an offset column that looks like
+  // one.
+  const objdump = /^[0-9a-f]+ <([\w.$]+)>:/m.test(asm);
+  for (const line of asm.split('\n')) {
+    const header = line.match(/^[0-9a-f]+ <([\w.$]+)>:/);
+    if (header) {
+      declared.add(header[1]);
+      continue;
+    }
+    const decl = line.match(
+      /^\s*(?:glabel|\.globl|non_word_aligned_thumb_func_start|thumb_func_start|arm_func_start)\s+([\w.$]+)/,
+    );
+    if (decl) {
+      declared.add(decl[1]);
+      continue;
+    }
+    if (objdump) {
+      continue;
+    }
+    // `.`-prefixed labels are the assembler's own (`.L6`, `.Lfe1`, `.gcc2_compiled.`): never a
+    // symbol anyone types, and listing them buries the one name the reader is looking for.
+    const label = line.match(/^\s*([A-Za-z_$][\w$.]*)\s*:/);
+    if (label) {
+      other.add(label[1]);
+    }
+  }
+  return { declared: [...declared], other: [...other].filter((l) => !declared.has(l)) };
+}
+
+/** How many names the warning lists before it elides. */
+const LABELS_SHOWN = 8;
+
+/** The warning for a `--asm` symbol the file does not declare as a function, or `undefined` when
+ *  there is nothing to warn about (the symbol IS declared, or the file declares and defines
+ *  nothing at all and any claim about what was lifted would be invented).
+ *
+ *  DECLARED NAMES FIRST, and they are why the list is worth printing: a real split function has
+ *  dozens of branch labels against one function label, so an unordered cut at `LABELS_SHOWN` is
+ *  eight `_08xxxxxx` entries and an ellipsis, burying the single name the reader came for.
+ *
+ *  A symbol that IS in the file but only as a branch label gets its own sentence rather than
+ *  silence: `_0800D192` is a name you can copy out of a disassembly by the hundred, the frontend
+ *  renames the file's one function to it, and the count is then published against something that
+ *  is not a function. */
+export function renameWarning(sym: string, asmPath: string, labels: AsmLabels): string | undefined {
+  const { declared, other } = labels;
+  if (declared.includes(sym)) {
+    return undefined;
+  }
+  if (other.includes(sym)) {
+    return declared.length === 0
+      ? // Nothing is declared, so there is no name to point at and no claim to make: a plain `.s`
+        // with a bare `name:` and no `.globl` is exactly the shape the rename exists for.
+        undefined
+      : `${JSON.stringify(sym)} is a label in ${asmPath} but not a FUNCTION there — the file declares ` +
+          `${declared.slice(0, LABELS_SHOWN).join(', ')}${declared.length > LABELS_SHOWN ? ', …' : ''}. ` +
+          `The lift below is of that function, RENAMED to ${sym}, so the count is the function's and ` +
+          `the name is a branch target's.`;
+  }
+  if (declared.length === 0 && other.length === 0) {
+    return undefined;
+  }
+  const shown = [...declared, ...other].slice(0, LABELS_SHOWN);
+  const total = declared.length + other.length;
+  return (
+    `${JSON.stringify(sym)} is not defined anywhere in ${asmPath} — the lift below is of whatever ` +
+    `function this file holds, RENAMED to ${sym} (the frontend allows that on a single-function ` +
+    `file). This file declares/defines: ${shown.join(', ')}${total > shown.length ? ', …' : ''}. ` +
+    `If you meant one of those, pass it: the count is that function's fan either way, so a typo ` +
+    `here prices the right function under a name that does not exist.`
+  );
+}
+
+/** The base artifact, or the reason it could not be read — `readCommitted` throws, and a throw
+ *  here would take down a fan the reader has already paid tens of seconds to enumerate. */
+function baseArtifact(base: string): BenchOutput | { error: string } {
+  try {
+    return readCommitted(base);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** Resolve a row the way a reader names one: the exact id first, then a substring of it.
@@ -206,17 +436,46 @@ export function pickCandidate<C extends Candidate>(candidates: C[], label: strin
 /** Flag combinations that cannot mean anything, refused BEFORE the row is built — enumeration on a
  *  big row costs ~46 s, and paying it to be told the flags were nonsense is the worst order.
  *
- *  There is one: `--enumerate --show best`. Nothing has been scored, so `best` would resolve to
- *  whatever enumeration emitted first — a near-worst spelling presented under the name of the
- *  winner, to a round both briefs have told that `--show best` is the winner and that
- *  `--enumerate` still serves `--show`. A wrong answer in the shape of a right one is worse than
- *  a refusal. */
+ *  There are two, and both are a flag about SCORING passed to a path that scores nothing:
+ *
+ *  `--enumerate --show best` — nothing has been scored, so `best` would resolve to whatever
+ *  enumeration emitted first: a near-worst spelling presented under the name of the winner, to a
+ *  round both briefs have told that `--show best` is the winner and that `--enumerate` still
+ *  serves `--show`. A wrong answer in the shape of a right one is worse than a refusal.
+ *
+ *  `--enumerate --force` — `--force` raises the FAN_SCORE_LIMIT compile guard, and a path that
+ *  compiles nothing has no guard to raise. Both enumeration-only paths reach here the same way:
+ *  `--asm` arrives as `enumerateOnly: true`. A flag a user passes to change the run and that
+ *  changes nothing is the silence this whole file refuses elsewhere.
+ *
+ *  …and a THIRD, the same rule's second instance: `--toolchain` WITHOUT `--asm`. `--asm` needs
+ *  `--toolchain` (a `.s` does not say which target lifted it), so the usage line, the docs and the
+ *  command header all put the two side by side — and forgetting or mistyping `--asm` then leaves
+ *  `bench fan <row> --toolchain ido7.1` pricing whatever the row id names, at exit 0, because a
+ *  ROW carries its own toolchain in its id and the row path never reads the flag. A row id is
+ *  `project:sym:toolchain`; that is where the answer is typed. */
 export function optionRefusal(o: FanOptions): string | undefined {
+  if (o.toolchain !== undefined && o.asmPath === undefined) {
+    return (
+      `--toolchain only means something with --asm, where a raw .s cannot say which target lifted ` +
+      `it. A ROW carries its toolchain in its own id (project:sym:toolchain), so this run would ` +
+      `have priced whichever toolchain the id resolved to and ignored --toolchain ` +
+      `${JSON.stringify(o.toolchain)} entirely. Name the row you meant — e.g. ` +
+      `\`bench fan <sym>\` prints the matching ids when more than one matches — or pass --asm.`
+    );
+  }
   if (o.enumerateOnly && o.show === 'best') {
     return (
       `--show best names the WINNER and --enumerate scores nothing, so there is no winner to name ` +
       `(an enumerated fan is in enumeration order, not score order). Drop --enumerate to score the ` +
       `fan and get a real best, or pass --show <label> for a spelling you can name.`
+    );
+  }
+  if (o.enumerateOnly && o.force) {
+    return (
+      `--force raises the ${FAN_SCORE_LIMIT}-candidate limit on COMPILING a fan, and nothing is ` +
+      `compiled here (--enumerate lists the fan; --asm has no target object to score against), so ` +
+      `it cannot mean anything. Drop --force to list the fan, or drop --enumerate to score it.`
     );
   }
   return undefined;
@@ -250,7 +509,7 @@ const stampFrom = (treeBefore: ReturnType<typeof sampleSourceTree>): string =>
  *  - `NoSpellableCandidateError` — the backend refused every tree before any compile. Nothing was
  *    dropped because nothing was ever built.
  *  - a DECLINE (`isDecline`) — the unmodelled construct that makes the published row `declined`
- *    (233 of 1,035 rows). Enumeration has no annotate mode, so it throws where the published row
+ *    (234 of 1,062 rows). Enumeration has no annotate mode, so it throws where the published row
  *    gets an `ASMLIFT_ERROR` marker.
  *
  *  The sentence is chosen by the ERROR and never by which call site caught it: `--force` skips the
@@ -360,6 +619,119 @@ export function unshowable(
     : `${JSON.stringify(label)} ${where}. Its source is still readable: re-run with --enumerate --show ${label}`;
 }
 
+/** THE FAN OF A FUNCTION THAT IS NOT A BENCHMARK ROW — one `.s` file, one toolchain, no target
+ *  object, nothing compiled.
+ *
+ *  The command above is dataset-row-scoped by construction and that is right for what it does: the
+ *  row IS the configuration, so what it prints is what the benchmark measured. But the question
+ *  "what would this function's fan cost" is asked about functions that have no row yet — the one
+ *  a dogfooding round is about to attempt, the one a round is deciding whether to add, the one
+ *  `fan.ts` prices at five hours and nobody has ever enumerated — `LoadBGTilemapData`, which is
+ *  NOT a benchmark row (`grep -c LoadBGTilemapData apps/benchmark/results/results.json` → 0), so
+ *  `bench fan <row>` cannot reach it. The alternative is a hand-built driver importing core from
+ *  outside the workspace, which is how a round meets `ERR_MODULE_NOT_FOUND` before it meets a
+ *  count.
+ *
+ *  ENUMERATION ONLY, and that is a refusal rather than an omission: scoring needs a target object
+ *  to diff against and a compiler configured to build against that object's world, which is
+ *  exactly the configuration a row carries and a bare `.s` does not. A fan listed from a `.s` is
+ *  an honest count of spellings; a SCORE from one would be a number against a target nobody named.
+ *
+ *  It is also NOT the harness's configuration: no prototypes, no side-table `asmData`, no symbol
+ *  map. So its count is comparable with another `.s` run, and with itself across two revisions —
+ *  which is what it is for — and not with a row's recorded `candidateCount`. Said out loud, because
+ *  a number that looks like the row's and is not is worse than no number. */
+export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: FanOptions = {}): number {
+  const tc = (TOOLCHAINS as Record<string, Toolchain | undefined>)[toolchainId];
+  if (tc === undefined) {
+    note(`unknown --toolchain ${JSON.stringify(toolchainId)} — one of: ${Object.keys(TOOLCHAINS).join(', ')}`);
+    return 2;
+  }
+  if (o.base !== undefined) {
+    note(
+      `--base compares against a row's RECORDED fan and a raw .s is not a row, so there is nothing ` +
+        `to look it up by. Enumerate the .s in both trees and compare the two counts.`,
+    );
+    return 2;
+  }
+  // BEFORE the file is read, for `optionRefusal`'s own stated reason — the refusal is worth taking
+  // before anything is paid for, and a nonsense flag pair reported as "cannot read missing.s" is
+  // the wrong answer to the wrong question.
+  const refusal = optionRefusal({ ...o, asmPath, toolchain: toolchainId, enumerateOnly: true });
+  if (refusal !== undefined) {
+    note(refusal);
+    return 2;
+  }
+  let asm: string;
+  try {
+    asm = scrubObjectHeader(readFileSync(asmPath, 'utf8'));
+  } catch (e) {
+    note(`cannot read ${asmPath}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`);
+    return 2;
+  }
+  // WHICH FUNCTION IS BEING PRICED. The only place in this command where a user-supplied symbol
+  // meets a user-supplied file, and on a one-function `.s` the frontend renames rather than
+  // refuses — so a name that is in no label silently prices the file's own function under it.
+  const warning = renameWarning(sym, asmPath, definedLabels(asm));
+  if (warning !== undefined) {
+    note(`asmlift: [fan] WARNING: ${warning}`);
+  }
+  note(
+    `${sym} from ${asmPath} — toolchain ${toolchainId}, ENUMERATION ONLY: no target object, so ` +
+      `nothing is compiled or scored, and no prototypes, asm-data side table or symbol map are in ` +
+      `scope. This count is comparable with another .s run of the same file, NOT with a benchmark ` +
+      `row's recorded candidateCount.`,
+  );
+
+  // The same phase-1 verdict the row path states first: a gap here is what would make a published
+  // row `declined`, and enumeration below throws on it rather than annotating.
+  try {
+    const dec = decompile(sym, asm, tc.targetDesc, { onGap: 'annotate' });
+    for (const d of dec.diagnostics) {
+      note(`asmlift: [declined] ${d.stage}: ${d.reason.split('\n')[0].slice(0, 200)}`);
+    }
+  } catch (e) {
+    note(`asmlift: [declined] annotate pass threw: ${(e as Error).message.split('\n')[0]}`);
+  }
+
+  const leverErrors = new Map<string, string>();
+  let cands: Candidate[];
+  try {
+    cands = enumerateRanked(sym, asm, tc.targetDesc, {
+      onLeverError: (label: string, error: string) => leverErrors.set(label, error.split('\n')[0]),
+    });
+  } catch (e) {
+    for (const [label, error] of leverErrors) {
+      note(`asmlift: [lever] ${label} threw (no candidate from it): ${error}`);
+    }
+    const r = noFanReport(`${sym} (${asmPath})`, e, o.show);
+    if (r.fan.length > 0) {
+      console.log(r.fan.join('\n'));
+    }
+    for (const n of r.notes) {
+      note(n);
+    }
+    if (r.harnessDefect) {
+      console.error(e);
+    }
+    return 2;
+  }
+  for (const [label, error] of leverErrors) {
+    note(`asmlift: [lever] ${label} threw (no candidate from it): ${error}`);
+  }
+  console.log(cands.map((cand) => `asmlift: [candidate] ${cand.label}`).join('\n'));
+  console.log(`asmlift: [fan] ${cands.length} candidate(s) enumerated, none scored (--asm)`);
+  if (o.show) {
+    const picked = pickCandidate(cands, o.show);
+    if (!picked) {
+      note(`no candidate labelled ${JSON.stringify(o.show)} — see the [candidate] lines above`);
+      return 2;
+    }
+    console.log(showSource(picked.label, picked.source));
+  }
+  return 0;
+}
+
 export function fan(rowId: string, o: FanOptions = {}): number {
   // The tree BEFORE the run, for the stamp on the `[ranked]` line. A pair of samples, as
   // provenance.ts requires: one reading is blind to any edit not standing at that instant, and a
@@ -386,6 +758,28 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   if (refusal !== undefined) {
     note(refusal);
     return 2;
+  }
+  // AND THE BASE, READ HERE — before the build, before the enumeration, before any compile.
+  //
+  // `optionRefusal`'s own rule is the reason: "refused BEFORE the row is built — enumeration on a
+  // big row costs ~46 s, and paying it to be told the flags were nonsense is the worst order." An
+  // unreadable `--base` is the same class of nonsense, and diagnosing it at the EXITS would put
+  // the candidates and the fan line first and the "cannot read" line last. The base is a
+  // `git show`; it answers in milliseconds.
+  //
+  // It also makes the comparison available on the paths that have no count to hand it — see
+  // `noFanWithDiff`.
+  let baseline: BenchOutput | undefined;
+  if (o.base !== undefined) {
+    const read = baseArtifact(o.base);
+    if ('error' in read) {
+      // A ref nothing can read is a bad ARGUMENT, not one of the data facts: stderr, and it moves
+      // the exit code, because `bench fan <row> --base X && …` otherwise reads success from a run
+      // that compared nothing.
+      note(fanDiffLine(c.id, undefined, o.base, read));
+      return 2;
+    }
+    baseline = read;
   }
 
   // The runner's own build, header scrub included: the disassembly asmlift sees must be the bytes
@@ -443,6 +837,41 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // re-runs every lever, so a lever that throws throws twice — reported twice, it reads as two
   // broken levers.
   const printedLevers = new Set<string>();
+  // THE MULTIPLIER, on stdout beside the fan it is about — printed at every exit this run can
+  // reach, whether or not it has a count: the `--enumerate` listing, the over-limit refusal (which
+  // is the one that matters most on the big rows — you learn what the fan did without paying a
+  // compile for any of it), the scored table, the `noncompile` path where the refusal lists ARE
+  // the fan (`fanSizeOfError`, the same sum the run records for that row class), and the DECLINED
+  // path, which has no count at all and is precisely where the base's count is the whole answer.
+  //
+  // The freshness stamp rides with it, once: `bench baseline` refuses to let a reader quote a
+  // number off an artifact its own branch has moved past, and a MULTIPLIER off that artifact
+  // carries the same hazard in a sharper form — see `fanBaseStaleNote`.
+  let stamped = false;
+  const printFanDiff = (n: number | undefined): void => {
+    if (o.base === undefined || baseline === undefined) {
+      return;
+    }
+    console.log(fanDiffLine(c.id, n, o.base, baseline));
+    if (!stamped) {
+      stamped = true;
+      const stale = fanBaseStaleNote(o.base, commitsSinceArtifact(o.base));
+      if (stale !== undefined) {
+        note(stale);
+      }
+    }
+  };
+  /** THE FAN-LESS EXIT, which is not always a count-less one. A `noncompile` row — every spelling
+   *  refused — throws, and the error carries both refusal lists, so the run RECORDS a
+   *  `candidateCount` for exactly this class (`fanSizeOfError`). A DECLINE carries neither, and
+   *  that is not a reason to say nothing: the base's recorded count IS the comparison there, on
+   *  all 234 declined rows — the row class both briefs send rounds to. `fanDiffLine` takes
+   *  `undefined` and has a sentence for it. */
+  const noFanWithDiff = (e: unknown): number => {
+    const code = noFan(c, e, o.show);
+    printFanDiff(fanSizeOfError(e));
+    return code;
+  };
   const printLevers = (): void => {
     for (const [label, error] of leverErrors) {
       if (!printedLevers.has(label)) {
@@ -457,7 +886,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // exists for is itself the expensive part.
   if (o.enumerateOnly || !o.force) {
     // GUARDED, because `enumerateCandidates` has no annotate mode: the gap the phase-1 pass above
-    // turns into an `ASMLIFT_ERROR` marker is a THROW here, and 233 of the corpus's 1,035 rows
+    // turns into an `ASMLIFT_ERROR` marker is a THROW here, and 234 of the corpus's 1,062 rows
     // publish `declined` on exactly such a gap — the very rows `attribute-function.md` sends a
     // round here to read.
     let cands: Candidate[];
@@ -465,12 +894,13 @@ export function fan(rowId: string, o: FanOptions = {}): number {
       cands = enumerateRanked(c.sym, asm, c.toolchain.targetDesc, withLevers);
     } catch (e) {
       printLevers();
-      return noFan(c, e, o.show);
+      return noFanWithDiff(e);
     }
     printLevers();
     if (o.enumerateOnly) {
       console.log(cands.map((cand) => `asmlift: [candidate] ${cand.label}`).join('\n'));
       console.log(`asmlift: [fan] ${cands.length} candidate(s) enumerated, none scored (--enumerate)`);
+      printFanDiff(cands.length);
       if (o.show) {
         const picked = pickCandidate(cands, o.show);
         if (!picked) {
@@ -490,6 +920,9 @@ export function fan(rowId: string, o: FanOptions = {}): number {
           `Re-run with --enumerate for the labels and sources without ` +
           `compiling, or --force to score them all.`,
       );
+      // …and the comparison anyway: the row this refusal fires on is exactly the row whose fan
+      // multiplier is worth knowing, and nothing was compiled to learn it.
+      printFanDiff(cands.length);
       return 2;
     }
   }
@@ -512,10 +945,14 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     });
   } catch (e) {
     printLevers();
-    return noFan(c, e, o.show);
+    return noFanWithDiff(e);
   }
   printLevers();
   console.log(renderFan(ranked, { synthesized: synthesizedRefs(c.tier, ranked.best), stamp: stampFrom(treeBefore) }));
+  // `fanSize`, not `candidates.length`: the recorded count this is compared against is the whole
+  // fan, refusals included, and comparing the published half against the whole would report a
+  // shrink on any row that dropped a spelling.
+  printFanDiff(fanSize(ranked));
   if (o.show) {
     const picked = pickCandidate(ranked.candidates, o.show);
     if (!picked) {

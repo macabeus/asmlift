@@ -40,8 +40,17 @@ export function headContains(ref: string): boolean | undefined {
   }
 }
 
-/** The artifact as of `ref` (a commit, tag or branch — `HEAD` by default). */
+/** The artifact as of `ref` (a commit, tag or branch — `HEAD` by default).
+ *
+ *  AN EMPTY REF IS NOT A MISSING ONE, and git will not say so: `git show :<path>` with an empty
+ *  left-hand side reads the staging INDEX, so an unguarded `--base=` compares against whatever is
+ *  STAGED and prints a confident line about it — `bench fan --base=` answers `the artifact at
+ *  records no candidate count … the series starts here` off the index. Every caller passes a ref
+ *  straight from a `--base` flag, so the guard belongs at the read. */
 export function readCommitted(ref = 'HEAD'): BenchOutput {
+  if (ref.trim() === '') {
+    throw new Error(`empty --base ref: git reads the staging INDEX for it, which is not a base — name a commit`);
+  }
   let raw: string;
   try {
     // execFile, not a shell string: `ref` comes straight from `--base`, and a shell would have to
