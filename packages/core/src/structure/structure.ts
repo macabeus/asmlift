@@ -4200,13 +4200,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  and the naming walk names the params of these shapes. Two further clauses were needed just to
    *  hold that draw (skip the copy test for a named param, or `fz735`'s call is spelled twice), so
    *  the clause is three rules that buy nothing and it is not here. */
+  /** Does `op` render AT ITS OWN POSITION, as `v = f(…)`?
+   *
+   *  ONE DEFINITION, TWO READERS, on purpose. `isSpelled`'s base case below is a MODEL of what
+   *  `sideEffects` emits, and this round exists because a predictor and an emitter that disagree
+   *  spell a call zero times or twice. Written out separately they were a copy either side could
+   *  silently break; named once, changing the rule moves the walk and the emission together.
+   *
+   *  The THIRD copy this predicate used to have — `unreadResult`'s negated exemption — is gone. It
+   *  now falls out of position rather than being restated: `sideEffects` tests the assign branch
+   *  BEFORE the `unreadResult` branch, and `isSpelled` returns at the base case above without ever
+   *  asking `unreadResult`. Measured inert: byte-identical emission over the 16,000 functions
+   *  `generateSsaFn` builds at four depths and over the 30 agbcc functions in `test/corpus`. */
+  const rendersAtOwnPosition = (op: Op): boolean => materialize.has(op) && !absorbedLoads.has(op);
   const spelledMemo = new Map<Op, boolean>();
   const isSpelled = (op: Op): boolean => {
     const memo = spelledMemo.get(op);
     if (memo !== undefined) {
       return memo;
     }
-    if (op.results.length === 0 || (materialize.has(op) && !absorbedLoads.has(op))) {
+    if (op.results.length === 0 || rendersAtOwnPosition(op)) {
       return true;
     }
     spelledMemo.set(op, true);
@@ -4220,12 +4233,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const unreadResult = (op: Op): boolean =>
     SPELLED_WHEN_DEAD_OPS.has(op.opcode) &&
     op.results.length > 0 &&
-    // A MATERIALIZED def already renders at its own position, as `v = f(…)`, and that spells the
-    // effect as surely as a bare statement does. Taking the `exprstmt` branch for one instead
-    // emits `expr(result)` — which for a named value is the NAME, so `v3;` replaces `v3 = f0(…)`
-    // and the call is gone. The two sets barely met while the use test was syntactic (a
-    // materialized op has uses); under the transitive test they overlap constantly.
-    !(materialize.has(op) && !absorbedLoads.has(op)) &&
+    // NO EXEMPTION FOR A MATERIALIZED DEF HERE, and it is not missing. Such a def already renders
+    // at its own position, as `v = f(…)`, which spells the effect as surely as a bare statement
+    // does; taking the `exprstmt` branch for one instead emits `expr(result)` — the NAME, so `v3;`
+    // replaces `v3 = f0(…)` and the call is gone. Both callers rule that out BEFORE asking:
+    // `isSpelled` returns at its `rendersAtOwnPosition` base case, and `sideEffects` tests the
+    // assign branch first. (The two sets barely met while the use test was syntactic — a
+    // materialized op has uses; under the transitive test they overlap constantly, which is why
+    // the ordering is load-bearing and `dead-effect.test.ts`'s `MATERIALIZED_UNREAD` pins it.)
     !hasSpelledUse(op.results[0]) &&
     (opSig(op.opcode)?.reads !== true || volatileQualifiable(op));
 
@@ -4287,6 +4302,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           ),
           value: expr(op.operands[2]),
         });
+      } else if (rendersAtOwnPosition(op)) {
+        // FIRST, and that order is the rule rather than a restatement of it: this branch is what
+        // "renders at its own position" MEANS, so an op it claims can never reach the `exprstmt`
+        // branch below and be spelled as a bare `v3;` with the call dropped. `unreadResult` used to
+        // carry a negated copy of this test to get the same effect; the copy is gone.
+        // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
+        // here would recompile to a second load the asm does not have)
+        const nm = varName.get(op.results[0])!;
+        out.push({ k: 'assign', name: nm, value: intoDeclaredTemp(nm, lowerDef(op, expr)) });
       } else if (unreadResult(op)) {
         // An op whose result nobody reads is still an execution. `store`/`astore` have no result and
         // were handled above, so what reaches here is `call`, `opaque` and a memory READ — and an
@@ -4297,11 +4321,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // `opaque` becomes the gap, so this reuses the SAME degradation a live opaque gets rather
         // than inventing a second way to be loud.
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
-      } else if (materialize.has(op) && !absorbedLoads.has(op)) {
-        // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
-        // here would recompile to a second load the asm does not have)
-        const nm = varName.get(op.results[0])!;
-        out.push({ k: 'assign', name: nm, value: intoDeclaredTemp(nm, lowerDef(op, expr)) });
       }
       // a merge copy anchored at this const's original position (anchorConstCopies, above)
       for (const a of anchoredAt.get(op) ?? []) {
