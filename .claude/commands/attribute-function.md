@@ -299,6 +299,12 @@ a copy that drifts silently, which is the defect this whole section exists to cl
 - `pnpm bench baseline <sym>` prices a scoped run before you launch it (`rank=Ns`, and it runs no
   bench at all). `pnpm bench gates --pass <pass>` replaces an instrument-and-revert cycle at a
   fraction of a run. Both prices: `docs/bench-cost.md` §1.
+- **An ablation's blast radius is `pnpm bench sweep --base-dir <the unablated worktree>`.** You
+  already build that second tree; this reads it. Every row re-lifted in both trees and both
+  symbol-map arms, nothing compiled, the moved rows named — with `--fan` when what you ablated
+  changes which spellings are enumerated rather than which one is emitted, and `--repeat` when you
+  need to know a difference is not the rig's. It also takes `--asm-dir <tree> --toolchain <id>`,
+  so the population can be a project's raw `.s` files rather than dataset rows. Prices: same table.
 - Background the long ones, wait on a bounded marker-AND-log-growth condition, keep only READ-ONLY
   work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree — which for
   this command is Phase 6 (it authors dataset rows) and Phase 7 (`pnpm format` is a tree WRITE).
