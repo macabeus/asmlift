@@ -237,6 +237,29 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
   const trace: Event[] = [];
   const env = new Map<string, Val>();
   sfn.params.forEach((p, i) => env.set(p.name, ((seed >> (i * 3)) % 11) - 5));
+  // POINTER ARITHMETIC IS SCALED, because C's is: `p = p + 1` on a `u16 *` moves TWO bytes, and a
+  // byte-wise reading of it reports a FALSE DIFFERENCE against the IR's own `add %p, 2` on every
+  // tree `l3/advance.ts` produces. The scale comes off the DECLARATION, so nothing is scaled unless
+  // the tree declares the local a pointer; a tree with no pointer local evaluates exactly as before.
+  const ptrScale = new Map<string, number>();
+  for (const l of sfn.locals) {
+    const t = l.type as { kind: string; to?: { kind: string; width?: number; size?: number } };
+    if (t.kind !== 'ptr' || !t.to) {
+      continue;
+    }
+    const to = t.to;
+    const bytes =
+      to.kind === 'int' || to.kind === 'unknown'
+        ? Math.max(1, (to.width ?? 8) / 8)
+        : to.kind === 'ptr'
+          ? 4
+          : to.kind === 'struct'
+            ? (to.size ?? 0)
+            : 0;
+    if (bytes > 0) {
+      ptrScale.set(l.name, bytes);
+    }
+  }
   let calls = 0;
   let steps = 0;
   const evalExpr = (e: Expr): Val => {
@@ -260,11 +283,14 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         }
         const r = evalExpr(e.r);
         if (l === UNDEF || r === UNDEF) return UNDEF;
+        // …the pointee scale of the LEFT operand when it is a declared pointer local, and 1 for
+        // everything else (see `ptrScale` above)
+        const scale = e.l.k === 'var' ? (ptrScale.get(e.l.name) ?? 1) : 1;
         switch (e.op) {
           case '+':
-            return (l + r) | 0;
+            return (l + r * scale) | 0;
           case '-':
-            return (l - r) | 0;
+            return (l - r * scale) | 0;
           case '<':
             return l < r ? 1 : 0;
           case '>':

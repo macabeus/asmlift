@@ -295,6 +295,17 @@ export interface TargetDescription {
     // and PPC lanes put the addend in the instruction by construction (`lui`/`%lo`, `lis`/`ori`),
     // so a surviving offset carries no information there. Absent ⇒ the row is never offered.
     foldsConstAddrOffset?: boolean;
+    // Does this compiler fold a pointer local's OWN ADVANCE back into the memory operand —
+    // `*p = a; p = p + 1; *p = b;` → `strh [r3, #0]` + `strh [r3, #2]`, no `add` — so the advanced
+    // spelling is byte-identical to the indexed one wherever the pointee is not volatile? agbcc
+    // does, on its own compiled evidence: the four corners in test/advance.test.ts's header, each
+    // built through the benchmark's agbcc against `kleod:StreamCmd_SetWindowRegs`'s object. True ⇒
+    // rank.ts withholds the UN-QUALIFIED `/advance` label, whose spelling this compiler cannot
+    // distinguish from the indexed one it already offers; `/advance/volatile` still rides, because
+    // `volatile` is what bars the fold and that product is the match on this row. Absent ⇒ falsy ⇒
+    // the plain label ships, which is the conservative reading for a compiler whose pair nobody has
+    // compiled — a compiler opts in on its own evidence and never by inheriting.
+    foldsPointerAdvance?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
     // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
@@ -385,6 +396,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     orderArgCopiesByWriteOrder: true,
     nearBaseSpan: 255,
     foldsConstAddrOffset: true,
+    foldsPointerAdvance: true,
     readsStayWhereWritten: true,
     switchAllowsBoundCase: true,
     switchArmsFollowLayout: true,

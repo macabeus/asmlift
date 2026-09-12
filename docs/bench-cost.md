@@ -60,7 +60,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:CountCollectedGems:agbcc  asmlift=match 0/344  m2c=noncompile -/-  fan=9192 rank=142.6s
+  kleod:CountCollectedGems:agbcc  asmlift=match 0/344  m2c=noncompile -/-  fan=9192 rank=146.4s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -113,10 +113,10 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-12: the ranked pass alone is **2,668 s over 155
-real rows** and **354 s over 673 synthetic rows**; wall clock is lower because eight shards run in
-parallel. The single row `kleod:ProcessInputAndUpdateEntities:agbcc` is 1,840 s of that real
-total — **69% of the tier in one row.**
+Summed out of the committed artifact of 2026-09-12: the ranked pass alone is **2,808 s over 155
+real rows** and **817 s over 674 synthetic rows**; wall clock is lower because eight shards run in
+parallel. The single row `kleod:ProcessInputAndUpdateEntities:agbcc` is 1,916 s of that real
+total — **68% of the tier in one row.**
 
 ## 4. How many full runs a round gets
 

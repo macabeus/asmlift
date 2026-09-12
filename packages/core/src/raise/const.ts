@@ -76,6 +76,44 @@ export function foldConstPair(opcode: string, a: number, b: number): number | nu
  *  for callers that must classify an op before they have its operands' values. */
 export const isConstFoldOpcode = (opcode: string): boolean => opcode in FOLD;
 
+/** THE EVIDENCE THE FOLD WOULD OTHERWISE DESTROY, stamped on the literal it produces.
+ *
+ *  Three Thumb shapes put two accesses a constant distance apart, and the assembly tells them
+ *  apart: two pool words (two independent `const` ops), one pool word plus memory-operand
+ *  displacements (`l3/ast.ts`'s `operandOff`), and one pool word plus an `add` to the register
+ *  that already held the first address (`ldr r3,=X; strh [r3]; adds r3,#2; strh [r3]`). The third
+ *  lifts as `add(const X, const 2)` — indistinguishable, once folded, from a literal `X + 2` the
+ *  compiler materialised in two instructions, which is this pass's whole clientele. So the fold
+ *  still happens and the distinction is recorded, exactly as `structure.ts` records `operandOff`
+ *  before its own fold (see the `operandOff` note in l3/ast.ts).
+ *
+ *  WHAT IT ASSERTS is narrow and is a fact about REGISTERS, not about C: at this instruction the
+ *  machine held the base address in a register, used it as an address, and advanced it by `step`
+ *  bytes to reach another address it also used. THE READER decides what to spell — `l3/advance.ts`
+ *  offers a pointer local advanced in place, which is the only C spelling that reproduces the
+ *  `add` on a compiler that folds a constant subscript into the memory operand, and which is
+ *  INERT (same bytes as the subscript) wherever the pointee is not `volatile`.
+ *
+ *  THE THREE REFUSALS, each of which makes the stamp mean something else:
+ *   • `or`, not `add` — a hi/lo `or` is a literal being assembled, never a pointer being moved.
+ *   • the ADDEND is itself a memory base. Then both halves are addresses and neither is the step;
+ *     the shape is not an advance and the stamp would name an arbitrary one of them.
+ *   • either the base or the result is never used AS AN ADDRESS. A register that only feeds
+ *     arithmetic is a value, and `X + 2` over two values is a literal by every reading.
+ *  A zero step is dropped too: it names no advance, and `l3/ast.ts`'s readers all test
+ *  `!== undefined` rather than truthiness, so a stamped 0 would read as a real one. */
+function advanceEvidence(op: Op, a: number, c: number, memBases: ReadonlySet<Value>): { advancedBy?: number } {
+  if (op.opcode !== 'add' || !memBases.has(op.results[0])) {
+    return {};
+  }
+  const baseIdx = memBases.has(op.operands[0]) ? 0 : memBases.has(op.operands[1]) ? 1 : -1;
+  if (baseIdx < 0 || memBases.has(op.operands[1 - baseIdx])) {
+    return {};
+  }
+  const step = baseIdx === 0 ? c : a;
+  return step === 0 ? {} : { advancedBy: step };
+}
+
 /** Fold each const/const `or`/`add` into one `const`, in place. Returns whether anything changed. The
  *  now-dead source consts are left for DCE (they may still have other uses; liveness is not our concern). */
 export function recognizeConsts(fn: Fn): boolean {
@@ -201,7 +239,10 @@ export function recognizeConsts(fn: Fn): boolean {
         continue;
       }
       // Reuse the SAME result Value → every existing use already points at it (no RAUW needed).
-      const folded = mkOp('const', { results: [op.results[0]], attrs: { value: fold(a, c) } });
+      const folded = mkOp('const', {
+        results: [op.results[0]],
+        attrs: { value: fold(a, c), ...advanceEvidence(op, a, c, memBases) },
+      });
       b.ops.splice(i, 1, folded);
       defs.set(op.results[0], folded); // keep the def map current so a chained fold sees this const
       changed = true;

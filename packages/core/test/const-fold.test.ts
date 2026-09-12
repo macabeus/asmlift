@@ -279,3 +279,55 @@ test('a CHAIN of refused pairs prints as one literal, not as a shorter sum', () 
   expect(out).not.toMatch(/1 \+ 2/);
   expect(out).toMatch(/= 3;/);
 });
+
+// ── (g) THE EVIDENCE THE FOLD RECORDS: a register advanced to a second address ────────────────
+// `ldr r3,=X; strh [r3]; adds r3,#2; strh [r3]` and a two-instruction materialisation of `X + 2`
+// lift to the SAME `add(const, const)`, and the fold makes them the same literal. The stamp is what
+// keeps them apart for `l3/advance.ts`; everything about the fold itself is unchanged.
+const ADVANCE = `fn advance {
+^bb0(%0: s32):
+  %1: s32* = const {value=67108936}
+  store %1, %0 {off=0, width=2}
+  %2: s32 = const {value=2}
+  %3: s32* = add %1, %2
+  store %3, %0 {off=0, width=2}
+  ret
+}
+`;
+
+const foldedConst = (fn: Fn, value: number): Op | undefined =>
+  ops(fn).find((o) => o.opcode === 'const' && o.attrs.value === value);
+
+test('a fold over a base the asm also used as an address records the advance', () => {
+  const { fn, changed } = run(ADVANCE);
+  expect(changed).toBe(true);
+  expect(foldedConst(fn, 67108938)?.attrs.advancedBy).toBe(2);
+});
+
+// The base register is a VALUE here — nothing dereferences `%1` — so `X + 2` is a literal by every
+// reading and there is no advance to record.
+test('a fold whose base is never dereferenced records nothing', () => {
+  const { fn } = run(ADVANCE.replace('store %1, %0 {off=0, width=2}', 'store %0, %1 {off=0, width=2}'));
+  expect(foldedConst(fn, 67108938)?.attrs.advancedBy).toBeUndefined();
+});
+
+// The RESULT must be an address too: a base advanced into something only arithmetic reads is not
+// a second access.
+test('a fold whose result is never dereferenced records nothing', () => {
+  const { fn } = run(ADVANCE.replace('store %3, %0 {off=0, width=2}', 'store %0, %3 {off=0, width=2}'));
+  expect(foldedConst(fn, 67108938)?.attrs.advancedBy).toBeUndefined();
+});
+
+// An `or` assembles a literal; it never moves a pointer, whatever its operands are dereferenced as.
+test('an `or` records nothing even when both halves are addresses', () => {
+  const { fn } = run(ADVANCE.replace('add %1, %2', 'or %1, %2'));
+  expect(foldedConst(fn, 67108938)?.attrs.advancedBy).toBeUndefined();
+});
+
+// Both operands used as addresses: neither is "the step", so the shape is not an advance.
+test('a fold whose addend is itself an address records nothing', () => {
+  const { fn } = run(
+    ADVANCE.replace('  %2: s32 = const {value=2}', '  %2: s32* = const {value=2}\n  store %2, %0 {off=0, width=2}'),
+  );
+  expect(foldedConst(fn, 67108938)?.attrs.advancedBy).toBeUndefined();
+});

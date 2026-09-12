@@ -9,6 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { ADVANCE_HEAD_GATES, ADVANCE_MEMBER_GATES } from '../src/l3/advance';
 import {
   BASECSE_GATES,
   BASEFOLD_GATES,
@@ -105,6 +106,12 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   UNMERGE_RUNG_GATES: UNMERGE_RUNG_GATES as readonly Gate<never>[],
   UNMERGE_TOTALITY_GATES: UNMERGE_TOTALITY_GATES as readonly Gate<never>[],
   PTR_FIELD_GATES: PTR_FIELD_GATES as readonly Gate<never>[],
+  // l3/advance.ts's two: the chain's head, and each successor against the member before it. The
+  // same two address rules appear in both, as separate rule objects — a head re-spelled at a
+  // second site is wrong for the member table's reason, and gates.ts's header says a second
+  // consumer shares the PREDICATE rather than the rule.
+  ADVANCE_HEAD_GATES: ADVANCE_HEAD_GATES as readonly Gate<never>[],
+  ADVANCE_MEMBER_GATES: ADVANCE_MEMBER_GATES as readonly Gate<never>[],
   FRESH_MERGE_GATES: FRESH_MERGE_GATES as readonly Gate<never>[],
   CARRIER_NAME_GATES: CARRIER_NAME_GATES as readonly Gate<never>[],
   ENCLOSING_CARRIER_GATES: ENCLOSING_CARRIER_GATES as readonly Gate<never>[],

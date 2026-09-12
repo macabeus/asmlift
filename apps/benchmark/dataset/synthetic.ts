@@ -8191,6 +8191,39 @@ export const SYNTHETIC: SynthSpec[] = [
     },
     symbols: PROBE_SLOT_MAP,
   },
+  // THE ADVANCED DEVICE REGISTER — a pointer the source MOVED between two writes, which the target
+  // records as `ldr r2,=X; strh [r2]; add r2,#2; strh [r2]`. The `add` is the whole row: it is the
+  // only thing separating this source from `reg[1] = b`, which agbcc compiles to `strh [r2, #2]`,
+  // and it survives only because the pointee is `volatile`. asmlift's `/advance` lever
+  // (l3/advance.ts) reads the lift's own `add` and spells it back.
+  //
+  // IT EXISTS BECAUSE IT IS THE ONLY PRE-EXISTING ROW THAT WOULD BE ONLY THIS — and none is.
+  // `pnpm bench sweep --fan --base origin/main` (2026-09-12: 10 record(s) moved, 0 base-only,
+  // 2 head-only, 2114 identical, and not one row whose DEFAULT spelling moved) reaches five rows
+  // that already existed — `kleod:StreamCmd_SetWindowRegs` fan 16 -> 17 map-ful and 10 -> 11
+  // map-less, `kleod:SetupBG3WindowOverlay` 1024 -> 1048 and 720 -> 744,
+  // `synthetic:dma_fill_uninit` 66 -> 78, `synthetic:offhi_split` and `offhi_fused` 12 -> 16 each
+  // — plus this row, which is the head-only pair. Every one of the five carries something else the
+  // lever does not own (a DMA block, an uninitialised slot, a fused offset), so a regression in the
+  // advance alone would surface there as one term of a conjunction. This row is the shape with
+  // nothing else in it.
+  //
+  // …AND ONE OF THE FIVE CANNOT SCORE AT ALL. `kleod:SetupBG3WindowOverlay:agbcc` is a
+  // `noncompile` row for a reason this lever does not touch: every one of its 1,048 candidates is
+  // `[dropped] agbcc failed: too many arguments to function 'm4aSoundVSyncOff'`, a declaration the
+  // row's own context gets wrong (`pnpm bench fan kleod:SetupBG3WindowOverlay:agbcc`, 2026-09-12,
+  // prints the 1,048 drops and no ranking). It prices the lever's REACH and buys nothing else: the
+  // +24 candidates there are 24 more compiles of a translation unit that cannot compile.
+  {
+    sym: 'volwalk',
+    src:
+      '#define REG_WININ (*(volatile u16 *)0x04000048)\n' +
+      'void volwalk(s32 a, s32 b){ volatile u16 *reg = &REG_WININ; *reg = a; reg++; *reg = b; }',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'void volwalk(s32 a, s32 b);',
+    proto: { volwalk: { params: ['s32', 's32'], returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
