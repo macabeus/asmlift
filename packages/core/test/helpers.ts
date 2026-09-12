@@ -61,22 +61,21 @@ export function mulberry32(seed: number): () => number {
  *  children. Depth 2 gives a do-while exactly one child loop, so every rule in `latchInnerSub` that
  *  is about WHICH children count — the filter that drops a child containing the latch, the filter
  *  that drops one that does not dominate it, and the ORDER the surviving children are applied in —
- *  never sees a second child. Measured before this shape existed: 2 calls of 187,117 reached a
- *  two-child latch; with it, 4,000 of 4,000.
+ *  never sees a second child: depths 0-2 reach a two-child latch on 2 of 187,117 `latchInnerSub`
+ *  calls, depth 3 on 4,000 of 4,000.
  *
- *  WHAT THAT REACH BOUGHT, AND WHAT IT DID NOT. This shape was built because all three rules could
- *  be deleted with the whole core suite green, and REACHING them did not change that: each is still
- *  deletable with the suite green. The reason is not a missing assertion — it is that on every
- *  shape this generator builds the three rules are INERT. Mutated one at a time (drop the
+ *  WHAT THAT REACH BUYS, AND WHAT IT DOES NOT. Reaching the three rules does not witness them,
+ *  because on every shape this generator builds they are INERT. Mutated one at a time (drop the
  *  latch-containment filter; drop the dominance filter; reverse the `.sort()`) and the emitted C
- *  hashed over 4,000 seeds at depth 2 AND depth 3: byte-identical, 16,000 functions, all three.
- *  They are NO-OPS here, not unwitnessed rules, and the inhabitant each would need is named:
- *  containment needs a child holding the latch, which is an overlapping pair the recognizer refuses
- *  earlier; dominance needs the non-dominating child to CARRY a value the latch reads, where C only
- *  offers it map entries nothing reads; the order needs two children mapping the SAME value, which
- *  is a dominating CHAIN (a grandchild), not the siblings below. Wiring an inner latch's own value
- *  round its back edge was built and reverted: it raises the substitution's occupancy, still moves
- *  0 bytes under all three mutants, and turns two fuzz arms red on wrong answers of its own.
+ *  hashed over 4,000 seeds at depth 2 AND depth 3 — 8,000 functions — is byte-identical to the
+ *  shipped rule's under all three. They are NO-OPS here, not unwitnessed rules, and the inhabitant
+ *  each would need is named: containment needs a child holding the latch, which is an overlapping
+ *  pair the recognizer refuses earlier; dominance needs the non-dominating child to CARRY a value
+ *  the latch reads, where C only offers it map entries nothing reads; the order needs two children
+ *  mapping the SAME value, which is a dominating CHAIN (a grandchild), not the siblings below.
+ *  Wiring an inner latch's own value round its back edge does not supply one: it raises the
+ *  substitution's occupancy, still moves 0 bytes under all three mutants, and turns two fuzz arms
+ *  red on wrong answers of its own.
  *
  *  The skeleton, fixed (11 blocks), with ops and edge arguments random as at depth 2:
  *
@@ -384,7 +383,7 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
 }
 
 /** THE SEEDS whose emitted tree still disagrees with its own IR, per depth — a ratchet, not a clean
- *  bill. Each one is a real emission defect this round measured and did not fix:
+ *  bill. Each one is a real emission defect, measured and not fixed here:
  *
  *    • a call INLINED AT ITS USE beside another call, which renders the two in the opposite order
  *      (`fz399`: `if ((s32)f1(a1) < (s32)f0(a1))` for an IR that calls f0 first);
@@ -392,21 +391,17 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
  *      unconditional execution becomes a conditional one (`fz27`'s `%8`, the `branchArgFed` case);
  *    • a call rendered at two positions, so it executes twice.
  *
- *  ONE QUANTITY, TWO READERS, and that was declined once on a measurement that had not been taken.
- *  Both naming fuzzes kept their own copy, because "the residuals being equal at every depth is a
- *  coincidence of two populations, not one quantity". Instrumented, it is not a coincidence: the two
- *  files' failing-seed lists are IDENTICAL seed for seed at all four depths. They have to be — the
+ *  ONE QUANTITY, TWO READERS. Both naming fuzzes read this same list, and their failing-seed lists
+ *  are IDENTICAL seed for seed at all four depths — not a coincidence of two populations: the
  *  residual is an EMISSION defect of the SHIPPED spelling, which both files structure, and each
  *  file's axis varies only a naming choice on top of it. The populations do differ (2,502 vs 2,508
- *  at depth 1), for a reason each file's `JUDGED` now states correctly; the DEFECTS do not.
+ *  at depth 1), for the reason each file's `JUDGED` states; the DEFECTS do not.
  *
- *  A LIST, NOT A COUNT, which is strictly better than both the shipped design and the declined one.
- *  `toBe(48)` was adopted to close "a change that fixes N defects and adds N stays green" and does
- *  not close it: 48 is as green on a swapped pair as `<= 48` is. And a count is what makes a shared
- *  constant dangerous — a file whose population quietly loses a bad seed goes SILENT on a count and
- *  LOUD on a list. The stated cost of a list ("re-derived every time the generator's stream moves")
- *  is already paid: `JUDGED` is exact per depth in both files, so a stream move re-derives eight
- *  numbers regardless. Re-derive with the probe in each file's `JUDGED` docblock. */
+ *  A LIST, NOT A COUNT. A count is green on a change that fixes one defect and adds another, and it
+ *  is what makes a shared constant dangerous: a file whose population quietly loses a bad seed goes
+ *  SILENT on a count and LOUD on a list. The cost — re-derived whenever the generator's stream moves
+ *  — is already paid by `JUDGED`, which is exact per depth in both files. Re-derive with the probe
+ *  in each file's `JUDGED` docblock. */
 export const IR_RESIDUAL_SEEDS: Readonly<Record<0 | 1 | 2 | 3, readonly number[]>> = {
   0: [
     27, 84, 226, 299, 399, 420, 425, 463, 661, 715, 862, 1036, 1073, 1147, 1248, 1279, 1330, 1367, 1464, 1543, 1612,

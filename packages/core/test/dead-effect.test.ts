@@ -1,21 +1,22 @@
 // AN EFFECT THE MACHINE PERFORMED MUST REACH THE SOURCE — `unreadResult` in
 // `structure/structure.ts`, and the transitive use test behind it.
 //
-// `sideEffects` spells a call nothing consumes, because a call is an execution. What decided
-// "nothing consumes it" was the analysis registry's USE SITES, which are syntactic: an op whose
-// result feeds one pure op that is itself never rendered HAS a use site, so the call read as
-// consumed — and then neither the consumer nor the call was emitted. The function simply stopped
+// `sideEffects` spells a call nothing consumes, because a call is an execution. "Nothing consumes
+// it" cannot be answered by the analysis registry's USE SITES, which are syntactic: an op whose
+// result feeds one pure op that is itself never rendered HAS a use site, so the call reads as
+// consumed — and then neither the consumer nor the call is emitted. The function simply stops
 // making the call. It compiles, it scores, and it computes something else.
 //
-// FOUND BY THE IR ORACLE, not by a reader. `irTraceOf` against the emitted tree over
-// `generateSsaFn`'s acyclic seeds disagreed on 433 of 4,000, and every disagreement was a call the
-// IR performed and the tree did not. Neither naming fuzz could see it: both their reference
-// spellings dropped the same call, which is the whole argument for an oracle that reads the IR
-// rather than a second spelling.
+// FOUND BY THE IR ORACLE, not by a reader. Without the transitive test, `irTraceOf` against the
+// emitted tree over `generateSsaFn`'s acyclic seeds disagrees on 433 of 4,000, and every
+// disagreement is a call the IR performed and the tree did not. Neither naming fuzz can see it:
+// both their reference spellings drop the same call, which is the whole argument for an oracle that
+// reads the IR rather than a second spelling.
 //
-// Three fixtures, one per rule the predicate is made of — the transitive walk, the materialized-def
-// exemption `unreadResult` needs in front of it, and `isSpelled`'s materialized BASE CASE, which is
-// a third rule and not a restatement of the second.
+// Three fixtures for the three rules the predicate is made of — the transitive walk, and the
+// materialized-def branch `sideEffects` must test BEFORE `unreadResult`, which two of them pin.
+// The third rule, `isSpelled`'s materialized base case, has no witness here and the fixture it
+// was written for says why.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -46,9 +47,9 @@ const DEAD_CONSUMER = `fn deadconsumer {
 // The same shape over a call the analysis MATERIALIZES — `%1`'s value has to survive `%2`, so it
 // is bound to a local at its own position. A materialized def already spells its effect as
 // `v = f0(…)`; routing it through the dead-op branch instead emits `expr(result)`, which for a
-// named value is the NAME, so `v0;` replaces the assignment and the call is gone again. The two
-// sets barely met while the use test was syntactic; under the transitive test they overlap
-// constantly, which is why the exemption is part of the predicate and not a detail.
+// named value is the NAME, so `v0;` replaces the assignment and the call is gone again. Under a
+// transitive use test the two sets overlap constantly, which is why the exemption is part of the
+// predicate and not a detail.
 const MATERIALIZED = `fn materialized {
 ^bb0(%0: s32):
   %1: s32 = call %0 {target="f0"}
@@ -61,20 +62,21 @@ const MATERIALIZED = `fn materialized {
 }
 `;
 
-// THE THIRD RULE, and the one the sweeps cannot see. `isSpelled` returns true for a materialized
-// def as a BASE CASE, before asking whether anything reads it — because such a def renders at its
-// own position whether or not its name is ever read. Drop that base case and the walk instead asks
-// the question, gets "nothing spelled reads `%2`", and reports the f1 call unspelled; `%1` then has
-// no spelled use either, so `unreadResult` fires on it and emits a BARE `f0(a0);` statement — on
-// top of the `f1(f0(a0))` the materialized def still renders. The call runs TWICE.
+// THE THIRD RULE, AND IT IS UNWITNESSED — named here rather than left to read like the two above.
+// `isSpelled` returns true for a materialized def as a BASE CASE, before asking whether anything
+// reads it, because such a def renders at its own position whether or not its name is ever read.
+// That is the right model of what `sideEffects` emits, but nothing in this repo can currently tell
+// the two apart: with `rendersAtOwnPosition(op)` deleted from the base case the emitted C is
+// byte-identical over the 16,000 functions the generator builds (depth 0-3, 4,000 seeds each) and
+// the whole of `packages/core/test` passes, 2,589 of 2,589 — this fixture included.
 //
-// Ablated, that costs exactly 2 emitted lines over the generator's 16,000 functions (depth 0-3,
-// 4,000 seeds each: `fz3585` at depth 2 and `fz377` at depth 3, byte-identical everywhere else) —
-// and the IR oracle scores both unchanged, because a function is judged at its own seed only and
-// neither extra call is on that seed's path. So the sweeps CANNOT pin this rule at any size, and
-// the whole core suite passes with the base case deleted. It takes a fixture, which is this one:
-// `%2`'s only consumer is a dead `add` in another block, which is what materializes it while
-// leaving its name unread.
+// The reason it is inert on a CALL is that `unreadResult` already answers yes for one — `effects`
+// puts it in `SPELLED_WHEN_DEAD_OPS` and its `reads` is not `true` — so the base case only changes
+// the answer for an op `unreadResult` REFUSES while `sideEffects` still renders it at its own
+// position: a non-volatile `load`/`aload`, whose `reads: true` keeps it out of the `exprstmt`
+// branch. The generator emits no `load`, so no seed here reaches it. What this fixture does pin is
+// the EMISSION — `%2`'s only consumer is a dead `add` in another block, which materializes it while
+// leaving its name unread, and the call must be spelled exactly once.
 const MATERIALIZED_UNREAD = `fn matunread {
 ^bb0(%0: s32):
   %1: s32 = call %0 {target="f0"}

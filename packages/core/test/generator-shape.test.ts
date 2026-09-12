@@ -2,14 +2,14 @@
 // itself.
 //
 // A fuzz that never reaches a shape proves nothing about the rules that read it, and it says so in
-// exactly the same green tick as a fuzz that reaches it 4,000 times. This project has paid for that
-// twice: a `carrier-write` sweep fired 0 times in 10,427 functions, and the enclosing loop's
-// multi-child latch was reached 2 times in 187,117 generator calls — which is why three rules of
-// `latchInnerSub` could each be deleted with the whole core suite green.
+// exactly the same green tick as a fuzz that reaches it 4,000 times. Two shapes in this repo are
+// out of reach that way: the `carrier-write` gate fires 0 times in 10,427 functions, and without
+// depth 3 an enclosing loop's multi-child latch is reached on 2 of 187,117 `latchInnerSub` calls,
+// which is why three rules of `latchInnerSub` can each be deleted with the whole core suite green.
 //
-// So the generator's own reach is a test. The numbers below are floors measured on this stream, not
-// targets: they exist so that a change to the generator that quietly stops producing a shape
-// reddens here rather than turning a sibling fuzz into a green no-op.
+// So the generator's own reach is a test. The numbers below are exact counts measured on this
+// stream, not targets: they exist so that a change to the generator that quietly stops producing a
+// shape reddens here rather than turning a sibling fuzz into a green no-op.
 //
 // REACH IS NOT COVERAGE, and this file reports the larger of the two numbers. `structured` counts
 // the seeds that produce a tree at all; how many any ASSERTION is then made about is the `judged`
@@ -51,7 +51,7 @@ const census = (depth: 0 | 1 | 2 | 3, want: number): { structured: number; loops
 };
 
 // PINNED, not floored, and that is the point of the file. The consumers one level downstream pin
-// `judged` to the unit; a producer asserted at `> 3000` against a measured 3,776 has 13% of slack in
+// `judged` to the unit; a producer asserted at `> 3000` against a measured 3,776 has 21% of slack in
 // which the generator can quietly stop building a shape while every sibling fuzz stays green with a
 // smaller population — the exact vacuity this file exists to refuse, held to a looser bar at the
 // place it is PRODUCED than at the place it is read. Re-derive by running this file: the assertion

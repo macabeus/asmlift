@@ -89,8 +89,7 @@ function spellings(
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES — `spellings` returns null silently on a decline or a
 // step cap, and every arm below then skips the seed. Pinned rather than floored (`> SEEDS / 10`)
 // because depth 3 judges 647: another 250 seeds over the cap would leave both arms green over
-// nothing. See `carrier-name-fuzz`'s copy for the four depth-2 seeds that left silently once
-// already.
+// nothing.
 //
 // DIFFERENT FROM `carrier-name-fuzz`'s BY SIX AT DEPTH 1 (2,508 here, 2,502 there), and the six are
 // THAT file's loss, not this file's. Its reference table `ADMIT_NOTHING` declines on 6 seeds the
@@ -98,8 +97,7 @@ function spellings(
 // it judges FEWER. This file's second `structure()` call costs nothing: measured per depth,
 // `coalesceMergeNames` declines on exactly the set the shipped spelling does — 1,349/1,349 at depth
 // 1, 224/224 at depth 2, 551/551 at depth 3 — and there is no seed this file judges that the sibling
-// does not. (An earlier version of this comment blamed the double structure, which predicts the
-// wrong sign and measures at zero.)
+// does not.
 const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2508, 2: 1556, 3: 647 };
 
 // All three arms sweep `SEEDS`, the nested one included even though its functions are the largest
@@ -140,9 +138,8 @@ describe.each([
       if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
     }
     expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
-    // THE SEEDS, not how many. A count — `<= 48` or `toBe(48)` alike — is green on a change that
-    // fixes one defect and adds another, which is the hole the count was adopted to close. A fix is
-    // meant to shorten this list, and a swap is meant to redden it.
+    // THE SEEDS, not how many: a count is green on a change that fixes one defect and adds
+    // another. A fix is meant to shorten this list, and a swap is meant to redden it.
     expect(bad).toEqual(IR_RESIDUAL_SEEDS[depth]);
   });
 });

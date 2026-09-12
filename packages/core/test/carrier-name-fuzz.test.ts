@@ -120,11 +120,10 @@ function spellings(
 
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
 // a seed declines or runs the tree interpreter past its step cap, and everything below then skips
-// it. Without this the only guard was `judged > SEEDS / 10`, and depth 3 sits at 647: a change that
-// pushed another 250 seeds past the cap would leave both arms green over nothing, which is exactly
-// the vacuity `generator-shape.test.ts` refuses one level up. It has happened at a smaller scale
-// already — the `unreadResult` fix this file's second arm was written for moved depth 2 from 1,560
-// to 1,556, four seeds that left with no record.
+// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 647: a change
+// that pushed another 250 seeds past the cap would leave both arms green over nothing, which is
+// exactly the vacuity `generator-shape.test.ts` refuses one level up. A change to what the emitter
+// spells moves these populations by a few seeds at a time, which a floor does not record.
 //
 // THESE NUMBERS ARE THIS FILE'S, not a shared quantity, and THIS FILE IS THE OUTLIER. It judges
 // 2,502 at depth 1 where `namecoalesce-fuzz` judges 2,508 — six FEWER, not six more — and the cause
@@ -134,9 +133,9 @@ function spellings(
 // declines are 1,337 for `ADMIT_NOTHING` against 1,349 for the shipped spelling, and there is no
 // seed this file judges that `namecoalesce-fuzz` does not (onlyC = 0 at all four depths).
 //
-// The sibling's extra `structure()` call costs it NOTHING, which the earlier version of this comment
-// had backwards in both mechanism and sign: `coalesceMergeNames` declines on exactly the set the
-// shipped spelling does — 1,349/1,349 at depth 1, 224/224 at depth 2, 551/551 at depth 3.
+// The sibling's extra `structure()` call costs it NOTHING: `coalesceMergeNames` declines on exactly
+// the set the shipped spelling does — 1,349/1,349 at depth 1, 224/224 at depth 2, 551/551 at
+// depth 3.
 //
 // RE-DERIVE, don't reason: classify every seed by which of `structure(fn, {}, {carrierNameGates:
 // ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
@@ -179,9 +178,8 @@ describe.each([
       if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
     }
     expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
-    // THE SEEDS, not how many. A count — `<= 48` or `toBe(48)` alike — is green on a change that
-    // fixes one defect and adds another, which is the hole the count was adopted to close. A fix is
-    // meant to shorten this list, and a swap is meant to redden it.
+    // THE SEEDS, not how many: a count is green on a change that fixes one defect and adds
+    // another. A fix is meant to shorten this list, and a swap is meant to redden it.
     expect(bad).toEqual(IR_RESIDUAL_SEEDS[depth]);
   });
 });

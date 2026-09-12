@@ -4166,54 +4166,44 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *     "instrument the refusal" rule; `structure()` has no diagnostic sink to write into. What
    *     exists instead is the ADMISSION side's zero point, `synthetic:dmareadback`, which fails
    *     loudly if the rule stops firing. */
+  /** Does `op` render AT ITS OWN POSITION, as `v = f(…)`?
+   *
+   *  ONE DEFINITION, TWO READERS, on purpose: `isSpelled`'s base case is a MODEL of what
+   *  `sideEffects` emits, and a predictor and an emitter that disagree spell a call zero times or
+   *  twice. There is no third copy in `unreadResult`, and none is needed — it falls out of position
+   *  instead, because `sideEffects` tests the assign branch BEFORE the `unreadResult` branch and
+   *  `isSpelled` returns at its base case without ever asking `unreadResult`. */
+  const rendersAtOwnPosition = (op: Op): boolean => materialize.has(op) && !absorbedLoads.has(op);
+  const spelledMemo = new Map<Op, boolean>();
   /** Will the tree SPELL `op` anywhere — as a statement of its own, or inlined into one?
    *
    *  `useSitesOf` is SYNTACTIC, and that is not the question `unreadResult` is asking. An op whose
    *  result feeds one pure op that is itself never rendered HAS a use site, so the syntactic test
    *  reads it as consumed; nothing then renders the consumer either, and an effectful op the
    *  machine executed disappears with no statement and no diagnostic — the one outcome the
-   *  `sideEffects` walk exists to prevent. The analysis registry already carries a HAND-WRITTEN
-   *  instance of this same correction one level up (a void function's `ret` operand is left out of
-   *  the registry so a call feeding only the suppressed return reads as dead); this is its
-   *  transitive form, which the registry cannot express because "is it rendered" is a question
-   *  about the TREE.
-   *
-   *  MEASURED, and by the IR oracle rather than by a reader: `irTraceOf` against the emitted tree
-   *  over `generateSsaFn`'s acyclic seeds disagreed on 433 of 4,000, every one of them a call the
-   *  IR performed and the tree did not — the smallest `fz15`'s `%15 = call %13 {f1}`, whose only
-   *  consumer is a dead `add`. Both naming fuzzes' REFERENCE spellings share the defect exactly,
-   *  which is why 65,000 spelling-against-spelling seeds never saw it.
+   *  `sideEffects` walk exists to prevent. The analysis registry carries a HAND-WRITTEN instance of
+   *  the same correction one level up (a void function's `ret` operand is left out of the registry,
+   *  so a call feeding only the suppressed return reads as dead); this is its transitive form, which
+   *  the registry cannot express because "is it rendered" is a question about the TREE. Measured by
+   *  the IR oracle rather than by a reader: without this walk `irTraceOf` disagrees with the emitted
+   *  tree on 433 of `generateSsaFn`'s 4,000 acyclic seeds, every one a call the IR performed and the
+   *  tree did not, and both naming fuzzes' REFERENCE spellings share the defect exactly.
    *
    *  A TERMINATOR, a `store`/`astore`/`ret` and a materialized def each render at their own
    *  position, so they are the base cases (the first three have no results and fall out of the
    *  same test). Everything else is spelled iff something spelled reads it — or iff it is effectful
    *  and nothing does, which is this walk. No cycle is reachable: op→op edges follow SSA def-use,
    *  and a cycle can only close through a block PARAM, which is not an op result. The memo is still
-   *  seeded `true` before recursing, so a malformed function degrades to the old over-admitting
-   *  answer rather than recursing forever.
+   *  seeded `true` before recursing, so a malformed function degrades to the over-admitting answer
+   *  rather than recursing forever.
    *
-   *  WHAT THIS DELIBERATELY DOES NOT MODEL, measured and rejected rather than left unconsidered: an
-   *  edge argument into a block param NOTHING READS is also spelled nowhere, so in principle the
-   *  walk should stop at a dead param instead of at the terminator. Built, it moves the residual by
-   *  ZERO — d0 48/4,000, d1 31/2,508, d2 6/1,556 with the clause and the identical counts without
-   *  it, because `argAssigns` writes a copy into every NAMED param whether or not the param is read,
-   *  and the naming walk names the params of these shapes. Two further clauses were needed just to
-   *  hold that draw (skip the copy test for a named param, or `fz735`'s call is spelled twice), so
-   *  the clause is three rules that buy nothing and it is not here. */
-  /** Does `op` render AT ITS OWN POSITION, as `v = f(…)`?
-   *
-   *  ONE DEFINITION, TWO READERS, on purpose. `isSpelled`'s base case below is a MODEL of what
-   *  `sideEffects` emits, and this round exists because a predictor and an emitter that disagree
-   *  spell a call zero times or twice. Written out separately they were a copy either side could
-   *  silently break; named once, changing the rule moves the walk and the emission together.
-   *
-   *  The THIRD copy this predicate used to have — `unreadResult`'s negated exemption — is gone. It
-   *  now falls out of position rather than being restated: `sideEffects` tests the assign branch
-   *  BEFORE the `unreadResult` branch, and `isSpelled` returns at the base case above without ever
-   *  asking `unreadResult`. Measured inert: byte-identical emission over the 16,000 functions
-   *  `generateSsaFn` builds at four depths and over the 30 agbcc functions in `test/corpus`. */
-  const rendersAtOwnPosition = (op: Op): boolean => materialize.has(op) && !absorbedLoads.has(op);
-  const spelledMemo = new Map<Op, boolean>();
+   *  WHAT THIS DELIBERATELY DOES NOT MODEL: an edge argument into a block param NOTHING READS is
+   *  also spelled nowhere, so in principle the walk should stop at a dead param rather than at the
+   *  terminator. That clause moves the residual by ZERO — d0 48/4,000, d1 31/2,508, d2 6/1,556 with
+   *  it and the identical counts without — because `argAssigns` writes a copy into every NAMED param
+   *  whether or not the param is read, and the naming walk names the params of these shapes. Holding
+   *  that draw takes two further clauses (skip the copy test for a named param, or `fz735`'s call is
+   *  spelled twice), so it is three rules that buy nothing and it is not here. */
   const isSpelled = (op: Op): boolean => {
     const memo = spelledMemo.get(op);
     if (memo !== undefined) {
@@ -4238,9 +4228,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // does; taking the `exprstmt` branch for one instead emits `expr(result)` — the NAME, so `v3;`
     // replaces `v3 = f0(…)` and the call is gone. Both callers rule that out BEFORE asking:
     // `isSpelled` returns at its `rendersAtOwnPosition` base case, and `sideEffects` tests the
-    // assign branch first. (The two sets barely met while the use test was syntactic — a
-    // materialized op has uses; under the transitive test they overlap constantly, which is why
-    // the ordering is load-bearing and `dead-effect.test.ts`'s `MATERIALIZED_UNREAD` pins it.)
+    // assign branch first. Under a transitive use test the two sets overlap constantly — a
+    // materialized def's name is often read by nothing spelled — so that ordering is load-bearing,
+    // and `dead-effect.test.ts`'s `MATERIALIZED` pins it.
     !hasSpelledUse(op.results[0]) &&
     (opSig(op.opcode)?.reads !== true || volatileQualifiable(op));
 
@@ -4305,8 +4295,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       } else if (rendersAtOwnPosition(op)) {
         // FIRST, and that order is the rule rather than a restatement of it: this branch is what
         // "renders at its own position" MEANS, so an op it claims can never reach the `exprstmt`
-        // branch below and be spelled as a bare `v3;` with the call dropped. `unreadResult` used to
-        // carry a negated copy of this test to get the same effect; the copy is gone.
+        // branch below and be spelled as a bare `v3;` with the call dropped.
         // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
         // here would recompile to a second load the asm does not have)
         const nm = varName.get(op.results[0])!;
