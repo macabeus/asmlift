@@ -79,6 +79,18 @@ function spellings(
 // a call rendered at two positions). The number is here so the next one cannot be added silently.
 const IR_RESIDUAL: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 48, 1: 31, 2: 6, 3: 5 };
 
+// HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES — `spellings` returns null silently on a decline or a
+// step cap, and every arm below then skips the seed. Pinned rather than floored (`> SEEDS / 10`)
+// because depth 3 judges 647: another 250 seeds over the cap would leave both arms green over
+// nothing. See `carrier-name-fuzz`'s copy for the four depth-2 seeds that left silently once
+// already.
+//
+// DIFFERENT FROM `carrier-name-fuzz`'s BY SIX AT DEPTH 1 (2,508 here, 2,502 there), because this
+// file's `spellings` structures the function TWICE and loses a seed either spelling declines on.
+// The residual constant above matching that file's at every depth is a coincidence of two
+// populations, not one measurement — neither belongs in `helpers.ts` as one shared number.
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2508, 2: 1556, 3: 647 };
+
 // All three arms sweep `SEEDS`, the nested one included even though its functions are the largest
 // the generator makes: it costs a couple of seconds, and a per-arm size would be a knob claiming an
 // asymmetry that is not there.
@@ -98,7 +110,7 @@ describe.each([
       judged++;
       if (tracesDiffer(r)) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
+    expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
     expect(bad).toEqual([]);
   });
 
@@ -116,8 +128,11 @@ describe.each([
       judged++;
       if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
-    expect(bad.length, `first disagreeing seed: ${bad[0] ?? '-'}`).toBeLessThanOrEqual(IR_RESIDUAL[depth]);
+    expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
+    // EXACT, not a ceiling: `<=` lets a change that fixes N defects and adds N stay green, and the
+    // ceilings are tight today (measured 48/31/6/5, declared 48/31/6/5). A fix is meant to move a
+    // number here.
+    expect(bad.length, `first disagreeing seed: ${bad[0] ?? '-'}`).toBe(IR_RESIDUAL[depth]);
   });
 });
 

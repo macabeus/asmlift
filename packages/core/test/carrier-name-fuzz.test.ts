@@ -119,6 +119,22 @@ function spellings(
 // guards against.
 const IR_RESIDUAL: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 48, 1: 31, 2: 6, 3: 5 };
 
+// HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
+// a seed declines or runs the tree interpreter past its step cap, and everything below then skips
+// it. Without this the only guard was `judged > SEEDS / 10`, and depth 3 sits at 647: a change that
+// pushed another 250 seeds past the cap would leave both arms green over nothing, which is exactly
+// the vacuity `generator-shape.test.ts` refuses one level up. It has happened at a smaller scale
+// already — the `unreadResult` fix this file's second arm was written for moved depth 2 from 1,560
+// to 1,556, four seeds that left with no record.
+//
+// THESE NUMBERS ARE THIS FILE'S, not a shared quantity. `namecoalesce-fuzz` sweeps the same
+// generator and judges 2,508 at depth 1 against this file's 2,502, because its `spellings`
+// structures TWICE and loses a seed either spelling declines on. The two files' residuals being
+// equal at every depth is a coincidence of two populations, not one measurement — do not fold
+// either constant into the other. Verified deterministic forward and in reversed seed order at
+// every depth, and `bad` is the identical seed list both ways.
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2502, 2: 1556, 3: 647 };
+
 describe.each([
   ['acyclic', 0],
   ['loop-bearing', 1],
@@ -135,7 +151,7 @@ describe.each([
       judged++;
       if (tracesDiffer(r)) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
+    expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
     expect(bad).toEqual([]);
   });
 
@@ -153,8 +169,11 @@ describe.each([
       judged++;
       if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
-    expect(bad.length, `first disagreeing seed: ${bad[0] ?? '-'}`).toBeLessThanOrEqual(IR_RESIDUAL[depth]);
+    expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
+    // EXACT, not a ceiling: `<=` lets a change that fixes N defects and adds N stay green, and the
+    // ceilings are tight today (measured 48/31/6/5, declared 48/31/6/5). A fix is meant to move a
+    // number here.
+    expect(bad.length, `first disagreeing seed: ${bad[0] ?? '-'}`).toBe(IR_RESIDUAL[depth]);
   });
 });
 
@@ -209,7 +228,10 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
       adopted++;
     }
   }
-  expect(judged).toBeGreaterThan(SEEDS / 10);
+  // Pinned for the same reason as the sweeps above. A smaller population than depth 2's 1,556:
+  // this arm needs BOTH the measured and the unmeasured spelling, and loses a seed either one
+  // declines on.
+  expect(judged, 'the measured arm judges the population it measured').toBe(1088);
   expect(adopted).toBeGreaterThan(0); // the rule fired: a seed whose spelling the record changed
   expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
