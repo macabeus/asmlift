@@ -665,9 +665,20 @@ function memAccess(
   // an address register to reach this access (raise/const.ts `advancedBy`, recorded before its own
   // fold destroyed it). It rides beside `operandOff` because both are facts about how the address
   // was computed rather than about which cell it names, and both are lost at L3 otherwise.
+  //
+  // THE TWO ARE EXCLUSIVE, which is the whole of `off === 0`. `advancedBy` is a fact about the BASE
+  // VALUE — the register the machine moved — while a non-zero `off` says THIS access was reached by
+  // a displacement off that register rather than by the advance. Carrying both stamps a
+  // `strh [r3, #2]` as another link in the chain, and `l3/advance.ts` then spells a second
+  // `p = p + 1;` where the target performed no second `add`: the distance still lands (the
+  // displacement was folded into the cell address, so `prev.addr + step` matches), so nothing
+  // downstream can refuse it, and the byte-exact spelling — one advance and then a subscript — is
+  // not in the fan at all. Pinned on the three-access shape in test/advance.test.ts, which is a
+  // COMPILED repro and not a row: `bench sweep --fan` prices this term at 0 records moved over
+  // 2,126, so no corpus row spells a displacement off an advanced register today.
   const addressEvidence = {
     ...(off !== 0 ? ({ operandOff: off } as const) : {}),
-    ...(advancedBy !== undefined ? ({ baseAdvanced: advancedBy } as const) : {}),
+    ...(advancedBy !== undefined && off === 0 ? ({ baseAdvanced: advancedBy } as const) : {}),
   };
   if (sym) {
     const gb = globalConstByte(baseExpr, off);
