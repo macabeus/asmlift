@@ -301,7 +301,11 @@ export function sweepRefusal(o: SweepOptions): string | undefined {
     return '--compare reads two files that already exist; --base/--base-dir produce them. Pick one.';
   }
   if (o.compare !== undefined && o.compare.length !== 2) {
-    return `--compare takes exactly two record files, got ${o.compare.length}`;
+    // `--compare a.json b.json` reads as one flag and one POSITIONAL, so `cli.ts` pairs
+    // `--compare` with `positionals[1]` and hands both here. The count can still be wrong — a
+    // missing second file — and then it has to be refused rather than compared against
+    // `undefined`, which is how a rig reports "0 moved" over an empty side.
+    return `--compare needs two record files: \`bench sweep --compare <base.json> <head.json>\` — got ${o.compare.length}`;
   }
   if (o.base !== undefined && o.baseDir !== undefined) {
     return '--base names a git ref to provision, --base-dir a tree that already exists. Pick one.';
@@ -389,6 +393,28 @@ export async function sweep(o: SweepOptions): Promise<number> {
     );
   }
 
+  // THE BASE TREE IS RESOLVED BEFORE THE HEAD SWEEP IS PAID FOR. Measured on the way in: with the
+  // resolution left where it reads naturally — after the head side, just before it is needed —
+  // `bench sweep --base no/such/ref` printed `1062 row(s) ... 59.6 s` and THEN "git cannot resolve
+  // that ref". A refusal a minute after the mistake is a refusal the reader has already stopped
+  // watching for, and `run/fan.ts` states the same rule about its own `optionRefusal`: take the
+  // refusal before anything is paid for.
+  let baseTree: string | undefined;
+  if (o.baseDir !== undefined) {
+    if (!existsSync(o.baseDir)) {
+      note(`asmlift: [sweep] --base-dir ${o.baseDir} does not exist`);
+      return 2;
+    }
+    baseTree = o.baseDir;
+  } else if (o.base !== undefined) {
+    const p = provisionBase(o.base);
+    if ('error' in p) {
+      note(`asmlift: [sweep] ${p.error}`);
+      return 2;
+    }
+    baseTree = p.dir;
+  }
+
   const { collect } = await import('./sweep-driver');
   const t0 = Date.now();
   const head = await collect(REPO_ROOT, sel);
@@ -426,26 +452,12 @@ export async function sweep(o: SweepOptions): Promise<number> {
     return disagreed === 0 ? 0 : 1;
   }
 
-  if (o.base === undefined && o.baseDir === undefined) {
+  if (baseTree === undefined) {
     console.log(`asmlift: [sweep] ${head.length} record(s); no base given, so nothing was compared`);
     return 0;
   }
 
-  let dir: string;
-  if (o.baseDir !== undefined) {
-    if (!existsSync(o.baseDir)) {
-      note(`asmlift: [sweep] --base-dir ${o.baseDir} does not exist`);
-      return 2;
-    }
-    dir = o.baseDir;
-  } else {
-    const p = provisionBase(o.base!);
-    if ('error' in p) {
-      note(`asmlift: [sweep] ${p.error}`);
-      return 2;
-    }
-    dir = p.dir;
-  }
+  const dir = baseTree;
   const t1 = Date.now();
   const base = collectBase(dir, sel);
   if ('error' in base) {

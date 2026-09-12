@@ -26,7 +26,7 @@
 //                                        # belongs to --asm alone: a row names its own in its id
 //   pnpm bench sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p]
 //                    [--arms harness,nomap] [--fan] [--force] [--repeat N]
-//                    [--json <f>] [--compare <a> <b>] [--asm-dir <d> --toolchain <id>]
+//                    [--json <f>] [--compare <base.json> <head.json>] [--asm-dir <d> --toolchain <id>]
 //                                        # THE CORPUS A/B: re-lift every row in this tree and in
 //                                        # another one, map-ful and map-less, and print the rows
 //                                        # whose emitted C (or enumerated fan, with --fan) differs.
@@ -151,7 +151,10 @@ const { values: opts, positionals } = parseArgs({
     fan: { type: 'boolean', default: false },
     repeat: { type: 'string' },
     json: { type: 'string' },
-    compare: { type: 'string', multiple: true },
+    // `--compare <base.json> <head.json>`: the second file is a POSITIONAL. `multiple: true` would
+    // need `--compare a --compare b`, which nobody types and which silently compared one file
+    // against `undefined` when they did not.
+    compare: { type: 'string' },
     'asm-dir': { type: 'string' },
     'asm-project': { type: 'string' },
   },
@@ -501,7 +504,8 @@ switch (command) {
   }
   case 'sweep': {
     // sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p] [--arms a,b]
-    //       [--fan] [--force] [--repeat N] [--json f] [--compare a b] [--asm-dir d --toolchain t]
+    //       [--fan] [--force] [--repeat N] [--json f] [--compare <base.json> <head.json>]
+    //       [--asm-dir d --toolchain t]
     //
     // The corpus A/B twenty agents hand-built. CORPUS-WIDE and affordable for the same reason
     // `bench gates` is and `bench fan` is not: nothing here is COMPILED. Lifting all 1,062
@@ -518,7 +522,7 @@ switch (command) {
         force: opts.force,
         ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),
         ...(opts.json !== undefined ? { json: opts.json } : {}),
-        ...(opts.compare !== undefined ? { compare: opts.compare } : {}),
+        ...(opts.compare !== undefined ? { compare: [opts.compare, ...positionals.slice(1)] } : {}),
         ...(opts.base !== undefined ? { base: opts.base } : {}),
         ...(opts['base-dir'] !== undefined ? { baseDir: opts['base-dir'] } : {}),
         ...(opts['asm-dir'] !== undefined ? { asmDir: opts['asm-dir'] } : {}),

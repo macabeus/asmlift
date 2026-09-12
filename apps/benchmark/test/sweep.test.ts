@@ -15,7 +15,7 @@
 //
 // The CI mirror gate (`vitest run apps/benchmark/test`) runs where no compiler is available, so
 // nothing here builds a target.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { SWEEP_FAN_LIMIT, type SweepRecord, compareSweeps, renderDiff, sweepRefusal } from '../src/run/sweep';
 
@@ -145,8 +145,13 @@ describe('the sweep refusals', () => {
   });
 
   it('refuses --compare that is not exactly two files', () => {
-    expect(sweepRefusal({ ...ok, compare: ['a.json'] })).toContain('exactly two');
-    expect(sweepRefusal({ ...ok, compare: ['a.json', 'b.json', 'c.json'] })).toContain('exactly two');
+    // `--compare a.json b.json` is one flag plus one positional, so a missing second file arrives
+    // here as a one-element list. Refused by NAME: compared against `undefined` instead, the
+    // command prints "0 record(s) moved" over an empty side, which is the most convincing wrong
+    // answer a differential tool can give.
+    expect(sweepRefusal({ ...ok, compare: ['a.json'] })).toContain('<base.json> <head.json>');
+    expect(sweepRefusal({ ...ok, compare: ['a.json', 'b.json', 'c.json'] })).toContain('two record files');
+    expect(sweepRefusal({ ...ok, compare: ['a.json', 'b.json'] })).toBeUndefined();
   });
 
   it('refuses --compare beside a base — one of them would have to be ignored', () => {
@@ -190,5 +195,28 @@ describe('the raw-asm population', () => {
       join(root, 'nonmatchings', 'beta.inc'),
       join(root, 'zeta.s'),
     ]);
+  });
+});
+
+describe('a base that cannot be resolved is refused before the head sweep is paid for', () => {
+  it('exits 2 on an unresolvable --base without lifting anything', async () => {
+    // MEASURED DEFECT, not a hypothetical: with the base resolved where it reads naturally — just
+    // before it is needed, after the head side — `bench sweep --base no/such/ref` printed
+    // `1062 row(s) ... 59.6 s` and only THEN "git cannot resolve that ref". `run/fan.ts` states the
+    // rule this restores ("a nonsense flag pair is worth refusing before a ~46 s enumeration is
+    // paid for it"). The driver is stubbed so that a regression fails LOUDLY here rather than by
+    // taking a minute.
+    const { sweep } = await import('../src/run/sweep');
+    const driver = await import('../src/run/sweep-driver');
+    const spy = vi.spyOn(driver, 'collect').mockResolvedValue([]);
+    try {
+      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'], base: 'no/such/ref-here' })).toBe(2);
+      expect(spy, 'the head sweep ran before the base ref was checked').not.toHaveBeenCalled();
+
+      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'], baseDir: '/definitely/not/a/tree' })).toBe(2);
+      expect(spy, 'the head sweep ran before --base-dir was checked').not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
