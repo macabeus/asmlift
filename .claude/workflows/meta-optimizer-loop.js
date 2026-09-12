@@ -13,10 +13,11 @@ const REPO = '/Users/macabeus/ApenasMeu/decompiler/asmlift'
 const WF = process.env.ASMLIFT_WF_DIR ?? '<this session\'s subagents/workflows dir>'
 const MEM = '~/.claude/projects/-Users-macabeus-ApenasMeu-decompiler-asmlift/memory'
 // THE LEDGER IS READ FROM `origin/main`, NOT FROM A PATH. `${REPO}` is the user's checkout and is
-// routinely tens of commits behind: on 2026-09-12 it was at 0b30aebe while main was at 8599234d, and
-// its copy of this ledger still carried the "~5 minutes" bench cost that entry 8 had already been
-// corrected to ~34 min on main. A file path there hands the reader the stale text; `git show` on a
-// just-fetched ref cannot. Same reason `SCOPE` sends every agent to its own worktree.
+// routinely tens of commits behind: on 2026-09-12 it was at 0b30aebe while main was at 8599234d. A
+// file path there hands the reader whatever that checkout was last left at — the ledger's bench-cost
+// entry is one of the figures that has since moved by an order of magnitude — while `git show` on a
+// just-fetched ref hands them what main says today. Same reason `SCOPE` sends every agent to its own
+// worktree.
 const LEDGER = `git -C ${REPO} fetch origin && git -C ${REPO} show origin/main:.claude/workflows/meta-optimizer-ledger.md`
 
 const CONTEXT = `

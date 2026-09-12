@@ -333,9 +333,8 @@ size, and therefore the `[ranked]` line, can differ from the harness's at the sa
 vehicle is faithful to the row as published, and drifts from the harness exactly as your change
 starts working. Confirm a moved row with `pnpm bench run --tier real --only <sym>`, whose cost is
 the ROW's own and spans three orders of magnitude across this tier — ask `pnpm bench baseline <sym>`
-for that row's `rank=` before you launch it (`docs/bench-cost.md` §1 and §3). This line used to
-price it at "30–90 s", which is under the artifact's own figure for the most expensive real row by
-more than an order of magnitude.
+for that row's `rank=` before you launch it (`docs/bench-cost.md` §1 and §3). A flat price for this
+command is wrong by more than an order of magnitude at both ends of the tier.
 
 And on an **unscored** row it is not "the rung this row stopped at" at all: only `match`/`nonmatch`
 rows have a source that pins a rung, so for anything `declined`/`noncompile`/`failed` the caller

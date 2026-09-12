@@ -35,10 +35,10 @@
 //      possible copy of a list. (This is the structural cost of defect 1's gate: its only
 //      enforceable remedy for shared text is "make the two files differ", and it cannot tell
 //      move-to-doc from reword. The rewording is where the divergence entered.)
-//   9. A DERIVABLE FIGURE LEFT AS PROSE. `docs/bench-cost.md` §3 is five fields of
-//      `results/results.json` hand-typed, and the fan `9192` appears in five files while being one
-//      integer in a committed JSON file. A `sed` that rewrote §3 to `99,999 s over 3` left the
-//      suite green.
+//   9. A DERIVABLE FIGURE LEFT AS PROSE. `docs/bench-cost.md` §3 states five fields of
+//      `results/results.json` in prose, and `CountCollectedGems`'s fan is hand-typed in several
+//      files while being one integer in that same committed JSON. §3 is checked against the
+//      artifact rather than read; nothing before checked it at all.
 //
 // WHAT IT STILL CANNOT DECIDE, so that nobody reads more into a green run than is there:
 //   - It cannot check that an instruction is TRUE. Only a command run can.
@@ -65,22 +65,20 @@ const ARTIFACT = join(ROOT, 'apps', 'benchmark', 'results', 'results.json');
 
 /** The two prompts that drive a measured round. `dogfood-klonoa.md` and `update-m2c.md` are not in
  *  the duplication pair: they describe different workflows and share no phase structure. They ARE
- *  in the link check below — sharing the LAWS is not sharing a phase structure, and until this was
- *  widened those two carried their own fourth copy of law §1 and linked neither doc. */
+ *  in the link check below — sharing the LAWS is not sharing a phase structure. */
 const PAIR = ['match-function.md', 'attribute-function.md'];
 
-/** The frontmatter plus the "Target function" preamble — identical by design in every command file,
- *  and the one place sharing text is the point rather than a drift hazard. Measured across all six
- *  command-file pairs: the longest shared run anywhere is the 7-line frontmatter of THIS pair, so 8
- *  clears it by exactly one line. It was 10, which left 3 lines of pure blind spot — a duplicated
- *  instruction placed there was invisible. */
+/** Lines 1-8 of the PAIR: the frontmatter, the `Target function: **$1**` line and the "if it is
+ *  empty, ask" instruction — the one place sharing text is the point rather than a drift hazard.
+ *  Shared by this pair only; of the six command-file pairs the other five share no run at all.
+ *  The identical run ends at line 8 (line 9 is blank in both), so 8 is its exact end: 6 already
+ *  clears the run's substantive lines, and 10 hides the first line of real prose in each file. */
 const PREAMBLE_LINES = 8;
 
 const commandFiles = () => readdirSync(COMMANDS_DIR).filter((f) => f.endsWith('.md'));
-/** The brief GENERATORS. `.js` was the only extension matched until a wave-2 mutation renamed the
- *  one file to `.mjs` and the `${REPO}` describe silently went from one test to zero — green, with
- *  the exact line that sent 16 of 21 spec reads to the frozen checkout put back. Every loop over a
- *  directory in this file now has a canary asserting it found something. */
+/** The brief GENERATORS. Every JS extension, not just `.js`: a rename to `.mjs` would otherwise
+ *  empty the `${REPO}` describe below, and a per-directory loop that finds no files is a green,
+ *  EMPTY describe rather than a failure. Every directory loop in this file has a canary. */
 const briefGenerators = () => readdirSync(WORKFLOWS_DIR).filter((f) => /\.(m|c)?js$/.test(f));
 const docFiles = () =>
   readdirSync(DOCS_DIR)
@@ -152,8 +150,8 @@ describe('the two round prompts do not duplicate an instruction', () => {
 
 describe('every link in a command file resolves', () => {
   // Both spellings: `](../../docs/x.md)` relative to the file, and `](docs/x.md)` relative to the
-  // repo root. The first version of this only saw links beginning with `.`, so a repo-root link
-  // that 404s was invisible — latent then, and the kind of thing an author writes by habit.
+  // repo root. Matching only the leading-`.` form leaves a repo-root link that 404s invisible, and
+  // that is the spelling an author reaches for by habit.
   const LINK = /\]\(([^)#\s]+)(?:#[^)\s]*)?\)/g;
   const EXTERNAL = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i;
   for (const f of commandFiles()) {
@@ -203,11 +201,11 @@ describe('docs/bench-cost.md', () => {
   const DATE = /\b20\d\d-\d\d-\d\d\b/;
   const datesIn = (s: string) => [...s.matchAll(/\b20\d\d-\d\d-\d\d\b/g)].map((m) => Date.parse(m[0]));
 
-  /** `NOT re-measured` skipped BOTH the dating test and the freshness test, anywhere in a row, with
-   *  no bound and no other condition — so `s/the 2026-09-12 ship run/NOT re-measured; the ship run/`
-   *  exempted the full-bench wall clock forever, in one edit, and the suite stayed green. The escape
-   *  now belongs to the rows this repo is FORBIDDEN to measure: HARD RULE 1's LoadBGTilemapData
-   *  ranked run, whose fan `fan.ts` prices at over five hours. Anything else must carry a date. */
+  /** The `NOT re-measured` escape belongs to the rows this repo is FORBIDDEN to measure: HARD
+   *  RULE 1's LoadBGTilemapData ranked run, whose fan `fan.ts` prices at over five hours. The row
+   *  it is claimed on must NAME that run in its command cell, because a phrase honoured on any row
+   *  exempts any figure from both the dating and the freshness test in a one-word edit. Anything
+   *  else must carry a date, and a claim of the escape elsewhere is reported rather than ignored. */
   const UNMEASURABLE = /LoadBGTilemapData/;
   const honestlyHistorical = (row: string) => row.includes('NOT re-measured') && UNMEASURABLE.test(cellOf(row, 1));
   const escapeAbused = (row: string) => row.includes('NOT re-measured') && !UNMEASURABLE.test(cellOf(row, 1));
@@ -277,14 +275,13 @@ describe('docs/bench-cost.md', () => {
     ).toEqual([]);
   });
 
-  /** §3 IS DERIVABLE, AND WAS HAND-TYPED. Every figure in "Answer the cost question without running
-   *  a bench" is a field of the committed artifact — `rankSeconds` and `candidateCount`, summed by
-   *  tier — and `tableRows()` scopes to `## 1.`, so nothing looked at them. `sed
-   *  's/2,668 s over 155/99,999 s over 3/'` left the suite green, and the fan `9192` is hand-typed
-   *  in five places while being one integer in a JSON file. The repo's own rule is that a pass may
-   *  be half-converted to a table provided the residue is NAMED: the residue here is the three
-   *  wall clocks in §1's first rows, which come from run logs and not from the artifact (`meta`
-   *  carries `generatedAt`, `counts`, `toolchains` and the two commits, and no duration). */
+  /** §3 IS DERIVABLE, so it is derived rather than read. Every figure in "Answer the cost question
+   *  without running a bench" is a field of the committed artifact — `rankSeconds` and
+   *  `candidateCount`, summed by tier — and `tableRows()` scopes to `## 1.`, so the two tests above
+   *  see none of them. The repo's own rule is that a pass may be half-converted to a table provided
+   *  the residue is NAMED: the residue here is the three wall clocks in §1's first rows, which come
+   *  from run logs and not from the artifact (`meta` carries `generatedAt`, `counts`, `toolchains`
+   *  and the two commits, and no duration). */
   it('§3 quotes the artifact it says it is summed out of', () => {
     if (!existsSync(BENCH_COST_DOC)) {
       return;
@@ -346,38 +343,31 @@ function claudeFiles(): string[] {
 
 /** A sentence that puts a wall-clock number on a harness or test command.
  *
- *  The first version named only `bench run` / `bench:merge` / "full bench", and so caught exactly
- *  one of the five cost classes this round actually repaired: `~120 candidates/s`, a ranked run's
- *  `1500-8000 s`, `bench fan`'s `~8 minutes`, `bench gates`' `~10 s` and `npx vitest run`'s `~120 s`
- *  were all invisible to it. Mutation-proven: a line pricing `bench fan` and `bench gates` passed.
- *  The vocabulary is now the commands the prompts actually price.
+ *  `COMMAND` is every command the prompts actually price, not only the full-bench ones: an
+ *  enumeration rate, a ranked run, `bench fan`, `bench gates` and `npx vitest run` each carry a
+ *  figure a prompt is tempted to copy, and a vocabulary narrower than that sees none of them.
  *
- *  It also pins the RULE and not the spelling: a figure written in words ("is over five hours to
- *  score") is the same claim as one written in digits, and the digits-only version could not see
- *  it — which mattered, because the one figure this round could not re-measure is spelled that way. */
+ *  `AMOUNT` pins the RULE and not the spelling: a figure written in words ("is over five hours to
+ *  score") is the same claim as one written in digits, and the one figure HARD RULE 1 forbids
+ *  re-measuring is spelled that way. */
 const AMOUNT = String.raw`(?:\b(?:~|about |over |under )?\d[\d,.]*|\b(?:half an|one|two|three|four|five|six|seven|eight|nine|ten)\s)\s*`;
 const UNIT = String.raw`(?:s|sec|secs|second|seconds|min|mins|minute|minutes|h|hr|hrs|hour|hours|ms)\b`;
 const COMMAND = String.raw`(?:pnpm |npx )?(?:bench[: ](?:run|merge|fan|gates|baseline|repro|target|diff|regression|setup|fidelity|smoke|verify|publish|vendor|stale-check|in-flight)|full bench|ranked run|ranked enumeration|vitest|test:matching|test:offline)`;
 
-/** BOTH ORDERS. The first version required the COMMAND token to come FIRST on the line, and English
- *  does not: "Budget ~34 min for a full `pnpm bench run`" passed while "A full `pnpm bench run`
- *  takes ~34 min" — the same claim, clauses swapped — failed. Every cost sentence a writer reaches
- *  for naturally was the half that escaped. */
+/** BOTH ORDERS, because English writes it either way: "Budget ~34 min for a full `pnpm bench run`"
+ *  and "A full `pnpm bench run` takes ~34 min" are one claim with the clauses swapped, so requiring
+ *  the COMMAND token first sees only half the cost sentences a writer reaches for. */
 const BENCH_COST = new RegExp(
   `(?:${COMMAND}[^\\n]{0,140}?${AMOUNT}${UNIT})|(?:${AMOUNT}${UNIT}[^\\n]{0,140}?${COMMAND})`,
   'i',
 );
 
 describe('a harness cost is written in one place', () => {
-  /** THE PROMPTS MAY NOT CARRY A FIGURE AT ALL. The rule used to be "date it or defer", and the
-   *  first remediation of this very round then wrote five freshly-dated figures into the two
-   *  prompts — `115 candidates/s`, `9,192 labels`, `80.2 s`, `~2.6 s`, `29 s` — including the fan
-   *  count §2 proves moves fastest of all (5,952 -> 9,192 inside one window). A date does not stop
-   *  a copy drifting; only not having a copy does. So inside `.claude/commands/**` the deferral is
-   *  the whole legal spelling: name the command, link `docs/bench-cost.md`, quote nothing.
-   *
-   *  This is exactly the rule the prompts already STATE ("Do not retype one of those numbers
-   *  here") and did not enforce. */
+  /** THE PROMPTS MAY NOT CARRY A FIGURE AT ALL — not even a freshly dated one. A date does not
+   *  stop a copy drifting; only not having a copy does, and §2 shows the fan counts moving fastest
+   *  of all. So inside `.claude/commands/**` the deferral is the whole legal spelling: name the
+   *  command, link `docs/bench-cost.md`, quote nothing. This is the rule the prompts themselves
+   *  STATE ("Do not retype one of those numbers here"), enforced. */
   it('no command file quotes a harness wall clock — the prompts defer, they do not copy', () => {
     const copies: string[] = [];
     for (const f of commandFiles()) {
@@ -396,17 +386,15 @@ describe('a harness cost is written in one place', () => {
   });
 
   /** …AND NOT A CELL OF §1 ANYWHERE IN THE FILE, on any line, however it is worded. The rule above
-   *  needs the command and the figure on one line; the five figures the first remediation of this
-   *  round wrote into the two prompts — `115 candidates/s`, `9,192 labels`, `80.2 s`, `~2.6 s`,
-   *  `29 s` — mostly sit a line away from the command they price, and a date does not stop a copy
-   *  drifting. So the banned set is DERIVED from §1's own cost cells: whatever number the table
-   *  currently states, no prompt may state it. One list, no second copy to drift.
+   *  needs the command and the figure on one line, and a prompt that copies a cell typically sits
+   *  it a line away from the command it prices. So the banned set is DERIVED from §1's own cost
+   *  cells: whatever number the table currently states, no prompt may state it. One list, no
+   *  second copy to drift.
    *
-   *  Widening the sentence rule to paragraph scope was tried instead and MEASURED to over-fire: 16
-   *  hits across the four prompts, 5 of them not cost claims at all (an incident narrative's "not
-   *  finished after 2h", the provenance notice's "within ~2 s", two toolchain remarks), and with
-   *  the paragraph joined into one window, 4 of 6 hits spanned unrelated list items tens of lines
-   *  apart. There is no threshold there; there is an exact list here. */
+   *  Widening the sentence rule to paragraph scope instead over-fires rather than narrowing:
+   *  joining a multi-line bullet into one window pairs a command with an unrelated number tens of
+   *  lines away. Over the four prompts it matches four paragraphs and not one of them states a §1
+   *  cost cell. There is no threshold there; there is an exact list here. */
   const figure = /(\d[\d,.]*)\s*(ms|s|sec|secs|min|mins|minute|minutes|h|hr|hrs|hour|hours)\b/gi;
   const normalize = (text: string) =>
     [...text.matchAll(figure)].map((m) => `${m[1].replace(/[.,]$/, '')} ${m[2].toLowerCase()}`);
@@ -433,12 +421,11 @@ describe('a harness cost is written in one place', () => {
     ).toEqual([]);
   });
 
-  /** `docs/` was outside every cost assertion, and the whole point of the round was to move the
-   *  cost prose OUT of the prompts and INTO `docs/` — so the guard was pointed away from where the
-   *  round had just put its material. Measured at the time: 17 cost lines across `docs/*.md`, six
-   *  undated, two of them live contradictions of the table this round declared canonical
-   *  (`ranked-repro.md` priced a `--only` confirm run at 30-90 s for a row the artifact records at
-   *  1,840 s). `docs/bench-cost.md` §1 is excluded here because the two tests above own it. */
+  /** `docs/` is where the cost prose lives once the prompts defer to it, so it is where an undated
+   *  figure does the most damage — a guard aimed only at `.claude/commands/**` is aimed away from
+   *  the material. The shape to catch: a doc pricing a scoped confirm run at a flat handful of
+   *  seconds while the artifact records that row in the thousands. `docs/bench-cost.md` §1 is
+   *  excluded because the two tests above own it. */
   function bench_cost_section_1(file: string): [number, number] {
     if (file !== BENCH_COST_DOC) {
       return [-1, -1];
@@ -542,8 +529,8 @@ describe('the workflow brief generator sends nobody to the frozen checkout', () 
     expect(
       briefGenerators(),
       'no brief generator found in .claude/workflows — a per-file loop with no files is a green, EMPTY ' +
-        'describe. `git mv meta-optimizer-loop.js …mjs` took this suite from 14 tests to 13, all passing, ' +
-        'with the frozen-checkout path restored to the file.',
+        'describe, so a rename out of the extension set below silently retires the check that keeps ' +
+        'frozen-checkout read paths out of the briefs.',
     ).not.toEqual([]);
   });
 
@@ -627,9 +614,9 @@ describe('the fourth Phase-0 case is a command a round can run', () => {
    *  $(scoring paths)`, which is a PROSE PLACEHOLDER — no command, env var or flag prints that
    *  list — and then banned hand-copying it six lines later. The only runnable form it left was
    *  `git status --porcelain`, which has no path filter: six untracked `.bin` files in the user's
-   *  own checkout put a round in case 4 and order a re-measure priced, on this corpus, between
-   *  142 s and 1,840 s. The doc now gives a one-liner that DERIVES the list from the export, and
-   *  this is the gate that the derivation still finds it. */
+   *  own checkout put a round in case 4 and order a scoped re-measure, which `docs/bench-cost.md`
+   *  §1 prices at the ROW's own cost — three orders of magnitude across this tier. The doc gives a
+   *  one-liner that DERIVES the list from the export, and this is the gate that it still finds it. */
   it('the SCORING_PATHS literal is extractable in the shape docs/baseline-freshness.md extracts it', async () => {
     const src = readFileSync(join(ROOT, 'apps', 'benchmark', 'src', 'provenance.ts'), 'utf8').split('\n');
     const start = src.findIndex((l) => /^export const SCORING_PATHS = \[/.test(l));

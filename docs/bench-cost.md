@@ -128,8 +128,9 @@ until grep -q 'EXIT=' "$LOG"; do
   sleep 60; waited=$((waited + 60))
   now=$(wc -c < "$LOG")
   if [ "$now" -eq "$prev" ]; then still=$((still + 60)); else still=0; prev=$now; fi
-  # 2400 s of no growth is ~30% over the longest single row this corpus has (1,880 s) —
-  # below that, a static log is normal, not a hang. Raise it, never lower it, as that row grows.
+  # 2400 s of no growth is ~30% over this corpus's long-pole ROW — the 1,840 s of §3, not the
+  # 1,880 s the whole real tier walls at. Below that, a static log is normal, not a hang.
+  # Raise it, never lower it, as that row grows.
   [ "$still" -ge 2400 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
   [ "$waited" -ge 9000 ] && { echo "OVER BUDGET ${waited}s"; break; }
 done
