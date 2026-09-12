@@ -18,52 +18,167 @@
 // are in test/advance.test.ts's header. So this pass emits a spelling and `compareScored`
 // referees; nothing here claims the source wrote it.
 //
-// SOUNDNESS IS ADDRESS EQUALITY, and exactly TWO of the rules below carry it. `p` is freshly
-// minted and assigned by nothing else, so at each member's access it holds `A0 + Σ steps so far` —
-// that member's own absolute address — PROVIDED every advance sits between the accesses it
-// separates on every path. A top-level statement list has no back edge and runs its statements in
-// order at most once each, so placing each advance at the top level immediately above its member's
-// statement, with the members at STRICTLY INCREASING top-level indices, is what makes that true.
-// Everything else the function spells is untouched, including a second access at one of these
-// addresses.
+// SOUNDNESS IS ADDRESS EQUALITY. `p` is freshly minted and assigned by nothing else, so at each
+// member's access it holds `A0 + Σ steps so far` — that member's own absolute address — PROVIDED
+// every advance sits between the accesses it separates on every path, and PROVIDED every node this
+// pass re-spells as `*p` is one of those accesses. A top-level statement list has no back edge and
+// runs its statements in order at most once each, so placing each advance at the top level
+// immediately above its member's statement, with the members at STRICTLY INCREASING top-level
+// indices, carries the first half.
 //
-// SCOPE (decline over approximate). A chain forms only when ALL hold —
-//   • every member is a CONST-ADDRESSED access (`l3/address.ts` cellAddress: a scalar-cast const
-//     base, a constant subscript, no leading dimension), and the members sit at strictly
-//     increasing TOP-LEVEL statement indices — the soundness rule above;
-//   • each member after the first carries `baseAdvanced` equal to its byte distance from the
-//     member before it. Equality is the whole gate: the evidence names a step, and a step that
-//     does not land on the next access is evidence about some other pair of addresses;
-//   • every member shares the first's `width` and `signed`, and every step is a multiple of that
-//     width — the minted local is a `T *` and the advance is `p = p + step / width`, so a step off
-//     the element grid has no spelling here.
-// Three more NARROW IT RATHER THAN MAKE IT SOUND. Each is UNWITNESSED — no corpus row has been
-// shown to inhabit the shape it excludes, and none was instrumented to say how often it fires —
-// so each is named as debt here rather than defended as a rule:
-//   • an access inside an arm or a loop body is not admitted as a member (its address joins the
-//     second-site set instead). Placed at the top level the advance would still be address-
-//     correct — a conditionally reached `*p` beside an unconditional `p = p + 1` is a spelling no
-//     corpus row asks for, and reading one into the asm is a guess;
-//   • an address reached at a SECOND admissible site declines the chain. Rewriting one site and
-//     leaving its twin absolute is correct and is two spellings of one cell, which nothing here
-//     can settle;
-//   • a NEGATIVE step declines rather than spelling `p = p + -1`. Unpinned direction, no
-//     inhabitant.
-// A function with no chain declines (null) and enumerates nothing.
+// THE SECOND HALF IS `rewrite`, AND IT MATCHES BY ADDRESS, NOT BY IDENTITY (`:rewrite` below): it
+// replaces EVERY `index` node whose `cellAddress` is a chain member's, wherever it sits. So a
+// second access at a member's address — a twin at the top level, or one inside an arm or a loop
+// body — is re-spelled `*p` at a point where `p` does not hold that address. The two rules that
+// refuse those shapes (`member-second-site`, `member-nested-site`, and their head twins) are
+// therefore SOUND, not narrowing. Removing `member-nested-site` and fuzzing 49,528 chains against
+// a pointer-aware memory-trace oracle moves 3,664 addresses (the wave-1 breaker's `fuzz2.mts`);
+// the shape is pinned here by `an access at a chain address inside a loop is not re-spelled`.
+//
+// SCOPE (decline over approximate) is `ADVANCE_HEAD_GATES` and `ADVANCE_MEMBER_GATES` below — as
+// tables rather than an `||` chain, so `sound` costs a `guardedBy`, `bench gates` can census the
+// refusals, and every rule is ablated against the real pass by test/advance.test.ts's battery. Two
+// of the twelve are NARROWING rather than soundness and say so (`head-already-advanced`,
+// `member-negative-step`); one more, `member-no-evidence`, is what makes this a reading of the asm
+// rather than a guess, but a chain built without it would still be address-correct.
+//
+// HOW OFTEN EACH FIRES, over the whole corpus — `bench sweep --fan`, both arms, 2,126 records,
+// instrumented on `firstRejection` (2026-09-12). The numbers count CALLS, and enumeration calls
+// this pass about eleven times per record, once per outer-axis tree:
+//     23,322 calls · 112 found a chain · 23,210 declined
+//     head-second-site 872 · member-no-evidence 664 · head-nested-site 256 · head-already-advanced 144
+//     every other member rule: 0
+// So the eight remaining member rules are pinned by the battery and by NOTHING IN THE CORPUS —
+// where the corpus refuses a chain, it refuses it at the head. Chain lengths found: 96 of two
+// members and 16 of four, no others.
+//
+// WHAT THIS PASS DOES NOT DO, both measured rather than assumed:
+//   • A function with TWO disjoint chains gets one candidate, spelling the FIRST BY POSITION — not
+//     the longest, and the second chain is unreachable by any label. ZERO of the 112 chain-bearing
+//     calls above held a second chain sharing no address with the first (the instrument kept
+//     scanning), so the second local this would need has no inhabitant to price it.
+//   • The init is `prepend`ed and there is no sunk twin; see the note at `placeBaseLocals` below.
 import { type IrType, scalarTypeForAccess } from '../ir/types';
 import { cellAddress } from './address';
 import { type Expr, type SFn, type Stmt, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
+import { type Gate, firstRejection } from './gates';
 import type { BaseInit } from './hoist';
 import { nameAllocator, placeBaseLocals } from './hoist';
 
 /** One const-addressed access, with the top-level statement it was reached at. */
-interface Site {
+export interface Site {
   stmt: number;
   addr: number;
   width: number;
   signed: boolean;
   advanced?: number;
 }
+
+/** One candidate member, judged against the chain so far. `twin`/`nested` are the two ways some
+ *  OTHER node in the tree names this site's address — the facts `rewrite`'s by-address match makes
+ *  load-bearing. */
+export interface MemberCtx {
+  prev: Site;
+  site: Site;
+  twin: boolean;
+  nested: boolean;
+}
+export type HeadCtx = Omit<MemberCtx, 'prev'>;
+
+/** The head's own admission. The two address rules are the same PREDICATE as the member table's
+ *  and deliberately not the same rule objects (see gates.ts on why a second consumer owns its
+ *  own): a head that is re-spelled at a second site is wrong for the same reason a member is. */
+export const ADVANCE_HEAD_GATES: readonly Gate<HeadCtx>[] = [
+  {
+    id: 'head-second-site',
+    why: 'rewrite matches by address, so a twin elsewhere would read `p` before it is set',
+    sound: true,
+    guardedBy: 'advance.test.ts: a chain address reached at a second site declines',
+    rejects: (c) => c.twin,
+  },
+  {
+    id: 'head-nested-site',
+    why: 'the same address inside an arm or a loop body is re-spelled at a point `p` may not hold',
+    sound: true,
+    guardedBy: 'advance.test.ts: an access at a chain address inside a loop is not re-spelled',
+    rejects: (c) => c.nested,
+  },
+  {
+    id: 'head-already-advanced',
+    why: 'NARROWING: a stamped site is somebody else’s successor, so starting there spells an absolute init for an address the machine reached by advancing',
+    sound: false,
+    guardedBy: 'advance.test.ts: a chain may not START at an advanced site',
+    rejects: (c) => c.site.advanced !== undefined,
+  },
+];
+
+/** Each successor, against the member before it. FIRST rejection wins, so a refusal is
+ *  attributable to one rule. */
+export const ADVANCE_MEMBER_GATES: readonly Gate<MemberCtx>[] = [
+  {
+    id: 'member-no-evidence',
+    why: 'without the stamp the pair is a compiler deriving two addresses from one pool word',
+    sound: false,
+    guardedBy: 'advance.test.ts: the same pair with no evidence declines',
+    rejects: (c) => c.site.advanced === undefined,
+  },
+  {
+    id: 'member-second-site',
+    why: 'rewrite matches by address, so a twin elsewhere would read `p` at the wrong value',
+    sound: true,
+    guardedBy: 'advance.test.ts: a chain address reached at a second site declines',
+    rejects: (c) => c.twin,
+  },
+  {
+    id: 'member-nested-site',
+    why: 'the same address inside an arm or a loop body is re-spelled at a point `p` may not hold',
+    sound: true,
+    guardedBy: 'advance.test.ts: an access at a chain address inside a loop is not re-spelled',
+    rejects: (c) => c.nested,
+  },
+  {
+    id: 'member-statement-order',
+    why: 'the advance must sit between the two accesses it separates, so the indices must increase',
+    sound: true,
+    guardedBy: 'advance.test.ts: two accesses in ONE statement are not a chain',
+    rejects: (c) => c.site.stmt <= c.prev.stmt,
+  },
+  {
+    id: 'member-width',
+    why: 'the minted local has ONE pointee width, and `*p` at another width names other bytes',
+    sound: true,
+    guardedBy: 'advance.test.ts: members of different widths decline',
+    rejects: (c) => c.site.width !== c.prev.width,
+  },
+  {
+    id: 'member-signedness',
+    why: 'the minted local has ONE pointee type, and `*p` through it sign-extends the other member wrongly',
+    sound: true,
+    guardedBy: 'advance.test.ts: members of different signedness decline',
+    rejects: (c) => c.site.signed !== c.prev.signed,
+  },
+  {
+    id: 'member-element-grid',
+    why: 'the emitted advance is `p = p + step / width`, which has no spelling off the element grid',
+    sound: true,
+    guardedBy: 'advance.test.ts: a step off the element grid declines',
+    rejects: (c) => c.site.advanced! % c.prev.width !== 0,
+  },
+  {
+    id: 'member-step-lands',
+    why: 'a step that does not land on this access is evidence about some other pair of addresses',
+    sound: true,
+    guardedBy: 'advance.test.ts: a step that does not land on the next access declines',
+    rejects: (c) => c.prev.addr + c.site.advanced! !== c.site.addr,
+  },
+  {
+    id: 'member-negative-step',
+    why: 'NARROWING: `p = p + -1` is valid C and address-correct; the direction is unpinned and has no inhabitant',
+    sound: false,
+    guardedBy: 'advance.test.ts: a NEGATIVE step declines',
+    rejects: (c) => c.site.advanced! <= 0,
+  },
+];
 
 /** Every const-addressed `index` node in the body, split into the ones reached EXACTLY ONCE per
  *  execution of a top-level statement — the only places an advance statement can be put — and the
@@ -105,38 +220,42 @@ function collectSites(body: readonly Stmt[]): { sites: Site[]; nestedAddrs: Set<
   return { sites, nestedAddrs };
 }
 
-/** The one chain this pass spells, or null. The FIRST advanced site anchors it: a function with two
- *  independent chains gets one candidate spelling the first, which is the conservative half of
- *  "decline over approximate" — a second chain would need its own local and its own placement, and
- *  no corpus row has one. */
-function chainOf(sites: readonly Site[], nestedAddrs: ReadonlySet<number>): Site[] | null {
+/** The one chain this pass spells, or null.
+ *
+ *  A NON-MEMBER SITE BETWEEN TWO MEMBERS DOES NOT END THE CHAIN. `p` is freshly minted, so an
+ *  access that does not touch it cannot move it — and the clientele is MMIO setup code, where one
+ *  `REG_BLDCNT = y;` between two window writes is the ordinary case. The rule used to be
+ *  POSITIONAL (the head was the site immediately before the first stamped one, and the walk
+ *  stopped at the first site that failed a gate), which declined that shape for no soundness
+ *  reason; a `var`-based store between the same two members was admitted, which no reader could
+ *  predict. Ambiguity is resolved greedily in statement order: where two later sites would both
+ *  extend the chain, the earlier one does.
+ *
+ *  PRICED AT ZERO. `bench sweep --fan --base 9e393db5`, both arms: 0 records moved, 2,126
+ *  identical. The shape this admits — MMIO writes with an unrelated const-addressed access between
+ *  two members — has no inhabitant in the corpus either, so this is a rule the file can now state
+ *  truthfully rather than reach the corpus can show. */
+function chainOf(sites: readonly Site[], nestedAddrs: ReadonlySet<number>, gates: AdvanceGates): Site[] | null {
+  const head = gates.head ?? ADVANCE_HEAD_GATES;
+  const member = gates.member ?? ADVANCE_MEMBER_GATES;
   const occurrences = new Map<number, number>();
   for (const s of sites) {
     occurrences.set(s.addr, (occurrences.get(s.addr) ?? 0) + 1);
   }
-  const unique = (s: Site): boolean => occurrences.get(s.addr) === 1 && !nestedAddrs.has(s.addr);
-  for (let i = 1; i < sites.length; i++) {
-    const head = sites[i - 1];
-    if (sites[i].advanced === undefined || !unique(head) || head.advanced !== undefined) {
+  const ctx = (site: Site): HeadCtx => ({
+    site,
+    twin: (occurrences.get(site.addr) ?? 0) > 1,
+    nested: nestedAddrs.has(site.addr),
+  });
+  for (let i = 0; i < sites.length; i++) {
+    if (firstRejection(head, ctx(sites[i])) !== null) {
       continue;
     }
-    const chain = [head];
-    for (let j = i; j < sites.length; j++) {
-      const prev = chain[chain.length - 1];
-      const step = sites[j].advanced;
-      if (
-        step === undefined ||
-        !unique(sites[j]) ||
-        sites[j].stmt <= prev.stmt ||
-        sites[j].width !== prev.width ||
-        sites[j].signed !== prev.signed ||
-        step <= 0 ||
-        step % prev.width !== 0 ||
-        prev.addr + step !== sites[j].addr
-      ) {
-        break;
+    const chain = [sites[i]];
+    for (let j = i + 1; j < sites.length; j++) {
+      if (firstRejection(member, { prev: chain[chain.length - 1], ...ctx(sites[j]) }) === null) {
+        chain.push(sites[j]);
       }
-      chain.push(sites[j]);
     }
     if (chain.length >= 2) {
       return chain;
@@ -145,10 +264,19 @@ function chainOf(sites: readonly Site[], nestedAddrs: ReadonlySet<number>): Site
   return null;
 }
 
+/** The two tables, ablatable — `gates.ts`'s reason: a test drops one entry and re-runs the REAL
+ *  predicate on real input, with no test-only branch in the shipped path. Nothing in `src/` passes
+ *  this; a shipped ablation of a `sound: true` rule emits wrong addresses, which is what
+ *  `ablateHeuristic` refuses. */
+export interface AdvanceGates {
+  head?: readonly Gate<HeadCtx>[];
+  member?: readonly Gate<MemberCtx>[];
+}
+
 /** Re-spell one advanced chain as a pointer local moved in place, or decline (null). */
-export function advancedBases(sfn: SFn): SFn | null {
+export function advancedBases(sfn: SFn, gates: AdvanceGates = {}): SFn | null {
   const { sites, nestedAddrs } = collectSites(sfn.body);
-  const chain = chainOf(sites, nestedAddrs);
+  const chain = chainOf(sites, nestedAddrs, gates);
   if (chain === null) {
     return null;
   }
@@ -159,6 +287,10 @@ export function advancedBases(sfn: SFn): SFn | null {
   // The access itself: every chain member reads `*p`, because `p` has been advanced to exactly its
   // address. The evidence fields go with the old base — they described how the ADDRESS was
   // computed, and this spelling is the answer to that question rather than another instance of it.
+  //
+  // BY ADDRESS, NOT BY IDENTITY, and the header's soundness argument turns on it: a node this
+  // finds at a member's address that is NOT the member — a twin, or one inside an arm or a loop —
+  // is re-spelled too, which is why the gates that refuse those shapes are `sound: true`.
   const rewrite = (e: Expr): Expr => {
     const m = mapExprChildren(e, rewrite);
     const addr = m.k === 'index' ? cellAddress(m) : null;
@@ -167,9 +299,13 @@ export function advancedBases(sfn: SFn): SFn | null {
     }
     return m;
   };
+  // The emitted distance is the GATED quantity — the step `member-step-lands` tied to this pair of
+  // addresses and `member-element-grid` divided — rather than the address difference, which is the
+  // same number only because those two rules hold. Deriving it separately is how a later ablation
+  // of one of them emits a fractional advance nothing checked.
   const advanceAt = new Map<number, number>();
   for (let i = 1; i < chain.length; i++) {
-    advanceAt.set(chain[i].stmt, (chain[i].addr - chain[i - 1].addr) / chain[i].width);
+    advanceAt.set(chain[i].stmt, chain[i].advanced! / chain[i].width);
   }
   const body: Stmt[] = [];
   sfn.body.forEach((s, i) => {
@@ -194,6 +330,17 @@ export function advancedBases(sfn: SFn): SFn | null {
   // pool word was loaded. Putting it in first-use order instead moves it below whatever else the
   // function loads first, which on the row this pass was built for swaps the two pool words and
   // costs the match (measured: variant A vs variant C in test/advance.test.ts's header).
+  //
+  // AND NO `/advance/sinkinit` TWIN, unlike `/nearbase`, which ships one for exactly this choice —
+  // not because the choice is better determined here (the generator cannot see the target either
+  // way) but because the twin CANNOT EXIST. `sinkInitsToFirstUse` sinks an init only when
+  // `localMentions` counts ONE assignment to its local ("or the move would cross the other write",
+  // l3/hoist.ts), and an advance IS a second assignment to this one — so the sink declines on every
+  // tree this pass produces, by construction rather than by row. Measured both ways: registering
+  // `/advance/sinkinit` and re-ranking `kleod:StreamCmd_SetWindowRegs:agbcc` leaves the fan at 18
+  // candidates with `--enumerate` listing only `/advance` and `/advance/volatile`, and the sink
+  // returns null on the advanced tree in-process. The `prepend` choice above is therefore the only
+  // placement this lever HAS, which is a stronger reason to record the compile behind it.
   const { body: placed } = placeBaseLocals({ ...sfn, locals, body }, [init], 'prepend');
   return { ...sfn, locals, body: placed };
 }
