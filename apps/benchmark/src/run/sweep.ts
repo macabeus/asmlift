@@ -28,32 +28,39 @@
 // deliberately wider than a row — `--asm-dir` sweeps a tree of `.s`/`.inc` files under the same
 // record shape and the same diff.
 //
-// WHAT IT COSTS, measured on this machine 2026-09-12 at bd7ad596, alone, `ASMLIFT_CANDCACHE`
-// default, over all 1,062 available rows:
+// WHAT IT COSTS. `time`d on THIS COMMAND (not on a probe of its parts), on this machine
+// 2026-09-12, alone, `ASMLIFT_CANDCACHE` default, over all 1,062 available rows:
 //
-//   | what                              | rows  | wall    |
-//   |-----------------------------------|-------|---------|
-//   | lift, 2 arms, warm target builds  | 1,062 | 28.8 s  |
-//   | lift, 2 arms, COLD target builds  | 1,062 | 136.9 s |
-//   | `--fan`, 1 arm, giants excluded   |   827 | 277.4 s |
+//   | what                                              | rows  | wall    |
+//   |---------------------------------------------------|-------|---------|
+//   | lift, 2 arms, warm target builds                  | 1,062 | 62.8 s  |
+//   | lift, 2 arms, every target built (BENCH_CACHE=0)  | 1,062 | 176.9 s |
+//   | `--repeat 2` (the determinism gate)               | 1,062 | 123.7 s |
+//   | `--fan`, 1 arm, the one over-limit row excluded    | 1,061 | 436.8 s |
 //
-// The split matters more than the totals: of the 136.9 s cold, 116.1 s is BUILDING the scoring
-// targets and 2.3 s is the 1,346 lifts. Lifting the whole corpus is free; everything else is the
-// harness getting the row's own configuration in front of it. That is why the default is
-// lift-only and `--fan` is a flag: enumeration is 120× the lift and is where a corpus sweep stops
-// being cheap.
+// An earlier table here priced the warm row at 28.8 s, which was a standalone probe's build+lift
+// loop and NOT this command: `time pnpm bench sweep` is 59.0 / 61.8 / 62.8 s across three runs on
+// two worktrees, and `docs/bench-cost.md` had it right. A header table is read as the command's
+// price, so it states the command's price.
+//
+// The split still matters more than the totals: of the cold run, ~116 s is BUILDING the scoring
+// targets and ~2.3 s is the 1,346 lifts (probe `price2.mts`, 2026-09-12). Lifting the whole corpus
+// is free; everything else is the harness getting the row's own configuration in front of it. That
+// is why the default is lift-only and `--fan` is a flag: enumeration is ~120× the lift and is where
+// a corpus sweep stops being cheap.
 //
 // WHAT IT DOES NOT DO. It never compiles a candidate and never scores one, so it cannot tell you
 // whether a row MATCHES — that is `bench run`, at ~2,040 s. It tells you which rows your branch
 // SPELLS differently, which is the question a round asks twenty times before it asks the other one
 // once.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { REPO_ROOT, RESULTS_DIR } from '../config';
-import type { SweepSelection } from './sweep-driver';
+import { TOOLCHAINS } from '../toolchains';
+import { ARMS, type SweepSelection, TREE_MODULES } from './sweep-driver';
 
 /** One row, one arm, in one tree. Every field is a fact a hand rig recorded, and the set is
  *  closed on purpose: a sweep whose payload each round extends is a rig with a stable filename,
@@ -66,6 +73,13 @@ export interface SweepRecord {
    *  through naming and global recovery, and a change that moves only one of them is exactly the
    *  change a one-arm rig reports as inert. */
   arm: string;
+  /** sha1/12 of the scrubbed asm this record was lifted FROM, and of the option object it was
+   *  lifted WITH (`rankOptionsFor`'s result — prototypes, `asmData`, the symbol map). The INPUT,
+   *  recorded because each side of a comparison loads its own tree's dataset and harness: without
+   *  these two fields a dataset edit under a stable row id moves `src` and reads as a decompiler
+   *  change. See `optsDigest` in sweep-driver.ts for the measurement. */
+  asm?: string;
+  opts?: string;
   /** sha1/12 of the emitted C. THE field: everything else is context for reading a move in it. */
   src?: string;
   /** the emitted C's length, so a hash move can be read as "one token" or "half the function" */
@@ -91,8 +105,33 @@ export interface SweepRecord {
   skipped?: string;
 }
 
-/** The fields the diff compares, in the order it prints them. */
-const FIELDS = ['src', 'len', 'diag', 'marks', 'threw', 'fan', 'fanHash', 'fanThrew', 'skipped'] as const;
+/** The fields the diff compares, in the order it prints them. The INPUT fields come first, because
+ *  a line that opens `asm … -> …` is a different finding from one that opens `src … -> …`. */
+const FIELDS = [
+  'asm',
+  'opts',
+  'src',
+  'len',
+  'diag',
+  'marks',
+  'threw',
+  'fan',
+  'fanHash',
+  'fanThrew',
+  'skipped',
+] as const;
+
+/** A record for which NOTHING was lifted: the row's toolchain is unavailable here, or its target
+ *  would not build. `fan-limit` is deliberately not one of these — that row WAS lifted, the guard
+ *  announced itself by name before paying, and only its enumeration is missing. */
+export const unmeasured = (r: SweepRecord): boolean => r.skipped === 'toolchain' || r.skipped === 'build';
+
+/** How many records in a sweep measured nothing, by cause. */
+export function unmeasuredCounts(records: readonly SweepRecord[]): { total: number; toolchain: number; build: number } {
+  const toolchain = records.filter((r) => r.skipped === 'toolchain').length;
+  const build = records.filter((r) => r.skipped === 'build').length;
+  return { total: toolchain + build, toolchain, build };
+}
 
 export interface RecordMove {
   id: string;
@@ -105,6 +144,11 @@ export interface SweepDiff {
   baseOnly: string[];
   headOnly: string[];
   same: number;
+  /** records that agree because NEITHER side lifted them. Counted apart from `same` because
+   *  "identical" is a claim about two decompilers and this is the absence of one: with
+   *  `ASMLIFT_AGBCC` unset — trap #6 of the round protocol, a login shell away — 618 of 1,620
+   *  synthetic records were never lifted on either side and the summary called them identical. */
+  notMeasured: number;
 }
 
 const key = (r: SweepRecord): string => `${r.id} ${r.arm}`;
@@ -118,16 +162,19 @@ export function compareSweeps(base: SweepRecord[], head: SweepRecord[]): SweepDi
   const h = new Map(head.map((r) => [key(r), r]));
   const moved: RecordMove[] = [];
   let same = 0;
+  let notMeasured = 0;
   for (const [k, hr] of h) {
     const br = b.get(k);
     if (br === undefined) {
       continue;
     }
     const fields = FIELDS.filter((f) => br[f] !== hr[f]).map((f) => ({ field: f, from: br[f], to: hr[f] }));
-    if (fields.length === 0) {
-      same++;
-    } else {
+    if (fields.length > 0) {
       moved.push({ id: hr.id, arm: hr.arm, fields });
+    } else if (unmeasured(hr)) {
+      notMeasured++;
+    } else {
+      same++;
     }
   }
   return {
@@ -135,6 +182,7 @@ export function compareSweeps(base: SweepRecord[], head: SweepRecord[]): SweepDi
     baseOnly: [...b.keys()].filter((k) => !h.has(k)),
     headOnly: [...h.keys()].filter((k) => !b.has(k)),
     same,
+    notMeasured,
   };
 }
 
@@ -187,21 +235,36 @@ export const SWEEP_FAN_LIMIT = 20000;
  *  diagnostic from becoming an overnight job, and a ref that will not resolve must not be able to
  *  turn the guard off. A row the artifact does not carry (a new dataset row) has no recorded
  *  count and is enumerated — the guard protects against the known giants, and says so. */
-export function recordedFans(): Map<string, number> {
+export function recordedFans(): { fans: Map<string, number>; unreadable?: string } {
+  const path = join(RESULTS_DIR, 'results.json');
+  // NO ARTIFACT AT ALL is the documented pre-guard behavior: a checkout that has never published
+  // one prices no row, every row enumerates, and the header says so. AN ARTIFACT THAT WILL NOT
+  // PARSE is a different thing and must not read as the same one — a truncated file mid-`bench
+  // merge`, or a shape change, used to empty the map inside a bare `catch {}` and turn the guard
+  // off with NO OUTPUT AT ALL. Reproduced by deleting the top-level `results` key: `--fan --only
+  // ProcessInputAndUpdateEntities` printed nothing and was still enumerating 77,760 spellings at
+  // 120 s, against 0.3 s to refuse with the artifact intact. A guard that disappears without a word
+  // is worse than no guard, so the caller refuses instead.
+  if (!existsSync(path)) {
+    return { fans: new Map() };
+  }
   const out = new Map<string, number>();
   try {
-    const { results } = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as {
+    const { results } = JSON.parse(readFileSync(path, 'utf8')) as {
       results: { id: string; asmlift: { candidateCount?: number } }[];
     };
+    if (!Array.isArray(results)) {
+      return { fans: out, unreadable: `${path} has no top-level \`results\` array` };
+    }
     for (const r of results) {
-      if (typeof r.asmlift.candidateCount === 'number') {
+      if (typeof r.asmlift?.candidateCount === 'number') {
         out.set(r.id, r.asmlift.candidateCount);
       }
     }
-  } catch {
-    // no artifact in this checkout — every row enumerates, which is the pre-guard behavior
+  } catch (e) {
+    return { fans: out, unreadable: `${path}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
   }
-  return out;
+  return { fans: out };
 }
 
 export interface SweepOptions extends SweepSelection {
@@ -216,6 +279,9 @@ export interface SweepOptions extends SweepSelection {
   /** run the selection this many times in ONE process (alternating direction) and report any
    *  record that disagreed with itself */
   repeat?: number;
+  /** report rows whose toolchain is unavailable (or whose target will not build) and carry on,
+   *  instead of exiting 2. For a machine that genuinely lacks a toolchain — mwcc needs Docker. */
+  allowUnmeasured?: boolean;
 }
 
 function note(s: string): void {
@@ -284,10 +350,33 @@ function provisionBase(ref: string): { dir: string } | { error: string } {
 /** Sweep a tree that is not this one, through THIS tree's driver. The driver is spawned rather
  *  than imported so that the base tree's modules never share a process with this tree's — see
  *  sweep-driver.ts's header for why the dynamic-import-by-root shape is safe and what it assumes. */
-function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[] } | { error: string } {
+/** Is this tree one THIS driver can sweep — and if not, which part of it is missing?
+ *
+ *  HOW FAR BACK `--base` REACHES, as a sentence instead of a raw `ERR_MODULE_NOT_FOUND` stack out
+ *  of `tsx`'s resolver, and BEFORE the head sweep is paid for (the same rule the base-ref
+ *  resolution above restored). The driver loads NINE modules from the tree under test and they are
+ *  the harness's internals, which move: the newest by creation date is
+ *  `apps/benchmark/src/asm-scrub.ts` (85f81116, 2026-09-09), so that commit is the floor —
+ *  `packages/core/src/symbols.ts` (ed33699c, 2026-08-02) is the next one down. Against `2bb1cde6`
+ *  (2026-08-22) the failure arrived as an unhandled stack and the word `ERR_MODULE_NOT_FOUND`,
+ *  which is failure mode #1 of the hand rigs this command replaces.
+ *
+ *  WHAT IT CANNOT CATCH, said out loud: a module that still EXISTS with a CHANGED SIGNATURE.
+ *  `rankOptionsFor`'s parameter list moved at 85f81116 and again at 3b82f953, and a base on the
+ *  other side of such a change lifts with DIFFERENT OPTIONS rather than with none — which is what
+ *  each record's `opts` digest makes visible instead of silent. */
+function baseTreeRefusal(dir: string): string | undefined {
   if (!existsSync(join(dir, 'node_modules'))) {
-    return { error: `base tree ${dir} has no node_modules — run \`pnpm install\` there, or use --base <ref>` };
+    return `base tree ${dir} has no node_modules — run \`pnpm install\` there, or use --base <ref>`;
   }
+  const missing = TREE_MODULES.filter((p) => !existsSync(join(dir, p)));
+  if (missing.length > 0) {
+    return `base tree ${dir} is older than this command's floor: it has no ${missing.join(', ')}. \`--base\` reaches back to 85f81116 (2026-09-09) for a whole-corpus sweep; compare against a newer revision, or use \`bench diff\` against the published artifact.`;
+  }
+  return undefined;
+}
+
+function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[] } | { error: string } {
   const out = join(tmpdir(), `asmlift-sweep-base-${process.pid}.json`);
   const driver = join(import.meta.dirname, 'sweep-driver.ts');
   const tsx = join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
@@ -298,12 +387,17 @@ function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[]
     maxBuffer: 1 << 28,
   });
   if (r.status !== 0) {
+    rmSync(out, { force: true });
     return { error: `the base sweep exited ${r.status ?? 'on a signal'} — nothing was compared` };
   }
   try {
     return { records: JSON.parse(readFileSync(out, 'utf8')) as SweepRecord[] };
   } catch (e) {
     return { error: `the base sweep wrote no readable records: ${e instanceof Error ? e.message : e}` };
+  } finally {
+    // The handoff file is the transport, not an artifact — a leaked `$TMPDIR/asmlift-sweep-base-
+    // <pid>.json` per run is how a scratch directory becomes unreadable.
+    rmSync(out, { force: true });
   }
 }
 
@@ -311,6 +405,9 @@ function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[]
 export function sweepRefusal(o: SweepOptions): string | undefined {
   if (o.compare !== undefined && (o.base !== undefined || o.baseDir !== undefined)) {
     return '--compare reads two files that already exist; --base/--base-dir produce them. Pick one.';
+  }
+  if (o.compare !== undefined && o.json !== undefined) {
+    return '--compare reads two record files and runs nothing, so there is nothing for --json to write. Drop one.';
   }
   if (o.compare !== undefined && o.compare.length !== 2) {
     // `--compare a.json b.json` reads as one flag and one POSITIONAL, so `cli.ts` pairs
@@ -337,12 +434,34 @@ export function sweepRefusal(o: SweepOptions): string | undefined {
   if (o.asmProject !== undefined && o.asmDir === undefined) {
     return '--asm-project belongs to --asm-dir alone (a dataset row carries its own symbol map).';
   }
-  const bad = o.arms.filter((a) => a !== 'harness' && a !== 'nomap');
+  if (o.asmDir !== undefined && o.toolchain !== undefined && !(o.toolchain in TOOLCHAINS)) {
+    // Refused HERE rather than thrown from inside the driver: an unknown toolchain used to arrive
+    // as a raw node stack on exit 1, which is this command's "rows moved" code.
+    return `unknown --toolchain ${JSON.stringify(o.toolchain)} — have: ${Object.keys(TOOLCHAINS).join(', ')}`;
+  }
+  if (o.asmDir !== undefined && !existsSync(o.asmDir)) {
+    return `--asm-dir ${o.asmDir} does not exist`;
+  }
+  if (o.asmDir !== undefined && o.fan === true && o.force !== true) {
+    // THE GUARD CANNOT REACH THIS POPULATION. `SWEEP_FAN_LIMIT` is read off the committed
+    // artifact's `candidateCount`, which exists for dataset rows only, so `--asm-dir --fan`
+    // enumerates every file unbounded — and the tree this flag exists to sweep,
+    // `checkouts/<project>/asm/nonmatchings`, is where the five-hour functions live. Measured on
+    // this branch: one 1.6 KB klonoa `.s` in a directory of its own had not finished enumerating
+    // at 120 s, while the only line printed named a dataset row the invocation never iterated.
+    return '--fan over --asm-dir has no size guard: the limit is read off the committed artifact, which prices dataset rows only, and this population includes functions priced at over five hours. Sweep a directory you have measured and pass --force.';
+  }
+  const bad = o.arms.filter((a) => !(ARMS as readonly string[]).includes(a));
   if (bad.length > 0) {
     return `unknown --arms ${bad.join(', ')} — the arms are 'harness' (the row's own configuration) and 'nomap' (that, minus the symbol map)`;
   }
   if (o.arms.length === 0) {
     return '--arms selected nothing';
+  }
+  if (new Set(o.arms).size !== o.arms.length) {
+    // The duplicate collapses in `compareSweeps`' Map, so `--arms harness,harness` lifted twice and
+    // reported one record — accepted-then-ignored, the class every other pair here is refused for.
+    return `--arms names ${o.arms.join(',')} — each arm at most once`;
   }
   return undefined;
 }
@@ -364,17 +483,22 @@ const selectionOf = (o: SweepOptions): SweepSelection => ({
  *  tree's committed artifact and handed to BOTH sides, so a base whose artifact prices a row
  *  differently still skips the same rows — otherwise the giant appears as a `head-only` record and
  *  the comparison has silently paid five hours to produce one. */
-function overLimitRows(o: SweepOptions): Record<string, number> {
-  if (o.fan !== true || o.force === true) {
-    return {};
+function overLimitRows(o: SweepOptions): { over: Record<string, number>; unreadable?: string } {
+  // `--asm-dir` is excluded rather than merely empty: the guard keys on a DATASET row id, a raw
+  // `.s` has no recorded count, and printing "`--fan` skips kleod:ProcessInputAndUpdateEntities"
+  // over a selection that never iterates a dataset row told a reader a guard had fired when none
+  // could. `sweepRefusal` refuses that combination; this keeps the note off the other paths too.
+  if (o.fan !== true || o.force === true || o.asmDir !== undefined) {
+    return { over: {} };
   }
+  const { fans, unreadable } = recordedFans();
   const over: Record<string, number> = {};
-  for (const [id, n] of recordedFans()) {
+  for (const [id, n] of fans) {
     if (n > SWEEP_FAN_LIMIT) {
       over[id] = n;
     }
   }
-  return over;
+  return { over, ...(unreadable !== undefined ? { unreadable } : {}) };
 }
 
 export async function sweep(o: SweepOptions): Promise<number> {
@@ -394,11 +518,29 @@ export async function sweep(o: SweepOptions): Promise<number> {
         return 2;
       }
     }
-    return reportDiff(compareSweeps(sides[0], sides[1]), `${o.compare[0]} -> ${o.compare[1]}`);
+    return reportDiff(compareSweeps(sides[0], sides[1]), `${o.compare[0]} -> ${o.compare[1]}`, o);
   }
 
-  const over = overLimitRows(o);
+  const { over, unreadable } = overLimitRows(o);
+  if (unreadable !== undefined) {
+    note(
+      `asmlift: [sweep] --fan needs the committed artifact to size the corpus's giants, and cannot read it: ${unreadable}`,
+    );
+    note(
+      `asmlift: [sweep] --force enumerates every row anyway (kleod:ProcessInputAndUpdateEntities is 77,760 spellings).`,
+    );
+    return 2;
+  }
   const sel = selectionOf({ ...o, overLimit: over });
+  if (o.asmDir !== undefined && o.asmProject === undefined && o.arms.includes('harness')) {
+    // ACCEPTED, and said out loud: with no project there is no symbol map, so the `harness` arm is
+    // the `nomap` arm under another name. The record is still emitted under both (a rectangular
+    // record set is what makes the row-set arithmetic readable), but a reader must not read two
+    // identical arms as evidence that the map changed nothing.
+    note(
+      `asmlift: [sweep] --asm-dir without --asm-project: there is no symbol map, so the 'harness' arm IS the 'nomap' arm here.`,
+    );
+  }
   for (const [id, n] of Object.entries(over)) {
     note(
       `asmlift: [sweep] --fan skips ${id}: ${n} recorded spellings, over SWEEP_FAN_LIMIT ${SWEEP_FAN_LIMIT} (--force to enumerate it anyway)`,
@@ -413,11 +555,16 @@ export async function sweep(o: SweepOptions): Promise<number> {
   // refusal before anything is paid for.
   let baseTree: string | undefined;
   if (o.baseDir !== undefined) {
-    if (!existsSync(o.baseDir)) {
+    // RESOLVED, because the driver is loaded as `import(`${root}/apps/...`)` and a bare relative
+    // root is not a module specifier: `--base-dir .local/sweep-base/<sha>` passed `existsSync`,
+    // reached the base subprocess and died there on `ERR_INVALID_MODULE_SPECIFIER`. Relative is
+    // what a reader types.
+    const dir = resolve(o.baseDir);
+    if (!existsSync(dir)) {
       note(`asmlift: [sweep] --base-dir ${o.baseDir} does not exist`);
       return 2;
     }
-    baseTree = o.baseDir;
+    baseTree = dir;
   } else if (o.base !== undefined) {
     const p = provisionBase(o.base);
     if ('error' in p) {
@@ -426,14 +573,31 @@ export async function sweep(o: SweepOptions): Promise<number> {
     }
     baseTree = p.dir;
   }
+  if (baseTree !== undefined) {
+    const bad = baseTreeRefusal(baseTree);
+    if (bad !== undefined) {
+      note(`asmlift: [sweep] ${bad}`);
+      return 2;
+    }
+  }
 
   const { collect } = await import('./sweep-driver');
   const t0 = Date.now();
   const head = await collect(REPO_ROOT, sel);
   const secs = (t: number): string => ((Date.now() - t) / 1000).toFixed(1);
+  const un = unmeasuredCounts(head);
   note(
-    `asmlift: [sweep] this tree: ${head.length} record(s) over ${new Set(head.map((r) => r.id)).size} row(s), ${o.arms.join('+')}${o.fan ? ', +fan' : ''} — ${secs(t0)} s`,
+    `asmlift: [sweep] this tree: ${head.length} record(s) over ${new Set(head.map((r) => r.id)).size} row(s), ${o.arms.join('+')}${o.fan ? ', +fan' : ''} — ${secs(t0)} s${
+      un.total > 0 ? `; ${un.total} NOT MEASURED (toolchain ${un.toolchain}, build ${un.build})` : ''
+    }`,
   );
+  // AN EMPTY SELECTION IS NOT A CLEAN BILL OF HEALTH. `bench sweep --base main && echo clean` is
+  // the gate this command is for, and a typo'd `--only`/`--project`/`--asm-dir` passed it: 0
+  // record(s), 0 moved, exit 0. `run/gate-census.ts` refuses the same condition at exit 2.
+  if (head.length === 0) {
+    note(`asmlift: [sweep] no rows selected — nothing was swept, so nothing was compared`);
+    return 2;
+  }
   if (o.json !== undefined) {
     writeFileSync(o.json, JSON.stringify(head));
     note(`asmlift: [sweep] wrote ${o.json}`);
@@ -461,12 +625,12 @@ export async function sweep(o: SweepOptions): Promise<number> {
     console.log(
       `asmlift: [sweep] determinism: ${head.length} record(s) × ${o.repeat} run(s) (alternating direction), ${disagreed} disagreement(s)`,
     );
-    return disagreed === 0 ? 0 : 1;
+    return unmeasuredRefusal(un.total, o) ?? (disagreed === 0 ? 0 : 1);
   }
 
   if (baseTree === undefined) {
     console.log(`asmlift: [sweep] ${head.length} record(s); no base given, so nothing was compared`);
-    return 0;
+    return unmeasuredRefusal(un.total, o) ?? 0;
   }
 
   const dir = baseTree;
@@ -477,18 +641,41 @@ export async function sweep(o: SweepOptions): Promise<number> {
     return 2;
   }
   note(`asmlift: [sweep] base tree: ${base.records.length} record(s) — ${secs(t1)} s`);
-  return reportDiff(compareSweeps(base.records, head), `${dir} -> this tree`);
+  return reportDiff(compareSweeps(base.records, head), `${dir} -> this tree`, o);
+}
+
+/** A sweep that could not lift part of its own selection did not answer the question, and exits 2
+ *  saying which part — the code `bench gates` uses for the same condition.
+ *
+ *  WHY IT IS A REFUSAL AND NOT A WARNING. The gate a round writes is `bench sweep --base main &&
+ *  echo clean`, and the environment this project loses most often is a toolchain: trap #6 of the
+ *  round protocol is a LOGIN shell shadowing the `cpp` shim, which turned 44 matches into
+ *  `noncompile` while the run reported ✓. With `ASMLIFT_AGBCC` unset, this command reported 618 of
+ *  1,620 synthetic records as "identical" and exited 0. Measured on a correctly wired machine, the
+ *  whole corpus sweeps with 0 of 2,124 records unmeasured, so this refusal costs a correct setup
+ *  nothing; `--allow-unmeasured` is for the setup that genuinely lacks a toolchain (mwcc needs
+ *  Docker) and wants the rest of the answer. */
+function unmeasuredRefusal(total: number, o: SweepOptions): number | undefined {
+  if (total === 0 || o.allowUnmeasured === true) {
+    return undefined;
+  }
+  note(
+    `asmlift: [sweep] ${total} record(s) were NOT MEASURED — their toolchain is unavailable here or their target would not build, so this sweep did not answer the question for them. Check \`which cpp\` and the ASMLIFT_* env (round protocol trap #6), or pass --allow-unmeasured.`,
+  );
+  return 2;
 }
 
 /** Print the comparison. Exit 1 when anything moved, matching `bench diff`'s contract: a
  *  comparison gate that exits 0 whatever it found is a gate nobody can put in a script. */
-function reportDiff(d: SweepDiff, what: string): number {
+function reportDiff(d: SweepDiff, what: string, o: SweepOptions): number {
   for (const line of renderDiff(d)) {
     console.log(line);
   }
   const moved = d.moved.length + d.baseOnly.length + d.headOnly.length;
   console.log(
-    `asmlift: [sweep] ${what}: ${d.moved.length} record(s) moved, ${d.baseOnly.length} base-only, ${d.headOnly.length} head-only, ${d.same} identical`,
+    `asmlift: [sweep] ${what}: ${d.moved.length} record(s) moved, ${d.baseOnly.length} base-only, ${d.headOnly.length} head-only, ${d.same} identical${
+      d.notMeasured > 0 ? `, ${d.notMeasured} NOT MEASURED on either side` : ''
+    }`,
   );
-  return moved === 0 ? 0 : 1;
+  return unmeasuredRefusal(d.notMeasured, o) ?? (moved === 0 ? 0 : 1);
 }

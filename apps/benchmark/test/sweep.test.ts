@@ -11,13 +11,26 @@
 //     asked for (`--toolchain` without `--asm-dir` was exactly this defect in `bench fan`, fixed
 //     in #194 by `optionRefusal`);
 //   - a `--fan` guard that lets the corpus's one 77,760-spelling row through and turns a 437 s
-//     diagnostic into an overnight job.
+//     diagnostic into an overnight job;
+//   - a census that counts a row NOBODY LIFTED — its toolchain missing from this shell — in the
+//     same word as a row both trees spelled identically.
 //
 // The CI mirror gate (`vitest run apps/benchmark/test`) runs where no compiler is available, so
-// nothing here builds a target.
+// nothing here builds a target. That is why the PRODUCER is pinned through the pure functions
+// `collect` is assembled from (`armsFor`, `optsDigest`) rather than by calling `collect`: a
+// reviewer collapsed the two arms onto one key and all 40 files / 1,128 tests of this suite stayed
+// green, because every assertion was on hand-built records.
 import { describe, expect, it, vi } from 'vitest';
 
-import { SWEEP_FAN_LIMIT, type SweepRecord, compareSweeps, renderDiff, sweepRefusal } from '../src/run/sweep';
+import {
+  SWEEP_FAN_LIMIT,
+  type SweepRecord,
+  compareSweeps,
+  renderDiff,
+  sweepRefusal,
+  unmeasuredCounts,
+} from '../src/run/sweep';
+import { armsFor, optsDigest } from '../src/run/sweep-driver';
 
 const rec = (over: Partial<SweepRecord> & Pick<SweepRecord, 'id' | 'arm'>): SweepRecord => ({
   src: 'aaaaaaaaaaaa',
@@ -110,6 +123,102 @@ describe('the sweep comparison', () => {
   });
 });
 
+describe('a record neither tree lifted is not "identical"', () => {
+  const skipped = (id: string, why: string): SweepRecord => ({ id, arm: 'harness', skipped: why });
+
+  it('counts a row whose toolchain is missing apart from a row both trees spelled the same way', () => {
+    // MEASURED DEFECT. With `ASMLIFT_AGBCC` unset — one login shell away, trap #6 of the round
+    // protocol — a whole synthetic-tier A/B against a real decompiler change reported
+    // `1002 record(s) moved ... 618 identical`, and 618 of those 1,620 records had never been
+    // lifted on either side. The two sides' records are field-for-field equal, so only the
+    // `skipped` cause tells them apart.
+    const side = [rec({ id: 'synthetic:a:agbcc', arm: 'harness' }), skipped('synthetic:b:mwcc_242_81', 'toolchain')];
+    const d = compareSweeps(side, side);
+    expect(d.same).toBe(1);
+    expect(d.notMeasured).toBe(1);
+  });
+
+  it('counts a build failure as not measured, and the announced fan-limit skip as measured', () => {
+    // `fan-limit` is the one `skipped` cause that is NOT a hole: the guard named the row and its
+    // recorded spelling count before paying, and the row was still LIFTED — only its enumeration
+    // is missing. Reading it as "not measured" would make `--fan` refuse on the corpus's one giant
+    // every time.
+    const side = [
+      skipped('synthetic:c:agbcc', 'build'),
+      rec({ id: 'kleod:ProcessInputAndUpdateEntities:agbcc', arm: 'harness', skipped: 'fan-limit' }),
+    ];
+    const d = compareSweeps(side, side);
+    expect(d.notMeasured).toBe(1);
+    expect(d.same).toBe(1);
+    expect(unmeasuredCounts(side)).toEqual({ total: 1, toolchain: 0, build: 1 });
+  });
+});
+
+describe('the record carries its INPUT, not only its output', () => {
+  it('reads a changed dataset row as a changed input rather than a changed decompiler', async () => {
+    // MEASURED DEFECT, and the reason `asm`/`opts` are fields at all: `collect` loads the tree
+    // under test's OWN dataset and harness, so the base side lifts the BASE tree's rows. Changing
+    // one string in `dataset/synthetic.ts` — and no line of `packages/` — moved 6 records, every
+    // one of them reading as a decompiler change. `baseOnly`/`headOnly` catches a row that appears
+    // or vanishes; a row whose INPUT moved under a stable id was invisible.
+    const b = [rec({ id: 'synthetic:mini:agbcc', arm: 'harness', asm: 'aaaaaaaaaaaa', opts: 'oooooooooooo' })];
+    const h = [
+      rec({
+        id: 'synthetic:mini:agbcc',
+        arm: 'harness',
+        asm: 'bbbbbbbbbbbb',
+        opts: 'oooooooooooo',
+        src: 'zzzzzzzzzzzz',
+      }),
+    ];
+    const line = renderDiff(compareSweeps(b, h))[0];
+    expect(line).toContain('asm aaaaaaaaaaaa -> bbbbbbbbbbbb');
+    expect(line.indexOf('asm ')).toBeLessThan(line.indexOf('src '));
+  });
+
+  it('digests the option object without depending on key order, and ignores the compiler closure', () => {
+    // `rankOptionsFor` builds its result by conditional spread, so the key ORDER is a property of
+    // which options exist and not of their values; and `compile` is a closure that cannot be
+    // compared across two processes at all.
+    const a = optsDigest({ symbols: { a: 1, b: 2 }, compile: () => 'x' });
+    const b = optsDigest({ compile: () => 'y', symbols: { b: 2, a: 1 } });
+    expect(a).toBe(b);
+    expect(optsDigest({ symbols: { a: 1 } })).not.toBe(a);
+    // and an option that APPEARS is a move: a row that gains a symbol map lifts differently
+    expect(optsDigest({})).not.toBe(optsDigest({ symbols: {} }));
+  });
+});
+
+describe('the two arms', () => {
+  it('asks for two DIFFERENT computations when the row has a symbol map', () => {
+    // THE ABLATION THIS PINS: `key: 'nomap'` for both arms collapses them onto one computation and
+    // makes the sweep blind to every symbol-map change — half of what the arms exist for, and the
+    // half that covers most naming and global-recovery work. The arms genuinely differ on 25 of 42
+    // `kleod` rows, so this is not a theoretical distinction.
+    const seen: boolean[] = [];
+    const armed = armsFor(['harness', 'nomap'], true, (withMap) => {
+      seen.push(withMap);
+      return withMap ? { symbols: {} } : {};
+    });
+    expect(armed.map((a) => a.key)).toEqual(['harness', 'nomap']);
+    expect(seen).toEqual([true, false]);
+    expect(armed[0].opts).not.toEqual(armed[1].opts);
+  });
+
+  it('asks for ONE computation when the row has no map, and still reports it under both names', () => {
+    // 810 of the 1,062 rows are synthetic and almost none carries a map, so lifting them twice
+    // would double the only expensive part of the command. The record set stays rectangular.
+    const seen: boolean[] = [];
+    const armed = armsFor(['harness', 'nomap'], false, (withMap) => {
+      seen.push(withMap);
+      return {};
+    });
+    expect(armed.map((a) => a.arm)).toEqual(['harness', 'nomap']);
+    expect(armed.map((a) => a.key)).toEqual(['nomap', 'nomap']);
+    expect(seen).toEqual([false]);
+  });
+});
+
 describe('the sweep refusals', () => {
   const ok = { tiers: ['synthetic'] as const, arms: ['harness'] };
 
@@ -157,6 +266,37 @@ describe('the sweep refusals', () => {
   it('refuses --compare beside a base — one of them would have to be ignored', () => {
     expect(sweepRefusal({ ...ok, compare: ['a.json', 'b.json'], base: 'origin/main' })).toContain('Pick one');
   });
+
+  it('refuses --compare beside --json, which it silently ignored', () => {
+    expect(sweepRefusal({ ...ok, compare: ['a.json', 'b.json'], json: 'out.json' })).toContain('nothing for --json');
+  });
+
+  it('refuses a repeated arm instead of collapsing it in the diff Map', () => {
+    expect(sweepRefusal({ ...ok, arms: ['harness', 'harness'] })).toContain('at most once');
+  });
+
+  it('refuses an unknown --toolchain by name instead of throwing a node stack on exit 1', () => {
+    // Exit 1 is this command's "rows moved" code, so a crash landing there is a wrong ANSWER, not
+    // just an ugly one: `--asm-dir <dir> --toolchain nosuch` threw out of the driver.
+    const r = sweepRefusal({ ...ok, asmDir: '/tmp', toolchain: 'nosuch' });
+    expect(r).toContain('unknown --toolchain');
+    expect(r).toContain('agbcc');
+  });
+
+  it('refuses an --asm-dir that does not exist', () => {
+    expect(sweepRefusal({ ...ok, asmDir: '/definitely/no/such/dir', toolchain: 'agbcc' })).toContain('does not exist');
+  });
+
+  it('refuses --fan over --asm-dir, where the size guard cannot reach', () => {
+    // `SWEEP_FAN_LIMIT` is read off the committed artifact's `candidateCount`, which exists for
+    // DATASET ROWS ONLY — so in `--asm-dir` mode the guard is structurally unreachable, and the
+    // population this flag exists to sweep (`checkouts/<project>/asm/nonmatchings`) is where the
+    // five-hour functions live. Measured: one 1.6 KB klonoa `.s` alone in a directory had not
+    // finished enumerating at 120 s, and the only line printed named a DATASET row that
+    // invocation never iterated.
+    expect(sweepRefusal({ ...ok, asmDir: '/tmp', toolchain: 'agbcc', fan: true })).toContain('no size guard');
+    expect(sweepRefusal({ ...ok, asmDir: '/tmp', toolchain: 'agbcc', fan: true, force: true })).toBeUndefined();
+  });
 });
 
 describe('the --fan size guard', () => {
@@ -195,6 +335,29 @@ describe('the raw-asm population', () => {
       join(root, 'nonmatchings', 'beta.inc'),
       join(root, 'zeta.s'),
     ]);
+  });
+});
+
+describe('a sweep that measured nothing is not a clean bill of health', () => {
+  it('exits 2 on an empty selection, and on a selection it could not lift', async () => {
+    // MEASURED DEFECTS, both. `bench sweep --base main && echo clean` is the gate this command is
+    // for. A typo'd `--only zzz-no-such-row` printed `0 record(s) over 0 row(s)` and exited 0; a
+    // shell with `ASMLIFT_AGBCC` unset printed `618 identical` over rows nobody lifted and exited
+    // 0. `run/gate-census.ts` refuses the first condition at exit 2 already.
+    const { sweep } = await import('../src/run/sweep');
+    const driver = await import('../src/run/sweep-driver');
+    const spy = vi.spyOn(driver, 'collect');
+    try {
+      spy.mockResolvedValue([]);
+      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'], only: 'zzz-no-such-row' })).toBe(2);
+
+      spy.mockResolvedValue([{ id: 'synthetic:a:mwcc_242_81', arm: 'harness', skipped: 'toolchain' }]);
+      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'] })).toBe(2);
+      // and the machine that genuinely lacks a toolchain (mwcc needs Docker) can still ask
+      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'], allowUnmeasured: true })).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

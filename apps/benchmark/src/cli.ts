@@ -27,14 +27,16 @@
 //   pnpm bench sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p]
 //                    [--arms harness,nomap] [--fan] [--force] [--repeat N]
 //                    [--json <f>] [--compare <base.json> <head.json>] [--asm-dir <d> --toolchain <id>]
+//                    [--allow-unmeasured]
 //                                        # THE CORPUS A/B: re-lift every row in this tree and in
 //                                        # another one, map-ful and map-less, and print the rows
 //                                        # whose emitted C (or enumerated fan, with --fan) differs.
-//                                        # Compile-free: 28.8 s over 1,062 rows warm against a
+//                                        # Compile-free: ~60 s over 1,062 rows warm against a
 //                                        # ~2,040 s `bench run`, so it answers "did my branch
 //                                        # change anything" twenty times per round. --repeat asks
 //                                        # the same question of this tree against ITSELF
-//                                        # (determinism). Exit 1 when anything moved, like `diff`
+//                                        # (determinism). Exit 1 when anything moved, like `diff`;
+//                                        # exit 2 when a row could not be lifted here at all
 //   pnpm bench gates --pass <id> [--only <row>] [--toolchain id]
 //                                        # the per-id REFUSAL CENSUS of an l3/gates.ts table, off a
 //                                        # real enumeration: which rule refused, how many times, in
@@ -145,9 +147,16 @@ const { values: opts, positionals } = parseArgs({
     // (120x the lift); `--repeat` asks this tree whether it agrees with itself; `--json` and
     // `--compare` split a comparison into two runs that need not happen on the same machine.
     // `--asm-dir` swaps dataset rows for a tree of raw `.s`/`.inc` files, which is the corpus the
-    // hand-built rigs swept that `bench fan` cannot reach.
+    // hand-built rigs swept that `bench fan` cannot reach; `--allow-unmeasured` downgrades the
+    // refusal a row whose toolchain is missing here earns.
+    //
+    // ONE FLAG SPELLING, TWO NOUNS, on adjacent subcommands: `bench sweep --base <ref>` PROVISIONS
+    // A WORKTREE at that ref and re-lifts in it, while `bench diff --base <ref>` READS THE
+    // PUBLISHED ARTIFACT at that ref. `sweep` needs the base revision's CODE, and no artifact
+    // carries it.
     'base-dir': { type: 'string' },
     arms: { type: 'string', default: 'harness,nomap' },
+    'allow-unmeasured': { type: 'boolean', default: false },
     fan: { type: 'boolean', default: false },
     repeat: { type: 'string' },
     json: { type: 'string' },
@@ -505,12 +514,13 @@ switch (command) {
   case 'sweep': {
     // sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p] [--arms a,b]
     //       [--fan] [--force] [--repeat N] [--json f] [--compare <base.json> <head.json>]
-    //       [--asm-dir d --toolchain t]
+    //       [--asm-dir d --toolchain t] [--allow-unmeasured]
     //
     // The corpus A/B twenty agents hand-built. CORPUS-WIDE and affordable for the same reason
     // `bench gates` is and `bench fan` is not: nothing here is COMPILED. Lifting all 1,062
-    // available rows in both arms is 28.8 s warm; `--fan` adds enumeration and is 277.4 s, which
-    // is why it is a flag. run/sweep.ts's header carries the measured table.
+    // available rows in both arms is ~60 s warm (`time`d on this command, three runs); `--fan`
+    // adds enumeration and is 436.8 s, which is why it is a flag. run/sweep.ts's header carries
+    // the measured table.
     const { sweep } = await import('./run/sweep');
     process.exit(
       await sweep({
@@ -518,6 +528,7 @@ switch (command) {
         ...(opts.only !== undefined ? { only: opts.only } : {}),
         ...(opts.project !== undefined ? { project: opts.project } : {}),
         arms: opts.arms.split(',').filter((a) => a !== ''),
+        allowUnmeasured: opts['allow-unmeasured'],
         fan: opts.fan,
         force: opts.force,
         ...(opts.repeat !== undefined ? { repeat: Number(opts.repeat) } : {}),

@@ -68,11 +68,46 @@ const firstLine = (e: unknown): string =>
     .split('\n')[0]
     .slice(0, 160);
 
+/** JSON with object keys sorted at every depth, so a digest over it does not move when a producer
+ *  reorders its spread. Functions (the candidate compiler) drop out, which is deliberate: they are
+ *  not comparable across two processes and their identity is not the fact being watched. */
+const stable = (v: unknown): string =>
+  JSON.stringify(v, (_k, val: unknown) =>
+    val !== null && typeof val === 'object' && !Array.isArray(val)
+      ? Object.fromEntries(
+          Object.keys(val as object)
+            .sort()
+            .map((k) => [k, (val as Record<string, unknown>)[k]]),
+        )
+      : val,
+  ) ?? 'undefined';
+
+/** A digest of the OPTION OBJECT this arm was lifted with — `rankOptionsFor`'s result, which
+ *  carries the row's prototypes, its `asmData` side table, its symbol map and whether a candidate
+ *  compiler was attached.
+ *
+ *  WHY THE RECORD CARRIES IT. `collect` loads the tree under test's OWN dataset and harness, so the
+ *  base side lifts the BASE tree's rows with the BASE tree's options. A row whose INPUT moved under
+ *  a stable id — an authored `src` edit, a re-vendored TU, a changed `proto` — therefore produces a
+ *  moved `src` that reads as a decompiler change and is not one. Measured on this branch: editing
+ *  one string in `dataset/synthetic.ts` and no line of `packages/` moved 6 records. `asm` and
+ *  `opts` are what make that readable — a `[moved]` line naming them says the INPUT moved, and a
+ *  line naming `src` alone says the decompiler did. This is the field `report/diff.ts` watches per
+ *  side for the same reason (MEMORY #112/#113: label unchanged while the program changed). */
+export function optsDigest(opts: Record<string, unknown>): string {
+  return sha(
+    Object.keys(opts)
+      .sort()
+      .map((k) => `${k}=${typeof opts[k] === 'function' ? 'fn' : stable(opts[k])}`)
+      .join('\0'),
+  );
+}
+
 /** One row's two-arm option sets, built through the harness's own `rankOptionsFor` so the
  *  `harness` arm is BY CONSTRUCTION the configuration `bench run` and `bench fan` measure. The
  *  `nomap` arm is the same call with the symbol map withheld — not a hand-assembled object, which
  *  is how a rig ends up comparing two configurations and calling the difference a code change. */
-type Armed = {
+export type Armed = {
   arm: string;
   /** which COMPUTATION this arm asks for. Two arms sharing a key are one lift and one enumeration;
    *  see `record` below for why that is not a shortcut. */
@@ -80,19 +115,61 @@ type Armed = {
   opts: Record<string, unknown>;
 };
 
+/** The arms, as the one table both populations read. */
+export const ARMS = ['harness', 'nomap'] as const;
+
+/** Which computation each selected arm asks for, and the options that compute it.
+ *
+ *  ONE FUNCTION AND NOT TWO SPELLINGS OF THE RULE, because the rule is the command's whole point
+ *  and it was written out at three sites: the `harness` arm only differs from `nomap` when the row
+ *  HAS a symbol map, so a map-less row is one computation reported under both names (rectangular
+ *  record set, and a row that GAINS a map between two revisions then shows as a move in the
+ *  `harness` arm rather than as a record appearing out of nowhere).
+ *
+ *  ABLATED, which is why it is exported and tested: collapsing this to `key: 'nomap'` makes the
+ *  sweep blind to every symbol-map change — half of what the two arms exist for, and the half that
+ *  covers most naming and global-recovery work — and the whole `apps/benchmark/test` suite stayed
+ *  green (40 files / 1,128 tests) when a reviewer did exactly that. `optsFor` is called once per
+ *  distinct computation, never once per arm. */
+export function armsFor(
+  arms: readonly string[],
+  hasMap: boolean,
+  optsFor: (withMap: boolean) => Record<string, unknown>,
+): Armed[] {
+  const computed = new Map<string, Record<string, unknown>>();
+  return arms.map((arm) => {
+    const key = arm === 'harness' && hasMap ? 'harness' : 'nomap';
+    let opts = computed.get(key);
+    if (opts === undefined) {
+      opts = optsFor(key === 'harness');
+      computed.set(key, opts);
+    }
+    return { arm, key, opts };
+  });
+}
+
+/** Everything this driver needs out of the tree under test, in load order — and the list `sweep.ts`
+ *  checks a base tree against BEFORE spawning, so a revision older than one of these refuses with a
+ *  sentence instead of an `ERR_MODULE_NOT_FOUND` stack out of `tsx`'s resolver. These are the
+ *  harness's internals and they move: the newest by creation date is `asm-scrub.ts` (85f81116,
+ *  2026-09-09), which is therefore the floor `--base` reaches. */
+export const TREE_MODULES = [
+  'apps/benchmark/src/cases/synthetic.ts',
+  'apps/benchmark/src/cases/real.ts',
+  'apps/benchmark/src/cases/manifests.ts',
+  'apps/benchmark/src/asm-scrub.ts',
+  'apps/benchmark/src/eval/asmlift.ts',
+  'packages/core/src/pipeline.ts',
+  'packages/cli/src/rank.ts',
+  'packages/core/src/symbols.ts',
+  'apps/benchmark/src/toolchains.ts',
+] as const;
+
 /** Everything this driver needs out of the tree under test, loaded by absolute path. */
 async function treeModules(root: string) {
-  const [synthetic, real, manifests, scrub, evalAsmlift, pipeline, rank, symbols, toolchains] = await Promise.all([
-    import(`${root}/apps/benchmark/src/cases/synthetic.ts`),
-    import(`${root}/apps/benchmark/src/cases/real.ts`),
-    import(`${root}/apps/benchmark/src/cases/manifests.ts`),
-    import(`${root}/apps/benchmark/src/asm-scrub.ts`),
-    import(`${root}/apps/benchmark/src/eval/asmlift.ts`),
-    import(`${root}/packages/core/src/pipeline.ts`),
-    import(`${root}/packages/cli/src/rank.ts`),
-    import(`${root}/packages/core/src/symbols.ts`),
-    import(`${root}/apps/benchmark/src/toolchains.ts`),
-  ]);
+  const [synthetic, real, manifests, scrub, evalAsmlift, pipeline, rank, symbols, toolchains] = await Promise.all(
+    TREE_MODULES.map((p) => import(`${root}/${p}`)),
+  );
   return { synthetic, real, manifests, scrub, evalAsmlift, pipeline, rank, symbols, toolchains };
 }
 
@@ -146,7 +223,10 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
         out.push({ ...already, arm });
         continue;
       }
-      const rec: SweepRecord = { id, arm };
+      // THE INPUTS, recorded beside the output: what was lifted (`asm`) and with which options
+      // (`opts`). Without them a dataset edit is indistinguishable from a decompiler change — see
+      // `optsDigest`'s header for the measurement.
+      const rec: SweepRecord = { id, arm, asm: sha(asm), opts: optsDigest(opts) };
       try {
         const d = m.pipeline.decompile(sym, asm, targetDesc, { ...opts, onGap: 'annotate' });
         rec.src = sha(d.source);
@@ -195,11 +275,9 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
         .pop()!
         .replace(/\.(s|inc)$/, '');
       const asm = m.scrub.scrubObjectHeader(readFileSync(file, 'utf8'));
-      const armed: Armed[] = sel.arms.map((arm) => ({
-        arm,
-        key: arm === 'harness' && map ? 'harness' : 'nomap',
-        opts: arm === 'harness' && map ? { symbols: m.symbols.asIfUndecompiled(map, sym) } : {},
-      }));
+      const armed = armsFor(sel.arms, map !== undefined, (withMap) =>
+        withMap ? { symbols: m.symbols.asIfUndecompiled(map, sym) } : {},
+      );
       record(`asm:${relative(sel.asmDir, file)}`, armed, sym, asm, tc.targetDesc, sel.fan === true);
     }
     return out;
@@ -231,17 +309,9 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
       continue;
     }
     const asm = m.scrub.scrubObjectHeader(built.asm);
-    const armed: Armed[] = sel.arms.map((arm) => ({
-      arm,
-      key: arm === 'nomap' || c.symbols === undefined ? 'nomap' : 'harness',
-      opts: m.evalAsmlift.rankOptionsFor(
-        c.toolchain,
-        built.obj,
-        c.proto,
-        c.compile,
-        arm === 'nomap' ? undefined : c.symbols,
-      ),
-    }));
+    const armed = armsFor(sel.arms, c.symbols !== undefined, (withMap) =>
+      m.evalAsmlift.rankOptionsFor(c.toolchain, built.obj, c.proto, c.compile, withMap ? c.symbols : undefined),
+    );
     const fanAllowed = sel.force === true || overLimit[c.id] === undefined;
     record(c.id, armed, c.sym, asm, c.toolchain.targetDesc, fanAllowed);
   }
