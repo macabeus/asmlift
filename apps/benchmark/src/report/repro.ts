@@ -111,11 +111,17 @@ export async function repro(
   const path = join(dir, `repro-${tool}.sh`);
   writeFileSync(path, script);
 
+  // THE TOOL'S OWN published figure. Printing `row.asmlift` under `--tool m2c` states a number this
+  // script cannot produce, next to a script that produces a different one: on `kleod:StrCpy:agbcc`
+  // asmlift is 5/8 and m2c is 6/7, and the reader compares the C in out.c against the wrong one.
+  const published = tool === 'm2c' ? row.m2c : row.asmlift;
   log(
-    `repro: ${row.id} — ${row.asmlift.outcome} ${row.asmlift.score ?? '-'}/${row.asmlift.maxScore ?? '-'} as published`,
+    `repro: ${row.id} — ${tool} ${published.outcome} ${published.score ?? '-'}/${published.maxScore ?? '-'} as published`,
   );
   log(`repro: wrote ${path}`);
-  if (row.tier === 'real' && row.asmlift.symbolMap) {
+  // asmlift only: `symbolMap` is an asmlift-only field of the schema, and m2c's channel is the
+  // `--context` header its own script writes.
+  if (tool === 'asmlift' && row.tier === 'real' && row.asmlift.symbolMap) {
     // A row measured WITH a map and reproduced without one answers a different question, and
     // `bench target` only warns — it exits 0 and the run continues.
     log(
@@ -136,6 +142,26 @@ export async function repro(
   for (const line of errText.split('\n').filter((l) => l.startsWith('WARN'))) {
     err(`repro: ${line}`);
   }
+  const broken = setupRefusal(errText);
+
+  // M2C HAS NO SCORING STEP. `m2cScript` ends at `python3 m2c.py … in.s`: it prints C to stdout, and
+  // `code === 0` means python ran. So there is no `[ranked]` line to look for on ANY m2c run,
+  // success included, and nothing was scored that "byte-exact" could describe — which is what the
+  // asmlift path below would report of a completely successful one. Hence its own exit path.
+  if (tool === 'm2c') {
+    if (broken) {
+      err(`repro: ${broken}`);
+      return 2;
+    }
+    log(
+      code === 0
+        ? `repro: script exit 0 — m2c ran; its C is in ${join(dir, 'out.c')}. This script does not ` +
+            'score it: compare it against the row yourself (`pnpm bench baseline` has the published figure).'
+        : `repro: script exit ${code} — m2c did not run to completion; read ${join(dir, 'out.err')}`,
+    );
+    return code;
+  }
+
   // `[ranked]`, not the `[score]` table: it carries `best …` and the `[asmlift source <sha>]`
   // stamp, and it is one line whether the fan was 1 or 100,000.
   const ranked = errText.split('\n').filter((l) => l.includes('[ranked]') || l.includes('[declined]'));
@@ -145,10 +171,50 @@ export async function repro(
   if (ranked.length === 0) {
     err(`repro: the run printed no [ranked] line — read ${join(dir, 'out.err')}`);
   }
+  // A SETUP failure must change the VERDICT LINE, not merely add one above it: the line below says
+  // the script behaved as designed and the row simply does not match, and `repro()` returns `code`,
+  // so exit 1 with no asmlift binary would be indistinguishable from exit 1 for a faithfully
+  // reproduced nonmatch. Exit 2 is "this command could not answer", the code an unknown `--tool`
+  // already returns.
+  if (broken) {
+    err(`repro: ${broken}`);
+    log(`repro: script exit ${code} — the CHECKOUT is not set up; this says NOTHING about the row`);
+    return 2;
+  }
   // exit 0 only on byte-exact (`--score-against`), so a non-matching row's script exits 1 by
   // design. That is the row reproducing, not the script breaking — pass it through and say so.
   log(`repro: script exit ${code}${code === 0 ? ' (byte-exact)' : ' — a non-matching row exits nonzero by design'}`);
   return code;
+}
+
+/** The failures of the MACHINE rather than of the row, named from the script's stderr. Returns the
+ *  recovery, or undefined when nothing here explains it.
+ *
+ *  Not a closed list: a cause missing from it reads as the row not matching, so add one whenever a
+ *  wiring failure is seen wearing that disguise. Regexing the stderr of a run that should never have
+ *  started is the inverse of `run/preflight.ts`'s contract, which is where this belongs once
+ *  `repro --run` has a preflight; keeping it pure makes that move a call-site change. */
+export function setupRefusal(errText: string): string | undefined {
+  if (
+    /\.bin\/asmlift: (?:No such file or directory|command not found)|cannot execute: required file not found/.test(
+      errText,
+    )
+  ) {
+    return (
+      "the checkout's asmlift bin is missing, not the row. The CLI's build output is gitignored, so " +
+      'a fresh worktree has no bin link: run `pnpm --filter @asmlift/cli build` and then ' +
+      '`pnpm install` again, and re-run this.'
+    );
+  }
+  const toolchain = errText.match(/cannot run '([^']+)' \([^)]*\) — not installed/);
+  if (toolchain) {
+    return (
+      `the pinned toolchain at ${toolchain[1]} is not installed on this machine, not the row. ` +
+      'Point the ASMLIFT_* env var for it at your copy (`source .envrc.local`), or install it, and ' +
+      're-run this.'
+    );
+  }
+  return undefined;
 }
 
 /** Run the script in its own directory, capturing both streams to files. Buffered rather than

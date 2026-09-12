@@ -14,7 +14,7 @@ import { join, relative } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 
 import { REPO_ROOT } from '../src/config';
-import { repro, reproDirFor } from '../src/report/repro';
+import { repro, reproDirFor, setupRefusal } from '../src/report/repro';
 import { LOCAL_SCRATCH_DIR } from '../src/run/preflight';
 
 const results = (JSON.parse(readFileSync(join(import.meta.dirname, '../results/results.json'), 'utf8')) as BenchOutput)
@@ -99,6 +99,17 @@ describe('bench repro — the script it hands over', () => {
     expect(existsSync(join(dir, 'repro-asmlift.sh'))).toBe(false);
   });
 
+  test("--tool m2c states M2C's published figure, not asmlift's", async () => {
+    // These differ on this row — asmlift 5/8, m2c 6/7 — so printing the asmlift one beside the
+    // m2c script hands the reader the wrong thing to compare out.c against.
+    const r = await run(id, { out: scratch(), tool: 'm2c' });
+    expect(fn.m2c.score).not.toBe(fn.asmlift.score);
+    expect(r.out).toContain(`m2c ${fn.m2c.outcome} ${fn.m2c.score}/${fn.m2c.maxScore} as published`);
+    expect(r.out).not.toContain(`${fn.asmlift.score}/${fn.asmlift.maxScore}`);
+    // and no symbol-map line: the map is asmlift's input, m2c's channel is the --context header
+    expect(r.out).not.toContain('symbol map from');
+  });
+
   test('the default out dir is one a bench run will not refuse the round for', () => {
     // The script's step 1 is `bench target … --out "$PWD"`, so run at the repo root it leaves
     // decomp.yaml/ctx.i/in.asm/proto.json untracked there — which `run/preflight.ts` refuses a
@@ -117,5 +128,37 @@ describe('bench repro — the script it hands over', () => {
     // an id is harness-generated, but this composes a filesystem path out of one, so a separator
     // or a traversal in it must land in the name and not in the path
     expect(relative(join(REPO_ROOT, '.local', 'repro'), reproDirFor('a/../b:c:d'))).toBe('a_.._b_c_d');
+  });
+});
+
+describe('bench repro — a broken MACHINE is not a non-matching row', () => {
+  // The fragile part of the diagnosis is a regex over a shell error string — three spellings for
+  // one missing binary, and a message format for the toolchain. A cause it stops recognising goes
+  // back to reading as a row that simply does not match, which is silent.
+  test('names the missing CLI bin, whichever way the shell spells it', () => {
+    for (const line of [
+      'bash: /wt/node_modules/.bin/asmlift: No such file or directory',
+      'bash: /wt/node_modules/.bin/asmlift: command not found',
+      '/wt/repro.sh: line 40: /wt/node_modules/.bin/asmlift: cannot execute: required file not found',
+    ]) {
+      expect(setupRefusal(line), line).toMatch(/asmlift bin is missing/);
+    }
+  });
+
+  test('names an uninstalled pinned toolchain, and names WHICH', () => {
+    const msg = setupRefusal(
+      "Error: cannot run '/private/tmp/transmuter/compilers/agbcc/agbcc' (ENOENT) — not installed, or its pinned-toolchain path is wrong",
+    );
+    expect(msg).toMatch(/not installed on this machine, not the row/);
+    expect(msg).toContain('/private/tmp/transmuter/compilers/agbcc/agbcc');
+  });
+
+  test('says nothing about a run that merely did not match', () => {
+    expect(setupRefusal('')).toBeUndefined();
+    expect(setupRefusal('[ranked] 1 candidate(s) scored, 0 dropped, best unsigned: 5/8')).toBeUndefined();
+    // the words are there but the shape is not: a comment quoting the recovery is not the failure
+    expect(
+      setupRefusal('# run `pnpm --filter @asmlift/cli build` if node_modules/.bin/asmlift is absent'),
+    ).toBeUndefined();
   });
 });

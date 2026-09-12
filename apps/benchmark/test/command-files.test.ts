@@ -39,6 +39,13 @@
 //      `results/results.json` in prose, and `CountCollectedGems`'s fan is hand-typed in several
 //      files while being one integer in that same committed JSON. §3 is checked against the
 //      artifact rather than read; nothing before checked it at all.
+//  10. A VERDICT THAT CLOSES A ROW, WITH NO EVIDENCE BEHIND IT. A precedent that asks for MORE work
+//      is self-correcting — the round measures, and a wrong one costs time. One that tells the agent
+//      to STOP is not: acting on it means not measuring, so the claim is never re-tested. A `docs/`
+//      link is the weakest thing that closes that, and the two checks around it do the rest:
+//      `citations.test.ts` holds the linked page's rows to still existing, the link check below
+//      refuses a 404. What the gate protects is pinned as a named SET of verdict bullets, because a
+//      count of them is satisfied by any block that happens to carry the words.
 //
 // WHAT IT STILL CANNOT DECIDE, so that nobody reads more into a green run than is there:
 //   - It cannot check that an instruction is TRUE. Only a command run can.
@@ -145,6 +152,227 @@ describe('the two round prompts do not duplicate an instruction', () => {
         expect(text, `${f} does not link ${doc} — the laws and the costs are shared by every round`).toContain(doc);
       }
     }
+  });
+});
+
+describe('a verdict that ENDS a round is linked to its evidence', () => {
+  // WHY THIS SHAPE. Three choices carry the gate, and each is what keeps it from passing over a
+  // corpus it is not really reading:
+  //
+  //   The KEY is the RULE — a verdict that tells the agent to stop — not any one word a prompt
+  //   happens to spell it with today, which an edit to the protected bullet also deletes.
+  //
+  //   The UNIT is the BULLET: a top-level `-`/`N.` item plus its continuation lines. A blank-line
+  //   block is too coarse — `## Hard rules`' five numbered items are one block, and its rule 4
+  //   carries `unmatchable` while its rule 5 links `docs/measurement-discipline.md`, so an
+  //   unrelated neighbour would back a verdict that links nothing. Three independent existentials
+  //   over an 18-line paragraph is not a rule about a verdict.
+  //
+  //   The ASSERTION is the pinned inhabitant SET below, not a count: a count is satisfied by any
+  //   block carrying the words, a named set only by the bullets the gate exists for.
+  //
+  // The link must be a MARKDOWN link, because the sibling link-resolution suite below only inspects
+  // `](…)` — a bare `docs/foo.md` in running text is an unchecked promise. `registerBacked` is a
+  // third, non-redundant check: re-pointing every verdict at some other `docs/` page keeps the set
+  // intact and the unbacked list empty while leaving the register itself unreferenced (#186: a
+  // stamp needs a test where it is produced).
+  const STOPS = /\bstops?\b/i;
+  const VERDICT = /\bunmatchable\b|\bquirks?\b/i;
+  const DOC_LINK = /\]\([^)\s]*docs\/[\w.-]+\.md[^)\s]*\)/;
+  const REGISTER_LINK = /\]\([^)\s]*docs\/unmatchable-quirks\.md[^)\s]*\)/;
+  const BULLET = /^(?:[-*+]|\d+\.)\s/;
+
+  /** Every verdict bullet that must carry an evidence link today, `file: label`. A verdict that is
+   *  reworded away drops out of this set and reddens the file; a NEW one has to be added here on
+   *  purpose, which is where an author is asked whether it is backed. Labels are the bullet's bold
+   *  lead, not line numbers — those rot on the next edit above them. */
+  const PINNED = ['match-function.md: Unmatchable source quirk', 'match-function.md: Stop rule.'];
+
+  /** The units a verdict can live in: a top-level bullet or numbered rule with its continuation
+   *  lines, and (for text that is not a list) a blank-line-delimited paragraph. */
+  const verdictUnits = (lines: string[]) => {
+    const units: { line: number; body: string[] }[] = [];
+    const pushBlock = (block: string[], base: number) => {
+      let s = 0;
+      for (let i = 0; i <= block.length; i++) {
+        if (i < block.length && !(i > s && BULLET.test(block[i]))) {
+          continue;
+        }
+        if (i > s) {
+          units.push({ line: base + s + 1, body: block.slice(s, i) });
+        }
+        s = i;
+      }
+    };
+    let start = 0;
+    for (let i = 0; i <= lines.length; i++) {
+      if (i < lines.length && lines[i].trim() !== '') {
+        continue;
+      }
+      if (i > start) {
+        pushBlock(lines.slice(start, i), start);
+      }
+      start = i + 1;
+    }
+    return units;
+  };
+
+  /** Units of `lines` that pronounce a row unmatchable AND tell the agent to stop. Returns WHICH
+   *  were examined, not just how many — a gate over an empty set is a comment with a test runner
+   *  attached, and a gate over an unnamed set is one a decoy can keep alive. */
+  const scanStops = (lines: string[], file = '<fixture>') => {
+    const unbacked: string[] = [];
+    const examined: { file: string; label: string; line: number }[] = [];
+    let registerBacked = 0;
+    for (const unit of verdictUnits(lines)) {
+      const text = unit.body.join(' ');
+      if (!VERDICT.test(text) || !STOPS.test(text)) {
+        continue;
+      }
+      const label = (unit.body[0].match(/\*\*(.+?)\*\*/)?.[1] ?? unit.body[0].trim().slice(0, 60)).trim();
+      examined.push({ file, label, line: unit.line });
+      if (REGISTER_LINK.test(text)) {
+        registerBacked++;
+      }
+      if (!DOC_LINK.test(text)) {
+        unbacked.push(`${file}:${unit.line}: ${unit.body[0].trim().slice(0, 70)}`);
+      }
+    }
+    return { examined, unbacked, registerBacked };
+  };
+
+  it('every unmatchable verdict in a command file links a docs/ page', () => {
+    const examined: { file: string; label: string; line: number }[] = [];
+    const unbacked: string[] = [];
+    let registerBacked = 0;
+    for (const f of commandFiles()) {
+      const found = scanStops(read(f), f);
+      examined.push(...found.examined);
+      unbacked.push(...found.unbacked);
+      registerBacked += found.registerBacked;
+    }
+    expect(unbacked, `a verdict that stops the round, with no evidence link: ${unbacked.join(' | ')}`).toEqual([]);
+    expect(
+      examined.map((e) => `${e.file}: ${e.label}`).sort(),
+      'the set of verdict bullets this gate protects has changed. MISSING entry: a bullet that told ' +
+        'an agent a row is unmatchable and to stop no longer reads that way — if that was deliberate, ' +
+        'delete it from PINNED; if not, this is the regression the gate exists to catch. EXTRA entry: ' +
+        'a new verdict that ends a round — add it to PINNED once it links its evidence.',
+    ).toEqual([...PINNED].sort());
+    expect(
+      registerBacked,
+      'no verdict bullet links docs/unmatchable-quirks.md any more. Every one of them is backed by ' +
+        'SOME docs page, so the check above is green — but the register that holds the cleared rows ' +
+        'is now unreachable from the prompts, which is how it stops being read.',
+    ).toBeGreaterThan(0);
+  });
+
+  it('fires on a verdict whose evidence link is missing, and only then', () => {
+    const bullet = [
+      '- **Unmatchable source quirk** — the original C used a construct no honest recovery would',
+      '  produce. Say so, prove it, and stop.',
+    ];
+    const unlinked = scanStops(bullet);
+    expect(unlinked.examined.map((e) => e.label)).toEqual(['Unmatchable source quirk']);
+    expect(unlinked.unbacked).toHaveLength(1);
+    expect(unlinked.unbacked[0]).toContain('<fixture>:1: - **Unmatchable source quirk**');
+    const backed = [
+      bullet[0],
+      `${bullet[1]} The bar is [\`docs/unmatchable-quirks.md\`](../../docs/unmatchable-quirks.md).`,
+    ];
+    expect(scanStops(backed).unbacked).toEqual([]);
+    expect(scanStops(backed).registerBacked).toBe(1);
+    // A bare path in prose is NOT a link: nothing downstream checks it resolves.
+    const prose = [bullet[0], `${bullet[1]} The bar is docs/unmatchable-quirks.md.`];
+    expect(scanStops(prose).unbacked).toHaveLength(1);
+    // Some other docs page is a link but not the register: backed, not register-backed.
+    const elsewhere = [bullet[0], `${bullet[1]} The bar is [\`docs/bench-cost.md\`](../../docs/bench-cost.md).`];
+    expect(scanStops(elsewhere).unbacked).toEqual([]);
+    expect(scanStops(elsewhere).registerBacked).toBe(0);
+  });
+
+  it('does not let a neighbouring rule back a verdict', () => {
+    // `## Hard rules` verbatim in shape: one blank-line block, five numbered items, the verdict in
+    // item 2 and an unrelated docs link in item 3. Scanned by blank-line block this is ONE backed
+    // block — examined 1, unbacked 0 — which is the shape the bullet unit exists to split.
+    const rules = [
+      '1. **Never trade a loud failure for a silent wrong answer.** Every new transform must state',
+      '   the condition under which it refuses.',
+      '2. **Stop rule.** If the capability is bigger than this session, or the row turns out',
+      '   unmatchable: keep and ship the commits that genuinely reduced the diff.',
+      '3. **Everything in [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md)**',
+      '   — numbers come from commands; a measured null ships.',
+    ];
+    const scanned = scanStops(rules, 'hard-rules');
+    expect(scanned.examined.map((e) => e.label)).toEqual(['Stop rule.']);
+    expect(scanned.unbacked).toHaveLength(1);
+    expect(scanned.unbacked[0]).toContain('hard-rules:3:');
+    expect(scanned.registerBacked).toBe(0);
+  });
+});
+
+describe('the unmatchable register is falsified by the artifact', () => {
+  // The register says of itself that "an entry here closes a row to future rounds and that is
+  // exactly the kind of claim that rots unwatched". It does not rot on a CLOCK the way the cost
+  // figures gated below do; it rots the instant somebody matches the row. `results.json` knows, and
+  // `citations.test.ts` already holds the ids in this page to rows that exist, so what is left is
+  // the one assertion the entry's own falsification condition names.
+  const REGISTER = join(DOCS_DIR, 'unmatchable-quirks.md');
+  const ROW_ID = /^\|\s*`([\w.-]+:[\w.-]+:[\w.-]+)`\s*\|/;
+  const SECTION = '## The register';
+
+  /** ONLY the rows under `## The register`. The page carries a SECOND table — the near-misses that
+   *  the inhabitant count explicitly says are NOT closed — and scanning the whole file would read
+   *  one of those as a closed row the moment its cell is reformatted into a bare row id. Under the
+   *  register's own semantics ("an entry here closes a row to future rounds") that silently closes a
+   *  row nobody voted to close, and the reader of this gate's green run would never learn it. */
+  const registerRows = () => {
+    const lines = readFileSync(REGISTER, 'utf8').split('\n');
+    const from = lines.indexOf(SECTION);
+    expect(
+      from,
+      `${REGISTER} has no '${SECTION}' heading — the table this gate reads has been renamed or ` +
+        'moved, and scanning the rest of the page would treat the near-miss table as closed rows',
+    ).toBeGreaterThanOrEqual(0);
+    const to = lines.findIndex((l, i) => i > from && l.startsWith('## '));
+    return lines
+      .slice(from + 1, to === -1 ? lines.length : to)
+      .map((l) => l.match(ROW_ID)?.[1])
+      .filter((id): id is string => Boolean(id));
+  };
+
+  it('every row it closes is still a nonmatch in results.json', () => {
+    const ids = registerRows();
+    expect(
+      ids.length,
+      `no row parsed out of ${REGISTER}'s table — either the register is empty (delete this gate) or ` +
+        'its table shape moved and this check went blind',
+    ).toBeGreaterThan(0);
+
+    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as {
+      id: string;
+      asmlift?: { outcome?: string };
+    }[];
+    const falsified: string[] = [];
+    for (const id of ids) {
+      const row = artifact.find((r) => r.id === id);
+      // `citations.test.ts` also resolves this id, and this assertion is KEPT anyway rather than
+      // deferred to it: an id that stops resolving leaves `row?.asmlift?.outcome` undefined, which
+      // is not `'match'`, so without this line the check below passes over an empty set and this
+      // gate is vacuous. The duplication is with a suite whose coverage of this page is conditional
+      // (`docs` being in its `SCANNED` list) and whose failure message is about citations, not
+      // about a closed row.
+      expect(row, `${REGISTER} closes ${id}, which is not a row in the committed results.json`).toBeDefined();
+      if (row?.asmlift?.outcome === 'match') {
+        falsified.push(id);
+      }
+    }
+    expect(
+      falsified,
+      `the register calls these rows unmatchable and the artifact says asmlift matched them. An entry ` +
+        `is falsified by one honest spelling reaching the target bytes, and a published match IS one: ` +
+        `delete the entry, do not annotate it. ${falsified.join(', ')}`,
+    ).toEqual([]);
   });
 });
 

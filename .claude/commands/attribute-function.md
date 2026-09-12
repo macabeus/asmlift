@@ -152,6 +152,10 @@ near-identical code diffs as ~100% different. Instead:
   capability gaps, some will belong to other, known machinery (dispatch shape of a recovered
   `switch`, signedness of locals, operand order). Separate them explicitly — a finding attributed
   to the wrong machinery produces a row that gates nothing.
+- Check the row against [`docs/unmatchable-quirks.md`](../../docs/unmatchable-quirks.md) before
+  filing a gap for it. A residual already cleared there is not a capability gap and must not become
+  a row; a residual you believe that register gets WRONG is worth more than any attribution, because
+  its entries close rows and each is falsified by one honest spelling reaching the target bytes.
 
 ## Phase 3 — Verify every hypothesis against the compiler itself
 

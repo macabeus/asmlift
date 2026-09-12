@@ -100,9 +100,13 @@ them are not "add a feature":
   candidate-generation change, and levers regress other rows far more often than they help; it
   needs a gate (see Hard Rules).
 - **Unmatchable source quirk** — the original C used a construct no honest recovery would produce
-  (register-allocation intermediates, a hand-written temporary, an unusual build flag). Real
-  precedent in this repo: `StrCpy`. Say so, prove it, and stop — do not invent machinery to imitate
-  a quirk.
+  (register-allocation intermediates, a hand-written temporary, an unusual build flag, a redundant
+  expression the compiler then eliminates). Say so, prove it, and stop — do not invent machinery to
+  imitate a quirk. The bar for "prove it" and the rows that have cleared it are
+  [`docs/unmatchable-quirks.md`](../../docs/unmatchable-quirks.md): two compiler sweeps, not an
+  argument about plausibility, because the verdict closes a row to every later round. An entry there
+  is falsified by one honest spelling reaching the target bytes — so read the row's entry and try to
+  break it rather than citing it.
 - **Harness / fidelity problem** — the row is built with a toolchain or flags the real project did
   not use (the `old_agbcc` class of bug). Then the fix is in the manifest/toolchain, not the
   decompiler, and it may *remove* the row rather than match it.
@@ -433,7 +437,10 @@ launch anything long. What this command leans on:
    for harness reasons.
 4. **Stop rule.** If the capability is bigger than this session, or the row turns out unmatchable:
    keep and ship the commits that genuinely reduced the diff, and report what is blocked and what
-   the next step would be. Do not force an ad-hoc hack to close the last few bytes.
+   the next step would be. Do not force an ad-hoc hack to close the last few bytes. "Unmatchable"
+   here means it cleared the bar in
+   [`docs/unmatchable-quirks.md`](../../docs/unmatchable-quirks.md) — two compiler sweeps — and
+   never "I ran out of session": that case is blocked, which is a different report.
 5. **Everything in [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md)** —
    numbers come from commands; a compiler claim is verified by compiling; a refusing site is named
    by instrumenting or ablating it; NO REACH ≠ LOSES ≠ DOES NOT COMPOSE; the denominator moves;
