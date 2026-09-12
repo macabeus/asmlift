@@ -9,11 +9,13 @@ import type { Case } from '../src/cases/types';
 import {
   FAN_SCORE_LIMIT,
   SCORE_SECONDS_PER_CANDIDATE,
+  definedLabels,
   estimatedScoreTime,
   fanDiffLine,
   noFanReport,
   optionRefusal,
   pickCandidate,
+  renameWarning,
   renderFan,
   scoreLine,
   selectCases,
@@ -226,6 +228,51 @@ describe('optionRefusal', () => {
 
   it('allows --show best on the scored path, which is sorted best-first', () => {
     expect(optionRefusal({ show: 'best' })).toBeUndefined();
+  });
+
+  // `--force` raises the COMPILE limit, and both enumeration-only paths compile nothing. It was
+  // accepted and dropped in silence — including `--asm --force`, which reaches this function as
+  // `enumerateOnly: true` (cli.ts passes `force` straight through to `fanOfAsm`).
+  it('refuses --force where nothing is compiled, instead of ignoring it', () => {
+    expect(optionRefusal({ enumerateOnly: true, force: true })).toContain('cannot mean anything');
+  });
+
+  it('allows --force on the scoring path, where there is a limit to raise', () => {
+    expect(optionRefusal({ force: true })).toBeUndefined();
+  });
+});
+
+// WHICH FUNCTION A `.s` FAN IS OF. The frontend refuses an unknown name on a multi-function file
+// and RENAMES on a single-function one — deliberately, because that rename is the klonoa workflow.
+// So the silent case is the one-function file, where a typo'd symbol priced the file's own
+// function under a name that exists nowhere and exited 0 with a confident count.
+describe('--asm names the function it actually priced', () => {
+  const oneFunction = ['\t.globl\tu8spill', '\t.thumb_func', 'u8spill:', '\tpush\t{r4}', '.L6:', '\tbx\tlr'].join('\n');
+
+  it('lists the labels a file defines, and not the assembler’s own', () => {
+    expect(definedLabels(oneFunction)).toEqual(['u8spill']);
+  });
+
+  it('reads a splitter macro’s name as a definition too', () => {
+    expect(definedLabels('\tthumb_func_start sub_0800D188\nsub_0800D188:\n\tbx lr')).toEqual(['sub_0800D188']);
+  });
+
+  it('warns when the symbol is in no label — the count is of whatever the file holds', () => {
+    const w = renameWarning('nosuchsym', 'u8spill.s', definedLabels(oneFunction));
+    expect(w).toContain('is not defined anywhere in u8spill.s');
+    expect(w).toContain('u8spill');
+  });
+
+  // The rename is LEGITIMATE and must not be refused: a klonoa split labels the function
+  // `sub_0800D188` and the round prices it under the name it is decompiling it as.
+  it('says nothing when the symbol is a label in the file', () => {
+    expect(renameWarning('u8spill', 'u8spill.s', definedLabels(oneFunction))).toBeUndefined();
+  });
+
+  // No labels parsed ⇒ no claim. Naming what "was really lifted" from a file this function could
+  // not read is exactly the confident wrong answer the warning exists to prevent.
+  it('makes no claim about a file it found no labels in', () => {
+    expect(renameWarning('anything', 'x.s', [])).toBeUndefined();
   });
 });
 

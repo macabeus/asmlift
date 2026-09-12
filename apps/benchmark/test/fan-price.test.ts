@@ -97,6 +97,19 @@ describe('the ranked row records its own price', () => {
     expect(r.rankSeconds).toBeGreaterThanOrEqual(0);
   });
 
+  // THE IDENTITY `bench fan --base` RESTS ON at three of its four exits: the number `--enumerate`
+  // prints is the number a run RECORDS. They are different calls — `--enumerate` prints
+  // `enumerateRanked(...).length`, the run records `fanSize(rankBy(enumerateRanked(...)))` — and
+  // they agree only because `rankBy` partitions its input and never filters it. Verified by hand
+  // on `synthetic:dma_wait:agbcc` (32 / 32 / 32) and pinned here, with the enumeration real on
+  // both sides: a rankBy that dropped a spelling from the fan would compare a published half
+  // against a recorded whole and report a shrink nobody caused.
+  test('the count a run records is the count --enumerate would print, over the same enumeration', () => {
+    rankInto(0, 0);
+    const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
+    expect(r.candidateCount).toBe(enumerateCandidates('f', LOADH, ARMV4T_AGBCC, {}).length);
+  });
+
   test('a NONCOMPILE row — every spelling refused — still carries its fan and its seconds', () => {
     ranked.mockImplementation(() => {
       throw new NoScorableCandidateError(
