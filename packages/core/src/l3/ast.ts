@@ -96,6 +96,16 @@ export type Expr =
   // reason — both spellings denote the same cell — and it is per SYMBOL, so every access of one
   // name carries the same answer, which is right for agbcc because one CSEd pool load serves
   // them all.
+  //
+  // `baseAdvanced` is the THIRD, and it answers about the ADDRESS COMPUTATION: this access's
+  // address was reached by ADDING this many bytes to a register that already held — and had just
+  // been used as — another address (`adds r3, #2` between two stores), rather than by a second
+  // pool word or a memory-operand displacement. `raise/const.ts` records it on the literal its
+  // fold produces, because the fold is what makes the three shapes indistinguishable; the
+  // structure seam copies it here. `l3/advance.ts` is what reads it, to offer a pointer local
+  // advanced in place. `exprEquals` ignores it for `operandOff`'s reason. Absence is never proof:
+  // a target whose frontend does not lift the advance stamps nothing, and the value is a byte
+  // count that can be NEGATIVE, so readers test `!== undefined`.
   | {
       k: 'index';
       base: Expr;
@@ -131,6 +141,7 @@ export type Expr =
       baseElem?: IrType;
       operandOff?: number;
       baseOrdered?: true;
+      baseAdvanced?: number;
     }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
@@ -437,9 +448,9 @@ export function exprEquals(a: Expr, b: Expr): boolean {
       const bb = b as typeof a;
       // `lead` is part of the ADDRESS (`g[0][i]` and `g[1][i]` are different elements), so it
       // must be compared — an omission here would let CSE/dedup collapse two distinct accesses.
-      // `operandOff` deliberately is NOT: two accesses agreeing on everything else denote the same
-      // cell and print the same subscript however the machine spelled the offset, so a CSE that
-      // collapses them respells nothing.
+      // The EVIDENCE fields (`operandOff`, `baseOrdered`, `baseAdvanced`) deliberately are NOT:
+      // two accesses agreeing on everything else denote the same cell and print the same subscript
+      // however the machine spelled the offset, so a CSE that collapses them respells nothing.
       const lead = a.lead ?? [];
       const bLead = bb.lead ?? [];
       return (

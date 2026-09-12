@@ -644,6 +644,7 @@ function memAccess(
   scalarGlobals: Set<string>,
   sym?: SymRenderCtx,
   isStore = false,
+  advancedBy?: number,
 ): Expr {
   // A deref of a global's address collapses to the bare global: `*(&gSym)` at off 0 is `gSym`;
   // at off N the global is an array — `gSym[N/width]` (a C global name decays to a pointer, so
@@ -660,7 +661,14 @@ function memAccess(
   // carried is already inside `baseExpr` — and folding them into one subscript below
   // (`idxVal + off / width`) is what makes the two indistinguishable at L3, so the displacement
   // is recorded before the fold destroys it (see the `operandOff` note in l3/ast.ts).
-  const fromOperand = off !== 0 ? ({ operandOff: off } as const) : {};
+  // …and the SECOND evidence field this seam carries: the byte step by which the machine advanced
+  // an address register to reach this access (raise/const.ts `advancedBy`, recorded before its own
+  // fold destroyed it). It rides beside `operandOff` because both are facts about how the address
+  // was computed rather than about which cell it names, and both are lost at L3 otherwise.
+  const addressEvidence = {
+    ...(off !== 0 ? ({ operandOff: off } as const) : {}),
+    ...(advancedBy !== undefined ? ({ baseAdvanced: advancedBy } as const) : {}),
+  };
   if (sym) {
     const gb = globalConstByte(baseExpr, off);
     const si = gb ? sym.info(gb.name) : undefined;
@@ -693,7 +701,7 @@ function memAccess(
     // buffer that member points AT (see ptrMemberElement).
     const elem = ptrMemberElement(baseExpr, null, off, width, signed, sym);
     if (elem) {
-      return { ...elem, ...fromOperand };
+      return { ...elem, ...addressEvidence };
     }
   }
   // …and the MULTIDIMENSIONAL bare-name spelling, which needs the byte terms globalOf's division
@@ -712,7 +720,7 @@ function memAccess(
       width,
       signed,
       lead: multi.lead,
-      ...fromOperand,
+      ...addressEvidence,
     };
   }
   const g = globalOf(baseExpr, width);
@@ -735,9 +743,9 @@ function memAccess(
     const lead = siArr === undefined ? null : bareArrayLead(siArr, width, signed);
     if (lead !== null) {
       sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr!.elemSigned ?? false)));
-      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead, ...fromOperand };
+      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead, ...addressEvidence };
     }
-    return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed, ...fromOperand };
+    return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed, ...addressEvidence };
   }
   const bt = base.type;
   if (bt.kind === 'ptr' && bt.to.kind === 'struct') {
@@ -749,7 +757,7 @@ function memAccess(
     const ok = rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === bt.to.name && baseExpr.k !== 'index';
     return { k: 'field', base: ok ? baseExpr : { k: 'cast', to: bt, e: baseExpr }, name: `field_${off}` };
   }
-  return { k: 'index', base: baseExpr, idx: { k: 'const', value: off / width }, width, signed, ...fromOperand };
+  return { k: 'index', base: baseExpr, idx: { k: 'const', value: off / width }, width, signed, ...addressEvidence };
 }
 
 // A variable-index array access `base[index]`; `base[index].field_K` when a `fieldOff` marks an
@@ -1906,6 +1914,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const preds = predecessorBlocks(fn);
   const ipdom = postDominators(fn);
   const dom = dominators(fn);
+
+  /** The byte step `raise/const.ts` recorded on the literal that feeds this access's address, or
+   *  `undefined` where the address was not reached by advancing a register. Read at the two
+   *  `memAccess` call sites, which are where an IR value becomes an L3 access node. */
+  const advanceStepOf = (base: Value): number | undefined => {
+    const step = defs.get(base)?.attrs.advancedBy;
+    return typeof step === 'number' ? step : undefined;
+  };
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
   const { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween } = analyze(
@@ -3655,6 +3671,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ctype,
         scalarGlobals,
         symCtx,
+        false,
+        advanceStepOf(d.operands[0]),
       );
     }
     // aload carries a runtime index operand (variable-index array access) — `base[index]`, or
@@ -4264,6 +4282,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           scalarGlobals,
           symCtx,
           true, // an lvalue: a member whose declaration is const cannot be NAMED as the target
+          advanceStepOf(op.operands[0]),
         );
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
