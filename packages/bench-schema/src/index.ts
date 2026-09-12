@@ -77,8 +77,12 @@ export interface DecompilerResult {
    *  three weeks. `droppedCandidates.length + withheldCandidates.length` was the artifact's whole
    *  view of a fan, which is the REFUSED part of it and on most rows is 0.
    *
-   *  DETERMINISTIC — enumeration is a cross over axes, not a measurement — so unlike `rankSeconds`
-   *  this is comparable between two artifacts and belongs in `stale-check`'s row key.
+   *  DETERMINISTIC GIVEN THE ENUMERATION SETTINGS — it is a cross over axes, not a measurement —
+   *  so unlike `rankSeconds` it is comparable between two artifacts and belongs in `stale-check`'s
+   *  row key. The qualification is not decorative: `ASMLIFT_PERSITE_SENSE=<n>` (packages/cli
+   *  rank.ts) forks the branch-sense booleans one bit per site and multiplies this by 2^n, read
+   *  from the ENVIRONMENT — so two shards launched from two shells record two counts for one row,
+   *  in a field `stale-check` compares. An artifact from a probe run is not one to commit.
    *
    *  Absent ⇒ the row never reached the ranked pass (`declined` on a phase-1 gap, or `failed`).
    *  `0` is not a possible value: a fan with no candidates throws before it can be counted. */
@@ -91,7 +95,16 @@ export interface DecompilerResult {
    *  about asmlift: it moves with machine load, with docker, and by ~5× with whether the candidate
    *  cache was warm. It is excluded from `bench diff`'s watched fields and from `stale-check`'s row
    *  key for exactly that reason — a nondeterministic field in either would report every row as
-   *  moved on every run. Read it as what this run cost, alongside the count that explains it. */
+   *  moved on every run. Read it as what this run cost, alongside the count that explains it.
+   *
+   *  ITS READER is `bench diff`'s cost section (`compareCost`/`costLines` in report/diff.ts),
+   *  which reports the tier total and names only rows over both floors, and says in the line
+   *  itself that it is wall clock. THE CACHE STATE IS NOT IN THIS ARTIFACT: the ~5× above is the
+   *  candidate cache, and the only record of it is the per-shard `[candcache] <mode> {…}` line in
+   *  the run log. It is deliberately not sampled into `meta` — `bench merge` rebuilds `meta` in
+   *  its OWN process, so a cache sample taken there would describe the merge and not the run,
+   *  which is why `meta.tree` was cut. A cost move is therefore a question for the fan and the run
+   *  log, never an attribution on its own. */
   rankSeconds?: number;
   /** asmlift only, scored rows: candidate spellings that FAILED TO BUILD and were dropped from
    *  the ranking, each with the compiler's first diagnostic line. A dropped sibling is a defect

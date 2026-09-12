@@ -69,7 +69,9 @@ import { rowsAddedSince } from './regression';
  *  this list decides the exit code and the artifact at `origin/main` predates the field: reading
  *  `undefined → 96` as a field change would paint every scored row red on the first comparison
  *  after it lands, on a run where nothing moved. The fan section states what moved, names the
- *  multiplier, and touches no verdict.
+ *  multiplier, and touches no verdict. `rankSeconds` is read there too, by the COST SECTION
+ *  (`compareCost`) — out of the verdict for the reason above, and not out of the report, because
+ *  a number recorded on 828 rows that nothing reads is bookkeeping.
  *
  *  `symbolsUsed` is the one published field still left out, and NOT for size — it is at most 1,108
  *  chars on any row of the current artifact. It is derived from the winning candidate, which
@@ -333,6 +335,89 @@ export function fanLines(r: FanReport, base: string, freshCounted: number): stri
   return lines;
 }
 
+/** WHAT THE RANKED PASS COST, between two artifacts — the reader `rankSeconds` did not have.
+ *
+ *  A recorded number nothing reads is bookkeeping: the field was excluded from `FIELDS` (it is
+ *  wall clock) and from `stale-check`'s row key (same reason), correctly, and then nothing else
+ *  looked at it. This is what it was recorded FOR — "the real tier rose 6.0× in 21 days on an
+ *  unchanged corpus", asked of two artifacts instead of two transcripts.
+ *
+ *  WALL CLOCK, AND SAID SO. It is measured under up to eight parallel shards on a machine that may
+ *  also be running another round, and it moves ~5× with whether the candidate cache was warm — a
+ *  state the artifact does NOT record (the per-shard `[candcache] <mode> {…}` line does, and
+ *  sampling it at merge time would publish the MERGE process's cache, not the run's). So a move
+ *  here is a QUESTION, never a verdict: the fan beside it is what makes it attributable, which is
+ *  why the two are reported in the same section and neither touches an exit code.
+ *
+ *  A floor, so a quiet run stays quiet: only rows that moved by both `COST_ROW_FLOOR_S` seconds
+ *  and `COST_ROW_FLOOR_X`× are named. Everything under that is the machine. */
+export const COST_ROW_FLOOR_S = 10;
+export const COST_ROW_FLOOR_X = 1.5;
+export const COST_ROWS_SHOWN = 5;
+
+export interface CostChange {
+  id: string;
+  from: number;
+  to: number;
+}
+export interface CostReport {
+  moved: CostChange[]; // over both floors, biggest absolute second-move first
+  compared: number; // rows where both sides recorded seconds
+  baseTotal: number;
+  freshTotal: number;
+}
+
+export function compareCost(base: BenchOutput, fresh: BenchOutput): CostReport {
+  const freshById = byId(fresh);
+  const moved: CostChange[] = [];
+  let compared = 0;
+  let baseTotal = 0;
+  let freshTotal = 0;
+  for (const was of base.results) {
+    const now = freshById.get(was.id);
+    const from = was.asmlift.rankSeconds;
+    const to = now?.asmlift.rankSeconds;
+    if (from === undefined || to === undefined) {
+      continue;
+    }
+    compared++;
+    baseTotal += from;
+    freshTotal += to;
+    const ratio = from > 0 ? to / from : Infinity;
+    if (Math.abs(to - from) >= COST_ROW_FLOOR_S && (ratio >= COST_ROW_FLOOR_X || ratio <= 1 / COST_ROW_FLOOR_X)) {
+      moved.push({ id: was.id, from, to });
+    }
+  }
+  moved.sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
+  return { moved, compared, baseTotal, freshTotal };
+}
+
+const secs = (n: number): string => `${n.toFixed(1)}s`;
+
+/** The cost section, as lines. Pure — `diffGate` prints them. Silent when the base recorded no
+ *  seconds: a series cannot start and report a move in the same run. */
+export function costLines(r: CostReport, base: string): string[] {
+  if (r.compared === 0) {
+    return [];
+  }
+  const shown = r.moved.slice(0, COST_ROWS_SHOWN);
+  const lines = shown.map(
+    (c) => `COST    ${c.id}: ${secs(c.from)} → ${secs(c.to)}` + (c.from > 0 ? ` (${(c.to / c.from).toFixed(2)}×)` : ''),
+  );
+  if (r.moved.length > shown.length) {
+    lines.push(
+      `COST    …and ${r.moved.length - shown.length} more row(s) over ${COST_ROW_FLOOR_S}s and ${COST_ROW_FLOOR_X}×`,
+    );
+  }
+  lines.push(
+    `cost vs ${base}: ranked pass ${secs(r.baseTotal)} → ${secs(r.freshTotal)}` +
+      (r.baseTotal > 0 ? ` (${(r.freshTotal / r.baseTotal).toFixed(2)}×)` : '') +
+      ` over ${r.compared} row(s) — WALL CLOCK under parallel shards, and ~5× with the candidate ` +
+      `cache; read it beside the fan above, not on its own.`,
+  );
+  return lines;
+}
+
 /** Is the artifact on disk still the base's own committed file, with no run behind it?
  *
  *  This gate reads whatever bytes happen to sit at `apps/benchmark/results/results.json` — and
@@ -408,6 +493,12 @@ export function diffGate(base = 'HEAD'): number {
     base,
     fresh.results.filter((r) => r.asmlift.candidateCount !== undefined).length,
   )) {
+    console.log(line);
+  }
+  // …and what it COST, in the same section and under the same rule: informational, no exit code.
+  // The fan is the "why" a cost move needs; printed apart, either number invites an attribution
+  // the other one refutes.
+  for (const line of costLines(compareCost(committed, fresh), base)) {
     console.log(line);
   }
 

@@ -6,8 +6,10 @@ import { describe, expect, test } from 'vitest';
 import {
   FAN_ROWS_SHOWN,
   type FanReport,
+  compareCost,
   compareFans,
   compareMeasurements,
+  costLines,
   fanLines,
   notRegenerated,
 } from '../src/report/diff';
@@ -353,6 +355,41 @@ describe('the fan section', () => {
     expect(lines.at(-1)).toContain('2 stopped ranking, 300 candidate(s) gone');
     expect(lines.at(-1)).toContain('ENDS here');
     expect(lines.some((l) => l.includes('predates the field'))).toBe(false);
+  });
+
+  // A COST SECTION, because a recorded number nothing reads is bookkeeping — and because the
+  // question `rankSeconds` was recorded for ("the real tier rose 6.0× in 21 days") is asked of two
+  // artifacts, not of two transcripts.
+  test('names a row whose ranking cost moved, over both floors, and totals the tier', () => {
+    const r = compareCost(
+      out(row('a', { rankSeconds: 100 }), row('quiet', { rankSeconds: 20 })),
+      out(row('a', { rankSeconds: 400 }), row('quiet', { rankSeconds: 21 })),
+    );
+    expect(r.moved).toEqual([{ id: 'a', from: 100, to: 400 }]);
+    const lines = costLines(r, 'origin/main');
+    expect(lines[0]).toBe('COST    a: 100.0s → 400.0s (4.00×)');
+    expect(lines.at(-1)).toContain('ranked pass 120.0s → 421.0s (3.51×) over 2 row(s)');
+    expect(lines.at(-1)).toContain('WALL CLOCK');
+  });
+
+  // Wall clock under eight parallel shards on a machine that may be running another round: a
+  // section that names ten rows on every run is a section a reader learns to skip.
+  test('a run that only moved by the machine names no row', () => {
+    const r = compareCost(out(row('a', { rankSeconds: 100 })), out(row('a', { rankSeconds: 108 })));
+    expect(r.moved).toEqual([]);
+    expect(costLines(r, 'origin/main')).toHaveLength(1);
+  });
+
+  // A big RATIO on a tiny row is the machine too (0.2s → 0.6s is three times nothing), and a big
+  // ABSOLUTE move on a huge row can be noise — both floors, or neither means anything.
+  test('a 3× on a row that ranks in under a second is under the seconds floor', () => {
+    expect(compareCost(out(row('a', { rankSeconds: 0.2 })), out(row('a', { rankSeconds: 0.6 }))).moved).toEqual([]);
+  });
+
+  // An artifact that predates the field: silence, not a vacuous `0.0s → 0.0s (1.00×)` that reads
+  // as a measured neutrality.
+  test('says nothing at all when the base recorded no seconds', () => {
+    expect(costLines(compareCost(out(row('a')), out(row('a', { rankSeconds: 9 }))), 'origin/main')).toEqual([]);
   });
 
   // An axis that touches 600 rows must not bury the totals line under 600 lines.
