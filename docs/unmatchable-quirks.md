@@ -41,13 +41,14 @@ spelling and compare **the function's own bytes, cut to the symbol's size**:
 
 ```sh
 arm-none-eabi-objcopy -O binary --only-section=.text <o> /tmp/f.bin
+off=$(arm-none-eabi-nm -S <o> | awk '$4=="<Symbol>"{print $1}')
 sz=$(arm-none-eabi-nm -S <o> | awk '$4=="<Symbol>"{print $2}')
-xxd -p -l $((0x$sz)) /tmp/f.bin
+xxd -p -s $((0x$off)) -l $((0x$sz)) /tmp/f.bin
 ```
 
-Two traps, both measured on 2026-09-12 on this machine's toolchain (Arm GNU Toolchain 14.2.Rel1,
-`objcopy` 2.43.1 — the one the row's harness uses), and both of which make the comparison **lie**
-rather than fail:
+Three traps, all measured on 2026-09-12 on this machine's toolchain (Arm GNU Toolchain 14.2.Rel1,
+`objcopy` 2.43.1 — the one the row's harness uses), and all three of which make the comparison
+**lie** rather than fail:
 
 - **Never write `… <o> - | xxd -p`.** This `objcopy` does not honour `-` as stdout. It prints
   nothing, exits **0**, and writes a file literally named `-` into the current directory. So every
@@ -61,6 +62,14 @@ rather than fail:
   to it carries the same fourteen bytes followed by **`c046`**. Cut to the symbol's size
   (`0000000e` here) and they are equal. Without the cut, the one spelling that _does_ match is the
   one the recipe reports as a mismatch.
+- **Cut from the symbol's OFFSET, not from byte 0.** `-l $sz` alone is only the function when the
+  symbol is first in `.text`, which it is for a one-function candidate file and is not the moment
+  the file declares a helper above it. Compiling `void Pad(u8*, u8*)` ahead of the same `StrCpy`
+  spelling puts it at `nm -S` value `00000008`, and the offset-less cut returns
+  `0978017070470000021c087810700132` — `Pad`, its alignment pad, and the first eight bytes of the
+  function — against `021c08781070013201310028f9d17047` for the real one. Every spelling in such a
+  file then reports "does not reach the target bytes", which is the NECESSARY half passing for the
+  wrong reason: a sweep that proves nothing, reported as a verdict that closes a row.
 
 The spelling asmlift actually publishes comes from `pnpm bench fan <row-id> --show best`, so the
 first thing to try is always **that `candidate` plus the construct**: if the row is a quirk row, the
