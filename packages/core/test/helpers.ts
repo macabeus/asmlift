@@ -55,11 +55,33 @@ export function mulberry32(seed: number): () => number {
  *  header, inner header, inner latch, outer latch, tail) and randomizes only the ops and the edge
  *  arguments: a skip edge that lands inside a loop body from outside makes the region irreducible,
  *  and what depth 2 exists to reach is the value that is carried by BOTH loops — the accumulator a
- *  nested `for` writes, whose home is outside the inner loop it is nevertheless updated in. */
-export function generateSsaFn(seed: number, depth: 0 | 1 | 2, readsOuter = false): Fn {
+ *  nested `for` writes, whose home is outside the inner loop it is nevertheless updated in.
+ *
+ *  3 is depth 2's SIBLING shape, and it exists for one reason: an enclosing loop with SEVERAL
+ *  children. Depth 2 gives a do-while exactly one child loop, so every rule in `latchInnerSub` that
+ *  is about WHICH children count — the filter that drops a child containing the latch, the filter
+ *  that drops one that does not dominate it, and the ORDER the surviving children are applied in —
+ *  has no inhabitant to be wrong about, and each can be deleted with the whole core suite green.
+ *  Measured before this shape existed: 2 calls of 187,117 reached a two-child latch.
+ *
+ *  The skeleton, fixed (11 blocks), with ops and edge arguments random as at depth 2:
+ *
+ *      bb0 entry ─▶ bb1 outer header ─▶ bb2 ⇄ bb3 (loop A) ─▶ bb4 ⇄ bb5 (loop B)
+ *                        ▲                                        │
+ *                        │                     bb6 branch ────────┘
+ *                        │                      │        ╲
+ *                        │             bb7 ⇄ bb8 (loop C) ╲
+ *                        └──────────── bb9 outer latch ◀───┘ ─▶ bb10 tail
+ *
+ *  A and B are siblings that both dominate the outer latch — two children, in a fixed textual
+ *  order, so reversing the order the substitutions apply in is observable. C is inside ONE ARM of a
+ *  branch, so it reaches the latch on some paths and does not dominate it — the inhabitant of the
+ *  dominance filter. No child contains the latch; that filter's inhabitant needs an irreducible
+ *  shape this generator does not build, and it stays named rather than reached. */
+export function generateSsaFn(seed: number, depth: 0 | 1 | 2 | 3, readsOuter = false): Fn {
   const rnd = mulberry32(seed);
   const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
-  const nBlocks = depth === 2 ? 6 + Math.floor(rnd() * 2) : 4 + Math.floor(rnd() * 3);
+  const nBlocks = depth === 3 ? 11 : depth === 2 ? 6 + Math.floor(rnd() * 2) : 4 + Math.floor(rnd() * 3);
   const a0 = mkValue(T.s(32));
   const a1 = mkValue(T.s(32));
   const blocks: Block[] = [{ params: [a0, a1], ops: [] }];
@@ -112,6 +134,29 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2, readsOuter = false
       continue;
     }
     const fwd = blocks[i + 1];
+    if (depth === 3) {
+      // the multi-child skeleton: latches at 3 (loop A), 5 (loop B), 8 (loop C), 9 (outer); a
+      // plain branch at 6 that puts loop C on one arm only; everything else a straight `br`.
+      const back = i === 3 ? blocks[2] : i === 5 ? blocks[4] : i === 8 ? blocks[7] : i === 9 ? blocks[1] : undefined;
+      const alt = i === 6 ? blocks[9] : undefined;
+      if (back === undefined && alt === undefined) {
+        b.ops.push(mkOp('br', { successors: [{ block: fwd, args: argsFor(fwd) }] }));
+        continue;
+      }
+      const t = back ?? alt!;
+      const cc = mkValue(T.u(32));
+      b.ops.push(mkOp('icmp_slt', { operands: [pick(avail), pick(avail)], results: [cc] }));
+      b.ops.push(
+        mkOp('cond_br', {
+          operands: [cc],
+          successors: [
+            { block: t, args: argsFor(t) },
+            { block: fwd, args: argsFor(fwd) },
+          ],
+        }),
+      );
+      continue;
+    }
     if (depth === 2) {
       // the fixed nested skeleton: a straight chain, with a guarded back edge at each latch
       const back = i === innerHeader + 1 ? blocks[innerHeader] : i === innerHeader + 2 ? blocks[1] : undefined;

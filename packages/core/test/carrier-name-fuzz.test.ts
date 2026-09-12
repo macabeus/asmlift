@@ -23,7 +23,7 @@ import type { SFn } from '../src/l3/ast';
 import { type Gate, without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, type CarrierName, structure } from '../src/structure/structure';
-import { BREATHE_EVERY, type Event, breathe, generateSsaFn, traceOf, tracesDiffer } from './helpers';
+import { BREATHE_EVERY, type Event, breathe, generateSsaFn, irTraceOf, traceOf, tracesDiffer } from './helpers';
 
 // Same load sensitivity as the sibling fuzz: solo these run in a couple of seconds, and under a
 // full parallel suite the 5 s default times out on machine load rather than on a defect.
@@ -67,13 +67,17 @@ const passThrough = (fn: Fn): void => {
   fn.writeOrder = { lastWrite: new Map(), writes: new Map(fn.blocks.map((b) => [b, 0] as const)) };
 };
 
-/** Both spellings of one seed, or null when the shape is not one this can judge. */
+/** Both spellings of one seed and what the IR itself does, or null when the shape is not one this
+ *  can judge. `ir` is the ORACLE — the observables read off the IR rather than off a structured
+ *  tree, so an EMISSION defect the reference spelling shares is visible to it and invisible to
+ *  `off`. It found one: a call whose only consumer was itself dropped vanished from every spelling
+ *  at once (`dead-effect.test.ts`). */
 function spellings(
   seed: number,
-  depth: 0 | 1 | 2,
+  depth: 0 | 1 | 2 | 3,
   drop?: string,
   nested?: { measured: boolean },
-): { off: Event[]; on: Event[]; src: string } | null {
+): { off: Event[]; on: Event[]; ir: Event[]; src: string } | null {
   let fn: Fn;
   try {
     fn = generateSsaFn(seed, depth, nested !== undefined);
@@ -94,16 +98,32 @@ function spellings(
     return null; // a decline is not a difference
   }
   try {
-    return { off: traceOf(off, seed), on: traceOf(on, seed), src: cBackend.emit(on) };
+    return { off: traceOf(off, seed), on: traceOf(on, seed), ir: irTraceOf(fn, seed), src: cBackend.emit(on) };
   } catch {
     return null; // step cap, or a construct the interpreter does not model
   }
 }
 
+// WHAT THE IR ORACLE STILL DISAGREES WITH, per depth, on the SHIPPED spelling — a ratchet, not a
+// clean bill. Each residual is a real emission defect this round measured and did not fix, and the
+// number is here so that the next one cannot be added silently:
+//
+//   • a call INLINED AT ITS USE beside another call, which renders the two in the opposite order
+//     (`fz399`: `if ((s32)f1(a1) < (s32)f0(a1))` for an IR that calls f0 first);
+//   • a call whose value reaches a merge, rendered as the edge copy INSIDE one arm, so an
+//     unconditional execution becomes a conditional one (`fz27`'s `%8`, the `branchArgFed` case);
+//   • a call rendered at two positions, so it executes twice.
+//
+// They are counts and not a frozen seed list on purpose: a seed list would have to be re-derived
+// every time the generator's stream moves, and the stream moving is not the regression this
+// guards against.
+const IR_RESIDUAL: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 48, 1: 31, 2: 6, 3: 5 };
+
 describe.each([
   ['acyclic', 0],
   ['loop-bearing', 1],
   ['nested', 2],
+  ['multi-child', 3],
 ] as const)('%s', (_name, depth) => {
   test('no name the walk adopts changes what the function does', async () => {
     const bad: number[] = [];
@@ -117,6 +137,24 @@ describe.each([
     }
     expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
     expect(bad).toEqual([]);
+  });
+
+  // THE ARM THAT IS NOT A SPELLING COMPARISON. The one above asks whether the walk's spelling and
+  // the reference spelling agree; both are trees this structurer emitted, so a defect they share
+  // is invisible to it by construction. This one asks whether the emitted tree computes what the
+  // IR does.
+  test("the walk's spelling computes what the IR computes", async () => {
+    const bad: number[] = [];
+    let judged = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
+      const r = spellings(seed, depth);
+      if (!r) continue;
+      judged++;
+      if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
+    }
+    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
+    expect(bad.length, `first disagreeing seed: ${bad[0] ?? '-'}`).toBeLessThanOrEqual(IR_RESIDUAL[depth]);
   });
 });
 
@@ -185,15 +223,24 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
 // is the point: exempting a gate is a visible act with a reason attached.
 const OUT_OF_REACH = new Set(['carrier-width', 'carrier-sign', 'carrier-write']);
 
-test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it changes what some function does', async () => {
+// AGAINST THE IR, not against the reference spelling. "Dropping it changes what some function does"
+// was measured as "the two spellings differ", which a rule could satisfy by making the function a
+// DIFFERENT RIGHT ANSWER — and which cannot distinguish a gate that prevents a wrong program from
+// one that prevents an unusual one. The bar here is the harder one a `sound` claim actually makes:
+// some function the shipped table gets RIGHT, the ablated table gets WRONG. Every sound gate in
+// reach still clears it (measured: `carrier-live` 900 wrong seeds at depth 0 against a base of 48,
+// `re-derives` 152, `sibling-param` 62).
+test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it makes some function disagree with its own IR', async () => {
   const inert: string[] = [];
   for (const g of CARRIER_NAME_GATES.filter((x) => x.sound && !OUT_OF_REACH.has(x.id))) {
     let found = false;
-    for (const depth of [0, 1, 2] as const) {
+    for (const depth of [0, 1, 2, 3] as const) {
       for (let seed = 1; seed <= SEEDS && !found; seed++) {
         if (seed % BREATHE_EVERY === 0) await breathe();
         const r = spellings(seed, depth, g.id);
-        if (r && tracesDiffer(r)) found = true;
+        if (!r || !tracesDiffer({ off: r.ir, on: r.on })) continue;
+        const base = spellings(seed, depth);
+        if (base && !tracesDiffer({ off: base.ir, on: base.on })) found = true;
       }
       if (found) break;
     }
