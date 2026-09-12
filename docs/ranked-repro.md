@@ -177,7 +177,8 @@ that, the number is `bench run`'s.
 #### The whole FAN, and any candidate's source: `pnpm bench fan`
 
 ```sh
-pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force]
+pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force] [--base <ref>]
+pnpm bench fan <sym> --asm <file.s> --toolchain <id> [--show <label>]
 ```
 
 The third vehicle, and the only one that answers **"which spellings did asmlift consider"** rather
@@ -212,6 +213,24 @@ Two things it can do that nothing else can:
   It also prints `[lever] <label> threw (no candidate from it)`, a channel `bench run` supplies no
   sink for at all — so a whole pre-fan half of a row's fan can vanish from a benchmark run with
   nothing printed, and here it does not.
+
+- **`--base <ref>` prints the fan MULTIPLIER against what that artifact recorded.** Since each row
+  carries its own `candidateCount`, this is a comparison rather than archaeology: `asmlift:
+[fan-diff] kleod:CountCollectedGems:agbcc: 5952 → 11904 (2.00×) vs origin/main`, with no bench run behind it.
+  It is sound because both sides are the SAME call — the run wrote its count out of
+  `rankOptionsFor`, and this enumerates under those same options for the same row id. It prints at
+  whichever exit the run reaches, the over-limit refusal included: on the rows that refuse, you
+  learn what the fan did without compiling any of it. Three ways there is no comparison are three
+  different sentences — an artifact that predates the field, a row the base never had, a ref
+  nothing can read — and none of them is a silence.
+- **`--asm <file.s> --toolchain <id>` prices a function that is not a benchmark row at all.** The
+  positional is then the SYMBOL. **Enumeration only**: scoring needs a target object to diff
+  against and a compiler configured for that object's world, which is exactly what a row carries
+  and a bare `.s` does not — a score from one would be a number against a target nobody named. And
+  it is NOT the harness's configuration: no prototypes, no `asmData` side table, no symbol map. So
+  its count compares with another `.s` run and with itself across two revisions, and NOT with a
+  row's recorded `candidateCount` — measured on `synthetic:dma_wait:agbcc`, whose row enumerates
+  **32** and whose bare `.s` enumerates **36**. The command says so on stderr every time.
 
 **A fan over 2,000 candidates is refused, not scored** (`--force` overrides), and the refusal
 prices the run it is refusing from the row's own count AND ITS OWN TIER. Scoring is a compile each,

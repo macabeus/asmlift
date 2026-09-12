@@ -22,6 +22,7 @@
 // The line shapes are deliberately the CLI's (`asmlift: [score] …`, `[dropped]`, `[withheld]`,
 // `[ranked]`), so docs/ranked-repro.md's comparison recipe — `grep -F '[score]'` over two runs —
 // works across the two commands without a second recipe to keep in step.
+import type { BenchOutput } from '@asmlift/bench-schema';
 import { declaredBlock } from '@asmlift/cli/declare';
 import { isDecline } from '@asmlift/cli/decline';
 import { bakedBuild, sampleSourceTree, sourceStamp } from '@asmlift/cli/provenance';
@@ -32,12 +33,16 @@ import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Candidate, DroppedCandidate, WithheldCandidate } from '@asmlift/core/rank';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
+import { readFileSync } from 'node:fs';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { realCases } from '../cases/real';
 import { syntheticCases } from '../cases/synthetic';
 import type { Case } from '../cases/types';
-import { asmliftFan, rankOptionsFor } from '../eval/asmlift';
+import { asmliftFan, fanSize, rankOptionsFor } from '../eval/asmlift';
+import { readCommitted } from '../report/committed';
+import { fanMove } from '../report/diff';
+import { TOOLCHAINS, type Toolchain } from '../toolchains';
 
 /** How many candidates this command will COMPILE before refusing without `--force`.
  *
@@ -101,12 +106,71 @@ export function estimatedScoreTime(n: number, tier: Case['tier']): string {
 export interface FanOptions {
   /** print this candidate's SOURCE (its label, or `best`) after the table */
   show?: string;
+  /** COMPARE this row's fan against the count the artifact at this ref recorded for it — the
+   *  fan multiplier a round is asked to report before it merges an axis. Spelled `--base` rather
+   *  than a second word for "which committed artifact to compare against": `diff`, `regression`,
+   *  `baseline` and `stale-check` all already take it, and two names for one ref is how the two
+   *  spellings come to mean different things. */
+  base?: string;
   /** List the fan without compiling anything. Cheap against the scoring pass and not free:
    *  5,952 labels took 50 s wall here (`kleod:CountCollectedGems:agbcc`, target build included),
    *  so the biggest fans take minutes to merely list. */
   enumerateOnly?: boolean;
   /** score a fan larger than FAN_SCORE_LIMIT anyway */
   force?: boolean;
+}
+
+/** THE FAN MULTIPLIER, against what the artifact at `base` recorded for this same row — one line,
+ *  and the number a round that ships an axis is asked to report before it merges.
+ *
+ *  It is a comparison of THIS TREE's enumeration against a RECORDED one, which is sound only
+ *  because both are the same call: the run wrote `candidateCount` out of `rankOptionsFor`'s
+ *  options, and this command enumerates under those same options for the same row id. A fan
+ *  enumerated under options assembled a second time is a fan of a different configuration —
+ *  docs/ranked-repro.md documents a 112,896-vs-135,936 spread from exactly that.
+ *
+ *  Every way the comparison cannot be made is a SENTENCE rather than a silence, because the
+ *  answer this returns is the one a round pastes: an artifact that predates the field, a row the
+ *  base never had, and a ref nothing can read are three different facts and only one of them is
+ *  about the fan.
+ *
+ *  Pure — the caller prints it — and it takes the base artifact rather than reading it, so the
+ *  three refusals are testable without a checkout to compare against. */
+export function fanDiffLine(
+  rowId: string,
+  now: number,
+  base: string,
+  committed: BenchOutput | { error: string },
+): string {
+  if ('error' in committed) {
+    return `asmlift: [fan-diff] cannot read the artifact at ${base}: ${committed.error.split('\n')[0]}`;
+  }
+  const was = committed.results.find((r) => r.id === rowId);
+  if (was === undefined) {
+    return (
+      `asmlift: [fan-diff] ${rowId} is not in the artifact at ${base} — this row was added since, so ` +
+      `there is no earlier fan to compare. This run enumerates ${now}.`
+    );
+  }
+  const from = was.asmlift.candidateCount;
+  if (from === undefined) {
+    return (
+      `asmlift: [fan-diff] the artifact at ${base} records no candidate count for ${rowId} ` +
+      `(it predates the field, or the row never ranked there). This run enumerates ${now}; the ` +
+      `series starts here.`
+    );
+  }
+  return `asmlift: [fan-diff] ${rowId}: ${fanMove(from, now)} vs ${base}`;
+}
+
+/** The base artifact, or the reason it could not be read — `readCommitted` throws, and a throw
+ *  here would take down a fan the reader has already paid tens of seconds to enumerate. */
+function baseArtifact(base: string): BenchOutput | { error: string } {
+  try {
+    return readCommitted(base);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** Resolve a row the way a reader names one: the exact id first, then a substring of it.
@@ -360,6 +424,107 @@ export function unshowable(
     : `${JSON.stringify(label)} ${where}. Its source is still readable: re-run with --enumerate --show ${label}`;
 }
 
+/** THE FAN OF A FUNCTION THAT IS NOT A BENCHMARK ROW — one `.s` file, one toolchain, no target
+ *  object, nothing compiled.
+ *
+ *  The command above is dataset-row-scoped by construction and that is right for what it does: the
+ *  row IS the configuration, so what it prints is what the benchmark measured. But the question
+ *  "what would this function's fan cost" is asked about functions that have no row yet — the one
+ *  a dogfooding round is about to attempt, the one a round is deciding whether to add, the one
+ *  `fan.ts` prices at five hours and nobody has ever enumerated. There was no way to ask it, so
+ *  rounds hand-built a driver, and 41 of 51 of those hit `ERR_MODULE_NOT_FOUND` before they got an
+ *  answer.
+ *
+ *  ENUMERATION ONLY, and that is a refusal rather than an omission: scoring needs a target object
+ *  to diff against and a compiler configured to build against that object's world, which is
+ *  exactly the configuration a row carries and a bare `.s` does not. A fan listed from a `.s` is
+ *  an honest count of spellings; a SCORE from one would be a number against a target nobody named.
+ *
+ *  It is also NOT the harness's configuration: no prototypes, no side-table `asmData`, no symbol
+ *  map. So its count is comparable with another `.s` run, and with itself across two revisions —
+ *  which is what it is for — and not with a row's recorded `candidateCount`. Said out loud, because
+ *  a number that looks like the row's and is not is worse than no number. */
+export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: FanOptions = {}): number {
+  const tc = (TOOLCHAINS as Record<string, Toolchain | undefined>)[toolchainId];
+  if (tc === undefined) {
+    note(`unknown --toolchain ${JSON.stringify(toolchainId)} — one of: ${Object.keys(TOOLCHAINS).join(', ')}`);
+    return 2;
+  }
+  if (o.base !== undefined) {
+    note(
+      `--base compares against a row's RECORDED fan and a raw .s is not a row, so there is nothing ` +
+        `to look it up by. Enumerate the .s in both trees and compare the two counts.`,
+    );
+    return 2;
+  }
+  let asm: string;
+  try {
+    asm = scrubObjectHeader(readFileSync(asmPath, 'utf8'));
+  } catch (e) {
+    note(`cannot read ${asmPath}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`);
+    return 2;
+  }
+  const refusal = optionRefusal({ ...o, enumerateOnly: true });
+  if (refusal !== undefined) {
+    note(refusal);
+    return 2;
+  }
+  note(
+    `${sym} from ${asmPath} — toolchain ${toolchainId}, ENUMERATION ONLY: no target object, so ` +
+      `nothing is compiled or scored, and no prototypes, asm-data side table or symbol map are in ` +
+      `scope. This count is comparable with another .s run of the same file, NOT with a benchmark ` +
+      `row's recorded candidateCount.`,
+  );
+
+  // The same phase-1 verdict the row path states first: a gap here is what would make a published
+  // row `declined`, and enumeration below throws on it rather than annotating.
+  try {
+    const dec = decompile(sym, asm, tc.targetDesc, { onGap: 'annotate' });
+    for (const d of dec.diagnostics) {
+      note(`asmlift: [declined] ${d.stage}: ${d.reason.split('\n')[0].slice(0, 200)}`);
+    }
+  } catch (e) {
+    note(`asmlift: [declined] annotate pass threw: ${(e as Error).message.split('\n')[0]}`);
+  }
+
+  const leverErrors = new Map<string, string>();
+  let cands: Candidate[];
+  try {
+    cands = enumerateRanked(sym, asm, tc.targetDesc, {
+      onLeverError: (label: string, error: string) => leverErrors.set(label, error.split('\n')[0]),
+    });
+  } catch (e) {
+    for (const [label, error] of leverErrors) {
+      note(`asmlift: [lever] ${label} threw (no candidate from it): ${error}`);
+    }
+    const r = noFanReport(`${sym} (${asmPath})`, e, o.show);
+    if (r.fan.length > 0) {
+      console.log(r.fan.join('\n'));
+    }
+    for (const n of r.notes) {
+      note(n);
+    }
+    if (r.harnessDefect) {
+      console.error(e);
+    }
+    return 2;
+  }
+  for (const [label, error] of leverErrors) {
+    note(`asmlift: [lever] ${label} threw (no candidate from it): ${error}`);
+  }
+  console.log(cands.map((cand) => `asmlift: [candidate] ${cand.label}`).join('\n'));
+  console.log(`asmlift: [fan] ${cands.length} candidate(s) enumerated, none scored (--asm)`);
+  if (o.show) {
+    const picked = pickCandidate(cands, o.show);
+    if (!picked) {
+      note(`no candidate labelled ${JSON.stringify(o.show)} — see the [candidate] lines above`);
+      return 2;
+    }
+    console.log(showSource(picked.label, picked.source));
+  }
+  return 0;
+}
+
 export function fan(rowId: string, o: FanOptions = {}): number {
   // The tree BEFORE the run, for the stamp on the `[ranked]` line. A pair of samples, as
   // provenance.ts requires: one reading is blind to any edit not standing at that instant, and a
@@ -443,6 +608,15 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // re-runs every lever, so a lever that throws throws twice — reported twice, it reads as two
   // broken levers.
   const printedLevers = new Set<string>();
+  // THE MULTIPLIER, on stdout beside the fan it is about — printed at whichever of the three exits
+  // this run reaches, because all three know a count: the `--enumerate` listing, the over-limit
+  // refusal (which is the one that matters most on the big rows — you learn what the fan did
+  // without paying a compile for any of it) and the scored table.
+  const printFanDiff = (n: number): void => {
+    if (o.base !== undefined) {
+      console.log(fanDiffLine(c.id, n, o.base, baseArtifact(o.base)));
+    }
+  };
   const printLevers = (): void => {
     for (const [label, error] of leverErrors) {
       if (!printedLevers.has(label)) {
@@ -471,6 +645,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     if (o.enumerateOnly) {
       console.log(cands.map((cand) => `asmlift: [candidate] ${cand.label}`).join('\n'));
       console.log(`asmlift: [fan] ${cands.length} candidate(s) enumerated, none scored (--enumerate)`);
+      printFanDiff(cands.length);
       if (o.show) {
         const picked = pickCandidate(cands, o.show);
         if (!picked) {
@@ -490,6 +665,9 @@ export function fan(rowId: string, o: FanOptions = {}): number {
           `Re-run with --enumerate for the labels and sources without ` +
           `compiling, or --force to score them all.`,
       );
+      // …and the comparison anyway: the row this refusal fires on is exactly the row whose fan
+      // multiplier is worth knowing, and nothing was compiled to learn it.
+      printFanDiff(cands.length);
       return 2;
     }
   }
@@ -516,6 +694,10 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   }
   printLevers();
   console.log(renderFan(ranked, { synthesized: synthesizedRefs(c.tier, ranked.best), stamp: stampFrom(treeBefore) }));
+  // `fanSize`, not `candidates.length`: the recorded count this is compared against is the whole
+  // fan, refusals included, and comparing the published half against the whole would report a
+  // shrink on any row that dropped a spelling.
+  printFanDiff(fanSize(ranked));
   if (o.show) {
     const picked = pickCandidate(ranked.candidates, o.show);
     if (!picked) {

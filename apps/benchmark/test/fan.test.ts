@@ -1,3 +1,4 @@
+import type { BenchOutput } from '@asmlift/bench-schema';
 import type { RankedCandidate, RankedResult } from '@asmlift/cli/rank';
 import { rankedSummaryLine } from '@asmlift/cli/score-format';
 import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
@@ -9,6 +10,7 @@ import {
   FAN_SCORE_LIMIT,
   SCORE_SECONDS_PER_CANDIDATE,
   estimatedScoreTime,
+  fanDiffLine,
   noFanReport,
   optionRefusal,
   pickCandidate,
@@ -361,5 +363,54 @@ describe('noFanReport', () => {
   it('says --show cannot be answered when the row produced no candidates at all', () => {
     const e = new FrontendUnsupportedError('cannot lift');
     expect(noFanReport('synthetic:absi:gcc2.7.2kmc', e, 'unsigned').notes.join('\n')).toContain('cannot be answered');
+  });
+});
+
+// THE FAN MULTIPLIER — this tree's enumeration against what the artifact at a base recorded for
+// the same row. `LoadBGTilemapData` went 59,904 → 225,792 in six days and that series exists only
+// because rounds happened to type it into commit subjects; this is the command that asks.
+describe('fanDiffLine', () => {
+  const artifact = (rows: { id: string; candidateCount?: number }[]): BenchOutput =>
+    ({
+      results: rows.map((r) => ({
+        id: r.id,
+        asmlift: r.candidateCount === undefined ? {} : { candidateCount: r.candidateCount },
+      })),
+    }) as unknown as BenchOutput;
+
+  it('prints the move and the multiplier a round is asked to report', () => {
+    const line = fanDiffLine(
+      'proj:Fn:agbcc',
+      225792,
+      'origin/main',
+      artifact([{ id: 'proj:Fn:agbcc', candidateCount: 59904 }]),
+    );
+    expect(line).toBe('asmlift: [fan-diff] proj:Fn:agbcc: 59904 → 225792 (3.77×) vs origin/main');
+  });
+
+  // A fan that SHRANK is the same line under 1 — a round that prunes an axis is reporting a
+  // multiplier too, and a renderer that only knows growth makes it invisible.
+  it('reports a shrink as a multiplier under 1', () => {
+    expect(fanDiffLine('r', 48, 'origin/main', artifact([{ id: 'r', candidateCount: 96 }]))).toContain(
+      '96 → 48 (0.50×)',
+    );
+  });
+
+  // Three ways there is no comparison, and they are three different facts. A silence would let a
+  // round paste "no change" for a question that was never asked.
+  it('says the base artifact predates the field, rather than reading it as a fan of zero', () => {
+    const line = fanDiffLine('r', 96, 'origin/main', artifact([{ id: 'r' }]));
+    expect(line).toContain('records no candidate count');
+    expect(line).toContain('96');
+  });
+
+  it('says a row the base never had was ADDED since, not that its fan grew from nothing', () => {
+    const line = fanDiffLine('r', 96, 'origin/main', artifact([{ id: 'other', candidateCount: 4 }]));
+    expect(line).toContain('is not in the artifact at origin/main');
+  });
+
+  it('says a ref it cannot read is a ref it cannot read', () => {
+    const line = fanDiffLine('r', 96, 'nope', { error: "cannot read …: fatal: invalid object name 'nope'" });
+    expect(line).toContain('cannot read the artifact at nope');
   });
 });
