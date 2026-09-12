@@ -1483,16 +1483,19 @@ export function enumerateCandidates(
     // the only target that reaches the stamp (the corpus census below), and the day a second one
     // does, `compilerBehaviors` is where this belongs rather than a label.
     //
-    // THE PLAIN LABEL IS MEASURED INERT ON EVERY ROW THAT REACHES IT, and rides anyway. On this row
-    // `/advance` 15/23 ties both the bare `unsigned` and `/nearbase/raw-globals`, for a byte-level
-    // reason (agbcc folds the advance back), and every one of the five rows the lever reaches is
-    // agbcc — so no row can distinguish it today. It costs one candidate per fan point it reaches,
-    // about half the lever's +90 over the corpus. It is kept for the compiler that has not been
-    // measured, NOT because a row asks for it: its source genuinely differs from every other
-    // candidate's, so a compiler that does not fold `p = p + 1; *p` back would score it apart, and
-    // deleting it would make `/advance` the only minting lever on this roster whose un-qualified
-    // spelling is unreachable. Delete it the moment a second toolchain reaches the stamp and still
-    // cannot distinguish it.
+    // THE PLAIN LABEL IS GATED ON THE COMPILER BEHAVIOUR IT IS INERT UNDER, which is the third
+    // option the two earlier waves did not consider — they argued deleting it against keeping it,
+    // and `foldsConstAddrOffset` two hundred lines above is the shipped precedent for neither.
+    // agbcc FOLDS the advance back (`compilerBehaviors.foldsPointerAdvance`, its four compiled
+    // corners in test/advance.test.ts's header), so the plain spelling is byte-identical to the
+    // indexed one this roster already offers, and it is measured inert on every row that reaches
+    // it — `/advance` 15/23 against this row's 0/22 match, and it LOSES outright on the other four
+    // (`offhi_split` 33/64 vs 12/61 · `offhi_fused` 31/63 vs 0/58 · `dma_fill_uninit` 76/114 vs
+    // 0/103 · `volwalk` 5/7 vs 0/7, all `bench fan`, 2026-09-12). ABSENT ⇒ FALSY ⇒ THE LABEL
+    // SHIPS, so every compiler whose pair nobody has compiled keeps exactly the coverage it had:
+    // a compiler that does not fold `p = p + 1; *p` back would score the spelling apart, and that
+    // is the case the label exists for. `/advance/volatile` is not gated — `volatile` is what bars
+    // the fold, and that product is this row's match.
     //
     // NO `/vol-store` PRODUCT. That lever pins a store whose WHOLE ADDRESS is a device constant,
     // and this one has just replaced those constants with a local — so on the shape `/advance`
@@ -1508,8 +1511,18 @@ export function enumerateCandidates(
     // not a decline — the same hazard `l3/nearbase.ts` records for committed base-CSE, which
     // `/advance` inherits: where `structureChecked` has already hoisted the chain's pool word, the
     // members arrive as a `var` base and this pass enumerates nothing at all.
+    //
+    // AND IT IS MAP-LESS ONLY, which is what caps its reach at five rows: with a symbol map the
+    // pool word promotes to `&REG_WININ` and `l3/address.ts`'s `cellAddress` answers null, so every
+    // `/advance` candidate on this row carries `/raw-globals` (`bench fan
+    // kleod:StreamCmd_SetWindowRegs:agbcc --enumerate`, 18 candidates, the two advanced ones both
+    // `/raw-globals`). A capability that reads a CONST address does not survive the symbol-map
+    // direction unless `cellAddress` learns the promoted form; test/advance.test.ts's footer is
+    // where that is written down at the pass.
     const advance = (): SFn | null => survives(sfn, advancedBases(sfn));
-    respell('/advance', advance);
+    if (!target.compilerBehaviors.foldsPointerAdvance) {
+      respell('/advance', advance);
+    }
     respell('/advance/volatile', () => {
       const a = advance();
       return a ? volatilePtrLocals(a, createdLocals(sfn, a)) : null;

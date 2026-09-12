@@ -489,18 +489,37 @@ _0804E730: .4byte 0x04000048
 _0804E734: .4byte 0x03004D84
 `;
 
-test('the row enumerates the advanced spelling, qualified and plain', () => {
-  const cands = enumerateCandidates('StreamCmd_SetWindowRegs', KLEOD_SWR, ARMV4T_AGBCC, {
+const swrCandidates = (target: typeof ARMV4T_AGBCC): { label: string; source: string }[] =>
+  enumerateCandidates('StreamCmd_SetWindowRegs', KLEOD_SWR, target, {
     prototypes: { StreamCmd_SetWindowRegs: { returnsVoid: true } },
   });
-  const qualified = cands.find((c) => c.label.endsWith('/advance/volatile'));
+
+test('the row enumerates the advanced spelling, qualified', () => {
+  const qualified = swrCandidates(ARMV4T_AGBCC).find((c) => c.label.endsWith('/advance/volatile'));
   expect(qualified).toBeDefined();
   // The byte-exact spelling, compiled against the row's target object before this pass existed.
   expect(qualified!.source).toMatch(/volatile u16 \* p0;/);
   expect(qualified!.source).toMatch(/p0 = \(u16 \*\)67108936;/);
   expect(qualified!.source).toMatch(/p0 = p0 \+ 1;/);
-  expect(cands.some((c) => c.label.endsWith('/advance'))).toBe(true);
   // …and the base init leads, because that is the order the target's own pool words record.
   const lines = qualified!.source.split('\n').filter((l) => l.includes(' = '));
   expect(lines[0]).toContain('p0 = (u16 *)67108936;');
+});
+
+// The PLAIN label, both ways round. agbcc folds `p = p + 1; *p` back into `strh [r3, #2]` (the four
+// corners in this file's header), so its un-qualified spelling is byte-identical to the indexed one
+// the roster already offers and rank.ts withholds it — while a target that has NOT been compiled on
+// that pair keeps it, which is the whole point of gating on a behaviour instead of deleting a label.
+test('the plain /advance label follows compilerBehaviors.foldsPointerAdvance', () => {
+  expect(ARMV4T_AGBCC.compilerBehaviors.foldsPointerAdvance).toBe(true);
+  const plain = (t: typeof ARMV4T_AGBCC): boolean => swrCandidates(t).some((c) => c.label.endsWith('/advance'));
+  expect(plain(ARMV4T_AGBCC)).toBe(false);
+  const unmeasured = {
+    ...ARMV4T_AGBCC,
+    compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, foldsPointerAdvance: undefined },
+  };
+  expect(plain(unmeasured)).toBe(true);
+  // and the qualified product rides on BOTH: `volatile` is what bars the fold
+  expect(swrCandidates(ARMV4T_AGBCC).some((c) => c.label.endsWith('/advance/volatile'))).toBe(true);
+  expect(swrCandidates(unmeasured).some((c) => c.label.endsWith('/advance/volatile'))).toBe(true);
 });
