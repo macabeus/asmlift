@@ -234,9 +234,15 @@ function claudeFiles(): string[] {
  *  one of the five cost classes this round actually repaired: `~120 candidates/s`, a ranked run's
  *  `1500-8000 s`, `bench fan`'s `~8 minutes`, `bench gates`' `~10 s` and `npx vitest run`'s `~120 s`
  *  were all invisible to it. Mutation-proven: a line pricing `bench fan` and `bench gates` passed.
- *  The vocabulary is now the commands the prompts actually price. */
-const BENCH_COST =
-  /(?:pnpm |npx )?(?:bench[: ](?:run|merge|fan|gates|baseline|repro|target|diff|regression|setup|fidelity|smoke|verify|publish|vendor|stale-check|in-flight)|full bench|ranked run|ranked enumeration|vitest|test:matching|test:offline)[^\n]{0,140}?\b(?:~|about )?\d[\d,.]*\s*(?:s|sec|seconds|min|minutes|h|hours|ms)\b/i;
+ *  The vocabulary is now the commands the prompts actually price.
+ *
+ *  It also pins the RULE and not the spelling: a figure written in words ("is over five hours to
+ *  score") is the same claim as one written in digits, and the digits-only version could not see
+ *  it — which mattered, because the one figure this round could not re-measure is spelled that way. */
+const AMOUNT = String.raw`(?:\b(?:~|about |over |under )?\d[\d,.]*|\b(?:half an|one|two|three|four|five|six|seven|eight|nine|ten)\s)\s*`;
+const UNIT = String.raw`(?:s|sec|secs|second|seconds|min|mins|minute|minutes|h|hr|hrs|hour|hours|ms)\b`;
+const COMMAND = String.raw`(?:pnpm |npx )?(?:bench[: ](?:run|merge|fan|gates|baseline|repro|target|diff|regression|setup|fidelity|smoke|verify|publish|vendor|stale-check|in-flight)|full bench|ranked run|ranked enumeration|vitest|test:matching|test:offline)`;
+const BENCH_COST = new RegExp(`${COMMAND}[^\\n]{0,140}?${AMOUNT}${UNIT}`, 'i');
 
 /** The full-bench wall clock specifically — the figure that has now gone stale TWICE (the ledger's
  *  "~5 minutes" and the prompts' "~1800 s"), and the one the round's own remediation immediately
