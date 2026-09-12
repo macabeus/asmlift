@@ -256,8 +256,8 @@ describe('the rows a branch added, compared against the branch own artifact', ()
 });
 
 // THE FAN, which is a COST and not a claim. It is reported beside the verdict and never inside it:
-// a round can multiply the confirming gate's own price by four and move no published number —
-// which is exactly what happened while the real tier went 274 s → 1,654 s on an unchanged corpus.
+// a round can multiply the confirming gate's own price by four and move no published number — a
+// real tier going 274 s → 1,654 s over an unchanged corpus moves nothing this gate watches.
 describe('compareFans', () => {
   test('names the rows whose fan moved, biggest absolute move first', () => {
     const r = compareFans(
@@ -357,9 +357,8 @@ describe('the fan section', () => {
     expect(lines.some((l) => l.includes('predates the field'))).toBe(false);
   });
 
-  // A COST SECTION, because a recorded number nothing reads is bookkeeping — and because the
-  // question `rankSeconds` was recorded for ("the real tier rose 6.0× in 21 days") is asked of two
-  // artifacts, not of two transcripts.
+  // A COST SECTION, because a recorded number nothing reads is bookkeeping — and because "did the
+  // real tier get 6.0× more expensive" is a question two artifacts answer and two transcripts do not.
   test('names a row whose ranking cost moved, over both floors, and totals the tier', () => {
     const r = compareCost(
       out(row('a', { rankSeconds: 100 }), row('quiet', { rankSeconds: 20 })),
@@ -392,10 +391,10 @@ describe('the fan section', () => {
     expect(costLines(compareCost(out(row('a')), out(row('a', { rankSeconds: 9 }))), 'origin/main')).toEqual([]);
   });
 
-  // THE DEFECT THE FAN SECTION WAS FIXED FOR, REPRODUCED IN THE COST SECTION IN THE SAME WAVE. A
-  // row that stops ranking leaves BOTH totals, so the line whose entire job is "did this round make
-  // the bench more expensive" printed `1.00×` on the run where 1,654 s — the real tier's whole tail
-  // — walked out of the corpus. The row set the total is over belongs in the total's own sentence.
+  // THE FAN SECTION'S ROW-SET DEFECT, ASKED OF THE COST SECTION. A row that stops ranking leaves
+  // BOTH totals, so the line whose entire job is "did this round make the bench more expensive"
+  // reads `1.00×` on the run where 1,654 s — the real tier's whole tail — walks out of the corpus.
+  // The row set the total is over belongs in the total's own sentence.
   test('a ranked pass that lost its most expensive row does not read as 1.00×', () => {
     const r = compareCost(
       out(row('big', { rankSeconds: 1654 }), row('a', { rankSeconds: 40 })),
@@ -427,9 +426,9 @@ describe('the fan section', () => {
     expect(lines[0]).toContain('1 row(s) (300.0s) left the comparison');
   });
 
-  // MIXED DENOMINATORS. The walk is over the BASE's rows, so a row the branch ADDED that ranked was
-  // in neither population — while `freshCounted` was computed over ALL fresh rows. The "N more
-  // counted here" clause therefore under-reported on exactly the rounds that add benchmark rows.
+  // MIXED DENOMINATORS. The walk is over the BASE's rows, so a row the branch ADDED that ranked is
+  // in neither population — while `freshCounted` is over ALL fresh rows. Unpaired, the "N more
+  // counted here" clause under-reports on exactly the rounds that add benchmark rows.
   test('a row the branch added and ranked is counted as counted-here', () => {
     const r = compareFans(
       out(row('a', { candidateCount: 10 })),

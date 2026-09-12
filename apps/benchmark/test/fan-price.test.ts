@@ -185,9 +185,8 @@ describe('what the gates do with a recorded cost', () => {
   });
 });
 
-// …and the line it goes INTO. `costNote` pinned alone is the shape of the incident where the
-// `[ranked]` line grew a third count and the only test still asserted two: a round's live view of
-// a run is the assembled line, so that is what a test has to hold.
+// …and the line it goes INTO. `costNote` pinned alone leaves the assembled line free to drift
+// from the test that asserts its shape, and a round's live view of a run IS the assembled line.
 describe('the per-row run line', () => {
   const side = (over: Partial<DecompilerResult>): DecompilerResult =>
     ({ decompiler: 'asmlift', outcome: 'nonmatch', score: 12, maxScore: 40, ...over }) as DecompilerResult;

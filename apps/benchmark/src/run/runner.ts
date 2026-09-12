@@ -69,10 +69,9 @@ export function fmt(d: DecompilerResult): string {
 /** The per-row log line's COST note: the row's wall seconds, and the size of the fan that is most
  *  of them.
  *
- *  The seconds were always printed and the fan never was, so a round watching a run scroll past
- *  could see that a row took 400 s and not that it compiled 5,952 spellings to get there. It is the
- *  only thing on this line that is not an outcome, and it is the number the round is steering by
- *  when it asks whether an axis it just shipped is affordable.
+ *  The seconds alone say a row took 400 s and not that it compiled 5,952 spellings to get there.
+ *  The pair is the only thing on this line that is not an outcome, and it is what a round watching
+ *  a run scroll past steers by when it asks whether an axis it just shipped is affordable.
  *
  *  Absent on a row that never ranked (declined, failed): a bare `(1.2s)` rather than `fan 0`, which
  *  would read as a claim about the row's enumeration instead of about the run. */
@@ -80,11 +79,9 @@ export function costNote(d: DecompilerResult, secs: string): string {
   return d.candidateCount === undefined ? `(${secs}s)` : `(${secs}s, fan ${d.candidateCount})`;
 }
 
-/** THE PER-ROW LINE, assembled — a round's whole live view of a run, and the thing this repo has
- *  already been caught letting drift: the `[ranked]` line grew a third count while the only test
- *  pinning it still asserted two, with every other gate green. `costNote` was pinned in isolation
- *  and the line it goes into was not, which is the same shape one layer up. Pure, so the assembled
- *  line is testable without a run. */
+/** THE PER-ROW LINE, assembled — a round's whole live view of a run. Pinning `costNote` alone
+ *  leaves the line it goes into unpinned, which is how a counted line drifts from the test that
+ *  asserts its shape. Pure, so the assembled line is testable without a run. */
 export function rowLine(n: number, total: number, tag: string, r: FunctionResult, secs: string): string {
   return `[${n}/${total}]${tag} ${r.id}  asmlift=${fmt(r.asmlift)} m2c=${fmt(r.m2c)}  ${costNote(r.asmlift, secs)}`;
 }

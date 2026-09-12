@@ -40,12 +40,10 @@ const score = (s: number | null | undefined, m: number | null | undefined): stri
 
 /** THE COST FIELDS, in the reader that already exists.
  *
- *  `candidateCount` and `rankSeconds` are published on every ranked row, and until this line the
- *  only way to read either was a NEW lookup (`bench fan <row> --base <ref>`) that re-implements the
- *  ref read and the "why there is no comparison" sentences — and does it WITHOUT the CURRENT /
- *  NOT CURRENT verdict below, which is this repo's own answer to quoting a stale artifact number.
- *  Two fields a whole round exists to record, invisible in the one command whose job is to report
- *  what the artifact says.
+ *  `candidateCount` and `rankSeconds` are published on every ranked row, and this is the command
+ *  whose job is to report what the artifact says. The alternative reader is `bench fan <row>
+ *  --base <ref>`, which enumerates to answer and carries no CURRENT / NOT CURRENT verdict — and
+ *  that verdict below is this repo's own answer to quoting a stale artifact number.
  *
  *  Omitted per row when the row has neither, so a declined row stays one line. `fan` is a count;
  *  `rank` is WALL CLOCK under parallel shards and moves ~5× with the candidate cache, which the

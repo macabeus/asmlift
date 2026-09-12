@@ -71,11 +71,10 @@ export interface DecompilerResult {
    *  enumeration emitted, i.e. `scored + dropped + withheld`. The row's own share of what a
    *  `bench run` costs, and the number that says whether an axis a round shipped multiplied it.
    *
-   *  It was never recorded. `LoadBGTilemapData`'s fan went 59,904 → 225,792 in six days and that
-   *  series exists ONLY because individual rounds happened to type it into commit subjects; the
-   *  real tier's wall clock rose 6.0× in 21 days on an unchanged 252 rows and nobody noticed for
-   *  three weeks. `droppedCandidates.length + withheldCandidates.length` was the artifact's whole
-   *  view of a fan, which is the REFUSED part of it and on most rows is 0.
+   *  Nothing else in the artifact carries it: `droppedCandidates.length +
+   *  withheldCandidates.length` is the REFUSED part of a fan and on most rows is 0. Without the
+   *  whole count, a fan that goes 59,904 → 225,792 (`LoadBGTilemapData`, in six days) and a real
+   *  tier whose wall clock rises 6.0× on an unchanged 252 rows are invisible to every gate.
    *
    *  DETERMINISTIC GIVEN THE ENUMERATION SETTINGS — it is a cross over axes, not a measurement —
    *  so unlike `rankSeconds` it is comparable between two artifacts and belongs in `stale-check`'s

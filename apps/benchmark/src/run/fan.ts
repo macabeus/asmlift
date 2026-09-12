@@ -141,10 +141,9 @@ export interface FanOptions {
  *  facts and only one of them is about the fan moving.
  *
  *  That fourth one is `now === undefined`, and it is the comparison a round needs MOST: a DECLINED
- *  row (233 of 1,035) throws before any enumeration, and `attribute-function.md` sends rounds to
+ *  row (234 of 1,062) throws before any enumeration, and `attribute-function.md` sends rounds to
  *  exactly those rows. "The artifact at origin/main recorded 26,880 for this row and this run has
- *  no fan" is `compareFans`'s `vanished` at single-row resolution — the fact the corpus-wide
- *  reader in `report/diff.ts` reports and this one used to answer with silence.
+ *  no fan" is `compareFans`'s `vanished` at single-row resolution.
  *
  *  Pure — the caller prints it — and it takes the base artifact rather than reading it, so the
  *  refusals are testable without a checkout to compare against. */
@@ -238,14 +237,14 @@ export function fanBaseStaleNote(base: string, since: { at?: string; scoring: st
  *    `*_func_start` macros are the splitter's. No new rule about which label is a function.
  *  - `other` — a plain `name:` definition that nothing declares. A branch label, usually.
  *
- *  OBJDUMP TEXT IS PARSED AS OBJDUMP, and that is the half this got wrong: four of the five
- *  toolchains `--asm` accepts are fed objdump output (which is why `scrubObjectHeader` runs two
- *  lines before the call), and there a plain `name:` match is never a label. `corpus.o:  file
- *  format elf32-tradbigmips` yielded `corpus.o` and the instruction OFFSET column `   c:\tmove…`
- *  yielded `c`, so `bench fan gcd --asm ido-gcd.asm` — the RIGHT symbol, sitting in the file's own
- *  `00000000 <gcd>:` header — warned that the file defines `corpus.o, c` and invited the reader to
- *  pass one of them. A warning that cries wolf on four toolchains of five trains rounds to ignore
- *  it on the fifth, where it is right. One header match is enough to know the dialect. */
+ *  OBJDUMP TEXT IS PARSED AS OBJDUMP: four of the five toolchains `--asm` accepts are fed objdump
+ *  output (which is why `scrubObjectHeader` runs two lines before the call), and there a plain
+ *  `name:` match is never a label. Read flatly, `corpus.o:  file format elf32-tradbigmips` yields
+ *  `corpus.o` and the instruction OFFSET column `   c:\tmove…` yields `c`, so `bench fan gcd --asm
+ *  ido-gcd.asm` — the RIGHT symbol, sitting in the file's own `00000000 <gcd>:` header — would be
+ *  told the file defines `corpus.o, c`. A warning that cries wolf on four toolchains of five
+ *  trains rounds to ignore it on the fifth, where it is right. One header match is enough to know
+ *  the dialect. */
 export interface AsmLabels {
   /** names the file DECLARES as functions, in file order */
   declared: string[];
@@ -294,13 +293,13 @@ const LABELS_SHOWN = 8;
  *  nothing at all and any claim about what was lifted would be invented).
  *
  *  DECLARED NAMES FIRST, and they are why the list is worth printing: a real split function has
- *  dozens of branch labels against one function label, so an unordered `slice(0, 8)` showed eight
- *  `_08xxxxxx` entries and an ellipsis, burying the single name the reader came for.
+ *  dozens of branch labels against one function label, so an unordered cut at `LABELS_SHOWN` is
+ *  eight `_08xxxxxx` entries and an ellipsis, burying the single name the reader came for.
  *
  *  A symbol that IS in the file but only as a branch label gets its own sentence rather than
- *  silence — that is B3's own failure mode one level in: `_0800D192` is a name you can copy out of
- *  a disassembly by the hundred, the frontend renames the file's one function to it, and the count
- *  is then published against something that is not a function. */
+ *  silence: `_0800D192` is a name you can copy out of a disassembly by the hundred, the frontend
+ *  renames the file's one function to it, and the count is then published against something that
+ *  is not a function. */
 export function renameWarning(sym: string, asmPath: string, labels: AsmLabels): string | undefined {
   const { declared, other } = labels;
   if (declared.includes(sym)) {
@@ -445,18 +444,16 @@ export function pickCandidate<C extends Candidate>(candidates: C[], label: strin
  *  serves `--show`. A wrong answer in the shape of a right one is worse than a refusal.
  *
  *  `--enumerate --force` — `--force` raises the FAN_SCORE_LIMIT compile guard, and a path that
- *  compiles nothing has no guard to raise. It was accepted and ignored in silence, on both
- *  enumeration-only paths: `--asm --force` reached here as `enumerateOnly: true` and was dropped
- *  the same way. A flag a user passes to change the run and that changes nothing is the silence
- *  this whole file refuses elsewhere.
+ *  compiles nothing has no guard to raise. Both enumeration-only paths reach here the same way:
+ *  `--asm` arrives as `enumerateOnly: true`. A flag a user passes to change the run and that
+ *  changes nothing is the silence this whole file refuses elsewhere.
  *
- *  …and a THIRD, which is the same rule's second instance and arrived with the very surface that
- *  teaches it: `--toolchain` WITHOUT `--asm`. `--asm` needs `--toolchain` (a `.s` does not say
- *  which target lifted it), so the usage line, the docs and the command header all put the two
- *  side by side — and then forgetting or mistyping `--asm` left `bench fan <row> --toolchain
- *  ido7.1` pricing agbcc at exit 0, because a ROW carries its own toolchain in its id and the row
- *  path never reads the flag. A row id is `project:sym:toolchain`; that is where the answer is
- *  typed. */
+ *  …and a THIRD, the same rule's second instance: `--toolchain` WITHOUT `--asm`. `--asm` needs
+ *  `--toolchain` (a `.s` does not say which target lifted it), so the usage line, the docs and the
+ *  command header all put the two side by side — and forgetting or mistyping `--asm` then leaves
+ *  `bench fan <row> --toolchain ido7.1` pricing whatever the row id names, at exit 0, because a
+ *  ROW carries its own toolchain in its id and the row path never reads the flag. A row id is
+ *  `project:sym:toolchain`; that is where the answer is typed. */
 export function optionRefusal(o: FanOptions): string | undefined {
   if (o.toolchain !== undefined && o.asmPath === undefined) {
     return (
@@ -512,7 +509,7 @@ const stampFrom = (treeBefore: ReturnType<typeof sampleSourceTree>): string =>
  *  - `NoSpellableCandidateError` — the backend refused every tree before any compile. Nothing was
  *    dropped because nothing was ever built.
  *  - a DECLINE (`isDecline`) — the unmodelled construct that makes the published row `declined`
- *    (233 of 1,035 rows). Enumeration has no annotate mode, so it throws where the published row
+ *    (234 of 1,062 rows). Enumeration has no annotate mode, so it throws where the published row
  *    gets an `ASMLIFT_ERROR` marker.
  *
  *  The sentence is chosen by the ERROR and never by which call site caught it: `--force` skips the
@@ -630,12 +627,10 @@ export function unshowable(
  *  "what would this function's fan cost" is asked about functions that have no row yet — the one
  *  a dogfooding round is about to attempt, the one a round is deciding whether to add, the one
  *  `fan.ts` prices at five hours and nobody has ever enumerated — `LoadBGTilemapData`, which is
- *  NOT a benchmark row (`grep -c LoadBGTilemapData results.json` → 0), so `bench fan <row>` cannot
- *  reach it and never could. There was no way to ask it, so rounds hand-built a driver: a mining
- *  round over this project's transcripts counted 41 of 51 of those hitting `ERR_MODULE_NOT_FOUND`
- *  before they got an answer (that figure is a claim about transcripts, not something this repo
- *  can check — but the round that built this command hit it on its own first probe, from the
- *  worktree root and again from `/tmp`).
+ *  NOT a benchmark row (`grep -c LoadBGTilemapData apps/benchmark/results/results.json` → 0), so
+ *  `bench fan <row>` cannot reach it. The alternative is a hand-built driver importing core from
+ *  outside the workspace, which is how a round meets `ERR_MODULE_NOT_FOUND` before it meets a
+ *  count.
  *
  *  ENUMERATION ONLY, and that is a refusal rather than an omission: scoring needs a target object
  *  to diff against and a compiler configured to build against that object's world, which is
@@ -768,9 +763,8 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   //
   // `optionRefusal`'s own rule is the reason: "refused BEFORE the row is built — enumeration on a
   // big row costs ~46 s, and paying it to be told the flags were nonsense is the worst order." An
-  // unreadable `--base` is the same class of nonsense, and it used to be diagnosed at the EXITS,
-  // after everything was paid for: `--base nosuchref-xyz` on the corpus's cheapest row printed
-  // four candidates and the fan line first, and the "cannot read" line last. The base is a
+  // unreadable `--base` is the same class of nonsense, and diagnosing it at the EXITS would put
+  // the candidates and the fan line first and the "cannot read" line last. The base is a
   // `git show`; it answers in milliseconds.
   //
   // It also makes the comparison available on the paths that have no count to hand it — see
@@ -870,9 +864,9 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   /** THE FAN-LESS EXIT, which is not always a count-less one. A `noncompile` row — every spelling
    *  refused — throws, and the error carries both refusal lists, so the run RECORDS a
    *  `candidateCount` for exactly this class (`fanSizeOfError`). A DECLINE carries neither, and
-   *  that is not a reason to say nothing: the base's recorded count IS the comparison there, and
-   *  `--base` was silently ignored on all 233 declined rows — the row class both briefs send
-   *  rounds to. `fanDiffLine` takes `undefined` and has a sentence for it. */
+   *  that is not a reason to say nothing: the base's recorded count IS the comparison there, on
+   *  all 234 declined rows — the row class both briefs send rounds to. `fanDiffLine` takes
+   *  `undefined` and has a sentence for it. */
   const noFanWithDiff = (e: unknown): number => {
     const code = noFan(c, e, o.show);
     printFanDiff(fanSizeOfError(e));
@@ -892,7 +886,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // exists for is itself the expensive part.
   if (o.enumerateOnly || !o.force) {
     // GUARDED, because `enumerateCandidates` has no annotate mode: the gap the phase-1 pass above
-    // turns into an `ASMLIFT_ERROR` marker is a THROW here, and 233 of the corpus's 1,035 rows
+    // turns into an `ASMLIFT_ERROR` marker is a THROW here, and 234 of the corpus's 1,062 rows
     // publish `declined` on exactly such a gap — the very rows `attribute-function.md` sends a
     // round here to read.
     let cands: Candidate[];

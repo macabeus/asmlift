@@ -231,9 +231,9 @@ describe('optionRefusal', () => {
     expect(optionRefusal({ show: 'best' })).toBeUndefined();
   });
 
-  // `--force` raises the COMPILE limit, and both enumeration-only paths compile nothing. It was
-  // accepted and dropped in silence — including `--asm --force`, which reaches this function as
-  // `enumerateOnly: true` (cli.ts passes `force` straight through to `fanOfAsm`).
+  // `--force` raises the COMPILE limit, and both enumeration-only paths compile nothing — `--asm`
+  // included, which reaches this function as `enumerateOnly: true` (cli.ts passes `force` straight
+  // through to `fanOfAsm`). Accepted, it would change nothing and say nothing.
   it('refuses --force where nothing is compiled, instead of ignoring it', () => {
     expect(optionRefusal({ enumerateOnly: true, force: true })).toContain('cannot mean anything');
   });
@@ -259,8 +259,8 @@ describe('optionRefusal', () => {
 
 // WHICH FUNCTION A `.s` FAN IS OF. The frontend refuses an unknown name on a multi-function file
 // and RENAMES on a single-function one — deliberately, because that rename is the klonoa workflow.
-// So the silent case is the one-function file, where a typo'd symbol priced the file's own
-// function under a name that exists nowhere and exited 0 with a confident count.
+// So the silent case is the one-function file, where a typo'd symbol prices the file's own
+// function under a name that exists nowhere and exits 0 with a confident count.
 describe('--asm names the function it actually priced', () => {
   const oneFunction = ['\t.globl\tu8spill', '\t.thumb_func', 'u8spill:', '\tpush\t{r4}', '.L6:', '\tbx\tlr'].join('\n');
 
@@ -306,8 +306,8 @@ describe('--asm names the function it actually priced', () => {
   });
 
   // THE FALSE WARNING. `gcd` IS the function — the file's own `00000000 <gcd>:` header says so —
-  // and the flat reading answered "this file defines corpus.o, c", pointing the reader at an
-  // object filename and a hex offset. Four toolchains of five are fed this dialect.
+  // and a flat reading answers "this file defines corpus.o, c", pointing the reader at an object
+  // filename and a hex offset. Four toolchains of five are fed this dialect.
   it('reads objdump text as objdump: the header is the function, the offset column is not a label', () => {
     expect(definedLabels(objdump)).toEqual({ declared: ['gcd'], other: [] });
     expect(renameWarning('gcd', 'ido-gcd.asm', definedLabels(objdump))).toBeUndefined();
@@ -332,9 +332,9 @@ describe('--asm names the function it actually priced', () => {
     expect(renameWarning('u8spill', 'u8spill.s', definedLabels(oneFunction))).toBeUndefined();
   });
 
-  // B3'S OWN FAILURE MODE, one level in. `_0800D192` is a name a round copies out of a
-  // disassembly by the hundred; it IS in the file, so the flat reading said nothing, and the
-  // frontend then renamed the file's one function to a branch target.
+  // A BRANCH LABEL IS NOT A FUNCTION. `_0800D192` is a name a round copies out of a disassembly by
+  // the hundred; it IS in the file, so a flat reading says nothing, and the frontend then renames
+  // the file's one function to a branch target.
   it('warns when the symbol is in the file only as a branch label', () => {
     const w = renameWarning('_0800D192', 'split.s', definedLabels(split));
     expect(w).toContain('is a label in split.s but not a FUNCTION there');
@@ -540,8 +540,8 @@ describe('fanDiffLine', () => {
   });
 
   // THE FOURTH FACT, and the one a round needs most: a DECLINED row throws before it enumerates,
-  // so there is no count on THIS side. `--base` was silently ignored on all 233 of them — the row
-  // class `attribute-function.md` sends rounds to. The base's recorded count is the answer there.
+  // so there is no count on THIS side, on all 234 of them — the row class `attribute-function.md`
+  // sends rounds to. The base's recorded count is the answer there.
   it('says the fan LEFT when the base counted and this run has none', () => {
     const line = fanDiffLine('r', undefined, 'origin/main', artifact([{ id: 'r', candidateCount: 26880 }]));
     expect(line).toContain('records 26880 candidate(s) for r');

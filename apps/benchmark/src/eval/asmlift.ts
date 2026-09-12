@@ -178,9 +178,8 @@ export function runAsmlift(
 
   // Phase 2 — rank candidates (compile + objdiff-score each) and take the differ-picked best.
   // CLOCKED, from here: this is the ranked pass and nothing else — not the target build, not the
-  // phase-1 annotate, not m2c. The runner's per-row `(12.3s)` log line is the whole row and was
-  // never published anywhere; this is the part that scales with the fan, and it is the part whose
-  // 6.0× on an unchanged corpus went unremarked for three weeks.
+  // phase-1 annotate, not m2c. The runner's per-row `(12.3s)` log line is the whole row and is
+  // published nowhere; this is the part that scales with the fan.
   const rankT0 = Date.now();
   try {
     const ranked = asmliftFan(tc, sym, asm, obj, opts);

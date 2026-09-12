@@ -206,24 +206,23 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
   };
 }
 
-/** WHAT THE FAN DID, between two artifacts — the series that used to exist only where a round
- *  happened to type it into a commit subject.
+/** WHAT THE FAN DID, between two artifacts.
  *
  *  Separate from `compareMeasurements` and deliberately so. That comparison decides the exit code
  *  and is about published CLAIMS; this one is about COST, which is not a claim about any row's
- *  answer: a round can triple the fan and move no number, and that is precisely the change nobody
- *  noticed for three weeks. Folding it in would also paint every scored row red the first time a
- *  run is compared against an artifact that predates the field.
+ *  answer: a round can triple the fan and move no number, so nothing else in the report would
+ *  report it. Folding it in would also paint every scored row red the first time a run is compared
+ *  against an artifact that predates the field.
  *
  *  Rows are compared only where BOTH sides recorded a count, and the two ways that can fail are
  *  counted SEPARATELY, because they are opposite facts about opposite sides. `unrecorded` is the
  *  BASE's side: it could not answer, so the series starts here. `vanished` is the FRESH side — a
  *  row the base counted that this run never ranked at all (it declined, or it failed).
  *
- *  That second direction used to be a bare `continue`, and it is the one the section exists for:
- *  a branch that stopped ranking a 50,000-candidate row printed `total 100 → 100 (1.00×)` over a
- *  silently smaller row set, which reads as perfect neutrality on the run where the largest fan in
- *  the corpus left it. A fan that VANISHED is a fan move. */
+ *  That second direction is the one the section exists for: summing the survivors alone, a branch
+ *  that stops ranking a 50,000-candidate row prints `total 100 → 100 (1.00×)` over a silently
+ *  smaller row set, which reads as perfect neutrality on the run where the largest fan in the
+ *  corpus left it. A fan that VANISHED is a fan move. */
 export interface FanChange {
   id: string;
   from: number;
@@ -231,10 +230,8 @@ export interface FanChange {
 }
 
 /** THE ROW-SET BOOKKEEPING BOTH SECTIONS NEED, in ONE place — because they are the same walk over
- *  the same two artifacts differing only in which per-row number they pick, and they have already
- *  drifted apart once INSIDE A SINGLE WAVE: the fan loop was taught that a row leaving the corpus
- *  is a move, and the cost loop, written eleven commits later, was born with the bare `continue`
- *  the fan loop had just had removed. A second copy of a rule is a second chance to lose it.
+ *  the same two artifacts differing only in which per-row number they pick, and a second copy of
+ *  the row-set rule is a second chance to lose it.
  *
  *  Three populations, and they are three different facts:
  *
@@ -293,9 +290,9 @@ export function comparePerRow(
     freshTotal += to;
   }
   // The rows the BRANCH ADDED. The loop above walks the base's rows, so a row that exists only in
-  // the fresh run was in neither population — and the summary's denominator (`freshCounted`) was
-  // computed over ALL fresh rows, so the "N more counted here" clause under-reported on exactly
-  // the rounds that add benchmark rows.
+  // the fresh run is in neither population — and the summary's denominator (`freshCounted`) is
+  // over ALL fresh rows, so without this the "N more counted here" clause under-reports on
+  // exactly the rounds that add benchmark rows.
   for (const now of fresh.results) {
     if (!baseIds.has(now.id)) {
       const to = pick(now);
@@ -477,10 +474,10 @@ export function costLines(r: CostReport, base: string): string[] {
     );
   }
   // THE ROW SET THE TOTAL IS OVER, in the same sentence as the total. Without it a 1,654 s row
-  // that stopped ranking leaves BOTH totals and the line whose entire job is "did this round make
-  // the bench more expensive" reads `1.00×` — the exact defect the fan section above was fixed
-  // for, reproduced in the same wave. The inverse (the corpus's most expensive row STARTS ranking)
-  // reads `1.00×` too, and is what `appeared` names.
+  // that stops ranking leaves BOTH totals and the line whose entire job is "did this round make
+  // the bench more expensive" reads `1.00×` — the fan section above carries the same rule. The
+  // inverse (the corpus's most expensive row STARTS ranking) reads `1.00×` too, and is what
+  // `appeared` names.
   lines.push(
     `cost vs ${base}: ranked pass ${secs(r.baseTotal)} → ${secs(r.freshTotal)}` +
       (r.baseTotal > 0 ? ` (${(r.freshTotal / r.baseTotal).toFixed(2)}×)` : '') +
@@ -561,8 +558,8 @@ export function diffGate(base = 'HEAD'): number {
 
   // WHAT THE FAN DID — informational, and it moves no exit code. The gate above answers "did a
   // published claim move"; a round can multiply the confirming gate's own cost by four and move
-  // none, which is what happened over the three weeks the real tier went 274 s → 1,654 s on an
-  // unchanged 252 rows. This is the same comparison a round already runs, saying so.
+  // none — a real tier going 274 s → 1,654 s over an unchanged 252 rows moves no published claim.
+  // This is the same comparison a round already runs, saying so.
   for (const line of fanLines(
     compareFans(committed, fresh),
     base,
