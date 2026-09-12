@@ -119,8 +119,8 @@ export async function repro(
     `repro: ${row.id} — ${tool} ${published.outcome} ${published.score ?? '-'}/${published.maxScore ?? '-'} as published`,
   );
   log(`repro: wrote ${path}`);
-  // asmlift only: the symbol map is asmlift's input (`symbolMap` is documented "asmlift only" in
-  // the schema), and m2c's channel is the --context header the script embeds verbatim.
+  // asmlift only: `symbolMap` is an asmlift-only field of the schema, and m2c's channel is the
+  // `--context` header its own script writes.
   if (tool === 'asmlift' && row.tier === 'real' && row.asmlift.symbolMap) {
     // A row measured WITH a map and reproduced without one answers a different question, and
     // `bench target` only warns — it exits 0 and the run continues.
@@ -146,10 +146,8 @@ export async function repro(
 
   // M2C HAS NO SCORING STEP. `m2cScript` ends at `python3 m2c.py … in.s`: it prints C to stdout, and
   // `code === 0` means python ran. So there is no `[ranked]` line to look for on ANY m2c run,
-  // success included, and nothing was scored that "byte-exact" could describe. Reporting it through
-  // the asmlift path below said three contradictory things at once on a completely successful run —
-  // asmlift's published score, "the run printed no [ranked] line — read out.err" (0 bytes), and
-  // "script exit 0 (byte-exact)". On a row a verdict has closed, "byte-exact" is the worst of them.
+  // success included, and nothing was scored that "byte-exact" could describe — which is what the
+  // asmlift path below would report of a completely successful one. Hence its own exit path.
   if (tool === 'm2c') {
     if (broken) {
       err(`repro: ${broken}`);
@@ -173,10 +171,9 @@ export async function repro(
   if (ranked.length === 0) {
     err(`repro: the run printed no [ranked] line — read ${join(dir, 'out.err')}`);
   }
-  // A SETUP failure must change the VERDICT LINE, not merely add one above it. The first version of
-  // this check printed its diagnosis and then fell into the line below, which says the script
-  // behaved as designed and the row simply does not match — and `repro()` returns `code`, so exit 1
-  // with no asmlift binary was byte-for-byte indistinguishable from exit 1 for a faithfully
+  // A SETUP failure must change the VERDICT LINE, not merely add one above it: the line below says
+  // the script behaved as designed and the row simply does not match, and `repro()` returns `code`,
+  // so exit 1 with no asmlift binary would be indistinguishable from exit 1 for a faithfully
   // reproduced nonmatch. Exit 2 is "this command could not answer", the code an unknown `--tool`
   // already returns.
   if (broken) {
@@ -193,11 +190,10 @@ export async function repro(
 /** The failures of the MACHINE rather than of the row, named from the script's stderr. Returns the
  *  recovery, or undefined when nothing here explains it.
  *
- *  NOT "the one cause that is not the row" — the first version of this check said so in a comment
- *  and the second cause was the very first one a reviewer hit, in a fresh worktree wired the
- *  documented way. Detecting these by regexing the stderr of a run that should not have started is
- *  the inverse of `run/preflight.ts`'s contract; that module is the right home once `repro --run`
- *  has a preflight, and this is a pure function so the move is a call-site change. */
+ *  Not a closed list: a cause missing from it reads as the row not matching, so add one whenever a
+ *  wiring failure is seen wearing that disguise. Regexing the stderr of a run that should never have
+ *  started is the inverse of `run/preflight.ts`'s contract, which is where this belongs once
+ *  `repro --run` has a preflight; keeping it pure makes that move a call-site change. */
 export function setupRefusal(errText: string): string | undefined {
   if (
     /\.bin\/asmlift: (?:No such file or directory|command not found)|cannot execute: required file not found/.test(

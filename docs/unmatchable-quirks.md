@@ -171,25 +171,23 @@ memory.
 
 ### The inhabitant count, and what it is a count OF
 
-The construct also has almost no inhabitants — but the predicate has to be the CLASS, not a proxy
-for it, and the first version of this section stated a proxy. Say the class outright: **a repeated
-identical read statement, inside one straight-line run, with no intervening call.** Over the 252
+The construct also has almost no inhabitants — but the predicate has to be the CLASS and not a proxy
+for it, so say the class outright: **a repeated identical read statement, inside one straight-line
+run, with no intervening call.** Over the 252
 functions in `apps/benchmark/dataset/real` (6 projects × 42) it has **one** inhabitant, this row.
 Re-run it — split each `funcC` into straight-line runs at every brace and control keyword, split
 those into statements, and report a statement that (a) repeats verbatim, (b) has a memory access on
 its right-hand side, and (c) has no `ident(` between the two occurrences.
 
-Dropping clause (c) — which is what the earlier wording did, under a distance bound of "under 24
-statements" — returns **two**, and lifting the distance bound too returns **three**. Both extras are
-near-misses, and each is excluded by a measurement rather than by the bound (taken 2026-09-12):
+Dropping clause (c) returns **two**; dropping it and admitting repeats at any distance returns
+**three**. Both extras are near-misses, and each is excluded by a measurement rather than by a
+distance bound — a bound tuned to the nearest non-inhabitant is how a census stops meaning anything,
+so there is none here (taken 2026-09-12):
 
 | near-miss                                  | repeats                                   | why it is not an inhabitant                                                                                                                                                                                                             |
 | ------------------------------------------ | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sa3:sub_806132C` (4 repeats, 15–16 apart) | `s->x = TO_WORLD_POS_RAW(…)` and its twin | A call sits between them, and agbcc does **not** CSE a load across a call: `*p = g; f(); *q = g;` keeps two `ldr` of `g` (`2168` … `2068`), while `*p = g; *q = g;` keeps one (`1268`, two `str`). The repeat is VISIBLE in the object. |
 | `af:Skin_Matrix_MulMatrix` (48, 24 apart)  | `cx = mfB->xx;` and its fifteen siblings  | An `ido7.1` row, not agbcc, and ido7.1 keeps both loads: `cx = b->xx; d->xx = cx*cx; cx = b->xx; d->yx = cx*cx;` disassembles to **two** `lwc1 $f0,0(a0)`, the single-read form to one. VISIBLE again.                                  |
-
-The bound "under 24" was doing the work of the second row and was set at exactly that row's
-distance, which is how a census stops meaning anything. It is gone.
 
 **And the clause that looks like it belongs here does not.** "No intervening may-aliasing store" is
 the obvious third condition, and it is wrong for agbcc: `c = p->a; q->b = c; c = p->a;` compiles

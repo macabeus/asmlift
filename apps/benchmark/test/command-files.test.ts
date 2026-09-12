@@ -40,20 +40,12 @@
 //      files while being one integer in that same committed JSON. §3 is checked against the
 //      artifact rather than read; nothing before checked it at all.
 //  10. A VERDICT THAT CLOSES A ROW, WITH NO EVIDENCE BEHIND IT. A precedent that asks for MORE work
-//      is self-correcting — the round measures, and a wrong precedent costs time. One that tells the
-//      agent to STOP is not: acting on it means not measuring, so the claim is never re-tested and
-//      its reason is never checked. The unmatchable-quirk bullet named a row and linked nothing;
-//      the round sent to re-test it found the classification right and the stated reason too weak
-//      to decide the case, and re-derived the verdict from the compiler. A `docs/` link is the
-//      weakest thing that closes it, and the two checks around it do the rest: `citations.test.ts`
-//      holds the linked page's rows to still existing, the link check below refuses a 404.
-//      The FIRST version of this gate examined 0 of 175 blocks, because it keyed on a word its own
-//      branch had deleted two commits earlier — green with the evidence link removed. The SECOND
-//      examined 2, and one of them was `## Hard rules` — an 18-line block holding the word
-//      `unmatchable` and an unrelated `docs/` link — so the `examined > 0` tripwire added for the
-//      first defeat was held up by a decoy and the gate was green with its subject deleted again.
-//      Hence the pinned inhabitant SET below rather than a count: this gate has twice been a
-//      comment with a test runner attached, and nothing else in this file would have said so.
+//      is self-correcting — the round measures, and a wrong one costs time. One that tells the agent
+//      to STOP is not: acting on it means not measuring, so the claim is never re-tested. A `docs/`
+//      link is the weakest thing that closes that, and the two checks around it do the rest:
+//      `citations.test.ts` holds the linked page's rows to still existing, the link check below
+//      refuses a 404. What the gate protects is pinned as a named SET of verdict bullets, because a
+//      count of them is satisfied by any block that happens to carry the words.
 //
 // WHAT IT STILL CANNOT DECIDE, so that nobody reads more into a green run than is there:
 //   - It cannot check that an instruction is TRUE. Only a command run can.
@@ -164,29 +156,26 @@ describe('the two round prompts do not duplicate an instruction', () => {
 });
 
 describe('a verdict that ENDS a round is linked to its evidence', () => {
-  // WHY THIS SHAPE, and not either of the two obvious ones. This gate has now been disarmed twice
-  // by its own corpus, and both defeats are encoded below.
+  // WHY THIS SHAPE. Three choices carry the gate, and each is what keeps it from passing over a
+  // corpus it is not really reading:
   //
-  //   DEFEAT 1 — the wrong KEY. The first version keyed on the word `precedent`, which the SAME
-  //   BRANCH's earlier commit had already deleted from the bullet the gate protects. It examined 0
-  //   of 175 blocks, so `unbacked` was `[]` unconditionally: green with the evidence link DELETED.
-  //   Fix: key on the RULE (a verdict that tells the agent to stop), require a MARKDOWN link
-  //   (the sibling link-resolution suite below only inspects `](…)`, so a bare `docs/foo.md` in
-  //   running text is an unchecked promise), and assert the scan examined something.
+  //   The KEY is the RULE — a verdict that tells the agent to stop — not any one word a prompt
+  //   happens to spell it with today, which an edit to the protected bullet also deletes.
   //
-  //   DEFEAT 2 — the wrong UNIT, which then propped up the count from defeat 1. Blocks were
-  //   blank-line delimited, so `## Hard rules`' five numbered items were ONE block: it carries the
-  //   word `unmatchable` (rule 4) and a `docs/measurement-discipline.md` link (rule 5), which has
-  //   nothing to do with any verdict. That decoy satisfied `examined > 0` on its own, so rewording
-  //   the Phase-1 outcome bullet and deleting its link — the exact regression — was green again.
-  //   Three independent existentials over an 18-line paragraph is not a rule about a verdict.
+  //   The UNIT is the BULLET: a top-level `-`/`N.` item plus its continuation lines. A blank-line
+  //   block is too coarse — `## Hard rules`' five numbered items are one block, and its rule 4
+  //   carries `unmatchable` while its rule 5 links `docs/measurement-discipline.md`, so an
+  //   unrelated neighbour would back a verdict that links nothing. Three independent existentials
+  //   over an 18-line paragraph is not a rule about a verdict.
   //
-  // Hence: the unit is the BULLET (a top-level `-`/`N.` item plus its continuation lines), the link
-  // must be in the bullet that carries the verdict, and the assertion on the corpus is the pinned
-  // INHABITANT SET below rather than a count. A count can be held up by anything; a named set
-  // cannot. `registerBacked` is a third, non-redundant check: re-pointing every verdict at some
-  // other `docs/` page keeps the set intact and the unbacked list empty while leaving the register
-  // itself unreferenced (#186: a stamp needs a test where it is produced).
+  //   The ASSERTION is the pinned inhabitant SET below, not a count: a count is satisfied by any
+  //   block carrying the words, a named set only by the bullets the gate exists for.
+  //
+  // The link must be a MARKDOWN link, because the sibling link-resolution suite below only inspects
+  // `](…)` — a bare `docs/foo.md` in running text is an unchecked promise. `registerBacked` is a
+  // third, non-redundant check: re-pointing every verdict at some other `docs/` page keeps the set
+  // intact and the unbacked list empty while leaving the register itself unreferenced (#186: a
+  // stamp needs a test where it is produced).
   const STOPS = /\bstops?\b/i;
   const VERDICT = /\bunmatchable\b|\bquirks?\b/i;
   const DOC_LINK = /\]\([^)\s]*docs\/[\w.-]+\.md[^)\s]*\)/;
@@ -302,10 +291,10 @@ describe('a verdict that ENDS a round is linked to its evidence', () => {
     expect(scanStops(elsewhere).registerBacked).toBe(0);
   });
 
-  it('does not let a neighbouring rule back a verdict — the defeat-2 shape', () => {
+  it('does not let a neighbouring rule back a verdict', () => {
     // `## Hard rules` verbatim in shape: one blank-line block, five numbered items, the verdict in
-    // item 2 and an unrelated docs link in item 3. Under the old block unit this scanned as ONE
-    // backed block — examined 1, unbacked 0, and the count kept the whole gate alive.
+    // item 2 and an unrelated docs link in item 3. Scanned by blank-line block this is ONE backed
+    // block — examined 1, unbacked 0 — which is the shape the bullet unit exists to split.
     const rules = [
       '1. **Never trade a loud failure for a silent wrong answer.** Every new transform must state',
       '   the condition under which it refuses.',
@@ -324,11 +313,10 @@ describe('a verdict that ENDS a round is linked to its evidence', () => {
 
 describe('the unmatchable register is falsified by the artifact', () => {
   // The register says of itself that "an entry here closes a row to future rounds and that is
-  // exactly the kind of claim that rots unwatched", and it shipped with no gate — while the cost
-  // table 170 lines above has one. A verdict does not rot on a CLOCK the way a cost figure does; it
-  // rots the instant somebody matches the row. `results.json` knows, and `citations.test.ts` already
-  // holds the ids in this page to rows that exist, so the only thing missing is the one assertion
-  // the entry's own falsification condition names.
+  // exactly the kind of claim that rots unwatched". It does not rot on a CLOCK the way the cost
+  // figures gated below do; it rots the instant somebody matches the row. `results.json` knows, and
+  // `citations.test.ts` already holds the ids in this page to rows that exist, so what is left is
+  // the one assertion the entry's own falsification condition names.
   const REGISTER = join(DOCS_DIR, 'unmatchable-quirks.md');
   const ROW_ID = /^\|\s*`([\w.-]+:[\w.-]+:[\w.-]+)`\s*\|/;
   const SECTION = '## The register';
@@ -371,9 +359,9 @@ describe('the unmatchable register is falsified by the artifact', () => {
       // `citations.test.ts` also resolves this id, and this assertion is KEPT anyway rather than
       // deferred to it: an id that stops resolving leaves `row?.asmlift?.outcome` undefined, which
       // is not `'match'`, so without this line the check below passes over an empty set and this
-      // gate is vacuous — the §10 defect, in the gate written for §10. The duplication is with a
-      // suite whose coverage of this page is conditional (`docs` being in its `SCANNED` list) and
-      // whose failure message is about citations, not about a closed row.
+      // gate is vacuous. The duplication is with a suite whose coverage of this page is conditional
+      // (`docs` being in its `SCANNED` list) and whose failure message is about citations, not
+      // about a closed row.
       expect(row, `${REGISTER} closes ${id}, which is not a row in the committed results.json`).toBeDefined();
       if (row?.asmlift?.outcome === 'match') {
         falsified.push(id);

@@ -132,10 +132,9 @@ describe('bench repro — the script it hands over', () => {
 });
 
 describe('bench repro — a broken MACHINE is not a non-matching row', () => {
-  // The one fragile part of the diagnosis is a regex over a shell error string, and it was pinned
-  // by nothing: the round that added it wrote 139 test lines about the command FILES and none about
-  // this. Its comment also called the bin link "the one cause that is not the row", and the second
-  // cause was the first thing a reviewer hit in a fresh worktree wired the documented way.
+  // The fragile part of the diagnosis is a regex over a shell error string — three spellings for
+  // one missing binary, and a message format for the toolchain. A cause it stops recognising goes
+  // back to reading as a row that simply does not match, which is silent.
   test('names the missing CLI bin, whichever way the shell spells it', () => {
     for (const line of [
       'bash: /wt/node_modules/.bin/asmlift: No such file or directory',
