@@ -666,16 +666,29 @@ function memAccess(
   // fold destroyed it). It rides beside `operandOff` because both are facts about how the address
   // was computed rather than about which cell it names, and both are lost at L3 otherwise.
   //
-  // THE TWO ARE EXCLUSIVE, which is the whole of `off === 0`. `advancedBy` is a fact about the BASE
-  // VALUE — the register the machine moved — while a non-zero `off` says THIS access was reached by
-  // a displacement off that register rather than by the advance. Carrying both stamps a
-  // `strh [r3, #2]` as another link in the chain, and `l3/advance.ts` then spells a second
-  // `p = p + 1;` where the target performed no second `add`: the distance still lands (the
-  // displacement was folded into the cell address, so `prev.addr + step` matches), so nothing
-  // downstream can refuse it, and the byte-exact spelling — one advance and then a subscript — is
-  // not in the fan at all. Pinned on the three-access shape in test/advance.test.ts, which is a
-  // COMPILED repro and not a row: `bench sweep --fan` prices this term at 0 records moved over
-  // 2,126, so no corpus row spells a displacement off an advanced register today.
+  // `off === 0` IS A NARROWING, AND ONE SIDE OF IT IS WHAT THE REPRO SHOWED. What the repro
+  // shows is a base value used as an address at TWO offsets — `ldr r3,=X; strh [r3]; adds r3,#2;
+  // strh [r3]; strh [r3,#2]`, where the third access carries `{adv 2, off 2}`. Stamping that one
+  // makes `l3/advance.ts` spell a second `p = p + 1;` where the target performed no second `add`:
+  // the distance still lands (the displacement was folded into the cell address, so
+  // `prev.addr + step` matches), so nothing downstream can refuse it, and the byte-exact spelling
+  // — one advance and then a subscript — is not in the fan at all. Pinned on that three-access
+  // shape in test/advance.test.ts, a COMPILED repro and not a row.
+  //
+  // WHAT IT IS NOT is "a non-zero `off` says this access was reached by a displacement RATHER THAN
+  // by the advance", which is false wherever ONE displacement rides EVERY member —
+  // `ldr r3,=X; strh [r3,#4]; adds r3,#2; strh [r3,#4]` is a real chain at X+4 and X+6, and this
+  // term refuses it (probe: both index nodes arrive `{off 4, adv undefined}` and `advancedBases`
+  // declines; the same tree with the pre-`8f5a5764` stamp admits and emits the correct two-member
+  // chain). The discriminating fact is the one the repro had — the same base VALUE used at more
+  // than one `off`, where only the smallest is the link — not `off` alone, and reaching it takes a
+  // per-value census of address offsets this seam does not have.
+  //
+  // PRICED AT 0 ROWS EITHER WAY, which is why the narrow term ships: instrumenting this seam over
+  // `bench sweep --fan --arms harness,nomap` (2,126 records, 1,063 rows) counts 4,361 `advancedBy`
+  // stamps, ALL of them at `off === 0` and none at `off !== 0`, over ten producing functions. So
+  // the shape above has no corpus inhabitant to pay for the census, and the capability it costs is
+  // recorded here rather than spent.
   const addressEvidence = {
     ...(off !== 0 ? ({ operandOff: off } as const) : {}),
     ...(advancedBy !== undefined && off === 0 ? ({ baseAdvanced: advancedBy } as const) : {}),

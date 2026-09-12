@@ -412,6 +412,12 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   third value of one — handing it to `hoistBaseLocals` spells a minted base's pool load above the
   base the compiler loads first, the exact hazard that file's own header forbids, so the boundary
   has to be something a caller cannot spell rather than something a comment asks it not to.
+  `l3/advance.ts` is the SECOND caller of that same `prepend`, for nearbase's reason plus one it
+  owns: its init materialises the register the chain then advances, so the target's own pool-word
+  order is what says where it goes. It differs from nearbase in the one way this section is about —
+  it has no `/sinkinit` twin and cannot have one, because `sinkInitsToFirstUse` moves an init only
+  where its local is assigned ONCE and an advance is a second assignment, so `prepend` is not a
+  choice there but the only placement that lever has.
 
   Placement being an ARGUMENT is worth stating carefully, because two things about it are easy to
   overclaim. It is not what a single row needed, and it is not what made one reachable:

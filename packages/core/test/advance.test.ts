@@ -35,7 +35,7 @@ import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
-import { count } from './helpers';
+import { count, traceOf, tracesDiffer } from './helpers';
 
 // Two halfword stores 2 bytes apart through ONE address register — the `REG_WININ` pair, reduced.
 const ADVANCE_IR = `fn advance {
@@ -109,6 +109,34 @@ test('a displacement off an advanced register is not another link in the chain',
   const out = cBackend.emit(advancedBases(structured(DISPLACED_IR))!);
   expect(count(out, 'p0 = p0 + 1;')).toBe(1);
   expect(out).toContain('[1] = a0;');
+});
+
+// …and the OTHER side of that term, pinned as the narrowing it is rather than left to be
+// rediscovered: where ONE displacement rides EVERY member the chain is real and this refuses it.
+// `structure.ts`'s `off === 0` is a per-ACCESS test, and what would decide the question is a
+// per-VALUE one (the same base used at more than one `off`). Priced at 0 corpus inhabitants —
+// 4,361 stamps over 1,063 rows, every one at `off === 0` — so the capability is recorded here and
+// not spent. Change the term and this test is the one that says what you changed.
+const SAME_DISPLACEMENT_IR = `fn offn {
+^bb0(%0: s32):
+  %1: s32* = const {value=67108928}
+  store %1, %0 {off=4, width=2}
+  %2: s32 = const {value=2}
+  %3: s32* = add %1, %2
+  store %3, %0 {off=4, width=2}
+  ret
+}
+`;
+
+test('one displacement on BOTH members is a real chain, and the stamp rule declines it', () => {
+  const nodes = indexNodes(structured(SAME_DISPLACEMENT_IR));
+  // the machine wrote 0x04000004+4 and then, after `adds #2`, 0x04000004+6 — two cells one step
+  // apart, and neither node carries the stamp that would say so
+  expect(nodes.map((n) => [n.baseAdvanced, n.operandOff])).toEqual([
+    [undefined, 4],
+    [undefined, 4],
+  ]);
+  expect(advancedBases(structured(SAME_DISPLACEMENT_IR))).toBeNull();
 });
 
 test('the advanced access still denotes the cell its absolute address names', () => {
@@ -261,27 +289,125 @@ test('two accesses in ONE statement are not a chain', () => {
   expect(advancedBases(fnWith([one]))).toBeNull();
 });
 
+// ── the differential: the same STORES, at the same addresses ─────────────────────────────────
+// The battery above reads the emitted TEXT. This reads what the tree DOES: `traceOf` observes each
+// store as (address, value), so the re-spelled tree must be indistinguishable from the one the
+// structurer produced — which is the whole soundness claim, checked rather than argued. It could
+// not be asked before this round: `traceOf` evaluated `p0 = p0 + 1` as ONE BYTE, so every tree this
+// pass emits reported a false difference. The scale now comes off the declaration (test/helpers.ts),
+// and the sensitivity check below is the ablation that must still be caught.
+test('the advanced tree observes the same stores as the tree it re-spells', () => {
+  const plain = fnWith([...PAIR]);
+  const advanced = advancedBases(plain)!;
+  for (const seed of [1, 7, 23, 91]) {
+    expect(traceOf(advanced, seed)).toEqual(traceOf(plain, seed));
+    expect(tracesDiffer({ off: traceOf(plain, seed), on: traceOf(advanced, seed) })).toBe(false);
+  }
+  // …and the instrument is SENSITIVE: with the twin rule dropped, the leading store at the SECOND
+  // member's cell is re-spelled `*p0` before the advance and writes 0x04000048 instead — two bytes
+  // low, on a store the machine really performed. (`member-second-site`'s fixture, as addresses.)
+  const withTwin = fnWith([storeTo(cell(0x0400004a)), ...PAIR]);
+  const wrong = advancedBases(withTwin, { member: without(ADVANCE_MEMBER_GATES, 'member-second-site') })!;
+  expect(tracesDiffer({ off: traceOf(withTwin, 1), on: traceOf(wrong, 1) })).toBe(true);
+  expect(traceOf(wrong, 1)[0].args[0]).toBe(0x04000048);
+  expect(traceOf(withTwin, 1)[0].args[0]).toBe(0x0400004a);
+});
+
 // ── the battery: every gate in both tables, ABLATED ───────────────────────────────────────────
 // The mutation battery as data rather than as a transcript: each gate names the shape it alone
 // refuses, and the test drops that one entry from the REAL table and re-runs the REAL pass. A gate
 // added without a fixture fails the coverage assertion, which is the hole `gate-contract.test.ts`
 // cannot see (it checks that a named guard exists, not that the gate is load-bearing).
-const FIXTURES: Record<string, Stmt[]> = {
-  'head-second-site': [...PAIR, storeTo(cell(0x04000048))],
-  'head-nested-site': [...PAIR, loopAt(0x04000048)],
-  'head-already-advanced': [storeTo(cell(0x04000048, 2, { baseAdvanced: 2 })), ...PAIR.slice(1)],
-  'member-no-evidence': [storeTo(cell(0x04000048)), storeTo(cell(0x0400004a))],
-  'member-second-site': [storeTo(cell(0x0400004a)), ...PAIR],
-  'member-nested-site': [loopAt(0x0400004a), ...PAIR],
-  'member-statement-order': [{ k: 'store', lval: cell(0x04000048), value: cell(0x0400004a, 2, { baseAdvanced: 2 }) }],
-  'member-width': [storeTo(cell(0x04000048, 2)), storeTo(cell(0x0400004a, 1, { baseAdvanced: 2 }))],
-  'member-signedness': [
-    storeTo(cell(0x04000048)),
-    storeTo({ ...(cell(0x0400004a, 2, { baseAdvanced: 2 }) as Extract<Expr, { k: 'index' }>), signed: true }),
-  ],
-  'member-element-grid': [storeTo(cell(0x04000048, 4)), storeTo(cell(0x0400004a, 4, { baseAdvanced: 2 }))],
-  'member-step-lands': [storeTo(cell(0x04000048)), storeTo(cell(0x0400004a, 2, { baseAdvanced: 4 }))],
-  'member-negative-step': [storeTo(cell(0x0400004a)), storeTo(cell(0x04000048, 2, { baseAdvanced: -2 }))],
+//
+// AND EACH FIXTURE CARRIES WHAT THE ABLATED PASS EMITS, which is the half `not.toBeNull()` cannot
+// see: admission is true of a soundness rule and of a narrowing rule alike, so a battery that
+// asserts only admission cannot referee `sound` — the flag `l3/gates.ts`'s `ablateHeuristic`
+// consumes, and the one this file's own `member-signedness` carried WRONGLY for a whole round
+// (ablated, that gate emits `*(s16 *)p0`, which is address- AND value-correct, and agbcc compiles
+// it). The `verdict` below is checked against `gate.sound`, so the two cannot drift again.
+type Verdict =
+  /** a silently WRONG address — the only thing `sound: true` may mean */
+  | 'wrong'
+  /** correct C for the same bytes, in a spelling this pass does not want */
+  | 'narrowing'
+  /** not C at all: agbcc answers `invalid operands to binary +` / `` `NaN' undeclared `` and the
+   *  candidate is dropped at compile with its message, never scored */
+  | 'noncompile';
+interface Fixture {
+  readonly body: Stmt[];
+  /** a line of the ABLATED emission, quoted from the run rather than predicted */
+  readonly emits: string;
+  /** how many `*p0` the ablated emission holds. The chain has TWO members, so a third is the node
+   *  that should have kept its own absolute address and was re-spelled where `p0` holds another —
+   *  the whole of what makes the four re-spelling rules sound. */
+  readonly derefs?: number;
+  readonly verdict: Verdict;
+}
+const FIXTURES: Record<string, Fixture> = {
+  // the four re-spelling rules: an access at a chain address, re-spelled where `p0` is elsewhere
+  'head-second-site': {
+    body: [...PAIR, storeTo(cell(0x04000048))],
+    emits: 'p0 = p0 + 1;',
+    derefs: 3,
+    verdict: 'wrong',
+  },
+  'head-nested-site': { body: [...PAIR, loopAt(0x04000048)], emits: 'while (a) {', derefs: 3, verdict: 'wrong' },
+  'member-second-site': {
+    body: [storeTo(cell(0x0400004a)), ...PAIR],
+    emits: 'p0 = p0 + 1;',
+    derefs: 3,
+    verdict: 'wrong',
+  },
+  'member-nested-site': { body: [loopAt(0x0400004a), ...PAIR], emits: 'while (a) {', derefs: 3, verdict: 'wrong' },
+  // …and the three that emit a wrong STEP or a wrong lvalue: `p0 = p0 + 2` on a `u16 *` is four
+  // bytes where the machine moved two, and one statement cannot hold the advance that separates it
+  'member-width': {
+    body: [storeTo(cell(0x04000048, 2)), storeTo(cell(0x0400004a, 1, { baseAdvanced: 2 }))],
+    emits: 'p0 = p0 + 2;',
+    verdict: 'wrong',
+  },
+  'member-step-lands': {
+    body: [storeTo(cell(0x04000048)), storeTo(cell(0x0400004a, 2, { baseAdvanced: 4 }))],
+    emits: 'p0 = p0 + 2;',
+    verdict: 'wrong',
+  },
+  'member-statement-order': {
+    body: [{ k: 'store', lval: cell(0x04000048), value: cell(0x0400004a, 2, { baseAdvanced: 2 }) }],
+    // one statement cannot hold the advance that separates its two accesses: the store reads and
+    // writes ONE cell where the machine read 0x0400004a and wrote 0x04000048
+    emits: '*p0 = *p0;',
+    verdict: 'wrong',
+  },
+  // the narrowings: every one of these emits C that denotes the machine's own bytes
+  'head-already-advanced': {
+    body: [storeTo(cell(0x04000048, 2, { baseAdvanced: 2 })), ...PAIR.slice(1)],
+    emits: 'p0 = (u16 *)67108936;',
+    verdict: 'narrowing',
+  },
+  'member-negative-step': {
+    body: [storeTo(cell(0x0400004a)), storeTo(cell(0x04000048, 2, { baseAdvanced: -2 }))],
+    emits: 'p0 = p0 + -1;',
+    verdict: 'narrowing',
+  },
+  'member-signedness': {
+    body: [
+      storeTo(cell(0x04000048)),
+      storeTo({ ...(cell(0x0400004a, 2, { baseAdvanced: 2 }) as Extract<Expr, { k: 'index' }>), signed: true }),
+    ],
+    emits: '*(s16 *)p0 = a;',
+    verdict: 'narrowing',
+  },
+  // and the two LOUD ones, whose emission is not C
+  'member-element-grid': {
+    body: [storeTo(cell(0x04000048, 4)), storeTo(cell(0x0400004a, 4, { baseAdvanced: 2 }))],
+    emits: 'p0 = p0 + 0.5;',
+    verdict: 'noncompile',
+  },
+  'member-no-evidence': {
+    body: [storeTo(cell(0x04000048)), storeTo(cell(0x0400004a))],
+    emits: 'p0 = p0 + NaN;',
+    verdict: 'noncompile',
+  },
 };
 
 test('every gate in both tables has a fixture below', () => {
@@ -290,10 +416,11 @@ test('every gate in both tables has a fixture below', () => {
   expect(Object.keys(FIXTURES).filter((id) => !ids.includes(id))).toEqual([]);
 });
 
-test.each([...ADVANCE_HEAD_GATES, ...ADVANCE_MEMBER_GATES].map((g) => g.id))(
-  '%s is load-bearing: its shape declines, and admits with the gate dropped',
-  (id) => {
-    const body = FIXTURES[id];
+test.each([...ADVANCE_HEAD_GATES, ...ADVANCE_MEMBER_GATES])(
+  '$id is load-bearing: its shape declines, and the ablated emission matches its verdict',
+  (gate) => {
+    const id = gate.id;
+    const { body, emits, derefs, verdict } = FIXTURES[id];
     expect(advancedBases(fnWith(body))).toBeNull();
     const ablated = id.startsWith('head-')
       ? { head: without(ADVANCE_HEAD_GATES, id) }
@@ -313,7 +440,22 @@ test.each([...ADVANCE_HEAD_GATES, ...ADVANCE_MEMBER_GATES].map((g) => g.id))(
     if (id === 'member-no-evidence') {
       expect(advancedBases(fnWith(body), ablated)).toBeNull();
     }
-    expect(advancedBases(fnWith(body), gates)).not.toBeNull();
+    const out = cBackend.emit(advancedBases(fnWith(body), gates)!);
+    expect(out).toContain(emits);
+    if (derefs !== undefined) {
+      // a `*p0` per chain member is right; the extra one is an access whose own address was
+      // absorbed into a pointer that does not hold it
+      expect(count(out, '*p0')).toBe(derefs);
+      expect(derefs).toBeGreaterThan(2);
+    }
+    // A fractional or `NaN` step is the `noncompile` verdict and nothing else may carry one: both
+    // are rejected by agbcc (`invalid operands to binary +`, `` `NaN' undeclared ``), so the two
+    // rules that hold them back are loud rather than sound.
+    expect(/\+ (NaN|-?\d*\.\d)/.test(out)).toBe(verdict === 'noncompile');
+    // THE CHECK THIS BATTERY EXISTS FOR: `sound` is true exactly where the ablation is silently
+    // wrong. A narrowing rule that claims soundness makes `ablateHeuristic` refuse a legitimate
+    // candidate for a recorded reason that is false.
+    expect(gate.sound).toBe(verdict === 'wrong');
   },
 );
 

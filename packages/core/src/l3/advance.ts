@@ -36,15 +36,30 @@
 // the shape is pinned here by `an access at a chain address inside a loop is not re-spelled`.
 //
 // SCOPE (decline over approximate) is `ADVANCE_HEAD_GATES` and `ADVANCE_MEMBER_GATES` below — as
-// tables rather than an `||` chain, so `sound` costs a `guardedBy`, `bench gates` can census the
-// refusals, and every rule is ablated against the real pass by test/advance.test.ts's battery. Two
-// of the twelve are NARROWING rather than soundness and say so (`head-already-advanced`,
-// `member-negative-step`); one more, `member-no-evidence`, is what makes this a reading of the asm
-// rather than a guess, but a chain built without it would still be address-correct.
+// tables rather than an `||` chain, so `sound` costs a `guardedBy` and every rule is ablated
+// against the real pass by test/advance.test.ts's battery, which records WHAT THE ABLATED PASS
+// EMITS and checks `sound` against it. NOT by `bench gates`: `pnpm bench gates --pass advance`
+// answers `no censusable pass "advance"`, and structurally must, because this pass is reached
+// through a static import binding in rank.ts rather than through a mutable caller-side record
+// (run/gate-census.ts's header, which measures the `TypeError` a module-namespace write raises).
+// The census below was therefore taken BY HAND; the recipe is two lines and in the header.
+//
+// FIVE OF THE TWELVE ARE NARROWING rather than soundness and each says which it is. Three are
+// judgements about what the asm shows (`head-already-advanced`, `member-negative-step`,
+// `member-no-evidence` — the last is what makes this a reading rather than a guess); one,
+// `member-signedness`, buys the minted local ONE pointee type where the backend would otherwise
+// spell a correct reinterpret cast; one, `member-element-grid`, is a LOUD refusal — ablated it
+// emits `p0 = p0 + 0.5;`, which is not C. Dropping `member-no-evidence` alone leaves the emitted
+// step `undefined / width` = `NaN`, refused downstream only by the two arithmetic rules'
+// comparisons against it (`NaN % w !== 0`, `NaN !== addr`) — an accident when it was unwritten,
+// pinned now by the battery's `noncompile` verdicts for both.
 //
 // HOW OFTEN EACH FIRES, over the whole corpus — `bench sweep --fan`, both arms, 2,126 records,
-// instrumented on `firstRejection` (2026-09-12). The numbers count CALLS, and enumeration calls
-// this pass about eleven times per record, once per outer-axis tree:
+// instrumented on `firstRejection` (2026-09-12), which is HAND INSTRUMENTATION and reproduced by
+// wrapping both tables in `tallying()` (l3/gates.ts) at this pass's one call site in rank.ts,
+// passing `.gates` to `advancedBases`, and printing `.refusals()` when the sweep ends. The numbers
+// count CALLS, and enumeration calls this pass about eleven times per record, once per outer-axis
+// tree:
 //     23,322 calls · 112 found a chain · 23,210 declined
 //     head-second-site 872 · member-no-evidence 664 · head-nested-site 256 · head-already-advanced 144
 //     every other member rule: 0
@@ -58,6 +73,11 @@
 //     calls above held a second chain sharing no address with the first (the instrument kept
 //     scanning), so the second local this would need has no inhabitant to price it.
 //   • The init is `prepend`ed and there is no sunk twin; see the note at `placeBaseLocals` below.
+//   • IT IS MAP-LESS ONLY. Every member is reached through `cellAddress`, which answers null once
+//     a symbol map promotes the pool word to `&REG_WININ` — so with a map this pass enumerates
+//     nothing, and every `/advance` candidate the corpus carries is a `/raw-globals` one. That is
+//     what caps the lever at five rows, and it is the question to ask of it the day the symbol-map
+//     direction lands: this capability survives only if `cellAddress` learns the promoted form.
 import { type IrType, scalarTypeForAccess } from '../ir/types';
 import { cellAddress } from './address';
 import { type Expr, type SFn, type Stmt, mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
@@ -152,15 +172,15 @@ export const ADVANCE_MEMBER_GATES: readonly Gate<MemberCtx>[] = [
   },
   {
     id: 'member-signedness',
-    why: 'the minted local has ONE pointee type, and `*p` through it sign-extends the other member wrongly',
-    sound: true,
+    why: 'NARROWING: one pointee TYPE, so the second member is not spelled through a reinterpret cast the source did not write',
+    sound: false,
     guardedBy: 'advance.test.ts: members of different signedness decline',
     rejects: (c) => c.site.signed !== c.prev.signed,
   },
   {
     id: 'member-element-grid',
-    why: 'the emitted advance is `p = p + step / width`, which has no spelling off the element grid',
-    sound: true,
+    why: 'LOUD: off the grid the emitted `p = p + step / width` is fractional (`p0 + 0.5`), which is not C at all',
+    sound: false,
     guardedBy: 'advance.test.ts: a step off the element grid declines',
     rejects: (c) => c.site.advanced! % c.prev.width !== 0,
   },
@@ -303,6 +323,16 @@ export function advancedBases(sfn: SFn, gates: AdvanceGates = {}): SFn | null {
   // addresses and `member-element-grid` divided — rather than the address difference, which is the
   // same number only because those two rules hold. Deriving it separately is how a later ablation
   // of one of them emits a fractional advance nothing checked.
+  //
+  // WHICH MAKES THE ARITHMETIC HERE TOTAL ONLY BECAUSE OF THE TABLE, and both ways out are LOUD
+  // rather than silent — measured, and pinned by the battery's `noncompile` verdicts rather than
+  // guarded here: with `member-element-grid` dropped this emits `p0 = p0 + 0.5;`, and with
+  // `member-no-evidence` dropped `advanced` is `undefined` and this emits `p0 = p0 + NaN;`.
+  // Neither is C, so a candidate carrying one is dropped at compile with its message rather than
+  // scored — which is why the two rules are `sound: false` and why no `Number.isInteger` refusal
+  // stands here: adding one would turn those two ablations into a DECLINE and delete the evidence
+  // the battery reads. `member-no-evidence` is ablatable by `ablateHeuristic`, so a round that
+  // ships that ablation as a ranked candidate ships noncompiling sources; that is its price.
   const advanceAt = new Map<number, number>();
   for (let i = 1; i < chain.length; i++) {
     advanceAt.set(chain[i].stmt, chain[i].advanced! / chain[i].width);
