@@ -11,6 +11,7 @@ import {
   SCORE_SECONDS_PER_CANDIDATE,
   definedLabels,
   estimatedScoreTime,
+  fanBaseStaleNote,
   fanDiffLine,
   noFanReport,
   optionRefusal,
@@ -240,6 +241,20 @@ describe('optionRefusal', () => {
   it('allows --force on the scoring path, where there is a limit to raise', () => {
     expect(optionRefusal({ force: true })).toBeUndefined();
   });
+
+  // THE SAME RULE'S SECOND INSTANCE, and it arrived with the surface that teaches it: `--asm`
+  // REQUIRES `--toolchain`, so the usage line puts them together — and `bench fan <row>
+  // --toolchain ido7.1` then priced agbcc at exit 0, because a row carries its toolchain in its
+  // own id and the row path never reads the flag.
+  it('refuses --toolchain without --asm, where the row id already names the toolchain', () => {
+    const r = optionRefusal({ toolchain: 'ido7.1' });
+    expect(r).toContain('--toolchain only means something with --asm');
+    expect(r).toContain('"ido7.1"');
+  });
+
+  it('allows --toolchain with --asm, which is the pair it exists for', () => {
+    expect(optionRefusal({ toolchain: 'ido7.1', asmPath: 'x.s', enumerateOnly: true })).toBeUndefined();
+  });
 });
 
 // WHICH FUNCTION A `.s` FAN IS OF. The frontend refuses an unknown name on a multi-function file
@@ -249,12 +264,53 @@ describe('optionRefusal', () => {
 describe('--asm names the function it actually priced', () => {
   const oneFunction = ['\t.globl\tu8spill', '\t.thumb_func', 'u8spill:', '\tpush\t{r4}', '.L6:', '\tbx\tlr'].join('\n');
 
+  // A klonoa split: ONE declared function and a crowd of branch labels. It is the shape `--asm`
+  // exists for, and the shape a flat "any `name:` is a definition" reading gets wrong twice.
+  const split = [
+    '\tthumb_func_start sub_0800D188',
+    'sub_0800D188:',
+    '\tpush\t{r4, lr}',
+    '_0800D192:',
+    '\tbx\tlr',
+    '_0800D19A:',
+    '\tbx\tlr',
+  ].join('\n');
+
+  // objdump text, which is what FOUR of the five toolchains `--asm` accepts are fed. It has no
+  // source labels at all: the `corpus.o:` line is objdump's own header and the `c:` is the
+  // instruction OFFSET column.
+  const objdump = [
+    '',
+    'corpus.o:     file format elf32-tradbigmips',
+    '',
+    'Disassembly of section .text:',
+    '',
+    '00000000 <gcd>:',
+    '   0:\t00a02825\tmove\ta1,a1',
+    '   c:\t00801021\tmove\tv0,a0',
+    '  fc:\t03e00008\tjr\tra',
+  ].join('\n');
+
   it('lists the labels a file defines, and not the assembler’s own', () => {
-    expect(definedLabels(oneFunction)).toEqual(['u8spill']);
+    expect(definedLabels(oneFunction)).toEqual({ declared: ['u8spill'], other: [] });
   });
 
   it('reads a splitter macro’s name as a definition too', () => {
-    expect(definedLabels('\tthumb_func_start sub_0800D188\nsub_0800D188:\n\tbx lr')).toEqual(['sub_0800D188']);
+    expect(definedLabels('\tthumb_func_start sub_0800D188\nsub_0800D188:\n\tbx lr').declared).toEqual(['sub_0800D188']);
+  });
+
+  // A BRANCH LABEL IS NOT A FUNCTION. Both facts are load-bearing: the declared name is what a
+  // reader came for, and `_08xxxxxx` is what they would otherwise be shown eight of.
+  it('tells a declared function from the branch labels around it', () => {
+    expect(definedLabels(split)).toEqual({ declared: ['sub_0800D188'], other: ['_0800D192', '_0800D19A'] });
+  });
+
+  // THE FALSE WARNING. `gcd` IS the function — the file's own `00000000 <gcd>:` header says so —
+  // and the flat reading answered "this file defines corpus.o, c", pointing the reader at an
+  // object filename and a hex offset. Four toolchains of five are fed this dialect.
+  it('reads objdump text as objdump: the header is the function, the offset column is not a label', () => {
+    expect(definedLabels(objdump)).toEqual({ declared: ['gcd'], other: [] });
+    expect(renameWarning('gcd', 'ido-gcd.asm', definedLabels(objdump))).toBeUndefined();
   });
 
   it('warns when the symbol is in no label — the count is of whatever the file holds', () => {
@@ -263,16 +319,38 @@ describe('--asm names the function it actually priced', () => {
     expect(w).toContain('u8spill');
   });
 
+  // DECLARED NAMES FIRST: a real split has dozens of branch labels against one function label, so
+  // an unordered list buries the single name the reader is looking for behind eight `_08xxxxxx`.
+  it('names the declared function before the branch labels, in a list that elides', () => {
+    const w = renameWarning('TOTALLY_WRONG', 'split.s', definedLabels(split));
+    expect(w).toContain('sub_0800D188, _0800D192');
+  });
+
   // The rename is LEGITIMATE and must not be refused: a klonoa split labels the function
   // `sub_0800D188` and the round prices it under the name it is decompiling it as.
   it('says nothing when the symbol is a label in the file', () => {
     expect(renameWarning('u8spill', 'u8spill.s', definedLabels(oneFunction))).toBeUndefined();
   });
 
+  // B3'S OWN FAILURE MODE, one level in. `_0800D192` is a name a round copies out of a
+  // disassembly by the hundred; it IS in the file, so the flat reading said nothing, and the
+  // frontend then renamed the file's one function to a branch target.
+  it('warns when the symbol is in the file only as a branch label', () => {
+    const w = renameWarning('_0800D192', 'split.s', definedLabels(split));
+    expect(w).toContain('is a label in split.s but not a FUNCTION there');
+    expect(w).toContain('sub_0800D188');
+  });
+
+  // …but only where something IS declared. A bare `.s` with `name:` and no `.globl` declares
+  // nothing, so there is no function to point at and the rename is the case the flag exists for.
+  it('makes no claim about a plain label in a file that declares nothing', () => {
+    expect(renameWarning('foo', 'x.s', { declared: [], other: ['foo'] })).toBeUndefined();
+  });
+
   // No labels parsed ⇒ no claim. Naming what "was really lifted" from a file this function could
   // not read is exactly the confident wrong answer the warning exists to prevent.
   it('makes no claim about a file it found no labels in', () => {
-    expect(renameWarning('anything', 'x.s', [])).toBeUndefined();
+    expect(renameWarning('anything', 'x.s', { declared: [], other: [] })).toBeUndefined();
   });
 });
 
@@ -459,5 +537,55 @@ describe('fanDiffLine', () => {
   it('says a ref it cannot read is a ref it cannot read', () => {
     const line = fanDiffLine('r', 96, 'nope', { error: "cannot read …: fatal: invalid object name 'nope'" });
     expect(line).toContain('cannot read the artifact at nope');
+  });
+
+  // THE FOURTH FACT, and the one a round needs most: a DECLINED row throws before it enumerates,
+  // so there is no count on THIS side. `--base` was silently ignored on all 233 of them — the row
+  // class `attribute-function.md` sends rounds to. The base's recorded count is the answer there.
+  it('says the fan LEFT when the base counted and this run has none', () => {
+    const line = fanDiffLine('r', undefined, 'origin/main', artifact([{ id: 'r', candidateCount: 26880 }]));
+    expect(line).toContain('records 26880 candidate(s) for r');
+    expect(line).toContain('that fan LEFT, it did not shrink to zero');
+  });
+
+  // …and the no-fan clause has to survive the other three sentences too: "this run enumerates
+  // undefined" is the kind of line that gets pasted into a PR body.
+  it('never renders a missing count as a number, on any of the four sentences', () => {
+    for (const committed of [
+      artifact([{ id: 'r' }]),
+      artifact([{ id: 'other', candidateCount: 4 }]),
+      artifact([{ id: 'r', candidateCount: 8 }]),
+    ]) {
+      const line = fanDiffLine('r', undefined, 'origin/main', committed);
+      expect(line).not.toContain('undefined');
+      expect(line).toContain('this run has no fan at all');
+    }
+  });
+
+  // A base with NO count and no fan here is not a series starting: nothing started.
+  it('does not say the series starts here when neither side counted', () => {
+    expect(fanDiffLine('r', undefined, 'origin/main', artifact([{ id: 'r' }]))).not.toContain('series starts here');
+  });
+});
+
+// IS THE BASE'S OWN NUMBER STILL THE BASE'S ANSWER. `bench baseline` stamps CURRENT / NOT CURRENT
+// on every number it prints; a MULTIPLIER read off the same artifact carries the hazard in a
+// sharper form — the commits between the artifact and the ref are exactly the ones that could have
+// made the move a branch is about to claim as its own.
+describe('fanBaseStaleNote', () => {
+  it('says nothing when no scoring commit landed on the base since its artifact', () => {
+    expect(fanBaseStaleNote('origin/main', { at: 'abcdef1234', scoring: [] })).toBeUndefined();
+  });
+
+  it('warns that part of the move may already be on the base, naming the commits', () => {
+    const n = fanBaseStaleNote('origin/main', { at: 'abcdef1234', scoring: ['1111111 a lever', '2222222 another'] });
+    expect(n).toContain('2 commit(s) on origin/main since then change what the fan is');
+    expect(n).toContain('1111111');
+    expect(n).toContain('may already be');
+  });
+
+  // git declining is not a clean bill of health — the same degradation `bench baseline` makes.
+  it('says the question is unverified when git cannot date the artifact', () => {
+    expect(fanBaseStaleNote('origin/main', { scoring: [] })).toContain('unverified');
   });
 });

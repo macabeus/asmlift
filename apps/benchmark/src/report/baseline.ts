@@ -38,8 +38,31 @@ const score = (s: number | null | undefined, m: number | null | undefined): stri
   // as `null` invites the reader to quote a null as a number.
   `${s ?? '-'}/${m ?? '-'}`;
 
+/** THE COST FIELDS, in the reader that already exists.
+ *
+ *  `candidateCount` and `rankSeconds` are published on every ranked row, and until this line the
+ *  only way to read either was a NEW lookup (`bench fan <row> --base <ref>`) that re-implements the
+ *  ref read and the "why there is no comparison" sentences — and does it WITHOUT the CURRENT /
+ *  NOT CURRENT verdict below, which is this repo's own answer to quoting a stale artifact number.
+ *  Two fields a whole round exists to record, invisible in the one command whose job is to report
+ *  what the artifact says.
+ *
+ *  Omitted per row when the row has neither, so a declined row stays one line. `fan` is a count;
+ *  `rank` is WALL CLOCK under parallel shards and moves ~5× with the candidate cache, which the
+ *  `cost` section of `bench diff` says at length and this line has no room for. */
+const cost = (r: FunctionResult): string => {
+  const bits: string[] = [];
+  if (r.asmlift.candidateCount !== undefined) {
+    bits.push(`fan=${r.asmlift.candidateCount}`);
+  }
+  if (r.asmlift.rankSeconds !== undefined) {
+    bits.push(`rank=${r.asmlift.rankSeconds.toFixed(1)}s`);
+  }
+  return bits.length === 0 ? '' : `  ${bits.join(' ')}`;
+};
+
 export function formatRow(r: FunctionResult): string {
-  return `${r.id}  asmlift=${r.asmlift.outcome} ${score(r.asmlift.score, r.asmlift.maxScore)}  m2c=${r.m2c.outcome} ${score(r.m2c.score, r.m2c.maxScore)}`;
+  return `${r.id}  asmlift=${r.asmlift.outcome} ${score(r.asmlift.score, r.asmlift.maxScore)}  m2c=${r.m2c.outcome} ${score(r.m2c.score, r.m2c.maxScore)}${cost(r)}`;
 }
 
 /** `git …` in the repo, or `undefined` when git declines to answer — the freshness verdict is a
