@@ -64,8 +64,8 @@ there is nothing extra to run and nothing to remember; what it says:
 `apps/benchmark/src/report/baseline.ts`) computes `git log <the artifact's own commit>..<base>` over
 `SCORING_PATHS`. It reads no `HEAD`, no index and no working tree, so a branch that has already
 COMMITTED its capability — a remediation agent, a wave-2 reviewer, any continuation — still gets
-`CURRENT`, and that word then means *the published number is still the published number*, not *it is
-still your number*. Measured 2026-09-12 at `3a4fd60f`: with a scoring-path file dirty in the
+`CURRENT`, and that word then means _the published number is still the published number_, not _it is
+still your number_. Measured 2026-09-12 at `3a4fd60f`: with a scoring-path file dirty in the
 worktree, `pnpm bench baseline CountCollectedGems` printed `CURRENT — nothing since 8599234d changes
 what it measures` unchanged. So there is a **fourth** case in which the round runs the row:
 

@@ -117,12 +117,11 @@ const HOUSE = `
   a compiler claim, instrument a refusing site, NO REACH ≠ LOSES, the denominator moves. Costs are
   in \`docs/bench-cost.md\`, dated — never quote a bench timing from memory or from a brief.
 - Lint is \`pnpm lint\` (= \`eslint .\`; the \`npx eslint apps packages\` house rule was retired in
-  #87). The two agree on the VERDICT, not on the output: measured 2026-09-12 at \`3a4fd60f\`,
-  \`eslint .\` is **0 errors / 140 warnings**, \`eslint apps packages\` **0 errors / 106 warnings**,
-  and the whole 34-warning difference is pre-existing \`semi\` warnings in THIS file — \`.claude/\`
-  is in \`.prettierignore\`, so \`pnpm format\` never touches it. Only errors block. **Do not "fix"
-  those warnings**: rewriting the brief generator is not the round. \`pnpm format\` before
-  committing — it is
+  #87). The two agree on the VERDICT and **not** on the output: \`eslint .\` reports exactly **34
+  warnings more**, and all 34 are \`semi\` warnings in THIS file, which \`.prettierignore\` keeps out
+  of \`pnpm format\`. Measured 2026-09-12: 134 vs 100 — **the totals move every round, the 34 does
+  not; quote neither from here, run it.** Only errors block, and **do not "fix" those warnings**:
+  rewriting the brief generator is not the round. \`pnpm format\` before committing — it is
   \`prettier --write .\`, a tree WRITE, so \`pnpm bench in-flight\` first: exit 1 means a bench is
   measuring this worktree, and one save stamps its whole run dirty (one round paid 2,420 s for it).
 - \`source /tmp/wt-env.sh\` in every shell before any harness command, or rows silently SKIP.

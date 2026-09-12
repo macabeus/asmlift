@@ -142,16 +142,16 @@ than restating it.
 "Is CI green?" and "did the PR merge?" are measurements too. **`scripts/pr-wait.sh <pr>`** polls the
 PR's real state under a deadline and exits with the ANSWER. **Six codes, not four** — the script's
 own header block (`scripts/pr-wait.sh:20-26`) is the list, and a round handed a short version has no
-reading for the two that mean *stop waiting*:
+reading for the two that mean _stop waiting_:
 
-| exit | meaning                                                                                        | what it means you should do                                                          |
-| ---- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| 0    | merged                                                                                          | done                                                                                   |
-| 1    | a check failed — a verdict GitHub actually gave                                                 | read the failing job                                                                   |
-| 2    | still pending, nothing decided; also a network blip, an expired token, "no checks reported"     | poll again or raise `--timeout`; **never** read a 2 as a red check                     |
-| 3    | green and ready to merge                                                                        | merge it                                                                               |
-| 4    | **`CLOSED` — closed without merging** (`:124`, `:210`)                                          | the PR is dead; stop waiting and say so, rather than polling to the deadline           |
-| 64   | **usage error, or the PR cannot be read at all** (`:43`, `:92`, `:112`)                         | you asked the wrong question; fix the invocation, do not retry it                      |
+| exit | meaning                                                                                     | what it means you should do                                                  |
+| ---- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 0    | merged                                                                                      | done                                                                         |
+| 1    | a check failed — a verdict GitHub actually gave                                             | read the failing job                                                         |
+| 2    | still pending, nothing decided; also a network blip, an expired token, "no checks reported" | poll again or raise `--timeout`; **never** read a 2 as a red check           |
+| 3    | green and ready to merge                                                                    | merge it                                                                     |
+| 4    | **`CLOSED` — closed without merging** (`:124`, `:210`)                                      | the PR is dead; stop waiting and say so, rather than polling to the deadline |
+| 64   | **usage error, or the PR cannot be read at all** (`:43`, `:92`, `:112`)                     | you asked the wrong question; fix the invocation, do not retry it            |
 
 Exit 2 is deliberately wide because `gh`'s own exit 1 confounds a failing check with a network
 error, an expired token and "no checks reported" (`gh help exit-codes`), so the buckets are read
