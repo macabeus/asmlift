@@ -62,6 +62,15 @@ import { rowsAddedSince } from './regression';
  *  other watched field moves on: identical source, identical score, identical label, a fan that
  *  demonstrably changed, and a gate that answered "nothing moved".
  *
+ *  THE TWO COST FIELDS ARE DELIBERATELY OUT, for two different reasons. `rankSeconds` is wall
+ *  clock: it moves on every row of every run (machine load, docker, ~5× cold vs warm candidate
+ *  cache), so watching it here would report every row as changed and retire this gate. And
+ *  `candidateCount` is watched — but by the FAN SECTION below rather than by this list, because
+ *  this list decides the exit code and the artifact at `origin/main` predates the field: reading
+ *  `undefined → 96` as a field change would paint every scored row red on the first comparison
+ *  after it lands, on a run where nothing moved. The fan section states what moved, names the
+ *  multiplier, and touches no verdict.
+ *
  *  `symbolsUsed` is the one published field still left out, and NOT for size — it is at most 1,108
  *  chars on any row of the current artifact. It is derived from the winning candidate, which
  *  `source` and `candidateLabel` already name, and it moved on 0 rows over `eb6dec7d`→`2fed1e42`;

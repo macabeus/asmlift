@@ -67,6 +67,32 @@ export interface DecompilerResult {
   /** asmlift only, scored rows: the label of the candidate spelling that won the differ
    *  ranking (e.g. "unsigned/raw-globals") — which lever combination produced `source`. */
   candidateLabel?: string;
+  /** asmlift only, RANKED rows: HOW BIG THIS ROW'S FAN WAS — every candidate spelling
+   *  enumeration emitted, i.e. `scored + dropped + withheld`. The row's own share of what a
+   *  `bench run` costs, and the number that says whether an axis a round shipped multiplied it.
+   *
+   *  It was never recorded. `LoadBGTilemapData`'s fan went 59,904 → 225,792 in six days and that
+   *  series exists ONLY because individual rounds happened to type it into commit subjects; the
+   *  real tier's wall clock rose 6.0× in 21 days on an unchanged 252 rows and nobody noticed for
+   *  three weeks. `droppedCandidates.length + withheldCandidates.length` was the artifact's whole
+   *  view of a fan, which is the REFUSED part of it and on most rows is 0.
+   *
+   *  DETERMINISTIC — enumeration is a cross over axes, not a measurement — so unlike `rankSeconds`
+   *  this is comparable between two artifacts and belongs in `stale-check`'s row key.
+   *
+   *  Absent ⇒ the row never reached the ranked pass (`declined` on a phase-1 gap, or `failed`).
+   *  `0` is not a possible value: a fan with no candidates throws before it can be counted. */
+  candidateCount?: number;
+  /** asmlift only, RANKED rows: wall seconds of the ranked pass — enumerate, then compile and
+   *  objdiff-score every candidate. The price `candidateCount` predicts, as this machine actually
+   *  paid it.
+   *
+   *  NOT A MEASUREMENT OF THE DECOMPILER and never comparable between two artifacts as a claim
+   *  about asmlift: it moves with machine load, with docker, and by ~5× with whether the candidate
+   *  cache was warm. It is excluded from `bench diff`'s watched fields and from `stale-check`'s row
+   *  key for exactly that reason — a nondeterministic field in either would report every row as
+   *  moved on every run. Read it as what this run cost, alongside the count that explains it. */
+  rankSeconds?: number;
   /** asmlift only, scored rows: candidate spellings that FAILED TO BUILD and were dropped from
    *  the ranking, each with the compiler's first diagnostic line. A dropped sibling is a defect
    *  (in the emitter, or in the facts it was handed), and without this the row publishes a clean

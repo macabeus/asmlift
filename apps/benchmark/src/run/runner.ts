@@ -66,6 +66,20 @@ export function fmt(d: DecompilerResult): string {
   return d.outcome; // 'failed'
 }
 
+/** The per-row log line's COST note: the row's wall seconds, and the size of the fan that is most
+ *  of them.
+ *
+ *  The seconds were always printed and the fan never was, so a round watching a run scroll past
+ *  could see that a row took 400 s and not that it compiled 5,952 spellings to get there. It is the
+ *  only thing on this line that is not an outcome, and it is the number the round is steering by
+ *  when it asks whether an axis it just shipped is affordable.
+ *
+ *  Absent on a row that never ranked (declined, failed): a bare `(1.2s)` rather than `fan 0`, which
+ *  would read as a claim about the row's enumeration instead of about the run. */
+export function costNote(d: DecompilerResult, secs: string): string {
+  return d.candidateCount === undefined ? `(${secs}s)` : `(${secs}s, fan ${d.candidateCount})`;
+}
+
 /** Whether flat index `idx` belongs to `shard` — the slicing contract the orchestrator rides on. */
 export function inShard(idx: number, shard: Shard): boolean {
   return idx % shard.n === shard.idx;
@@ -148,7 +162,9 @@ export function runCases(
     const r = evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile);
     results.push(r);
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
-    console.log(`[${++done}/${mine.length}]${tag} ${c.id}  asmlift=${fmt(r.asmlift)} m2c=${fmt(r.m2c)}  (${secs}s)`);
+    console.log(
+      `[${++done}/${mine.length}]${tag} ${c.id}  asmlift=${fmt(r.asmlift)} m2c=${fmt(r.m2c)}  ${costNote(r.asmlift, secs)}`,
+    );
     flush();
   }
   flush();
