@@ -41,7 +41,10 @@
    diff against `origin/main`'s `results.json`.
 7. Diffing the two `.s` TEXTS instead of objdiff's rendering produced 145 bogus rows once;
    alignment padding rendered as `lsl rN,#0` vs `.hword 0` produced 8 more.
-8. A full `pnpm bench run` is **~5 minutes**, not ~30. The expensive thing is the ranked LBG run.
+8. ~~A full `pnpm bench run` is ~5 minutes~~ — TRUE WHEN WRITTEN, FALSE SINCE. Measured
+   2026-09-12: **~34 min** (synthetic 161 s + real 1,880 s), and the real tier alone grew 4.3× in
+   the 17 days to that date on an unchanged 252 rows. `docs/bench-cost.md` holds the dated table;
+   never quote a bench cost from this ledger.
 9. Rebasing a capability branch conflicts in the three generated artifacts and usually nothing
    else — never hand-merge `results.json`; discard both sides and regenerate.
 

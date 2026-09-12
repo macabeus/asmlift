@@ -124,3 +124,41 @@ describe('docs/bench-cost.md', () => {
     ).toEqual([]);
   });
 });
+
+/** Everything under `.claude/` an agent or a brief author reads: the two round prompts, the other
+ *  two commands, the workflow brief generator and its ledger. */
+function claudeFiles(dir = join(ROOT, '.claude'), out: string[] = []): string[] {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) claudeFiles(p, out);
+    else if (/\.(md|js)$/.test(p)) out.push(p);
+  }
+  return out;
+}
+
+/** A sentence that puts a wall-clock number on a bench command. Deliberately narrow: it is the
+ *  class that has actually gone stale here — the ledger asserted "a full `pnpm bench run` is ~5
+ *  minutes" for months against a run that takes ~34, and both prompts carried "~1800 s — synthetic
+ *  182 s + real 1618 s" against 161 + 1,880. */
+const BENCH_COST =
+  /(?:bench run|bench:merge|full bench|bench\b[^\n]{0,40}\brun\b)[^\n]{0,120}?\b(?:~|about )?\d[\d,.]*\s*(?:s|sec|seconds|min|minutes|h|hours)\b/i;
+
+describe('no undated bench cost under .claude/', () => {
+  it('every wall-clock claim about a bench command carries a date or defers to docs/bench-cost.md', () => {
+    const undated: string[] = [];
+    for (const file of claudeFiles()) {
+      const lines = readFileSync(file, 'utf8').split('\n');
+      lines.forEach((line, i) => {
+        if (!BENCH_COST.test(line)) return;
+        // The date may sit on the line or in the sentence around it; so may the deferral.
+        const context = lines.slice(Math.max(0, i - 2), i + 3).join('\n');
+        if (/\b20\d\d-\d\d-\d\d\b/.test(context) || context.includes('docs/bench-cost.md')) return;
+        undated.push(`${file.slice(ROOT.length + 1)}:${i + 1}  ${line.trim().slice(0, 80)}`);
+      });
+    }
+    expect(
+      undated,
+      'a bench cost with no measured date beside it reads as current forever — date it, or point at docs/bench-cost.md',
+    ).toEqual([]);
+  });
+});

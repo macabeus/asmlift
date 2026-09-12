@@ -20,7 +20,10 @@ const CONTEXT = `
 asmlift is a TS matching-decompiler. A loop runs \`/attribute-function\` on the klonoa function
 \`LoadBGTilemapData\` (LBG) to name missing capabilities and author benchmark rows, then
 \`/match-function\` builds the capability those rows gate. Each round is a Workflow of ~8 agents.
-**LBG has gone 547 → 473; the corpus is 834 rows, asmlift 433 / m2c 357.**
+**Never quote the corpus totals from this file** — they were 834 rows / 433 / 357 when it was
+written and are wrong by now. Read them from the committed artifact
+(\`apps/benchmark/results/results.json\`'s \`meta.counts\`, and the totals \`pnpm bench diff\` prints),
+and a single row's number from \`pnpm bench baseline <sym>\`.
 
 ## READ THIS FIRST — the ledger, not the whole corpus
 
@@ -38,7 +41,8 @@ believe a ledger entry is wrong, say so with the measurement that shows it.
   \`journal.jsonl\` (one \`{"type":"result"}\` line per agent) over the raw transcripts — it carries
   each agent's own report, which is usually enough.
 - \`${MEM}/\` — durable lessons, including the live-tracks table.
-- Run logs: \`/tmp/lbg8/*.log\`.
+- Run logs, if the round that produced them named a path — there is no standing log directory
+  (\`/tmp/lbg8/\` is gone as of 2026-09-12; do not send an agent to it).
 
 **Budget rule: spend at most a third of your effort reading, and the rest analysing.** If you find
 yourself opening a fourth transcript, stop and work with what the journals told you.
@@ -55,7 +59,12 @@ const SCOPE = `
 ## Scope
 
 **IN scope:**
-- \`${REPO}/.claude/commands/**\` — the prompts driving every round. Highest leverage available.
+- \`.claude/commands/**\` — the prompts driving every round. Highest leverage available.
+  **Read and edit them in YOUR OWN worktree, by absolute path** — \`${REPO}\` is the user's checkout
+  and is routinely tens of commits behind, so a relative path or a \`${REPO}/\` path hands you a
+  stale spec: 16 of 21 reads across rounds #183–#188 did exactly that. When you brief an agent,
+  give the path as \`<the worktree you created for it>/.claude/commands/…\`, never relative and
+  never as a pasted excerpt. \`docs/measurement-discipline.md\` §0 is the rule.
 - \`docs/**\`, \`scripts/**\`, \`.github/workflows/**\`.
 - \`apps/benchmark/src/**\` and \`packages/cli/src/**\` — surgical changes that make the flow FASTER
   or SMOOTHER **without changing any output**.
@@ -88,8 +97,11 @@ const HOUSE = `
 
 - **NEVER \`git stash\`.**
 - \`research/\` is gitignored — never cite a research/ path in a commit, a PR body, or a doc.
-- **Numbers come from commands.** Never state a timing, a count or a behaviour you did not observe.
-- Lint is \`npx eslint apps packages\` (NOT \`pnpm lint\`). \`pnpm format\` before committing — it is
+- **Numbers come from commands**, and the rest of \`docs/measurement-discipline.md\` with it: compile
+  a compiler claim, instrument a refusing site, NO REACH ≠ LOSES, the denominator moves. Costs are
+  in \`docs/bench-cost.md\`, dated — never quote a bench timing from memory or from a brief.
+- Lint is \`pnpm lint\` (the \`npx eslint apps packages\` house rule was retired in #87, which made
+  \`pnpm lint\`'s verdict byte-identical to it). \`pnpm format\` before committing — it is
   \`prettier --write .\`, a tree WRITE, so \`pnpm bench in-flight\` first: exit 1 means a bench is
   measuring this worktree, and one save stamps its whole run dirty (one round paid 2,420 s for it).
 - \`source /tmp/wt-env.sh\` in every shell before any harness command, or rows silently SKIP.
@@ -200,7 +212,7 @@ ${JSON.stringify(findings, null, 2)}
 
 Then build the survivors:
 - \`cd /tmp/wt-meta-impl && source /tmp/wt-env.sh && git fetch origin && git checkout -B meta/v3-${i} origin/main\`
-- \`pnpm typecheck\`, \`npx vitest run --maxWorkers=3\`, \`npx eslint apps packages\`, \`pnpm format\`.
+- \`pnpm typecheck\`, \`npx vitest run --maxWorkers=3\`, \`pnpm lint\`, \`pnpm format\`.
 - **PROVE OUTPUT NEUTRALITY** exactly as the scope section specifies; put the comparison script and
   its output in your report. Any difference blocks the change.
 - Commit saying what defect it closes and what proved it. Push, open a PR titled for iteration ${i}.
