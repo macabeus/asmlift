@@ -140,11 +140,23 @@ than restating it.
 ## 8. Never ask a human what a command answers
 
 "Is CI green?" and "did the PR merge?" are measurements too. **`scripts/pr-wait.sh <pr>`** polls the
-PR's real state under a deadline and exits with the ANSWER: **0** merged · **1** a check failed ·
-**2** still pending, nothing decided · **3** green and ready to merge. Exit 2 covers a network
-blip, an expired token and "no checks reported" — the cases gh's own exit code confounds with
-failure — so a 2 is never read as a red check. That question was asked of a human six times in one
-session and the script answers all six.
+PR's real state under a deadline and exits with the ANSWER. **Six codes, not four** — the script's
+own header block (`scripts/pr-wait.sh:20-26`) is the list, and a round handed a short version has no
+reading for the two that mean *stop waiting*:
+
+| exit | meaning                                                                                        | what it means you should do                                                          |
+| ---- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 0    | merged                                                                                          | done                                                                                   |
+| 1    | a check failed — a verdict GitHub actually gave                                                 | read the failing job                                                                   |
+| 2    | still pending, nothing decided; also a network blip, an expired token, "no checks reported"     | poll again or raise `--timeout`; **never** read a 2 as a red check                     |
+| 3    | green and ready to merge                                                                        | merge it                                                                               |
+| 4    | **`CLOSED` — closed without merging** (`:124`, `:210`)                                          | the PR is dead; stop waiting and say so, rather than polling to the deadline           |
+| 64   | **usage error, or the PR cannot be read at all** (`:43`, `:92`, `:112`)                         | you asked the wrong question; fix the invocation, do not retry it                      |
+
+Exit 2 is deliberately wide because `gh`'s own exit 1 confounds a failing check with a network
+error, an expired token and "no checks reported" (`gh help exit-codes`), so the buckets are read
+rather than the status. That question was asked of a human six times in one session and the script
+answers all six.
 
 The same applies to the tree you are about to edit (`pnpm bench in-flight`), the row you were
 handed (`pnpm bench baseline`), the fan you are about to pay for (`pnpm bench fan --enumerate`) and

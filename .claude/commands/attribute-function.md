@@ -42,12 +42,16 @@ Three docs carry what this command shares with `/match-function`, and it does no
    and each row's price printed as `fan=N rank=Ns`. Record the outcome verbatim for both
    decompilers — **the whole `diff:N/M`, never the `N` alone**.
 
-1. **Run the row only when step 0 did not answer.** A `CURRENT` verdict is the fact; a gap sized
-   against it is sized against the published number. `pnpm bench run --tier real --only $1` is for
-   the three cases step 0 leaves open: it said `NOT CURRENT` (name the commits you re-measured
-   across), it exited 1 (no row — the target is measured outside the harness), or you are claiming
-   a MOVE and need the before/after pair from one command. Do not re-derive a `CURRENT` baseline
-   "to be sure": four agents in one chain did, at 450–471 s each.
+1. **Run the row only when step 0 did not answer.** On a tree that touches no scoring path a
+   `CURRENT` verdict is the fact, and a gap sized against it is sized against the published number.
+   `pnpm bench run --tier real --only $1` is for the four cases step 0 leaves open, owned by
+   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) §3 and corrected there: it said
+   `NOT CURRENT` (name the commits you re-measured across); it exited 1 (no row — the target is
+   measured outside the harness); **your own branch or worktree touches a scoring path**, in which
+   case `CURRENT` is a statement about `origin/main` and not about you (`baseline` reads
+   `<artifact commit>..origin/main` and never your `HEAD`, index or working tree); or you are
+   claiming a MOVE and need the before/after pair from one command. Otherwise do not re-derive a
+   `CURRENT` baseline "to be sure": four agents in one chain did, at 450–471 s each.
 2. Reproduce outside the harness with **the row's own generated script**: `pnpm bench repro $1
    --run`. It writes that script (`results.json` → `scripts.asmlift`) into the gitignored
    `.local/repro/<row>/` with this machine's paths filled in, runs it, and prints the `[ranked]`
@@ -72,7 +76,9 @@ Three docs carry what this command shares with `/match-function`, and it does no
    huge fan takes half an hour to list: that is a big fan, not a hang). It still serves
    `--show <label>`, though not `--show best`: nothing has been scored, so there is no winner to
    name. A fan over 2,000 is refused unless you pass `--force`, and the refusal quotes what
-   `--force` would cost on THIS row. `--base <ref>` adds one line — this tree's count against the
+   `--force` would cost on THIS row — **but that refusal is not free**: it is checked after the
+   enumeration (`fan.ts:914`), so on a huge row it prints only once the half-hour of enumeration has
+   been paid. `--base <ref>` adds one line — this tree's count against the
    one that ref's artifact recorded (`[fan-diff] <row>: 5952 → 11904 (2.00×) vs origin/main`), and
    it prints on the declined and noncompile paths too, where the recorded count IS the answer; an
    unreadable or empty ref is refused at exit 2 before any enumeration. `--asm <file.s> --toolchain
@@ -278,14 +284,18 @@ attribution line for every decline naming its first blocker. Constraints learned
 ## Cost discipline
 
 Every figure this command needs is in [`docs/bench-cost.md`](../../docs/bench-cost.md), dated, and
-that is the only copy of it. Three parts of it this command leans on hardest:
+that is the only copy of it. **Do not retype a number from it into this file** — a retyped cost is
+a copy that drifts silently, which is the defect this whole section exists to close, and
+`command-files.test.ts` now fails on one. Three parts of it this command leans on hardest:
 
 - **Phase 6's smoke runs are the cheap path and Phase 7's is the expensive one.** A full
-  `pnpm bench run` is ~34 min warm (2026-09-12); `--tier synthetic --only <sym> --toolchain <id>
-  --serial` is seconds. Every row × toolchain is smoked individually BEFORE the full run for that reason, and
-  because one compiler-hostile candidate with no compile timeout stalls every future full run.
-- `pnpm bench baseline <sym>` prices a scoped run before you launch it (`rank=Ns`, ~2.6 s at
-  2026-09-12, no bench). `pnpm bench gates --pass <pass>` is ~29 s and replaces an instrument-and-revert cycle.
+  `pnpm bench run` is the expensive one (`docs/bench-cost.md` §1); `--tier synthetic --only <sym>
+  --toolchain <id> --serial` is seconds. Every row × toolchain is smoked individually BEFORE the
+  full run for that reason, and because one compiler-hostile candidate with no compile timeout
+  stalls every future full run.
+- `pnpm bench baseline <sym>` prices a scoped run before you launch it (`rank=Ns`, and it runs no
+  bench at all). `pnpm bench gates --pass <pass>` replaces an instrument-and-revert cycle at a
+  fraction of a run. Both prices: `docs/bench-cost.md` §1.
 - Background the long ones, wait on a bounded marker-AND-log-growth condition, keep only READ-ONLY
   work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree — which for
   this command is Phase 6 (it authors dataset rows) and Phase 7 (`pnpm format` is a tree WRITE).

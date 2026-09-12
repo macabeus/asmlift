@@ -344,8 +344,11 @@ Then update the memory files under
 3. **Never write to the user's live checkouts, and never push `main`** in any of the three repos.
    Worktrees and feature branches only.
 4. **A score is not a match.** Only `make compare` is — and only on the merged branch.
-5. **Numbers come from commands you ran**, shown or quoted. Recompile any score another tool reports
-   before repeating it — Transmuter reported a 152→34 improvement that did not exist.
+5. **Numbers come from commands you ran**, shown or quoted — the whole law is
+   [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md), and what a harness
+   command costs is [`docs/bench-cost.md`](../../docs/bench-cost.md), dated. Correct either there,
+   never here. Recompile any score another tool reports before repeating it — Transmuter reported a
+   152→34 improvement that did not exist.
 6. **asmlift stays pinned for the duration.** Log its defects; fix them after the round.
 7. **Never declare a function irreducibly unmatchable from hand experiments.** Name the blocking
    hypothesis and leave it open.

@@ -7,7 +7,9 @@
   line; `scripts/check-artifact-provenance.sh` + a PR-only CI job.
 - **#81** the headline re-measured; the second adversarial wave re-briefed; an unmeasured asmlift
   claim actually run. (`.claude/commands/` only.)
-- **#82** the ranked run gets a **compile pool** (measured **36m10s serial → 21m32s at `--jobs 6`**,
+- **#82** (merged 2026-08-22; every timing in this entry is a MEASUREMENT OF THAT DAY, kept as the
+  record of why the change landed — not a current price. Current prices: `docs/bench-cost.md`.)
+  The ranked run gets a **compile pool** (measured **36m10s serial → 21m32s at `--jobs 6`**,
   20608 candidates, 0 dropped, identical winner; scaling 2.00x/3.44x/4.44x/4.86x at p2/p4/p6/p8),
   a **liveness pulse** (the serial ranked run had written 0 bytes for 36 minutes), and a
   neutrality command for this loop.

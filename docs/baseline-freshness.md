@@ -60,6 +60,19 @@ there is nothing extra to run and nothing to remember; what it says:
   narrower. Not disqualifying — `check-artifact-provenance.sh` reports these rather than failing
   them, and says why — but they can still move a row, so name them if your delta is small.
 
+**The verdict is about `origin/main`, never about YOU.** `commitsSinceArtifact` (in
+`apps/benchmark/src/report/baseline.ts`) computes `git log <the artifact's own commit>..<base>` over
+`SCORING_PATHS`. It reads no `HEAD`, no index and no working tree, so a branch that has already
+COMMITTED its capability — a remediation agent, a wave-2 reviewer, any continuation — still gets
+`CURRENT`, and that word then means *the published number is still the published number*, not *it is
+still your number*. Measured 2026-09-12 at `3a4fd60f`: with a scoring-path file dirty in the
+worktree, `pnpm bench baseline CountCollectedGems` printed `CURRENT — nothing since 8599234d changes
+what it measures` unchanged. So there is a **fourth** case in which the round runs the row:
+
+- `git diff --name-only origin/main...HEAD -- $(scoring paths)` or `git status --porcelain` is
+  non-empty for a scoring path ⇒ the artifact answers about main, not about your tree. Re-measure
+  the row on your own branch before you quote it as yours.
+
 The two path lists behind that split are `paths` and `measures` in
 `scripts/check-artifact-provenance.sh`, exported to TypeScript as `MEASURED_PATHS` and
 `SCORING_PATHS` and held equal to the script by `apps/benchmark/test/fidelity-provenance.test.ts`.

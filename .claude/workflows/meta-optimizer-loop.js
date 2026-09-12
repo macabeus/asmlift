@@ -12,7 +12,12 @@ const REPO = '/Users/macabeus/ApenasMeu/decompiler/asmlift'
 // Workflow transcripts for THIS session — the runtime prints the dir when a workflow launches.
 const WF = process.env.ASMLIFT_WF_DIR ?? '<this session\'s subagents/workflows dir>'
 const MEM = '~/.claude/projects/-Users-macabeus-ApenasMeu-decompiler-asmlift/memory'
-const LEDGER = `${REPO}/.claude/workflows/meta-optimizer-ledger.md`
+// THE LEDGER IS READ FROM `origin/main`, NOT FROM A PATH. `${REPO}` is the user's checkout and is
+// routinely tens of commits behind: on 2026-09-12 it was at 0b30aebe while main was at 8599234d, and
+// its copy of this ledger still carried the "~5 minutes" bench cost that entry 8 had already been
+// corrected to ~34 min on main. A file path there hands the reader the stale text; `git show` on a
+// just-fetched ref cannot. Same reason `SCOPE` sends every agent to its own worktree.
+const LEDGER = `git -C ${REPO} fetch origin && git -C ${REPO} show origin/main:.claude/workflows/meta-optimizer-ledger.md`
 
 const CONTEXT = `
 ## What this project is doing
@@ -27,8 +32,15 @@ and a single row's number from \`pnpm bench baseline <sym>\`.
 
 ## READ THIS FIRST — the ledger, not the whole corpus
 
-\`${LEDGER}\` lists everything this loop has already shipped, every harness trap already fixed, and
-the known-open items already named. **Read it before anything else.** It exists because the previous
+The ledger lists everything this loop has already shipped, every harness trap already fixed, and
+the known-open items already named. **Read it before anything else, and read it from \`origin/main\`
+rather than from a path:**
+
+\`\`\`sh
+${LEDGER}
+\`\`\`
+
+It exists because the previous
 incarnation re-read all 44 agent transcripts (38+ MB) on every iteration, so each pass spent more of
 itself re-deriving history than analysing anything new. Do not re-report a ledger entry; if you
 believe a ledger entry is wrong, say so with the measurement that shows it.
@@ -64,7 +76,11 @@ const SCOPE = `
   and is routinely tens of commits behind, so a relative path or a \`${REPO}/\` path hands you a
   stale spec: 16 of 21 reads across rounds #183–#188 did exactly that. When you brief an agent,
   give the path as \`<the worktree you created for it>/.claude/commands/…\`, never relative and
-  never as a pasted excerpt. \`docs/measurement-discipline.md\` §0 is the rule.
+  never as a pasted excerpt. **If you have no worktree — the SUPERVISOR does not — then "your own
+  worktree" resolves to \`${REPO}\`, the stale one, so read from the ref instead:
+  \`git -C ${REPO} fetch origin && git -C ${REPO} show origin/main:.claude/commands/<file>.md\`.**
+  \`docs/measurement-discipline.md\` §0 is the rule; \`command-files.test.ts\` gates this file
+  against \`${REPO}\`-rooted read paths.
 - \`docs/**\`, \`scripts/**\`, \`.github/workflows/**\`.
 - \`apps/benchmark/src/**\` and \`packages/cli/src/**\` — surgical changes that make the flow FASTER
   or SMOOTHER **without changing any output**.
@@ -100,8 +116,13 @@ const HOUSE = `
 - **Numbers come from commands**, and the rest of \`docs/measurement-discipline.md\` with it: compile
   a compiler claim, instrument a refusing site, NO REACH ≠ LOSES, the denominator moves. Costs are
   in \`docs/bench-cost.md\`, dated — never quote a bench timing from memory or from a brief.
-- Lint is \`pnpm lint\` (the \`npx eslint apps packages\` house rule was retired in #87, which made
-  \`pnpm lint\`'s verdict byte-identical to it). \`pnpm format\` before committing — it is
+- Lint is \`pnpm lint\` (= \`eslint .\`; the \`npx eslint apps packages\` house rule was retired in
+  #87). The two agree on the VERDICT, not on the output: measured 2026-09-12 at \`3a4fd60f\`,
+  \`eslint .\` is **0 errors / 140 warnings**, \`eslint apps packages\` **0 errors / 106 warnings**,
+  and the whole 34-warning difference is pre-existing \`semi\` warnings in THIS file — \`.claude/\`
+  is in \`.prettierignore\`, so \`pnpm format\` never touches it. Only errors block. **Do not "fix"
+  those warnings**: rewriting the brief generator is not the round. \`pnpm format\` before
+  committing — it is
   \`prettier --write .\`, a tree WRITE, so \`pnpm bench in-flight\` first: exit 1 means a bench is
   measuring this worktree, and one save stamps its whole run dirty (one round paid 2,420 s for it).
 - \`source /tmp/wt-env.sh\` in every shell before any harness command, or rows silently SKIP.
