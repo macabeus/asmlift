@@ -437,7 +437,10 @@ launch anything long. What this command leans on:
    for harness reasons.
 4. **Stop rule.** If the capability is bigger than this session, or the row turns out unmatchable:
    keep and ship the commits that genuinely reduced the diff, and report what is blocked and what
-   the next step would be. Do not force an ad-hoc hack to close the last few bytes.
+   the next step would be. Do not force an ad-hoc hack to close the last few bytes. "Unmatchable"
+   here means it cleared the bar in
+   [`docs/unmatchable-quirks.md`](../../docs/unmatchable-quirks.md) — two compiler sweeps — and
+   never "I ran out of session": that case is blocked, which is a different report.
 5. **Everything in [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md)** —
    numbers come from commands; a compiler claim is verified by compiling; a refusing site is named
    by instrumenting or ablating it; NO REACH ≠ LOSES ≠ DOES NOT COMPOSE; the denominator moves;

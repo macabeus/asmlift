@@ -48,9 +48,12 @@
 //      weakest thing that closes it, and the two checks around it do the rest: `citations.test.ts`
 //      holds the linked page's rows to still existing, the link check below refuses a 404.
 //      The FIRST version of this gate examined 0 of 175 blocks, because it keyed on a word its own
-//      branch had deleted two commits earlier — green with the evidence link removed. Hence the
-//      `examined > 0` assertion and the fixture beside it: a gate whose examined-block count is zero
-//      is not a weak gate, it is no gate, and nothing else in this file would have said so.
+//      branch had deleted two commits earlier — green with the evidence link removed. The SECOND
+//      examined 2, and one of them was `## Hard rules` — an 18-line block holding the word
+//      `unmatchable` and an unrelated `docs/` link — so the `examined > 0` tripwire added for the
+//      first defeat was held up by a decoy and the gate was green with its subject deleted again.
+//      Hence the pinned inhabitant SET below rather than a count: this gate has twice been a
+//      comment with a test runner attached, and nothing else in this file would have said so.
 //
 // WHAT IT STILL CANNOT DECIDE, so that nobody reads more into a green run than is there:
 //   - It cannot check that an instruction is TRUE. Only a command run can.
@@ -161,64 +164,117 @@ describe('the two round prompts do not duplicate an instruction', () => {
 });
 
 describe('a verdict that ENDS a round is linked to its evidence', () => {
-  // WHY THIS SHAPE, and not the obvious one. The first version of this gate keyed on the word
-  // `precedent` — a word the SAME BRANCH's earlier commit had already deleted from the bullet the
-  // gate was written to protect. Replayed over `.claude/commands/*.md` it examined 0 of 175 blocks,
-  // so `unbacked` was `[]` unconditionally: it stayed green with the evidence link DELETED, which
-  // is the single regression it exists to prevent. Three things follow, all encoded below:
-  //   - key on the RULE (a verdict that tells the agent to stop) rather than on one sentence's
-  //     wording;
-  //   - assert the scan EXAMINED something, so that re-wording the outcome list reddens this file
-  //     instead of silently disarming it (#186: a stamp needs a test where it is produced);
-  //   - require a MARKDOWN link, because the sibling "every link in a command file resolves" suite
-  //     below only inspects `](…)` — a bare `docs/foo.md` in running text is an unchecked promise,
-  //     and the first version accepted one.
+  // WHY THIS SHAPE, and not either of the two obvious ones. This gate has now been disarmed twice
+  // by its own corpus, and both defeats are encoded below.
   //
-  // Blocks are blank-line separated, so a bullet LIST is one block: a link anywhere in the list
-  // that carries the verdict satisfies it. That is deliberate — the unit an agent reads is the
-  // outcome list, not the line.
+  //   DEFEAT 1 — the wrong KEY. The first version keyed on the word `precedent`, which the SAME
+  //   BRANCH's earlier commit had already deleted from the bullet the gate protects. It examined 0
+  //   of 175 blocks, so `unbacked` was `[]` unconditionally: green with the evidence link DELETED.
+  //   Fix: key on the RULE (a verdict that tells the agent to stop), require a MARKDOWN link
+  //   (the sibling link-resolution suite below only inspects `](…)`, so a bare `docs/foo.md` in
+  //   running text is an unchecked promise), and assert the scan examined something.
+  //
+  //   DEFEAT 2 — the wrong UNIT, which then propped up the count from defeat 1. Blocks were
+  //   blank-line delimited, so `## Hard rules`' five numbered items were ONE block: it carries the
+  //   word `unmatchable` (rule 4) and a `docs/measurement-discipline.md` link (rule 5), which has
+  //   nothing to do with any verdict. That decoy satisfied `examined > 0` on its own, so rewording
+  //   the Phase-1 outcome bullet and deleting its link — the exact regression — was green again.
+  //   Three independent existentials over an 18-line paragraph is not a rule about a verdict.
+  //
+  // Hence: the unit is the BULLET (a top-level `-`/`N.` item plus its continuation lines), the link
+  // must be in the bullet that carries the verdict, and the assertion on the corpus is the pinned
+  // INHABITANT SET below rather than a count. A count can be held up by anything; a named set
+  // cannot. `registerBacked` is a third, non-redundant check: re-pointing every verdict at some
+  // other `docs/` page keeps the set intact and the unbacked list empty while leaving the register
+  // itself unreferenced (#186: a stamp needs a test where it is produced).
   const STOPS = /\bstops?\b/i;
   const VERDICT = /\bunmatchable\b|\bquirks?\b/i;
   const DOC_LINK = /\]\([^)\s]*docs\/[\w.-]+\.md[^)\s]*\)/;
+  const REGISTER_LINK = /\]\([^)\s]*docs\/unmatchable-quirks\.md[^)\s]*\)/;
+  const BULLET = /^(?:[-*+]|\d+\.)\s/;
 
-  /** Blank-line-delimited blocks of `lines` that pronounce a row unmatchable AND tell the agent to
-   *  stop. Returns how many such blocks were examined as well as which lack an evidence link: a
-   *  gate over an empty set is a comment with a test runner attached. */
-  const scanStops = (lines: string[], file = '<fixture>') => {
-    const unbacked: string[] = [];
-    let examined = 0;
+  /** Every verdict bullet that must carry an evidence link today, `file: label`. A verdict that is
+   *  reworded away drops out of this set and reddens the file; a NEW one has to be added here on
+   *  purpose, which is where an author is asked whether it is backed. Labels are the bullet's bold
+   *  lead, not line numbers — those rot on the next edit above them. */
+  const PINNED = ['match-function.md: Unmatchable source quirk', 'match-function.md: Stop rule.'];
+
+  /** The units a verdict can live in: a top-level bullet or numbered rule with its continuation
+   *  lines, and (for text that is not a list) a blank-line-delimited paragraph. */
+  const verdictUnits = (lines: string[]) => {
+    const units: { line: number; body: string[] }[] = [];
+    const pushBlock = (block: string[], base: number) => {
+      let s = 0;
+      for (let i = 0; i <= block.length; i++) {
+        if (i < block.length && !(i > s && BULLET.test(block[i]))) {
+          continue;
+        }
+        if (i > s) {
+          units.push({ line: base + s + 1, body: block.slice(s, i) });
+        }
+        s = i;
+      }
+    };
     let start = 0;
     for (let i = 0; i <= lines.length; i++) {
       if (i < lines.length && lines[i].trim() !== '') {
         continue;
       }
-      const block = lines.slice(start, i);
-      const text = block.join(' ');
-      if (block.length > 0 && VERDICT.test(text) && STOPS.test(text)) {
-        examined++;
-        if (!DOC_LINK.test(text)) {
-          unbacked.push(`${file}:${start + 1}: ${block[0].trim().slice(0, 70)}`);
-        }
+      if (i > start) {
+        pushBlock(lines.slice(start, i), start);
       }
       start = i + 1;
     }
-    return { examined, unbacked };
+    return units;
+  };
+
+  /** Units of `lines` that pronounce a row unmatchable AND tell the agent to stop. Returns WHICH
+   *  were examined, not just how many — a gate over an empty set is a comment with a test runner
+   *  attached, and a gate over an unnamed set is one a decoy can keep alive. */
+  const scanStops = (lines: string[], file = '<fixture>') => {
+    const unbacked: string[] = [];
+    const examined: { file: string; label: string; line: number }[] = [];
+    let registerBacked = 0;
+    for (const unit of verdictUnits(lines)) {
+      const text = unit.body.join(' ');
+      if (!VERDICT.test(text) || !STOPS.test(text)) {
+        continue;
+      }
+      const label = (unit.body[0].match(/\*\*(.+?)\*\*/)?.[1] ?? unit.body[0].trim().slice(0, 60)).trim();
+      examined.push({ file, label, line: unit.line });
+      if (REGISTER_LINK.test(text)) {
+        registerBacked++;
+      }
+      if (!DOC_LINK.test(text)) {
+        unbacked.push(`${file}:${unit.line}: ${unit.body[0].trim().slice(0, 70)}`);
+      }
+    }
+    return { examined, unbacked, registerBacked };
   };
 
   it('every unmatchable verdict in a command file links a docs/ page', () => {
-    let examined = 0;
+    const examined: { file: string; label: string; line: number }[] = [];
     const unbacked: string[] = [];
+    let registerBacked = 0;
     for (const f of commandFiles()) {
       const found = scanStops(read(f), f);
-      examined += found.examined;
+      examined.push(...found.examined);
       unbacked.push(...found.unbacked);
+      registerBacked += found.registerBacked;
     }
     expect(unbacked, `a verdict that stops the round, with no evidence link: ${unbacked.join(' | ')}`).toEqual([]);
     expect(
-      examined,
-      'this gate examined no block at all, so it passes whatever the command files say. The wording ' +
-        'it keys on has moved: re-point it at the outcome bullet that tells an agent a row is ' +
-        'unmatchable and to stop.',
+      examined.map((e) => `${e.file}: ${e.label}`).sort(),
+      'the set of verdict bullets this gate protects has changed. MISSING entry: a bullet that told ' +
+        'an agent a row is unmatchable and to stop no longer reads that way — if that was deliberate, ' +
+        'delete it from PINNED; if not, this is the regression the gate exists to catch. EXTRA entry: ' +
+        'a new verdict that ends a round — add it to PINNED once it links its evidence.',
+    ).toEqual([...PINNED].sort());
+    expect(
+      registerBacked,
+      'no verdict bullet links docs/unmatchable-quirks.md any more. Every one of them is backed by ' +
+        'SOME docs page, so the check above is green — but the register that holds the cleared rows ' +
+        'is now unreachable from the prompts, which is how it stops being read.',
     ).toBeGreaterThan(0);
   });
 
@@ -228,17 +284,41 @@ describe('a verdict that ENDS a round is linked to its evidence', () => {
       '  produce. Say so, prove it, and stop.',
     ];
     const unlinked = scanStops(bullet);
-    expect(unlinked.examined).toBe(1);
+    expect(unlinked.examined.map((e) => e.label)).toEqual(['Unmatchable source quirk']);
     expect(unlinked.unbacked).toHaveLength(1);
     expect(unlinked.unbacked[0]).toContain('<fixture>:1: - **Unmatchable source quirk**');
     const backed = [
       bullet[0],
       `${bullet[1]} The bar is [\`docs/unmatchable-quirks.md\`](../../docs/unmatchable-quirks.md).`,
     ];
-    expect(scanStops(backed)).toEqual({ examined: 1, unbacked: [] });
+    expect(scanStops(backed).unbacked).toEqual([]);
+    expect(scanStops(backed).registerBacked).toBe(1);
     // A bare path in prose is NOT a link: nothing downstream checks it resolves.
     const prose = [bullet[0], `${bullet[1]} The bar is docs/unmatchable-quirks.md.`];
     expect(scanStops(prose).unbacked).toHaveLength(1);
+    // Some other docs page is a link but not the register: backed, not register-backed.
+    const elsewhere = [bullet[0], `${bullet[1]} The bar is [\`docs/bench-cost.md\`](../../docs/bench-cost.md).`];
+    expect(scanStops(elsewhere).unbacked).toEqual([]);
+    expect(scanStops(elsewhere).registerBacked).toBe(0);
+  });
+
+  it('does not let a neighbouring rule back a verdict — the defeat-2 shape', () => {
+    // `## Hard rules` verbatim in shape: one blank-line block, five numbered items, the verdict in
+    // item 2 and an unrelated docs link in item 3. Under the old block unit this scanned as ONE
+    // backed block — examined 1, unbacked 0, and the count kept the whole gate alive.
+    const rules = [
+      '1. **Never trade a loud failure for a silent wrong answer.** Every new transform must state',
+      '   the condition under which it refuses.',
+      '2. **Stop rule.** If the capability is bigger than this session, or the row turns out',
+      '   unmatchable: keep and ship the commits that genuinely reduced the diff.',
+      '3. **Everything in [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md)**',
+      '   — numbers come from commands; a measured null ships.',
+    ];
+    const scanned = scanStops(rules, 'hard-rules');
+    expect(scanned.examined.map((e) => e.label)).toEqual(['Stop rule.']);
+    expect(scanned.unbacked).toHaveLength(1);
+    expect(scanned.unbacked[0]).toContain('hard-rules:3:');
+    expect(scanned.registerBacked).toBe(0);
   });
 });
 

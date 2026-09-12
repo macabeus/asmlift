@@ -351,7 +351,9 @@ Then update the memory files under
    152→34 improvement that did not exist.
 6. **asmlift stays pinned for the duration.** Log its defects; fix them after the round.
 7. **Never declare a function irreducibly unmatchable from hand experiments.** Name the blocking
-   hypothesis and leave it open.
+   hypothesis and leave it open. The bar that would close it, and the rows that have cleared it, is
+   [`docs/unmatchable-quirks.md`](../../docs/unmatchable-quirks.md) — two compiler sweeps — and its
+   entries are benchmark rows, so a checkout function cannot enter it at all.
 8. **A placeholder name beats a guess**, and an unverified runtime claim beats nothing only if it is
    labelled as unverified.
 9. **Never use an `asm("")` barrier, and never count a function that carries one as matched.** A
