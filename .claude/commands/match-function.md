@@ -11,6 +11,21 @@ Your job is **not** "make this one row match". It is: find the *general capabili
 missing, build it soundly, and let this row fall out as evidence. A change that only works because
 you looked at this function's diff is a failure, even if the row flips to MATCH.
 
+**Read this file from YOUR OWN worktree, by absolute path.** A relative path resolves into whatever
+checkout your shell started in, which is usually tens of commits behind — 16 of 21 reads of this
+file across rounds #183–#188 returned a stale copy, and those agents followed a specification that
+named none of the tooling built for them. §0 of
+[`docs/measurement-discipline.md`](../../docs/measurement-discipline.md) is the rule and the fix.
+
+Three things this command does not restate, because they are shared with `/attribute-function` and
+a rule spelled twice is a rule with two chances to be lost:
+
+- [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md) — the laws every number
+  here is measured against. **Read it before Phase 0.**
+- [`docs/bench-cost.md`](../../docs/bench-cost.md) — what each command costs, how many full benches
+  a round gets, and how to wait on one.
+- [`docs/ranked-repro.md`](../../docs/ranked-repro.md) — the vehicles that produce a ranked number.
+
 ---
 
 ## Phase 0 — Resolve and baseline (never skip)
@@ -21,15 +36,26 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md). `/attribute-function` opens
    with the same step, so correct the rule in that doc and not here.
 
-1. Resolve the row: `pnpm bench run --tier real --only $1` (`--only` is a substring match on the
-   symbol; row ids are `project:sym:toolchain`). If it hits more than one row, list them and pick
-   the one the user meant — say which you picked.
-2. Record the **baseline** verbatim: asmlift outcome (`MATCH` / `diff:N/M` / `noncompile(k)` /
-   `declined(k gap(s))` / `failed`) and m2c's for the same row. Every later claim of improvement is
-   measured against this exact number, produced by this exact command. **Record the whole `N/M`,
-   never the `N` alone**: `M` is `maxScore`, the objdiff row count of the *winning candidate's*
-   alignment, so it moves when the candidate does. `diff:290/404 → diff:171/387` is 119 points on a
-   scale that also lost 17; quoted as `290 → 171` it makes the next reader subtract.
+   **This step usually ENDS the baseline question.** It costs ~2.6 s, runs no bench, prints EVERY
+   row whose symbol matches (so it disambiguates for you), and since #192 prints each row's price
+   as `fan=N rank=Ns`. Record what it prints verbatim: the asmlift outcome, m2c's, and the whole
+   `N/M` — never the `N` alone (`docs/measurement-discipline.md` §5).
+
+1. **Run the row only when step 0 did not answer**, which is three cases and no others:
+   - step 0 said **`NOT CURRENT`** — commits that decide a measurement landed after the artifact, so
+     re-measure with `pnpm bench run --tier real --only $1` and name the commits you measured
+     across;
+   - step 0 **exited 1** (no row for that symbol) — the target is measured outside the harness, so
+     the ranked repro is your vehicle, not `bench run`;
+   - you are about to claim a MOVE, in which case the before/after pair must come from the same
+     command.
+
+   A `CURRENT` verdict is the fact. Do not follow it with a re-derivation "to be sure": four agents
+   in one chain did exactly that and paid 450–471 s each for a number the artifact already held.
+   (`--only` is a substring match on the symbol; row ids are `project:sym:toolchain`. Say which row
+   you picked.)
+2. State the baseline in your first user-facing message, and say which brief was stale and by how
+   much. Never report progress without a before/after pair of real command output.
 3. Read the asm and the current asmlift output side by side. Get the target `.o` and a working dir
    with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness — but
    that is step 1 of the row's generated script, not the reproduction: no `[score]`, no input `.s`,
@@ -38,9 +64,7 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    Reproduce with the row's own script (`pnpm bench repro <sym|id> --run`) and confirm a moved row
    with `pnpm bench run --tier real --only <sym>`; see "The VEHICLE is part of the number" in
    [`docs/ranked-repro.md`](../../docs/ranked-repro.md).
-4. State the baseline in your first user-facing message. Never report progress without a
-   before/after pair of real command output.
-5. **Write every repro command down verbatim, flags included** — the `--only` line above, and any
+4. **Write every repro command down verbatim, flags included** — the `--only` line above, and any
    ranked enumeration you run outside the harness. Every later measurement (each reviewer's, each
    remediation's, the PR body's) re-runs *that* command, not one recomposed from memory. For the
    ranked enumeration that means **whichever vehicle in
@@ -77,7 +101,7 @@ them are not "add a feature":
 you.** `pnpm bench fan <sym|row-id>` prints every spelling asmlift considered for that row — each
 one's label, its score against its own denominator, the ones the scorer dropped, the ones withheld
 — in the harness's own configuration (the row's target object, prototypes, context compile and
-symbol map), so it is comparable with the published row rather than with a checkout. Two flags:
+symbol map), so it is comparable with the published row rather than with a checkout. The flags:
 
 - `--show <label>` prints that candidate's SOURCE. Nothing else can: `results.json` carries the
   winner's C and no other's, so "the near-miss spelling is right and only loses on X" is a claim
@@ -90,15 +114,28 @@ symbol map), so it is comparable with the published row rather than with a check
   to answer "did my new lever produce a candidate at all" — a label that is absent was never
   enumerated, and a lever that THREW prints as `[lever] … threw (no candidate from it)`, which a
   `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely:
-  ~120 candidates/s measured, so a 225,792-candidate fan is ~30 minutes to list. A long
-  enumeration is a big fan, not a hang.
+  **115 candidates/s** (measured 2026-09-12: 9,192 labels in 80.2 s), so the biggest fans take
+  half an hour to merely list. A long enumeration is a big fan, not a hang.
+- `--base <ref>` prints one line — this tree's enumeration against the count that ref's artifact
+  recorded for the same row: `[fan-diff] <row>: 5952 → 11904 (2.00×) vs origin/main`. **That is the
+  multiplier a round is asked to report before it merges an axis**, and it costs an enumeration
+  rather than a bench run. It prints at every exit, including the over-limit refusal and a declined
+  row — where the recorded count IS the answer. An unreadable or empty ref is refused at exit 2
+  before the enumeration, not diagnosed after it.
+- `--asm <file.s> --toolchain <id>` prices a function that is not a dataset row — the one a dogfood
+  round is about to attempt. ENUMERATION ONLY, and not the harness's configuration (no prototypes,
+  no asmData, no symbol map), which the command says every time. `--force` beside either
+  enumeration-only path is refused rather than ignored, and `--toolchain` without `--asm` is
+  refused rather than eaten.
 
 A fan over 2,000 candidates is refused rather than scored (`--force` overrides): that is a compile
 each, and the refusal quotes the row's own price at its own TIER'S measured rate — 60 ms/candidate
 synthetic, 85 ms real, because a real candidate escalates through up to three preludes where a
-synthetic one is a single small one. So `kleod:CountCollectedGems:agbcc`'s 5,952 is ~8 minutes
-(measured twice at 8.0 and 8.6; worth `--force`), and `LoadBGTilemapData`'s 225,792 is over five
-hours (`--enumerate` is the answer there).
+synthetic one is a single small one. **Ask `pnpm bench baseline <sym>` for the fan before you type
+`--force`**: it prints `fan=N rank=Ns` off the artifact in ~2.6 s, and those fans move fast —
+`kleod:CountCollectedGems:agbcc` was 5,952 when this paragraph was written and is 9,192 as
+measured on 2026-09-12. `LoadBGTilemapData`'s 225,792 is over five hours to score and ~33 minutes
+to `--enumerate`; **never start the scored run** (`docs/bench-cost.md` §1).
 
 **A declined or noncompile row has NO fan, and the command says so** (`asmlift: [fan] no fan …`,
 exit 2) rather than crashing: enumeration throws on the same gap the row declines on, and on a
@@ -169,8 +206,8 @@ Per commit:
 ## Phase 4 — Full-bench zero-flip gate
 
 `pnpm bench run` REFUSES to start when the tree's code differs from HEAD, and names the files:
-`pnpm bench:merge` refuses those numbers anyway, ~39 minutes later, and twice that refusal was one
-untracked env file. Commit first. Anything local a worktree needs (env exports, PATH overrides)
+`pnpm bench:merge` refuses those numbers anyway, ~34 minutes later (2026-09-12), and twice that
+refusal was one untracked env file. Commit first. Anything local a worktree needs (env exports, PATH overrides)
 goes in **`.envrc.local`**, gitignored for exactly this — but nothing loads it, so
 `source .envrc.local` yourself in the shell you run from; anything else local goes under
 **`.local/`**, gitignored too. Reach for `$(git rev-parse --git-path info/exclude)` only for a path
@@ -207,6 +244,14 @@ count, which moves when the FAN changed even though every score held. If a match
 tighten the gate on your lever or drop the lever — do not rationalize a trade unless the user
 explicitly approves it. Report the totals (asmlift vs m2c) before and after.
 
+Since #192 `diff` also prints a **FAN** section and a **COST** section under the verdict — the rows
+whose candidate count or ranked seconds moved most, with their multipliers, and a total over the
+rows both artifacts could answer for. **Both are INFORMATIONAL: neither moves an exit code**, and
+`candidateCount` is deliberately not in `FIELDS`. Read them anyway and put the fan multiplier in the
+PR body: an axis that moves no row and multiplies the confirming gate's own price by four is exactly
+what every gate this repo runs was blind to for three weeks. A row that stopped ranking is reported
+as `vanished` with the count that left, not silently dropped from the total.
+
 Four things this gate does not catch by itself:
 
 - **The regenerated artifact is the LAST commit on the branch — after the final rebase.**
@@ -235,10 +280,14 @@ Four things this gate does not catch by itself:
   A gate list spelled as `test:offline` + `apps/benchmark/test` +
   `test:matching` — which is what several rounds have run — leaves `apps/web/test` collected by
   nobody, and a change to the DEFAULT map-less spelling lands there: the playground preset pins its
-  own map-less source byte for byte. Run `npx vitest run` (the whole config, apps included) and
-  `pnpm test:matching`, and quote both counts. A branch has shipped twenty commits, two adversarial
-  rounds and every full bench run green while `pnpm exec vitest run apps/web/test` was red — from
-  its very first capability commit.
+  own map-less source byte for byte. Run `npx vitest run` (the root config, which is a strict
+  SUPERSET of those three CI suites — `packages/{core,cli/test/offline,toolchains}/test` plus
+  `apps/*/test`; read `include` in `vitest.config.ts`) and `pnpm test:matching`, and **quote both
+  counts**. Measured 2026-09-12 at `8599234d`: `npx vitest run` is 230 files / 4,199 tests in ~40 s
+  and `pnpm test:matching` 42 files / 394 tests in ~67 s, 0 skipped — a `test:matching` run that
+  reports SKIPS is a gate that did not run, and three PRs have published one as their gate. A
+  branch has shipped twenty commits, two adversarial rounds and every full bench run green while
+  `pnpm exec vitest run apps/web/test` was red — from its very first capability commit.
 - **A corpus sweep's configuration is part of its claim.** Sweeping a project's functions with the
   new rule ON vs OFF proves nothing about the configuration you did not run: with a symbol map
   every absolute pool constant lifts to a `gaddr`, so a symbol-map sweep is blind to a rule that
@@ -319,82 +368,23 @@ this phase is the only pass they get.
   `asmlift-adversarial-validation.md`) with the round's outcome and any gate that turned out to be
   load-bearing.
 - Push the branch (this project's convention is commit + push on a finished goal).
-- Then `scripts/pr-wait.sh <pr>` — it polls the PR's real state under a deadline and exits with the ANSWER (0 merged · 1 a check failed · 2 still pending, nothing decided · 3 green and ready to merge). Never ask a human whether CI is green or whether the PR merged; that question was asked six times in one session and the script answers all six.
+- Then **`scripts/pr-wait.sh <pr>`**, never a human — `docs/measurement-discipline.md` §8 has
+  its four exit codes and why a pending check is not a failed one.
 
-## Cost discipline — measured, and a rule rather than a preference
+## Cost discipline
 
-Read off this project's own logs, not estimated:
+**[`docs/bench-cost.md`](../../docs/bench-cost.md) is the table, and the only copy of it.** Every
+figure there carries the date it was measured, because they move: the real tier went 434 s →
+1,880 s in 17 days on an unchanged 252 rows. Read it before you launch anything long. In one line:
 
-| command | cost |
-| --- | --- |
-| `pnpm bench run` (all tiers) | **~1800 s** — synthetic 182 s + real 1618 s |
-| `pnpm bench run --tier synthetic` | **~182 s** |
-| `pnpm bench run --tier <t> --only <sym>` | 5–15 s |
-| a ranked run at LoadBGTilemapData scale | 1500–8000 s |
-| `npx vitest run` (root config) | ~120 s |
-
-**A full `pnpm bench run` runs EXACTLY TWICE in a round: once at the zero-flip gate, and once at
-ship after the final rebase.** Everything else uses the scoped forms — the synthetic tier for a
-broad sanity check, `--only` for the rows a change can reach. This is not a style note. One round
-ran it **eleven times**, four of them inside a single remediation agent, and spent about four and a
-half hours on nine runs that the scoped forms answer in three minutes. The real tier is ~90% of the
-cost and is dominated by asmlift's own enumeration, which is the thing under test and therefore
-uncacheable — so the saving comes from not repeating it, never from making it faster.
-
-If you believe a third full run is genuinely needed, run it and **say in your report why** — a
-stated reason is fine, a silent extra half hour is not.
-
-### Start the long command, then keep working
-
-A full bench and a ranked run are pure waiting. Launch one in the BACKGROUND at the start of a
-phase whose other work does not depend on its answer, and read the log at the end:
-
-```sh
-( pnpm bench run > /tmp/<round>-bench.log 2>&1; echo "EXIT=$?" >> /tmp/<round>-bench.log ) &
-… meanwhile: read the diff, grep the corpus, run the unit tests, draft the report …
-until grep -q 'EXIT=' /tmp/<round>-bench.log; do sleep 30; done
-```
-
-**What you keep working ON is constrained, and it is checkable.** `provenance.ts` samples git
-DURING the run and the sample is STICKY, so ONE edit — a comment audit, a `pnpm format`, an editor
-save, anywhere but the benchmark's own regenerated artifacts — stamps the whole run dirty and
-`bench:merge` throws the numbers away 39 minutes later. A round lost **2,420 s** to exactly that,
-auditing its comments beside its own gate bench. So a run in flight records itself, in
-`/tmp/asmlift-bench-running-<uid>/<pid>.json`. **Run `pnpm bench in-flight` before any phase that
-EDITS the tree, and read its exit code: 1 means a run is measuring this worktree — wait for its
-`EXIT=` line — and 0 means the tree is yours.** The work this background pattern is for is
-read-only: reading the diff, grepping the corpus, drafting the report. **The unit suites are NOT**
-— `packages/cli/test/offline/provenance.test.ts` writes an untracked `__provenance-probe__/` into
-`packages/` for the length of one test (it has to: it is asserting that the sampler can tell three
-dirty states apart), and a bench that samples inside that window is stamped dirty for good. Measured
-on this branch's own gate run. Run the suites before the bench or after it, not beside it. A
-run that was killed leaves its record behind and it reads STALE — that blocks nothing, and the next
-run sweeps it.
-
-**If you edit anyway, the run says so within ~2 s** — `[provenance] THE TREE WENT DIRTY MID-RUN`,
-on the run's own stderr, once, naming the paths. That line means the run is already lost: the
-sample is sticky and reverting does not undo it. Stop it, revert or commit, start it again.
-
-**`kill -TERM` does not stop a `bench run`** — measured: one sent SIGTERM 6 s in ran all 291 cases
-and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
-case, so no signal handler can run until it is done. `kill -9` is the stop that works, and the
-record it strands is stale.
-
-**Wait on a log marker, never on `pgrep -f "<pattern>"`** when the pattern also matches your own
-waiting shell — five waiter shells once deadlocked on each other for eight hours doing exactly
-that, long after the jobs they watched had finished.
-
-**Two full benches must never overlap on this machine.** It has 10 cores, the run fans 8 shards,
-and a ranked run takes `--jobs 6`; a bench measured **2704 s against a neighbour versus 1800 s
-solo**. Worse than slow: a shard killed by a neighbour writes a partial tier with **no error line**,
-and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line. **`bench run`
-enforces this**: the register is machine-wide, so a second FULL bench is refused while one is
-running in ANY worktree, and a second run in THIS worktree is refused when it writes a tier file
-the live one is writing. What is still allowed is the scoped dev loop — a `--tier synthetic --only
-<sym>` probe beside a background `--tier real`, here or beside a neighbour's full bench — because a
-15 s probe is not what fans 8 shards. If you have a real reason to measure anyway, `--no-lock` says
-so out loud and leaves every other record alone; **never `rm` a record you did not write**, which
-is the one move that silently unprotects someone else's run.
+- a full `pnpm bench run` is **~34 min** warm (2026-09-12), and it runs **once at the zero-flip
+  gate plus once after the final rebase** — a round whose base did not move runs it once, and a round that touches
+  no path in `MEASURED_PATHS` runs it zero times;
+- `pnpm bench baseline <sym>` answers the price of a scoped run in ~2.6 s without one;
+- background the long ones, wait on a bounded marker-AND-log-growth condition, keep only
+  READ-ONLY work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree;
+- `kill -TERM` does not stop a bench, `kill -9` orphans its shards, and two full benches must never
+  overlap on this machine. All four are in that file with what they cost when ignored.
 
 ---
 
@@ -412,10 +402,9 @@ is the one move that silently unprotects someone else's run.
 4. **Stop rule.** If the capability is bigger than this session, or the row turns out unmatchable:
    keep and ship the commits that genuinely reduced the diff, and report what is blocked and what
    the next step would be. Do not force an ad-hoc hack to close the last few bytes.
-5. **Numbers come from commands.** Never state a diff number, a match, or a regression you did not
-   just observe in tool output that you show or quote.
-6. **Never explain a discrepancy — re-run it.** A number that disagrees with this round's own
-   chain is a broken measurement until the Phase 0 command reproduces it. Running *a* command is
-   not enough to make a number real: a round once published 557 and 578 for a function whose
-   baseline was 547 and rationalised the gap as unpinned build objects, when the cause was a
-   dropped flag — the false number and the false story merged together.
+5. **Everything in [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md)** —
+   numbers come from commands; a compiler claim is verified by compiling; a refusing site is named
+   by instrumenting or ablating it; NO REACH ≠ LOSES ≠ DOES NOT COMPOSE; the denominator moves;
+   never explain a discrepancy, re-run it; a measured null ships. Those are hard rules of this
+   command too. They live there because `/attribute-function` has the same ones, and the last time
+   a rule lived in only one of the two prompts they drifted.
