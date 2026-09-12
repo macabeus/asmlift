@@ -32,6 +32,7 @@ import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
 import { Fn, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
+import { advancedBases } from './l3/advance';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { type BaseKey, admittedBases, hoistBaseLocals } from './l3/basecse';
@@ -1462,6 +1463,28 @@ export function enumerateCandidates(
     };
     respell('/nearbase', () => near(sfn));
     respell('/nearbase/sinkinit', () => nearSunk(sfn));
+    // `/advance` — a pointer local the source MOVED between two accesses (l3/advance.ts), read off
+    // the `add` the target performed on an address register that already held an address it used.
+    //
+    // THE `/volatile` PRODUCT IS THE ONE THAT PAYS, and both halves are measured on
+    // `kleod:StreamCmd_SetWindowRegs:agbcc`. Against the INDEXED spelling of the same minted local
+    // the advance buys nothing — agbcc folds `p = p + 1; *p` back into `strh [r3, #2]`, so
+    // `/advance` and `/nearbase` both score 15/23 there — and against the qualified one it is the
+    // match: `/advance/volatile` 0/22, because `volatile` bars that fold and leaves the `add` the
+    // target records. The plain label rides beside it as the un-qualified twin every minting lever
+    // on this roster keeps, and because the fold is one compiler's behaviour.
+    //
+    // NO `/vol-store` PRODUCT. That lever pins a store whose WHOLE ADDRESS is a device constant,
+    // and this one has just replaced those constants with a local — so on the shape `/advance`
+    // fires for, the pair reaches only whatever OTHER const-addressed device store the function
+    // still has, which no row on the corpus has beside an advanced chain. A pairing with no
+    // inhabitant is candidates without a row behind them.
+    const advance = (): SFn | null => survives(sfn, advancedBases(sfn));
+    respell('/advance', advance);
+    respell('/advance/volatile', () => {
+      const a = advance();
+      return a ? volatilePtrLocals(a, createdLocals(sfn, a)) : null;
+    });
     // The livebase × nearbase PAIRINGS — the same admission as livebase × indexed above:
     // the volatile triple is the row-demanded one, and the joint spelling is reachable from
     // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
