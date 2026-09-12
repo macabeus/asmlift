@@ -41,17 +41,24 @@ a rule spelled twice is a rule with two chances to be lost:
    as `fan=N rank=Ns`. Record what it prints verbatim: the asmlift outcome, m2c's, and the whole
    `N/M` — never the `N` alone (`docs/measurement-discipline.md` §5).
 
-1. **Run the row only when step 0 did not answer**, which is three cases and no others:
+1. **Run the row only when step 0 did not answer**, which is the four cases
+   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) §3 owns — correct that list
+   there, not here:
    - step 0 said **`NOT CURRENT`** — commits that decide a measurement landed after the artifact, so
      re-measure with `pnpm bench run --tier real --only $1` and name the commits you measured
      across;
    - step 0 **exited 1** (no row for that symbol) — the target is measured outside the harness, so
      the ranked repro is your vehicle, not `bench run`;
+   - **your own branch or worktree touches a scoring path** — `baseline` reads only
+     `<artifact commit>..origin/main`, never your `HEAD`, index or working tree, so `CURRENT` is a
+     statement about main and not about you. From this command's first capability commit onward you
+     are in this case;
    - you are about to claim a MOVE, in which case the before/after pair must come from the same
      command.
 
-   A `CURRENT` verdict is the fact. Do not follow it with a re-derivation "to be sure": four agents
-   in one chain did exactly that and paid 450–471 s each for a number the artifact already held.
+   On a tree that touches no scoring path, a `CURRENT` verdict is the fact. Do not follow that with
+   a re-derivation "to be sure": four agents in one chain did exactly that and paid 450–471 s each
+   for a number the artifact already held.
    (`--only` is a substring match on the symbol; row ids are `project:sym:toolchain`. Say which row
    you picked.)
 2. State the baseline in your first user-facing message, and say which brief was stale and by how
@@ -135,7 +142,10 @@ synthetic one is a single small one. **Ask `pnpm bench baseline <sym>` for the f
 `--force`**: it prints `fan=N rank=Ns` off the artifact in ~2.6 s, and those fans move fast —
 `kleod:CountCollectedGems:agbcc` was 5,952 when this paragraph was written and is 9,192 as
 measured on 2026-09-12. `LoadBGTilemapData`'s 225,792 is over five hours to score and ~33 minutes
-to `--enumerate`; **never start the scored run** (`docs/bench-cost.md` §1).
+to `--enumerate`; **never start the scored run** (`docs/bench-cost.md` §1). **And the 2,000 guard is
+not a cheap shield**: it is tested on `cands.length` AFTER the enumeration (`fan.ts:914`, read
+2026-09-12), so a bare `pnpm bench fan` on a row that size pays the whole ~33 min of enumeration and
+only then refuses.
 
 **A declined or noncompile row has NO fan, and the command says so** (`asmlift: [fan] no fan …`,
 exit 2) rather than crashing: enumeration throws on the same gap the row declines on, and on a
@@ -206,7 +216,7 @@ Per commit:
 ## Phase 4 — Full-bench zero-flip gate
 
 `pnpm bench run` REFUSES to start when the tree's code differs from HEAD, and names the files:
-`pnpm bench:merge` refuses those numbers anyway, ~34 minutes later (2026-09-12), and twice that
+`pnpm bench:merge` refuses those numbers anyway — a whole run later (`docs/bench-cost.md` §1) — and twice that
 refusal was one untracked env file. Commit first. Anything local a worktree needs (env exports, PATH overrides)
 goes in **`.envrc.local`**, gitignored for exactly this — but nothing loads it, so
 `source .envrc.local` yourself in the shell you run from; anything else local goes under
@@ -283,8 +293,10 @@ Four things this gate does not catch by itself:
   own map-less source byte for byte. Run `npx vitest run` (the root config, which is a strict
   SUPERSET of those three CI suites — `packages/{core,cli/test/offline,toolchains}/test` plus
   `apps/*/test`; read `include` in `vitest.config.ts`) and `pnpm test:matching`, and **quote both
-  counts**. Measured 2026-09-12 at `8599234d`: `npx vitest run` is 230 files / 4,199 tests in ~40 s
-  and `pnpm test:matching` 42 files / 394 tests in ~67 s, 0 skipped — a `test:matching` run that
+  counts**. The shapes to expect are in [`docs/bench-cost.md`](../../docs/bench-cost.md) §1, dated
+  and re-measured there rather than here — **both counts GROW as tests are added, so yours
+  disagreeing is not a failure; yours missing a whole suite is.** The skips are the tell: a
+  `test:matching` run that
   reports SKIPS is a gate that did not run, and three PRs have published one as their gate. A
   branch has shipped twenty commits, two adversarial rounds and every full bench run green while
   `pnpm exec vitest run apps/web/test` was red — from its very first capability commit.
@@ -374,13 +386,15 @@ this phase is the only pass they get.
 ## Cost discipline
 
 **[`docs/bench-cost.md`](../../docs/bench-cost.md) is the table, and the only copy of it.** Every
-figure there carries the date it was measured, because they move: the real tier went 434 s →
-1,880 s in 17 days on an unchanged 252 rows. Read it before you launch anything long. In one line:
+figure there carries the date it was measured, because they move: the real tier grew 4.3× in 17 days
+on an unchanged row count. **Do not retype one of those numbers here** — a second copy drifts
+silently, and `apps/benchmark/test/command-files.test.ts` fails on one. Read the table before you
+launch anything long. What this command leans on:
 
-- a full `pnpm bench run` is **~34 min** warm (2026-09-12), and it runs **once at the zero-flip
-  gate plus once after the final rebase** — a round whose base did not move runs it once, and a round that touches
-  no path in `MEASURED_PATHS` runs it zero times;
-- `pnpm bench baseline <sym>` answers the price of a scoped run in ~2.6 s without one;
+- a full `pnpm bench run` is the expensive one (`docs/bench-cost.md` §1), and it runs **once at the
+  zero-flip gate plus once after the final rebase** — a round whose base did not move runs it once,
+  and a round that touches no path in `MEASURED_PATHS` runs it zero times;
+- `pnpm bench baseline <sym>` answers the price of a scoped run in seconds, without one;
 - background the long ones, wait on a bounded marker-AND-log-growth condition, keep only
   READ-ONLY work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree;
 - `kill -TERM` does not stop a bench, `kill -9` orphans its shards, and two full benches must never
