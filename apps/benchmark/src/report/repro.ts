@@ -144,6 +144,18 @@ export async function repro(
   }
   if (ranked.length === 0) {
     err(`repro: the run printed no [ranked] line — read ${join(dir, 'out.err')}`);
+    // THE ONE CAUSE THAT IS NOT THE ROW. `@asmlift/cli`'s build output is gitignored, so in a
+    // fresh worktree the first `pnpm install` cannot create the bin link and `--run` dies on a bare
+    // ENOENT that says nothing about what to do. `repro-scripts.ts` writes the recovery into the
+    // generated script as a comment, three lines above the invocation — where nobody reading this
+    // error is looking. Say it where the failure is.
+    if (/\.bin\/asmlift: No such file or directory|cannot execute: required file not found/.test(errText)) {
+      err(
+        "repro: that is the checkout's asmlift bin missing, not the row. The CLI's build output is " +
+          'gitignored, so a fresh worktree has no bin link: run `pnpm --filter @asmlift/cli build` ' +
+          'and then `pnpm install` again, and re-run this.',
+      );
+    }
   }
   // exit 0 only on byte-exact (`--score-against`), so a non-matching row's script exits 1 by
   // design. That is the row reproducing, not the script breaking — pass it through and say so.
