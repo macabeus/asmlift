@@ -5,8 +5,17 @@
 import type { BenchOutput } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
-import { codeDirtyFrom, codeDirtyPaths, combineProvenance, wentDirtyNotice } from '../src/provenance';
+import {
+  TREE_BASE_REF,
+  codeDirtyFrom,
+  codeDirtyPaths,
+  combineProvenance,
+  treeChangeSet,
+  treeState,
+  wentDirtyNotice,
+} from '../src/provenance';
 import { checkTierProvenance } from '../src/report/merge';
+import { benchMeta } from '../src/run/runner';
 
 const tier = (asmlift?: { commit: string; dirty: boolean }): BenchOutput =>
   ({ meta: { generatedAt: 'whenever', ...(asmlift ? { asmlift } : {}) }, results: [] }) as unknown as BenchOutput;
@@ -130,5 +139,44 @@ describe('saying it out loud, at the moment it happens', () => {
     expect(msg).toContain('in 7 path(s)');
     expect(msg).toContain('…and 2 more');
     expect(msg).not.toContain('  g');
+  });
+});
+
+// WHAT THE RUN WAS TESTING. The transcripts log every bench command and its output and none logs
+// the working tree at that instant, so "could a cheaper gate have covered this invocation?" was
+// unanswerable after the fact across 131 h of full-tier bench. The artifact records it now.
+describe('the run`s change set', () => {
+  test('is the paths `git diff --name-only <merge-base>` names, blank lines dropped', () => {
+    expect(treeChangeSet('packages/core/src/structure/structure.ts\napps/benchmark/src/run/fan.ts\n')).toEqual({
+      changed: ['packages/core/src/structure/structure.ts', 'apps/benchmark/src/run/fan.ts'],
+    });
+  });
+
+  test('records nothing for a tree that changes nothing — an empty list, never a missing field', () => {
+    expect(treeChangeSet('')).toEqual({ changed: [] });
+  });
+
+  // A rebase or a `pnpm format` sweep touches hundreds of paths and this list is COMMITTED inside
+  // the artifact. Capped, and the count of what was cut is kept — a truncated list with no count
+  // reads as a complete one.
+  test('caps the list and says how many it cut', () => {
+    const many = Array.from({ length: 9 }, (_, i) => `f${i}.ts`).join('\n');
+    expect(treeChangeSet(many, 4)).toEqual({ changed: ['f0.ts', 'f1.ts', 'f2.ts', 'f3.ts'], more: 5 });
+  });
+
+  // The real thing, in this checkout: the base ref resolves, so the field exists and names a
+  // commit rather than a branch name (a ref is a different commit on every machine).
+  test('resolves the branch point in this checkout, and records the COMMIT', () => {
+    const t = treeState();
+    expect(t).toBeDefined();
+    expect(t?.base).toBe(TREE_BASE_REF);
+    expect(t?.baseCommit).toMatch(/^[0-9a-f]{40}$/);
+    expect(Array.isArray(t?.changed)).toBe(true);
+  });
+
+  // …and the artifact's meta carries it, which is the whole point: `benchMeta` is the ONE meta
+  // builder, so the tier files, the stitched tier and `bench merge`'s output all get it.
+  test('rides on benchMeta, the one meta builder every artifact goes through', () => {
+    expect(benchMeta([]).tree?.baseCommit).toMatch(/^[0-9a-f]{40}$/);
   });
 });

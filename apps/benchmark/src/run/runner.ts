@@ -7,7 +7,7 @@ import { writeFileSync } from 'node:fs';
 import { scrubObjectHeader } from '../asm-scrub';
 import type { Case } from '../cases/types';
 import { type EvalSpec, evaluate } from '../eval/evaluate';
-import { asmliftProvenance } from '../provenance';
+import { asmliftProvenance, treeState } from '../provenance';
 
 export interface Shard {
   idx: number; // 0-based shard index
@@ -27,6 +27,7 @@ export function parseShard(s: string): Shard {
  *  PRODUCED. `merge` re-stamps `asmlift` with its own sample and cross-checks the two (see
  *  ../provenance.ts for why one sample at merge time was not enough). */
 export function benchMeta(results: FunctionResult[]): BenchMeta {
+  const tree = treeState();
   return {
     generatedAt: new Date().toISOString(),
     toolchains: [...new Set(results.map((r) => r.toolchain))],
@@ -35,6 +36,9 @@ export function benchMeta(results: FunctionResult[]): BenchMeta {
       synthetic: results.filter((r) => r.tier === 'synthetic').length,
       real: results.filter((r) => r.tier === 'real').length,
     },
+    // WHAT THIS RUN WAS TESTING, memoized per process — see provenance.ts for why sampling it
+    // here rather than plumbing a launch-time sample through every shard is the same answer.
+    ...(tree ? { tree } : {}),
     asmlift: asmliftProvenance(),
   };
 }

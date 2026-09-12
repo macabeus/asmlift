@@ -109,6 +109,81 @@ export function sameMeasuredCode(a: string, b: string): boolean {
   return r.status === 0;
 }
 
+/** The ref a run's change set is measured against. The branch point, because that is what every
+ *  comparison gate in this harness already uses (`--base origin/main`) and what a round's work
+ *  actually is. */
+export const TREE_BASE_REF = 'origin/main';
+
+/** How many changed paths a run records before it summarises the rest. A rebase or a `pnpm format`
+ *  sweep can touch hundreds, and the artifact is committed. */
+export const TREE_PATHS_RECORDED = 40;
+
+/** WHAT THE TREE THAT PRODUCED THESE NUMBERS CHANGES, against the branch point — recorded on the
+ *  artifact so "could a cheaper gate have covered this invocation?" is answerable at all.
+ *
+ *  Every transcript logs the bench command and its output and NONE logs the working tree at that
+ *  instant, so the question "did this run need to happen" has never been askable after the fact:
+ *  131 h of full-tier bench across 99 runs, and no record anywhere of what any of them was
+ *  testing. This is that record, and it costs two `git` calls once per process. */
+export interface TreeState {
+  /** the ref the change set is measured against */
+  base: string;
+  /** the merge-base commit with it — a ref name is a different commit on every machine */
+  baseCommit: string;
+  /** repo-relative paths that differ between that commit and the WORKING TREE: this branch's own
+   *  commits AND anything uncommitted, in one list, because both are equally "what this run was
+   *  measuring" and a run cannot tell them apart by looking at a number it produced. */
+  changed: string[];
+  /** how many more there were than `changed` lists */
+  more?: number;
+}
+
+/** `git diff --name-only <base>`'s output as the capped list the artifact carries. Pure, so the
+ *  cap is testable without a checkout to dirty. */
+export function treeChangeSet(nameOnly: string, cap = TREE_PATHS_RECORDED): Pick<TreeState, 'changed' | 'more'> {
+  const all = nameOnly.split('\n').filter((l) => l.trim() !== '');
+  return { changed: all.slice(0, cap), ...(all.length > cap ? { more: all.length - cap } : {}) };
+}
+
+/** Sampled ONCE per process and memoized — `undefined` memoizes too, so an unresolvable base is
+ *  not re-asked once per case. */
+let treeSample: { value: TreeState | undefined } | undefined;
+
+/** The run's change set, or `undefined` when git cannot answer.
+ *
+ *  REFUSES, rather than guessing, when `origin/main` is not in this checkout (a fork, a shallow
+ *  CI clone, a checkout that never fetched): there is no honest fallback — comparing against
+ *  `HEAD` would record the empty list for every run and read as "this run tested nothing".
+ *
+ *  WHY SAMPLING IT AT MERGE TIME IS THE SAME ANSWER AS SAMPLING IT AT LAUNCH, which is what lets
+ *  this ride on `benchMeta` with no plumbing through the shards: the COMMITTED half cannot move,
+ *  because `report/merge.ts` refuses a tier whose run-time stamp names a different commit than
+ *  merge time. The UNCOMMITTED half cannot be non-empty on any run that is allowed to publish,
+ *  because `run/preflight.ts` refuses a whole-tier run on a code-dirty tree and `provenance`'s own
+ *  sticky sample stamps anything that goes dirty mid-run, which `merge` then refuses. A scoped dev
+ *  loop may of course run dirty — and there this records exactly the uncommitted edit it was
+ *  testing, which is the case the question is about. */
+export function treeState(): TreeState | undefined {
+  if (treeSample !== undefined) {
+    return treeSample.value;
+  }
+  treeSample = { value: undefined };
+  const base = spawnSync('git', ['-C', REPO_ROOT, 'merge-base', TREE_BASE_REF, 'HEAD'], { encoding: 'utf8' });
+  if (base.status !== 0 || base.stdout.trim() === '') {
+    return undefined;
+  }
+  const baseCommit = base.stdout.trim();
+  // ONE `git diff` against the merge-base COMMIT, with no second revision: that form compares it
+  // against the working tree, so this branch's commits and its uncommitted edits arrive together
+  // rather than as two lists a reader has to union.
+  const diff = spawnSync('git', ['-C', REPO_ROOT, 'diff', '--name-only', baseCommit], { encoding: 'utf8' });
+  if (diff.status !== 0) {
+    return undefined;
+  }
+  treeSample = { value: { base: TREE_BASE_REF, baseCommit, ...treeChangeSet(diff.stdout) } };
+  return treeSample.value;
+}
+
 const SAMPLE_INTERVAL_MS = 2000;
 let lastSample = 0;
 let sticky: { commit: string; dirty: boolean } | undefined;
