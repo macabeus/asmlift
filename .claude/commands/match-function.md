@@ -403,6 +403,16 @@ launch anything long. What this command leans on:
   zero-flip gate plus once after the final rebase** — a round whose base did not move runs it once,
   and a round that touches no path in `MEASURED_PATHS` runs it zero times;
 - `pnpm bench baseline <sym>` answers the price of a scoped run in seconds, without one;
+- **`pnpm bench sweep --base origin/main` is the corpus A/B**, and it is the one to reach for
+  whenever you would otherwise write a throwaway census script: it re-lifts every row in both
+  trees, map-ful and map-less, compiles nothing, and prints the rows whose emitted C moved. `--fan`
+  does the same for the whole enumerated candidate set, which is the arm an axis actually moves —
+  a corpus whose DEFAULT spelling is unchanged can still have had its fan doubled, and that is the
+  multiplier this command asks you to report. `--repeat N` asks the same of this tree against
+  itself. Read its exit code as `diff`'s with one addition: 1 = something moved, 2 = it did NOT
+  answer — an empty selection, or a row this shell could not lift at all (trap #6). And a moved
+  line that opens `asm …` or `opts …` says the row's INPUT moved, not the decompiler. Prices in
+  `docs/bench-cost.md` §1, and §3 carries the measured example of the two arms disagreeing;
 - background the long ones, wait on a bounded marker-AND-log-growth condition, keep only
   READ-ONLY work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree;
 - `kill -TERM` does not stop a bench, `kill -9` orphans its shards, and two full benches must never

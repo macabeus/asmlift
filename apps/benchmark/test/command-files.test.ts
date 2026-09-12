@@ -352,7 +352,7 @@ function claudeFiles(): string[] {
  *  re-measuring is spelled that way. */
 const AMOUNT = String.raw`(?:\b(?:~|about |over |under )?\d[\d,.]*|\b(?:half an|one|two|three|four|five|six|seven|eight|nine|ten)\s)\s*`;
 const UNIT = String.raw`(?:s|sec|secs|second|seconds|min|mins|minute|minutes|h|hr|hrs|hour|hours|ms)\b`;
-const COMMAND = String.raw`(?:pnpm |npx )?(?:bench[: ](?:run|merge|fan|gates|baseline|repro|target|diff|regression|setup|fidelity|smoke|verify|publish|vendor|stale-check|in-flight)|full bench|ranked run|ranked enumeration|vitest|test:matching|test:offline)`;
+const COMMAND = String.raw`(?:pnpm |npx )?(?:bench[: ](?:run|merge|fan|sweep|gates|baseline|repro|target|diff|regression|setup|fidelity|smoke|verify|publish|vendor|stale-check|in-flight)|full bench|ranked run|ranked enumeration|vitest|test:matching|test:offline)`;
 
 /** BOTH ORDERS, because English writes it either way: "Budget ~34 min for a full `pnpm bench run`"
  *  and "A full `pnpm bench run` takes ~34 min" are one claim with the clauses swapped, so requiring
