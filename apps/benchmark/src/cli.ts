@@ -20,8 +20,10 @@
 //                                        # and score, not just the winner's — in the harness's own
 //                                        # configuration; --show prints a candidate's SOURCE and
 //                                        # --enumerate lists the fan without compiling anything;
-//                                        # --base <ref> adds the fan multiplier vs that artifact,
-//                                        # and --asm prices a .s that is not a row (no scoring)
+//                                        # --base <ref> adds the fan multiplier vs that artifact
+//                                        # (on a declined row, the count that LEFT), and --asm
+//                                        # prices a .s that is not a row, no scoring. --toolchain
+//                                        # belongs to --asm alone: a row names its own in its id
 //   pnpm bench gates --pass <id> [--only <row>] [--toolchain id]
 //                                        # the per-id REFUSAL CENSUS of an l3/gates.ts table, off a
 //                                        # real enumeration: which rule refused, how many times, in
@@ -447,9 +449,18 @@ switch (command) {
       process.exit(2);
     }
     const { fan, fanOfAsm } = await import('./run/fan');
+    // `!== undefined` and not truthiness: `--base=` parses as the EMPTY STRING, and dropping it
+    // ran the whole command with no comparison at exit 0 — the same silence the refusals here
+    // exist to end. An empty ref reaches `readCommitted` and is refused there, by name.
+    //
+    // `toolchain`/`asmPath` go to BOTH paths, and only so `optionRefusal` can see the pair:
+    // `--toolchain` without `--asm` was accepted and ignored, pricing whichever toolchain the row
+    // id resolved to.
     const fanOpts = {
       ...(opts.show ? { show: opts.show } : {}),
-      ...(opts.base ? { base: opts.base } : {}),
+      ...(opts.base !== undefined ? { base: opts.base } : {}),
+      ...(opts.toolchain !== undefined ? { toolchain: opts.toolchain } : {}),
+      ...(opts.asm !== undefined ? { asmPath: opts.asm } : {}),
       enumerateOnly: opts.enumerate,
       force: opts.force,
     };
