@@ -7,7 +7,9 @@
   line; `scripts/check-artifact-provenance.sh` + a PR-only CI job.
 - **#81** the headline re-measured; the second adversarial wave re-briefed; an unmeasured asmlift
   claim actually run. (`.claude/commands/` only.)
-- **#82** the ranked run gets a **compile pool** (measured **36m10s serial → 21m32s at `--jobs 6`**,
+- **#82** (merged 2026-08-22; every timing in this entry is a MEASUREMENT OF THAT DAY, kept as the
+  record of why the change landed — not a current price. Current prices: `docs/bench-cost.md`.)
+  The ranked run gets a **compile pool** (measured **36m10s serial → 21m32s at `--jobs 6`**,
   20608 candidates, 0 dropped, identical winner; scaling 2.00x/3.44x/4.44x/4.86x at p2/p4/p6/p8),
   a **liveness pulse** (the serial ranked run had written 0 bytes for 36 minutes), and a
   neutrality command for this loop.
@@ -41,7 +43,10 @@
    diff against `origin/main`'s `results.json`.
 7. Diffing the two `.s` TEXTS instead of objdiff's rendering produced 145 bogus rows once;
    alignment padding rendered as `lsl rN,#0` vs `.hword 0` produced 8 more.
-8. A full `pnpm bench run` is **~5 minutes**, not ~30. The expensive thing is the ranked LBG run.
+8. ~~A full `pnpm bench run` is ~5 minutes~~ — TRUE WHEN WRITTEN, FALSE SINCE. Measured
+   2026-09-12: **~34 min** (synthetic 161 s + real 1,880 s), and the real tier alone grew 4.3× in
+   the 17 days to that date on an unchanged 252 rows. `docs/bench-cost.md` holds the dated table;
+   never quote a bench cost from this ledger.
 9. Rebasing a capability branch conflicts in the three generated artifacts and usually nothing
    else — never hand-merge `results.json`; discard both sides and regenerate.
 

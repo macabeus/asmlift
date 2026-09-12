@@ -14,6 +14,20 @@ no existing row exercises. You do **not** implement levers here — if a fix loo
 it as "the lever this row gates" and stop. A finding without a row (or a reason it cannot have
 one) is an unfinished finding.
 
+**Read this file from YOUR OWN worktree, by absolute path.** A relative path resolves into whatever
+checkout your shell started in, which is usually tens of commits behind — 16 of 21 reads of the
+sibling prompt across rounds #183–#188 returned a stale copy. §0 of
+[`docs/measurement-discipline.md`](../../docs/measurement-discipline.md) is the rule and the fix.
+
+Three docs carry what this command shares with `/match-function`, and it does not restate them:
+
+- [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md) is the one to read
+  first. §5 ("the denominator moves") decides how you are allowed to write a residual, and §2–§3
+  are what separate an attribution from a guess.
+- [`docs/bench-cost.md`](../../docs/bench-cost.md) prices everything below, dated.
+- [`docs/ranked-repro.md`](../../docs/ranked-repro.md) owns the vehicles, their flags and the four
+  warnings attached to them.
+
 ---
 
 ## Phase 0 — Resolve and baseline (never skip)
@@ -24,8 +38,23 @@ one) is an unfinished finding.
    [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md). `/match-function` opens with
    the same step, so correct the rule in that doc and not here.
 
-1. Resolve the row: `pnpm bench run --tier real --only $1`. Record the outcome verbatim for both
-   decompilers — **the whole `diff:N/M`, never the `N` alone** (see "the denominator moves" below).
+   **This step usually ENDS the baseline question**: seconds, no bench (priced in
+   `docs/bench-cost.md` §1), every matching row listed,
+   and each row's price printed as `fan=N rank=Ns`. Record the outcome verbatim for both
+   decompilers — **the whole `diff:N/M`, never the `N` alone**.
+
+1. **Run the row only when step 0 did not answer.** On a tree that touches no scoring path a
+   `CURRENT` verdict is the fact, and a gap sized against it is sized against the published number.
+   `pnpm bench run --tier real --only $1` is for the four cases step 0 leaves open, owned by
+   [`docs/baseline-freshness.md`](../../docs/baseline-freshness.md) §3 and corrected there: it said
+   `NOT CURRENT` (name the commits you re-measured across); it exited 1 (no row — the target is
+   measured outside the harness); **your own branch or worktree touches a scoring path**, in which
+   case `CURRENT` is a statement about `origin/main` and not about you (`baseline` reads
+   `<artifact commit>..origin/main` and never your `HEAD`, index or working tree — and that doc
+   gives the two-line command that ANSWERS it, pathspec derived from `SCORING_PATHS`, because a bare
+   `git status` counts a stray untracked file as a reason to re-measure); or you are
+   claiming a MOVE and need the before/after pair from one command. Otherwise do not re-derive a
+   `CURRENT` baseline "to be sure": four agents in one chain did, at 450–471 s each.
 2. Reproduce outside the harness with **the row's own generated script**: `pnpm bench repro $1
    --run`. It writes that script (`results.json` → `scripts.asmlift`) into the gitignored
    `.local/repro/<row>/` with this machine's paths filled in, runs it, and prints the `[ranked]`
@@ -46,10 +75,18 @@ one) is an unfinished finding.
    about this list, so read it. Its `[ranked]` line carries the same `synthesized` count and
    `[asmlift source <sha>]` stamp as the vehicles above, so it is quotable in the same way.
    `--enumerate` lists the same candidates' LABELS without compiling anything — no scores, because
-   nothing was compiled (~120 candidates/s, so a huge fan takes minutes to list: that is a big fan,
-   not a hang). It still serves `--show <label>`, though not `--show best`: nothing has been
-   scored, so there is no winner to name. A fan over 2,000 is
-   refused unless you pass `--force`, and the refusal quotes what `--force` would cost on THIS row.
+   nothing was compiled — the rate, and what a huge fan therefore costs to merely LIST, is a row of
+   `docs/bench-cost.md` §1; a long enumeration is a big fan, not a hang. It still serves
+   `--show <label>`, though not `--show best`: nothing has been scored, so there is no winner to
+   name. A fan over 2,000 is refused unless you pass `--force`, and the refusal quotes what
+   `--force` would cost on THIS row — **but that refusal is not free**: it is checked after the
+   enumeration (`fan.ts:914`), so on a huge row it prints only once the half-hour of enumeration has
+   been paid. `--base <ref>` adds one line — this tree's count against the
+   one that ref's artifact recorded (`[fan-diff] <row>: 5952 → 11904 (2.00×) vs origin/main`), and
+   it prints on the declined and noncompile paths too, where the recorded count IS the answer; an
+   unreadable or empty ref is refused at exit 2 before any enumeration. `--asm <file.s> --toolchain
+   <id>` prices a function that has no row at all, enumeration-only and outside the harness's
+   configuration, which it says every time.
    Unlike the two vehicles above, this one runs in the harness's own configuration by construction
    — it is the same call `bench run` makes for the row.
    **A declined row usually has no fan at all** — and that is a finding, not a broken command:
@@ -64,32 +101,17 @@ one) is an unfinished finding.
 
 ## The denominator moves — so a residual is never a "partition"
 
-`maxScore` is not a property of the target function. It is the objdiff row count of the **winning
-candidate's** alignment, so a different candidate is scored against a different scale. Across two
-committed artifacts (`eb6dec7d` → `2fed1e42`) fourteen of 1013 rows moved their denominator (twelve
-on the asmlift side), and `kleod:CountCollectedGems:agbcc` moved 290/404 → **171/387** — 17 points
-of scale inside a 119-point "improvement". Read as a subtraction on a fixed 404, that row's
-residual was decomposed into six gaps said to **PARTITION the 290**; the gaps then predicted 297
-points and delivered 119, and an extra attribution round was spent explaining a shortfall that was
-partly the scale.
+**The rule and its evidence are §5 of
+[`docs/measurement-discipline.md`](../../docs/measurement-discipline.md)**, because
+`/match-function` is held to it too. Read it there. It is load-bearing for THIS command in
+particular: `kleod:CountCollectedGems:agbcc` moved 290/404 → 171/387, a 119-point "improvement"
+containing 17 points of scale, and that row's residual was then decomposed into six gaps said to
+PARTITION the 290. They predicted 297 points, delivered 119, and an extra attribution round was
+spent explaining a shortfall that was partly the scale.
 
-Rules, and they are not optional:
-
-- **Never write "partition", "accounts for all of", "the N decomposes into", or any other
-  exhaustive-decomposition word about a residual** unless you have shown the denominator is fixed
-  across every measurement you are comparing. Write "these gaps cover X of the N *measured at
-  maxScore M*" and give M.
-- **A delta is a pair of fractions, not a difference.** Quote `before N₁/M₁ → after N₂/M₂` in the
-  report, the PR body and the row comment. If M moved, say so in the same sentence and say by how
-  much; if you do not know M, you do not have the delta.
-- **The tools tell you.** `pnpm bench run` prints `diff:<score>/<maxScore>` per row, and
-  `pnpm bench diff` prints `asmlift.score: 290/404 → 171/387` plus a separate
-  `asmlift.maxScore: 404 → 387` line **whenever** the denominator moves — alone or beside a moving
-  score. Every denominator move between `eb6dec7d` and `2fed1e42` printed both lines, so a
-  `maxScore` line is never evidence that the score held still. You do not have to open
-  `results.json` to see this.
-- **Gap arithmetic is a prediction until measured.** Sum-of-parts vs. whole is a claim about a
-  moving scale; state it as a prediction with the ablation that falsifies it.
+One addition that belongs only here: **gap arithmetic is a prediction until measured.** Sum-of-parts
+vs. whole is a claim about a moving scale — state it as a prediction, with the ablation that
+falsifies it.
 
 ## Phase 1 — Capture what was actually compiled
 
@@ -260,123 +282,53 @@ attribution line for every decline naming its first blocker. Constraints learned
   An attribution that has silently gone stale sends the next session down the wrong lever.
 - Report: baseline, the named gap classes with their verified causes, the row matrix, and what
   a future `/match-function` should build first. Push the branch and open the PR.
-- Then `scripts/pr-wait.sh <pr>` — it polls the PR's real state under a deadline and exits with the ANSWER (0 merged · 1 a check failed · 2 still pending, nothing decided · 3 green and ready to merge). Never ask a human whether CI is green or whether the PR merged; that question was asked six times in one session and the script answers all six.
+- Then **`scripts/pr-wait.sh <pr>`** for the merge state (`docs/measurement-discipline.md` §8).
 
-## Cost discipline — measured, and a rule rather than a preference
+## Cost discipline
 
-Read off this project's own logs, not estimated:
+Every figure this command needs is in [`docs/bench-cost.md`](../../docs/bench-cost.md), dated, and
+that is the only copy of it. **Do not retype a number from it into this file** — a retyped cost is
+a copy that drifts silently, which is the defect this whole section exists to close, and
+`command-files.test.ts` now fails on one. Three parts of it this command leans on hardest:
 
-| command | cost |
-| --- | --- |
-| `pnpm bench run` (all tiers) | **~1800 s** — synthetic 182 s + real 1618 s |
-| `pnpm bench run --tier synthetic` | **~182 s** |
-| `pnpm bench run --tier <t> --only <sym>` | 5–15 s |
-| a ranked run at LoadBGTilemapData scale | 1500–8000 s |
-| `npx vitest run` (root config) | ~120 s |
-
-**A full `pnpm bench run` runs EXACTLY TWICE in a round: once at the zero-flip gate, and once at
-ship after the final rebase.** Everything else uses the scoped forms — the synthetic tier for a
-broad sanity check, `--only` for the rows a change can reach. This is not a style note. One round
-ran it **eleven times**, four of them inside a single remediation agent, and spent about four and a
-half hours on nine runs that the scoped forms answer in three minutes. The real tier is ~90% of the
-cost and is dominated by asmlift's own enumeration, which is the thing under test and therefore
-uncacheable — so the saving comes from not repeating it, never from making it faster.
-
-If you believe a third full run is genuinely needed, run it and **say in your report why** — a
-stated reason is fine, a silent extra half hour is not.
-
-### Start the long command, then keep working
-
-A full bench and a ranked run are pure waiting. Launch one in the BACKGROUND at the start of a
-phase whose other work does not depend on its answer, and read the log at the end:
-
-```sh
-( pnpm bench run > /tmp/<round>-bench.log 2>&1; echo "EXIT=$?" >> /tmp/<round>-bench.log ) &
-… meanwhile: read the diff, grep the corpus, run the unit tests, draft the report …
-until grep -q 'EXIT=' /tmp/<round>-bench.log; do sleep 30; done
-```
-
-**What you keep working ON is constrained, and it is checkable.** `provenance.ts` samples git
-DURING the run and the sample is STICKY, so ONE edit — a comment audit, a `pnpm format`, an editor
-save, anywhere but the benchmark's own regenerated artifacts — stamps the whole run dirty and
-`bench:merge` throws the numbers away 39 minutes later. A round lost **2,420 s** to exactly that,
-auditing its comments beside its own gate bench. So a run in flight records itself, in
-`/tmp/asmlift-bench-running-<uid>/<pid>.json`. **Run `pnpm bench in-flight` before any phase that
-EDITS the tree, and read its exit code: 1 means a run is measuring this worktree — wait for its
-`EXIT=` line — and 0 means the tree is yours.** The work this background pattern is for is
-read-only: reading the diff, grepping the corpus, drafting the report. **The unit suites are NOT**
-— `packages/cli/test/offline/provenance.test.ts` writes an untracked `__provenance-probe__/` into
-`packages/` for the length of one test (it has to: it is asserting that the sampler can tell three
-dirty states apart), and a bench that samples inside that window is stamped dirty for good. Measured
-on this branch's own gate run. Run the suites before the bench or after it, not beside it. A
-run that was killed leaves its record behind and it reads STALE — that blocks nothing, and the next
-run sweeps it.
-
-**If you edit anyway, the run says so within ~2 s** — `[provenance] THE TREE WENT DIRTY MID-RUN`,
-on the run's own stderr, once, naming the paths. That line means the run is already lost: the
-sample is sticky and reverting does not undo it. Stop it, revert or commit, start it again.
-
-**`kill -TERM` does not stop a `bench run`** — measured: one sent SIGTERM 6 s in ran all 291 cases
-and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
-case, so no signal handler can run until it is done. `kill -9` is the stop that works, and the
-record it strands is stale.
-
-**Wait on a log marker, never on `pgrep -f "<pattern>"`** when the pattern also matches your own
-waiting shell — five waiter shells once deadlocked on each other for eight hours doing exactly
-that, long after the jobs they watched had finished.
-
-**Two full benches must never overlap on this machine.** It has 10 cores, the run fans 8 shards,
-and a ranked run takes `--jobs 6`; a bench measured **2704 s against a neighbour versus 1800 s
-solo**. Worse than slow: a shard killed by a neighbour writes a partial tier with **no error line**,
-and `grep -c SKIP` reads 0 either way — so always read the `✓`/`✗` tier line. **`bench run`
-enforces this**: the register is machine-wide, so a second FULL bench is refused while one is
-running in ANY worktree, and a second run in THIS worktree is refused when it writes a tier file
-the live one is writing. What is still allowed is the scoped dev loop — a `--tier synthetic --only
-<sym>` probe beside a background `--tier real`, here or beside a neighbour's full bench — because a
-15 s probe is not what fans 8 shards. If you have a real reason to measure anyway, `--no-lock` says
-so out loud and leaves every other record alone; **never `rm` a record you did not write**, which
-is the one move that silently unprotects someone else's run.
+- **Phase 6's smoke runs are the cheap path and Phase 7's is the expensive one.** A full
+  `pnpm bench run` is the expensive one (`docs/bench-cost.md` §1); `--tier synthetic --only <sym>
+  --toolchain <id> --serial` is seconds. Every row × toolchain is smoked individually BEFORE the
+  full run for that reason, and because one compiler-hostile candidate with no compile timeout
+  stalls every future full run.
+- `pnpm bench baseline <sym>` prices a scoped run before you launch it (`rank=Ns`, and it runs no
+  bench at all). `pnpm bench gates --pass <pass>` replaces an instrument-and-revert cycle at a
+  fraction of a run. Both prices: `docs/bench-cost.md` §1.
+- Background the long ones, wait on a bounded marker-AND-log-growth condition, keep only READ-ONLY
+  work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree — which for
+  this command is Phase 6 (it authors dataset rows) and Phase 7 (`pnpm format` is a tree WRITE).
 
 ---
 
 ## Hard rules
 
-1. **Numbers come from commands.** Never state a score, a pool count, or a compiler behavior you
-   did not just observe in tool output.
-2. **Every compiler claim is verified by compiling — and every claim about asmlift's own code by
-   running asmlift.** The diff suggests; only the compiler confirms. The same asymmetry bites on
-   this side: name the site that declines by instrumenting it (print which `return null` fires) or
-   by ablating it and watching the row move, never by reading the source and inferring. A guard
-   you did not watch fire is a hypothesis, and one printed as a mechanism aims the next round at
-   the wrong guard — a round once attributed a decline to a refusal that fires zero times on the
-   whole corpus. **When you had to patch a refusal to print why it fired, say so in the PR body
-   (not only in `research/`, whose path nothing may cite) and name the pass.** That instrument
-   episode is one of the two things that license converting those refusals to a `Gate` table later
+1. **[`docs/measurement-discipline.md`](../../docs/measurement-discipline.md) in full**, and two of
+   its laws decide whether this command's output is worth anything: §2, every compiler claim is
+   verified by COMPILING (Phase 3 is that law made into a phase), and §3, a refusing site is named
+   by INSTRUMENTING or ABLATING it — never by reading the source and inferring. A guard you did not
+   watch fire is a hypothesis, and one published as a mechanism aims the next round at the wrong
+   guard. §3 also carries the order to try before you patch anything: `pnpm bench gates --pass
+   <pass>`, then an exported census or a `refusals` map, then an instrument.
+2. **Say in the PR body when you had to patch a refusal to print why it fired, and name the pass**
+   — not only in `research/`, whose path nothing may cite. That instrument episode is one of the two
+   things that license converting those refusals to a `Gate` table later
    (`grep -n "THE UNIT OF THAT DECISION" docs/level-tower.md`); a refusal you come to suspect never
-   fires at all is the other. Before you instrument, check whether you have to, in this order:
-   **`pnpm bench gates --pass unmerge` prints the per-id refusal census of a tabled pass** — every
-   rule, how many times it refused first, over the agbcc synthetic tier in ~10 s, with no edit to
-   core and nothing to revert. `--toolchain id` picks another synthetic tier; `--only` reaches both
-   tiers but matches a SUBSTRING of the row id and pools every match, so name the full
-   `tier:sym:toolchain` id when you want one row. Its numbers reproduce `l3/unmerge.ts`'s
-   instrumented 40/16 split with no patch, which is what a census is FOR. **Do not write your own
-   script for this** — the three hazards measured in
-   `grep -n "WHY A SUBCOMMAND AND NOT A DOCUMENTED SCRIPT" apps/benchmark/src/run/gate-census.ts`
-   are why it is a subcommand, and one of them stamps your next `bench run` DIRTY after 2,000 s. A
-   pass NOT in that registry is not censusable this way and the command says so: the seam its caller
-   needs is what a second entry costs. A count is FIRST REJECTIONS and not reach — of the six
+   fires at all is the other. Four details `bench gates` will not tell you itself: `--toolchain id`
+   picks another synthetic tier, and `--only` matches a SUBSTRING of the row id and POOLS every
+   match, so name the full `tier:sym:toolchain` id when you want one row; a count there is FIRST
+   REJECTIONS and not reach, so read the MOVED column beside it
+   (`grep -n "TWO COLUMNS, AND THEY DISAGREE HERE" packages/core/src/l3/unmerge.ts`) — of the six
    ablatable rules in `l3/unmerge.ts` exactly one moves a row, three refuse and are overruled, and
-   two never fire — so read the MOVED column beside it
-   (`grep -n "TWO COLUMNS, AND THEY DISAGREE HERE" packages/core/src/l3/unmerge.ts`) before you
-   build anything on a big number. Failing that, if the pass exports a census
-   (`arrayShapeRefusals` in `raise/globalshape.ts`) or returns a `refusals` map
-   (`l3/coalesce.ts`, `l3/scopebase.ts`, `structure/namecoalesce.ts`), a test reads the id straight
-   out. Only a table that is neither injectable nor reported still costs a patch —
-   26 of the 32 `firstRejection` call sites compare the id to `null` and drop it. All three report
-   the FIRST rejecter, so a rule missing from the census is starved or refused-earlier, not proven
-   dead.
-   If the first blocker is one a round has already reasoned about beside the gate, cite that
-   instead of re-deriving it.
+   two never fire; all three census routes report the FIRST rejecter, so a rule missing from one is
+   starved or refused-earlier, not proven dead; and a pass NOT in the registry is not censusable
+   this way, which is a claim about its CALLER's seam rather than about its table. If the first
+   blocker is one a round has already reasoned about beside the gate, cite that instead of
+   re-deriving it.
 3. **Never edit the benchmark to make a row look better** — the reference source defines the
    target; manifests and results are never tuned. Harness defects (a hang, a missing timeout)
    are fixed or documented as their own labelled change.

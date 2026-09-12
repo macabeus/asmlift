@@ -38,6 +38,10 @@ Key facts about the setup (verified 2026-08-05):
    (upstream occasionally breaks on newer Pythons; catch it in 2 seconds, not mid-run).
 5. `pnpm bench run` (background it), then `pnpm bench merge` — `run` only writes the per-tier
    files; `merge` produces `results.json` and republishes the web data. Both steps are required.
+   What that costs, how to background and wait on it, and why you never kill one you have not
+   proven hung: [`docs/bench-cost.md`](../../docs/bench-cost.md), dated — never quote a bench
+   timing from memory. The laws every number here is held to are
+   [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md).
    While that run is in flight the tree is not yours to edit: `pnpm bench in-flight` before you
    touch a file, and if you edit anyway the run prints `[provenance] THE TREE WENT DIRTY MID-RUN`
    within ~2 s — that means it is already lost, so stop it rather than finish it.
