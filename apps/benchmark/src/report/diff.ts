@@ -204,6 +204,92 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
   };
 }
 
+/** WHAT THE FAN DID, between two artifacts — the series that used to exist only where a round
+ *  happened to type it into a commit subject.
+ *
+ *  Separate from `compareMeasurements` and deliberately so. That comparison decides the exit code
+ *  and is about published CLAIMS; this one is about COST, which is not a claim about any row's
+ *  answer: a round can triple the fan and move no number, and that is precisely the change nobody
+ *  noticed for three weeks. Folding it in would also paint every scored row red the first time a
+ *  run is compared against an artifact that predates the field.
+ *
+ *  Rows are compared only where BOTH sides recorded a count. `unrecorded` is how many the base
+ *  could not answer for, so a thin comparison says so instead of reading as a quiet one. */
+export interface FanChange {
+  id: string;
+  from: number;
+  to: number;
+}
+export interface FanReport {
+  changed: FanChange[]; // biggest absolute move first
+  compared: number; // rows where both sides recorded a count
+  unrecorded: number; // rows the fresh run counted and the base did not
+  baseTotal: number; // summed over the compared rows only — a total over a moving row set is not a series
+  freshTotal: number;
+}
+
+export function compareFans(base: BenchOutput, fresh: BenchOutput): FanReport {
+  const freshById = byId(fresh);
+  const changed: FanChange[] = [];
+  let compared = 0;
+  let unrecorded = 0;
+  let baseTotal = 0;
+  let freshTotal = 0;
+  for (const was of base.results) {
+    const now = freshById.get(was.id);
+    if (now === undefined) {
+      continue;
+    }
+    const from = was.asmlift.candidateCount;
+    const to = now.asmlift.candidateCount;
+    if (to === undefined) {
+      continue; // this run never ranked the row (declined/failed) — no fan to compare
+    }
+    if (from === undefined) {
+      unrecorded++;
+      continue;
+    }
+    compared++;
+    baseTotal += from;
+    freshTotal += to;
+    if (from !== to) {
+      changed.push({ id: was.id, from, to });
+    }
+  }
+  changed.sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
+  return { changed, compared, unrecorded, baseTotal, freshTotal };
+}
+
+/** `59904 → 225792 (3.77×)`. The multiplier is the number a round is asked to report before merge,
+ *  and it is the half that survives a reader's memory; a shrink prints the same way, under 1. */
+export const fanMove = (from: number, to: number): string =>
+  `${from} → ${to}${from > 0 ? ` (${(to / from).toFixed(2)}×)` : ''}`;
+
+/** How many rows the fan section names before it summarises. The whole point is the biggest movers
+ *  plus the total; an axis that touches 600 rows must not bury the totals line under 600 lines. */
+export const FAN_ROWS_SHOWN = 15;
+
+/** The fan section, as lines. Pure — `diffGate` prints them. */
+export function fanLines(r: FanReport, base: string, freshCounted: number): string[] {
+  if (r.compared === 0) {
+    return [
+      `fan vs ${base}: NOT COMPARABLE — no row at ${base} records a candidate count (that artifact ` +
+        `predates the field). This run counted ${freshCounted} row(s); the series starts here.`,
+    ];
+  }
+  const shown = r.changed.slice(0, FAN_ROWS_SHOWN);
+  const lines = shown.map((c) => `FAN     ${c.id}: ${fanMove(c.from, c.to)}`);
+  if (r.changed.length > shown.length) {
+    lines.push(`FAN     …and ${r.changed.length - shown.length} more row(s) moved`);
+  }
+  lines.push(
+    `fan vs ${base}: ${r.changed.length} row(s) moved, total ${fanMove(r.baseTotal, r.freshTotal)} ` +
+      `over ${r.compared} comparable row(s)` +
+      (r.unrecorded > 0 ? ` — ${r.unrecorded} more counted here and not at ${base}` : ''),
+  );
+  return lines;
+}
+
 /** Is the artifact on disk still the base's own committed file, with no run behind it?
  *
  *  This gate reads whatever bytes happen to sit at `apps/benchmark/results/results.json` — and
@@ -269,6 +355,18 @@ export function diffGate(base = 'HEAD'): number {
     `diff vs ${base}: ${report.changed.length} field change(s), ${report.added.length} added, ` +
       `${report.removed.length} removed (${report.baseRows} base rows, ${report.freshRows} fresh rows)`,
   );
+
+  // WHAT THE FAN DID — informational, and it moves no exit code. The gate above answers "did a
+  // published claim move"; a round can multiply the confirming gate's own cost by four and move
+  // none, which is what happened over the three weeks the real tier went 274 s → 1,654 s on an
+  // unchanged 252 rows. This is the same comparison a round already runs, saying so.
+  for (const line of fanLines(
+    compareFans(committed, fresh),
+    base,
+    fresh.results.filter((r) => r.asmlift.candidateCount !== undefined).length,
+  )) {
+    console.log(line);
+  }
 
   // THE ROWS THIS BRANCH ADDED, compared against the branch's OWN last artifact.
   //

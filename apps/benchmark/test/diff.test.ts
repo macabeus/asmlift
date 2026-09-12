@@ -3,7 +3,14 @@
 import type { BenchOutput, DecompilerResult, FunctionResult, Outcome } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
-import { compareMeasurements, notRegenerated } from '../src/report/diff';
+import {
+  FAN_ROWS_SHOWN,
+  type FanReport,
+  compareFans,
+  compareMeasurements,
+  fanLines,
+  notRegenerated,
+} from '../src/report/diff';
 
 const res = (over: Partial<DecompilerResult> = {}): DecompilerResult =>
   ({
@@ -243,5 +250,76 @@ describe('the rows a branch added, compared against the branch own artifact', ()
     const fresh = out(row('a', { score: 99 }), row('b', { score: 0, outcome: 'match' as Outcome }));
     expect(compareMeasurements(base, fresh).changed.map((c) => c.id)).toEqual(['a']);
     expect(compareMeasurements(addedRows(base, self), fresh).changed).toEqual([]);
+  });
+});
+
+// THE FAN, which is a COST and not a claim. It is reported beside the verdict and never inside it:
+// a round can multiply the confirming gate's own price by four and move no published number —
+// which is exactly what happened while the real tier went 274 s → 1,654 s on an unchanged corpus.
+describe('compareFans', () => {
+  test('names the rows whose fan moved, biggest absolute move first', () => {
+    const r = compareFans(
+      out(row('a', { candidateCount: 96 }), row('b', { candidateCount: 59904 })),
+      out(row('a', { candidateCount: 192 }), row('b', { candidateCount: 225792 })),
+    );
+    expect(r.changed).toEqual([
+      { id: 'b', from: 59904, to: 225792 },
+      { id: 'a', from: 96, to: 192 },
+    ]);
+    expect([r.baseTotal, r.freshTotal, r.compared]).toEqual([60000, 225984, 2]);
+  });
+
+  // The cost question is not the neutrality question: a fan that held is silence here, and a
+  // published field that moved is not this section's business.
+  test('an unchanged fan moves nothing, whatever the row`s score did', () => {
+    const r = compareFans(
+      out(row('a', { candidateCount: 96, score: 3 })),
+      out(row('a', { candidateCount: 96, score: 9 })),
+    );
+    expect(r.changed).toEqual([]);
+    expect(r.compared).toBe(1);
+  });
+
+  // The transition: `origin/main`'s artifact predates the field, and reading `undefined → 96` as a
+  // move would report the whole corpus on the first comparison after this lands.
+  test('a base row with no recorded count is not a move — it is an unanswerable comparison', () => {
+    const r = compareFans(out(row('a')), out(row('a', { candidateCount: 96 })));
+    expect(r.changed).toEqual([]);
+    expect(r).toMatchObject({ compared: 0, unrecorded: 1, baseTotal: 0, freshTotal: 0 });
+  });
+
+  // …and a row this run DECLINED never ranked, so it has no fan to compare. Counting it as 0 would
+  // publish a fan collapse for a row nobody enumerated.
+  test('a row the fresh run never ranked is skipped, not counted as zero', () => {
+    const r = compareFans(out(row('a', { candidateCount: 96 })), out(row('a', { outcome: 'declined' })));
+    expect(r).toMatchObject({ compared: 0, unrecorded: 0, changed: [] });
+  });
+});
+
+describe('the fan section', () => {
+  const rep = (over: Partial<FanReport> = {}): FanReport =>
+    ({ changed: [], compared: 2, unrecorded: 0, baseTotal: 60000, freshTotal: 225984, ...over }) as FanReport;
+
+  test('prints the multiplier, which is the number a round reports before merge', () => {
+    const lines = fanLines(rep({ changed: [{ id: 'b', from: 59904, to: 225792 }] }), 'origin/main', 900);
+    expect(lines[0]).toBe('FAN     b: 59904 → 225792 (3.77×)');
+    expect(lines.at(-1)).toContain('total 60000 → 225984 (3.77×) over 2 comparable row(s)');
+  });
+
+  // A base that records nothing must say so. A silent `0 row(s) moved` over 0 comparable rows is
+  // the shape of a green line that measured nothing — the vacuity this file already guards twice.
+  test('says NOT COMPARABLE against an artifact that predates the field', () => {
+    const out = fanLines(rep({ compared: 0, unrecorded: 900, baseTotal: 0, freshTotal: 0 }), 'origin/main', 900);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('NOT COMPARABLE');
+    expect(out[0]).toContain('900 row(s)');
+  });
+
+  // An axis that touches 600 rows must not bury the totals line under 600 lines.
+  test('caps the named rows and says how many more moved', () => {
+    const changed = Array.from({ length: FAN_ROWS_SHOWN + 3 }, (_, i) => ({ id: `r${i}`, from: 10, to: 20 + i }));
+    const lines = fanLines(rep({ changed }), 'origin/main', 900);
+    expect(lines.filter((l) => l.startsWith('FAN     r'))).toHaveLength(FAN_ROWS_SHOWN);
+    expect(lines.some((l) => l.includes('and 3 more row(s) moved'))).toBe(true);
   });
 });
