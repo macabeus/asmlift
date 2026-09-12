@@ -222,9 +222,21 @@ function note(s: string): void {
   console.error(s);
 }
 
-/** Where `--base <ref>` puts the tree it provisions. `.local/` is the repo's sanctioned name for
- *  per-worktree local state and is gitignored, so a provisioned base cannot make this tree dirty
- *  and cannot reach `bench run`'s preflight. */
+/** Where `--base <ref>` puts the tree it provisions, named by the base's sha so a second sweep
+ *  against the same revision reuses it.
+ *
+ *  `.local/` is the repo's sanctioned name for per-worktree local state and is gitignored, so a
+ *  provisioned base can neither make this tree dirty nor reach `bench run`'s preflight — which
+ *  matters, because an untracked file anywhere else under the repo is CODE to `provenance.ts` and
+ *  voids the next full run after ~2,000 s. That was one of the three standing hazards of the hand
+ *  rigs this replaces.
+ *
+ *  IT IS STILL A GIT WORKTREE, registered in the shared `.git`. Provisioning one is the same act a
+ *  round's own setup performs, and it is cleaned up the same way: `git worktree remove <path>`, or
+ *  `git worktree prune` once the directory is gone with the round's worktree. Nothing here removes
+ *  it automatically — a base tree costs a `pnpm install` to rebuild and is reused by every later
+ *  sweep against that revision, so deleting it after one comparison would be the expensive
+ *  choice. */
 export const BASE_TREES_DIR = join(REPO_ROOT, '.local', 'sweep-base');
 
 function git(args: string[], cwd = REPO_ROOT): { ok: boolean; out: string } {
