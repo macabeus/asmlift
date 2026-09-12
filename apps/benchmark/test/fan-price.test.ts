@@ -14,7 +14,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import { fanSize, fanSizeOfError, runAsmlift } from '../src/eval/asmlift';
 import { rowKey } from '../src/report/stale-check';
-import { costNote } from '../src/run/runner';
+import { costNote, rowLine } from '../src/run/runner';
 import type { Toolchain } from '../src/toolchains';
 
 vi.mock('@asmlift/cli/rank', () => ({ decompileRanked: vi.fn() }));
@@ -182,6 +182,34 @@ describe('what the gates do with a recorded cost', () => {
   // this artifact started recording in order to stop losing.
   test('stale-check DOES compare candidateCount', () => {
     expect(rowKey(row(side({ candidateCount: 96 })))).not.toBe(rowKey(row(side({ candidateCount: 384 }))));
+  });
+});
+
+// …and the line it goes INTO. `costNote` pinned alone is the shape of the incident where the
+// `[ranked]` line grew a third count and the only test still asserted two: a round's live view of
+// a run is the assembled line, so that is what a test has to hold.
+describe('the per-row run line', () => {
+  const side = (over: Partial<DecompilerResult>): DecompilerResult =>
+    ({ decompiler: 'asmlift', outcome: 'nonmatch', score: 12, maxScore: 40, ...over }) as DecompilerResult;
+
+  test('is index, id, both outcomes, then the cost — fan included', () => {
+    const r = {
+      id: 'kleod:CountCollectedGems:agbcc',
+      asmlift: side({ score: 18, maxScore: 344, candidateCount: 5952 }),
+      m2c: side({ decompiler: 'm2c', outcome: 'noncompile', compileErrors: 1 }),
+    } as unknown as FunctionResult;
+    expect(rowLine(7, 812, ' s3', r, '518.3')).toBe(
+      '[7/812] s3 kleod:CountCollectedGems:agbcc  asmlift=diff:18/344 m2c=noncompile(1)  (518.3s, fan 5952)',
+    );
+  });
+
+  test('a row that never ranked prints no fan, and the rest of the line is unchanged', () => {
+    const r = {
+      id: 'x:y:agbcc',
+      asmlift: side({ outcome: 'declined', errorMarkers: ['gap'] }),
+      m2c: side({ decompiler: 'm2c', outcome: 'failed' }),
+    } as unknown as FunctionResult;
+    expect(rowLine(1, 1, '', r, '1.2')).toBe('[1/1] x:y:agbcc  asmlift=declined(1 gap(s)) m2c=failed  (1.2s)');
   });
 });
 

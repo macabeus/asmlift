@@ -80,6 +80,15 @@ export function costNote(d: DecompilerResult, secs: string): string {
   return d.candidateCount === undefined ? `(${secs}s)` : `(${secs}s, fan ${d.candidateCount})`;
 }
 
+/** THE PER-ROW LINE, assembled — a round's whole live view of a run, and the thing this repo has
+ *  already been caught letting drift: the `[ranked]` line grew a third count while the only test
+ *  pinning it still asserted two, with every other gate green. `costNote` was pinned in isolation
+ *  and the line it goes into was not, which is the same shape one layer up. Pure, so the assembled
+ *  line is testable without a run. */
+export function rowLine(n: number, total: number, tag: string, r: FunctionResult, secs: string): string {
+  return `[${n}/${total}]${tag} ${r.id}  asmlift=${fmt(r.asmlift)} m2c=${fmt(r.m2c)}  ${costNote(r.asmlift, secs)}`;
+}
+
 /** Whether flat index `idx` belongs to `shard` — the slicing contract the orchestrator rides on. */
 export function inShard(idx: number, shard: Shard): boolean {
   return idx % shard.n === shard.idx;
@@ -162,9 +171,7 @@ export function runCases(
     const r = evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile);
     results.push(r);
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
-    console.log(
-      `[${++done}/${mine.length}]${tag} ${c.id}  asmlift=${fmt(r.asmlift)} m2c=${fmt(r.m2c)}  ${costNote(r.asmlift, secs)}`,
-    );
+    console.log(rowLine(++done, mine.length, tag, r, secs));
     flush();
   }
   flush();
