@@ -164,23 +164,10 @@ export interface FunctionResult {
   gapSize?: GapSize | null;
 }
 
-/** WHAT THE TREE THAT PRODUCED A RUN CHANGED, against the branch point — recorded so that
- *  "could a cheaper gate have covered this invocation?" is answerable at all. Every transcript
- *  logs the bench command and its output and none logs the working tree at that instant; absent
- *  when git could not resolve the base (a fork, a shallow clone). */
-export interface TreeState {
-  base: string; // the ref (e.g. "origin/main")
-  baseCommit: string; // the merge-base commit — a ref name is a different commit per machine
-  changed: string[]; // repo-relative paths differing between it and the working tree, capped
-  more?: number; // paths beyond the cap
-}
-
 export interface BenchMeta {
   generatedAt: string;
   toolchains: ToolchainId[];
   counts: { total: number; synthetic: number; real: number };
-  /** provenance: what this run's tree changed against the branch point (see TreeState). */
-  tree?: TreeState;
   /** provenance: which asmlift produced these numbers (commit sha + working-tree dirty flag);
    *  absent only if git was unreadable. */
   asmlift?: { commit: string; dirty: boolean };

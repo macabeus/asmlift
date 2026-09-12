@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 
 import { RESULTS_DIR } from '../config';
-import { asmliftProvenance, combineProvenance, treeState } from '../provenance';
+import { asmliftProvenance, combineProvenance } from '../provenance';
 import { benchMeta } from './runner';
 
 const CLI = join(import.meta.dirname, '..', 'cli.ts');
@@ -220,10 +220,6 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   // exits — belt to the shard stamps' braces, and the only cover a tier whose parts carry no stamp
   // has at all.
   asmliftProvenance();
-  // …and the change set, for the same reason and once: memoizing it here makes the artifact's
-  // "what was this run testing" record literally a launch-time sample on the fanned path, rather
-  // than one taken at stitch after every child has exited.
-  treeState();
 
   // ONE queue across ALL tiers, drained by exactly `opts.jobs` slots. Fanning the tiers one after
   // the other (a `Promise.all` per tier) made every run pay both tiers' TAILS: the real fan could
