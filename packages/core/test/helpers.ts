@@ -55,11 +55,45 @@ export function mulberry32(seed: number): () => number {
  *  header, inner header, inner latch, outer latch, tail) and randomizes only the ops and the edge
  *  arguments: a skip edge that lands inside a loop body from outside makes the region irreducible,
  *  and what depth 2 exists to reach is the value that is carried by BOTH loops — the accumulator a
- *  nested `for` writes, whose home is outside the inner loop it is nevertheless updated in. */
-export function generateSsaFn(seed: number, depth: 0 | 1 | 2, readsOuter = false): Fn {
+ *  nested `for` writes, whose home is outside the inner loop it is nevertheless updated in.
+ *
+ *  3 is depth 2's SIBLING shape, and it exists for one reason: an enclosing loop with SEVERAL
+ *  children. Depth 2 gives a do-while exactly one child loop, so every rule in `latchInnerSub` that
+ *  is about WHICH children count — the filter that drops a child containing the latch, the filter
+ *  that drops one that does not dominate it, and the ORDER the surviving children are applied in —
+ *  never sees a second child: depths 0-2 reach a two-child latch on 2 of 187,117 `latchInnerSub`
+ *  calls, depth 3 on 4,000 of 4,000.
+ *
+ *  WHAT THAT REACH BUYS, AND WHAT IT DOES NOT. Reaching the three rules does not witness them,
+ *  because on every shape this generator builds they are INERT. Mutated one at a time (drop the
+ *  latch-containment filter; drop the dominance filter; reverse the `.sort()`) and the emitted C
+ *  hashed over 4,000 seeds at depth 2 AND depth 3 — 8,000 functions — is byte-identical to the
+ *  shipped rule's under all three. They are NO-OPS here, not unwitnessed rules, and the inhabitant
+ *  each would need is named: containment needs a child holding the latch, which is an overlapping
+ *  pair the recognizer refuses earlier; dominance needs the non-dominating child to CARRY a value
+ *  the latch reads, where C only offers it map entries nothing reads; the order needs two children
+ *  mapping the SAME value, which is a dominating CHAIN (a grandchild), not the siblings below.
+ *  Wiring an inner latch's own value round its back edge does not supply one: it raises the
+ *  substitution's occupancy, still moves 0 bytes under all three mutants, and turns two fuzz arms
+ *  red on wrong answers of its own.
+ *
+ *  The skeleton, fixed (11 blocks), with ops and edge arguments random as at depth 2:
+ *
+ *      bb0 entry ─▶ bb1 outer header ─▶ bb2 ⇄ bb3 (loop A) ─▶ bb4 ⇄ bb5 (loop B)
+ *                        ▲                                        │
+ *                        │                     bb6 branch ────────┘
+ *                        │                      │        ╲
+ *                        │             bb7 ⇄ bb8 (loop C) ╲
+ *                        └──────────── bb9 outer latch ◀───┘ ─▶ bb10 tail
+ *
+ *  A and B are siblings that both dominate the outer latch — two children, in a fixed textual
+ *  order. C is inside ONE ARM of a branch, so it reaches the latch on some paths and does not
+ *  dominate it: the dominance filter fires on it on every seed (ablated, `kids` goes from 2 to 3 on
+ *  4,000 of 4,000), which is REACH and, per the paragraph above, not an observable difference. */
+export function generateSsaFn(seed: number, depth: 0 | 1 | 2 | 3, readsOuter = false): Fn {
   const rnd = mulberry32(seed);
   const pick = <X>(xs: readonly X[]): X => xs[Math.floor(rnd() * xs.length)];
-  const nBlocks = depth === 2 ? 6 + Math.floor(rnd() * 2) : 4 + Math.floor(rnd() * 3);
+  const nBlocks = depth === 3 ? 11 : depth === 2 ? 6 + Math.floor(rnd() * 2) : 4 + Math.floor(rnd() * 3);
   const a0 = mkValue(T.s(32));
   const a1 = mkValue(T.s(32));
   const blocks: Block[] = [{ params: [a0, a1], ops: [] }];
@@ -112,6 +146,29 @@ export function generateSsaFn(seed: number, depth: 0 | 1 | 2, readsOuter = false
       continue;
     }
     const fwd = blocks[i + 1];
+    if (depth === 3) {
+      // the multi-child skeleton: latches at 3 (loop A), 5 (loop B), 8 (loop C), 9 (outer); a
+      // plain branch at 6 that puts loop C on one arm only; everything else a straight `br`.
+      const back = i === 3 ? blocks[2] : i === 5 ? blocks[4] : i === 8 ? blocks[7] : i === 9 ? blocks[1] : undefined;
+      const alt = i === 6 ? blocks[9] : undefined;
+      if (back === undefined && alt === undefined) {
+        b.ops.push(mkOp('br', { successors: [{ block: fwd, args: argsFor(fwd) }] }));
+        continue;
+      }
+      const t = back ?? alt!;
+      const cc = mkValue(T.u(32));
+      b.ops.push(mkOp('icmp_slt', { operands: [pick(avail), pick(avail)], results: [cc] }));
+      b.ops.push(
+        mkOp('cond_br', {
+          operands: [cc],
+          successors: [
+            { block: t, args: argsFor(t) },
+            { block: fwd, args: argsFor(fwd) },
+          ],
+        }),
+      );
+      continue;
+    }
     if (depth === 2) {
       // the fixed nested skeleton: a straight chain, with a guarded back edge at each latch
       const back = i === innerHeader + 1 ? blocks[innerHeader] : i === innerHeader + 2 ? blocks[1] : undefined;
@@ -325,6 +382,40 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
   return trace;
 }
 
+/** THE SEEDS whose emitted tree still disagrees with its own IR, per depth — a ratchet, not a clean
+ *  bill. Each one is a real emission defect, measured and not fixed here:
+ *
+ *    • a call INLINED AT ITS USE beside another call, which renders the two in the opposite order
+ *      (`fz399`: `if ((s32)f1(a1) < (s32)f0(a1))` for an IR that calls f0 first);
+ *    • a call whose value reaches a merge, rendered as the edge copy INSIDE one arm, so an
+ *      unconditional execution becomes a conditional one (`fz27`'s `%8`, the `branchArgFed` case);
+ *    • a call rendered at two positions, so it executes twice.
+ *
+ *  ONE QUANTITY, TWO READERS. Both naming fuzzes read this same list, and their failing-seed lists
+ *  are IDENTICAL seed for seed at all four depths — not a coincidence of two populations: the
+ *  residual is an EMISSION defect of the SHIPPED spelling, which both files structure, and each
+ *  file's axis varies only a naming choice on top of it. The populations do differ (2,502 vs 2,508
+ *  at depth 1), for the reason each file's `JUDGED` states; the DEFECTS do not.
+ *
+ *  A LIST, NOT A COUNT. A count is green on a change that fixes one defect and adds another, and it
+ *  is what makes a shared constant dangerous: a file whose population quietly loses a bad seed goes
+ *  SILENT on a count and LOUD on a list. The cost — re-derived whenever the generator's stream moves
+ *  — is already paid by `JUDGED`, which is exact per depth in both files. Re-derive with the probe
+ *  in each file's `JUDGED` docblock. */
+export const IR_RESIDUAL_SEEDS: Readonly<Record<0 | 1 | 2 | 3, readonly number[]>> = {
+  0: [
+    27, 84, 226, 299, 399, 420, 425, 463, 661, 715, 862, 1036, 1073, 1147, 1248, 1279, 1330, 1367, 1464, 1543, 1612,
+    1656, 1778, 1781, 1794, 1902, 1938, 1962, 2046, 2178, 2267, 2318, 2493, 2546, 2608, 2758, 2927, 2979, 3021, 3047,
+    3072, 3151, 3162, 3334, 3669, 3719, 3798, 3977,
+  ],
+  1: [
+    76, 84, 253, 299, 354, 420, 421, 435, 497, 601, 612, 899, 940, 967, 1155, 1239, 1330, 1475, 1543, 1610, 1950, 1959,
+    1970, 2006, 2270, 2912, 2965, 3274, 3324, 3392, 3956,
+  ],
+  2: [659, 1853, 2176, 3324, 3928, 3943],
+  3: [1130, 1354, 1841, 2836, 3249],
+};
+
 // A position where EITHER side is UNDEF constrains nothing: the original read a local no path had
 // assigned, so both spellings are ill-defined there rather than one being wrong. Everything else —
 // a different callee, a different argument, a different trace LENGTH (which is what a changed trip
@@ -348,7 +439,25 @@ export const tracesDiffer = (r: { off: Event[]; on: Event[] }): boolean => {
  *  to it: an inner loop's back-edge value re-derived at the enclosing loop's latch was wrong in
  *  every spelling at once, and only this caught it. Same seeding, same deterministic call model,
  *  same 32-bit wrap. The generator's vocabulary only; anything else throws, as does a run past the
- *  step cap. */
+ *  step cap.
+ *
+ *  AN ORACLE FOR THE SYNTHETIC GENERATOR'S VOCABULARY, and calling it more than that would be a
+ *  claim it cannot meet. It models 14 of the IR's 48 registered opcodes (`const`, `add`, `sub`,
+ *  `icmp_slt`, `icmp_sge`, `icmp_eq`, `logic_and`, `logic_or`, `call`, `gaddr`, `store`, `ret`,
+ *  `br`, `cond_br`) — exactly what `generateSsaFn` emits. Measured on this repo's own agbcc corpus,
+ *  re-parsed from each function's recovered IR dump: 24 of the 30 `test/corpus` functions round-trip
+ *  the dump at all and this judges 2 of those 24. Blockers, by function: `load` 8, `shl` 6, `icmp_ne`
+ *  3, `aload` 1, `mul` 1, `smod` 1, `icmp_uge` 1, `undef` 1.
+ *
+ *  SO NO BENCHMARK ROW, RANKED CANDIDATE OR WINNER IS JUDGED BY THIS TODAY — the readers are the two
+ *  naming fuzzes, `generator-shape`, `dead-effect` and `loop-shape-refusals`, all of which feed it
+ *  the same generator. That is named debt, not a design: the arithmetic and comparison blockers are
+ *  one `case` each, `load`/`aload` want a memory model that `store` half-implies, and the place a
+ *  real-row assertion belongs is `apps/benchmark/src/eval/asmlift.ts`, which already holds both the
+ *  lifted `Fn` and the structured tree. `undef` is NOT one `case`: {@link traceOf} models it as a
+ *  poison value that {@link tracesDiffer} then excuses, and this interpreter's env is plain numbers
+ *  — giving it a wrong `undef` would make the oracle lie rather than decline, which is worse than
+ *  the asymmetry. */
 export function irTraceOf(fn: Fn, seed: number): Event[] {
   const trace: Event[] = [];
   const env = new Map<Value, number>();

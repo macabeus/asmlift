@@ -23,7 +23,16 @@ import type { SFn } from '../src/l3/ast';
 import { type Gate, without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, type CarrierName, structure } from '../src/structure/structure';
-import { BREATHE_EVERY, type Event, breathe, generateSsaFn, traceOf, tracesDiffer } from './helpers';
+import {
+  BREATHE_EVERY,
+  type Event,
+  IR_RESIDUAL_SEEDS,
+  breathe,
+  generateSsaFn,
+  irTraceOf,
+  traceOf,
+  tracesDiffer,
+} from './helpers';
 
 // Same load sensitivity as the sibling fuzz: solo these run in a couple of seconds, and under a
 // full parallel suite the 5 s default times out on machine load rather than on a defect.
@@ -67,13 +76,17 @@ const passThrough = (fn: Fn): void => {
   fn.writeOrder = { lastWrite: new Map(), writes: new Map(fn.blocks.map((b) => [b, 0] as const)) };
 };
 
-/** Both spellings of one seed, or null when the shape is not one this can judge. */
+/** Both spellings of one seed and what the IR itself does, or null when the shape is not one this
+ *  can judge. `ir` is the ORACLE — the observables read off the IR rather than off a structured
+ *  tree, so an EMISSION defect the reference spelling shares is visible to it and invisible to
+ *  `off`. It found one: a call whose only consumer was itself dropped vanished from every spelling
+ *  at once (`dead-effect.test.ts`). */
 function spellings(
   seed: number,
-  depth: 0 | 1 | 2,
+  depth: 0 | 1 | 2 | 3,
   drop?: string,
   nested?: { measured: boolean },
-): { off: Event[]; on: Event[]; src: string } | null {
+): { off: Event[]; on: Event[]; ir: Event[]; src: string } | null {
   let fn: Fn;
   try {
     fn = generateSsaFn(seed, depth, nested !== undefined);
@@ -94,16 +107,47 @@ function spellings(
     return null; // a decline is not a difference
   }
   try {
-    return { off: traceOf(off, seed), on: traceOf(on, seed), src: cBackend.emit(on) };
+    return { off: traceOf(off, seed), on: traceOf(on, seed), ir: irTraceOf(fn, seed), src: cBackend.emit(on) };
   } catch {
     return null; // step cap, or a construct the interpreter does not model
   }
 }
 
+// WHAT THE IR ORACLE STILL DISAGREES WITH is `IR_RESIDUAL_SEEDS` in `helpers.ts`, shared with
+// `namecoalesce-fuzz` — a LIST of seeds rather than a count, and one quantity rather than a copy per
+// file. Its docblock carries the three defects behind it and the measurement that folded the two
+// copies together.
+
+// HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
+// a seed declines or runs the tree interpreter past its step cap, and everything below then skips
+// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 647: a change
+// that pushed another 250 seeds past the cap would leave both arms green over nothing, which is
+// exactly the vacuity `generator-shape.test.ts` refuses one level up. A change to what the emitter
+// spells moves these populations by a few seeds at a time, which a floor does not record.
+//
+// THESE NUMBERS ARE THIS FILE'S, not a shared quantity, and THIS FILE IS THE OUTLIER. It judges
+// 2,502 at depth 1 where `namecoalesce-fuzz` judges 2,508 — six FEWER, not six more — and the cause
+// is the REFERENCE table above, not the sibling. `ADMIT_NOTHING` declines on 6 seeds the shipped
+// spelling structures (291, 1089, 1489, 1724, 3021, 3923, each `unrecovered back-edge into block
+// #k`), and `spellings` needs both, so those six leave here and stay there. Instrumented per depth:
+// declines are 1,337 for `ADMIT_NOTHING` against 1,349 for the shipped spelling, and there is no
+// seed this file judges that `namecoalesce-fuzz` does not (onlyC = 0 at all four depths).
+//
+// The sibling's extra `structure()` call costs it NOTHING: `coalesceMergeNames` declines on exactly
+// the set the shipped spelling does — 1,349/1,349 at depth 1, 224/224 at depth 2, 551/551 at
+// depth 3.
+//
+// RE-DERIVE, don't reason: classify every seed by which of `structure(fn, {}, {carrierNameGates:
+// ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
+// whether `traceOf`/`irTraceOf` cap. Verified deterministic forward and in reversed seed order at
+// every depth, and `bad` is the identical seed list both ways.
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2502, 2: 1556, 3: 647 };
+
 describe.each([
   ['acyclic', 0],
   ['loop-bearing', 1],
   ['nested', 2],
+  ['multi-child', 3],
 ] as const)('%s', (_name, depth) => {
   test('no name the walk adopts changes what the function does', async () => {
     const bad: number[] = [];
@@ -115,8 +159,28 @@ describe.each([
       judged++;
       if (tracesDiffer(r)) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
+    expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
     expect(bad).toEqual([]);
+  });
+
+  // THE ARM THAT IS NOT A SPELLING COMPARISON. The one above asks whether the walk's spelling and
+  // the reference spelling agree; both are trees this structurer emitted, so a defect they share
+  // is invisible to it by construction. This one asks whether the emitted tree computes what the
+  // IR does.
+  test("the walk's spelling computes what the IR computes", async () => {
+    const bad: number[] = [];
+    let judged = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
+      const r = spellings(seed, depth);
+      if (!r) continue;
+      judged++;
+      if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
+    }
+    expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
+    // THE SEEDS, not how many: a count is green on a change that fixes one defect and adds
+    // another. A fix is meant to shorten this list, and a swap is meant to redden it.
+    expect(bad).toEqual(IR_RESIDUAL_SEEDS[depth]);
   });
 });
 
@@ -171,8 +235,15 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
       adopted++;
     }
   }
-  expect(judged).toBeGreaterThan(SEEDS / 10);
-  expect(adopted).toBeGreaterThan(0); // the rule fired: a seed whose spelling the record changed
+  // Pinned for the same reason as the sweeps above. A smaller population than depth 2's 1,556:
+  // this arm needs BOTH the measured and the unmeasured spelling, and loses a seed either one
+  // declines on.
+  expect(judged, 'the measured arm judges the population it measured').toBe(1088);
+  // PINNED, not floored, for the same reason `judged` is. `adopted` is the FIRING counter — the
+  // thing that stops the `bad.filter(...)` arm below being green over nothing — so a floor of 1 is
+  // exactly the vacuity the pin above exists to refuse: a change that took `enclosingCarrierName`
+  // from 252 firings to 1 would leave both arms green, with `judged` still at 1,088 vouching for it.
+  expect(adopted, 'the rule fired on the seeds whose spelling the record changed').toBe(252);
   expect(bad.filter((s) => !preexisting.has(s))).toEqual([]);
 });
 
@@ -185,15 +256,24 @@ test('nested, measured: a carried value adopting its enclosing header name adds 
 // is the point: exempting a gate is a visible act with a reason attached.
 const OUT_OF_REACH = new Set(['carrier-width', 'carrier-sign', 'carrier-write']);
 
-test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it changes what some function does', async () => {
+// AGAINST THE IR, not against the reference spelling. "Dropping it changes what some function does"
+// was measured as "the two spellings differ", which a rule could satisfy by making the function a
+// DIFFERENT RIGHT ANSWER — and which cannot distinguish a gate that prevents a wrong program from
+// one that prevents an unusual one. The bar here is the harder one a `sound` claim actually makes:
+// some function the shipped table gets RIGHT, the ablated table gets WRONG. Every sound gate in
+// reach still clears it (measured: `carrier-live` 900 wrong seeds at depth 0 against a base of 48,
+// `re-derives` 152, `sibling-param` 62).
+test('every SOUND gate of CARRIER_NAME_GATES is load-bearing — dropping it makes some function disagree with its own IR', async () => {
   const inert: string[] = [];
   for (const g of CARRIER_NAME_GATES.filter((x) => x.sound && !OUT_OF_REACH.has(x.id))) {
     let found = false;
-    for (const depth of [0, 1, 2] as const) {
+    for (const depth of [0, 1, 2, 3] as const) {
       for (let seed = 1; seed <= SEEDS && !found; seed++) {
         if (seed % BREATHE_EVERY === 0) await breathe();
         const r = spellings(seed, depth, g.id);
-        if (r && tracesDiffer(r)) found = true;
+        if (!r || !tracesDiffer({ off: r.ir, on: r.on })) continue;
+        const base = spellings(seed, depth);
+        if (base && !tracesDiffer({ off: base.ir, on: base.on })) found = true;
       }
       if (found) break;
     }

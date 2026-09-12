@@ -24,7 +24,16 @@ import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { structure } from '../src/structure/structure';
-import { BREATHE_EVERY, type Event, breathe, generateSsaFn, traceOf, tracesDiffer } from './helpers';
+import {
+  BREATHE_EVERY,
+  type Event,
+  IR_RESIDUAL_SEEDS,
+  breathe,
+  generateSsaFn,
+  irTraceOf,
+  traceOf,
+  tracesDiffer,
+} from './helpers';
 
 // CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
 // budget. Solo these tests run in 0.9-1.7 s; inside a full `pnpm test:offline` at loadavg ~26 this
@@ -36,8 +45,16 @@ vi.setConfig({ testTimeout: 60_000 });
 
 const SEEDS = 4000;
 
-/** Both spellings of one seed, or null when the shape is not one this can judge. */
-function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[]; on: Event[] } | null {
+/** Both spellings of one seed and what the IR itself does, or null when the shape is not one this
+ *  can judge. `ir` is the ORACLE — the observables read off the IR rather than off a structured
+ *  tree, so an EMISSION defect the axis-off spelling shares is visible to it and invisible to
+ *  `off`. It found one: a call whose only consumer was itself dropped vanished from every spelling
+ *  at once (`dead-effect.test.ts`). */
+function spellings(
+  seed: number,
+  depth: 0 | 1 | 2 | 3,
+  drop?: string,
+): { off: Event[]; on: Event[]; ir: Event[] } | null {
   let fn: Fn;
   try {
     fn = generateSsaFn(seed, depth);
@@ -58,11 +75,30 @@ function spellings(seed: number, depth: 0 | 1 | 2, drop?: string): { off: Event[
     return null;
   }
   try {
-    return { off: traceOf(off, seed), on: traceOf(on, seed) };
+    return { off: traceOf(off, seed), on: traceOf(on, seed), ir: irTraceOf(fn, seed) };
   } catch {
     return null; // step cap, or a construct the interpreter does not model
   }
 }
+
+// WHAT THE IR ORACLE STILL DISAGREES WITH is `IR_RESIDUAL_SEEDS` in `helpers.ts`, shared with
+// `carrier-name-fuzz` — a LIST of seeds rather than a count, and one quantity rather than a copy per
+// file. Its docblock carries the three defects behind it and the measurement that folded the two
+// copies together.
+
+// HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES — `spellings` returns null silently on a decline or a
+// step cap, and every arm below then skips the seed. Pinned rather than floored (`> SEEDS / 10`)
+// because depth 3 judges 647: another 250 seeds over the cap would leave both arms green over
+// nothing.
+//
+// DIFFERENT FROM `carrier-name-fuzz`'s BY SIX AT DEPTH 1 (2,508 here, 2,502 there), and the six are
+// THAT file's loss, not this file's. Its reference table `ADMIT_NOTHING` declines on 6 seeds the
+// shipped spelling structures (291, 1089, 1489, 1724, 3021, 3923) and its `spellings` needs both, so
+// it judges FEWER. This file's second `structure()` call costs nothing: measured per depth,
+// `coalesceMergeNames` declines on exactly the set the shipped spelling does — 1,349/1,349 at depth
+// 1, 224/224 at depth 2, 551/551 at depth 3 — and there is no seed this file judges that the sibling
+// does not.
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2508, 2: 1556, 3: 647 };
 
 // All three arms sweep `SEEDS`, the nested one included even though its functions are the largest
 // the generator makes: it costs a couple of seconds, and a per-arm size would be a knob claiming an
@@ -71,6 +107,7 @@ describe.each([
   ['acyclic', 0],
   ['loop-bearing', 1],
   ['nested', 2],
+  ['multi-child', 3],
 ] as const)('%s', (_name, depth) => {
   test('no merge the pass makes changes what the function does', async () => {
     const bad: number[] = [];
@@ -82,8 +119,28 @@ describe.each([
       judged++;
       if (tracesDiffer(r)) bad.push(seed);
     }
-    expect(judged).toBeGreaterThan(SEEDS / 10); // the sweep is not vacuous
+    expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
     expect(bad).toEqual([]);
+  });
+
+  // THE ARM THAT IS NOT A SPELLING COMPARISON. The one above asks whether the merged spelling and
+  // the unmerged one agree; both are trees this structurer emitted, so a defect they share is
+  // invisible to it by construction. This one asks whether the emitted tree computes what the IR
+  // does.
+  test('the merged spelling computes what the IR computes', async () => {
+    const bad: number[] = [];
+    let judged = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      if (seed % BREATHE_EVERY === 0) await breathe();
+      const r = spellings(seed, depth);
+      if (!r) continue;
+      judged++;
+      if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
+    }
+    expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
+    // THE SEEDS, not how many: a count is green on a change that fixes one defect and adds
+    // another. A fix is meant to shorten this list, and a swap is meant to redden it.
+    expect(bad).toEqual(IR_RESIDUAL_SEEDS[depth]);
   });
 });
 
@@ -102,18 +159,26 @@ describe.each([
 // attached, so a rule added later is still held to the bar unless someone argues it out.
 const OUT_OF_REACH = new Set(['type']);
 
-test('every SOUND gate is load-bearing: dropping it changes what some function does', async () => {
+// AGAINST THE IR, not against the axis-off spelling. "Dropping it changes what some function does"
+// was measured as "the two spellings differ", which a rule could satisfy by producing a DIFFERENT
+// RIGHT ANSWER, and which cannot tell a gate that prevents a wrong program from one that prevents
+// an unusual one. The bar here is the harder one a `sound` claim actually makes: some function the
+// shipped table gets RIGHT, the ablated table gets WRONG. Both sound gates in reach still clear it
+// (measured: `interference` 825 wrong seeds at depth 0 against a base of 48, `sibling-params` 59).
+test('every SOUND gate is load-bearing: dropping it makes some function disagree with its own IR', async () => {
   // Written over the TABLE, not over named gates: a rule added later is held to this without
   // anyone remembering to. A gate whose ablation changes nothing is either subsumed or decorative,
   // and either way it must not claim `sound`.
   const inert: string[] = [];
   for (const g of NAME_COALESCE_GATES.filter((x) => x.sound && !OUT_OF_REACH.has(x.id))) {
     let found = false;
-    for (const depth of [0, 1, 2] as const) {
+    for (const depth of [0, 1, 2, 3] as const) {
       for (let seed = 1; seed <= SEEDS && !found; seed++) {
         if (seed % BREATHE_EVERY === 0) await breathe();
         const r = spellings(seed, depth, g.id);
-        if (r && tracesDiffer(r)) found = true;
+        if (!r || !tracesDiffer({ off: r.ir, on: r.on })) continue;
+        const base = spellings(seed, depth);
+        if (base && !tracesDiffer({ off: base.ir, on: base.on })) found = true;
       }
       if (found) break;
     }
