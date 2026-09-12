@@ -242,6 +242,51 @@ describe('a verdict that ENDS a round is linked to its evidence', () => {
   });
 });
 
+describe('the unmatchable register is falsified by the artifact', () => {
+  // The register says of itself that "an entry here closes a row to future rounds and that is
+  // exactly the kind of claim that rots unwatched", and it shipped with no gate — while the cost
+  // table 170 lines above has one. A verdict does not rot on a CLOCK the way a cost figure does; it
+  // rots the instant somebody matches the row. `results.json` knows, and `citations.test.ts` already
+  // holds the ids in this page to rows that exist, so the only thing missing is the one assertion
+  // the entry's own falsification condition names.
+  const REGISTER = join(DOCS_DIR, 'unmatchable-quirks.md');
+  const ROW_ID = /^\|\s*`([\w.-]+:[\w.-]+:[\w.-]+)`\s*\|/;
+
+  const registerRows = () =>
+    readFileSync(REGISTER, 'utf8')
+      .split('\n')
+      .map((l) => l.match(ROW_ID)?.[1])
+      .filter((id): id is string => Boolean(id));
+
+  it('every row it closes is still a nonmatch in results.json', () => {
+    const ids = registerRows();
+    expect(
+      ids.length,
+      `no row parsed out of ${REGISTER}'s table — either the register is empty (delete this gate) or ` +
+        'its table shape moved and this check went blind',
+    ).toBeGreaterThan(0);
+
+    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as {
+      id: string;
+      asmlift?: { outcome?: string };
+    }[];
+    const falsified: string[] = [];
+    for (const id of ids) {
+      const row = artifact.find((r) => r.id === id);
+      expect(row, `${REGISTER} closes ${id}, which is not a row in the committed results.json`).toBeDefined();
+      if (row?.asmlift?.outcome === 'match') {
+        falsified.push(id);
+      }
+    }
+    expect(
+      falsified,
+      `the register calls these rows unmatchable and the artifact says asmlift matched them. An entry ` +
+        `is falsified by one honest spelling reaching the target bytes, and a published match IS one: ` +
+        `delete the entry, do not annotate it. ${falsified.join(', ')}`,
+    ).toEqual([]);
+  });
+});
+
 describe('every link in a command file resolves', () => {
   // Both spellings: `](../../docs/x.md)` relative to the file, and `](docs/x.md)` relative to the
   // repo root. Matching only the leading-`.` form leaves a repo-root link that 404s invisible, and
