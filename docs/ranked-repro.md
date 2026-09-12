@@ -219,10 +219,15 @@ Two things it can do that nothing else can:
 [fan-diff] kleod:CountCollectedGems:agbcc: 5952 → 11904 (2.00×) vs origin/main`, with no bench run behind it.
   It is sound because both sides are the SAME call — the run wrote its count out of
   `rankOptionsFor`, and this enumerates under those same options for the same row id. It prints at
-  whichever exit the run reaches, the over-limit refusal included: on the rows that refuse, you
-  learn what the fan did without compiling any of it. Three ways there is no comparison are three
-  different sentences — an artifact that predates the field, a row the base never had, a ref
-  nothing can read — and none of them is a silence.
+  whichever of FOUR exits the run reaches: the `--enumerate` listing, the scored table, the
+  over-limit refusal (on the rows that refuse, you learn what the fan did without compiling any of
+  it), and the `noncompile` path — where every spelling was refused and the two refusal lists ARE
+  the fan, so it is the one row class whose count the artifact knows. Three ways there is no
+  comparison are three different sentences — an artifact that predates the field, a row the base
+  never had, a ref nothing can read — and none of them is a silence. The first two are ANSWERS and
+  print beside the count; a ref nothing can read is a bad ARGUMENT, so it goes to stderr and
+  **exits 2**: `bench fan <row> --base X && …` must not read success from a run that compared
+  nothing.
 - **`--asm <file.s> --toolchain <id>` prices a function that is not a benchmark row at all.** The
   positional is then the SYMBOL. **Enumeration only**: scoring needs a target object to diff
   against and a compiler configured for that object's world, which is exactly what a row carries
@@ -231,6 +236,14 @@ Two things it can do that nothing else can:
   its count compares with another `.s` run and with itself across two revisions, and NOT with a
   row's recorded `candidateCount` — measured on `synthetic:dma_wait:agbcc`, whose row enumerates
   **32** and whose bare `.s` enumerates **36**. The command says so on stderr every time.
+
+  **Which function it priced.** On a `.s` holding two or more functions, a name that is not one of
+  them is refused by the frontend, loudly. On a SINGLE-function `.s` the frontend does the opposite
+  and lifts that one function under the name you typed — deliberately, because that rename is the
+  point when the split calls it `sub_0800D188` and you are decompiling it as something else. So a
+  typo prices the right function under a name that exists nowhere, and the command warns when the
+  symbol is in no label of the file, naming the labels it does define. It is a warning and not a
+  refusal: refusing would break the rename this flag exists for.
 
 **A fan over 2,000 candidates is refused, not scored** (`--force` overrides), and the refusal
 prices the run it is refusing from the row's own count AND ITS OWN TIER. Scoring is a compile each,
@@ -242,7 +255,9 @@ prelude; one rate for both under-prices the real tier by ~35%, on the row the re
 is. So the limit is ~2 minutes of synthetic scoring, `CountCollectedGems` is ~8 minutes — a
 `--force` worth typing, not an hour — and `LoadBGTilemapData`'s 225,792 is a five-hour run;
 `--enumerate` is the answer at THAT size, and note the guard is checked after the pre-count
-enumeration, so the refusal itself pays the enumeration price above.
+enumeration, so the refusal itself pays the enumeration price above. `--force` raises that compile
+limit and nothing else, so it is **refused** beside a path that compiles nothing (`--enumerate`,
+`--asm`) rather than accepted and dropped.
 
 **A row with no fan says so, and exits 2.** Neither of the ranked path's two calls can be assumed
 to return: on a `declined` row (233 of 1,035) enumeration THROWS on the same gap the published row

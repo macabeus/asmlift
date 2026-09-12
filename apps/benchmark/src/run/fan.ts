@@ -495,9 +495,13 @@ export function unshowable(
  *  row IS the configuration, so what it prints is what the benchmark measured. But the question
  *  "what would this function's fan cost" is asked about functions that have no row yet — the one
  *  a dogfooding round is about to attempt, the one a round is deciding whether to add, the one
- *  `fan.ts` prices at five hours and nobody has ever enumerated. There was no way to ask it, so
- *  rounds hand-built a driver, and 41 of 51 of those hit `ERR_MODULE_NOT_FOUND` before they got an
- *  answer.
+ *  `fan.ts` prices at five hours and nobody has ever enumerated — `LoadBGTilemapData`, which is
+ *  NOT a benchmark row (`grep -c LoadBGTilemapData results.json` → 0), so `bench fan <row>` cannot
+ *  reach it and never could. There was no way to ask it, so rounds hand-built a driver: a mining
+ *  round over this project's transcripts counted 41 of 51 of those hitting `ERR_MODULE_NOT_FOUND`
+ *  before they got an answer (that figure is a claim about transcripts, not something this repo
+ *  can check — but the round that built this command hit it on its own first probe, from the
+ *  worktree root and again from `/tmp`).
  *
  *  ENUMERATION ONLY, and that is a refusal rather than an omission: scoring needs a target object
  *  to diff against and a compiler configured to build against that object's world, which is
