@@ -331,12 +331,27 @@ describe('the unmatchable register is falsified by the artifact', () => {
   // the entry's own falsification condition names.
   const REGISTER = join(DOCS_DIR, 'unmatchable-quirks.md');
   const ROW_ID = /^\|\s*`([\w.-]+:[\w.-]+:[\w.-]+)`\s*\|/;
+  const SECTION = '## The register';
 
-  const registerRows = () =>
-    readFileSync(REGISTER, 'utf8')
-      .split('\n')
+  /** ONLY the rows under `## The register`. The page carries a SECOND table — the near-misses that
+   *  the inhabitant count explicitly says are NOT closed — and scanning the whole file would read
+   *  one of those as a closed row the moment its cell is reformatted into a bare row id. Under the
+   *  register's own semantics ("an entry here closes a row to future rounds") that silently closes a
+   *  row nobody voted to close, and the reader of this gate's green run would never learn it. */
+  const registerRows = () => {
+    const lines = readFileSync(REGISTER, 'utf8').split('\n');
+    const from = lines.indexOf(SECTION);
+    expect(
+      from,
+      `${REGISTER} has no '${SECTION}' heading — the table this gate reads has been renamed or ` +
+        'moved, and scanning the rest of the page would treat the near-miss table as closed rows',
+    ).toBeGreaterThanOrEqual(0);
+    const to = lines.findIndex((l, i) => i > from && l.startsWith('## '));
+    return lines
+      .slice(from + 1, to === -1 ? lines.length : to)
       .map((l) => l.match(ROW_ID)?.[1])
       .filter((id): id is string => Boolean(id));
+  };
 
   it('every row it closes is still a nonmatch in results.json', () => {
     const ids = registerRows();
@@ -353,6 +368,12 @@ describe('the unmatchable register is falsified by the artifact', () => {
     const falsified: string[] = [];
     for (const id of ids) {
       const row = artifact.find((r) => r.id === id);
+      // `citations.test.ts` also resolves this id, and this assertion is KEPT anyway rather than
+      // deferred to it: an id that stops resolving leaves `row?.asmlift?.outcome` undefined, which
+      // is not `'match'`, so without this line the check below passes over an empty set and this
+      // gate is vacuous — the §10 defect, in the gate written for §10. The duplication is with a
+      // suite whose coverage of this page is conditional (`docs` being in its `SCANNED` list) and
+      // whose failure message is about citations, not about a closed row.
       expect(row, `${REGISTER} closes ${id}, which is not a row in the committed results.json`).toBeDefined();
       if (row?.asmlift?.outcome === 'match') {
         falsified.push(id);
