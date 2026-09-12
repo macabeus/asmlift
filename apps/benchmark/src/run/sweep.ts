@@ -31,17 +31,34 @@
 // WHAT IT COSTS. `time`d on THIS COMMAND (not on a probe of its parts), on this machine
 // 2026-09-12, alone, `ASMLIFT_CANDCACHE` default, over all 1,062 available rows:
 //
-//   | what                                              | rows  | wall    |
-//   |---------------------------------------------------|-------|---------|
-//   | lift, 2 arms, warm target builds                  | 1,062 | 62.8 s  |
-//   | lift, 2 arms, every target built (BENCH_CACHE=0)  | 1,062 | 176.9 s |
-//   | `--repeat 2` (the determinism gate)               | 1,062 | 123.7 s |
-//   | `--fan`, 1 arm, the one over-limit row excluded    | 1,061 | 436.8 s |
+//   | what                                                 | rows  | wall    |
+//   |------------------------------------------------------|-------|---------|
+//   | lift, 2 arms, warm target builds — ONE side          | 1,062 | 60.4 s  |
+//   | lift, 2 arms, every target built (BENCH_CACHE=0)     | 1,062 | 176.9 s |
+//   | `--repeat 2` (the determinism gate)                  | 1,062 | 123.7 s |
+//   | `--fan`, 1 arm, the one over-limit row excluded      | 1,061 | 436.8 s |
+//   | `--base <ref>`, BOTH sides — the flag this exists for | 1,062 | 232 s   |
+//   | `--base-dir <tree> --tier real`, both sides          |   252 | 75.7 s  |
 //
 // An earlier table here priced the warm row at 28.8 s, which was a standalone probe's build+lift
 // loop and NOT this command: `time pnpm bench sweep` is 59.0 / 61.8 / 62.8 s across three runs on
 // two worktrees, and `docs/bench-cost.md` had it right. A header table is read as the command's
 // price, so it states the command's price.
+//
+// AND THE PRICE OF THIS COMMAND IS THE `--base` ROW, not the first one: a sweep with no base
+// compares nothing. Four whole-corpus measurements, 2026-09-12: `--base HEAD` against a base tree
+// provisioned and swept hours earlier is 234.1 s (this tree 60.4 s, base tree 173.3 s), and
+// `--base 5c440d38` — `git worktree add` + `pnpm install` + the sweep — is 231.7 s (this tree
+// 59.9 s, base tree 169.0 s). So the base side is ~170 s EVERY time and does not amortize, which
+// the earlier "its first target builds are cold" reading of the same number got wrong: that same
+// base tree sweeping ITSELF, in its own process, is 58.3 s, and the real tier's base side is
+// 40.0 s against a head side of 35.2 s with not one cache file written. The gap is in the corpus's
+// other 810 rows and is NOT understood; it is quoted here as a measured wall clock and nothing
+// more. Budget ~4 minutes for a whole-corpus `--base`, and prefer `--tier`/`--project` when the
+// question is scoped — a real-tier A/B is 75.7 s.
+//
+// Both sides are also cold in a FRESH round worktree, where the head side pays its own ~170 s of
+// target builds too: 337 s measured that way (wave-2 review, 2026-09-12).
 //
 // The split still matters more than the totals: of the cold run, ~116 s is BUILDING the scoring
 // targets and ~2.3 s is the 1,346 lifts (probe `price2.mts`, 2026-09-12). Lifting the whole corpus
@@ -235,7 +252,7 @@ export const SWEEP_FAN_LIMIT = 20000;
  *  diagnostic from becoming an overnight job, and a ref that will not resolve must not be able to
  *  turn the guard off. A row the artifact does not carry (a new dataset row) has no recorded
  *  count and is enumerated — the guard protects against the known giants, and says so. */
-export function recordedFans(): { fans: Map<string, number>; unreadable?: string } {
+export function recordedFans(): { fans: Map<string, number>; unreadable?: string; path?: string; rows?: number } {
   const path = join(RESULTS_DIR, 'results.json');
   // NO ARTIFACT AT ALL is the documented pre-guard behavior: a checkout that has never published
   // one prices no row, every row enumerates, and the header says so. AN ARTIFACT THAT WILL NOT
@@ -254,17 +271,40 @@ export function recordedFans(): { fans: Map<string, number>; unreadable?: string
       results: { id: string; asmlift: { candidateCount?: number } }[];
     };
     if (!Array.isArray(results)) {
-      return { fans: out, unreadable: `${path} has no top-level \`results\` array` };
+      return { fans: out, path, unreadable: `${path} has no top-level \`results\` array` };
     }
     for (const r of results) {
       if (typeof r.asmlift?.candidateCount === 'number') {
         out.set(r.id, r.asmlift.candidateCount);
       }
     }
+    return { fans: out, path, rows: results.length };
   } catch (e) {
-    return { fans: out, unreadable: `${path}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
+    return { fans: out, path, unreadable: `${path}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
   }
-  return { fans: out };
+}
+
+/** Does this selection name that row? The same three filters `collect` applies, over a row ID
+ *  instead of a `Case` — `synthetic:<sym>:<toolchain>` or `<project>:<sym>:<toolchain>`, where
+ *  `--only` is a substring of the SYM (`syntheticCases`/`realCases` both filter `x.sym`, not the
+ *  id) and the synthetic tier is the rows whose project is `synthetic`.
+ *
+ *  Exported because it is what lets the `--fan` guard say how much of its own selection the
+ *  artifact could price, which is the difference between "no giants here" and "I cannot see". */
+export function selectsRow(o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>, id: string): boolean {
+  const parts = id.split(':');
+  if (parts.length < 3) {
+    return false;
+  }
+  const project = parts[0];
+  const sym = parts.slice(1, -1).join(':');
+  if (!o.tiers.includes(project === 'synthetic' ? 'synthetic' : 'real')) {
+    return false;
+  }
+  if (o.project !== undefined && project !== o.project) {
+    return false;
+  }
+  return o.only === undefined || sym.includes(o.only);
 }
 
 export interface SweepOptions extends SweepSelection {
@@ -337,6 +377,14 @@ function provisionBase(ref: string): { dir: string } | { error: string } {
     }
     note(`asmlift: [sweep] provisioned base worktree ${dir} at ${sha.out.trim().slice(0, 12)} (${ref})`);
   }
+  // THE FLOOR IS CHECKED BEFORE THE INSTALL, because it reads files out of the checkout and needs
+  // no `node_modules`: a ref below the floor used to pay a `pnpm install` and only then be told it
+  // could never have been swept. Same rule as the base-ref resolution below — take the refusal
+  // before anything is paid for.
+  const old = moduleFloorRefusal(dir);
+  if (old !== undefined) {
+    return { error: old };
+  }
   if (!existsSync(join(dir, 'node_modules'))) {
     note(`asmlift: [sweep] pnpm install in the base tree (once per base revision, ~2 s)`);
     const r = spawnSync('pnpm', ['install', '--silent'], { cwd: dir, encoding: 'utf8' });
@@ -364,16 +412,27 @@ function provisionBase(ref: string): { dir: string } | { error: string } {
  *  WHAT IT CANNOT CATCH, said out loud: a module that still EXISTS with a CHANGED SIGNATURE.
  *  `rankOptionsFor`'s parameter list moved at 85f81116 and again at 3b82f953, and a base on the
  *  other side of such a change lifts with DIFFERENT OPTIONS rather than with none — which is what
- *  each record's `opts` digest makes visible instead of silent. */
-function baseTreeRefusal(dir: string): string | undefined {
-  if (!existsSync(join(dir, 'node_modules'))) {
-    return `base tree ${dir} has no node_modules — run \`pnpm install\` there, or use --base <ref>`;
-  }
+ *  each record's `opts` digest makes visible instead of silent.
+ *
+ *  AND THAT COMPENSATING CONTROL IS ONLY AS GOOD AS THE DIGEST. It was claimed here while
+ *  `optsDigest` still rendered every `Map` as `{}`, so the one signature change it was offered
+ *  against — a `rankOptionsFor` that builds a DIFFERENT symbol map rather than dropping the key —
+ *  was invisible to this check AND to `opts`. See `canon` in sweep-driver.ts: the sentence above
+ *  became true when that was fixed, and stops being true again for any option shape `canon` cannot
+ *  render. */
+function moduleFloorRefusal(dir: string): string | undefined {
   const missing = TREE_MODULES.filter((p) => !existsSync(join(dir, p)));
   if (missing.length > 0) {
     return `base tree ${dir} is older than this command's floor: it has no ${missing.join(', ')}. \`--base\` reaches back to 85f81116 (2026-09-09) for a whole-corpus sweep; compare against a newer revision, or use \`bench diff\` against the published artifact.`;
   }
   return undefined;
+}
+
+function baseTreeRefusal(dir: string): string | undefined {
+  if (!existsSync(join(dir, 'node_modules'))) {
+    return `base tree ${dir} has no node_modules — run \`pnpm install\` there, or use --base <ref>`;
+  }
+  return moduleFloorRefusal(dir);
 }
 
 function collectBase(dir: string, sel: SweepSelection): { records: SweepRecord[] } | { error: string } {
@@ -466,6 +525,38 @@ export function sweepRefusal(o: SweepOptions): string | undefined {
   return undefined;
 }
 
+/** Is this parsed file a side of a comparison — and if not, which part of it is not?
+ *
+ *  EXIT 1 IS THIS COMMAND'S "ROWS MOVED" CODE, so a crash landing there is a wrong ANSWER and not
+ *  merely an ugly one: `bench sweep --compare a b; [ $? -eq 1 ] && report` reads it as a finding.
+ *  The `try/catch` above wraps `JSON.parse` alone, so a file that PARSES and is not an array of
+ *  records reached `compareSweeps` and died on `base.map is not a function` as a raw node stack —
+ *  and the realistic input is a reader pointing `--compare` at `apps/benchmark/results/results.json`,
+ *  which is a JSON OBJECT and belongs to `bench diff`.
+ *
+ *  An EMPTY side is refused for the reason an empty selection is (`head.length === 0` below): it
+ *  compares clean against anything, and `bench sweep --compare … && echo clean` is the gate this
+ *  command is for. Reproduced: two `[]` files printed `0 record(s) moved … 0 identical` at exit 0. */
+export function recordFileRefusal(file: string, parsed: unknown): string | undefined {
+  if (!Array.isArray(parsed)) {
+    return `${file} is not a sweep record file: it parses to ${parsed === null ? 'null' : typeof parsed}, and \`--json\` writes a JSON ARRAY of records. (\`results.json\` is \`bench run\`'s artifact — \`bench diff\` reads that one.)`;
+  }
+  if (parsed.length === 0) {
+    return `${file} holds no records, so it compares clean against anything — the run that wrote it swept nothing, or was interrupted mid-write`;
+  }
+  const bad = (parsed as unknown[]).findIndex(
+    (r) =>
+      r === null ||
+      typeof r !== 'object' ||
+      typeof (r as SweepRecord).id !== 'string' ||
+      typeof (r as SweepRecord).arm !== 'string',
+  );
+  if (bad >= 0) {
+    return `${file} is not a sweep record file: entry ${bad} has no \`id\`/\`arm\` pair, which is what a comparison keys on`;
+  }
+  return undefined;
+}
+
 const selectionOf = (o: SweepOptions): SweepSelection => ({
   tiers: o.tiers,
   ...(o.only !== undefined ? { only: o.only } : {}),
@@ -491,14 +582,54 @@ function overLimitRows(o: SweepOptions): { over: Record<string, number>; unreada
   if (o.fan !== true || o.force === true || o.asmDir !== undefined) {
     return { over: {} };
   }
-  const { fans, unreadable } = recordedFans();
+  return fanGuard(o, recordedFans());
+}
+
+/** The guard itself, over an artifact that has ALREADY been read — the pure half, because the CI
+ *  mirror runs where the committed artifact is the repo's own and a test cannot perturb it. */
+export function fanGuard(
+  o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>,
+  artifact: ReturnType<typeof recordedFans>,
+): { over: Record<string, number>; unreadable?: string } {
+  const { fans, unreadable, path, rows } = artifact;
+  if (unreadable !== undefined) {
+    return { over: {}, unreadable };
+  }
   const over: Record<string, number> = {};
+  let priced = 0;
   for (const [id, n] of fans) {
+    if (!selectsRow(o, id)) {
+      continue;
+    }
+    priced++;
     if (n > SWEEP_FAN_LIMIT) {
       over[id] = n;
     }
   }
-  return { over, ...(unreadable !== undefined ? { unreadable } : {}) };
+  // AN ARTIFACT THAT PRICES NONE OF THE SELECTION IS UNREADABLE, not "no giants here". This is
+  // where the first version of the guard still failed OPEN and SILENTLY one level below the JSON
+  // error it had learned to catch: with `results: []` — a shard that wrote no rows, or a checkout
+  // mid-`bench merge` — the loop added nothing, nothing was over the limit, and `--fan --only
+  // ProcessInputAndUpdateEntities` printed NOTHING and was still enumerating 77,760 spellings when
+  // it was killed at 25 s, against 0.9 s to refuse with the artifact intact. Renaming the
+  // `asmlift` key on all 1,062 results — the schema move this guard's own comment names as its
+  // trigger — did the same at 30 s. The count is SELECTION-SCOPED and not corpus-wide, because a
+  // whole-corpus artifact that prices no `kleod` row bounds a `--project kleod --fan` run exactly
+  // as little as an empty one does.
+  //
+  // THE PRICE, said out loud: a selection of rows the artifact does not carry — a dataset row this
+  // branch ADDS — now refuses where it used to enumerate. That is the right default for a flag
+  // whose population contains five-hour functions, and `--force` is one word.
+  if (path !== undefined && priced === 0) {
+    return {
+      over: {},
+      unreadable:
+        fans.size === 0
+          ? `${path} prices no row at all — 0 of its ${rows ?? 0} result(s) carry an \`asmlift.candidateCount\`, which is what a schema move under that key, or an artifact from a shard that wrote no rows, looks like`
+          : `${path} prices ${fans.size} row(s) and not one of the rows this selection names, so it bounds nothing here`,
+    };
+  }
+  return { over };
 }
 
 export async function sweep(o: SweepOptions): Promise<number> {
@@ -511,12 +642,32 @@ export async function sweep(o: SweepOptions): Promise<number> {
   if (o.compare !== undefined) {
     const sides: SweepRecord[][] = [];
     for (const f of o.compare) {
+      let parsed: unknown;
       try {
-        sides.push(JSON.parse(readFileSync(f, 'utf8')) as SweepRecord[]);
+        parsed = JSON.parse(readFileSync(f, 'utf8'));
       } catch (e) {
         note(`asmlift: [sweep] cannot read ${f}: ${e instanceof Error ? e.message.split('\n')[0] : e}`);
         return 2;
       }
+      const bad = recordFileRefusal(f, parsed);
+      if (bad !== undefined) {
+        note(`asmlift: [sweep] ${bad}`);
+        return 2;
+      }
+      sides.push(parsed as SweepRecord[]);
+    }
+    // NEITHER SIDE'S RECORDS ARE THIS PROCESS'S. `--json`/`--compare` exist to split a comparison
+    // across two machines, so both files were written by a run this one did not watch. A pair with
+    // no key in common was not swept over the same selection — a truncated write, two different
+    // `--only`s, one side's `--arms` — and comparing them reports every record as base-only or
+    // head-only, which is arithmetic, not an answer.
+    const shared = new Set(sides[0].map((r) => `${r.id} ${r.arm}`));
+    const overlap = sides[1].filter((r) => shared.has(`${r.id} ${r.arm}`)).length;
+    if (overlap === 0) {
+      note(
+        `asmlift: [sweep] ${o.compare[0]} and ${o.compare[1]} share no record: ${sides[0].length} and ${sides[1].length} record(s) and not one id+arm in common, so nothing was compared. Sweep both sides over the same --tier/--only/--project/--arms.`,
+      );
+      return 2;
     }
     return reportDiff(compareSweeps(sides[0], sides[1]), `${o.compare[0]} -> ${o.compare[1]}`, o);
   }
@@ -524,7 +675,7 @@ export async function sweep(o: SweepOptions): Promise<number> {
   const { over, unreadable } = overLimitRows(o);
   if (unreadable !== undefined) {
     note(
-      `asmlift: [sweep] --fan needs the committed artifact to size the corpus's giants, and cannot read it: ${unreadable}`,
+      `asmlift: [sweep] --fan needs the committed artifact to size what it is about to enumerate, and it does not: ${unreadable}`,
     );
     note(
       `asmlift: [sweep] --force enumerates every row anyway (kleod:ProcessInputAndUpdateEntities is 77,760 spellings).`,
@@ -655,12 +806,20 @@ export async function sweep(o: SweepOptions): Promise<number> {
  *  whole corpus sweeps with 0 of 2,124 records unmeasured, so this refusal costs a correct setup
  *  nothing; `--allow-unmeasured` is for the setup that genuinely lacks a toolchain (mwcc needs
  *  Docker) and wants the rest of the answer. */
-function unmeasuredRefusal(total: number, o: SweepOptions): number | undefined {
+function unmeasuredRefusal(total: number, o: SweepOptions, moved = 0): number | undefined {
   if (total === 0 || o.allowUnmeasured === true) {
     return undefined;
   }
+  // THE ENVIRONMENT CODE MASKS THE ANSWER CODE, and only one number fits in an exit status. 2 wins
+  // because a sweep that could not lift part of its selection did not answer the question — but a
+  // sweep with REAL moves must not read as "environment broken" and nothing else, so the count is
+  // in the line. The `[moved]` lines are printed above this one either way.
   note(
-    `asmlift: [sweep] ${total} record(s) were NOT MEASURED — their toolchain is unavailable here or their target would not build, so this sweep did not answer the question for them. Check \`which cpp\` and the ASMLIFT_* env (round protocol trap #6), or pass --allow-unmeasured.`,
+    `asmlift: [sweep] ${total} record(s) were NOT MEASURED — their toolchain is unavailable here or their target would not build, so this sweep did not answer the question for them${
+      moved > 0
+        ? ` (and ${moved} record(s) DID move — those lines are above, and --allow-unmeasured exits 1 on them)`
+        : ''
+    }. Check \`which cpp\` and the ASMLIFT_* env (round protocol trap #6), or pass --allow-unmeasured.`,
   );
   return 2;
 }
@@ -677,5 +836,5 @@ function reportDiff(d: SweepDiff, what: string, o: SweepOptions): number {
       d.notMeasured > 0 ? `, ${d.notMeasured} NOT MEASURED on either side` : ''
     }`,
   );
-  return unmeasuredRefusal(d.notMeasured, o) ?? (moved === 0 ? 0 : 1);
+  return unmeasuredRefusal(d.notMeasured, o, moved) ?? (moved === 0 ? 0 : 1);
 }

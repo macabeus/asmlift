@@ -26,11 +26,14 @@ import {
   SWEEP_FAN_LIMIT,
   type SweepRecord,
   compareSweeps,
+  fanGuard,
+  recordFileRefusal,
   renderDiff,
+  selectsRow,
   sweepRefusal,
   unmeasuredCounts,
 } from '../src/run/sweep';
-import { armsFor, optsDigest } from '../src/run/sweep-driver';
+import { armsFor, optsDigest, stable } from '../src/run/sweep-driver';
 
 const rec = (over: Partial<SweepRecord> & Pick<SweepRecord, 'id' | 'arm'>): SweepRecord => ({
   src: 'aaaaaaaaaaaa',
@@ -187,6 +190,68 @@ describe('the record carries its INPUT, not only its output', () => {
     // and an option that APPEARS is a move: a row that gains a symbol map lifts differently
     expect(optsDigest({})).not.toBe(optsDigest({ symbols: {} }));
   });
+
+  it('digests a symbol MAP by its contents — the shape `rankOptionsFor` actually returns', () => {
+    // THE DEFECT THIS PINS, and it survived the first version of the `opts` field because the test
+    // written for it passed a PLAIN OBJECT where the producer supplies a `Map`:
+    // `JSON.stringify(new Map(...))` is `{}`, so `opts.symbols` (`SymbolMap = Map<number,
+    // SymbolInfo[]>`) and `AsmData`'s two maps — the real tier's whole vendored input — digested
+    // identically no matter what was in them. Renaming all 1,784 symbols in
+    // `dataset/real/tu/kleod/symbols.json.gz` and no line of `packages/` then moved 25 records
+    // reading `src`/`len` ALONE, which is verbatim the sentence `asm`/`opts` were added to prevent.
+    // A test whose input is not a shape the producer emits pins nothing.
+    const mapA = new Map<number, unknown>([[0x1000, [{ name: 'gFoo' }]]]);
+    const mapB = new Map<number, unknown>([[0x2000, [{ name: 'gCompletelyDifferent' }]]]);
+    expect(optsDigest({ symbols: mapA })).not.toBe(optsDigest({ symbols: mapB }));
+    expect(optsDigest({ symbols: mapA })).not.toBe(optsDigest({ symbols: new Map() }));
+    // insertion order is the loader's, not the map's contents: two sides must agree
+    expect(
+      optsDigest({
+        symbols: new Map([
+          [1, 'a'],
+          [2, 'b'],
+        ]),
+      }),
+    ).toBe(
+      optsDigest({
+        symbols: new Map([
+          [2, 'b'],
+          [1, 'a'],
+        ]),
+      }),
+    );
+  });
+
+  it('digests a Set and a typed array by contents too — `asmData.sections` is bytes', () => {
+    expect(optsDigest({ s: new Set(['a']) })).not.toBe(optsDigest({ s: new Set(['b']) }));
+    // nested one level down, which is where `AsmData` keeps them
+    const asm = (b: number[], addr: number) => ({
+      sections: new Map([['.rodata', new Uint8Array(b)]]),
+      symbols: new Map([['jt', { addr }]]),
+    });
+    expect(optsDigest({ asmData: asm([0, 0, 0, 0x34], 0) })).not.toBe(
+      optsDigest({ asmData: asm([9, 9, 9, 0x99], 64) }),
+    );
+    expect(optsDigest({ asmData: asm([1, 2], 0) })).toBe(optsDigest({ asmData: asm([1, 2], 0) }));
+  });
+
+  it('renders a container the same way whether or not it was digested before', () => {
+    // The serializer caches on container IDENTITY (a project's symbol map is one object digested
+    // once per row per arm — serializing it every time costs +27% on the real tier). A cache that
+    // returned a different string on the second call would make a record's `opts` depend on where
+    // it sat in the corpus, which is the one thing `--repeat` cannot tell from a real move.
+    const m = new Map([[1, { a: [1, 2, 3] }]]);
+    expect(stable(m)).toBe(stable(m));
+    expect(stable(m)).toBe(stable(new Map([[1, { a: [1, 2, 3] }]])));
+  });
+
+  it('marks a cycle instead of following it', () => {
+    // A hang inside a digest would be worse than a collision, and `opts` is whatever a producer
+    // put in it.
+    const a: Record<string, unknown> = { name: 'a' };
+    a.self = a;
+    expect(stable(a)).toContain('[cycle]');
+  });
 });
 
 describe('the two arms', () => {
@@ -296,6 +361,99 @@ describe('the sweep refusals', () => {
     // invocation never iterated.
     expect(sweepRefusal({ ...ok, asmDir: '/tmp', toolchain: 'agbcc', fan: true })).toContain('no size guard');
     expect(sweepRefusal({ ...ok, asmDir: '/tmp', toolchain: 'agbcc', fan: true, force: true })).toBeUndefined();
+  });
+});
+
+describe('the --fan size guard reads its own SELECTION, not just the artifact', () => {
+  const artifact = (pairs: [string, number][], rows = pairs.length) => ({
+    fans: new Map(pairs),
+    path: '/repo/apps/benchmark/results/results.json',
+    rows,
+  });
+  const giant: [string, number] = ['kleod:ProcessInputAndUpdateEntities:agbcc', 77760];
+  const small: [string, number] = ['sa3:GetInput:agbcc', 120];
+  const sel = { tiers: ['synthetic', 'real'] as const };
+
+  it('names the giant when the artifact prices it', () => {
+    expect(fanGuard(sel, artifact([giant, small]))).toEqual({ over: { [giant[0]]: 77760 } });
+  });
+
+  it('refuses an artifact that prices NO row, instead of reading it as "no giants here"', () => {
+    // MEASURED DEFECT, one level below the one the first guard learned to catch. A `JSON.parse`
+    // throw and a missing `results` key were refused; a WELL-FORMED `results` array that prices
+    // nothing was not — the loop added nothing, `over` stayed empty, and the guard was off with NO
+    // OUTPUT AT ALL. `--fan --only ProcessInputAndUpdateEntities` printed nothing and was still
+    // enumerating 77,760 spellings when it was killed at 25 s (`results: []`) and at 30 s (the
+    // `asmlift` key renamed on all 1,062 results — the schema move this guard's own comment names
+    // as its trigger), against 0.9 s to refuse with the artifact intact. `results: []` needs no
+    // corruption: a shard that wrote no rows, or a checkout mid-`bench merge`.
+    const r = fanGuard(sel, artifact([], 1062));
+    expect(r.unreadable).toContain('prices no row at all');
+    expect(r.unreadable).toContain('1062');
+  });
+
+  it('refuses an artifact that prices plenty of rows and none of THIS selection', () => {
+    // Selection-scoped and not corpus-wide: an artifact that prices 787 rows and no `kleod` row
+    // bounds `--project kleod --fan` exactly as little as an empty one does. Measured by stripping
+    // `candidateCount` from the 42 kleod rows: the kleod selection refuses, an `sa3` selection off
+    // the SAME artifact still sweeps.
+    const r = fanGuard({ tiers: ['real'], project: 'kleod' }, artifact([small]));
+    expect(r.unreadable).toContain('not one of the rows this selection names');
+    expect(fanGuard({ tiers: ['real'], project: 'sa3' }, artifact([small])).unreadable).toBeUndefined();
+  });
+
+  it('passes an unreadable artifact through rather than pricing what it could parse', () => {
+    expect(fanGuard(sel, { fans: new Map(), unreadable: 'no top-level `results` array' }).unreadable).toContain(
+      'results',
+    );
+  });
+
+  it('says nothing when there is no artifact at all — the documented pre-guard behaviour', () => {
+    // A checkout that has never published one prices no row and every row enumerates. That is a
+    // DIFFERENT fact from an artifact that exists and prices nothing, and conflating them either
+    // breaks a fresh clone or restores the fail-open.
+    expect(fanGuard(sel, { fans: new Map() })).toEqual({ over: {} });
+  });
+});
+
+describe('which rows a selection names', () => {
+  it('applies the same three filters `collect` does, over an id', () => {
+    // `--only` is a substring of the SYM and not of the id (`syntheticCases`/`realCases` both
+    // filter `x.sym`), and the synthetic tier is the rows whose project is `synthetic`. Getting
+    // this wrong in either direction breaks the `--fan` guard above: too narrow refuses a valid
+    // sweep, too wide restores the fail-open.
+    const both = { tiers: ['synthetic', 'real'] as const };
+    expect(selectsRow(both, 'synthetic:mini:agbcc')).toBe(true);
+    expect(selectsRow({ tiers: ['real'] }, 'synthetic:mini:agbcc')).toBe(false);
+    expect(selectsRow({ tiers: ['synthetic'] }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
+    expect(selectsRow({ ...both, project: 'kleod' }, 'sa3:GetInput:agbcc')).toBe(false);
+    expect(selectsRow({ ...both, only: 'Gems' }, 'kleod:CountCollectedGems:agbcc')).toBe(true);
+    // the substring matches the SYM, not the project or the toolchain
+    expect(selectsRow({ ...both, only: 'kleod' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
+    expect(selectsRow({ ...both, only: 'agbcc' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
+  });
+});
+
+describe('a --compare side that is not a sweep record file', () => {
+  it('refuses a file that parses to something other than an array of records', () => {
+    // EXIT 1 IS THIS COMMAND'S "ROWS MOVED" CODE, so a crash landing there is a wrong ANSWER:
+    // `bench sweep --compare a b; [ $? -eq 1 ] && report` reads it as a finding. The `try/catch`
+    // wrapped `JSON.parse` alone, so a file that PARSES and is not an array reached `compareSweeps`
+    // and died on `base.map is not a function` as a raw node stack — and the realistic input is a
+    // reader pointing `--compare` at `results.json`, which is an OBJECT and belongs to `bench diff`.
+    expect(recordFileRefusal('r.json', {})).toContain('not a sweep record file');
+    expect(recordFileRefusal('r.json', {})).toContain('bench diff');
+    expect(recordFileRefusal('r.json', null)).toContain('not a sweep record file');
+    expect(recordFileRefusal('r.json', [{ id: 'a:b:agbcc' }])).toContain('`id`/`arm`');
+  });
+
+  it('refuses an EMPTY side, which compares clean against anything', () => {
+    // `--json`/`--compare` exist to split a comparison across two machines, so the file this reads
+    // was written by a process this one did not watch: a truncated or interrupted write was a clean
+    // bill of health at exit 0 (`0 record(s) moved ... 0 identical`) in the same gate shape the
+    // empty-selection refusal below was filed for.
+    expect(recordFileRefusal('r.json', [])).toContain('holds no records');
+    expect(recordFileRefusal('r.json', [{ id: 'a:b:agbcc', arm: 'harness' }])).toBeUndefined();
   });
 });
 

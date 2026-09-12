@@ -68,19 +68,90 @@ const firstLine = (e: unknown): string =>
     .split('\n')[0]
     .slice(0, 160);
 
-/** JSON with object keys sorted at every depth, so a digest over it does not move when a producer
- *  reorders its spread. Functions (the candidate compiler) drop out, which is deliberate: they are
- *  not comparable across two processes and their identity is not the fact being watched. */
-const stable = (v: unknown): string =>
-  JSON.stringify(v, (_k, val: unknown) =>
-    val !== null && typeof val === 'object' && !Array.isArray(val)
-      ? Object.fromEntries(
-          Object.keys(val as object)
-            .sort()
-            .map((k) => [k, (val as Record<string, unknown>)[k]]),
-        )
-      : val,
-  ) ?? 'undefined';
+/** Serialization of ONE `Map`/`Set`/typed array, cached on the container's identity.
+ *
+ *  WHY: a project's vendored symbol map is one object of ~1,800 entries and the sweep digests it
+ *  once per row per arm — 42 kleod records over one map. A/B'd here on the real tier's 504 records,
+ *  two runs each: the `JSON.stringify` digest this replaces is 31.7 / 31.9 s, serializing the
+ *  containers every time is 43.7 / 43.6 s (+37%), and caching on identity is 35.2 / 35.0 s (+10%)
+ *  and catches the same perturbations, because the expensive containers are dataset-owned and
+ *  shared. The cache buys back 8.5 s of the 11.9 s the correctness costs.
+ *
+ *  THE ASSUMPTION, said out loud: a container is not MUTATED between two digests of it inside one
+ *  sweep process. The corpus is built once per process and `rankOptionsFor` only reads it; a
+ *  producer that mutated a symbol map in place mid-sweep would be reported as unchanged here (and
+ *  would already break `--repeat`, which exists to catch exactly that class). */
+const serialized = new WeakMap<object, string>();
+
+/** A canonical string for an option value: object keys sorted at every depth, `Map` entries sorted,
+ *  `Set` members sorted, bytes hashed.
+ *
+ *  NOT `JSON.stringify`, and this was a MEASURED defect in the first shape of this digest.
+ *  `JSON.stringify(new Map(...))` is `{}` and `JSON.stringify(new Set(...))` is `{}` — so the two
+ *  options that carry the real tier's whole vendored input digested the same no matter what was in
+ *  them: `SymbolMap = Map<number, SymbolInfo[]>` (`opts.symbols`) and `AsmData`'s `sections`/
+ *  `symbols` maps. Renaming all 1,784 symbols in `dataset/real/tu/kleod/symbols.json.gz` and no
+ *  line of `packages/` then moved 25 records reading `src`/`len` ALONE — verbatim the sentence
+ *  these two fields were added to prevent, on the tier both round command files point this command
+ *  at. A typed array survived `JSON.stringify` as an index object, which is visible but pays a
+ *  megabyte of string per `.rodata` section; it is hashed instead.
+ *
+ *  Cycles are marked rather than followed (a hang here would be worse than a collision) and a value
+ *  that contains one is not cached, since its rendering depends on where the walk entered it. */
+const canon = (v: unknown, seen: Set<object>): string => {
+  if (typeof v === 'function') {
+    return '"fn"';
+  }
+  if (v === null || typeof v !== 'object') {
+    return JSON.stringify(v) ?? 'undefined';
+  }
+  const o = v as object;
+  const memo = serialized.get(o);
+  if (memo !== undefined) {
+    return memo;
+  }
+  if (seen.has(o)) {
+    return '"[cycle]"';
+  }
+  seen.add(o);
+  let out: string;
+  if (ArrayBuffer.isView(o)) {
+    const b = o as ArrayBufferView;
+    const bytes = new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+    out = `bytes(${b.byteLength}):${createHash('sha1').update(bytes).digest('hex').slice(0, 16)}`;
+  } else if (Array.isArray(o)) {
+    out = `[${o.map((x) => canon(x, seen)).join(',')}]`;
+  } else if (o instanceof Map) {
+    // SORTED, because a `Map` preserves insertion order and insertion order is a property of the
+    // loader, not of the map's contents: `--repeat` and a base/head pair must agree.
+    out = `Map{${[...o]
+      .map(([k, val]) => `${canon(k, seen)}:${canon(val, seen)}`)
+      .sort()
+      .join(',')}}`;
+  } else if (o instanceof Set) {
+    out = `Set{${[...o]
+      .map((x) => canon(x, seen))
+      .sort()
+      .join(',')}}`;
+  } else {
+    out = `{${Object.keys(o)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canon((o as Record<string, unknown>)[k], seen)}`)
+      .join(',')}}`;
+  }
+  seen.delete(o);
+  const cyclic = out.includes('"[cycle]"');
+  if (out.length > 256) {
+    out = `#${createHash('sha1').update(out).digest('hex').slice(0, 16)}`;
+  }
+  if (!cyclic) {
+    serialized.set(o, out);
+  }
+  return out;
+};
+
+/** The canonical rendering of one option value. Exported for the test that pins the `Map` case. */
+export const stable = (v: unknown): string => canon(v, new Set());
 
 /** A digest of the OPTION OBJECT this arm was lifted with — `rankOptionsFor`'s result, which
  *  carries the row's prototypes, its `asmData` side table, its symbol map and whether a candidate
@@ -93,12 +164,16 @@ const stable = (v: unknown): string =>
  *  one string in `dataset/synthetic.ts` and no line of `packages/` moved 6 records. `asm` and
  *  `opts` are what make that readable — a `[moved]` line naming them says the INPUT moved, and a
  *  line naming `src` alone says the decompiler did. This is the field `report/diff.ts` watches per
- *  side for the same reason (MEMORY #112/#113: label unchanged while the program changed). */
+ *  side for the same reason (MEMORY #112/#113: label unchanged while the program changed).
+ *
+ *  WHAT IT CAN SEE is decided by `canon` above, and the first version of this function could not
+ *  see a `Map` — read that header before trusting this digest with a new option shape. */
 export function optsDigest(opts: Record<string, unknown>): string {
+  const seen = new Set<object>();
   return sha(
     Object.keys(opts)
       .sort()
-      .map((k) => `${k}=${typeof opts[k] === 'function' ? 'fn' : stable(opts[k])}`)
+      .map((k) => `${k}=${typeof opts[k] === 'function' ? 'fn' : canon(opts[k], seen)}`)
       .join('\0'),
   );
 }
