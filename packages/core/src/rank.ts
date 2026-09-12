@@ -1471,14 +1471,43 @@ export function enumerateCandidates(
     // the advance buys nothing — agbcc folds `p = p + 1; *p` back into `strh [r3, #2]`, so
     // `/advance` and `/nearbase` both score 15/23 there — and against the qualified one it is the
     // match: `/advance/volatile` 0/22, because `volatile` bars that fold and leaves the `add` the
-    // target records. The plain label rides beside it as the un-qualified twin every minting lever
-    // on this roster keeps, and because the fold is one compiler's behaviour.
+    // target records.
+    //
+    // WHY THE CONJUNCTION IS AN AXIS AND NOT A DEFAULT, since the four corners in
+    // test/advance.test.ts's header read as a FUNCTION from the asm: on agbcc a surviving
+    // `adds r3,#2` between two accesses through one address register is produced by exactly one of
+    // the four sources, so volatility and the advance are both determined once the stamp is there.
+    // What the mapping is a function OF is one compiler — agbcc — and the stamp's own population:
+    // every access agbcc DID fold carries no stamp, so a default would never see them, but nothing
+    // says the next compiler's fold has the same shape. It stays an axis for as long as agbcc is
+    // the only target that reaches the stamp (the corpus census below), and the day a second one
+    // does, `compilerBehaviors` is where this belongs rather than a label.
+    //
+    // THE PLAIN LABEL IS MEASURED INERT ON EVERY ROW THAT REACHES IT, and rides anyway. On this row
+    // `/advance` 15/23 ties both the bare `unsigned` and `/nearbase/raw-globals`, for a byte-level
+    // reason (agbcc folds the advance back), and every one of the five rows the lever reaches is
+    // agbcc — so no row can distinguish it today. It costs one candidate per fan point it reaches,
+    // about half the lever's +90 over the corpus. It is kept for the compiler that has not been
+    // measured, NOT because a row asks for it: its source genuinely differs from every other
+    // candidate's, so a compiler that does not fold `p = p + 1; *p` back would score it apart, and
+    // deleting it would make `/advance` the only minting lever on this roster whose un-qualified
+    // spelling is unreachable. Delete it the moment a second toolchain reaches the stamp and still
+    // cannot distinguish it.
     //
     // NO `/vol-store` PRODUCT. That lever pins a store whose WHOLE ADDRESS is a device constant,
     // and this one has just replaced those constants with a local — so on the shape `/advance`
     // fires for, the pair reaches only whatever OTHER const-addressed device store the function
     // still has, which no row on the corpus has beside an advanced chain. A pairing with no
     // inhabitant is candidates without a row behind them.
+    //
+    // AND NO `/nearbase` OR `/livebase` PAIRING, which is a different answer from the one those two
+    // give each other ("each lever's constants are invisible to the other's model"). Here they are
+    // not: all three mint a local for a const address, and `l3/advance.ts` needs its members to
+    // still BE const-addressed accesses (`cellAddress`), which is exactly what a nearbase cluster
+    // or a livebase hoist has already replaced. Running `/advance` on such a tree is a NO-REACH,
+    // not a decline — the same hazard `l3/nearbase.ts` records for committed base-CSE, which
+    // `/advance` inherits: where `structureChecked` has already hoisted the chain's pool word, the
+    // members arrive as a `var` base and this pass enumerates nothing at all.
     const advance = (): SFn | null => survives(sfn, advancedBases(sfn));
     respell('/advance', advance);
     respell('/advance/volatile', () => {

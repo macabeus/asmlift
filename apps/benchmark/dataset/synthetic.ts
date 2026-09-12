@@ -8205,6 +8205,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // the lever does not own — a DMA block, an uninitialised slot, a fused offset — so a regression
   // in the advance alone would surface there as one term of a conjunction. This row is the shape
   // with nothing else in it.
+  //
+  // …AND ONE OF THOSE FIVE CANNOT SCORE AT ALL. `kleod:SetupBG3WindowOverlay:agbcc` is a
+  // `noncompile` row for a reason that predates this lever: every one of its 1,072 candidates is
+  // `[dropped] agbcc failed: too many arguments to function 'm4aSoundVSyncOff'`, a declaration the
+  // row's own context gets wrong (re-checked 2026-09-12 with `bench fan`, which prints the 1,072
+  // drops and no ranking). It prices the lever's REACH and buys nothing else: the +48 candidates
+  // there are 48 more compiles of a translation unit that cannot compile.
   {
     sym: 'volwalk',
     src:
