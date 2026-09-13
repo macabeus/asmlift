@@ -15,6 +15,7 @@ import { print } from '../src/ir/print';
 import { T } from '../src/ir/types';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** Which passes the mock fails at every `/defsite` point. The primary pass is the one without the
  *  follow; the `/shared-ret` pass is the one with the follow on a fn the primary pass also saw. */
@@ -80,15 +81,31 @@ test.each([
   ['/shared-ret', THUMB_LEFT],
 ])('the %s twin skips every axis point its primary sibling dropped, and keeps the rest', (suffix, asm) => {
   const { errors, cands } = run(asm, { primary: true, sharedRet: false });
-  expect(errors.some((l) => l.includes('/defsite') && !l.includes('/shared-'))).toBe(true);
-  const twin = cands.filter((c) => c.label.includes(suffix));
+  const reported = (l: string) => l.split('/').slice(1);
+  expect(
+    errors.some(
+      (l) =>
+        hasVariation(reported(l), 'defsite') &&
+        !hasVariation(reported(l), 'shared-ret') &&
+        !hasVariation(reported(l), 'shared-tail'),
+    ),
+  ).toBe(true);
+  const twin = cands.filter((c) => hasVariation(c.label.split('/'), suffix.slice(1)));
   expect(twin.length).toBeGreaterThan(0);
-  expect(twin.filter((c) => c.label.includes('/defsite'))).toEqual([]);
+  expect(twin.filter((c) => hasVariation(c.label.split('/'), 'defsite'))).toEqual([]);
 });
 
 test('a point the `/shared-ret` twin drops still ships in the `/shared-tail` twin', () => {
   const { errors, cands } = run(THUMB_FLAT, { primary: false, sharedRet: true });
-  expect(errors.some((l) => l.includes('/shared-ret') && l.includes('/defsite'))).toBe(true);
-  expect(cands.filter((c) => c.label.includes('/shared-ret') && c.label.includes('/defsite'))).toEqual([]);
-  expect(cands.some((c) => c.label.includes('/shared-tail') && c.label.includes('/defsite'))).toBe(true);
+  expect(
+    errors.some(
+      (l) => hasVariation(l.split('/').slice(1), 'shared-ret') && hasVariation(l.split('/').slice(1), 'defsite'),
+    ),
+  ).toBe(true);
+  expect(
+    cands.filter((c) => hasVariation(c.label.split('/'), 'shared-ret') && hasVariation(c.label.split('/'), 'defsite')),
+  ).toEqual([]);
+  expect(
+    cands.some((c) => hasVariation(c.label.split('/'), 'shared-tail') && hasVariation(c.label.split('/'), 'defsite')),
+  ).toBe(true);
 });

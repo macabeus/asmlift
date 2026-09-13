@@ -16,6 +16,7 @@ import { T } from '../src/ir/types';
 import type { SFn } from '../src/l3/ast';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 vi.mock('../src/l3/initfirst', () => ({
   initFirstGuards: (): SFn => {
@@ -47,7 +48,7 @@ describe('one throwing shape does not take the others with it', () => {
   test('…and the report names the SHAPE SUBSET, not just the lever it was derived onto', () => {
     // the subset is the candidate's identity, so that is what a failure is reported under: the
     // `/initfirst` singleton and the all-shapes subset are two candidates and two reports.
-    expect(errors.every((e) => e.label.includes('/initfirst'))).toBe(true);
+    expect(errors.every((e) => hasVariation(e.label.split('/').slice(1), 'initfirst'))).toBe(true);
     const shapeSuffixes = new Set(errors.map((e) => e.label.slice(e.label.indexOf('/initfirst'))));
     expect([...shapeSuffixes].sort()).toEqual(['/initfirst', '/initfirst/pollguard/pollread']);
   });
@@ -57,11 +58,13 @@ describe('one throwing shape does not take the others with it', () => {
     // try per subset — the regression this pins is the shapes derived INSIDE `respell`, so the
     // assertion has to name a lever and a shape together.
     expect(
-      cands.filter((c) => c.label.includes('/regionbase') && c.label.includes('/pollguard')).length,
+      cands.filter(
+        (c) => hasVariation(c.label.split('/'), 'regionbase') && hasVariation(c.label.split('/'), 'pollguard'),
+      ).length,
     ).toBeGreaterThan(0);
   });
 
   test('…and the lever spellings the shapes derive FROM are untouched', () => {
-    expect(cands.filter((c) => c.label.includes('/regionbase')).length).toBeGreaterThan(0);
+    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'regionbase')).length).toBeGreaterThan(0);
   });
 });

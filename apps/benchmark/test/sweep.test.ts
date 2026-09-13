@@ -23,6 +23,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  FIELDS,
   SWEEP_FAN_LIMIT,
   type SweepRecord,
   compareSweeps,
@@ -34,7 +35,7 @@ import {
   sweepRefusal,
   unmeasuredCounts,
 } from '../src/run/sweep';
-import { armsFor, optsDigest, stable } from '../src/run/sweep-driver';
+import { armsFor, fanDigests, optsDigest, stable } from '../src/run/sweep-driver';
 
 const rec = (over: Partial<SweepRecord> & Pick<SweepRecord, 'id' | 'arm'>): SweepRecord => ({
   src: 'aaaaaaaaaaaa',
@@ -124,6 +125,62 @@ describe('the sweep comparison', () => {
     const h = [rec({ id: 'r:s:agbcc', arm: 'harness', fan: 32, fanHash: '222222222222' })];
     const d = compareSweeps(b, h);
     expect(d.moved[0].fields).toEqual([{ field: 'fanHash', from: '111111111111', to: '222222222222' }]);
+  });
+});
+
+describe('the three fan hashes', () => {
+  // A field outside `FIELDS` is written to `--json` and never compared, so a proof built on it passes
+  // whatever the two trees did. Each fan hash must be able to move a record on its own.
+  it.each(['fanHash', 'fanSourceHash', 'fanVariationsHash'] as const)(
+    'records differing only in %s yield exactly one move naming it',
+    (field) => {
+      expect(FIELDS).toContain(field);
+      const b = [rec({ id: 'r:s:agbcc', arm: 'harness', [field]: '111111111111' })];
+      const h = [rec({ id: 'r:s:agbcc', arm: 'harness', [field]: '222222222222' })];
+      const d = compareSweeps(b, h);
+      expect(d.moved).toHaveLength(1);
+      expect(d.moved[0].fields).toEqual([{ field, from: '111111111111', to: '222222222222' }]);
+    },
+  );
+
+  const fan = [
+    { label: 'unsigned', source: 'a;' },
+    { label: 'unsigned/defsite', source: 'b;' },
+    { label: 'signed', source: 'c;' },
+  ];
+
+  it('a renamed variation moves the name hash and the pair hash, never the source hash', () => {
+    const renamed = fan.map((c) => (c.label === 'unsigned/defsite' ? { ...c, label: 'unsigned/anchored' } : c));
+    const [was, now] = [fanDigests(fan), fanDigests(renamed)];
+    expect(now.fanSourceHash).toBe(was.fanSourceHash);
+    expect(now.fanVariationsHash).not.toBe(was.fanVariationsHash);
+    expect(now.fanHash).not.toBe(was.fanHash);
+    expect(now.fan).toBe(was.fan);
+  });
+
+  it('a changed source moves the source hash and the pair hash, never the name hash', () => {
+    const respelled = fan.map((c) => (c.label === 'signed' ? { ...c, source: 'd;' } : c));
+    const [was, now] = [fanDigests(fan), fanDigests(respelled)];
+    expect(now.fanSourceHash).not.toBe(was.fanSourceHash);
+    expect(now.fanVariationsHash).toBe(was.fanVariationsHash);
+    expect(now.fanHash).not.toBe(was.fanHash);
+  });
+
+  it('a reorder moves all three: score ties break by enumeration order', () => {
+    const reordered = [fan[1], fan[0], fan[2]];
+    const [was, now] = [fanDigests(fan), fanDigests(reordered)];
+    expect(now.fanSourceHash).not.toBe(was.fanSourceHash);
+    expect(now.fanVariationsHash).not.toBe(was.fanVariationsHash);
+    expect(now.fanHash).not.toBe(was.fanHash);
+  });
+
+  it('every fan record carries all three hashes, over an empty fan too', () => {
+    for (const d of [fanDigests(fan), fanDigests([])]) {
+      expect(Object.keys(d).sort()).toEqual(['fan', 'fanHash', 'fanSourceHash', 'fanVariationsHash']);
+      for (const h of [d.fanHash, d.fanSourceHash, d.fanVariationsHash]) {
+        expect(h).toMatch(/^[0-9a-f]{12}$/);
+      }
+    }
   });
 });
 

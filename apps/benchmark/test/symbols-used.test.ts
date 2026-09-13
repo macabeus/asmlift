@@ -10,6 +10,7 @@ import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import { describe, expect, test, vi } from 'vitest';
 
 import { runAsmlift, symbolShape, symbolsUsedFrom } from '../src/eval/asmlift';
@@ -60,13 +61,13 @@ const MAP: SymbolMap = new Map([[0x03001234, [COUNTER]]]);
 
 describe('symbolsUsed / candidateLabel capture (pinned)', () => {
   test('a symbol-fed row records the winning refs with pre-formatted shapes, plus the label', () => {
-    rankPicking((l) => !l.includes('/raw-globals'));
+    rankPicking((l) => !hasVariation(l.split('/'), 'raw-globals'));
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('nonmatch');
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([{ name: 'gCounter', shape: 'scalar u16' }]);
     expect(r.candidateLabel).toBeDefined();
-    expect(r.candidateLabel).not.toContain('/raw-globals');
+    expect(hasVariation(r.candidateLabel!.split('/'), 'raw-globals')).toBe(false);
   });
 
   test('a CALL target is never recorded, even alongside a recorded data ref', () => {
@@ -76,7 +77,7 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
       [0x03001234, [COUNTER]],
       [0x08001000, [{ name: 'DoThing', kind: 'code' }]],
     ]);
-    rankPicking((l) => !l.includes('/raw-globals'));
+    rankPicking((l) => !hasVariation(l.split('/'), 'raw-globals'));
     const r = runAsmlift(TC, 'f', body, '/nonexistent.o', undefined, noCompile, map);
     const names = (r.symbolsUsed ?? []).map((s) => s.name);
     expect(names).toContain('gCounter');
@@ -84,11 +85,11 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
   });
 
   test('a raw-globals winner on a map row ⇒ symbolMap true, symbolsUsed HONESTLY empty', () => {
-    rankPicking((l) => l.includes('/raw-globals'));
+    rankPicking((l) => hasVariation(l.split('/'), 'raw-globals'));
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([]);
-    expect(r.candidateLabel).toContain('/raw-globals'); // the label says which spelling won
+    expect(hasVariation(r.candidateLabel!.split('/'), 'raw-globals')).toBe(true); // the label says which spelling won
   });
 
   test('no map ⇒ no symbolsUsed field at all; the label still records the winner', () => {

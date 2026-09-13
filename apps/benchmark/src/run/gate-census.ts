@@ -52,7 +52,7 @@ import {
 } from '@asmlift/core/l3/unmerge';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
-import { PRE_FAN_PRODUCTS } from '@asmlift/core/rank-axes';
+import { PRE_FAN_PRODUCTS, UNMERGE_SUFFIX } from '@asmlift/core/rank-axes';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { realCases } from '../cases/real';
@@ -86,9 +86,9 @@ export const PASSES: Record<string, CensusablePass> = {
       // BY SUFFIX, never by index. `PRE_FAN_PRODUCTS` holds one entry today, and a census taken
       // through the wrong one enumerates normally and reports an EMPTY table — the silent-zero
       // failure this file's header names, arriving by a second route.
-      const product = PRE_FAN_PRODUCTS.find((p) => p.suffix === '/unmerge');
+      const product = PRE_FAN_PRODUCTS.find((p) => p.suffix === UNMERGE_SUFFIX);
       if (!product) {
-        throw new Error("no PRE_FAN_PRODUCTS entry '/unmerge' — the pass's caller-side seam moved");
+        throw new Error(`no PRE_FAN_PRODUCTS entry '${UNMERGE_SUFFIX}' — the pass's caller-side seam moved`);
       }
       const restore = product.apply;
       const gates: UnmergeGates = {

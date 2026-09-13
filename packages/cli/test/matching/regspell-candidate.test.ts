@@ -26,6 +26,7 @@
 // register pressure has no synthetic reproduction here. The benchmark is what covers the win.
 import { enumerateCandidates, rankBy } from '@asmlift/core/rank';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { expect, test } from 'vitest';
 
@@ -41,9 +42,9 @@ test('the register-copy candidates are enumerated and ranked through the ranked 
   // by list POSITION and the fresh spelling lands at index 1 and wears the reuse name — and this
   // file is the only place the label is pinned at all, so it would pin the mislabel. Asserting the
   // ABSENCE of the reuse name is the load-bearing half: without it, positional labelling passes.
-  expect(cands.some((x) => x.label.endsWith('/regcopy'))).toBe(true);
-  expect(cands.some((x) => x.label.endsWith('/regcopy-ret-fresh'))).toBe(true);
-  expect(cands.filter((x) => x.label.endsWith('/regcopy-ret'))).toEqual([]);
+  expect(cands.some((x) => hasVariation(x.label.split('/'), 'regcopy', null))).toBe(true);
+  expect(cands.some((x) => hasVariation(x.label.split('/'), 'regcopy', 'ret-fresh'))).toBe(true);
+  expect(cands.filter((x) => hasVariation(x.label.split('/'), 'regcopy', 'ret'))).toEqual([]);
   // every regcopy candidate is emittable C, not a shape that throws downstream of the seam
   const r = rankBy(cands, 'recip', (src) => scoreC(src, 'recip', obj));
   expect(r.best.score.match).toBe(true);

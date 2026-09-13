@@ -92,6 +92,12 @@ export interface SweepRecord {
    *  sorted: the order is what the ranker consumes, so a reorder with the same set is a real
    *  change to what gets scored first, and `--repeat` exists to tell a reorder from a flake. */
   fanHash?: string;
+  /** `--fan` only: sha1/12 over the candidates' sources alone, in enumeration order — see
+   *  `fanDigests` in sweep-driver.ts for what each of the three fan hashes can see. */
+  fanSourceHash?: string;
+  /** `--fan` only: sha1/12 over the candidates' variations alone, each as its `/`-joined string,
+   *  in enumeration order. */
+  fanVariationsHash?: string;
   /** `--fan` only: the first line of what enumeration threw. Not an error — `enumerateRanked` has
    *  no annotate mode, so every row that publishes `declined` throws here (234 of the 1,062 rows
    *  the artifact carries at bd7ad596), and the census must count them rather than stop at the
@@ -103,8 +109,10 @@ export interface SweepRecord {
 }
 
 /** The fields the diff compares, in the order it prints them. The INPUT fields come first, because
- *  a line that opens `asm … -> …` is a different finding from one that opens `src … -> …`. */
-const FIELDS = [
+ *  a line that opens `asm … -> …` is a different finding from one that opens `src … -> …`. A record
+ *  field missing from this list is written to `--json` and never compared, so a sweep that gains a
+ *  field gains it here too. */
+export const FIELDS = [
   'asm',
   'opts',
   'src',
@@ -114,6 +122,8 @@ const FIELDS = [
   'threw',
   'fan',
   'fanHash',
+  'fanSourceHash',
+  'fanVariationsHash',
   'fanThrew',
   'skipped',
 ] as const;

@@ -10,6 +10,7 @@ import { decompile } from '@asmlift/core/pipeline';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
 import { ARMV4T_AGBCC, PPC_MWCC } from '@asmlift/core/target';
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import {
   assembleTarget,
   compileMipsGcc272Target,
@@ -82,14 +83,14 @@ describe('the emitted orientation decides the match, and only one orientation is
       `int f(int a, int b, int *p, int *q){ if (a && b) { ${ARM} return 2; } return 3; }`,
     );
     const dv = decompileRanked('f', divergent, ARMV4T_AGBCC, assembleTarget(divergent));
-    expect(dv.candidates.some((c) => c.label.includes('flip-branch'))).toBe(true);
+    expect(dv.candidates.some((c) => hasVariation(c.label.split('/'), 'flip-branch'))).toBe(true);
     expect(dv.best.score.match).toBe(true);
     // the reconverging sibling, which differs only in that its arms rejoin, is /flip-join's:
     // its flipped spelling is a distinct candidate where the divergent axis never fires
     const reconverging = compileTargetAsm(src('&&'));
     const rc = decompileRanked('f', reconverging, ARMV4T_AGBCC, assembleTarget(reconverging));
-    expect(rc.candidates.some((c) => c.label.includes('flip-branch'))).toBe(false);
-    expect(rc.candidates.some((c) => c.label.includes('flip-join'))).toBe(true);
+    expect(rc.candidates.some((c) => hasVariation(c.label.split('/'), 'flip-branch'))).toBe(false);
+    expect(rc.candidates.some((c) => hasVariation(c.label.split('/'), 'flip-join'))).toBe(true);
   });
 });
 

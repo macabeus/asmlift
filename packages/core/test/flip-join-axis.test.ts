@@ -7,6 +7,7 @@ import { describe, expect, test } from 'vitest';
 
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 const P = { f: { returnsVoid: true } };
 const wrap = (body: string) => `f:\n\tpush\t{lr}\n${body}\tpop\t{r1}\n\tbx\tlr\n`;
@@ -21,11 +22,11 @@ const PLAIN =
 describe('/flip-join is enumerated wherever a two-armed joined if exists', () => {
   test('an ordinary joined if emits BOTH senses, and the flipped one is a source of its own', () => {
     const all = cands(PLAIN);
-    expect(all.some((c) => c.label.includes('/flip-join'))).toBe(true);
+    expect(all.some((c) => hasVariation(c.label.split('/'), 'flip-join'))).toBe(true);
     // Not a duplicate the dedup would have collapsed: dropping the axis drops a distinct spelling,
     // which is what makes the sense a question for the differ and not for a predicate.
     const sources = (cs: typeof all) => new Set(cs.map((c) => c.source)).size;
-    expect(sources(all)).toBeGreaterThan(sources(all.filter((c) => !c.label.includes('/flip-join'))));
+    expect(sources(all)).toBeGreaterThan(sources(all.filter((c) => !hasVariation(c.label.split('/'), 'flip-join'))));
   });
 
   test('…and a function with no joined if pays nothing for it', () => {
@@ -33,6 +34,6 @@ describe('/flip-join is enumerated wherever a two-armed joined if exists', () =>
     // dedup collapses the pair before any compile.
     const DIVERGENT = '\tcmp\tr0, #0\n\tbeq\t.L2\n\tmov\tr0, #1\n\tpop\t{r1}\n\tbx\tr1\n.L2:\n\tmov\tr0, #2\n';
     const all = enumerateCandidates('f', `f:\n\tpush\t{lr}\n${DIVERGENT}\tpop\t{r1}\n\tbx\tr1\n`, ARMV4T_AGBCC, {});
-    expect(all.some((c) => c.label.includes('/flip-join'))).toBe(false);
+    expect(all.some((c) => hasVariation(c.label.split('/'), 'flip-join'))).toBe(false);
   });
 });

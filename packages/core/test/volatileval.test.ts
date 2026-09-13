@@ -21,6 +21,7 @@ import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
   name: 'f',
@@ -186,7 +187,7 @@ test('the primary keeps the plain declaration — the slot is a fact, the qualif
 
 test('/vol-slot is enumerated for the spill, and declares the slot volatile', () => {
   const cands = enumerateCandidates('f', SPILL, ARMV4T_AGBCC);
-  const vol = cands.find((c) => c.label.endsWith('/vol-slot'));
+  const vol = cands.find((c) => hasVariation(c.label.split('/').slice(-1), 'vol-slot'));
   expect(vol).toBeDefined();
   expect(vol!.source).toContain('volatile u16 sp4;');
   // …and only the qualifier moved: the body is the primary's, verbatim
@@ -196,7 +197,9 @@ test('/vol-slot is enumerated for the spill, and declares the slot volatile', ()
 
 test('a function with no frame object enumerates no /vol-slot candidate', () => {
   const NOSLOT = `f:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n`;
-  expect(enumerateCandidates('f', NOSLOT, ARMV4T_AGBCC).some((c) => c.label.includes('/vol-slot'))).toBe(false);
+  expect(enumerateCandidates('f', NOSLOT, ARMV4T_AGBCC).some((c) => hasVariation(c.label.split('/'), 'vol-slot'))).toBe(
+    false,
+  );
 });
 
 // agbcc's own output for `s32 dv(u32 a0) { volatile u16 sp0; sp0 = 5; sp0 = a0 + 1; g(a0);
@@ -221,9 +224,11 @@ test('a slot whose dead store the readability pass dropped enumerates no /vol-sl
   const opts = { prototypes: { g: { params: 1 } } };
   // the slot IS recovered, so the decline is the access-set rule and not a missing frame object
   expect(decompile('dv', DROPPED_STORE, ARMV4T_AGBCC, opts).source).toContain('u16 sp0;');
-  expect(enumerateCandidates('dv', DROPPED_STORE, ARMV4T_AGBCC, opts).some((c) => c.label.includes('/vol-slot'))).toBe(
-    false,
-  );
+  expect(
+    enumerateCandidates('dv', DROPPED_STORE, ARMV4T_AGBCC, opts).some((c) =>
+      hasVariation(c.label.split('/'), 'vol-slot'),
+    ),
+  ).toBe(false);
 });
 
 // One `ldrh` feeding two uses: the structurer emits one C read per USE, so the tree reads the
@@ -248,7 +253,9 @@ const COLLAPSED_LOAD = `f:
 test('a slot read twice from one machine load enumerates no /vol-slot candidate', () => {
   const opts = { prototypes: { g: { params: 1 }, h: { params: 2 } } };
   expect(decompile('f', COLLAPSED_LOAD, ARMV4T_AGBCC, opts).source).toContain('h(sp4, sp4)');
-  expect(enumerateCandidates('f', COLLAPSED_LOAD, ARMV4T_AGBCC, opts).some((c) => c.label.includes('/vol-slot'))).toBe(
-    false,
-  );
+  expect(
+    enumerateCandidates('f', COLLAPSED_LOAD, ARMV4T_AGBCC, opts).some((c) =>
+      hasVariation(c.label.split('/'), 'vol-slot'),
+    ),
+  ).toBe(false);
 });

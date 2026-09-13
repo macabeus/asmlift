@@ -27,6 +27,7 @@ import { enumerateCandidates } from '../src/rank';
 import { edgeCopyOrdersDiffer } from '../src/structure/structure';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 const GCD = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
 // No CFG edge carries two copies at all, so the two orders cannot differ.
@@ -61,7 +62,7 @@ test('the axis offers the def-position spelling beside the record-ordered one', 
 
 test('…and it is a real product: every spelling gets the sibling, never just the base', () => {
   const labels = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {}).map((c) => c.label);
-  const withAxis = labels.filter((l) => l.endsWith('/copy-defpos'));
+  const withAxis = labels.filter((l) => hasVariation(l.split('/').slice(-1), 'copy-defpos'));
   expect(withAxis.length).toBeGreaterThan(0);
   for (const l of withAxis) {
     expect(labels).toContain(l.slice(0, -'/copy-defpos'.length));
@@ -71,7 +72,9 @@ test('…and it is a real product: every spelling gets the sibling, never just t
 test('the gate withholds the sibling where the two orders cannot differ', () => {
   const fn = frontendFor(ARMV4T_AGBCC).lift('half', HALF, ARMV4T_AGBCC, {}, undefined, undefined);
   expect(edgeCopyOrdersDiffer(fn)).toBe(false);
-  expect(enumerateCandidates('half', HALF, ARMV4T_AGBCC, {}).some((c) => c.label.includes('copy-defpos'))).toBe(false);
+  expect(
+    enumerateCandidates('half', HALF, ARMV4T_AGBCC, {}).some((c) => hasVariation(c.label.split('/'), 'copy-defpos')),
+  ).toBe(false);
 });
 
 test('an UNMEASURED fn has no question to ask: parsed IR never admits the axis', () => {

@@ -22,6 +22,7 @@ import { type SymbolInfo, type SymbolMap } from '../src/symbols';
 import { symbolsByName } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
 import { structureOptionsFor } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 // A function reaching as much of the vocabulary as one fixture can: a loop, a divergent if, a
 // call, a global read through a map-declared struct, a frame object and a switch.
@@ -154,5 +155,5 @@ test('the skip removes no candidate: the mapped ARM function enumerates the same
   expect(cands.length).toBeGreaterThan(1);
   expect(new Set(cands.map((c) => c.source)).size).toBe(cands.length); // still fully deduped
   expect(cands.some((c) => c.source.includes('dreamStones'))).toBe(true);
-  expect(cands.some((c) => c.label.includes('/raw-globals'))).toBe(true);
+  expect(cands.some((c) => hasVariation(c.label.split('/'), 'raw-globals'))).toBe(true);
 });

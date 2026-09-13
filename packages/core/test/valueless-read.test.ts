@@ -32,6 +32,7 @@ import { decompile } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** `.word` pool holding one address, referenced as `_pool`. */
 const pool = (hex: string) => `_pool: .4byte ${hex}\n`;
@@ -267,7 +268,9 @@ test('the `/volatile` candidate carries the read through a qualified pointer loc
     '\tbx\tlr\n' +
     pool('0x040000D4');
   const cands = enumerateCandidates('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } });
-  const vol = cands.filter((c) => c.label.includes('volatile') && !c.label.includes('vol-store'));
+  const vol = cands.filter(
+    (c) => hasVariation(c.label.split('/'), 'volatile') && !hasVariation(c.label.split('/'), 'vol-store'),
+  );
   expect(vol.length).toBeGreaterThan(0);
   for (const c of vol) {
     expect(c.source).toMatch(/volatile s32 \* p0;/);

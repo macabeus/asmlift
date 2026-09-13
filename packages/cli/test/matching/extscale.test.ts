@@ -15,6 +15,7 @@
 // Toolchain-gated like the other agbcc tests (compileTargetAsm/scoreC use real agbcc).
 import { decompile } from '@asmlift/core/pipeline';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileCandAgbcc, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -153,6 +154,6 @@ describe('the fused scale orders an array subscript — real agbcc, byte-exact',
       compile: (source) => compileCandAgbcc(decls + source),
     });
     expect(r.best.score.match).toBe(true);
-    expect(r.best.label).toContain('/orderbase');
+    expect(hasVariation(r.best.label.split('/'), 'orderbase')).toBe(true);
   });
 });

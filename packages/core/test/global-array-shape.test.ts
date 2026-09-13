@@ -34,6 +34,7 @@ import {
 import { enumerateCandidates } from '../src/rank';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 /** A Thumb leaf function, in the exact shape agbcc emits one: body, then an aligned pool. */
 const thumb = (name: string, body: string, pool: string): string =>
@@ -1038,8 +1039,8 @@ describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does',
   test('both arms are enumerated, and they are genuinely different spellings', () => {
     const cands = enumerateCandidates('f', RANK2, ARMV4T_AGBCC);
     expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/flat-rank', 'signed', 'signed/flat-rank']);
-    const on = cands.filter((c) => !c.label.includes('flat-rank'));
-    const off = cands.filter((c) => c.label.includes('flat-rank'));
+    const on = cands.filter((c) => !hasVariation(c.label.split('/'), 'flat-rank'));
+    const off = cands.filter((c) => hasVariation(c.label.split('/'), 'flat-rank'));
     expect(on.every((c) => c.source.includes('gPtrTbl[a0][a1]'))).toBe(true);
     expect(off.every((c) => c.source.includes('(u32)&gPtrTbl'))).toBe(true);
     expect(off.every((c) => !c.source.includes('gPtrTbl[a0]'))).toBe(true);

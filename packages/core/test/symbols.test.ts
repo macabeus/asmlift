@@ -20,6 +20,7 @@ import {
   symbolsByName,
 } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 const asmOf = (sym: string, body: string) => `${sym}:\n${body}`;
 const run = (sym: string, body: string, symbols?: SymbolMap) =>
@@ -210,14 +211,16 @@ describe('declaration shapes (P2)', () => {
   // recovery is enumerated as `/flat-rank`'s ON arm with the differ refereeing.
   test('the displaced flat spelling is enumerated as the `/flat-rank` arm', () => {
     const cands = enumerateCandidates('f', asmOf('f', ROW_AND_ELEM), ARMV4T_AGBCC, { symbols: rows([4, 1024]) });
-    const flat = cands.filter((c) => c.label.includes('/flat-rank'));
+    const flat = cands.filter((c) => hasVariation(c.label.split('/'), 'flat-rank'));
     expect(flat.length).toBeGreaterThan(0);
     for (const c of flat) {
       expect(c.source).toContain('*(u16 *)((a0 << 11) + (a1 << 1) + (u32)&gRows)');
       expect(c.source).not.toContain('gRows[a0][a1]');
     }
     // …and the recovered spelling is still the one the unsuffixed candidates carry
-    const plain = cands.filter((c) => !c.label.includes('/flat-rank') && !c.label.includes('/raw-globals'));
+    const plain = cands.filter(
+      (c) => !hasVariation(c.label.split('/'), 'flat-rank') && !hasVariation(c.label.split('/'), 'raw-globals'),
+    );
     expect(plain.length).toBeGreaterThan(0);
     for (const c of plain) {
       expect(c.source).toContain('gRows[a0][a1]');
@@ -233,7 +236,7 @@ describe('declaration shapes (P2)', () => {
       '\tlsl\tr0, r0, #0xa\n\tadd\tr0, r0, r1\n\tlsl\tr0, r0, #0x1\n' +
       '\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03000900\n';
     const cands = enumerateCandidates('f', asmOf('f', flat), ARMV4T_AGBCC, { symbols: rows([4, 1024]) });
-    expect(cands.filter((c) => c.label.includes('/flat-rank'))).toHaveLength(0);
+    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'flat-rank'))).toHaveLength(0);
   });
 
   test('the recovery is INERT without the rank — a rank-1 declaration keeps the flat spelling', () => {
@@ -1039,7 +1042,9 @@ describe('ranking prefers the named spelling when bytes are equal', () => {
     const body = '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
     const symbols = mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]);
     const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols });
-    const best = rankBy(cands, 'f', (_s, _sym, c) => ({ score: c.label.includes('raw') ? 1 : 2 })).best;
+    const best = rankBy(cands, 'f', (_s, _sym, c) => ({
+      score: hasVariation(c.label.split('/'), 'raw-globals') ? 1 : 2,
+    })).best;
     expect(best.label).toBe('unsigned/raw-globals');
   });
 });

@@ -13,6 +13,7 @@ import type { SFn } from '@asmlift/core/l3/ast';
 import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import { MIPS_IDO } from '@asmlift/core/target';
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import { compileMipsTarget, scorePascalMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -96,7 +97,7 @@ test('a comparison enumerates for Pascal: the unspellable candidates drop, the r
   expect(candidates.length).toBeGreaterThan(0);
   // the pin fires only where a param is declared unsigned, so the surviving spellings are signed —
   // and `Integer` is what makes the emitted `<` the signed compare the `slt` names
-  expect(candidates.every((k) => !k.label.startsWith('unsigned'))).toBe(true);
+  expect(candidates.every((k) => !hasVariation(k.label.split('/'), 'unsigned'))).toBe(true);
   expect(candidates.every((k) => k.source.includes('a0: Integer'))).toBe(true);
 });
 

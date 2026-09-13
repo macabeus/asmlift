@@ -21,6 +21,7 @@ import { OFFMEMBER_GATES, offmemberBases, spellOperandMembers } from '../src/l3/
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 const lifted = (ir: string): SFn => structureChecked(parse(ir), {});
 
@@ -292,5 +293,5 @@ test('rank offers /offmember on a fold-declaring target', () => {
     '.L2:\n\t.align\t2, 0\n' +
     '.L1:\n\t.word\t0x3003468\n';
   const labels = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.label);
-  expect(labels.some((l) => l.includes('/offmember'))).toBe(true);
+  expect(labels.some((l) => hasVariation(l.split('/'), 'offmember'))).toBe(true);
 });

@@ -11,6 +11,7 @@ import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 import { c } from './helpers';
 
 const U8P = T.ptr(T.int(8, false));
@@ -353,7 +354,14 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
   });
 
   test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {
-    expect(labels.filter((l) => l.includes('sinkinit') && !l.includes('livebase'))).toEqual([]);
+    expect(
+      labels.filter(
+        (l) =>
+          hasVariation(l.split('/'), 'sinkinit') &&
+          !hasVariation(l.split('/'), 'livebase') &&
+          !hasVariation(l.split('/'), 'livebase-block'),
+      ),
+    ).toEqual([]);
   });
 });
 

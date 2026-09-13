@@ -11,6 +11,7 @@
 // WHAT THIS CANNOT DO, the same limit citations.test.ts states for itself: results.json holds
 // each row's winner, not what the row would win with an axis ablated. A green assertion here says
 // the property still holds, never that the mechanism behind it is still load-bearing.
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -26,7 +27,7 @@ const winners = rows.flatMap((r) =>
   r.asmlift?.candidateLabel !== undefined ? [{ id: r.id, label: r.asmlift.candidateLabel }] : [],
 );
 
-const carrying = (token: string) => winners.filter((w) => w.label.includes(token));
+const carrying = (name: string) => winners.filter((w) => hasVariation(w.label.split('/'), name));
 
 describe('the winner-label properties rank.ts argues from', () => {
   it('nothing at all published a label, or the artifact is not the one these assertions are about', () => {
@@ -41,7 +42,9 @@ describe('the winner-label properties rank.ts argues from', () => {
     // delete the same four candidates, and a per-row label/source diff catches two of them. It
     // cannot catch the PER-FUNCTION one, and this is why — that reading needs both tokens in one
     // label to be observable, and no published winner carries both.
-    const both = winners.filter((w) => w.label.includes('/orderbase') && w.label.includes('/setup-args'));
+    const both = winners.filter(
+      (w) => hasVariation(w.label.split('/'), 'orderbase') && hasVariation(w.label.split('/'), 'setup-args'),
+    );
     expect(both.map((w) => `${w.id}  ${w.label}`)).toEqual([]);
   });
 
@@ -50,8 +53,8 @@ describe('the winner-label properties rank.ts argues from', () => {
     // levers ever wins one of the artifact's rows alone". The standalone `respell`s are kept so a
     // lever can LOSE on its own terms, which is only observable while the single-lever spelling is
     // in the fan — but a winner would mean the note's premise had changed.
-    const unpaired = [...carrying('/unreduce'), ...carrying('/ptr-field')].filter(
-      (w) => !w.label.includes('/vol-store'),
+    const unpaired = [...carrying('unreduce'), ...carrying('ptr-field')].filter(
+      (w) => !hasVariation(w.label.split('/'), 'vol-store'),
     );
     expect(unpaired.map((w) => `${w.id}  ${w.label}`)).toEqual([]);
   });
@@ -62,6 +65,6 @@ describe('the winner-label properties rank.ts argues from', () => {
     // zero over the REAL tier is 0 of ONE reaching row, so the axis's two-sidedness has to be read
     // off the synthetic row that inhabits it. A second winner would not be a failure of the axis,
     // but it would make that paragraph's framing wrong.
-    expect(carrying('/no-ptr-elem').map((w) => w.id)).toEqual(['synthetic:ptrelem:agbcc']);
+    expect(carrying('no-ptr-elem').map((w) => w.id)).toEqual(['synthetic:ptrelem:agbcc']);
   });
 });

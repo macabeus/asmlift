@@ -29,6 +29,7 @@ import {
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 
 const IWRAM = 0x03004000;
 const DEVICE = 0x040000d4;
@@ -326,14 +327,23 @@ describe('the pairing is OFFERED, and additively', () => {
   });
 
   test('`/livebase-block/homesplit` is in the fan', () => {
-    expect(cands.filter((c) => c.label.includes('/livebase-block/homesplit')).length).toBeGreaterThan(0);
+    expect(
+      cands.filter((c) => hasVariations(c.label.split('/'), ['livebase-block', 'homesplit'])).length,
+    ).toBeGreaterThan(0);
   });
 
   test('…and every spelling it composes from is STILL in the fan', () => {
     // Hard Rule 3: the pairing sits BESIDE its two halves and the un-hoisted primary, and the
     // differ settles the allocation. A pairing that replaced either half could cost `dmaflat`.
-    expect(cands.some((c) => /\/livebase-block(\/volatile)?$/.test(c.label))).toBe(true);
-    expect(cands.some((c) => c.label.includes('/regionbase'))).toBe(true);
+    const last = (c: { label: string }, n: number) => c.label.split('/').slice(-n);
+    expect(
+      cands.some(
+        (c) =>
+          hasVariations(last(c, 1), ['livebase-block']) ||
+          (hasVariations(last(c, 2), ['livebase-block', 'volatile']) && hasVariation(last(c, 1), 'volatile', null)),
+      ),
+    ).toBe(true);
+    expect(cands.some((c) => hasVariation(c.label.split('/'), 'regionbase'))).toBe(true);
   });
 
   test('BOTH withholds are enumerated — which key the source homed is not derivable', () => {
@@ -343,7 +353,7 @@ describe('the pairing is OFFERED, and additively', () => {
     const count = (src: string, addr: number): number =>
       new Set([...src.matchAll(new RegExp(`(\\w+) = \\((?:volatile )?s32 \\*\\)${addr};`, 'g'))].map((m) => m[1])).size;
     const shapes = cands
-      .filter((c) => c.label.includes('/livebase-block/homesplit'))
+      .filter((c) => hasVariations(c.label.split('/'), ['livebase-block', 'homesplit']))
       .map((c) => `${count(c.source, 0x03004000)}:${count(c.source, 0x040000d4)}`);
     expect(shapes).toContain('1:3');
     expect(shapes).toContain('3:1');

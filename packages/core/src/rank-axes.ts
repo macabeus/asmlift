@@ -360,6 +360,11 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
   { suffix: '/pollguard', apply: pollGuards },
   { suffix: '/pollread', apply: pollReads },
 ];
+
+/** `/unmerge`'s suffix, exported so a caller that has to find its entry in `PRE_FAN_PRODUCTS` reads
+ *  the constant the entry is built from instead of a second copy of the string. */
+export const UNMERGE_SUFFIX = '/unmerge';
+
 /** The PRE-FAN products (rank's FOURTH sanctioned product mechanism): a tree rewrite applied
  *  BEFORE the re-spelling fan, so the whole fan derives from its output instead of composing onto
  *  it. Same record type as SHAPE_PRODUCTS above, and deliberately so — the only difference is
@@ -424,7 +429,7 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
  *  OUTCOME gate over all tiers, so every one of them turns it red — but `benchmark.yml` is
  *  `workflow_dispatch`, manual, with no cron, so nothing runs that gate on a PR. The scores and the
  *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block. */
-export const PRE_FAN_PRODUCTS: typeof SHAPE_PRODUCTS = [{ suffix: '/unmerge', apply: unmergeJoins }];
+export const PRE_FAN_PRODUCTS: typeof SHAPE_PRODUCTS = [{ suffix: UNMERGE_SUFFIX, apply: unmergeJoins }];
 
 export const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
   ...SHAPE_PRODUCTS.map((x) => [x]),

@@ -17,6 +17,7 @@ import { describe, expect, test, vi } from 'vitest';
 import type { SFn } from '../src/l3/ast';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 
 vi.mock('../src/l3/sinkinit', () => ({
   // every top-level assignment to the END of the body — the minted base locals included, so their
@@ -38,11 +39,17 @@ describe('a def-moving pass composed onto a placing lever is judged', () => {
   test('the composition is DROPPED, not scored', () => {
     // `/livebase/sinkinit` and `/nearbase/sinkinit` both fire on this disassembly, and both mint
     // the locals the mover then strands.
-    expect(cands.filter((c) => /(livebase|nearbase)\/(volatile\/)?(nearbase\/)?sinkinit/.test(c.label))).toEqual([]);
+    const composed = [
+      ['livebase', 'sinkinit'],
+      ['livebase', 'volatile', 'sinkinit'],
+      ['nearbase', 'sinkinit'],
+      ['nearbase', 'volatile', 'sinkinit'],
+    ];
+    expect(cands.filter((c) => composed.some((run) => hasVariations(c.label.split('/'), run)))).toEqual([]);
   });
 
   test('…and it is REPORTED, with the composed label naming it', () => {
-    const named = errors.filter((e) => e.label.includes('sinkinit'));
+    const named = errors.filter((e) => hasVariation(e.label.split('/').slice(1), 'sinkinit'));
     expect(named.length).toBeGreaterThan(0);
     expect(named.every((e) => /assignment does not reach/.test(e.error))).toBe(true);
   });
@@ -50,6 +57,12 @@ describe('a def-moving pass composed onto a placing lever is judged', () => {
   test('…while `/sinkinit` on the BASE tree is untouched — it mints nothing to strand', () => {
     // the differential judges MINTED locals only, so a mover applied to the primary tree is not
     // this check's business and stays in the fan.
-    expect(cands.some((c) => c.label.endsWith('/sinkinit') && !/livebase|nearbase/.test(c.label))).toBe(true);
+    expect(
+      cands.some(
+        (c) =>
+          hasVariation(c.label.split('/').slice(-1), 'sinkinit') &&
+          !['livebase', 'livebase-block', 'nearbase'].some((n) => hasVariation(c.label.split('/'), n)),
+      ),
+    ).toBe(true);
   });
 });

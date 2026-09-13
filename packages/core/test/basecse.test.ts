@@ -25,6 +25,7 @@ import { decompile, structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 import { c } from './helpers';
 
 // `fromOperand` marks the access whose offset reached the MEMORY OPERAND — the DISPLACEMENT the
@@ -889,7 +890,7 @@ describe('the block admission is WIRED into enumeration', () => {
   test('one base and no cell beside it ⇒ it DECLINES rather than repeat /livebase', () => {
     const labels = candsFor('onepoll').map((x) => x.label);
     expect(labels).toContain('signed/livebase/volatile');
-    expect(labels.filter((l) => l.includes('livebase-block'))).toEqual([]);
+    expect(labels.filter((l) => hasVariation(l.split('/'), 'livebase-block'))).toEqual([]);
   });
 
   test('/basefold reaches the roster where the target declares the fold, and only there', () => {
@@ -899,7 +900,7 @@ describe('the block admission is WIRED into enumeration', () => {
     expect(labels).toContain('unsigned/basefold');
     // its first use IS its first statement, so the sunk row re-emits the head row's source and the
     // dedup collapses it — the second placement costs nothing where it cannot move anything
-    expect(labels.filter((l) => l.includes('basefold/sinkinit'))).toEqual([]);
+    expect(labels.filter((l) => hasVariations(l.split('/'), ['basefold', 'sinkinit']))).toEqual([]);
     // the fold is a per-compiler declaration, so a target without it never offers the row
     const noFold = {
       ...ARMV4T_AGBCC,
@@ -908,7 +909,7 @@ describe('the block admission is WIRED into enumeration', () => {
     expect(
       candsFor('basecell', noFold)
         .map((x) => x.label)
-        .filter((l) => l.includes('basefold')),
+        .filter((l) => hasVariation(l.split('/'), 'basefold')),
     ).toEqual([]);
   });
 
@@ -931,8 +932,8 @@ describe('the block admission is WIRED into enumeration', () => {
     // function and never fires at all ('the admission rides at BOTH placements where they differ',
     // the only test that fails when the clause goes).
     const labels = candsFor('mixpoll').map((x) => x.label);
-    expect(labels.filter((l) => l.endsWith('/livebase'))).not.toEqual([]);
-    expect(labels.filter((l) => l.endsWith('/livebase-block'))).not.toEqual([]);
+    expect(labels.filter((l) => hasVariation(l.split('/').slice(-1), 'livebase'))).not.toEqual([]);
+    expect(labels.filter((l) => hasVariation(l.split('/').slice(-1), 'livebase-block'))).not.toEqual([]);
   });
 
   test('the SYMBOL half reaches the roster end to end, from real agbcc output', () => {
@@ -961,7 +962,7 @@ describe('the block admission is WIRED into enumeration', () => {
   test('/basefold declines where its exemption binds nothing', () => {
     // mixpoll's bases are all reached 2+ times, so the exemption is vacuous there — and every key
     // it could have bound the DEFAULT hoist already took, before `fanOut` saw the tree.
-    expect(cands.map((x) => x.label).filter((l) => l.includes('basefold'))).toEqual([]);
+    expect(cands.map((x) => x.label).filter((l) => hasVariation(l.split('/'), 'basefold'))).toEqual([]);
   });
 
   test('/basefold joins no PAIRING: no row demands the joint spelling', () => {
@@ -973,14 +974,18 @@ describe('the block admission is WIRED into enumeration', () => {
     // anything.
     const basefold = candsFor('foldsink')
       .map((x) => x.label)
-      .filter((l) => l.includes('basefold'));
+      .filter((l) => hasVariation(l.split('/'), 'basefold'));
     expect(basefold).toContain('unsigned/basefold');
     expect(basefold).toContain('unsigned/basefold/sinkinit');
     // the roster's own two suffixes and nothing else — no product crossed with them
-    for (const suffix of ['/indexed', '/nearbase', '/coalesce']) {
-      expect(basefold.filter((l) => l.includes(suffix))).toEqual([]);
+    for (const name of ['indexed', 'nearbase', 'coalesce']) {
+      expect(basefold.filter((l) => hasVariation(l.split('/'), name))).toEqual([]);
     }
-    expect(basefold.filter((l) => l.includes('/sinkinit') && !l.includes('/basefold/sinkinit'))).toEqual([]);
+    expect(
+      basefold.filter(
+        (l) => hasVariation(l.split('/'), 'sinkinit') && !hasVariations(l.split('/'), ['basefold', 'sinkinit']),
+      ),
+    ).toEqual([]);
   });
 
   test('every /livebase PRODUCT fans over the roster, and one of them is reachable no other way', () => {
@@ -990,7 +995,13 @@ describe('the block admission is WIRED into enumeration', () => {
     // pairing exists on `-block` alone.
     const labels = candsFor('sizebound').map((x) => x.label);
     expect(labels).toContain('signed/livebase-block/volatile/nearbase');
-    expect(labels.filter((l) => l.startsWith('signed/livebase/') && l.includes('nearbase'))).toEqual([]);
+    expect(
+      labels.filter(
+        (l) =>
+          hasVariations(l.split('/').slice(0, 2), ['signed', 'livebase']) &&
+          hasVariation(l.split('/').slice(2), 'nearbase'),
+      ),
+    ).toEqual([]);
   });
 
   test('/nearbase rides at BOTH orderings, so nothing commits its placement uncontested', () => {
@@ -1131,7 +1142,11 @@ ${body}
     const labels = enumerateCandidates('f', ORDERED, ARMV4T_AGBCC).map((c) => c.label);
     expect(labels).toContain('unsigned/orderbase');
     // …and it is not offered where the order says otherwise
-    expect(enumerateCandidates('f', NOT_ORDERED, ARMV4T_AGBCC).map((c) => c.label)).not.toContain('unsigned/orderbase');
+    expect(
+      enumerateCandidates('f', NOT_ORDERED, ARMV4T_AGBCC).some(
+        (c) => c.label.split('/').length === 2 && hasVariations(c.label.split('/'), ['unsigned', 'orderbase']),
+      ),
+    ).toBe(false);
   });
 
   test('a key whose accesses DISAGREE on the stamp is refused whole, never half-homed', () => {

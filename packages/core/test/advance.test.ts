@@ -35,6 +35,7 @@ import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 import { count, traceOf, tracesDiffer } from './helpers';
 
 // Two halfword stores 2 bytes apart through ONE address register — the `REG_WININ` pair, reduced.
@@ -500,7 +501,7 @@ const swrCandidates = (target: typeof ARMV4T_AGBCC): { label: string; source: st
   });
 
 test('the row enumerates the advanced spelling, qualified', () => {
-  const qualified = swrCandidates(ARMV4T_AGBCC).find((c) => c.label.endsWith('/advance/volatile'));
+  const qualified = swrCandidates(ARMV4T_AGBCC).find((c) => hasVariations(c.label.split('/'), ['advance', 'volatile']));
   expect(qualified).toBeDefined();
   // The byte-exact spelling, compiled against the row's own target object.
   expect(qualified!.source).toMatch(/volatile u16 \* p0;/);
@@ -517,7 +518,10 @@ test('the row enumerates the advanced spelling, qualified', () => {
 // that pair keeps it, which is the whole point of gating on a behaviour instead of deleting a label.
 test('the plain /advance label follows compilerBehaviors.foldsPointerAdvance', () => {
   expect(ARMV4T_AGBCC.compilerBehaviors.foldsPointerAdvance).toBe(true);
-  const plain = (t: typeof ARMV4T_AGBCC): boolean => swrCandidates(t).some((c) => c.label.endsWith('/advance'));
+  const plain = (t: typeof ARMV4T_AGBCC): boolean =>
+    swrCandidates(t).some(
+      (c) => hasVariation(c.label.split('/'), 'advance') && !hasVariation(c.label.split('/'), 'volatile'),
+    );
   expect(plain(ARMV4T_AGBCC)).toBe(false);
   const unmeasured = {
     ...ARMV4T_AGBCC,
@@ -525,6 +529,8 @@ test('the plain /advance label follows compilerBehaviors.foldsPointerAdvance', (
   };
   expect(plain(unmeasured)).toBe(true);
   // and the qualified product rides on BOTH: `volatile` is what bars the fold
-  expect(swrCandidates(ARMV4T_AGBCC).some((c) => c.label.endsWith('/advance/volatile'))).toBe(true);
-  expect(swrCandidates(unmeasured).some((c) => c.label.endsWith('/advance/volatile'))).toBe(true);
+  expect(swrCandidates(ARMV4T_AGBCC).some((c) => hasVariations(c.label.split('/'), ['advance', 'volatile']))).toBe(
+    true,
+  );
+  expect(swrCandidates(unmeasured).some((c) => hasVariations(c.label.split('/'), ['advance', 'volatile']))).toBe(true);
 });

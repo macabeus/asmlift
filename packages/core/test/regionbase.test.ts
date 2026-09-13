@@ -31,6 +31,7 @@ import {
 } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 
 const G = [{ name: 'g', type: T.ptr(T.u(16)) }];
 
@@ -301,7 +302,7 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     ).size;
 
   test('`/regionbase` is in the fan', () => {
-    expect(cands.filter((c) => c.label.includes('/regionbase')).length).toBeGreaterThan(0);
+    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'regionbase')).length).toBeGreaterThan(0);
   });
 
   test('`/regionbase/volatile` is in the fan too — the device base keeps its qualifier', () => {
@@ -309,7 +310,7 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     // local it wins with is published UNqualified, and `compareScored`'s deviceVolatile tie-break
     // has no qualified twin to prefer — the qualifier would be given up by an absence in the fan
     // rather than by a measurement.
-    const vol = cands.filter((c) => c.label.includes('/regionbase/volatile'));
+    const vol = cands.filter((c) => hasVariations(c.label.split('/'), ['regionbase', 'volatile']));
     expect(vol.length).toBeGreaterThan(0);
     // the qualifier lands on the DECLARATION of the minted locals, not on the cast
     expect(vol.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
@@ -321,12 +322,18 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     // REG_DMA0CNT that starts the transfer. `/volatile` qualifies a pointer LOCAL and cannot reach
     // a store that stays inline; `/vol-store` is the pass that can, and until it was paired with
     // this lever the winning source dropped a device qualifier the un-hoisted spelling carries.
-    const triple = cands.filter((c) => c.label.includes('/regionbase/volatile/vol-store'));
+    const triple = cands.filter((c) => hasVariations(c.label.split('/'), ['regionbase', 'volatile', 'vol-store']));
     expect(triple.length).toBeGreaterThan(0);
     expect(triple.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
     expect(triple.every((c) => /\(\(volatile s32 \*\)67109076\)\[2\] =/.test(c.source))).toBe(true);
     // and no candidate loses one: the pair-less spelling is still in the fan
-    expect(cands.some((c) => c.label.includes('/regionbase/volatile') && !c.label.includes('vol-store'))).toBe(true);
+    expect(
+      cands.some(
+        (c) =>
+          hasVariations(c.label.split('/'), ['regionbase', 'volatile']) &&
+          !hasVariation(c.label.split('/'), 'vol-store'),
+      ),
+    ).toBe(true);
   });
 
   test('and every label that binds the base three times is this pass, or a pipe THROUGH it', () => {
@@ -336,7 +343,11 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     // the moment that pairing existed; the dataset block comment predicted exactly this.
     const three = cands.filter((c) => dmaLocals(c.source) >= 3);
     expect(three.length).toBeGreaterThan(0);
-    expect(three.every((c) => /\/regionbase|\/homesplit/.test(c.label))).toBe(true);
+    expect(
+      three.every(
+        (c) => hasVariation(c.label.split('/'), 'regionbase') || hasVariation(c.label.split('/'), 'homesplit'),
+      ),
+    ).toBe(true);
   });
 });
 

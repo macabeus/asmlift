@@ -20,6 +20,7 @@ import { hasHomeableSharedAddress, sharedBaseClasses } from '../src/structure/an
 import { structure } from '../src/structure/structure';
 import { type SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 import { count } from './helpers';
 
 const emit = (ir: string, on: boolean): string => {
@@ -188,9 +189,9 @@ const PAIR_ASM =
 test('a symbol map does not blind the raw sibling: /addr-home rides /raw-globals', () => {
   const symbols: SymbolMap = new Map([[0x8057acc, [{ name: 'gEntries', kind: 'data' }]]]);
   const cands = enumerateCandidates('f', PAIR_ASM, ARMV4T_AGBCC, { symbols });
-  const homed = cands.filter((c) => c.label.includes('/addr-home'));
+  const homed = cands.filter((c) => hasVariation(c.label.split('/'), 'addr-home'));
   expect(homed.length).toBeGreaterThan(0);
-  expect(homed.every((c) => c.label.includes('/raw-globals'))).toBe(true);
+  expect(homed.every((c) => hasVariation(c.label.split('/'), 'raw-globals'))).toBe(true);
 });
 
 // ── THE MERGE CLASS ────────────────────────────────────────────────────────────────────────

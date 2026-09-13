@@ -23,6 +23,7 @@
 // All scored byte-exact on agbcc.
 import { decompile } from '@asmlift/core/pipeline';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -103,7 +104,7 @@ describe('F-CFG return-sinking: a ONE-SET-ARM diamond IS sunk', () => {
     expect(scoreC(unranked.source, sym, obj).match).toBe(false); // …but the wrong sense
     const r = decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
     expect(r.best.score.match).toBe(true);
-    expect(r.best.label).toContain('flip-branch');
+    expect(hasVariation(r.best.label.split('/'), 'flip-branch')).toBe(true);
   });
 });
 

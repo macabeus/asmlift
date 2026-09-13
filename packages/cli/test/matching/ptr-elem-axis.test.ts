@@ -35,6 +35,7 @@ import { renderDeclarations } from '@asmlift/core/declare';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
+import { hasVariation } from '@asmlift/core/variation-tokens';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
@@ -131,19 +132,21 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
   for (const s of SHAPES) {
     describe(s.name, () => {
       test('the axis is enumerated at all — both arms present, so the comparison is real', () => {
-        expect(ranked.get(`${s.name}/byte`)?.labels.filter((l) => l.includes('no-ptr-elem')).length).toBeGreaterThan(0);
+        expect(
+          ranked.get(`${s.name}/byte`)?.labels.filter((l) => hasVariation(l.split('/'), 'no-ptr-elem')).length,
+        ).toBeGreaterThan(0);
       });
 
       test('BYTE target: `/no-ptr-elem` matches and the element default does not', () => {
         const r = ranked.get(`${s.name}/byte`);
         expect(r?.score).toBe(0);
-        expect(r?.label).toContain('no-ptr-elem');
+        expect(hasVariation(r!.label.split('/'), 'no-ptr-elem')).toBe(true);
       });
 
       test('ELEMENT target: the default matches — the axis is two-sided, not a better default', () => {
         const r = ranked.get(`${s.name}/elem`);
         expect(r?.score).toBe(0);
-        expect(r?.label).not.toContain('no-ptr-elem');
+        expect(hasVariation(r!.label.split('/'), 'no-ptr-elem')).toBe(false);
       });
     });
   }

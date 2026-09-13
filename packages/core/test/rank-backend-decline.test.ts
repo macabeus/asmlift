@@ -12,6 +12,7 @@ import { cBackend } from '../src/backend/c';
 import type { LanguageBackend } from '../src/l3/ast';
 import { NoScorableCandidateError, NoSpellableCandidateError, enumerateCandidates, rankBy } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 // `a0 < a1 ? 1 : 0` — a divergent if whose compare the signedness pin casts under the `unsigned`
 // candidate (both params declared u32, the compare opcode signed).
@@ -48,7 +49,7 @@ test('a tree the backend refuses drops its candidates and keeps the others', () 
   // the pin fires only under `unsigned`, so exactly the signed candidates survive
   expect(all).toContain('unsigned');
   expect(kept.length).toBeGreaterThan(0);
-  expect(kept.every((l) => !l.startsWith('unsigned'))).toBe(true);
+  expect(kept.every((l) => !hasVariation(l.split('/'), 'unsigned'))).toBe(true);
   // and the refusal is REPORTED, never swallowed — the same channel a dropped re-spelling uses
   expect(seen.some((s) => s.includes('refusing backend'))).toBe(true);
 });
@@ -150,13 +151,13 @@ test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the p
   ].join('\n');
 
   const plain = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.label);
-  const unmerged = plain.filter((l) => l.includes('/unmerge'));
+  const unmerged = plain.filter((l) => hasVariation(l.split('/'), 'unmerge'));
   expect(unmerged.length).toBeGreaterThan(0); // the fixture really reaches the pre-fan product
 
   // a backend that emits normally but refuses exactly the trees the pre-fan product produced
   const refused = new Set(
     enumerateCandidates('f', asm, ARMV4T_AGBCC)
-      .filter((c) => c.label.includes('/unmerge'))
+      .filter((c) => hasVariation(c.label.split('/'), 'unmerge'))
       .map((c) => c.source),
   );
   const seen: string[] = [];
@@ -174,9 +175,9 @@ test('a refusal on a PRE-FAN tree is reported under the pre-fan label, not the p
     onLeverError: (label) => seen.push(label),
   }).map((c) => c.label);
 
-  expect(kept.some((l) => l.includes('/unmerge'))).toBe(false); // the half really was deleted
+  expect(kept.some((l) => hasVariation(l.split('/'), 'unmerge'))).toBe(false); // the half really was deleted
   expect(seen.length).toBeGreaterThan(0);
-  expect(seen.every((l) => l.includes('/unmerge'))).toBe(true); // …and every report names it
+  expect(seen.every((l) => hasVariation(l.split('/').slice(1), 'unmerge'))).toBe(true); // …and every report names it
 });
 
 // …AND THE PRE-FAN LABEL HAS TO REACH THE LEVER REFUSALS TOO, not just the primary emit's. The
@@ -224,12 +225,12 @@ test('a refusal of a LEVER on a pre-fan tree carries the pre-fan label too', () 
 
   const all = enumerateCandidates('f', asm, ARMV4T_AGBCC);
   // the fixture really reaches a LEVER spelling built on the pre-fan tree
-  const deeper = all.filter((c) => /\/unmerge\/./.test(c.label));
+  const deeper = all.filter((c) => hasVariation(c.label.split('/').slice(0, -1), 'unmerge'));
   expect(deeper.length).toBeGreaterThan(0);
   // …and the pre-fan tree's own primary spelling is NOT among what we refuse, so `fanOut` gets
   // past the early return and into the re-spellings
   const refused = new Set(deeper.map((c) => c.source));
-  expect(all.some((c) => /\/unmerge$/.test(c.label) && !refused.has(c.source))).toBe(true);
+  expect(all.some((c) => hasVariation(c.label.split('/').slice(-1), 'unmerge') && !refused.has(c.source))).toBe(true);
 
   const seen: string[] = [];
   const kept = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
@@ -246,8 +247,8 @@ test('a refusal of a LEVER on a pre-fan tree carries the pre-fan label too', () 
     onLeverError: (label) => seen.push(label),
   }).map((c) => c.label);
 
-  expect(kept.some((l) => /\/unmerge\/./.test(l))).toBe(false); // the lever spellings really died
+  expect(kept.some((l) => hasVariation(l.split('/').slice(0, -1), 'unmerge'))).toBe(false); // the lever spellings really died
   expect(seen.length).toBeGreaterThan(0);
   // every report names the pre-fan spelling it was fanning, ahead of the lever that failed
-  expect(seen.every((l) => l.includes('/unmerge/'))).toBe(true);
+  expect(seen.every((l) => hasVariation(l.split('/').slice(1, -1), 'unmerge'))).toBe(true);
 });

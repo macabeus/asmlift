@@ -16,6 +16,7 @@ import { T } from '../src/ir/types';
 import type { SFn } from '../src/l3/ast';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation } from '../src/variation-tokens';
 
 vi.mock('../src/l3/nearbase', () => ({
   // mint a cluster base, read it at the top of the body, and assign it AFTER the return — the
@@ -44,11 +45,11 @@ describe('the mover’s OWN minted local is judged', () => {
   });
 
   test('no `/nearbase` spelling reaches the fan', () => {
-    expect(cands.filter((c) => c.label.includes('nearbase'))).toEqual([]);
+    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'nearbase'))).toEqual([]);
   });
 
   test('…and every one is REPORTED under a label naming it', () => {
-    const named = errors.filter((e) => e.label.includes('nearbase'));
+    const named = errors.filter((e) => hasVariation(e.label.split('/').slice(1), 'nearbase'));
     expect(named.length).toBeGreaterThan(0);
     expect(named.every((e) => /assignment does not reach/.test(e.error))).toBe(true);
   });

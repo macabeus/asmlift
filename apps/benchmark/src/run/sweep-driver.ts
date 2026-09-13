@@ -84,6 +84,40 @@ const firstLine = (e: unknown): string =>
  *  would already break `--repeat`, which exists to catch exactly that class). */
 const serialized = new WeakMap<object, string>();
 
+/** The `--fan` payload of one enumeration: its size and three ordered hashes over its candidates.
+ *
+ *  THREE HASHES AND NOT ONE, because a change to what a candidate is CALLED and a change to what it
+ *  SAYS are different findings, and one hash over both cannot tell them apart:
+ *
+ *    - `fanHash` covers each candidate's variations and source together, in enumeration order.
+ *    - `fanSourceHash` covers the sources alone. It holds still under a change that only renames
+ *      variations, and it moves under anything that changes, adds, drops or REORDERS a source —
+ *      order being what `compareScored` breaks a score tie by.
+ *    - `fanVariationsHash` covers the names alone, each hashed as its `/`-joined presentation
+ *      string, so two trees that store a candidate's variations in different shapes still compare
+ *      equal when they name the same variations. It moves when a candidate is named by a different
+ *      route while its source stays put.
+ *
+ *  Exported for `sweep.test.ts`, which pins what each hash can and cannot see: `collect` needs a
+ *  compiler to build a row's target, and the CI mirror gate has none. */
+export function fanDigests(cands: readonly { label: string; source: string }[]): {
+  fan: number;
+  fanHash: string;
+  fanSourceHash: string;
+  fanVariationsHash: string;
+} {
+  const both = createHash('sha1');
+  const sources = createHash('sha1');
+  const names = createHash('sha1');
+  for (const c of cands) {
+    both.update(`${c.label}\0${c.source}\0`);
+    sources.update(`${c.source}\0`);
+    names.update(`${c.label}\0`);
+  }
+  const hex = (h: ReturnType<typeof createHash>): string => h.digest('hex').slice(0, 12);
+  return { fan: cands.length, fanHash: hex(both), fanSourceHash: hex(sources), fanVariationsHash: hex(names) };
+}
+
 /** A canonical string for an option value: object keys sorted at every depth, `Map` entries sorted,
  *  `Set` members sorted, bytes hashed.
  *
@@ -319,13 +353,10 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
           rec.skipped = 'fan-limit';
         } else {
           try {
-            const cands = m.rank.enumerateRanked(sym, asm, targetDesc, { ...opts, onLeverError: () => {} });
-            rec.fan = cands.length;
-            const h = createHash('sha1');
-            for (const c of cands) {
-              h.update(`${c.label}\0${c.source}\0`);
-            }
-            rec.fanHash = h.digest('hex').slice(0, 12);
+            Object.assign(
+              rec,
+              fanDigests(m.rank.enumerateRanked(sym, asm, targetDesc, { ...opts, onLeverError: () => {} })),
+            );
           } catch (e) {
             rec.fanThrew = firstLine(e);
           }

@@ -1,0 +1,195 @@
+// The words candidate enumeration no longer uses, counted over every tracked text file.
+//
+// The enumeration vocabulary is `docs/vocabulary.md`: a candidate, the fan, the winner, a variation
+// (a candidate's name is the list of variations it applied), dropped, withheld. The rules below
+// are the words and identifiers that vocabulary replaced. Each rule's `allow` list is the reviewed
+// set of lines where the same spelling means something else — an ECharts axis, a Tailwind variant,
+// an external file's name — and never the enumeration sense.
+//
+// MODE. `record` counts every surviving line per rule and writes the counts to
+// `.local/retired-words.json`, failing nothing. `enforce` fails on any surviving line.
+//
+// THE RULES MATCH WHOLE WORDS, and two of them are written against a near-miss on purpose:
+//   - `variant` retires and `variation` is the vocabulary's own word, so the rule is
+//     `\bvariants?\b`; a stem such as `variant\w*` would flag every renamed line.
+//   - `label` is correct in every sense but a candidate's name (assembly labels, `goto` labels,
+//     display labels, HTML and chart labels), so no rule matches the bare word: only the
+//     candidate-name identifiers and phrases are listed.
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { describe, expect, test } from 'vitest';
+
+import { REPO_ROOT } from '../src/config';
+
+const MODE = 'record' as 'record' | 'enforce';
+
+interface Allow {
+  path: RegExp;
+  /** the line must also match this; absent = every line of the file */
+  line?: RegExp;
+  why: string;
+}
+
+interface Rule {
+  id: string;
+  pattern: RegExp;
+  allow?: Allow[];
+}
+
+const THIS_FILE = relative(REPO_ROOT, import.meta.filename);
+
+const RULES: Rule[] = [
+  {
+    id: 'axis',
+    pattern: /\bax(?:is|es)\b/i,
+    allow: [
+      { path: /^apps\/web\/src\/pages\/benchmark\/components\/charts\//, why: 'ECharts axes' },
+      { path: /^apps\/web\/src\/pages\/benchmark\/theme\.ts$/, why: 'a chart grouping axis' },
+      {
+        path: /^apps\/web\/src\/pages\/benchmark\/components\/FeaturePicker\.tsx$/,
+        why: "the feature vocabulary's grouping axis",
+      },
+      { path: /^apps\/web\/src\/shared\/components\/HoverCard\.tsx$/, line: /one axis/, why: 'a CSS overflow axis' },
+      { path: /^packages\/bench-schema\/src\/features\.ts$/, why: "the feature vocabulary's two orthogonal axes" },
+      { path: /^packages\/bench-schema\/README\.md$/, line: /filter groups by/, why: "the feature vocabulary's axis" },
+      { path: /^\.claude\/commands\/dogfood-klonoa\.md$/, line: /\[window\]\[axis\]/, why: 'an array dimension' },
+    ],
+  },
+  {
+    id: 'lever',
+    pattern: /\blevers?\b/i,
+    allow: [{ path: /./, line: /agbcc-source-shape-levers\.md/, why: "an external document's file name" }],
+  },
+  {
+    id: 'variant',
+    pattern: /\bvariants?\b/i,
+    allow: [{ path: /^apps\/web\/src\/index\.css$/, line: /motion-safe:/, why: 'a Tailwind variant' }],
+  },
+  {
+    id: 'candidate-name identifiers',
+    pattern:
+      /\b(?:candidateLabel|winnerLabel|LABEL_TOKENS|labelSlot|hasTokens?|parseToken|fanLabelHash)\b|label-tokens|\blabel (?:tokens?|slots?)\b/i,
+  },
+  {
+    id: 'fan size',
+    pattern: /\bcandidateCount\b/,
+  },
+  {
+    id: 'published flags and reserved words',
+    pattern: /--arms\b|--show best\b/,
+  },
+  {
+    id: 'enumeration identifiers',
+    pattern:
+      /\b(?:STRUCTURING_AXES|StructuringAxis|probeGate|variantGate|SHAPE_PRODUCTS|SHAPE_SUBSETS|applyShapes|PRE_FAN_PRODUCTS|(?:LIVEBASE|BASEFOLD|UNFOLDED|ORDERBASE)_ADMISSIONS|BaseAdmission|SIGN_CANDS|LeverResult|composeLevers|onLeverError|onAxisGated|fanExitCode|rowKey|SPELLING_DEFAULTS|fanOut|FanResult|leverLabel|REGCOPY_LABEL|droppedPrimary|AxisCand|axisCands|axisFlagsOff|isBaseAxisPoint|bitfieldCands|ptrElemCands|declRankCands|svCands|variantCands|variantOff|symbolVariants|liftVariants|connectiveVariants|probeDefs|probeShapes|probeTreeOwned|ARMS|armsFor|Armed)\b/,
+  },
+  {
+    id: 'enumeration phrases',
+    pattern:
+      /\b(?:axis points?|sense points?|fan points?|base spelling|base lift|recorded spellings|shape products?|pre-fan products?|sanctioned product|product (?:mechanism|kind)|per-compiler default|respellings?)\b/i,
+  },
+];
+
+/** Tracked text files: the scan skips data (JSON, compressed TUs) and anything that is not UTF-8
+ *  text, and it skips itself, because its rules spell every retired word. */
+function trackedTextFiles(): string[] {
+  return execFileSync('git', ['ls-files', '-z'], { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 1 << 26 })
+    .split('\0')
+    .filter((f) => f !== '' && f !== THIS_FILE)
+    .filter((f) => !/\.(?:json|gz|png|jpe?g|gif|ico|webp|woff2?|o|bin|wasm|elf|gba|z64|zip)$/i.test(f))
+    .filter((f) => !/(?:^|\/)pnpm-lock\.yaml$/.test(f))
+    .filter((f) => {
+      try {
+        return statSync(join(REPO_ROOT, f)).isFile();
+      } catch {
+        return false;
+      }
+    });
+}
+
+interface Survivor {
+  rule: string;
+  file: string;
+  line: number;
+  text: string;
+}
+
+/** Every line a rule matches that its allow list does not cover. */
+function survivors(rules: readonly Rule[], files: readonly string[]): Survivor[] {
+  const out: Survivor[] = [];
+  for (const file of files) {
+    const text = readFileSync(join(REPO_ROOT, file), 'utf8');
+    if (text.includes('\0')) {
+      continue;
+    }
+    text.split('\n').forEach((line, i) => {
+      for (const rule of rules) {
+        if (!rule.pattern.test(line)) {
+          continue;
+        }
+        if (rule.allow?.some((a) => a.path.test(file) && (a.line === undefined || a.line.test(line)))) {
+          continue;
+        }
+        out.push({ rule: rule.id, file, line: i + 1, text: line.trim().slice(0, 200) });
+      }
+    });
+  }
+  return out;
+}
+
+describe('the rules themselves', () => {
+  const rule = (id: string) => RULES.find((r) => r.id === id)!.pattern;
+
+  test('`variant` is retired and `variation` is not', () => {
+    for (const w of ['variant', 'variants', 'Variant', 'VARIANTS', 'a lift variant.']) {
+      expect(rule('variant').test(w)).toBe(true);
+    }
+    for (const w of ['variation', 'variations', 'Variation', 'VARIATION_TOKENS', 'invariant', 'SetIdAndVariant']) {
+      expect(rule('variant').test(w)).toBe(false);
+    }
+  });
+
+  test('the bare word `label` is never flagged; the candidate-name identifiers are', () => {
+    for (const w of ['label', 'labels', '.L1: label', 'goto label;', 'FeatureDef.label', '<label>']) {
+      expect(RULES.some((r) => r.pattern.test(w))).toBe(false);
+    }
+    for (const w of ['candidateLabel', 'winnerLabel', 'LABEL_TOKENS', 'labelSlot', 'a label token', 'label slot']) {
+      expect(rule('candidate-name identifiers').test(w)).toBe(true);
+    }
+  });
+
+  test('every allow entry covers at least one line, so a stale entry is found and deleted', () => {
+    const files = trackedTextFiles();
+    const unused = RULES.flatMap((r) =>
+      (r.allow ?? [])
+        .filter(
+          (a) =>
+            !files.some(
+              (f) =>
+                a.path.test(f) &&
+                readFileSync(join(REPO_ROOT, f), 'utf8')
+                  .split('\n')
+                  .some((l) => r.pattern.test(l) && (a.line === undefined || a.line.test(l))),
+            ),
+        )
+        .map((a) => `${r.id}: ${a.path} ${a.line ?? ''} (${a.why})`),
+    );
+    expect(unused).toEqual([]);
+  });
+});
+
+describe(`retired words (${MODE} mode)`, () => {
+  test('surviving lines per rule', () => {
+    const found = survivors(RULES, trackedTextFiles());
+    if (MODE === 'enforce') {
+      expect(found.map((s) => `${s.file}:${s.line} [${s.rule}] ${s.text}`)).toEqual([]);
+      return;
+    }
+    const counts = Object.fromEntries(RULES.map((r) => [r.id, found.filter((s) => s.rule === r.id).length]));
+    const dir = join(REPO_ROOT, '.local');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'retired-words.json'), `${JSON.stringify({ counts, survivors: found }, null, 1)}\n`);
+    expect(Object.keys(counts)).toEqual(RULES.map((r) => r.id));
+  });
+});
