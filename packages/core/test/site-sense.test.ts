@@ -125,7 +125,7 @@ describe('/site-sense reads the fold’s orientation, per site', () => {
     // `/flip-join` with or without this axis.
     //
     // POSITIVE IS NOT UNIVERSALLY RIGHT HERE, and one committed row says so: the two long-branch
-    // sites of `kleod:CheckWorldCompletion:agbcc` want OPPOSITE spellings against its own
+    // sites of `kleod:WorldMapScreenIsValidPath:agbcc` want OPPOSITE spellings against its own
     // `refSource` — positive at the `(x & 0x80) != 0 && (y & 0x7F) != 0x7F` guard, negated at the
     // three-`return 1` ladder below it. This asserts the better of two constants, not a decided
     // cell; the row is 45/191 with the same winner either way, so nothing in the corpus referees

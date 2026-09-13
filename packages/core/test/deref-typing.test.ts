@@ -476,7 +476,7 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
 // template makes it fatal, so the emitted C does not build where its author would put it.
 describe('assigning &gSym to a pointer local', () => {
   // A merge whose phi is a pointer fed by `gaddr` from both arms — the shape that materializes the
-  // address into a local (kleod:UpdateHUDCounterDisplay's `gBgTilemapBufs` base register).
+  // address into a local (kleod:DrawLevelHud_DreamStones's `gBgTilemapBufs` base register).
   const PHI_OF_GADDR = `fn f {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}

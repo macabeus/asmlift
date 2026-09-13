@@ -331,7 +331,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     the relayed clause. Priced over the set it REFUSES rather than the set it admits: it fires on
 //     6 rows, protects 2 (`pokeemerald:IsStringLengthAtLeast`,
 //     `pokeemerald:TrySetCantSelectMoveBattleScript`), and on the other 4 the published winner
-//     folds THROUGH it — `kleod:CheckWorldCompletion`'s refused site is `v5 == 3 || v5 == 5` on an
+//     folds THROUGH it — `kleod:WorldMapScreenIsValidPath`'s refused site is `v5 == 3 || v5 == 5` on an
 //     ordinary inner-loop counter with no dispatch region near it. It is the axis, not the clause,
 //     that keeps those 4. A structural discriminator is L1-visible and would be strictly better —
 //     is the shared block the entry of a region with dispatch-shaped in-edges, is the scrutinee
@@ -503,7 +503,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // while wanting the opposite spelling. The third stamp is `scEdgeRelayed`, the trampoline the
 // inversion leaves on one of the two edges — see its own note at the stamp. The table the consumer
 // reads is `structure.ts`'s `senseFromFoldEvidence` site default, and one of its cells is
-// undecided by all three facts (`kleod:CheckWorldCompletion:agbcc`, two sites, opposite senses).
+// undecided by all three facts (`kleod:WorldMapScreenIsValidPath:agbcc`, two sites, opposite senses).
 //
 // Every refusal falls through untouched — a miss, never a miscompile.
 /** Per-call options for `recognizeBranchShortCircuit` — the tree-ownership refusal's two ends. */
@@ -518,7 +518,7 @@ export interface BranchShortCircuitOptions {
    *  wanting OPPOSITE spellings has no candidate that spells the mix, and nothing reports the gap.
    *  A per-FUNCTION predicate cannot decide a per-SITE question — the same shape the joined-if
    *  default hit — and here it costs completeness rather than correctness. The alternative is a
-   *  fork per site: `kleod:CheckWorldCompletion` refuses at 10 and goes 96 → 192 candidates as one
+   *  fork per site: `kleod:WorldMapScreenIsValidPath` refuses at 10 and goes 96 → 192 candidates as one
    *  boolean, where a per-site fork would be 1024×. That is why the boolean, not an oversight. */
   foldTreeOwned?: boolean;
   /** Called at each site the pairwise tree-ownership refusal is the ONE thing stopping the fold —

@@ -128,7 +128,7 @@ describe('benchMeta (pinned)', () => {
 
 // A gap's score is a numerator over a denominator that MOVES: `maxScore` is the objdiff row count
 // of the winning candidate's alignment, so a better candidate changes it (404 → 387 on
-// `kleod:CountCollectedGems:agbcc`). A line printing only the numerator reads as a subtraction on
+// `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`). A line printing only the numerator reads as a subtraction on
 // a fixed scale, and that reading sent an attribution round hunting for capability gaps to explain
 // a denominator move.
 describe('fmt renders a gap over its denominator', () => {

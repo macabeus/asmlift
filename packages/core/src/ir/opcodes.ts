@@ -254,7 +254,7 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *  is raise/shortcircuit.ts, which hoists an arm's body into the block above, and the structurer
  *  inlines an unnamed value back into the `&&`/`||` right-hand side, where C's own short-circuit
  *  re-guards it. Adding the two reads
- *  here costs three byte-matches (kleod:UpdateHUDCounterDisplay, synthetic:breakloop,
+ *  here costs three byte-matches (kleod:DrawLevelHud_DreamStones, synthetic:breakloop,
  *  synthetic:strcmp1), so the argument is load-bearing rather than merely plausible.
  *
  *  KNOWN GAP: the trapping divides are absent too, and there the re-guard argument does NOT carry

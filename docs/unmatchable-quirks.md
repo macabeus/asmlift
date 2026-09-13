@@ -22,9 +22,12 @@ below is the one to run, and a falsified entry is deleted, not annotated.
 
 ## The register
 
-| row                  | verdict taken | asmlift | the quirk                                        |
-| -------------------- | ------------- | ------- | ------------------------------------------------ |
-| `kleod:StrCpy:agbcc` | 2026-09-12    | 2a626ac | a redundant re-read the compiler then eliminates |
+| row | verdict taken | asmlift | the quirk |
+| --- | ------------- | ------- | --------- |
+
+_No entry today._ The register's only entry closed a row that no longer exists: see
+[Retired: `StrCpy`](#retired-strcpy-kleod) below. An empty register is a claim too — that no current
+row has been shown unmatchable by both halves above — and it is falsified by adding an entry.
 
 ## The recipe
 
@@ -75,21 +78,31 @@ The spelling asmlift actually publishes comes from `pnpm bench fan <row-id> --sh
 first thing to try is always **that `candidate` plus the construct**: if the row is a quirk row, the
 delta is usually one line.
 
-## `kleod:StrCpy:agbcc`
+## Retired: `StrCpy` (kleod)
 
-Taken 2026-09-12 at asmlift `2a626ac`. Every number below is from that day.
+**Retired 2026-09-13, with the row.** The kleod project's rows moved from `Dream-Atelier/kl-eod-decomp`
+to `testyourmine/kleod` (through the `macabeus/kleod` fork's `asmlift-benchmark` branch). In that
+decompilation this function — `StringCopy` at `0x08000460` — is hand-written assembly in
+`asm/util.s`: nobody wrote C for it, so there is no honest reference source a benchmark row could be
+built from. That is the same fact the verdict below reached from the other side, and it was the
+measurement that triggered the swap (#197).
+
+The entry is kept, not deleted, because it is not falsified: nothing below was overturned, and its
+NECESSARY/INVISIBLE analysis is the worked example of what this page accepts as a verdict. Every
+number in it was taken on 2026-09-12 at asmlift `2a626ac`, against the retired row, and describes no
+current row.
 
 ### The row
 
 ```
 pnpm bench baseline StrCpy
-kleod:StrCpy:agbcc  asmlift=nonmatch 5/8  m2c=nonmatch 6/7  fan=1 rank=3.6s
+(the retired kleod StrCpy row)  asmlift=nonmatch 5/8  m2c=nonmatch 6/7  fan=1 rank=3.6s
 ```
 
 The fan is **1**: asmlift considers exactly one spelling for this function, so there is no ranking
 question here, only a generation one. All three vehicles agreed on the day (`docs/ranked-repro.md`'s
-table is still the one that measures): `pnpm bench fan kleod:StrCpy:agbcc` and
-`pnpm bench repro kleod:StrCpy:agbcc --run` both `unsigned: 5/8`, the project-checkout command
+table was the one that measured): `pnpm bench fan` and `pnpm bench repro --run` on the row both
+gave `unsigned: 5/8`, the project-checkout command
 `unsigned: 6/9`.
 
 The target is seven Thumb instructions, `0a78 0270 0130 0131 002a f9d1 7047`:

@@ -35,7 +35,7 @@
 // GATE: at least TWO arguments of the same call must qualify, with DISTINCT bases. The reordering
 // this reproduces only exists when two addresses compete for registers during argument setup — with
 // ONE base there is nothing to interleave, so the compiler emits the same sequence either way and
-// naming it is pure churn. (Evidence: on kleod:UpdateFadeEffect, hoisting only the first base
+// naming it is pure churn. (Evidence: on kleod:HBlankIntr_DeleteAllSaveDataScreen, hoisting only the first base
 // leaves the diff at 2; both together take it to 0.)
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';

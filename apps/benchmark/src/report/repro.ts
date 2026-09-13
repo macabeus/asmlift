@@ -18,7 +18,7 @@
 //     a wrong map is worse than none — the names come out wrong, not absent.
 //   * `--run` reports the `[ranked]` line, which carries `best …` AND the source sha. A
 //     `grep -F '[score]' | tail -1` reports the WORST candidate, because that table is sorted
-//     best-first: on `kleod:GetEntityLookupData:agbcc` it gives `signed: 15/18` where the row is
+//     best-first: on `kleod:sub_0803D140:agbcc` it gives `signed: 15/18` where the row is
 //     `unsigned/raw-globals: 4/14`.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { spawn } from 'node:child_process';
@@ -112,8 +112,8 @@ export async function repro(
   writeFileSync(path, script);
 
   // THE TOOL'S OWN published figure. Printing `row.asmlift` under `--tool m2c` states a number this
-  // script cannot produce, next to a script that produces a different one: on `kleod:StrCpy:agbcc`
-  // asmlift is 5/8 and m2c is 6/7, and the reader compares the C in out.c against the wrong one.
+  // script cannot produce, next to a script that produces a different one: on any row the two tools
+  // score differently, the reader compares the C in out.c against the wrong one.
   const published = tool === 'm2c' ? row.m2c : row.asmlift;
   log(
     `repro: ${row.id} — ${tool} ${published.outcome} ${published.score ?? '-'}/${published.maxScore ?? '-'} as published`,

@@ -5,7 +5,7 @@
 // that file pulls in the `agbcc` package, whose `lib/config.json` import fails under vitest's ESM
 // loader ('needs an import attribute of "type: json"') and whose wasm has no fetch in node.
 //
-// THE ACCEPTANCE TEST IS THE BUG REPORT: `kleod:UpdateWorldMapNodeTile:agbcc`, opened from the
+// THE ACCEPTANCE TEST IS THE BUG REPORT: `kleod:WorldMapScreenDrawPath:agbcc`, opened from the
 // Benchmark view with "Open in playground", produced
 // "ranking unavailable — no scorable candidate ... in.i: In function `UpdateWorldMapNodeTile':".
 // Two bugs made that line: the candidates named three pool globals nobody declared (core, fixed
@@ -105,16 +105,16 @@ describe('the one stderr line the UI shows', () => {
   });
 });
 
-describe('the reported row ranks: kleod:UpdateWorldMapNodeTile:agbcc, opened in the playground', () => {
+describe('the reported row ranks: kleod:WorldMapScreenDrawPath:agbcc, opened in the playground', () => {
   const results = JSON.parse(
     readFileSync(join(import.meta.dirname, '../src/pages/benchmark/data/results.json'), 'utf8'),
   ) as { results: { id: string }[] };
-  const row = results.results.find((r) => r.id === 'kleod:UpdateWorldMapNodeTile:agbcc');
+  const row = results.results.find((r) => r.id === 'kleod:WorldMapScreenDrawPath:agbcc');
 
   test('the row the bug report names is in the shipped dataset', () => {
     // Pinned by id inside a file every bench round regenerates: without this, a dataset change
     // turns the acceptance test into an opaque TypeError instead of a sentence.
-    expect(row, 'kleod:UpdateWorldMapNodeTile:agbcc present in the shipped results.json').toBeTruthy();
+    expect(row, 'kleod:WorldMapScreenDrawPath:agbcc present in the shipped results.json').toBeTruthy();
   });
 
   test('every candidate compiles in a TU that declares the globals its source spells', () => {

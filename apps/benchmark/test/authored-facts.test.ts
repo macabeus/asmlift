@@ -204,24 +204,15 @@ describe('the prototype line appended to a vendored m2c context', () => {
   // grow quietly. A manifest's `prependC` sometimes has to forward-declare the function for the
   // reference to compile standalone, and m2c can read it. Closing it would mean re-vendoring the
   // blob asmlift's candidate scorer also compiles against, so it is DISCLOSED (README residual 4)
-  // rather than removed — measured at 3 of 8 rows changing m2c's output and 0 matches either way.
+  // rather than removed. It was 8 rows until the 2026-09 kleod source swap: kleod's rows now take
+  // their `prependC` from their own translation unit's file scope with the row's own prototype
+  // dropped, and every one of them still builds to the ROM's bytes without it.
   test('only the known rows have their own signature declared by their prependC', () => {
     const self = lines
       .filter(({ fn }) => fn.prependC && new RegExp(`\\b${fn.sym}\\s*\\(`).test(fn.prependC))
       .map(({ where }) => where)
       .sort();
-    expect(self).toEqual(
-      [
-        'kleod:ConfigureEntityBehavior',
-        'kleod:CountCollectedGems',
-        'kleod:IsSelectButtonPressed',
-        'kleod:ProcessInputAndUpdateEntities',
-        'kleod:SetupBG3WindowOverlay',
-        'kleod:UpdateWorldMapNodeAnim',
-        'kleod:VBlankDMA_Level2',
-        'pokeemerald:AcroBikeHandleInputTurning',
-      ].sort(),
-    );
+    expect(self).toEqual(['pokeemerald:AcroBikeHandleInputTurning']);
   });
 });
 

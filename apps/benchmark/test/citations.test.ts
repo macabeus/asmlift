@@ -1,5 +1,5 @@
 // Comments state which benchmark row guards a mechanism — "removing this gate costs
-// kleod:UpdateFadeEffect its match". Since `benchmark.yml` runs `bench regression`, the named row is
+// kleod:HBlankIntr_DeleteAllSaveDataScreen its match". Since `benchmark.yml` runs `bench regression`, the named row is
 // what makes CI fail if the mechanism breaks, so the claim's precondition is that the row still
 // exists — and a row's symbol changes whenever a manifest does. This asserts the precondition.
 //

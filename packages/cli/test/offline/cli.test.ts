@@ -223,7 +223,7 @@ test('a DERIVED shape the source never spells prints no `[assumed]` line either'
   // is a claim about the SOURCE, not about the derivation, and the two part company. Here the
   // element derives (4 bytes, read off the outer `lsl #0x2`) and `recognizeStructArrays` then
   // rewrites the access into a 28-byte element with a field offset, which has no bare spelling.
-  // `kleod:SetupBG3WindowOverlay` is this shape on the real corpus.
+  // `kleod:ButtonConfigurationScreenInit` is this shape on the real corpus.
   const asm =
     '\t.code\t16\n.text\n\t.align\t2, 0\n\t.globl\tf\n\t.thumb_func\nf:\n' +
     '\tldr\tr2, .L3\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n' +

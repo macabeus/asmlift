@@ -380,7 +380,7 @@ f:
   // alongside it or the rule looks unnecessary: with an interior read alone, ablating the rule
   // records no access at all (an interior read is not evidence) and the symbol is refused anyway.
   // With a clean access beside it, ablating derives `elemSize 2` off a name the function also
-  // reads at +4 — the wrong declaration. `kleod:UpdateCameraScroll` is the corpus inhabitant of
+  // reads at +4 — the wrong declaration. `kleod:AthleticChallengeScrollUpdate` is the corpus inhabitant of
   // the ABLATION result (`gSineTable` derives `elemSize 2` without the rule) but not of this
   // fixture's shape: its rejected use is the rule's NON-ACCESS half, pinned separately below.
   [
@@ -515,7 +515,7 @@ describe('refusals: which rule decided, and what it is worth', () => {
   // THE RULE'S OTHER HALF, which its own fixture does not exercise: `interior-or-non-access`
   // rejects a use whose consumers are not all whole-element accesses, and "not a whole-element
   // access" is EITHER a load/store at a displacement OR something that is not a load or a store at
-  // all. Only the first is an interior read. The corpus shape is the second — `kleod:UpdateCameraScroll`'s
+  // all. Only the first is an interior read. The corpus shape is the second — `kleod:AthleticChallengeScrollUpdate`'s
   // `gSineTable`, read once cleanly at width 2 with its element address also an operand of another
   // `add` — and it is what makes that name a plain scalar leaf the licence keeps and the
   // declaration refuses, with NO null width anywhere in the order consumer's evidence.
@@ -616,8 +616,8 @@ describe('refusals: which rule decided, and what it is worth', () => {
 //
 // compile to — ONE object, byte-identical `.s` included. Recording that as `false` (the positive
 // claim "the index was scaled first") is how this rule came to be the FIRST rejection of four
-// corpus symbols whose base is materialized first: `kleod:CopyBGScrollTiles`,
-// `kleod:SetupBG3WindowOverlay`, `sa3:VramGetTotalAllocatedTiles`, `sa3:VramMalloc`. All four now
+// corpus symbols whose base is materialized first: `kleod:DrawLevelHud_Hearts`,
+// `kleod:ButtonConfigurationScreenInit`, `sa3:VramGetTotalAllocatedTiles`, `sa3:VramMalloc`. All four now
 // route to `no-positive-evidence`, which is what "this says nothing" is called; the derived map
 // over the whole corpus is unchanged either way (9 shapes over 359 functions).
 //
@@ -781,7 +781,7 @@ describe('the order licence reads only what it can compare', () => {
 // THE FIXTURE IS PART OF THE CLAIM, and `interior-or-non-access` is the worked example: its
 // fixture has to carry a CLEAN access beside the interior one, because with the interior read
 // alone removing the rule records no access and the symbol is refused anyway — a weaker question
-// than the corpus asks, where `kleod:UpdateCameraScroll` derives an element type without the rule.
+// than the corpus asks, where `kleod:AthleticChallengeScrollUpdate` derives an element type without the rule.
 // A gate that measures as subsumed may simply have the wrong input.
 
 describe('every gate: which rule decides, and whether it is uniquely load-bearing', () => {
@@ -988,7 +988,7 @@ describe('the assumed declaration is never hidden', () => {
     // The other half, and it needs no symbol map at all: a derivation reaching a symbol does not
     // make the SOURCE depend on it. Every consumer of a shape can still refuse, and the access
     // then keeps `((T *)&gSym)[i]`, which reproduces the bytes under ANY declaration.
-    // `kleod:SetupBG3WindowOverlay` is exactly this row on the real corpus (1 of the 7 map-less
+    // `kleod:ButtonConfigurationScreenInit` is exactly this row on the real corpus (1 of the 7 map-less
     // agbcc rows the derivation reaches), and before this narrowing the CLI printed "the source
     // spells them BARE" beside a source that had emitted the cast form.
     expect(derive('f', STRUCT_ELEM).get('gBgInfo')?.elemSize).toBe(4);
@@ -1218,7 +1218,7 @@ describe('the order licence, split out for the value-home consumer', () => {
     // whole-set question — "does SOME access read an interior" — and it is what a rule must ask
     // instead of looking at one access and generalising: where a CLEAN access sits beside an
     // interior one (`interior-or-non-access`'s own fixture, and
-    // `kleod:TransformSingleEntityToScreen`'s `gUnk_03002920` on the corpus, both symbol-map arms)
+    // `kleod:sub_0800A5B8`'s `gUnk_03002920` on the corpus, both symbol-map arms)
     // the clean access's 2 says nothing about the access that has no width at all, and a rule that
     // carried it across would license the name.
     const widthRules = ['stride-is-not-the-element', 'mixed-extension', 'mid-element-constant'];
@@ -1269,8 +1269,8 @@ describe('the order licence, split out for the value-home consumer', () => {
 // `relocation-addend`'s declaration fixture is exactly that shape: ablating EVERY rule in both
 // halves licenses nothing there, because the addend `add`'s only consumer is the index `add`.
 // Its licence fixture therefore carries a CLEAN base-first access beside the rejected use, which
-// is the shape the corpus has — that rule alone blocks three real names (`kleod:EntityItemDrop`'s
-// `gItemDropParamTable`, `kleod:UpdateWorldMapNodeTile`'s `gUnk_08116748`,
+// is the shape the corpus has — that rule alone blocks three real names (`kleod:sub_0801F4D0`'s
+// `gItemDropParamTable`, `kleod:WorldMapScreenDrawPath`'s `gUnk_08116748`,
 // `pokeemerald:TrySetCantSelectMoveBattleScript`'s `gBattleMons`) on both symbol-map arms.
 
 const LICENCE_FIXTURES: readonly (readonly [string, string])[] = [

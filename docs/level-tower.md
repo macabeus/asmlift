@@ -222,7 +222,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   from counts to prices.** A number here is a delta between two candidate sets, and a round that
   changes the structurer changes both sets; so an axis measured as expensive is not refuted, it is
   dated. `/unmerge` (`l3/unmerge.ts`, enumerated by `PRE_FAN_PRODUCTS` in `rank-axes.ts`) is the
-  worked case — one axis, one row (`kleod:CountCollectedGems:agbcc`), the axis untouched throughout,
+  worked case — one axis, one row (`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`), the axis untouched throughout,
   **+44** against the #172-era winner and **+24** at #169's base, both MEASURED, then **−17/352**
   once #184 and #185 flattened the ladder and dropped the accumulator copies. It was the most
   expensive axis on that row for three rounds and is in its winning label now. Three more points
@@ -255,7 +255,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `switch (x) { case 0: case 2: … }` are two spellings of one asm shape that only a differ can
   choose between, and the row it was built for turned out to want neither: what was missing was a
   ten-line grouping in the structurer, which took
-  `kleod:ProcessInputAndUpdateEntities:agbcc` from 367 to 306 with the axis ON and to 306 with it
+  `kleod:PauseMenuScreenHandler:agbcc` from 367 to 306 with the axis ON and to 306 with it
   OFF — same breakdown, half the wall clock.
 
   The rule that follows is cheap: **an underdetermination claim about two source spellings is a
@@ -292,8 +292,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   ×3:17, ×4:1, ×4.5:1, ×5:4}); below 2× where the new tree instead makes a sibling inert, above it
   where it wakes one. Priced in the unit that costs compiles — surviving candidates over every row's
   own `targetAsm`, map-less — `/fresh-merge` is **+4579 over an axis-free fan of 18106, +25.3%**,
-  and **94% of that is two klonoa functions**: `kleod:ProcessInputAndUpdateEntities:agbcc` 4800 →
-  8640 and `kleod:ConfigureEntityBehavior:agbcc` 480 → 960. Quote the concentration, not just the
+  and **94% of that is two klonoa functions**: `kleod:PauseMenuScreenHandler:agbcc` 4800 →
+  8640 and `kleod:sub_0803F68C:agbcc` 480 → 960. Quote the concentration, not just the
   total: a row count ("105 rows pay ×2") understates the dominant row by two orders of magnitude,
   because rows are not the unit that compiles.
 
@@ -465,7 +465,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   SUNK ONE IS NOT: `synthetic:foldhead` is MATCH at 0 under `unsigned/basefold` and NONMATCH 11
   the moment the head entry is removed, while ablated, `synthetic:foldsink` and `sa3:sub_803213C`
   are MATCH with the sunk row removed, with the head row removed and with both removed, and
-  `kleod:ProcessInputAndUpdateEntities` is 211 either way. `synthetic:basecell` looks like the sunk
+  `kleod:PauseMenuScreenHandler` is 211 either way. `synthetic:basecell` looks like the sunk
   row's bracket and is not — both rows emit the identical source there and `seen` collapses the
   sunk one. A bracket is a claim about the WHOLE tree and not about the rule it names, so it
   expires whenever anything else learns to reach the same spelling: the rows this pair was bought
@@ -802,7 +802,7 @@ again, silently.
 the reach census it rests on counts OUTCOMES: 4 rows of the 806 that lift can move, 3 better and 1
 neutral. What that census does not say is that THREE of those rows now enumerate axes
 they could not before (`/merge-home`, `/defsite`, `/loop-entry`) and pay for them:
-`synthetic:sinkacc:agbcc` enumerates 36 -> 54 candidates and `kleod:CheckWorldCompletion:agbcc`
+`synthetic:sinkacc:agbcc` enumerates 36 -> 54 candidates and `kleod:WorldMapScreenIsValidPath:agbcc`
 2.69x as many, which is roughly 2x the wall clock on each real row. The fourth,
 `synthetic:fib:gcc2.7.2kmc`, is the two-sided control and gains NOTHING — 8 -> 8 candidates, the same
 eight labels, and its winner was already `signed/defsite/loop-entry` at 12 on main — so it is a
@@ -961,7 +961,7 @@ on the ranked real row `LoadBGTilemapData` the winner goes **473 → 419**. SIX 
 match with an arity the source never had — the fabricated parameter landing in the register the
 local occupied anyway — no longer need the coincidence, and all six now carry the arity their
 reference does: `synthetic:armhomes` 5 → 4, `hipress` 3 → 2, `maskhome` 7 → 4, `nestinit` 5 → 4,
-`sizehome` 4 → 3, and `kleod:UpdateHUDCounterDisplay` 2 → 0 against a reference that really is
+`sizehome` 4 → 3, and `kleod:DrawLevelHud_DreamStones` 2 → 0 against a reference that really is
 `(void)`.
 
 The lesson is not "measure again later". It is that the first measurement was taken against

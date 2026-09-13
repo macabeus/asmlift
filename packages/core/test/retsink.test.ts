@@ -135,7 +135,7 @@ test('a fall-through case arm is a fall-IN, not a chain, and its shared return s
  *  predecessors of `.L6` have a body, and one of them (`.L4`) even falls straight through into it,
  *  so a gate that subtracts "a predecessor that computed something and ran on" sees no chain here
  *  at all. It is the chain: the two arms are the two conditions' early exits, and `.L6` is the
- *  shared one. Five real-tier sites have this shape, `kleod:EntityItemDrop:agbcc` among them. */
+ *  shared one. Five real-tier sites have this shape, `kleod:sub_0801F4D0:agbcc` among them. */
 const TWO_ARMS =
   'm1:\n' +
   '\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n' +
@@ -291,7 +291,7 @@ test('ablating the dispatch gate reads an `if` join, and a guarded switch, as fa
 
 // ── the third admission arm: a CONSTANT-ARM diamond ──────────────────────────────────────────────
 
-/** `kleod:IsSelectButtonPressed`'s shape, with the global load that feeds the compare elided: one
+/** `kleod:HeldUp`'s shape, with the global load that feeds the compare elided: one
  *  condition, two arms, each a single `mov` of a constant, converging on a bare `bx lr`. */
 const CONST_SELECT =
   'sel:\n' +

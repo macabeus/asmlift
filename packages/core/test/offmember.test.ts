@@ -204,7 +204,7 @@ describe('every gate is load-bearing', () => {
 // oversight: the declaration governs the constant subscripts it was built from, and a sibling this
 // pass has no member spelling for keeps its own cast. Pinned because the alternative was built and
 // measured — refusing a base whose siblings it cannot spell costs
-// kleod:ProcessInputAndUpdateEntities score and moves none of the other artifact rows whose winner
+// kleod:PauseMenuScreenHandler score and moves none of the other artifact rows whose winner
 // carries `/offmember`, which are the only rows an extra gate here can move. Neither the bracket
 // nor the size of that row set is restated here: l3/offmember.ts's header carries the measurement
 // and names the query over the artifact that produces the set.

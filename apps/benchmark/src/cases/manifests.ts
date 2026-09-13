@@ -58,7 +58,7 @@ export interface RealFunction {
    *    m2c      the same project's vendored preprocessed CONTEXT, plus at most the one prototype
    *             line `proto` already gives asmlift (real.ts's `m2cOwnPrototype`). Neither tool is
    *             handed the row's own signature out of the reference source — with one measured
-   *             exception on 8 rows, README residual 4.
+   *             exception, README residual 4.
    *
    *  So withholding struct layouts from m2c does not "match asmlift"; it under-provisions m2c
    *  against a tool handed layouts outright. This flag is set on every real row without a

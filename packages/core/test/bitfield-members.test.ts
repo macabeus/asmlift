@@ -1,7 +1,7 @@
 // BITFIELD members from the symbol map: `(x << a) >> b` over a struct global's loaded bytes
 // spells the declared field (`gState.dreamStones`), whose `u32 f : n` declaration then makes C's
 // own promotion reproduce the signedness downstream operators compiled with. Built for
-// kleod:UpdateHUDCounterDisplay (the __udivsi3-for-__divsi3 family); the refusal conditions are
+// kleod:DrawLevelHud_DreamStones (the __udivsi3-for-__divsi3 family); the refusal conditions are
 // what keep it exact rather than approximate, so they are what these tests pin hardest.
 import { describe, expect, test } from 'vitest';
 

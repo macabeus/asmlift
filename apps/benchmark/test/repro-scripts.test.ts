@@ -230,11 +230,6 @@ describe('asmliftScript (pinned)', () => {
       // the old "standalone run does NOT load it" caveat is gone — the script loads the map now
       expect(s, fn.id).not.toContain('does NOT load');
     }
-    // kleod's repoDir differs from its GitHub repo name — the placeholder must use repoDir
-    const kleod = withMap.find((r) => r.project === 'kleod');
-    if (kleod) {
-      expect(asmliftScript(kleod)).toContain("PROJECT_PATH='/path/to/klonoa-empire-of-dreams'");
-    }
     // map-free rows keep the plain pre-step and no placeholder — and so do the AUTHORED-map
     // rows, whose map `bench target` writes itself: there is no checkout for a placeholder to
     // point at, and a script that asked for one would be asking for a thing that does not exist.

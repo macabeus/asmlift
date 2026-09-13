@@ -176,12 +176,13 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // the scope itself rather than on an approximation of it.
   //
   // An ADMISSION, not a default: forced on, the spelling is REPLACED across the fan rather than
-  // added to it, which costs `kleod:MultiplyQ4`, `kleod:MultiplyQ8` and
-  // `pokeemerald:MathUtil_Mul16` their matches. On the roster that is unreachable — `compareScored`
+  // added to it, which costs `kleod:MultiplyQ8` and `pokeemerald:MathUtil_Mul16` their matches
+  // (and cost `MultiplyQ4`, its byte-for-byte twin, until the 2026-09 kleod source swap retired that
+  // row as a duplicate). On the roster that is unreachable — `compareScored`
   // orders by score and the un-homed sibling rides beside it.
   //
   // Its fan is essentially one row's: over the corpus rows the gate admits, 2790 → 5841
-  // candidates map-less and 2538 → 5363 with a map, of which `kleod:UpdateCameraScroll` (outcome
+  // candidates map-less and 2538 → 5363 with a map, of which `kleod:AthleticChallengeScrollUpdate` (outcome
   // `noncompile`, so they buy nothing) is +2944 and +2752, three rows add none at all where
   // `/defsite` already spells the same tree, and the rest pay 107 and 73 between them.
   //
@@ -189,7 +190,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // a property of this file: it moves whenever an upstream pass changes whether a merge feed still
   // EXISTS in the IR. It now reads **20** of the 804 rows that lift (mine, both tiers), three more
   // than the same census over the tree before this branch: `synthetic:sinkacc:agbcc`,
-  // `kleod:CountCollectedGems:agbcc` and `kleod:CheckWorldCompletion:agbcc`, which `raise/const.ts`
+  // `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` and `kleod:WorldMapScreenIsValidPath:agbcc`, which `raise/const.ts`
   // gained by REFUSING to fold an accumulator's `add(const 0, const 1)` and so keeping the feed
   // alive for this gate to see. Re-measure the counts above before tuning off them — the number
   // recorded here has gone stale once already.
@@ -310,7 +311,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
   //
   // THE MAPPING IS STILL NOT A FUNCTION, which is the standing reason this is an axis rather than a
   // default: at `(scSharedOnFall=true, scSharedIsTaken=false)` the corpus holds one function with
-  // two sites of OPPOSITE source sense (`kleod:CheckWorldCompletion:agbcc`, 45/191 and unmoved
+  // two sites of OPPOSITE source sense (`kleod:WorldMapScreenIsValidPath:agbcc`, 45/191 and unmoved
   // because `/site-sense` is not its winner), so no constant is right there. Read the table in
   // structure.ts as the best per-site default, never as a decision procedure — the enumeration that
   // does not have to pick is `rank.ts`'s per-site `/sense-N` probe.
@@ -380,7 +381,7 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
  *  NOT A SECOND ADMISSION GROUND — the bar above is still WHERE the rewrite is applied, and sign
  *  base-dependence discriminates nothing (every axis in this file has a base-dependent price). What
  *  follows is why the lever is ENUMERATED at all. `/unmerge`'S SIGN IS A PROPERTY OF THE BASE, NOT
- *  OF THE AXIS. One axis, one row (`kleod:CountCollectedGems:agbcc`), with the axis untouched
+ *  OF THE AXIS. One axis, one row (`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`), with the axis untouched
  *  throughout — two MEASUREMENTS and three GRAFTS, kept apart because a graft is a lower bound with
  *  an unreliable sign AND magnitude, which this very axis then demonstrated:
  *
@@ -411,7 +412,7 @@ export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }
  *  candidate. Measured, not assumed — `unmergeAt`'s SUCCESSFUL returns counted per call under an
  *  instrumented `unmergeJoins` (`bench gates --pass unmerge` tallies each rule's REFUSALS and never
  *  a success), over the synthetic agbcc tier: k = 1 on 23 of the 25 firing rows and on
- *  `kleod:CountCollectedGems:agbcc` itself, k = 2 on `synthetic:joinsame` and
+ *  `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` itself, k = 2 on `synthetic:joinsame` and
  *  `synthetic:joinsense` — both MATCH, so the refusal costs nothing today. State it as PR #120
  *  states its own: a price, never an immunity.
  *
@@ -496,7 +497,7 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  `prototypes: {}` while the harness scores every one of them with `--proto proto.json`, and
  *  says nothing about it. Numbers below are from the heredoc.
  *  20 observations bind a key the default table refuses, spread over 14 rows in 4 projects (6
- *  map-ful, 14 map-less), 25 keys in all. FOUR are numeric — two on `kleod:RollRandomLevelVariant`
+ *  map-ful, 14 map-less), 25 keys in all. FOUR are numeric — two on `kleod:sub_0803E8CC`
  *  and one each on `synthetic:basecell` and `synthetic:foldsink`, all map-less, because with a map
  *  the pool constant lifts to a `gaddr` and the numeric clause stands down while the symbol clause
  *  takes over. The other 21 are SYMBOL keys over 11 rows in three projects (6 of those
@@ -524,18 +525,18 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  row's count of `basefold`-labelled candidates exactly, which is both what says the ablation
  *  reached and what says these are sources nothing earlier in the roster emits.
  *  It is CONCENTRATED, not spread: in the map configuration the harness uses on real rows,
- *  `kleod:ProcessInputAndUpdateEntities` takes +2880 (14976 → 17856),
- *  `kleod:UpdateCameraScroll` +512 (5968 → 6480), `kleod:CountCollectedGems` +192 (384 → 576),
- *  `kleod:UpdateWorldMapNodeAnim` +176 (488 → 664) and nothing else more than 32. Re-run a
+ *  `kleod:PauseMenuScreenHandler` takes +2880 (14976 → 17856),
+ *  `kleod:AthleticChallengeScrollUpdate` +512 (5968 → 6480), `kleod:WorldMapScreenCheckNewWorldUnlocked` +192 (384 → 576),
+ *  `kleod:WorldMapScreenUnlockNewWorld` +176 (488 → 664) and nothing else more than 32. Re-run a
  *  concentration figure before budgeting against it: a DELTA can reproduce while the fan it was
  *  quoted against has moved, and that is what makes a stale paragraph read as verified.
- *  `kleod:UpdateCameraScroll` is an `outcome: noncompile` row — `decompileRanked` throws only when
+ *  `kleod:AthleticChallengeScrollUpdate` is an `outcome: noncompile` row — `decompileRanked` throws only when
  *  EVERY candidate failed to build — so its whole fan is compiled and discarded, and this made
  *  that discard 10% bigger. Timed on two full bench runs on a shared box, and not re-timed since
  *  the deltas above, so read them as a floor rather than a price: that row 377.6s → 483.0s, the
  *  second 238.4s → 313.6s, real tier 416.1s → 529.4s. Priced — and the three rows the pair was
  *  bought with DO NOT BUY IT TODAY: ablated, `sa3:sub_803213C` is MATCH with the pair removed,
- *  `kleod:ProcessInputAndUpdateEntities` 211 either way and `kleod:CountCollectedGems` 290 either
+ *  `kleod:PauseMenuScreenHandler` 211 either way and `kleod:WorldMapScreenCheckNewWorldUnlocked` 290 either
  *  way. A SCORE QUOTED HERE IS THE ARTIFACT'S: it moves whenever anything at all moves the row,
  *  a basefold change or not, so re-read it off the artifact rather than off this line. Read the
  *  ablation in the note on BASEFOLD_ADMISSIONS, which carries the fan counts that prove it
@@ -591,8 +592,8 @@ export const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  (Their fans still move: `foldsink` 12 → 8 → 8 → 4 over control/sunk/head/both, `basecell`
  *  4 → 4 → 4 → 2, the four-number sequence saying that on `basecell` the two entries emit the
  *  SAME two sources and `seen` collapses them, so only removing both takes the fan down.)
- *  `sa3:sub_803213C` MATCH, and — with the pair removed — `kleod:ProcessInputAndUpdateEntities`
- *  211, `kleod:CountCollectedGems` 290 and `kleod:RollRandomLevelVariant` 18, each of them the
+ *  `sa3:sub_803213C` MATCH, and — with the pair removed — `kleod:PauseMenuScreenHandler`
+ *  211, `kleod:WorldMapScreenCheckNewWorldUnlocked` 290 and `kleod:sub_0803E8CC` 18, each of them the
  *  number the artifact already carries, and each of them ENTAILED rather than separately scored:
  *  the ablated candidate set is a strict SUBSET of the control one on every row here (enumerated
  *  both ways, 0 sources ADDED and 0 RELABELLED — `ProcessInputAndUpdateEntities` 58752 → 48384
@@ -667,8 +668,8 @@ export const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  are the same 44 candidates above. ONE 15-LINE FUNCTION CANNOT SETTLE A CORPUS QUESTION, so the
  *  same knob was censused over every agbcc row the artifact carries, candidates only: `true` adds
  *  912 distinct sources over 8 rows, +1.92% of the agbcc corpus fan (quoted as the DELTA,
- *  because the total moves with the corpus and with the roster) — `kleod:UpdateCameraScroll`
- *  +608, `synthetic:sizebound` +128, `synthetic:dmascope` +64, `kleod:SetupBG3WindowOverlay` and
+ *  because the total moves with the corpus and with the roster) — `kleod:AthleticChallengeScrollUpdate`
+ *  +608, `synthetic:sizebound` +128, `synthetic:dmascope` +64, `kleod:ButtonConfigurationScreenInit` and
  *  `synthetic:maskhome` +32 each, and +16 each on `dmafield`, `dmaflat` and `dmapoll`. Five of the
  *  eight are MATCH and two are `noncompile`, where extra candidates cannot help; the one that
  *  could, `synthetic:sizebound`, scores diff:8 with the products on and diff:8 with them off. So
@@ -691,12 +692,12 @@ export const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *  TWO PLACEMENTS, and the FLAT second one is a measured zero. `synthetic:bgarr` emits the identical
  *  source at `head` and `first-use` (the hoist has nothing to sit above) and that one row
  *  generalizes to nothing: over the artifact's agbcc rows the two emit DIFFERENT source on 3 of the
- *  8 rows this admission binds map-less and 4 of the 10 map-ful — `kleod:SetupBG3WindowOverlay`,
- *  `kleod:UpdateCameraScroll`, `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful
- *  `kleod:StreamCmd_SetBGScroll`. Run through the harness on all four, an entry at
+ *  8 rows this admission binds map-less and 4 of the 10 map-ful — `kleod:ButtonConfigurationScreenInit`,
+ *  `kleod:AthleticChallengeScrollUpdate`, `pokeemerald:TrySetCantSelectMoveBattleScript`, and map-ful
+ *  `kleod:sub_0804C7FC`. Run through the harness on all four, an entry at
  *  `placement: 'first-use'` scores nothing: 146 → 146, noncompile → noncompile, MATCH → MATCH,
  *  noncompile → noncompile, against +1129 candidates over those rows' 15167 (+7.4%) and
- *  `kleod:UpdateCameraScroll` 224 s → 278 s. That row stays withheld.
+ *  `kleod:AthleticChallengeScrollUpdate` 224 s → 278 s. That row stays withheld.
  *
  *  `scope` is a DIFFERENT question and a row demanded it. `first-use` reaches only the top-level
  *  statement list, so on a function whose licensed base is used solely inside a guarded loop it
@@ -714,7 +715,7 @@ export const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *  nested one. `hoistBaseLocals` DECLINES at `scope` in exactly that case (l3/basecse.ts) — a
  *  WITHDRAWAL and not a dedup, because on 29 of the 41 the flat spelling is one no other row here
  *  produces, which that file's header prices. Measured on
- *  `kleod:UpdateCameraScroll` map-ful, the row that priced the withheld one: 512 of its 512
+ *  `kleod:AthleticChallengeScrollUpdate` map-ful, the row that priced the withheld one: 512 of its 512
  *  `/orderbase/scoped` sources placed the init at the top level, and all 512 are gone.
  *
  *  `pairings: false` on both for the field's own reason — a product is added for a row that demands

@@ -28,7 +28,7 @@
 // four blocks collapsed to two, with no unconditional branch to the merge at all. For the {0,1} pair
 // it goes further and folds branchlessly (`negs r0,r0; lsrs r0,r0,#31`), erasing the comparison too.
 // So where the TARGET holds that diamond, a merge variable is the spelling of some other function,
-// and sinking is the only candidate that can match (`kleod:IsSelectButtonPressed:agbcc`).
+// and sinking is the only candidate that can match (`kleod:HeldUp:agbcc`).
 //
 // ONE MODEL, NOT TWO. The predicate is `narrowlocal.ts`'s exported `armIsOneSet` — no op that
 // `REEVAL_UNSAFE_OPS` calls unsafe, and EXACTLY one result-producing op — read here by
@@ -133,7 +133,7 @@
 // bodied ones above, and they are what `packages/cli/test/matching` pins.
 //
 // REACH: ONE corpus row. Re-lifting all 1039 rows against `origin/main` changes the emitted source
-// of `kleod:IsSelectButtonPressed:agbcc` and of nothing else. That is one inhabitant because the
+// of `kleod:HeldUp:agbcc` and of nothing else. That is one inhabitant because the
 // corpus has one, not because the rule is shaped to it: the three synthetic rows minted for this
 // admission (`selconst`, `selhead` — a body in the HEAD, arms still one SET each — and `selloop`, a
 // loop ahead of the diamond; see `apps/benchmark/dataset/synthetic.ts`) are MATCH on agbcc as well,
@@ -204,7 +204,7 @@
 // "this pred computed something and ran on" is a proxy for the same intuition, and it refuses the
 // shape this pass exists for, where the two arms of `if (a) { … return 0; } if (b) { … return 0; }`
 // both compute and both jump to the shared exit (`retsink.test.ts`'s `TWO_ARMS`; five real-tier
-// sites have it, `kleod:EntityItemDrop:agbcc` among them).
+// sites have it, `kleod:sub_0801F4D0:agbcc` among them).
 //
 // "THE PREVIOUS ARM OF THE SAME DISPATCH" IS A CLAIM ABOUT A DISPATCH, so this file models one
 // (`scrutOf`/`armsOf` below): two arms of two DIFFERENT tests on the SAME scrutinee. A proxy that
@@ -363,7 +363,7 @@ export const SELECT_GATES: readonly Gate<SelectCandidate>[] = [
     //
     // SUBSUMED ON THIS CORPUS, and the row ids are the point. Instrumenting `firstRejection` over
     // all 1039 rows shows the clause first-refusing two agbcc sites — `kleod:Decompress` and
-    // `kleod:ReadKeyInput` — so the ARM Thumb frontend really does hand this table operand-less
+    // `kleod:InputHandler_Normal` — so the ARM Thumb frontend really does hand this table operand-less
     // `ret` merges. Ablating it still moves 0 rows,
     // because `arms-are-one-set` refuses both a step later. It is kept for the same reason
     // `no-arrival-but-the-arms` is: the two make independent claims, and this one is the only thing

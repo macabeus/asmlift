@@ -46,7 +46,7 @@ test('trace: stage sequence, pattern event, and source parity with decompile()',
 
 test('trace: the STAGE reports what it derived, the REPORT what the source rests on', () => {
   // These are two different questions and the trace answers both, because they differ wherever a
-  // consumer refused the shape (`kleod:SetupBG3WindowOverlay` on the corpus) or the caller's own
+  // consumer refused the shape (`kleod:ButtonConfigurationScreenInit` on the corpus) or the caller's own
   // map already declared the name (`sa3:sa2__sub_8083504`). The stage note is the stage's own
   // product — a reader following `stage:lift` → `stage:structure` needs to see the shape that was
   // read — while `assumedSymbols` is the obligation handed to whoever pastes the source.

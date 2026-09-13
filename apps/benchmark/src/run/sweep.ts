@@ -215,9 +215,9 @@ export function renderDiff(d: SweepDiff): string[] {
  *  docs/ranked-repro.md at 225,792 spellings and over five hours; the dataset does not carry it,
  *  so a SKIP regex naming it protects the corpus sweep from nothing):
  *
- *    kleod:ProcessInputAndUpdateEntities:agbcc   77,760   EXCLUDED
- *    kleod:UpdateCameraScroll:agbcc              13,728   admitted, measured 25.1 s
- *    kleod:CountCollectedGems:agbcc               9,192   admitted, measured 83.0 s — the slowest
+ *    kleod:PauseMenuScreenHandler:agbcc   77,760   EXCLUDED
+ *    kleod:AthleticChallengeScrollUpdate:agbcc              13,728   admitted, measured 25.1 s
+ *    kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc               9,192   admitted, measured 83.0 s — the slowest
  *
  *  20,000 sits between the one giant and the largest row a round actually enumerates. Lower would
  *  exclude `CountCollectedGems`, which is this project's most-enumerated row and therefore the
@@ -588,7 +588,7 @@ const selectionOf = (o: SweepOptions): SweepSelection => ({
  *  the comparison has silently paid five hours to produce one. */
 function overLimitRows(o: SweepOptions): { over: Record<string, number>; unreadable?: string } {
   // `--asm-dir` is excluded rather than merely empty: the guard keys on a DATASET row id, a raw
-  // `.s` has no recorded count, and printing "`--fan` skips kleod:ProcessInputAndUpdateEntities"
+  // `.s` has no recorded count, and printing "`--fan` skips kleod:PauseMenuScreenHandler"
   // over a selection that never iterates a dataset row told a reader a guard had fired when none
   // could. `sweepRefusal` refuses that combination; this keeps the note off the other paths too.
   if (o.fan !== true || o.force === true || o.asmDir !== undefined) {
@@ -710,9 +710,7 @@ export async function sweep(o: SweepOptions): Promise<number> {
     note(
       `asmlift: [sweep] --fan needs the committed artifact to size what it is about to enumerate, and it does not: ${unreadable}`,
     );
-    note(
-      `asmlift: [sweep] --force enumerates every row anyway (kleod:ProcessInputAndUpdateEntities is 77,760 spellings).`,
-    );
+    note(`asmlift: [sweep] --force enumerates every row anyway (kleod:PauseMenuScreenHandler is 77,760 spellings).`);
     return 2;
   }
   const sel = selectionOf({ ...o, overLimit: over });

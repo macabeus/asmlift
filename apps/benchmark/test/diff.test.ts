@@ -179,7 +179,7 @@ describe('compareMeasurements', () => {
   });
 
   // THE FAN MOVED AND NOTHING ELSE DID. Over `eb6dec7d`→`2fed1e42` this is 2 real rows
-  // (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`): identical
+  // (`kleod:PauseMenuScreenHandler:agbcc`, `kleod:DrawLevelHud_DreamStones:agbcc`): identical
   // source, identical score, identical label, a different number of spellings that failed to build.
   // The COUNT is watched and the LIST is not — the list runs to 51,840 entries on one row of the
   // current artifact.

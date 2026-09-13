@@ -344,11 +344,18 @@ describe('the unmatchable register is falsified by the artifact', () => {
 
   it('every row it closes is still a nonmatch in results.json', () => {
     const ids = registerRows();
-    expect(
-      ids.length,
-      `no row parsed out of ${REGISTER}'s table — either the register is empty (delete this gate) or ` +
-        'its table shape moved and this check went blind',
-    ).toBeGreaterThan(0);
+    // AN EMPTY REGISTER IS A STATE, NOT A BLIND SPOT — its only entry's row was retired with the
+    // project source it came from (2026-09). What this must still refuse is a table this gate can no
+    // longer READ, which would also parse to zero rows: so zero rows is accepted only beside the
+    // table's own header, spelled as the page spells it.
+    if (ids.length === 0) {
+      const page = readFileSync(REGISTER, 'utf8');
+      expect(
+        page.includes('| row ') && page.includes('| verdict taken |'),
+        `no row parsed out of ${REGISTER}'s table, and its header is gone too — the table shape moved ` +
+          'and this check went blind',
+      ).toBe(true);
+    }
 
     const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as (Identifiable & {
       asmlift?: { outcome?: string };
@@ -537,8 +544,8 @@ describe('docs/bench-cost.md', () => {
 
     const real = ranked('real');
     const synthetic = ranked('synthetic');
-    const piue = row('kleod:ProcessInputAndUpdateEntities:agbcc');
-    const ccg = row('kleod:CountCollectedGems:agbcc');
+    const piue = row('kleod:PauseMenuScreenHandler:agbcc');
+    const ccg = row('kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc');
 
     const expected = [
       `${group(sum(real))} s over ${real.length}`,

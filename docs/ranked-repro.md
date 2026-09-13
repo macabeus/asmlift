@@ -84,7 +84,7 @@ below), fills in `ASMLIFT_PATH` and the row's own project checkout, runs it with
 and stderr to `out.err`, and reports **the `[ranked]` line**:
 
 ```
-repro: kleod:GetEntityLookupData:agbcc — nonmatch 4/14 as published
+repro: kleod:sub_0803D140:agbcc — nonmatch 4/14 as published
 repro: symbol map from …/apps/benchmark/checkouts/klonoa-empire-of-dreams
 asmlift: [ranked] 4 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best unsigned/raw-globals: 4/14 [asmlift source 3a06c74]
 repro: script exit 1 — a non-matching row exits nonzero by design
@@ -206,7 +206,7 @@ Two things it can do that nothing else can:
   refused rather than answered with whatever enumeration emitted first). That is the cheap
   configuration-identification this file's "Getting the fan alone is cheap" section describes,
   without killing the run after its first `[progress]` line. **Cheap relative to compiling, not
-  cheap absolutely**: `kleod:CountCollectedGems:agbcc`'s 5,952 labels take 50 s wall with the
+  cheap absolutely**: `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`'s 5,952 labels take 50 s wall with the
   target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
   to LIST. Read a long enumeration as a big fan, not as a hang.
 
@@ -286,7 +286,7 @@ the field, or the row never ranked there). And this run enumerates 32; the serie
 **A fan over 2,000 candidates is refused, not scored** (`--force` overrides), and the refusal
 prices the run it is refusing from the row's own count AND ITS OWN TIER. Scoring is a compile each,
 and the two tiers do not compile the same thing: `synthetic:sizebound:agbcc`'s 800 take **48 s
-cold** (10 s warm, 60 ms each), while `kleod:CountCollectedGems:agbcc`'s 5,952 took **518 s and
+cold** (10 s warm, 60 ms each), while `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`'s 5,952 took **518 s and
 483 s** on two cold runs (85 ms each, both reproducing the published `171/387`) — a real candidate
 escalates through up to three preludes in `compile/real.ts`, a synthetic one through a single small
 prelude; one rate for both under-prices the real tier by ~35%, on the row the refusal's own example
@@ -907,7 +907,7 @@ worse than none.
 is objdiff's total row count for _that candidate's_ alignment against the target, so it belongs to
 the candidate and not to the target: a different spelling aligns differently and is scored against
 a different scale. **A run-to-run delta is therefore a pair of fractions, never a subtraction.**
-`kleod:CountCollectedGems:agbcc` moved 290/404 → 171/387 between two committed artifacts, and
+`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` moved 290/404 → 171/387 between two committed artifacts, and
 reading its `290 → 171` as 119 points on a fixed scale cost an attribution round. Quote both
 numbers; if the denominators differ, say so in the same sentence.
 

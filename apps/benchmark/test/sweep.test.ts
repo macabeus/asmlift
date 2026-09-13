@@ -149,7 +149,7 @@ describe('a record neither tree lifted is not "identical"', () => {
     // every time.
     const side = [
       skipped('synthetic:c:agbcc', 'build'),
-      rec({ id: 'kleod:ProcessInputAndUpdateEntities:agbcc', arm: 'harness', skipped: 'fan-limit' }),
+      rec({ id: 'kleod:PauseMenuScreenHandler:agbcc', arm: 'harness', skipped: 'fan-limit' }),
     ];
     const d = compareSweeps(side, side);
     expect(d.notMeasured).toBe(1);
@@ -370,7 +370,7 @@ describe('the --fan size guard reads its own SELECTION, not just the artifact', 
     path: '/repo/apps/benchmark/results/results.json',
     rows,
   });
-  const giant: [string, number] = ['kleod:ProcessInputAndUpdateEntities:agbcc', 77760];
+  const giant: [string, number] = ['kleod:PauseMenuScreenHandler:agbcc', 77760];
   const small: [string, number] = ['sa3:GetInput:agbcc', 120];
   const sel = { tiers: ['synthetic', 'real'] as const };
 
@@ -478,12 +478,12 @@ describe('which rows a selection names', () => {
     const both = { tiers: ['synthetic', 'real'] as const };
     expect(selectsRow(both, 'synthetic:mini:agbcc')).toBe(true);
     expect(selectsRow({ tiers: ['real'] }, 'synthetic:mini:agbcc')).toBe(false);
-    expect(selectsRow({ tiers: ['synthetic'] }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
+    expect(selectsRow({ tiers: ['synthetic'] }, 'kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc')).toBe(false);
     expect(selectsRow({ ...both, project: 'kleod' }, 'sa3:GetInput:agbcc')).toBe(false);
-    expect(selectsRow({ ...both, only: 'Gems' }, 'kleod:CountCollectedGems:agbcc')).toBe(true);
+    expect(selectsRow({ ...both, only: 'Gems' }, 'kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc')).toBe(true);
     // the substring matches the SYM, not the project or the toolchain
-    expect(selectsRow({ ...both, only: 'kleod' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
-    expect(selectsRow({ ...both, only: 'agbcc' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
+    expect(selectsRow({ ...both, only: 'kleod' }, 'kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc')).toBe(false);
+    expect(selectsRow({ ...both, only: 'agbcc' }, 'kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc')).toBe(false);
   });
 
   it('answers to a former name, as `collect` does', () => {
@@ -552,8 +552,8 @@ describe('a --compare side that is not a sweep record file', () => {
 describe('the --fan size guard', () => {
   it("sits above the biggest row a round actually enumerates and below the corpus's one giant", () => {
     // Not a round number for its own sake, and the bracket is read off the COMMITTED artifact:
-    // `kleod:CountCollectedGems:agbcc` records 9,192 spellings (measured 83.0 s here) and is the
-    // row this project's rounds enumerate most; `kleod:ProcessInputAndUpdateEntities:agbcc`
+    // `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` records 9,192 spellings (measured 83.0 s here) and is the
+    // row this project's rounds enumerate most; `kleod:PauseMenuScreenHandler:agbcc`
     // records 77,760 and is the only corpus row over the limit. A limit between them IS the
     // design, so moving it has to fail here rather than quietly turn a 437 s sweep into an
     // overnight one.

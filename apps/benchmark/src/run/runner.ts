@@ -43,7 +43,7 @@ export function benchMeta(results: FunctionResult[]): BenchMeta {
  *
  *  A gap prints `diff:<score>/<maxScore>`, NOT `diff:<score>`, because `maxScore` is not a
  *  constant of the row: it is the objdiff row count of the winning candidate's alignment, so it
- *  moves whenever the candidate does (`kleod:CountCollectedGems:agbcc` went 290/404 → 171/387
+ *  moves whenever the candidate does (`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` went 290/404 → 171/387
  *  between two committed artifacts). A bare numerator invites reading two runs' scores as a
  *  subtraction on a fixed scale, which is how a 17-point denominator move got attributed to
  *  capability gaps. */

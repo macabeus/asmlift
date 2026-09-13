@@ -1,170 +1,170 @@
 {
-  "ReturnOne": {
-    "tu": "ReturnOne.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
-  },
-  "StrCpy": {
-    "tu": "StrCpy.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
-  },
   "MultiplyQ8": {
     "tu": "MultiplyQ8.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
-  },
-  "MultiplyQ4": {
-    "tu": "MultiplyQ4.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+    "ctx": "ctx-4400a3777343.i.gz"
   },
   "DivideQ8": {
     "tu": "DivideQ8.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+    "ctx": "ctx-4400a3777343.i.gz"
   },
   "ReciprocalQ8": {
     "tu": "ReciprocalQ8.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+    "ctx": "ctx-4400a3777343.i.gz"
   },
-  "DivideQ4": {
-    "tu": "DivideQ4.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "InputHandler_Normal": {
+    "tu": "InputHandler_Normal.i.gz",
+    "ctx": "ctx-362987f524b4.i.gz"
   },
-  "ReciprocalQ4": {
-    "tu": "ReciprocalQ4.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "VBlankIntr_CutsceneTransition": {
+    "tu": "VBlankIntr_CutsceneTransition.i.gz",
+    "ctx": "ctx-4400a3777343.i.gz"
   },
-  "ReadKeyInput": {
-    "tu": "ReadKeyInput.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_0804B270": {
+    "tu": "sub_0804B270.i.gz",
+    "ctx": "ctx-564ce1bc4958.i.gz"
   },
-  "VBlankHandlerMinimal": {
-    "tu": "VBlankHandlerMinimal.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_0803D140": {
+    "tu": "sub_0803D140.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "ReadUnalignedU32": {
-    "tu": "ReadUnalignedU32.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "WorldMapScreenDrawUnlockedWorlds": {
+    "tu": "WorldMapScreenDrawUnlockedWorlds.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "GetEntityLookupData": {
-    "tu": "GetEntityLookupData.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
-  },
-  "UpdateEntities": {
-    "tu": "UpdateEntities.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
-  },
-  "GameUpdate": {
-    "tu": "GameUpdate.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_08045734": {
+    "tu": "sub_08045734.i.gz",
+    "ctx": "ctx-a600f32236f7.i.gz"
   },
   "Decompress": {
     "tu": "Decompress.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+    "ctx": "ctx-4400a3777343.i.gz"
   },
   "DecompressDma": {
     "tu": "DecompressDma.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+    "ctx": "ctx-4400a3777343.i.gz"
   },
-  "CheckTileCollisionVertical": {
-    "tu": "CheckTileCollisionVertical.i.gz",
-    "ctx": "ctx-9ccc03ef54d1.i.gz"
+  "sub_08014184": {
+    "tu": "sub_08014184.i.gz",
+    "ctx": "ctx-862996fa0aa6.i.gz"
   },
-  "ProcessHBlankWait": {
-    "tu": "ProcessHBlankWait.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_0804DC64": {
+    "tu": "sub_0804DC64.i.gz",
+    "ctx": "ctx-564ce1bc4958.i.gz"
   },
   "DecompressAlloc": {
     "tu": "DecompressAlloc.i.gz",
-    "ctx": "ctx-bbb0f9d88b2b.i.gz"
+    "ctx": "ctx-4400a3777343.i.gz"
   },
-  "WritePaletteColor": {
-    "tu": "WritePaletteColor.i.gz",
-    "ctx": "ctx-057283b93369.i.gz"
+  "sub_0804C844": {
+    "tu": "sub_0804C844.i.gz",
+    "ctx": "ctx-989f1d4d9555.i.gz"
   },
-  "ReadUnalignedU16": {
-    "tu": "ReadUnalignedU16.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_0804B254": {
+    "tu": "sub_0804B254.i.gz",
+    "ctx": "ctx-564ce1bc4958.i.gz"
   },
-  "FreeAllDecompBuffers": {
-    "tu": "FreeAllDecompBuffers.i.gz",
-    "ctx": "ctx-f808d4b2fde6.i.gz"
+  "sub_080008DC": {
+    "tu": "sub_080008DC.i.gz",
+    "ctx": "ctx-362987f524b4.i.gz"
   },
-  "DmaSpriteToObjVram": {
-    "tu": "DmaSpriteToObjVram.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_0804C1C0": {
+    "tu": "sub_0804C1C0.i.gz",
+    "ctx": "ctx-564ce1bc4958.i.gz"
   },
-  "StreamCmd_SetWindowRegs": {
-    "tu": "StreamCmd_SetWindowRegs.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_0804E708": {
+    "tu": "sub_0804E708.i.gz",
+    "ctx": "ctx-564ce1bc4958.i.gz"
   },
-  "RollRandomLevelVariant": {
-    "tu": "RollRandomLevelVariant.i.gz",
-    "ctx": "ctx-10a1ea923d7f.i.gz"
+  "sub_0803E8CC": {
+    "tu": "sub_0803E8CC.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "TransformSingleEntityToScreen": {
-    "tu": "TransformSingleEntityToScreen.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_0800A5B8": {
+    "tu": "sub_0800A5B8.i.gz",
+    "ctx": "ctx-4c5fe21f7ad7.i.gz"
   },
-  "CopyBGScrollTiles": {
-    "tu": "CopyBGScrollTiles.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "DrawLevelHud_Hearts": {
+    "tu": "DrawLevelHud_Hearts.i.gz",
+    "ctx": "ctx-f11a58eb7f4e.i.gz"
   },
-  "UpdateHUDCounterDisplay": {
-    "tu": "UpdateHUDCounterDisplay.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "DrawLevelHud_DreamStones": {
+    "tu": "DrawLevelHud_DreamStones.i.gz",
+    "ctx": "ctx-f11a58eb7f4e.i.gz"
   },
-  "CheckWorldCompletion": {
-    "tu": "CheckWorldCompletion.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "WorldMapScreenIsValidPath": {
+    "tu": "WorldMapScreenIsValidPath.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "UpdateWorldMapNodeTile": {
-    "tu": "UpdateWorldMapNodeTile.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "WorldMapScreenDrawPath": {
+    "tu": "WorldMapScreenDrawPath.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "UpdateFadeEffect": {
-    "tu": "UpdateFadeEffect.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "HBlankIntr_DeleteAllSaveDataScreen": {
+    "tu": "HBlankIntr_DeleteAllSaveDataScreen.i.gz",
+    "ctx": "ctx-4400a3777343.i.gz"
   },
-  "StreamCmd_SetBGScroll": {
-    "tu": "StreamCmd_SetBGScroll.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+  "sub_0804C7FC": {
+    "tu": "sub_0804C7FC.i.gz",
+    "ctx": "ctx-989f1d4d9555.i.gz"
   },
-  "ProcessInputAndUpdateEntities": {
-    "tu": "ProcessInputAndUpdateEntities.i.gz",
-    "ctx": "ctx-dd37d37455e4.i.gz"
+  "PauseMenuScreenHandler": {
+    "tu": "PauseMenuScreenHandler.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "ConfigureEntityBehavior": {
-    "tu": "ConfigureEntityBehavior.i.gz",
-    "ctx": "ctx-8f3949f8ca4f.i.gz"
+  "sub_0803F68C": {
+    "tu": "sub_0803F68C.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "UpdateCameraScroll": {
-    "tu": "UpdateCameraScroll.i.gz",
-    "ctx": "ctx-c68b94e46656.i.gz"
+  "AthleticChallengeScrollUpdate": {
+    "tu": "AthleticChallengeScrollUpdate.i.gz",
+    "ctx": "ctx-8ab42b340ed1.i.gz"
   },
-  "CountCollectedGems": {
-    "tu": "CountCollectedGems.i.gz",
-    "ctx": "ctx-8f3949f8ca4f.i.gz"
+  "WorldMapScreenCheckNewWorldUnlocked": {
+    "tu": "WorldMapScreenCheckNewWorldUnlocked.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "UpdateWorldMapNodeAnim": {
-    "tu": "UpdateWorldMapNodeAnim.i.gz",
-    "ctx": "ctx-dd37d37455e4.i.gz"
+  "WorldMapScreenUnlockNewWorld": {
+    "tu": "WorldMapScreenUnlockNewWorld.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "EntityItemDrop": {
-    "tu": "EntityItemDrop.i.gz",
-    "ctx": "ctx-d4ba501e6cbc.i.gz"
+  "sub_0801F4D0": {
+    "tu": "sub_0801F4D0.i.gz",
+    "ctx": "ctx-862996fa0aa6.i.gz"
   },
-  "SetupBG3WindowOverlay": {
-    "tu": "SetupBG3WindowOverlay.i.gz",
-    "ctx": "ctx-13fbdb507b65.i.gz"
+  "ButtonConfigurationScreenInit": {
+    "tu": "ButtonConfigurationScreenInit.i.gz",
+    "ctx": "ctx-7fb26f8bfb50.i.gz"
   },
-  "EntityDeathAnimation": {
-    "tu": "EntityDeathAnimation.i.gz",
-    "ctx": "ctx-169871128279.i.gz"
+  "sub_0801DE44": {
+    "tu": "sub_0801DE44.i.gz",
+    "ctx": "ctx-862996fa0aa6.i.gz"
   },
-  "IsSelectButtonPressed": {
-    "tu": "IsSelectButtonPressed.i.gz",
-    "ctx": "ctx-468a872ed564.i.gz"
+  "HeldUp": {
+    "tu": "HeldUp.i.gz",
+    "ctx": "ctx-b3f10d28917d.i.gz"
   },
-  "VBlankDMA_Level2": {
-    "tu": "VBlankDMA_Level2.i.gz",
-    "ctx": "ctx-11a3f2b324e5.i.gz"
+  "LoadObjects_World2Select": {
+    "tu": "LoadObjects_World2Select.i.gz",
+    "ctx": "ctx-6d5396c7bf99.i.gz"
+  },
+  "UpdateEntityAnimationInfoEntries": {
+    "tu": "UpdateEntityAnimationInfoEntries.i.gz",
+    "ctx": "ctx-f11a58eb7f4e.i.gz"
+  },
+  "sub_08045F68": {
+    "tu": "sub_08045F68.i.gz",
+    "ctx": "ctx-a600f32236f7.i.gz"
+  },
+  "sub_0804C898": {
+    "tu": "sub_0804C898.i.gz",
+    "ctx": "ctx-564ce1bc4958.i.gz"
+  },
+  "sub_0804C300": {
+    "tu": "sub_0804C300.i.gz",
+    "ctx": "ctx-989f1d4d9555.i.gz"
+  },
+  "DeleteAllSaveData": {
+    "tu": "DeleteAllSaveData.i.gz",
+    "ctx": "ctx-528a577a2b2b.i.gz"
   }
 }

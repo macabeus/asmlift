@@ -24,7 +24,7 @@ It prints the row as the published benchmark has it, and then whether that is st
 example, on the day this was written:
 
 ```
-kleod:CountCollectedGems:agbcc  asmlift=nonmatch 171/387  m2c=noncompile -/-
+kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 171/387  m2c=noncompile -/-
 baseline: 1 row(s) from the artifact generated <timestamp>, as committed on origin/main
 baseline: CURRENT — nothing since <sha> changes what it measures, so these numbers beat any you were handed.
 ```

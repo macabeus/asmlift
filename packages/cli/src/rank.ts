@@ -88,7 +88,7 @@ export const enumerateRanked = (name: string, asm: string, target: TargetDescrip
  *
  *  BOUNDED, and LOUDLY: 2^n is the whole point of the probe, so a value that would enumerate
  *  millions of points is a typo rather than a request, and an unbounded one dies in the allocator
- *  with nothing said. `kleod:CountCollectedGems` has 16 sense sites and the full fork there is
+ *  with nothing said. `kleod:WorldMapScreenCheckNewWorldUnlocked` has 16 sense sites and the full fork there is
  *  65536× — already unaffordable, which is a finding the probe is meant to REPORT. */
 const PERSITE_SENSE_MAX_BITS = 12;
 const perSiteSenseProbe = (): { perSiteSenseBits?: number } => {

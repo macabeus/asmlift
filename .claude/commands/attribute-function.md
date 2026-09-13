@@ -104,7 +104,7 @@ Three docs carry what this command shares with `/match-function`, and it does no
 **The rule and its evidence are §5 of
 [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md)**, because
 `/match-function` is held to it too. Read it there. It is load-bearing for THIS command in
-particular: `kleod:CountCollectedGems:agbcc` moved 290/404 → 171/387, a 119-point "improvement"
+particular: `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` moved 290/404 → 171/387, a 119-point "improvement"
 containing 17 points of scale, and that row's residual was then decomposed into six gaps said to
 PARTITION the 290. They predicted 297 points, delivered 119, and an extra attribution round was
 spent explaining a shortfall that was partly the scale.

@@ -418,6 +418,13 @@ const PROBE_NEST_MAP: SymbolMap = new Map([
 ]);
 
 export const SYNTHETIC: SynthSpec[] = [
+  // ── baseline ──────────────────────────────────────────────────────────────────────────
+  // The control group: a function carrying no other feature. Its body must derive no tag at all
+  // (no operator, no branch, no call), or it stops being a control. The corpus's only `baseline`
+  // row used to be the real kleod row at 0x0800045c, which the 2026-09 source swap found is not a
+  // function (it is the `movs r0, #1; bx lr` tail label of `StringCompare` in testyourmine/kleod's
+  // asm/util.s), so the control lives here, where no binary can dispute its boundaries.
+  { sym: 'retone', src: 'int retone(void){ return 1; }', features: ['baseline'], toolchains: ['agbcc'] },
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'sub', src: 'int sub(int a,int b){ return a-b; }', features: ['arithmetic'], toolchains: ALL },
@@ -1636,14 +1643,14 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   {
     // THE ONE-SET-ARM RETURN DIAMOND (raise/retsink.ts `SELECT_GATES`). The capability that closed
-    // `kleod:IsSelectButtonPressed:agbcc` had no synthetic inhabitant at all, and the corpus's only
+    // `kleod:HeldUp:agbcc` had no synthetic inhabitant at all, and the corpus's only
     // real one is that row; a rule with one row behind it cannot show whether it travels. Run on
     // ALL four toolchains deliberately: the admission is declared for agbcc alone
     // (`compilerBehaviors.hoistsSingleSetArm`), so the IDO / KMC / mwcc columns of this row are
     // what would say if that ever stopped being true.
     //
     // TAGGED LIKE THE ROW IT GENERALISES, so the capability's two rows share a feature slice wider
-    // than `branch`: `kleod:IsSelectButtonPressed` carries `bool`/`branch`/`mask`/`global`, and this
+    // than `branch`: `kleod:HeldUp` carries `bool`/`branch`/`mask`/`global`, and this
     // one returns a truth value (`bool`) and isolates a bit field with an AND mask (`mask`) by
     // bench-schema's own definitions. No `global` — the condition here is on a parameter.
     sym: 'selconst',
@@ -2030,7 +2037,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // the assign-back that lands the result in a local before the `return` then has TWO spellings —
   // R1's now-dead value var (`/regcopy-ret`) or a fresh one (`/regcopy-ret-fresh`). Which one the
   // source used is not derivable from the asm, so both are ranked. The reuse side is already
-  // pinned by real rows (`kleod:MultiplyQ8`/`MultiplyQ4`, `pokeemerald:MathUtil_Mul16`, all agbcc,
+  // pinned by real rows (`kleod:MultiplyQ8`, `pokeemerald:MathUtil_Mul16`, all agbcc,
   // where the fresh tail scores 3 against the reuse tail's 0); this row is the fresh side, which
   // no corpus row exercised.
   // WHY ido7.1 ALONE. The three spellings are three different objects only on ido: measured on
@@ -3955,7 +3962,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // COVERAGE. No row CARRIED the `narrow-counter` tag before this family — trivially, the tag is new.
   // The SHAPE was not uncovered. Reference side: 22 base rows pass this tag's own floor predicate,
-  // 18 agbcc, and one of those (`kleod:UpdateEntities:agbcc`) already MATCHES — a narrow counter is
+  // 18 agbcc, and one of those (`kleod:WorldMapScreenDrawUnlockedWorlds:agbcc`) already MATCHES — a narrow counter is
   // not automatically a gap. Candidate side: 17 base agbcc rows already carry a narrowed self-
   // increment in their PUBLISHED asmlift output, 2 of those MATCHing; exactly ONE carries the SIGNED
   // form these rows are cut from, `v = (u16)((s16)v + 1)` — `sa3:PackSaveSector` (366). That row's
@@ -5003,15 +5010,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // (9 `/regionbase`, 45 `/livebase-block`, 8 both, none of them benchmark rows) over 258 lifting
   // functions, while the harness's real rows and the canonical ranked command run MAP-FUL, where
   // it is 24 / 49 / 16, and WHICH SET a row inhabits is itself configuration-dependent. Exactly ONE
-  // of the 16 map-ful BOTH inhabitants is a benchmark row — `kleod:UpdateCameraScroll`, `noncompile`
+  // of the 16 map-ful BOTH inhabitants is a benchmark row — `kleod:AthleticChallengeScrollUpdate`, `noncompile`
   // with no `candidateLabel`, its whole fan failing to build, so it can express no winner. The only
-  // other row anywhere in the map-ful census is `kleod:UpdateHUDCounterDisplay`, and it is a
+  // other row anywhere in the map-ful census is `kleod:DrawLevelHud_DreamStones`, and it is a
   // `/regionbase`-ONLY inhabitant there (map-less it is in neither set); it MATCHes on
   // `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`, so its WINNER carries
   // `/scopebase` and not `/regionbase` even though its fan holds one. Neither closes the hole. The
   // PRE-EXISTING row census this pair fills stays 2 / 4 / 0; with these two rows in it the
   // winner-carries counts read 2 `/regionbase` / 5 `/livebase-block` / 0 both
-  // (`kleod:ProcessInputAndUpdateEntities` carried the sixth at `7e78d80c` and its winner no
+  // (`kleod:PauseMenuScreenHandler` carried the sixth at `7e78d80c` and its winner no
   // longer does).
   //
   // The number to carry to LBG is a DEFICIT of 31, not a ceiling on available gain: `/regionbase`'s
@@ -5170,7 +5177,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // against the harness's, so this rig cannot speak to that row. Quote the SCOPE with the number.
   // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS, and the two are one token apart:
   // rank.ts enumerates COALESCED variants of the same `hoistScopedBases` under
-  // `/scopebase-coalesce`, and one of those wins a match — `kleod:UpdateHUDCounterDisplay:agbcc`,
+  // `/scopebase-coalesce`, and one of those wins a match — `kleod:DrawLevelHud_DreamStones:agbcc`,
   // MATCH on `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`. So an exact-token
   // census of the plain admission never sees that row at all; a substring one does, and a deletion
   // aimed at `l3/scopebase.ts` rather than at `respell('/scopebase', …)` costs that match.
@@ -5189,8 +5196,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // each row's sorted distinct-source set — and in BOTH symbol-map configurations, because with a
   // map every absolute pool constant lifts to a `gaddr` and a census run in one arm is blind to
   // the other. SEVEN rows gain candidates and ZERO lose one, the same seven in both arms:
-  //   kleod:ProcessInputAndUpdateEntities  21120 → 23040 map-less   58752 → 62208 map-ful
-  //   kleod:ConfigureEntityBehavior         1056 →  1248             1536 →  1728
+  //   kleod:PauseMenuScreenHandler  21120 → 23040 map-less   58752 → 62208 map-ful
+  //   kleod:sub_0803F68C         1056 →  1248             1536 →  1728
   //   synthetic:dmascope                     496 →   544              496 →   544
   //   synthetic:dmaflat / synthetic:dmapoll   72 →    80               72 →    80
   //   synthetic:unfoldpark                    36 →    44               36 →    44
@@ -5207,7 +5214,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // `ProcessInputAndUpdateEntities`, the corpus's slowest row, takes +3456 of the map-ful +3724.
   // A SECOND POPULATION MOVES WITHOUT THE FAN MOVING: 21 rows carry `/unfolded`-labelled
   // candidates whose source set is byte-identical to the ablated arm's, `synthetic:foldpark` (4)
-  // and `kleod:UpdateCameraScroll` (1024) among them. Those are renames, not spellings, and the
+  // and `kleod:AthleticChallengeScrollUpdate` (1024) among them. Those are renames, not spellings, and the
   // only thing they can move is a published `candidateLabel` — which is why the gate on this entry
   // is `bench diff`'s label field and not `bench regression`.
   // The one other guard that reads the field, `BASEFOLD_GATES`, reaches none of these keys: its
@@ -5740,7 +5747,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // THE CONSEQUENCE, stated because it is a gap and not a reassurance: deleting either FOLD is a
   // label-only change on these rows. `bench regression` reports 0 lost and would green-light it;
   // only `bench diff`'s `candidateLabel` field catches it. The folds' match-level cost is on the
-  // REAL tier — PR #136 measured the write fold alone at `kleod:ProcessInputAndUpdateEntities`
+  // REAL tier — PR #136 measured the write fold alone at `kleod:PauseMenuScreenHandler`
   // 284 → 248, and that row is 211 in the artifact under later unrelated changes, so RE-DERIVE the
   // fold's own value rather than quoting either number — and nothing here brackets it. A row where
   // the fold ON is the only spelling that matches would,
@@ -6307,7 +6314,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // ═══ CountCollectedGems attribution rows (attr/countgems) ═══════════════════════════════════
   // Fourteen agbcc-only rows pinning the six capability gaps the CountCollectedGems attribution
   // names, plus one class that fell out of `nestacc`, each with its two-sided control where one
-  // exists. `kleod:CountCollectedGems:agbcc` is the highest-scoring non-matching kleod row —
+  // exists. `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` is the highest-scoring non-matching kleod row —
   // `asmlift=diff:290 m2c=noncompile(1)`, 319 target lines against an 85-line reference — and a
   // cumulative ablation chain that walks its winner to the reference one spelling at a time reads
   // 290 → 184 → 159 → 58 → 40 → 36 → 50 → 0, the last step byte-exact. These rows are that chain's
@@ -6405,23 +6412,23 @@ export const SYNTHETIC: SynthSpec[] = [
   //    re-read of the result — because `localMentions` is sampled before any rewriting and this
   //    pass duplicates statements, so a stale count and the arm count can agree by coincidence.
   //    Corpus REACH is four rows and only four — `armcb`, `maskchain`, `sxparam` and
-  //    `kleod:CountCollectedGems:agbcc`. THE PRICE IS PER-ROW. Measured at the CLI's own
+  //    `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`. THE PRICE IS PER-ROW. Measured at the CLI's own
   //    `enumerate` wrapper, both sides, with `origin/main`'s `unmerge.ts` swapped in for the
   //    before:
   //      armcb 8 → 14 · armcb2 (the control) 14 → 14 · maskchain 24 → 32 · sxparam 2 → 4
-  //      kleod:CountCollectedGems:agbcc 3072 → 5952 (+2880, +94 %), 58.3 s → 81.5 s wall (+40 %)
+  //      kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc 3072 → 5952 (+2880, +94 %), 58.3 s → 81.5 s wall (+40 %)
   //    AN OFFLINE CENSUS DOES REPRODUCE THE REAL TIER, but only with the row's own provisioning:
   //    hand `enumerateCandidates` the case's `symbols` (the vendored map, `asIfUndecompiled`), its
   //    `proto`, and the `asmData` side table off the built target's object, exactly as
   //    `eval/asmlift.ts` does. Under-provision any of the three and the census reads 2.6× low.
   //    The pole, same rig, enumeration only (no candidate compiles, so this is NOT the 1549 s
-  //    benchmark row): `kleod:ProcessInputAndUpdateEntities:agbcc` enumerates **77760 either
+  //    benchmark row): `kleod:PauseMenuScreenHandler:agbcc` enumerates **77760 either
   //    way** — unmoved by the lever, which is the claim that matters. So the honest price is
   //    per-row: the corpus's second-heaviest agbcc row pays +94 % candidates for a candidate that
   //    correctly loses.
   //    AND THE REAL ROW DOES NOT MOVE, which is this gap's pass: G6 alone makes the source WORSE
   //    (the winning spelling plus `/unmerge` costs more than the winner), so its candidate is
-  //    enumerated and correctly loses. `kleod:CountCollectedGems:agbcc` 171 → 171, same winning
+  //    enumerated and correctly loses. `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` 171 → 171, same winning
   //    label.
   //  • `sinkacc` 17 → **4, CLOSED**, and the L3 attribution above it was a true observation with a
   //    false conclusion attached. The fan dump was right — 36 candidates, winner
@@ -6444,7 +6451,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //    that lift.
   //    WHAT THE REACH CENSUS DOES NOT SAY IS THE COST. THREE of those rows now enumerate axes they
   //    could not before, and pay for them: `sinkacc` enumerates 36 → 54 candidates and
-  //    `kleod:CheckWorldCompletion:agbcc` 2.69x as many (312 → 840 through a bare
+  //    `kleod:WorldMapScreenIsValidPath:agbcc` 2.69x as many (312 → 840 through a bare
   //    `enumerateCandidates`, 624 → 1680 through the runner, which sees more options — the RATIO is
   //    what reproduces), roughly 2x the wall clock on each real row. The fourth reached row, the
   //    `fib` control above, pays NOTHING — 8 → 8 candidates, the same eight labels, winner already
@@ -6527,7 +6534,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //    and standalone.
   //  • The short-circuit fold / tail-duplication class belongs to the `llcmp` family, not here.
   //    Predicted from a file swap while that work was unmerged, and now CONFIRMED against the
-  //    merged pass: rebased onto it, `kleod:CountCollectedGems:agbcc` reads diff:290 exactly and
+  //    merged pass: rebased onto it, `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` reads diff:290 exactly and
   //    all fourteen rows below read their published scores unmoved, while `synthetic:llcmp:agbcc`
   //    is the MATCH that work bought. The fold is a connected channel that pays nothing here.
   //
@@ -6557,7 +6564,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // flip-labelled — `joinsense`/`joinsame` win on `/unmerge` and `mixsense` on plain `unsigned`.
   // Over the committed artifact: 17 rows have a winner
   // label carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 17 MATCH — TWO of
-  // those five REAL (`kleod:ProcessHBlankWait:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`), the
+  // those five REAL (`kleod:sub_0804DC64:agbcc`, `kleod:DrawLevelHud_DreamStones:agbcc`), the
   // other three `synthetic:ifand_far:agbcc`, `synthetic:ifor_near:agbcc` and
   // `synthetic:ifor_near:mwcc_242_81`. Recompute the set by filtering `results.json` on
   // `asmlift.candidateLabel` matching `(^|/)(flip-join|flip-branch)(/|$)`. For G2 the exposure is
@@ -6686,7 +6693,7 @@ export const SYNTHETIC: SynthSpec[] = [
     // takes the cast form and scores diff:5 — measured, by making the member path refuse exactly
     // as the global path does and re-running.
     //
-    // Its real-tier inhabitant is `kleod:CheckWorldCompletion:agbcc`, whose reference spells a
+    // Its real-tier inhabitant is `kleod:WorldMapScreenIsValidPath:agbcc`, whose reference spells a
     // nested `gUnk_03004670->unk8[var_r0][var_r2]` that agbcc collapsed into one flat counter
     // before the add. `k` there runs 0..47 through a declared row of 8, which is out of bounds and
     // byte-identical — the same object, as this row's own MATCH shows, and the only spelling that
@@ -6998,7 +7005,7 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { joinsame: { returnsVoid: true } },
   },
   {
-    // C3 of `kleod:CountCollectedGems:agbcc`'s second decomposition (#172): the site-sense reading
+    // C3 of `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`'s second decomposition (#172): the site-sense reading
     // itself, on a CHAINED condition. Both `if`s here are written in the SAME positive sense, so
     // this is not `joinsense`'s mix and no value of `negateJoinedBranchSense` is being defeated by
     // one. The second condition is `(a == K1 || a == K2) && b == K3`, which folds TWICE: the outer
@@ -7024,7 +7031,7 @@ export const SYNTHETIC: SynthSpec[] = [
   },
 
   // ── THE ELSE-LADDER ARM CLIFF, and the nested-loop accumulator copy (attr2/CountCollectedGems) ─
-  // The SECOND attribution round on `kleod:CountCollectedGems:agbcc`. The first one (#156)
+  // The SECOND attribution round on `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`. The first one (#156)
   // partitioned that row's 290 into seven gaps by a byte-exact ablation, all seven shipped
   // (#163-#170), every row they owned closed — `pmarr1`, `pmarr2`, `bfzero`, `armcb`, `swladder`
   // all MATCH above — and the real row went 290 -> 171 rather than to 0. These nine rows are what
@@ -7194,7 +7201,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // accumulator copies gone (`enclosingCarrierName`) it PAYS −17 on the real row and is in the
   // WINNING label — `unsigned/connective/defsite/loop-entry/flip-join/reread-globals/derived-home/
   // merge-home/uns-cmp/site-sense/unmerge/livebase`, 39/352. Two independent routes agree, both at
-  // `d6b21ba`: `pnpm bench fan kleod:CountCollectedGems:agbcc --force` (5952 scored, 0 dropped)
+  // `d6b21ba`: `pnpm bench fan kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc --force` (5952 scored, 0 dropped)
   // gives best-WITH 39/352 against best-WITHOUT 56/352, the two labels differing only in the
   // trailing home axis; and emptying `PRE_FAN_PRODUCTS` (packages/core/src/rank-axes.ts), then
   // `ASMLIFT_CANDCACHE=0 pnpm bench run --tier real --only CountCollectedGems`, lands the row on
@@ -7223,7 +7230,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // site B merged has no candidate anywhere in the fan. Priced rather than asserted, by counting
   // `unmergeAt`'s SUCCESSFUL returns per call under an instrumented `unmergeJoins` — a temporary
   // print, because `bench gates --pass unmerge` tallies each rule's REFUSALS and never a success —
-  // over the whole synthetic agbcc tier and `bench fan kleod:CountCollectedGems:agbcc
+  // over the whole synthetic agbcc tier and `bench fan kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc
   // --enumerate`: k = 1 on 23 of the 25
   // firing rows AND on the real row (576 calls, `sites=1` every one), k = 2 on `synthetic:joinsame`
   // and `synthetic:joinsense`. So the refusal is real and inhabited at k = 2, its cost today is
@@ -7260,11 +7267,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // `workflow_dispatch` with no cron, so that gate runs when a human dispatches the benchmark, not
   // on a PR. The real row is the expensive one to discover, not the only one.) A non-MATCH row the ablation also worsens, so the axis is
   // load-bearing past this family: `synthetic:mergeldcast:gcc2.7.2kmc` 4/9 -> 5/9. That figure and
-  // the five real non-MATCH rows that also worsen — `kleod:EntityItemDrop`,
-  // `kleod:UpdateWorldMapNodeTile`, `sa3:GetInput`, `sa3:sa2__sub_8083504`,
+  // the five real non-MATCH rows that also worsen — `kleod:sub_0801F4D0`,
+  // `kleod:WorldMapScreenDrawPath`, `sa3:GetInput`, `sa3:sa2__sub_8083504`,
   // `marioparty3:func_800600C0_60CC0`, all five carrying `/unmerge` in their published label —
   // were measured at `981bb0b9` and are NOT in #172, which names none of the five and no
-  // `mergeldcast`; quote them from here, not from that PR. They have not been re-measured since. `kleod:ProcessInputAndUpdateEntities:agbcc` carries the label and was NOT
+  // `mergeldcast`; quote them from here, not from that PR. They have not been re-measured since. `kleod:PauseMenuScreenHandler:agbcc` carries the label and was NOT
   // measured either (~2700 s): assume it at risk, not safe.
   //
   // Rows that carry `/unmerge` in their winning label and are nevertheless INERT under the
@@ -7646,7 +7653,7 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
   },
   // ── THE SHARED DEFAULT TAIL (attr3/CountCollectedGems) ──────────────────────────────────────
-  // The THIRD attribution round on `kleod:CountCollectedGems:agbcc`, at the 18/344 the C1a, C2 and
+  // The THIRD attribution round on `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`, at the 18/344 the C1a, C2 and
   // C3 builds (#184, #185, #187) left it at, and the build that CLOSED it. Eleven rows: eight
   // gaps, all MATCH, and three controls.
   //
@@ -8200,18 +8207,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // IT EXISTS BECAUSE IT IS THE ONLY PRE-EXISTING ROW THAT WOULD BE ONLY THIS — and none is.
   // `pnpm bench sweep --fan --base origin/main` (2026-09-12: 10 record(s) moved, 0 base-only,
   // 2 head-only, 2114 identical, and not one row whose DEFAULT spelling moved) reaches five rows
-  // that already existed — `kleod:StreamCmd_SetWindowRegs` fan 16 -> 17 map-ful and 10 -> 11
-  // map-less, `kleod:SetupBG3WindowOverlay` 1024 -> 1048 and 720 -> 744,
+  // that already existed — `kleod:sub_0804E708` fan 16 -> 17 map-ful and 10 -> 11
+  // map-less, `kleod:ButtonConfigurationScreenInit` 1024 -> 1048 and 720 -> 744,
   // `synthetic:dma_fill_uninit` 66 -> 78, `synthetic:offhi_split` and `offhi_fused` 12 -> 16 each
   // — plus this row, which is the head-only pair. Every one of the five carries something else the
   // lever does not own (a DMA block, an uninitialised slot, a fused offset), so a regression in the
   // advance alone would surface there as one term of a conjunction. This row is the shape with
   // nothing else in it.
   //
-  // …AND ONE OF THE FIVE CANNOT SCORE AT ALL. `kleod:SetupBG3WindowOverlay:agbcc` is a
+  // …AND ONE OF THE FIVE CANNOT SCORE AT ALL. `kleod:ButtonConfigurationScreenInit:agbcc` is a
   // `noncompile` row for a reason this lever does not touch: every one of its 1,048 candidates is
   // `[dropped] agbcc failed: too many arguments to function 'm4aSoundVSyncOff'`, a declaration the
-  // row's own context gets wrong (`pnpm bench fan kleod:SetupBG3WindowOverlay:agbcc`, 2026-09-12,
+  // row's own context gets wrong (`pnpm bench fan kleod:ButtonConfigurationScreenInit:agbcc`, 2026-09-12,
   // prints the 1,048 drops and no ranking). It prices the lever's REACH and buys nothing else: the
   // +24 candidates there are 24 more compiles of a translation unit that cannot compile.
   {
