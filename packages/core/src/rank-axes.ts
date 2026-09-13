@@ -594,7 +594,8 @@ export const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  SAME two sources and `seen` collapses them, so only removing both takes the fan down.)
  *  `sa3:sub_803213C` MATCH, and — with the pair removed — `kleod:ProcessInputAndUpdateEntities`
  *  211, `kleod:CountCollectedGems` 290 and `kleod:RollRandomLevelVariant` 18, each of them the
- *  number the artifact already carries, and each of them ENTAILED rather than separately scored:
+ *  number the artifact carried then (all three retired 2026-09-13), and each of them ENTAILED
+ *  rather than separately scored:
  *  the ablated candidate set is a strict SUBSET of the control one on every row here (enumerated
  *  both ways, 0 sources ADDED and 0 RELABELLED — `ProcessInputAndUpdateEntities` 58752 → 48384
  *  with 10368 carrying the token, `CountCollectedGems` 576 → 384 with 192, `RollRandomLevelVariant`

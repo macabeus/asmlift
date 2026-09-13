@@ -471,7 +471,8 @@ function spellablePointee(
  *  so it is the only spelling that both type-checks and keeps the bytes, which is a narrower claim
  *  than "the only spelling that type-checks". The `pmarrrow` synthetic row referees it (pass
  *  `subscriptsFromExtents` a `needRecovered` of true, as the global path does, and the row takes
- *  the cast form: MATCH → diff:5); `kleod:CheckWorldCompletion:agbcc` is its real-tier inhabitant;
+ *  the cast form: MATCH → diff:5); `kleod:CheckWorldCompletion:agbcc` was its real-tier inhabitant
+ *  until kleod's rows were retired (2026-09-13);
  *  at rank 3 the same merge spells `->x[0][0][k]`.
  *
  *  A VARIABLE SUBSCRIPT IS NEVER BOUNDED, here or anywhere. The member lookup bounds only the
@@ -5614,8 +5615,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // computation, a call. The count is then a floor rather than the access set, and it is read as
   // the access set (the l3/volatileval.ts gate), so it refuses instead of reporting a number that
   // undercounts. Reached rather than theoretical: an address-escaped frame scratch takes it —
-  // `synthetic:dma_fill_uninit` and `kleod:ProcessInputAndUpdateEntities` both lose their record
-  // here.
+  // `synthetic:dma_fill_uninit` loses its record here, and so did `kleod:ProcessInputAndUpdateEntities`
+  // before that row was retired (2026-09-13).
   const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
     const off = at.attrs.off as number;
     const roots = new Set<Value>();

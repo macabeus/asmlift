@@ -53,7 +53,7 @@
 // WHAT THE WINDOW IS NOT: A CLAIM THAT NOTHING ELSE MAY QUALIFY ORDINARY MEMORY. `/volatile`
 // (l3/volatileptr.ts) does exactly that, and a sweep over 834 corpus trees finds it qualifying an
 // address outside this window on 21 (tree, local, address) pairs, 16 of them on agbcc — including
-// `kleod:WritePaletteColor:agbcc`, a published byte-exact MATCH whose winning source contains
+// `kleod:WritePaletteColor:agbcc` (retired 2026-09-13), then a published byte-exact MATCH whose winning source contained
 // `*(volatile s32 *)50351492 = v2 + 5;` at 0x03004D84, which is IWRAM — the same minted-cast form
 // this lever produces, at an address this lever's window refuses.
 //

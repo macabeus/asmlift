@@ -28,7 +28,8 @@
 // four blocks collapsed to two, with no unconditional branch to the merge at all. For the {0,1} pair
 // it goes further and folds branchlessly (`negs r0,r0; lsrs r0,r0,#31`), erasing the comparison too.
 // So where the TARGET holds that diamond, a merge variable is the spelling of some other function,
-// and sinking is the only candidate that can match (`kleod:IsSelectButtonPressed:agbcc`).
+// and sinking is the only candidate that can match (measured on `kleod:IsSelectButtonPressed:agbcc`,
+// retired 2026-09-13).
 //
 // ONE MODEL, NOT TWO. The predicate is `narrowlocal.ts`'s exported `armIsOneSet` — no op that
 // `REEVAL_UNSAFE_OPS` calls unsafe, and EXACTLY one result-producing op — read here by

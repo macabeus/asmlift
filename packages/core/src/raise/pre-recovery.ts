@@ -102,10 +102,11 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     // Numbering alone is not enough and not safe to ship alone: collapsing the duplicates leaves a
     // block param whose edges now all carry one value, and the structurer still destroys THAT into
     // a local (it only reuses a name a carrier already has, and an inlined `gaddr` has none).
-    // Numbering alone costs kleod:UpdateHUDCounterDisplay its match, so the pair is the atomic
-    // unit, expressed as a body rather than a sum of two unrelated counts. It is NOT monotone,
-    // which is worth knowing before tuning either half: dropping the cleanup IMPROVES
-    // kleod:ConfigureEntityBehavior and kleod:CountCollectedGems, neither of them near matching.
+    // Numbering alone cost kleod:UpdateHUDCounterDisplay its match (measured on kleod's
+    // kl-eod-decomp rows, retired 2026-09-13), so the pair is the atomic unit, expressed as a body
+    // rather than a sum of two unrelated counts. It was NOT monotone, which is worth knowing before
+    // tuning either half: dropping the cleanup IMPROVED kleod:ConfigureEntityBehavior and
+    // kleod:CountCollectedGems, neither of them near matching then.
     run: (fn) => {
       const n = numberPureValues(fn);
       return n + simplifyTrivialPhis(fn);
