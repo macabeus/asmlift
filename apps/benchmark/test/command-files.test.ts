@@ -344,18 +344,19 @@ describe('the unmatchable register is falsified by the artifact', () => {
 
   it('every row it closes is still a nonmatch in results.json', () => {
     const ids = registerRows();
-    // AN EMPTY REGISTER IS A STATE, NOT A BLIND SPOT — its only entry's row was retired with the
-    // project source it came from (2026-09). What this must still refuse is a table this gate can no
-    // longer READ, which would also parse to zero rows: so zero rows is accepted only beside the
-    // table's own header, spelled as the page spells it.
-    if (ids.length === 0) {
-      const page = readFileSync(REGISTER, 'utf8');
-      expect(
-        page.includes('| row ') && page.includes('| verdict taken |'),
-        `no row parsed out of ${REGISTER}'s table, and its header is gone too — the table shape moved ` +
-          'and this check went blind',
-      ).toBe(true);
-    }
+    // THE PAGE HAS TO STILL PARSE, and the register alone can no longer prove it: its only entry's row
+    // was retired with the project source it came from (2026-09-13) and the table is empty. So the
+    // count asserted is register rows PLUS retired entries (`## Retired: \`Sym\` (project)`), and
+    // each retired entry is itself checked below — it claims its row is gone, which the artifact
+    // can falsify. An unreadable page parses to zero of both and fails here.
+    const retired = [...readFileSync(REGISTER, 'utf8').matchAll(/^## Retired: `([\w.]+)` \((\w+)\)$/gm)].map(
+      (m) => `${m[2]}:${m[1]}`,
+    );
+    expect(
+      ids.length + retired.length,
+      `neither a register row nor a retired entry parsed out of ${REGISTER} — either the page holds no ` +
+        'entry at all (delete this gate) or its shape moved and this check went blind',
+    ).toBeGreaterThan(0);
 
     const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as (Identifiable & {
       asmlift?: { outcome?: string };
@@ -380,6 +381,11 @@ describe('the unmatchable register is falsified by the artifact', () => {
       `the register calls these rows unmatchable and the artifact says asmlift matched them. An entry ` +
         `is falsified by one honest spelling reaching the target bytes, and a published match IS one: ` +
         `delete the entry, do not annotate it. ${falsified.join(', ')}`,
+    ).toEqual([]);
+    const stillLive = retired.filter((ref) => resolveRow(artifact, ref) !== undefined);
+    expect(
+      stillLive,
+      `${REGISTER} retires these rows and the committed results.json still carries them: ${stillLive.join(', ')}`,
     ).toEqual([]);
   });
 });
@@ -544,8 +550,8 @@ describe('docs/bench-cost.md', () => {
 
     const real = ranked('real');
     const synthetic = ranked('synthetic');
-    const piue = row('kleod:PauseMenuScreenHandler:agbcc');
-    const ccg = row('kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc');
+    const piue = row('kleod:ProcessInputAndUpdateEntities:agbcc');
+    const ccg = row('kleod:CountCollectedGems:agbcc');
 
     const expected = [
       `${group(sum(real))} s over ${real.length}`,
