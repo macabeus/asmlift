@@ -352,21 +352,44 @@ the round that first ran it.
   (`readelf -sW`/`nm`, Thumb bit clear on agbcc) and `test/real-manifests.test.ts` holds it equal to
   the committed `tu/<project>/symbols.json.gz`. Two rows at one address that cite different
   repositories are different rows (bench-schema `joinArtifacts`): a source swap is removed + added.
+  The repository is read off `sourceUrl`, which the manifest validator requires on every real row
+  and requires to cite the manifest's own `repo`. It is the FORK that is cited, so moving a fork to
+  another owner reads as every row removed and added, too.
 - **An upstream rename** is `sym` → the new name, the old name appended to `aliases`, `funcC`'s
   identifier and the `proto` key renamed, then `pnpm bench vendor --project <p>` — `index.json` and
-  the TU file names are keyed by `sym`, so the alias table alone does not make a rename.
-- **A source swap retires rows.** Every dated measurement of a removed row keeps citing it by the name
-  it was measured under, and the row is listed in `dataset/retired-rows.json` so the citation gates
-  accept it. Never move such a citation to the row now at that address: its fan, outcome and cost
-  were measured on another author's source, context and symbol map. Only a claim RE-MEASURED on the
-  new row may name it. A current id shared by both decompilations (kleod's `MultiplyQ8`) cannot be
-  listed, so date its old citations in prose.
+  the TU file names are keyed by `sym`, so the alias table alone does not make a rename. A function
+  is also named by its CALLERS: grep every row's `funcC`, `prependC` and `proto` in the project for
+  the old name (kleod's `sub_0804B254` appears in three other rows' `funcC` and `prependC`), and
+  let `bench vendor` rewrite the vendored contexts that declare it. Every selector (`bench fan`,
+  `bench run --only`, `bench sweep --only`, `bench target`) still answers to the old name through
+  `aliases`.
+- **A source swap retires rows.** List EVERY removed row in `dataset/retired-rows.json`, with the
+  `addr` and `sourceUrl` it was measured under — including rows whose id the new decompilation
+  reuses (kleod's `MultiplyQ8`): the register is keyed by identity and id qualified by the cited
+  repository, so such an entry does not collide with the live row. `bench regression` and
+  `bench diff` then print those rows `retired`, apart from `missing`/`removed`, so a row another
+  project silently lost still fails the gate. Every dated measurement of a removed row keeps citing
+  it by the name it was measured under. Never move such a citation to the row now at that address:
+  its fan, outcome and cost were measured on another author's source, context and symbol map. Only a
+  claim RE-MEASURED on the new row may name it. The citation gates accept a retired name but cannot
+  tell a dated note from a stale "this row guards …" (see `test/citations.test.ts` for why that is
+  a review rule): re-tense every such claim by hand, and a citation of a REUSED id still reads as the
+  live row, so date it in prose.
 - **Wiring a row from its own TU** (what kleod's 2026-09-13 rows used): `funcC` is the definition's
   verbatim span at the pinned commit; `prependC` is that TU's file-scope declarations minus the row's
   own prototype, plus a prototype for each same-TU callee no header declares; `headers` is the union
-  of the TUs' `#include`s; `proto` gives `returnsVoid` exactly where the return type is `void`; tags
-  are the judgement tags that pass `JUDGEMENT_FLOOR` on the new body. Then check fidelity the
-  harness's way: every row, compiled standalone, equals the ROM function bytes (relocations masked).
+  of the TUs' `#include`s, in the order committed — kleod's was assembled by hand from an include
+  census and is not a derived order, so the fidelity check below is what vouches for it; `proto`
+  gives `returnsVoid` exactly where the return type is `void`; tags are the judgement tags that pass
+  `JUDGEMENT_FLOOR` on the new body. Then check fidelity the harness's way: every row, compiled
+  standalone, equals the ROM function bytes (relocations masked).
+- **Pins.** A fork branch is the upstream commit plus one integration commit. kleod's is
+  `macabeus/kleod@6f149e3` on upstream `testyourmine/kleod@64a83ad`; the upstream sha is otherwise
+  only in the fork's README.
+- **Vendoring preprocesses with the host `cpp-14`** (Homebrew GCC on the machine that vendored kleod),
+  not the project's toolchain. Checked on kleod's 42 TUs and 13 contexts: 0 `__APPLE__`/`__DATA,`
+  hits. A future row whose TU defines `EWRAM_DATA`/`INCBIN` data can pick those up; grep the blobs
+  after vendoring.
 
 ## Harness layout (`src/`)
 

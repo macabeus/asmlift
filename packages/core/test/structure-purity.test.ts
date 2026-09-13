@@ -27,6 +27,14 @@ import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 // packages/core imports it, and the test fence's positive control passed in the same red run.)
 vi.setConfig({ testTimeout: 60_000 });
 
+// THE CORPUS IS A CHECKOUT NO SETUP RECIPE PRODUCES ANY MORE. It is kl-eod-decomp's split
+// `asm/nonmatchings` (182 `.s` files on the machine that last had it), cloned by `bench setup` into
+// `checkouts/klonoa-empire-of-dreams` until kleod's rows moved to testyourmine/kleod on 2026-09-13.
+// That decomp's `checkouts/kleod` has no split nonmatchings (one `.inc` under `asm/nonmatching`), so
+// it cannot stand in. To run this test, clone `Dream-Atelier/kl-eod-decomp` (branch
+// `asmlift-benchmark`, commit `494f499`) there and run its `setup.sh` (python >= 3.11) and `gmake`
+// — the same remedy `packages/cli/test/matching/checkout-gate.ts` prints. Without it the test is
+// SKIPPED, not passed: a green run over zero functions said nothing and read as if it had.
 const ASM_DIR = join(__dirname, '../../../apps/benchmark/checkouts/klonoa-empire-of-dreams/asm/nonmatchings');
 
 /** Every liftable function in the klonoa corpus, or none when the checkout is absent (CI). */
@@ -47,11 +55,13 @@ function corpus(): { name: string; asm: string }[] {
   return files.map((f) => ({ name: f.split('/').pop()!.replace(/\.s$/, ''), asm: readFileSync(f, 'utf8') }));
 }
 
-test('structuring does not mutate the function it reads', () => {
+const CORPUS = corpus();
+
+test.skipIf(CORPUS.length === 0)('structuring does not mutate the function it reads', () => {
   const opts = structureOptionsFor(ARMV4T_AGBCC, false);
   let checked = 0;
   const defects: string[] = [];
-  for (const { name, asm } of corpus()) {
+  for (const { name, asm } of CORPUS) {
     let fn;
     try {
       fn = frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, undefined);
@@ -92,6 +102,6 @@ test('structuring does not mutate the function it reads', () => {
     }
   }
   expect(defects).toEqual([]);
-  // Not vacuous — but the checkout is optional, so this only asserts when the corpus is present.
-  expect(checked === 0 || checked > 20).toBe(true);
+  // Not vacuous: the test only runs with the corpus present (skipIf above), so it must reach it.
+  expect(checked).toBeGreaterThan(20);
 });
