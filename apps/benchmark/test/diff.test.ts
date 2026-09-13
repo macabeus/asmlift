@@ -122,6 +122,34 @@ describe('compareMeasurements', () => {
     expect(r.ok).toBe(false);
   });
 
+  test('a vanished row the register retires is RETIRED, printed apart from one a skipped run REMOVED', () => {
+    // An expected retirement must not hide a real loss in the same list. The verdict is unchanged
+    // (a swap is not neutral), only the two populations are told apart.
+    const real = (id: string, addr: string, sourceUrl: string): FunctionResult =>
+      ({
+        ...row(id),
+        project: id.split(':')[0],
+        sym: id.split(':')[1],
+        toolchain: 'agbcc',
+        tier: 'real',
+        addr,
+        sourceUrl,
+      }) as FunctionResult;
+    const OLD = 'https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f499/src/math.c#L1-L2';
+    const gone = real('kleod:MultiplyQ8:agbcc', '0x08000948', OLD);
+    const skipped = real(
+      'sa3:AbsMax:agbcc',
+      '0x08000100',
+      'https://github.com/macabeus/sa3/blob/3a3b371/src/x.c#L1-L2',
+    );
+    const r = compareMeasurements(out(gone, skipped), out(), [{ id: gone.id, addr: '0x08000948', sourceUrl: OLD }]);
+    expect({ retired: r.retired, removed: r.removed, ok: r.ok }).toEqual({
+      retired: ['kleod:MultiplyQ8:agbcc'],
+      removed: ['sa3:AbsMax:agbcc'],
+      ok: false,
+    });
+  });
+
   test('provenance is not compared — only the listed fields', () => {
     const base = out(row('a'));
     const fresh = out(row('a'));

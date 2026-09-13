@@ -1,10 +1,10 @@
 {
-  "_": "Benchmark rows that no longer exist, kept so that a DATED measurement of one can keep citing it by the name it was measured under (apps/benchmark/test/citations.test.ts, dataset-symmetry.test.ts). A citation of a retired row guards nothing: no current row fails CI when the mechanism it names breaks. See apps/benchmark/README.md, 'Re-pinning or swapping a project'.",
+  "_": "Benchmark rows that no longer exist. The regression gate joins this register, so a registered row reads 'retired' rather than 'missing' (apps/benchmark/src/report/regression.ts), and a DATED measurement of one may keep citing it by the name it was measured under (apps/benchmark/test/citations.test.ts, dataset-symmetry.test.ts). A citation of a retired row guards nothing: no current row fails CI when the mechanism it names breaks. See apps/benchmark/README.md, 'Re-pinning or swapping a project'.",
   "retirements": [
     {
       "project": "kleod",
       "retired": "2026-09-13",
-      "why": "kleod's rows moved from Dream-Atelier/kl-eod-decomp to testyourmine/kleod (the macabeus/kleod fork). Both build the same ROM, so most new rows sit at an old row's address, but each is another author's source with its own context and symbol map: a number measured on one of these rows is not a number about the row now at its address. The six rows whose names both decomps share (MultiplyQ8, DivideQ8, ReciprocalQ8, Decompress, DecompressDma, DecompressAlloc) are current ids and cannot be listed here.",
+      "why": "kleod's rows moved from Dream-Atelier/kl-eod-decomp to testyourmine/kleod (the macabeus/kleod fork). Both build the same ROM, so most new rows sit at an old row's address, but each is another author's source with its own context and symbol map: a number measured on one of these rows is not a number about the row now at its address. All 42 old rows are listed. Six of them (MultiplyQ8, DivideQ8, ReciprocalQ8, Decompress, DecompressDma, DecompressAlloc) share their id with a live row of the new decompilation; the register is keyed by identity and id qualified by the cited repository, so those entries do not collide with the live rows, but a citation of one of those six ids still reads as the live row and must be dated in prose.",
       "rows": [
         {
           "id": "kleod:ReturnOne:agbcc",
@@ -185,6 +185,36 @@
           "id": "kleod:VBlankDMA_Level2:agbcc",
           "addr": "0x08026f68",
           "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_1.c#L1340-L1389"
+        },
+        {
+          "id": "kleod:MultiplyQ8:agbcc",
+          "addr": "0x08000948",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L116-L127"
+        },
+        {
+          "id": "kleod:DivideQ8:agbcc",
+          "addr": "0x08000960",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L11-L13"
+        },
+        {
+          "id": "kleod:ReciprocalQ8:agbcc",
+          "addr": "0x08000978",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L19-L22"
+        },
+        {
+          "id": "kleod:Decompress:agbcc",
+          "addr": "0x08043af4",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L110-L121"
+        },
+        {
+          "id": "kleod:DecompressDma:agbcc",
+          "addr": "0x08043b34",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L129-L136"
+        },
+        {
+          "id": "kleod:DecompressAlloc:agbcc",
+          "addr": "0x08043b80",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L142-L148"
         }
       ]
     }

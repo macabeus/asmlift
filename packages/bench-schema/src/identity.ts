@@ -83,6 +83,54 @@ export function selectByRef<R extends { id: string; aliases?: readonly string[] 
 export const sourceRepo = (r: Identifiable): string | undefined =>
   r.sourceUrl === undefined ? undefined : /^https:\/\/github\.com\/([^/]+\/[^/]+)\//.exec(r.sourceUrl)?.[1];
 
+// RETIREMENT. A row the dataset stops carrying on purpose — its project's source moved to another
+// decompilation — is RETIRED, and `dataset/retired-rows.json` records it with the address and the
+// source URL it was measured under. Retirement is part of identity, not a citation allowlist: a
+// regression gate joins the register, so a registered row reads `retired` rather than `missing`,
+// and a row that vanished WITHOUT being registered still fails. Before this, the kleod swap's gate
+// exited 1 on 42 expected `MISSING` lines, and exited 1 identically when a pokeemerald row was also
+// silently skipped: 43 lines, same verdict, told apart only by a person reading them.
+//
+// Keyed by identity AND id, each qualified by the repository the source is cited from — never by
+// id alone. Two decompilations of one ROM reuse both: six kleod names (MultiplyQ8, …) are a live
+// row and a retired row at once, and 35 of the 42 new rows sit at a retired row's address.
+// Unqualified, the register could not list those six rows, and a future row that took a retired
+// name would force deleting the entry and silently re-attach every dated citation to the new row.
+
+/** A row the dataset no longer carries, as `dataset/retired-rows.json` records it. */
+export interface RetiredRow {
+  id: string;
+  addr: string;
+  sourceUrl: string;
+}
+
+/** A register entry as the fields identity is computed from. */
+export const retiredIdentifiable = (e: RetiredRow): Identifiable => {
+  const parts = e.id.split(':');
+  return {
+    id: e.id,
+    project: parts[0],
+    sym: parts.slice(1, -1).join(':'),
+    toolchain: parts[parts.length - 1],
+    tier: 'real',
+    addr: e.addr,
+    sourceUrl: e.sourceUrl,
+  };
+};
+
+/** The keys a real row is retired under: its identity and its id, each `@` the repository its source
+ *  is cited from. Empty for a row that cites no repository, so such a row can never be excused as
+ *  retired: it stays `missing`. The id form is what lets an artifact from before addresses meet the
+ *  register. */
+export const retirementKeys = (r: Identifiable): string[] => {
+  const repo = sourceRepo(r);
+  return r.tier !== 'real' || repo === undefined ? [] : [...new Set([rowIdentity(r), r.id])].map((k) => `${k}@${repo}`);
+};
+
+/** Every key the register retires, for `retirementKeys(row).some(k => set.has(k))`. */
+export const retiredKeySet = (register: readonly RetiredRow[]): Set<string> =>
+  new Set(register.flatMap((e) => retirementKeys(retiredIdentifiable(e))));
+
 /** Find the row a reference names. A reference is any of: a row identity
  *  (`project:0x…:toolchain`), an id, an alias id, or — without the toolchain — `project:name`,
  *  which must name exactly one row. Returns undefined when nothing, or more than one row, answers. */

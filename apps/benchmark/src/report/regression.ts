@@ -6,10 +6,19 @@
 // eyeball over a 600-row JSON. Here it is mechanical: any match→non-match flip, or any committed
 // row missing from the fresh run (a silently-skipped toolchain reads as "no regression" without
 // this), exits non-zero.
-import { type BenchOutput, type DecompilerId, type Outcome, joinArtifacts } from '@asmlift/bench-schema';
+import {
+  type BenchOutput,
+  type DecompilerId,
+  type Outcome,
+  type RetiredRow,
+  joinArtifacts,
+  retiredKeySet,
+  retirementKeys,
+} from '@asmlift/bench-schema';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { retiredRows } from '../cases/retired';
 import { RESULTS_DIR } from '../config';
 import { readCommitted, sameRun } from './committed';
 
@@ -23,6 +32,9 @@ export interface OutcomeFlip {
 export interface RegressionReport {
   /** committed row ids absent from the fresh run — coverage silently shrank; NEVER "no regression" */
   missing: string[];
+  /** committed row ids absent from the fresh run AND registered in `dataset/retired-rows.json` under
+   *  the repository they cite (bench-schema `retirementKeys`). Expected, printed, never a failure. */
+  retired: string[];
   /** fresh row ids no committed row joins. Informational, never a failure — but a change that
    *  claims to move no row must print 0 here, and a join that silently failed prints every row
    *  twice: once `missing`, once here. */
@@ -42,13 +54,19 @@ export interface RegressionReport {
   ok: boolean;
 }
 
-export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): RegressionReport {
+export function compareOutcomes(
+  committed: BenchOutput,
+  fresh: BenchOutput,
+  register: readonly RetiredRow[] = [],
+): RegressionReport {
   // Rows are joined by IDENTITY (a real row's address), not by id: an upstream rename changes the
   // id and must not read as one row lost and another added.
   const join = joinArtifacts(committed.results, fresh.results);
   const freshByKey = new Map(fresh.results.map((r) => [join.headKey(r), r]));
   const committedKeys = new Set(committed.results.map(join.baseKey));
+  const retiredKeys = retiredKeySet(register);
   const missing: string[] = [];
+  const retired: string[] = [];
   const lost: OutcomeFlip[] = [];
   const gained: OutcomeFlip[] = [];
   const changed: OutcomeFlip[] = [];
@@ -56,7 +74,7 @@ export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): Reg
   for (const was of committed.results) {
     const now = freshByKey.get(join.baseKey(was));
     if (!now) {
-      missing.push(was.id);
+      (retirementKeys(was).some((k) => retiredKeys.has(k)) ? retired : missing).push(was.id);
       continue;
     }
     for (const d of ['asmlift', 'm2c'] as const) {
@@ -78,6 +96,7 @@ export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): Reg
   const added = fresh.results.filter((r) => !committedKeys.has(join.headKey(r))).map((r) => r.id);
   return {
     missing,
+    retired,
     added,
     bridged: join.bridged,
     lost,
@@ -115,10 +134,13 @@ export function rowsAddedSince(base: BenchOutput, self: BenchOutput): BenchOutpu
 export function regressionGate(base = 'HEAD'): number {
   const committed = readCommitted(base);
   const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
-  const report = compareOutcomes(committed, fresh);
+  const report = compareOutcomes(committed, fresh, retiredRows());
 
   for (const f of report.gained) {
     console.log(`GAINED  ${f.id} [${f.decompiler}] ${f.from} → match`);
+  }
+  for (const id of report.retired) {
+    console.log(`retired ${id} — absent from the fresh run, registered in dataset/retired-rows.json`);
   }
   for (const f of report.changed) {
     console.log(`changed ${f.id} [${f.decompiler}] ${f.from} → ${f.to}`);
@@ -132,9 +154,9 @@ export function regressionGate(base = 'HEAD'): number {
   for (const id of report.added) {
     console.log(`added   ${id} — no committed row joins it`);
   }
-  const { lost, missing, gained, changed, added, bridged } = report;
+  const { lost, missing, retired, gained, changed, added, bridged } = report;
   console.log(
-    `regression: ${lost.length} lost, ${missing.length} missing, ${added.length} added, ${gained.length} gained, ` +
+    `regression: ${lost.length} lost, ${missing.length} missing, ${retired.length} retired, ${added.length} added, ${gained.length} gained, ` +
       `${changed.length} other flips (${committed.results.length} committed rows` +
       `${bridged > 0 ? `; ${bridged} carried no address and joined by name` : ''})`,
   );

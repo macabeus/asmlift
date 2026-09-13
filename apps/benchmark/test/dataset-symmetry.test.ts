@@ -21,6 +21,7 @@ import {
   splitParams,
 } from '../src/cases/authored-facts';
 import { JUDGEMENT_FLOOR, stripLiterals } from '../src/cases/features';
+import { retiredRows } from '../src/cases/retired';
 
 const ALL_SPECS = [...SYNTHETIC, ...SYNTHETIC_CPP];
 
@@ -250,13 +251,7 @@ describe('the dataset cites only benchmark rows that exist', () => {
   const CITABLE = new Set(rows.flatMap((r) => rowNames(r).flatMap((n) => [n, n.slice(0, n.lastIndexOf(':'))])));
   // rows that no longer exist, citable by the name a dated measurement was taken under — the same
   // register citations.test.ts reads, and the same rule (dataset/retired-rows.json)
-  const RETIRED = new Set(
-    (
-      JSON.parse(readFileSync(join(DATASET, 'retired-rows.json'), 'utf8')) as {
-        retirements: { rows: { id: string }[] }[];
-      }
-    ).retirements.flatMap((t) => t.rows.flatMap((r) => [r.id, r.id.slice(0, r.id.lastIndexOf(':'))])),
-  );
+  const RETIRED = new Set(retiredRows().flatMap((r) => [r.id, r.id.slice(0, r.id.lastIndexOf(':'))]));
   const PROJECTS = [...new Set(rows.map((r) => r.project))].sort();
   const CITATION = new RegExp(`\\b(${PROJECTS.join('|')}):[A-Za-z_]\\w*(?::[\\w.]+)?`, 'g');
 

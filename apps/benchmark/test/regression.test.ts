@@ -129,6 +129,68 @@ describe('compareOutcomes across row identity', () => {
   });
 });
 
+// THE SOURCE SWAP. A project's rows move to another decompilation: every old row is gone and a new
+// one sits at most of their addresses. Measured before the register joined the gate: `ok` was false
+// whether or not another project also lost a row (42 MISSING, or 43 with one pokeemerald row
+// skipped), so the zero-lost gate held for the other five projects only if a person read the lines.
+describe('compareOutcomes across a source swap, with the retired-row register', () => {
+  const OLD = 'https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f499/src/math.c#L1-L2';
+  const NEW = 'https://github.com/macabeus/kleod/blob/6f149e3/src/math.c#L1-L2';
+  const realRow = (id: string, a: Outcome, over: Partial<FunctionResult>): FunctionResult =>
+    ({
+      ...row(id, a, 'nonmatch'),
+      project: id.split(':')[0],
+      sym: id.split(':')[1],
+      toolchain: 'agbcc',
+      tier: 'real',
+      ...over,
+    }) as FunctionResult;
+  // MultiplyQ8 is the hard case: the SAME id and the SAME address in both decompilations
+  const oldQ8 = realRow('kleod:MultiplyQ8:agbcc', 'match', { addr: '0x08000948', sourceUrl: OLD });
+  const oldGems = realRow('kleod:CountCollectedGems:agbcc', 'match', { addr: '0x0801e0b4', sourceUrl: OLD });
+  const newQ8 = realRow('kleod:MultiplyQ8:agbcc', 'nonmatch', { addr: '0x08000948', sourceUrl: NEW });
+  const newWm = realRow('kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc', 'nonmatch', {
+    addr: '0x0801e0b4',
+    sourceUrl: NEW,
+  });
+  const emerald = realRow('pokeemerald:GetInput:agbcc', 'match', {
+    addr: '0x08000100',
+    sourceUrl: 'https://github.com/macabeus/pokeemerald/blob/abcdef0/src/x.c#L1-L2',
+  });
+  const register = [oldQ8, oldGems].map((r) => ({ id: r.id, addr: r.addr!, sourceUrl: r.sourceUrl! }));
+
+  test('registered rows read `retired`, not `missing`, and the gate passes — including a shared id', () => {
+    const r = compareOutcomes(out(oldQ8, oldGems, emerald), out(newQ8, newWm, emerald), register);
+    expect({ ok: r.ok, missing: r.missing, retired: r.retired, lost: r.lost }).toEqual({
+      ok: true,
+      missing: [],
+      retired: ['kleod:MultiplyQ8:agbcc', 'kleod:CountCollectedGems:agbcc'],
+      lost: [],
+    });
+    expect(r.added).toEqual(['kleod:MultiplyQ8:agbcc', 'kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc']);
+  });
+
+  test('a row of ANOTHER project skipped in the same run still fails the gate', () => {
+    const r = compareOutcomes(out(oldQ8, oldGems, emerald), out(newQ8, newWm), register);
+    expect(r.ok).toBe(false);
+    expect(r.missing).toEqual(['pokeemerald:GetInput:agbcc']);
+  });
+
+  test('a vanished row the register does not name is `missing`, even at a registered address', () => {
+    // same address, same id, but cited from a repository the register does not retire
+    const unregistered = { ...oldQ8, sourceUrl: 'https://github.com/someone/else/blob/1234567/src/x.c#L1-L2' };
+    const r = compareOutcomes(out(unregistered as FunctionResult), out(), register);
+    expect(r.ok).toBe(false);
+    expect(r.missing).toEqual(['kleod:MultiplyQ8:agbcc']);
+  });
+
+  test('a pre-address base row still meets the register, by id under its repository', () => {
+    const { addr: _drop, ...noAddr } = oldGems;
+    const r = compareOutcomes(out(noAddr as FunctionResult), out(newWm), register);
+    expect({ ok: r.ok, retired: r.retired }).toEqual({ ok: true, retired: ['kleod:CountCollectedGems:agbcc'] });
+  });
+});
+
 // THE POPULATION THE BASE COMPARISON CANNOT SEE. `compareOutcomes` walks the BASE's rows, so a row
 // the branch added is compared against nothing at all — for as long as the branch lives, however
 // many times it republishes its own artifact. Measured on this branch: with base `origin/main` the
