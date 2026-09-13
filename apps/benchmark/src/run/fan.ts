@@ -22,7 +22,7 @@
 // The line shapes are deliberately the CLI's (`asmlift: [score] …`, `[dropped]`, `[withheld]`,
 // `[ranked]`), so docs/ranked-repro.md's comparison recipe — `grep -F '[score]'` over two runs —
 // works across the two commands without a second recipe to keep in step.
-import { type BenchOutput, type Identifiable, joinArtifacts, resolveRow } from '@asmlift/bench-schema';
+import { type BenchOutput, type Identifiable, joinArtifacts, resolveRow, selectByRef } from '@asmlift/bench-schema';
 import { declaredBlock } from '@asmlift/cli/declare';
 import { isDecline } from '@asmlift/cli/decline';
 import { bakedBuild, sampleSourceTree, sourceStamp } from '@asmlift/cli/provenance';
@@ -356,8 +356,9 @@ function baseArtifact(base: string): BenchOutput | { error: string } {
  *  command that silently picks one of four toolchains for a symbol answers a question nobody
  *  asked. */
 export function selectCases(cases: Case[], query: string): Case[] {
-  const exact = cases.filter((c) => c.id === query);
-  return exact.length > 0 ? exact : cases.filter((c) => c.id.includes(query));
+  // bench-schema `selectByRef`: the same exact-then-substring rule over every name the row has had,
+  // so a row renamed upstream is still selected by the name a brief typed.
+  return selectByRef(cases, query);
 }
 
 /** One candidate as the CLI spells it — through the CLI's OWN renderer, denominator included.

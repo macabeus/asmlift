@@ -2,7 +2,16 @@
 // presentation, and a row answers to its former names. These pin the three properties the address
 // migration exists to buy — a rename is not a removal, a pre-migration artifact still joins, and a
 // same-named row of a DIFFERENT decompilation does not.
-import { type Identifiable, joinArtifacts, resolveRow, rowIdentity, rowNames } from '@asmlift/bench-schema';
+import {
+  type Identifiable,
+  idNames,
+  joinArtifacts,
+  onlySelects,
+  resolveRow,
+  rowIdentity,
+  rowNames,
+  selectByRef,
+} from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
 const real = (sym: string, over: Partial<Identifiable> = {}): Identifiable => ({
@@ -60,6 +69,33 @@ describe('resolveRow — every spelling a person or a link uses', () => {
     expect(resolveRow(rows, 'synthetic:add')).toBeUndefined();
     expect(resolveRow(rows, 'synthetic:add:ido7.1')?.toolchain).toBe('ido7.1');
     expect(resolveRow(rows, 'kleod:Nope')).toBeUndefined();
+  });
+});
+
+describe('selection answers to a former name through every reader', () => {
+  // Before one rule: after a rename, `bench target Old` (resolveRow) found the row, while
+  // `bench fan Old` (selectCases), `bench sweep --only Old` (selectsRow) and `bench run --only Old`
+  // (realCases) selected nothing and said nothing. The CLI entries themselves are pinned in
+  // fan.test.ts and sweep.test.ts; these pin the two functions all of them go through.
+  const renamed = real('EntityLookup', { addr: '0x0803d140', aliases: ['sub_0803D140'] });
+
+  test('idNames spells an alias id exactly as rowNames does', () => {
+    expect(idNames(renamed.id, renamed.aliases)).toEqual(rowNames(renamed));
+    expect(idNames('synthetic:add:ido7.1')).toEqual(['synthetic:add:ido7.1']);
+  });
+
+  test('--only: a substring of the name or of a former name, never of project or toolchain', () => {
+    expect(onlySelects('sub_0803D1', renamed.sym, renamed.aliases)).toBe(true);
+    expect(onlySelects('Lookup', renamed.sym, renamed.aliases)).toBe(true);
+    expect(onlySelects('kleod', renamed.sym, renamed.aliases)).toBe(false);
+    expect(onlySelects(undefined, renamed.sym)).toBe(true);
+  });
+
+  test('by reference: an old id resolves exactly, and a substring of an old id still selects', () => {
+    const rows = [renamed, syn('add')];
+    expect(selectByRef(rows, 'kleod:sub_0803D140:agbcc')).toEqual([renamed]);
+    expect(selectByRef(rows, 'sub_0803D140')).toEqual([renamed]);
+    expect(selectByRef(rows, 'Nope')).toEqual([]);
   });
 });
 

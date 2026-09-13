@@ -47,7 +47,7 @@
 // whether a row MATCHES — that is `bench run` (`docs/bench-cost.md` §1). It tells you which rows
 // your branch SPELLS differently, which is the question a round asks twenty times before it asks
 // the other one once.
-import { type Identifiable, joinArtifacts } from '@asmlift/bench-schema';
+import { type Identifiable, joinArtifacts, onlySelects } from '@asmlift/bench-schema';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -258,7 +258,14 @@ export function rekeyFans(recorded: readonly RecordedRow[], current: readonly Id
  *  diagnostic from becoming an overnight job, and a ref that will not resolve must not be able to
  *  turn the guard off. A row the artifact does not carry (a new dataset row) has no recorded
  *  count and is enumerated — the guard protects against the known giants, and says so. */
-export function recordedFans(): { fans: Map<string, number>; unreadable?: string; path?: string; rows?: number } {
+export function recordedFans(): {
+  fans: Map<string, number>;
+  unreadable?: string;
+  path?: string;
+  rows?: number;
+  /** the CURRENT dataset's real rows — what a selection can name, priced or not (see fanGuard) */
+  current?: readonly Pick<Identifiable, 'id' | 'project' | 'aliases'>[];
+} {
   const path = join(RESULTS_DIR, 'results.json');
   // NO ARTIFACT AT ALL is this guard's documented open case: a checkout that has never published
   // one prices no row, every row enumerates, and the header says so. AN ARTIFACT THAT WILL NOT
@@ -277,7 +284,8 @@ export function recordedFans(): { fans: Map<string, number>; unreadable?: string
     if (!Array.isArray(results)) {
       return { fans: out, path, unreadable: `${path} has no top-level \`results\` array` };
     }
-    return { fans: rekeyFans(results, realRowIdentities()), path, rows: results.length };
+    const current = realRowIdentities();
+    return { fans: rekeyFans(results, current), path, rows: results.length, current };
   } catch (e) {
     return { fans: out, path, unreadable: `${path}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
   }
@@ -285,12 +293,18 @@ export function recordedFans(): { fans: Map<string, number>; unreadable?: string
 
 /** Does this selection name that row? The same three filters `collect` applies, over a row ID
  *  instead of a `Case` — `synthetic:<sym>:<toolchain>` or `<project>:<sym>:<toolchain>`, where
- *  `--only` is a substring of the SYM (`syntheticCases`/`realCases` both filter `x.sym`, not the
- *  id) and the synthetic tier is the rows whose project is `synthetic`.
+ *  `--only` is a substring of the SYM or of a former name (`syntheticCases`/`realCases` both filter
+ *  through bench-schema `onlySelects`, not the id) and the synthetic tier is the rows whose project
+ *  is `synthetic`. Pass the row's `aliases`, or a renamed row reads as unselected here while
+ *  `collect` sweeps it.
  *
  *  Exported because it is what lets the `--fan` guard say how much of its own selection the
  *  artifact could price, which is the difference between "no giants here" and "I cannot see". */
-export function selectsRow(o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>, id: string): boolean {
+export function selectsRow(
+  o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>,
+  id: string,
+  aliases?: readonly string[],
+): boolean {
   const parts = id.split(':');
   if (parts.length < 3) {
     return false;
@@ -303,7 +317,7 @@ export function selectsRow(o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>, 
   if (o.project !== undefined && project !== o.project) {
     return false;
   }
-  return o.only === undefined || sym.includes(o.only);
+  return onlySelects(o.only, sym, aliases);
 }
 
 export interface SweepOptions extends SweepSelection {
@@ -589,17 +603,20 @@ export function fanGuard(
   o: Pick<SweepOptions, 'tiers' | 'only' | 'project'>,
   artifact: ReturnType<typeof recordedFans>,
 ): { over: Record<string, number>; unreadable?: string } {
-  const { fans, unreadable, path, rows } = artifact;
+  const { fans, unreadable, path, rows, current } = artifact;
   if (unreadable !== undefined) {
     return { over: {}, unreadable };
   }
+  const aliasesOf = new Map((current ?? []).map((r) => [r.id, r.aliases]));
   const over: Record<string, number> = {};
   let priced = 0;
+  const pricedProjects = new Set<string>();
   for (const [id, n] of fans) {
-    if (!selectsRow(o, id)) {
+    if (!selectsRow(o, id, aliasesOf.get(id))) {
       continue;
     }
     priced++;
+    pricedProjects.add(id.slice(0, id.indexOf(':')));
     if (n > SWEEP_FAN_LIMIT) {
       over[id] = n;
     }
@@ -625,6 +642,24 @@ export function fanGuard(
           ? `${path} prices no row at all — 0 of its ${rows ?? 0} result(s) carry an \`asmlift.candidateCount\`, which is what a schema move under that key, or an artifact from a shard that wrote no rows, looks like`
           : `${path} prices ${fans.size} row(s) and not one of the rows this selection names, so it bounds nothing here`,
     };
+  }
+  // AND PER PROJECT, because the count above is selection-wide: five priced projects masked one
+  // unpriced one. Measured on the kleod source swap with the pre-swap artifact: `--project kleod
+  // --fan` refused (0 priced), while `--tier real --fan` priced 210 rows of the other five projects,
+  // so `over` came back empty and PauseMenuScreenHandler (27,360 spellings, over SWEEP_FAN_LIMIT)
+  // enumerated unguarded. Every re-pin of a project's source reopens exactly this until the artifact
+  // is regenerated. Only the real tier can be checked this way — `current` is the dataset's REAL
+  // rows — so a synthetic-only hole is still covered by the selection-wide count alone.
+  if (path !== undefined && current !== undefined) {
+    const unpriced = [...new Set(current.filter((r) => selectsRow(o, r.id, r.aliases)).map((r) => r.project))].filter(
+      (p) => !pricedProjects.has(p),
+    );
+    if (unpriced.length > 0) {
+      return {
+        over: {},
+        unreadable: `${path} prices no row of ${unpriced.join(', ')} that this selection names, so it bounds nothing there — regenerate the artifact, narrow the selection, or pass --force`,
+      };
+    }
   }
   return { over };
 }

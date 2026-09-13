@@ -43,11 +43,41 @@ export const ADDR_PATTERN = /^0x[0-9a-f]{8}$/;
 export const rowIdentity = (r: Identifiable): string =>
   r.tier === 'real' && r.addr !== undefined ? `${r.project}:${r.addr}:${r.toolchain}` : r.id;
 
+/** Every `project:name:toolchain` spelling an id answers to: the id first, then the same id with
+ *  each alias in the name's place. Takes the id rather than a row so a reader holding only an id
+ *  and the aliases (the sweep's fan guard, a `Case`) spells aliases exactly as `rowNames` does. */
+export const idNames = (id: string, aliases?: readonly string[]): string[] => {
+  const head = id.slice(0, id.indexOf(':') + 1);
+  const tail = id.slice(id.lastIndexOf(':'));
+  return [id, ...(aliases ?? []).map((a) => `${head}${a}${tail}`)];
+};
+
 /** Every `project:name:toolchain` spelling a row answers to: its id first, then its aliases. */
-export const rowNames = (r: Identifiable): string[] => [
-  r.id,
-  ...(r.aliases ?? []).map((a) => `${r.project}:${a}:${r.toolchain}`),
-];
+export const rowNames = (r: Identifiable): string[] => idNames(r.id, r.aliases);
+
+// ROW SELECTION. The harness has two selection semantics on purpose, and ONE alias rule across
+// both. `--only` (`bench run`, `sweep`, `fidelity`) is a substring of the function NAME, never of
+// the project or toolchain; `bench fan` and `bench gates --only` name a row by id, exact first,
+// then a substring of the id. Both answer to every name the row has had. Measured before this
+// rule, on a row renamed with its old name in `aliases`: `bench target Old` resolved the row while
+// `bench fan Old`, `bench sweep --only Old` and `bench run --only Old` selected nothing, silently,
+// because each of those readers matched `sym` or `id` alone.
+
+/** `--only`: does this substring select a row named `sym` (formerly `aliases`)? An absent or empty
+ *  filter selects everything. */
+export const onlySelects = (only: string | undefined, sym: string, aliases?: readonly string[]): boolean =>
+  !only || [sym, ...(aliases ?? [])].some((n) => n.includes(only));
+
+/** Name a row by id: every row one of whose names (`idNames`) IS the query, else every row one of
+ *  whose names CONTAINS it. Exact-first so a row whose whole id is a substring of another's still
+ *  resolves to itself. Returns every hit, so the caller reports an ambiguity instead of guessing. */
+export function selectByRef<R extends { id: string; aliases?: readonly string[] }>(
+  rows: readonly R[],
+  query: string,
+): R[] {
+  const exact = rows.filter((r) => idNames(r.id, r.aliases).includes(query));
+  return exact.length > 0 ? exact : rows.filter((r) => idNames(r.id, r.aliases).some((n) => n.includes(query)));
+}
 
 /** The GitHub `owner/name` a row's reference source is cited from, when it has one. */
 export const sourceRepo = (r: Identifiable): string | undefined =>

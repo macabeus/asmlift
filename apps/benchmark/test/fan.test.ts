@@ -63,6 +63,13 @@ describe('selectCases', () => {
   it('returns nothing for a name no row carries', () => {
     expect(selectCases([row('kleod:Foo:agbcc')], 'Nope')).toEqual([]);
   });
+
+  // After an upstream rename `bench target Old` resolved the row and `bench fan Old` found nothing.
+  it('selects a renamed row by its former name, exactly and by substring', () => {
+    const renamed = { id: 'kleod:EntityLookup:agbcc', aliases: ['sub_0803D140'] } as Case;
+    expect(selectCases([renamed], 'kleod:sub_0803D140:agbcc')).toEqual([renamed]);
+    expect(selectCases([renamed, row('kleod:Foo:agbcc')], 'sub_0803D140')).toEqual([renamed]);
+  });
 });
 
 describe('scoreLine', () => {

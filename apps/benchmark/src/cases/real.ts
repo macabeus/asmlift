@@ -9,6 +9,7 @@
 // Neither is handed the row's own signature out of the reference source. manifests.ts's `m2cCtx`
 // doc states what each channel carries; README.md lists the residuals, in both directions, and
 // the one corner where a signature fact still reaches m2c only. Do not re-derive either here.
+import { onlySelects } from '@asmlift/bench-schema';
 import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
 
@@ -19,7 +20,7 @@ import type { Case } from './types';
 
 export interface RealFilter {
   project?: string;
-  only?: string; // substring match on the symbol
+  only?: string; // substring match on the symbol or a former name (bench-schema onlySelects)
 }
 
 export function realCases(filter: RealFilter = {}): Case[] {
@@ -27,7 +28,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
   const cases: Case[] = [];
   for (const man of manifests) {
     const tc = TOOLCHAINS[man.toolchain];
-    for (const f of man.functions.filter((x) => !filter.only || x.sym.includes(filter.only))) {
+    for (const f of man.functions.filter((x) => onlySelects(filter.only, x.sym, x.aliases))) {
       const ctxI = f.m2cCtx ? man.vendored(f.sym).ctxI : null;
       const ctxProto = ctxI === null ? null : m2cOwnPrototype(f.sym, f.proto, ctxI);
       cases.push({

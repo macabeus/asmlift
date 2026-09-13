@@ -485,6 +485,45 @@ describe('which rows a selection names', () => {
     expect(selectsRow({ ...both, only: 'kleod' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
     expect(selectsRow({ ...both, only: 'agbcc' }, 'kleod:CountCollectedGems:agbcc')).toBe(false);
   });
+
+  it('answers to a former name, as `collect` does', () => {
+    // `realCases` selects a renamed row by its old name (bench-schema onlySelects); without the
+    // aliases here, the fan guard would call that row unselected and price the sweep without it.
+    const r = { tiers: ['real'] as const, only: 'sub_0803D1' };
+    expect(selectsRow(r, 'kleod:EntityLookup:agbcc')).toBe(false);
+    expect(selectsRow(r, 'kleod:EntityLookup:agbcc', ['sub_0803D140'])).toBe(true);
+  });
+});
+
+describe('the --fan guard refuses PER PROJECT, not only selection-wide', () => {
+  // Measured on the kleod swap before the fix, with the pre-swap artifact: `--project kleod` was
+  // refused, `--tier real` was not — five priced projects masked the one priced by nothing, and
+  // PauseMenuScreenHandler (27,360 spellings) would have enumerated unguarded.
+  const current = [
+    { id: 'sa3:GetInput:agbcc', project: 'sa3' },
+    { id: 'kleod:PauseMenuScreenHandler:agbcc', project: 'kleod' },
+  ];
+  const artifact = (pairs: [string, number][]) => ({ fans: new Map(pairs), path: '/r.json', rows: 2, current });
+
+  it('refuses a tier-wide selection when one of its projects is priced by nothing', () => {
+    const g = fanGuard({ tiers: ['real'] }, artifact([['sa3:GetInput:agbcc', 120]]));
+    expect(g.unreadable).toContain('prices no row of kleod');
+    // …and a selection that names only the priced project still sweeps
+    expect(fanGuard({ tiers: ['real'], project: 'sa3' }, artifact([['sa3:GetInput:agbcc', 120]])).unreadable).toBe(
+      undefined,
+    );
+  });
+
+  it('passes once every selected project is priced', () => {
+    const g = fanGuard(
+      { tiers: ['real'] },
+      artifact([
+        ['sa3:GetInput:agbcc', 120],
+        ['kleod:PauseMenuScreenHandler:agbcc', 27360],
+      ]),
+    );
+    expect(g).toEqual({ over: { 'kleod:PauseMenuScreenHandler:agbcc': 27360 } });
+  });
 });
 
 describe('a --compare side that is not a sweep record file', () => {
