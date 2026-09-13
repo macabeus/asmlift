@@ -336,10 +336,19 @@ describe('the unmatchable register is falsified by the artifact', () => {
         'moved, and scanning the rest of the page would treat the near-miss table as closed rows',
     ).toBeGreaterThanOrEqual(0);
     const to = lines.findIndex((l, i) => i > from && l.startsWith('## '));
-    return lines
-      .slice(from + 1, to === -1 ? lines.length : to)
-      .map((l) => l.match(ROW_ID)?.[1])
-      .filter((id): id is string => Boolean(id));
+    // EVERY table line past the header and separator must parse as a row. Filtering the
+    // unparseable ones out made a malformed entry invisible: measured with the table otherwise
+    // empty, `| af:gfxopen:ido7.1 | stop-here | nonmatch | … |` (the id without backticks, a row
+    // that MATCHES) passed this gate, because it parsed to no id and the count check below was
+    // satisfied by the page's retired entry alone.
+    const table = lines.slice(from + 1, to === -1 ? lines.length : to).filter((l) => l.trimStart().startsWith('|'));
+    const entries = table.filter((l, i) => !(i === 0 || /^\|\s*:?-{3,}/.test(l.trim())));
+    const malformed = entries.filter((l) => !ROW_ID.test(l));
+    expect(
+      malformed,
+      `${REGISTER} has register lines this gate cannot read — a row id must be the first cell, in backticks`,
+    ).toEqual([]);
+    return entries.map((l) => l.match(ROW_ID)![1]);
   };
 
   it('every row it closes is still a nonmatch in results.json', () => {
@@ -348,7 +357,8 @@ describe('the unmatchable register is falsified by the artifact', () => {
     // was retired with the project source it came from (2026-09-13) and the table is empty. So the
     // count asserted is register rows PLUS retired entries (`## Retired: \`Sym\` (project)`), and
     // each retired entry is itself checked below — it claims its row is gone, which the artifact
-    // can falsify. An unreadable page parses to zero of both and fails here.
+    // can falsify. This count alone does NOT prove the table parses (the retired entry satisfies it
+    // whatever the table holds); `registerRows` fails on any table line it cannot read.
     const retired = [...readFileSync(REGISTER, 'utf8').matchAll(/^## Retired: `([\w.]+)` \((\w+)\)$/gm)].map(
       (m) => `${m[2]}:${m[1]}`,
     );
