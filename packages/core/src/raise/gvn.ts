@@ -64,7 +64,7 @@
 //
 // Several modules answer "is this address a local?" with independent policies — here: never;
 // basecse: at whichever of the two positions `l3/hoist.ts` is handed (the COMMITTED call states
-// the function top, its roster admissions also offer each init's first use), when the gate table
+// the function top, its roster's hoists also offer each init's first use), when the gate table
 // admits the base; l3/scopebase.ts: at the innermost scope holding the uses; l3/argbase.ts:
 // immediately before a call whose arguments share it. The newer placement variations — l3/nearbase.ts,
 // l3/inlinebase.ts, l3/homesplit.ts — answer it too, each with its own.

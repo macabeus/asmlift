@@ -197,7 +197,7 @@ function rankedStderr(a: {
   // which presumes the candidate was enumerated at all. A variation that threw produced no
   // candidate to drop.
   const threw = [...a.enumerationErrors]
-    .map(([label, error]) => `asmlift: [threw] ${label} threw (no candidate from it): ${error}\n`)
+    .map(([threw, error]) => `asmlift: [threw] ${threw} threw (no candidate from it): ${error}\n`)
     .join('');
   const drops = ranked.dropped.length
     ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
@@ -666,9 +666,10 @@ export async function runCli(
         prototypes,
         symbols,
         compile,
-        onEnumerationError: (label: string, error: string) => {
-          if (!enumerationErrors.has(label)) {
-            enumerationErrors.set(label, error);
+        onEnumerationError: (variations: readonly string[], error: string) => {
+          const threw = [name, ...variations].join('/');
+          if (!enumerationErrors.has(threw)) {
+            enumerationErrors.set(threw, error);
           }
         },
         ...(onProgress ? { onProgress } : {}),

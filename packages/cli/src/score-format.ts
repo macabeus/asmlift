@@ -11,7 +11,7 @@ import { joinVariations } from '@asmlift/core/variation-tokens';
 /** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
  *
  *  THE ONE RENDERER FOR EVERY SCORE ANY asmlift COMMAND PRINTS: the CLI's `[score]` table, the
- *  `[ranked]` line's `best …`, the `[withheld]` line, the `[progress]` line — and the benchmark's
+ *  `[ranked]` line's `winner …`, the `[withheld]` line, the `[progress]` line — and the benchmark's
  *  `bench fan`, which prints those same four for one row. A reader comparing two runs cannot be
  *  asked to know which lines carry a denominator, and the harness is where two runs get compared.
  *
@@ -60,7 +60,7 @@ export function rankedSummaryLine(a: {
   return (
     `asmlift: [ranked] ${a.scored} candidate(s) scored, ${a.dropped} dropped, ` +
     `${a.withheld} withheld, ${a.synthesized} synthesized, ` +
-    `best ${joinVariations(a.winner.variations)}: ${scoreOf(a.winner.score)} ` +
+    `winner ${joinVariations(a.winner.variations)}: ${scoreOf(a.winner.score)} ` +
     `[${a.stamp}]`
   );
 }

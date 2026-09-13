@@ -16,7 +16,7 @@
 //     DIFFERENT project cannot be grafted. `bench target` warns about a MISSING map; a wrong one is
 //     silent (`cases/project-elf.ts` reads whatever `decomp.yaml` is at the root it is given), and
 //     a wrong map is worse than none — the names come out wrong, not absent.
-//   * `--run` reports the `[ranked]` line, which carries `best …` AND the source sha. A
+//   * `--run` reports the `[ranked]` line, which carries `winner …` AND the source sha. A
 //     `grep -F '[score]' | tail -1` reports the WORST candidate, because that table is sorted
 //     best-first: on `kleod:GetEntityLookupData:agbcc` it gives `signed: 15/18` where the row is
 //     `unsigned/raw-globals: 4/14`.
@@ -162,7 +162,7 @@ export async function repro(
     return code;
   }
 
-  // `[ranked]`, not the `[score]` table: it carries `best …` and the `[asmlift source <sha>]`
+  // `[ranked]`, not the `[score]` table: it carries `winner …` and the `[asmlift source <sha>]`
   // stamp, and it is one line whether the fan was 1 or 100,000.
   const ranked = errText.split('\n').filter((l) => l.includes('[ranked]') || l.includes('[declined]'));
   for (const line of ranked) {

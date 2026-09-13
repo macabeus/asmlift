@@ -133,8 +133,14 @@ export interface EnumerateOptions {
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
-   *  and without this it looks identical to a variation that correctly declined. */
-  onEnumerationError?: (label: string, error: string) => void;
+   *  and without this it looks identical to a variation that correctly declined.
+   *
+   *  `variations` names the setting that threw, in the order a candidate's `variations` lists them
+   *  but without a signedness variation, so a setting that throws under both signednesses is
+   *  reported twice with the same list: `['defsite',
+   *  'unmerge']` for a throw under `/defsite/unmerge`, and `[]` when the function's own tree could
+   *  not be spelled. */
+  onEnumerationError?: (variations: readonly string[], error: string) => void;
   /** Called once per (name, reason) when the declaration synthesis REFUSES a name the tree
    *  references (see `RefusedDeclarationReason`). The name then stays undeclared and the
    *  candidate fails loudly in a self-declared world — this is what lets the consumer say which
@@ -387,6 +393,10 @@ export function enumerateCandidates(
   opts: EnumerateOptions = {},
 ): Candidate[] {
   const backend = opts.backend ?? cBackend;
+  /** Report a setting that THREW through `onEnumerationError`, as the variations its `/`-prefixed
+   *  suffix names (none for the function's own tree). */
+  const reportThrow = (suffix: string, e: unknown): void =>
+    opts.onEnumerationError?.(suffix === '' ? [] : splitVariations(suffix.slice(1)), firstLine(e));
   /** The last refusal from a backend asked to spell a tree — what the empty-enumeration check
    *  below reports, so "this backend can spell nothing here" names its reason. */
   let lastEmitError: unknown = null;
@@ -858,7 +868,7 @@ export function enumerateCandidates(
     try {
       sources.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {
-      opts.onEnumerationError?.(name + preRespellSuffix, firstLine(e));
+      reportThrow(preRespellSuffix, e);
       return { sources, emit: { error: e } };
     }
     // Respell variations — each on the same footing as signedness/branch sense, each guarded:
@@ -995,7 +1005,7 @@ export function enumerateCandidates(
                 });
               }
             } catch (e) {
-              opts.onEnumerationError?.(name + preRespellSuffix + suffix + shapeSuffix, firstLine(e));
+              reportThrow(preRespellSuffix + suffix + shapeSuffix, e);
             }
           }
         }
@@ -1005,7 +1015,7 @@ export function enumerateCandidates(
         // refused, so without this a variation that fails here vanishes with no trace — indistinguishable
         // from one that correctly declined, which is exactly the hidden failure
         // DroppedCandidate exists to surface.
-        opts.onEnumerationError?.(name + preRespellSuffix + suffix, firstLine(e));
+        reportThrow(preRespellSuffix + suffix, e);
       }
     };
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A variation on the
@@ -1022,9 +1032,9 @@ export function enumerateCandidates(
           respell(shaped.suffix, () => shaped.out, true);
         }
       } catch (e) {
-        // the error label falls back to the full subset — the fired set is unknown mid-throw
-        const label = subset.map((x) => x.suffix).join('');
-        opts.onEnumerationError?.(name + preRespellSuffix + label, firstLine(e));
+        // the report names the full subset — the fired set is unknown mid-throw
+        const subsetSuffix = subset.map((x) => x.suffix).join('');
+        reportThrow(preRespellSuffix + subsetSuffix, e);
       }
     }
     respell('/argbase', () => materializeArgBases(sfn));
@@ -1220,7 +1230,7 @@ export function enumerateCandidates(
         const base = from();
         results = base ? resultsOf(base) : [];
       } catch (e) {
-        opts.onEnumerationError?.(name + preRespellSuffix + suffix, firstLine(e));
+        reportThrow(preRespellSuffix + suffix, e);
         return;
       }
       for (const c of results) {
@@ -1259,7 +1269,7 @@ export function enumerateCandidates(
     // declares the array-shape fork, so a target with neither is offered the two `/livebase` hoists
     // and nothing else. The same fact is stated at the POLICY sites above; a roster change repairs
     // all of them or none.
-    const admissions: readonly BaseHoist[] = [
+    const hoists: readonly BaseHoist[] = [
       ...LIVEBASE_HOISTS,
       ...(target.compilerBehaviors.foldsConstAddrOffset ? [...BASEFOLD_HOISTS, ...UNFOLDED_HOISTS] : []),
       // …and the ORDER hoists where the compiler's subscript expansion forks on the base's array-ness,
@@ -1338,13 +1348,13 @@ export function enumerateCandidates(
       placement: HoistPlacement,
       bound: readonly string[],
     ): boolean => rows.slice(0, i).some((r) => r.placement === placement && sameBases(bound, census(r.gates)));
-    const livebases = admissions.map(({ suffix, gates, placement, pairings }, i) => {
+    const livebases = hoists.map(({ suffix, gates, placement, pairings }, i) => {
       const hoist = (): SFn | null => {
         const bound = census(gates);
         if (bound.length === 0) {
           return null;
         }
-        return shadowedByEarlier(admissions, i, placement, bound) ? null : hoistBaseLocals(sfn, gates, placement);
+        return shadowedByEarlier(hoists, i, placement, bound) ? null : hoistBaseLocals(sfn, gates, placement);
       };
       const volatiles = (): SFn | null => {
         const r = hoist();
@@ -1809,7 +1819,7 @@ export function enumerateCandidates(
             throw e; // the default lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped variation, never an aborted enumeration — the same posture as `respell`.
-          opts.onEnumerationError?.(name + liftSetting.suffix, firstLine(e));
+          reportThrow(liftSetting.suffix, e);
           continue;
         }
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
@@ -1865,7 +1875,7 @@ export function enumerateCandidates(
                 verify(fn);
               }
             } catch (e) {
-              opts.onEnumerationError?.(name + liftSetting.suffix + SHARED_TAIL_SUFFIX, firstLine(e));
+              reportThrow(liftSetting.suffix + SHARED_TAIL_SUFFIX, e);
               break;
             }
             // Unsunk, this fn is the `/shared-ret` pass's again.
@@ -1947,7 +1957,7 @@ export function enumerateCandidates(
               dropped.add(s.suffix);
               // an anchored setting that fails structuring or its contracts is a dropped variation, never
               // an aborted enumeration — same rule as respell below
-              opts.onEnumerationError?.(name + vsuffix + s.suffix, firstLine(e));
+              reportThrow(vsuffix + s.suffix, e);
               continue;
             }
             // A TREE another structure setting already produced. `respellTree` reads the tree and this
@@ -2019,15 +2029,15 @@ export function enumerateCandidates(
                 //
                 // It is reported instead through `onEnumerationError` under `pf.suffix`, which is what
                 // `respellTree`'s second argument is for: a default emit refusal does not THROW —
-                // `respellTree` returns it — so the `catch` below never sees it, and under the bare
-                // function name it would read as a refusal of the row's default source while the
+                // `respellTree` returns it — so the `catch` below never sees it, and reported with no
+                // variations it would read as a refusal of the row's default source while the
                 // variation's whole half of the fan was deleted.
                 const respelled = respellTree(made, pf.suffix).sources;
                 for (const sp of respelled) {
                   sources.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
                 }
               } catch (e) {
-                opts.onEnumerationError?.(`${name}${pf.suffix}`, firstLine(e));
+                reportThrow(pf.suffix, e);
               }
             }
             for (const sp of sources) {

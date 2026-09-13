@@ -82,7 +82,7 @@ a rule spelled twice is a rule with two chances to be lost:
    that file documents two, they give different numbers on the same function, and their flags do
    not transfer (never "fix" the generated script by adding the checkout command's). Only the row's
    generated script is comparable with a harness outcome: `pnpm bench repro <sym|id> --run`. The
-   **`[ranked]` line** is the comparison recipe for both — it carries `best …` and the
+   **`[ranked]` line** is the comparison recipe for both — it carries `winner …` and the
    `[asmlift source <sha>]` stamp. Never `grep '[score]' | tail -1`: that table is sorted
    best-first, so the last line is the WORST candidate, and on `kleod:GetEntityLookupData:agbcc` it
    reports `15/18` against a published `4/14`. That file is shared with `/attribute-function` — the

@@ -556,7 +556,7 @@ export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
 
 /** THE REGION RULE, as a value. A third rule is one entry here — a partition, a gate table, and
  *  the population its counting rules are judged over — rather than three hand-edited branches in
- *  three functions, which is the same doctrine `rank.ts` states for its own admissions ("one entry
+ *  three functions, which is the same doctrine `rank-variations.ts` states for its hoist roster ("one entry
  *  here, one gate table, and that table's line in the gate-contract roster — not nine hand-edited
  *  sites that can drift"). */
 export interface RegionRule {

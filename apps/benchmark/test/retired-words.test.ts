@@ -6,9 +6,12 @@
 // set of lines where the same spelling means something else — an ECharts axis, a Tailwind variant,
 // an external file's name — and never the enumeration sense.
 //
-// THE RULES MATCH WHOLE WORDS, and two of them are written against a near-miss on purpose:
-//   - `variant` retires and `variation` is the vocabulary's own word, so the rule is
-//     `\bvariants?\b`; a stem such as `variant\w*` would flag every renamed line.
+// THE RULES MATCH WHOLE WORDS AND IDENTIFIER PARTS — `lever` alone, and `printLevers`, `LeverResult`
+// and `ALL_LEVERS` too, since a whole-word match never sees a camelCase identifier. Two rules are
+// written against a near-miss on purpose:
+//   - `variant` retires and `variation` is the vocabulary's own word, so the rule matches `variant`
+//     and `Variants` as a word or an identifier part; a stem such as `variant\w*` would flag every
+//     renamed line.
 //   - `label` is correct in every sense but a candidate's name (assembly labels, `goto` labels,
 //     display labels, HTML and chart labels), so no rule matches the bare word: only the
 //     candidate-name identifiers and phrases are listed.
@@ -34,10 +37,24 @@ interface Rule {
 
 const THIS_FILE = relative(REPO_ROOT, import.meta.filename);
 
+/** A retired word as a whole word in any case, or as one part of an identifier: `lever`, `Levers`,
+ *  `LEVERS`, `printLevers`, `LeverResult`, `ALL_LEVERS`. Case-sensitive on purpose: `clever` and
+ *  `invariant` hold the word in lower case after a lower-case letter, which no identifier part does. */
+function retired(one: string, many: string): RegExp {
+  const cap = (w: string): string => w[0].toUpperCase() + w.slice(1);
+  const word = `(?:${many}|${one}|${cap(many)}|${cap(one)}|${many.toUpperCase()}|${one.toUpperCase()})`;
+  const lower = `(?:${many}|${one})`;
+  const part = `(?:${cap(many)}|${cap(one)})`;
+  const upper = `(?:${many.toUpperCase()}|${one.toUpperCase()})`;
+  return new RegExp(
+    `\\b${word}\\b|(?<=[a-z0-9])${part}(?![a-z])|\\b(?:${lower}|${part})(?=[A-Z0-9])|(?<=_)${upper}\\b|\\b${upper}(?=_)`,
+  );
+}
+
 const RULES: Rule[] = [
   {
     id: 'axis',
-    pattern: /\bax(?:is|es)\b/i,
+    pattern: retired('axis', 'axes'),
     allow: [
       { path: /^apps\/web\/src\/pages\/benchmark\/components\/charts\//, why: 'ECharts axes' },
       { path: /^apps\/web\/src\/pages\/benchmark\/theme\.ts$/, why: 'a chart grouping axis' },
@@ -53,13 +70,14 @@ const RULES: Rule[] = [
   },
   {
     id: 'lever',
-    pattern: /\blevers?\b/i,
+    pattern: retired('lever', 'levers'),
     allow: [{ path: /./, line: /agbcc-source-shape-levers\.md/, why: "an external document's file name" }],
   },
   {
     id: 'variant',
-    pattern: /\bvariants?\b/i,
+    pattern: retired('variant', 'variants'),
     allow: [
+      { path: /./, line: /RollRandomLevelVariant/, why: "a ROM function's symbol name" },
       { path: /^apps\/web\/src\/index\.css$/, line: /motion-safe:/, why: 'a Tailwind variant' },
       { path: /^packages\/core\/test\/determinism\.test\.ts$/, line: /alpha-variant/, why: 'a lambda-calculus term' },
       {
@@ -70,7 +88,7 @@ const RULES: Rule[] = [
       { path: /^apps\/benchmark\/dataset\/synthetic\.ts$/, line: /main-variant type/, why: "gcc's own term" },
       {
         path: /^scripts\/(?:lbg-declarations\/generate\.py|regen-[a-z-]+-probes\.ts)$/,
-        line: /\bvariants\b|\bVARIANTS\b/,
+        line: /\bvariants\b|VARIANTS\b/,
         why: "a study's set of hand-written source spellings",
       },
     ],
@@ -154,8 +172,25 @@ describe('the rules themselves', () => {
     for (const w of ['variant', 'variants', 'Variant', 'VARIANTS', 'a lift variant.']) {
       expect(rule('variant').test(w)).toBe(true);
     }
-    for (const w of ['variation', 'variations', 'Variation', 'VARIATION_TOKENS', 'invariant', 'SetIdAndVariant']) {
+    for (const w of ['variation', 'variations', 'Variation', 'VARIATION_TOKENS', 'invariant', 'Invariants']) {
       expect(rule('variant').test(w)).toBe(false);
+    }
+  });
+
+  test('a retired word is found inside an identifier, and never inside an ordinary word', () => {
+    for (const w of [
+      'printLevers',
+      'LeverResult',
+      'ALL_LEVERS',
+      'leverLabel',
+      'onAxisGated',
+      'xAxis',
+      'MIPS_VARIANTS',
+    ]) {
+      expect(RULES.some((r) => r.pattern.test(w))).toBe(true);
+    }
+    for (const w of ['clever', 'leverage', 'taxis', 'maxes', 'invariants']) {
+      expect(RULES.some((r) => r.pattern.test(w))).toBe(false);
     }
   });
 

@@ -68,10 +68,10 @@ const THUMB_FLAT =
 const run = (asm: string, failing: typeof fail) => {
   Object.assign(fail, failing);
   defaultFns.clear();
-  const errors: string[] = [];
+  const errors: (readonly string[])[] = [];
   const cands = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
     prototypes: P,
-    onEnumerationError: (label) => errors.push(label),
+    onEnumerationError: (variations) => errors.push(variations),
   });
   return { errors, cands };
 };
@@ -81,14 +81,8 @@ test.each([
   ['/shared-ret', THUMB_LEFT],
 ])('the %s alternative skips every setting its default sibling dropped, and keeps the rest', (suffix, asm) => {
   const { errors, cands } = run(asm, { default: true, sharedRet: false });
-  const reported = (l: string) => l.split('/').slice(1);
   expect(
-    errors.some(
-      (l) =>
-        hasVariation(reported(l), 'defsite') &&
-        !hasVariation(reported(l), 'shared-ret') &&
-        !hasVariation(reported(l), 'shared-tail'),
-    ),
+    errors.some((v) => hasVariation(v, 'defsite') && !hasVariation(v, 'shared-ret') && !hasVariation(v, 'shared-tail')),
   ).toBe(true);
   const alternative = cands.filter((c) => hasVariation(c.variations, suffix.slice(1)));
   expect(alternative.length).toBeGreaterThan(0);
@@ -97,11 +91,7 @@ test.each([
 
 test('a setting the `/shared-ret` alternative drops still ships in the `/shared-tail` alternative', () => {
   const { errors, cands } = run(THUMB_FLAT, { default: false, sharedRet: true });
-  expect(
-    errors.some(
-      (l) => hasVariation(l.split('/').slice(1), 'shared-ret') && hasVariation(l.split('/').slice(1), 'defsite'),
-    ),
-  ).toBe(true);
+  expect(errors.some((v) => hasVariation(v, 'shared-ret') && hasVariation(v, 'defsite'))).toBe(true);
   expect(
     cands.filter((c) => hasVariation(c.variations, 'shared-ret') && hasVariation(c.variations, 'defsite')),
   ).toEqual([]);

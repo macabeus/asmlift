@@ -20,6 +20,7 @@
 // `collect` is assembled from (`mapModesFor`, `optsDigest`) rather than by calling `collect`: every
 // assertion on a hand-built record is blind to what the producer actually emits, so a sweep that
 // collapsed its two map modes onto one key would pass a suite made only of those.
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -177,14 +178,12 @@ describe('the three fan hashes', () => {
     expect(now.fanHash).not.toBe(was.fanHash);
   });
 
-  it('a tree whose candidates carry the name `/`-joined hashes exactly like one that carries the list', () => {
-    // Both sides of `--base` run through this driver, each with its own tree's `Candidate` shape.
-    expect(fanDigests(fan.map((c) => ({ label: joined(c), source: c.source })))).toEqual(fanDigests(fan));
-  });
-
-  it('the name is hashed through its `/` join, so a list and its JSON text never hash alike', () => {
-    const asJson = fan.map((c) => ({ label: JSON.stringify(c.variations), source: c.source }));
-    expect(fanDigests(asJson).fanVariationsHash).not.toBe(fanDigests(fan).fanVariationsHash);
+  it('the name is hashed as its `/` join, never as the serialized list', () => {
+    const sha = (s: string): string => createHash('sha1').update(s).digest('hex').slice(0, 12);
+    expect(fanDigests(fan).fanVariationsHash).toBe(sha(fan.map((c) => `${joined(c)}\0`).join('')));
+    expect(fanDigests(fan).fanVariationsHash).not.toBe(
+      sha(fan.map((c) => `${JSON.stringify(c.variations)}\0`).join('')),
+    );
   });
 
   it('every fan record carries all three hashes, over an empty fan too', () => {

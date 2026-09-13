@@ -103,7 +103,7 @@ describe('renderFan', () => {
     expect(out).toContain('asmlift: [score] b: 3/12');
     expect(out).toContain('asmlift: [score] c: 4/13');
     expect(out).toContain(
-      'asmlift: [ranked] 3 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best a: 0/12 (match) [asmlift source deadbee]',
+      'asmlift: [ranked] 3 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, winner a: 0/12 (match) [asmlift source deadbee]',
     );
   });
 

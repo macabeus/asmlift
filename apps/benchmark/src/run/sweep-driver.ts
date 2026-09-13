@@ -84,15 +84,10 @@ const firstLine = (e: unknown): string =>
  *  would already break `--repeat`, which exists to catch exactly that class). */
 const serialized = new WeakMap<object, string>();
 
-/** One candidate as the enumeration of WHICHEVER tree this driver runs hands it back. Nothing is
- *  imported from the tree (see the header), so the name arrives in the shape that tree's own
- *  `Candidate` declares: its variations as a list, or that list already `/`-joined into `label`. */
-export type SweptCandidate = { source: string } & ({ variations: readonly string[] } | { label: string });
-
-/** A swept candidate's name as ONE string, `/`-joined — core's `joinVariations` spelling, restated
- *  here because this file imports nothing from the tree it drives. Never `JSON.stringify` of the
- *  list: that would hash the same names differently for the two shapes above. */
-const printedName = (c: SweptCandidate): string => ('variations' in c ? c.variations.join('/') : c.label);
+/** One candidate as the enumeration of the tree this driver runs hands it back — the two fields of
+ *  core's `Candidate` the fan hashes read, declared here because nothing is imported from that tree
+ *  (see the header). */
+export type SweptCandidate = { variations: readonly string[]; source: string };
 
 /** The `--fan` payload of one enumeration: its size and three ordered hashes over its candidates.
  *
@@ -104,9 +99,7 @@ const printedName = (c: SweptCandidate): string => ('variations' in c ? c.variat
  *      variations, and it moves under anything that changes, adds, drops or REORDERS a source —
  *      order being what `compareScored` breaks a score tie by.
  *    - `fanVariationsHash` covers the names alone, each hashed as its `/`-joined presentation
- *      string, so two trees that store a candidate's variations in different shapes still compare
- *      equal when they name the same variations. It moves when a candidate is named by a different
- *      route while its source stays put.
+ *      string. It moves when a candidate is named by a different route while its source stays put.
  *
  *  Exported for `sweep.test.ts`, which pins what each hash can and cannot see: `collect` needs a
  *  compiler to build a row's target, and the CI mirror gate has none. */
@@ -120,7 +113,9 @@ export function fanDigests(cands: readonly SweptCandidate[]): {
   const sources = createHash('sha1');
   const names = createHash('sha1');
   for (const c of cands) {
-    const name = printedName(c);
+    // core's `joinVariations` spelling, restated because this file imports nothing from the tree it
+    // drives; never `JSON.stringify`, which would make the hash a fact about serialization
+    const name = c.variations.join('/');
     both.update(`${name}\0${c.source}\0`);
     sources.update(`${c.source}\0`);
     names.update(`${name}\0`);

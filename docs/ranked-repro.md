@@ -87,11 +87,11 @@ and stderr to `out.err`, and reports **the `[ranked]` line**:
 ```
 repro: kleod:GetEntityLookupData:agbcc — nonmatch 4/14 as published
 repro: symbol map from …/apps/benchmark/checkouts/klonoa-empire-of-dreams
-asmlift: [ranked] 4 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best unsigned/raw-globals: 4/14 [asmlift source 3a06c74]
+asmlift: [ranked] 4 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, winner unsigned/raw-globals: 4/14 [asmlift source 3a06c74]
 repro: script exit 1 — a non-matching row exits nonzero by design
 ```
 
-**Quote the `[ranked]` line, not a `[score]` line.** It carries `best …` and the `[asmlift source
+**Quote the `[ranked]` line, not a `[score]` line.** It carries `winner …` and the `[asmlift source
 <sha>]` stamp this file requires beside every fan number, in one line whatever the fan size. The
 `[score]` table above it is sorted **best first**, so a `| tail -1` reports the WORST candidate —
 measured on the row above, `signed: 15/18` against a published `4/14`, a different numerator and a
@@ -211,7 +211,7 @@ Two things it can do that nothing else can:
   target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
   to LIST. Read a long enumeration as a big fan, not as a hang.
 
-  It also prints `[threw] <label> threw (no candidate from it)`, a channel `bench run` supplies no
+  It also prints `[threw] <function>/<variations> threw (no candidate from it)`, a channel `bench run` supplies no
   sink for at all — so the half of a row's fan a pre-respell variation produces can vanish from a
   benchmark run with nothing printed, and here it does not.
 
@@ -851,7 +851,7 @@ find nothing to disagree with and go green having audited nothing.
   writes:
 
   ```
-  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best <variations>: 531/<rows> [asmlift source 7362050]
+  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, winner <variations>: 531/<rows> [asmlift source 7362050]
   ```
 
   A score from a run that dropped candidates is not comparable to one that dropped none — and

@@ -53,7 +53,7 @@ export interface RankOptions {
    *  `decompileRanked` without supplying one, so a whole pre-fan half of a row's fan can still
    *  vanish from a `pnpm bench run` with nothing printed. Read an absent `[threw]` line as a fact
    *  about the wiring before reading it as a fact about the variations. */
-  onEnumerationError?: (label: string, error: string) => void;
+  onEnumerationError?: (variations: readonly string[], error: string) => void;
 }
 
 // Self-declaring candidates: a candidate that names map-derived symbols carries their refs

@@ -1,4 +1,5 @@
 import type { DecompilerId, DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { useMemo, useState } from 'react';
 
 import { CodeBlock, type CodeLanguage } from '../../../shared/components/CodeBlock';
@@ -282,7 +283,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
     digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
   }
   if (r.winnerVariations) {
-    digest.push(`winner ${r.winnerVariations.join('/')}`);
+    digest.push(`winner ${joinVariations(r.winnerVariations)}`);
   }
 
   return (
@@ -351,7 +352,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
                 className="mt-1.5 font-mono text-slate-500"
                 title="the candidate spelling that won the differ ranking"
               >
-                winner: {r.winnerVariations.join('/')}
+                winner: {joinVariations(r.winnerVariations)}
               </div>
             )}
           </ProvenanceRow>

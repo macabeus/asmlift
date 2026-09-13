@@ -3714,9 +3714,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // 419 → 406, attributed twice over: the with-gate log's best candidate carrying no `-block` variation
   // reads 419 exactly, which is what the without-gate log's winner scores. The 9728 extra
-  // candidates are what fanning every `/livebase` product over both admissions costs on a function
+  // candidates are what fanning every `/livebase` composition over both `/livebase` hoists costs on a function
   // that inhabits them, and 5120 of them are the `/coalesce` pairing — worth 21 points on
-  // `/livebase` here (440 → 419) and nothing on the narrow admission, whose best paired spelling
+  // `/livebase` here (440 → 419) and nothing on the narrow hoist, whose best paired spelling
   // reads 408, two behind going unpaired.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
@@ -4987,10 +4987,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // links (`uhalf`/`utag` overlapping struct fields, three `preupdate_*` do-while pre-update,
   // `lladd`/`llsub` unmodelled `adc`/`sbc`, `stkarg` stack-as-data) and 0 targets fail to build,
   // the two failure modes counted apart. Fans carrying BOTH VARIATIONS: 2, these two
-  // rows. Rows where BOTH ADMISSIONS BIND: 4 — these two plus `dmascope` and `dmascope2`, where
+  // rows. Rows where BOTH HOISTS BIND: 4 — these two plus `dmascope` and `dmascope2`, where
   // `/livebase-block` is shadowed. So no existing row can change outcome when the pairing changes
-  // TODAY. PREDICTION: `dmascope`/`dmascope2` are where a product
-  // starts enumerating the moment one exists, so re-run them with the pairing and stop reading
+  // TODAY. PREDICTION: `dmascope`/`dmascope2` are where the pairing's candidates
+  // start enumerating the moment it exists, so re-run them with the pairing and stop reading
   // either as a variation-clean control after; falsified by their fans carrying no candidate with both
   // variations on the commit that ships it. On the `/regionbase` side the census is already a reach
   // count — no row in the tier holds a `/regionbase` tree whose candidates the source dedup eats.
@@ -6031,7 +6031,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //     decomp.yaml`. That yaml is the one the benchmark itself scores through; `--target` then
   //     comes from it. Its `[declared]` line reads `1 declaration(s) synthesized from the target
   //     asm`; its `[ranked]` line reads `2 candidate(s) scored, 0 dropped, 0 withheld,
-  //     1 synthesized, best unsigned: <score>` followed by a source stamp.
+  //     1 synthesized, winner unsigned: <score>` followed by a source stamp.
   //   • EVERY CANDIDATE'S SCORE — `[ranked]` prints only the WINNER, so this needs a third call:
   //     `decompileRanked(sym, asm, tc.targetDesc, obj, { compile: benchCompilerFor('agbcc') })`,
   //     walking `.candidates` (NOT `.results`, which does not exist — `rankBy` returns

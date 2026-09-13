@@ -2,7 +2,7 @@
 //
 // `l3/basecse.ts`'s COMMITTED call emits every base hoist at the head of `sfn.body`, so a base
 // first touched halfway down the function is live across everything above it — a live range the
-// original never had, and agbcc pays for it with a callee-saved register. (Its roster admissions
+// original never had, and agbcc pays for it with a callee-saved register. (Its roster's hoists
 // ask for this placement directly, through the same `l3/hoist.ts` mechanism this variation uses; what
 // the variation adds is reaching the run on a tree the roster did not build — one NOTHING re-hoisted,
 // or one `l3/nearbase.ts` prepended into, which is the `/nearbase/sinkinit` pairing.)

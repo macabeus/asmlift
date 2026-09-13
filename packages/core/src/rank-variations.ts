@@ -618,7 +618,7 @@ export const LIVEBASE_HOISTS: readonly BaseHoist[] = [
  *  entry is NOT in that category: deleting it costs `synthetic:foldhead` its match, which
  *  `bench regression` fails on.
  *  HOW THE ABLATION IS DONE, since there is no shipped knob: filter this roster at its one use
- *  site (the `admissions` const in `enumerateCandidates`) behind a temporary env read, run the
+ *  site (the `hoists` const in `enumerateCandidates`) behind a temporary env read, run the
  *  rows with `ASMLIFT_CANDCACHE=0`, and revert. Prove the filter REACHED before believing a null
  *  result — `synthetic:livepark` MATCH → diff:3 with `/livebase` AND `/unfolded` both removed is
  *  the positive control, and a fan count per configuration is the second. Removing `/livebase`

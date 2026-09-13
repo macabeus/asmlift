@@ -38,18 +38,18 @@ vi.mock('../src/l3/nearbase', () => ({
 
 describe('the mover’s OWN minted local is judged', () => {
   const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
-  const errors: { label: string; error: string }[] = [];
+  const errors: { variations: readonly string[]; error: string }[] = [];
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
     prototypes: { dmascope: { params: ['s32'], returnsVoid: true } },
-    onEnumerationError: (label, error) => errors.push({ label, error }),
+    onEnumerationError: (variations, error) => errors.push({ variations, error }),
   });
 
   test('no `/nearbase` spelling reaches the fan', () => {
     expect(cands.filter((c) => hasVariation(c.variations, 'nearbase'))).toEqual([]);
   });
 
-  test('…and every one is REPORTED under a label naming it', () => {
-    const named = errors.filter((e) => hasVariation(e.label.split('/').slice(1), 'nearbase'));
+  test('…and every one is REPORTED under variations naming it', () => {
+    const named = errors.filter((e) => hasVariation(e.variations, 'nearbase'));
     expect(named.length).toBeGreaterThan(0);
     expect(named.every((e) => /assignment does not reach/.test(e.error))).toBe(true);
   });

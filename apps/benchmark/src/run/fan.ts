@@ -430,12 +430,11 @@ export function synthesizedRefs(tier: Case['tier'], winner: RankedCandidate): Sy
   return tier === 'real' ? [] : (winner.symbolRefs ?? []).filter((r) => r.synthesized);
 }
 
-/** Is `c` the candidate `--show` named? The argument is parsed into the variations it names, here and
- *  nowhere else, and compared through the one join — so `unsigned/defsite` never matches
- *  `unsigned/defsite/raw-globals`. `optionRefusal` has already refused an argument that names no
- *  variations, so the parse cannot throw by the time a fan exists. */
-const isShown = (c: { variations: readonly string[] }, show: string): boolean =>
-  joinVariations(c.variations) === joinVariations(splitVariations(show));
+/** Is `c` the candidate `--show` named? Compared as the whole printed name — so `unsigned/defsite`
+ *  never matches `unsigned/defsite/raw-globals`. `optionRefusal` has already parsed the argument
+ *  with `splitVariations` and refused one that names no variations, so a malformed name never
+ *  reaches a fan. */
+const isShown = (c: { variations: readonly string[] }, show: string): boolean => joinVariations(c.variations) === show;
 
 /** `--show`: the named candidate, or the winner under the reserved name `winner`. Undefined ⇒ the
  *  caller lists what there was, because a typo'd name and a variation that produced no candidate at
@@ -734,11 +733,12 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
   let cands: Candidate[];
   try {
     cands = enumerateRanked(sym, asm, tc.targetDesc, {
-      onEnumerationError: (label: string, error: string) => enumerationErrors.set(label, error.split('\n')[0]),
+      onEnumerationError: (variations: readonly string[], error: string) =>
+        enumerationErrors.set([sym, ...variations].join('/'), error.split('\n')[0]),
     });
   } catch (e) {
-    for (const [label, error] of enumerationErrors) {
-      note(`asmlift: [threw] ${label} threw (no candidate from it): ${error}`);
+    for (const [threw, error] of enumerationErrors) {
+      note(`asmlift: [threw] ${threw} threw (no candidate from it): ${error}`);
     }
     const r = noFanReport(`${sym} (${asmPath})`, e, o.show);
     if (r.fan.length > 0) {
@@ -752,8 +752,8 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
     }
     return 2;
   }
-  for (const [label, error] of enumerationErrors) {
-    note(`asmlift: [threw] ${label} threw (no candidate from it): ${error}`);
+  for (const [threw, error] of enumerationErrors) {
+    note(`asmlift: [threw] ${threw} threw (no candidate from it): ${error}`);
   }
   console.log(cands.map((cand) => `asmlift: [candidate] ${joinVariations(cand.variations)}`).join('\n'));
   console.log(`asmlift: [fan] ${cands.length} candidate(s) enumerated, none scored (--asm)`);
@@ -865,14 +865,15 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // SILENTLY DROPPED option, and a dropped `symbols` is the 112,896-vs-135,936 discrepancy class
   // docs/ranked-repro.md is about. `rankOptionsFor`'s own annotation does not reach here —
   // excess-property checking fires on a literal only where that literal is itself annotated.
-  const withLevers: RankOptions = {
+  const reportingOpts: RankOptions = {
     ...opts,
-    onEnumerationError: (label: string, error: string) => enumerationErrors.set(label, error.split('\n')[0]),
+    onEnumerationError: (variations: readonly string[], error: string) =>
+      enumerationErrors.set([c.sym, ...variations].join('/'), error.split('\n')[0]),
   };
-  // ONCE PER LABEL. Both the pre-count enumeration and the scoring pass enumerate, and each
-  // re-runs every variation, so a variation that throws throws twice — reported twice, it reads as two
-  // broken variations.
-  const printedLevers = new Set<string>();
+  // ONCE PER THROWING SETTING. Both the pre-count enumeration and the scoring pass enumerate, and
+  // each re-runs every variation, so a variation that throws throws twice — reported twice, it reads
+  // as two broken variations.
+  const printedThrows = new Set<string>();
   // THE MULTIPLIER, on stdout beside the fan it is about — printed at every exit this run can
   // reach, whether or not it has a count: the `--enumerate` listing, the over-limit refusal (which
   // is the one that matters most on the big rows — you learn what the fan did without paying a
@@ -908,11 +909,11 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     printFanDiff(fanSizeOfError(e));
     return code;
   };
-  const printLevers = (): void => {
-    for (const [label, error] of enumerationErrors) {
-      if (!printedLevers.has(label)) {
-        printedLevers.add(label);
-        note(`asmlift: [threw] ${label} threw (no candidate from it): ${error}`);
+  const printThrows = (): void => {
+    for (const [threw, error] of enumerationErrors) {
+      if (!printedThrows.has(threw)) {
+        printedThrows.add(threw);
+        note(`asmlift: [threw] ${threw} threw (no candidate from it): ${error}`);
       }
     }
   };
@@ -927,12 +928,12 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     // round here to read.
     let cands: Candidate[];
     try {
-      cands = enumerateRanked(c.sym, asm, c.toolchain.targetDesc, withLevers);
+      cands = enumerateRanked(c.sym, asm, c.toolchain.targetDesc, reportingOpts);
     } catch (e) {
-      printLevers();
+      printThrows();
       return noFanWithDiff(e);
     }
-    printLevers();
+    printThrows();
     if (o.enumerateOnly) {
       console.log(cands.map((cand) => `asmlift: [candidate] ${joinVariations(cand.variations)}`).join('\n'));
       console.log(`asmlift: [fan] ${cands.length} candidate(s) enumerated, none scored (--enumerate)`);
@@ -970,7 +971,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   let ranked: RankedResult;
   try {
     ranked = asmliftFan(c.toolchain, c.sym, asm, obj, {
-      ...withLevers,
+      ...reportingOpts,
       onProgress: (done, total, bestSoFar) => {
         const every = Math.max(1, Math.floor(total / 10));
         if (done === 1 || done === total || done % every === 0) {
@@ -980,10 +981,10 @@ export function fan(rowId: string, o: FanOptions = {}): number {
       },
     });
   } catch (e) {
-    printLevers();
+    printThrows();
     return noFanWithDiff(e);
   }
-  printLevers();
+  printThrows();
   console.log(renderFan(ranked, { synthesized: synthesizedRefs(c.tier, ranked.winner), stamp: stampFrom(treeBefore) }));
   // `fanSize`, not `candidates.length`: the recorded count this is compared against is the whole
   // fan, refusals included, and comparing the published half against the whole would report a

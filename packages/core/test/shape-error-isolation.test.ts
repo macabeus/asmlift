@@ -34,10 +34,10 @@ vi.mock('../src/l3/pollguard', async (importOriginal) => {
 
 describe('one throwing shape does not take the others with it', () => {
   const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
-  const errors: { label: string; error: string }[] = [];
+  const errors: { variations: readonly string[]; error: string }[] = [];
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
     prototypes: { dmascope: { params: ['s32'], returnsVoid: true } },
-    onEnumerationError: (label, error) => errors.push({ label, error }),
+    onEnumerationError: (variations, error) => errors.push({ variations, error }),
   });
 
   test('the FIRST subset throws…', () => {
@@ -48,9 +48,9 @@ describe('one throwing shape does not take the others with it', () => {
   test('…and the report names the STACKED SUBSET, not just the variation it was derived onto', () => {
     // the subset is the candidate's identity, so that is what a failure is reported under: the
     // `/initfirst` singleton and the all-shapes subset are two candidates and two reports.
-    expect(errors.every((e) => hasVariation(e.label.split('/').slice(1), 'initfirst'))).toBe(true);
-    const shapeSuffixes = new Set(errors.map((e) => e.label.slice(e.label.indexOf('/initfirst'))));
-    expect([...shapeSuffixes].sort()).toEqual(['/initfirst', '/initfirst/pollguard/pollread']);
+    expect(errors.every((e) => hasVariation(e.variations, 'initfirst'))).toBe(true);
+    const subsets = new Set(errors.map((e) => e.variations.slice(e.variations.indexOf('initfirst')).join('/')));
+    expect([...subsets].sort()).toEqual(['initfirst', 'initfirst/pollguard/pollread']);
   });
 
   test('…while the LATER subsets are still derived ONTO THE RESPELLED TREES', () => {

@@ -17,6 +17,7 @@ import {
   retiredKeySet,
   retirementKeys,
 } from '@asmlift/bench-schema';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -166,8 +167,8 @@ const show = (field: string, v: unknown, res: Record<string, unknown>): string =
   // `maxScore` key at all (hand-built objects; artifacts predating the field) keeps the bare
   // numerator, since `290/404 → 171/undefined` says less than `171`.
   // A name is printed the way every command prints one: the winner's variations, `/`-joined.
-  if (field === 'winnerVariations' && Array.isArray(v)) {
-    return v.join('/');
+  if (field === 'winnerVariations') {
+    return joinVariations(v as readonly string[]);
   }
   if (field === 'score' && 'maxScore' in res) {
     return `${String(v)}/${typeof res.maxScore === 'number' ? res.maxScore : '?'}`;

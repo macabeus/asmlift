@@ -37,7 +37,7 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
   });
 
   it('no winner carries both /orderbase and /setup-args — the corpus gate cannot see the per-FUNCTION licence reading', () => {
-    // Guards the paragraph at the `admissions` roster in rank.ts, "AND THE SAME SKIP KEYED ON THE
+    // Guards the paragraph at the `hoists` roster in rank.ts, "AND THE SAME SKIP KEYED ON THE
     // LICENCE ITSELF WOULD BUY NOTHING": three wrong readings of an `orderLicensedGlobals` skip
     // delete the same four candidates, and a per-row variations/source diff catches two of them. It
     // cannot catch the PER-FUNCTION one, and this is why — that reading needs both variations in one

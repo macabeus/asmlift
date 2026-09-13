@@ -30,10 +30,10 @@ vi.mock('../src/l3/sinkinit', () => ({
 
 describe('a def-moving pass composed onto a placing variation is judged', () => {
   const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
-  const errors: { label: string; error: string }[] = [];
+  const errors: { variations: readonly string[]; error: string }[] = [];
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
     prototypes: { dmascope: { params: ['s32'], returnsVoid: true } },
-    onEnumerationError: (label, error) => errors.push({ label, error }),
+    onEnumerationError: (variations, error) => errors.push({ variations, error }),
   });
 
   test('the composition is DROPPED, not scored', () => {
@@ -48,8 +48,8 @@ describe('a def-moving pass composed onto a placing variation is judged', () => 
     expect(cands.filter((c) => composed.some((run) => hasVariations(c.variations, run)))).toEqual([]);
   });
 
-  test('…and it is REPORTED, with the composed label naming it', () => {
-    const named = errors.filter((e) => hasVariation(e.label.split('/').slice(1), 'sinkinit'));
+  test('…and it is REPORTED, with the composed variations naming it', () => {
+    const named = errors.filter((e) => hasVariation(e.variations, 'sinkinit'));
     expect(named.length).toBeGreaterThan(0);
     expect(named.every((e) => /assignment does not reach/.test(e.error))).toBe(true);
   });
