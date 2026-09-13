@@ -4766,10 +4766,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // per-region homes for a MASK and loop invariants, one home per arm of an `if`, and `sizebound`
   // (nonmatch 8) is one base's init placed at its own scope while a second base's stays at
   // function top. Both are about WHERE one home goes; this family is about HOW MANY there are.
-  // And NOT what `/livebase-block` names, whose name invites the wrong reading: `rank.ts:468-470`
-  // gives `/livebase` and `/livebase-block` the same `placement: 'head'`, and "block" there is the
+  // And NOT what `/livebase-block` names, whose name invites the wrong reading: `LIVEBASE_HOISTS`
+  // (rank-variations.ts) gives `/livebase` and `/livebase-block` the same `placement: 'head'`, and "block" there is the
   // single-cell ELIGIBILITY gate, not a scope (`HoistPlacement = 'head' | 'first-use' | 'scope'`,
-  // hoist.ts:215 — the two this pair uses are both function-scope). A winner carrying
+  // l3/hoist.ts — the two this pair uses are both function-scope). A winner carrying
   // `/livebase-block` is not evidence that
   // the base count was considered.
   //
@@ -6406,7 +6406,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //    `:201` ALONE therefore leaves the fan byte-identical (`diff:32` unchanged, `armcb2` still
   //    MATCH) — which is a fact about the SECOND link, not evidence that `:201` is innocent. The
   //    variation exists and the control `armcb2` MATCHes THROUGH it, so this 32 is the LADDER
-  //    admission and not a missing rewrite. L3 respell variation (`rank.ts:329`, `/unmerge`).
+  //    admission and not a missing rewrite. L3 pre-respell variation (`/unmerge`, `PRE_RESPELL_VARIATIONS`).
   //    The row's own winner is `unsigned/flip-join` at 32 in a fan of 8 — see the G1 watch below.
   //    **CLOSED: MATCH on `unsigned/unmerge/offmember`**, fan 8 → 14. `pushJoin` recurses into
   //    every TERMINAL arm of the ladder and the arity gate becomes "at least twice", carried by
@@ -7279,15 +7279,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // Rows that carry `/unmerge` among their winner's variations and are nevertheless INERT under the
   // ablation — `armshare`, `readshare`, `mergeloop`, `mergecast`, `mergecastu`, `mergeu16`,
   // `mergenarrow` — are why the winner's variations are a PRE-CHECK and not the evidence. The mechanism is NOT
-  // `applyStacked` (never called on the pre-fan path — its two call sites, `rank.ts:951` and `:988`,
-  // are `STACKED_SUBSETS`; the `/unmerge` suffix is built inline at `rank.ts:1801-1836`) and NOT the
+  // `applyStacked` (never called on the pre-respell path — both its call sites in rank.ts are
+  // `STACKED_SUBSETS` loops; `/unmerge` is applied by rank.ts's `PRE_RESPELL_VARIATIONS` loop) and NOT the
   // source dedup (the default fan's spellings are pushed FIRST, so an identical source keeps the
   // default fan's variations and never surfaces as a carrier). Measured on `synthetic:armshare:agbcc`, cache
   // off, one row each way: base MATCH 0/26 on `unsigned/unmerge`, ablated MATCH 0/26 on
   // `unsigned` — SAME SCORE, DIFFERENT SOURCE (the carrier spells `*(s32 *)50345024 = v1 << 3;` per
   // arm, the ablated winner hoists `v2`/`v3` and stores once after the join). So a carrier is a
   // DISTINCT spelling that ties on score and wins on `compareScored`'s within-tie quality keys
-  // (`rank.ts:2010-2021`: group, `deviceVolatile`, `castCount`, `lineCount`, enumeration order) —
+  // (rank.ts: `preference`, `deviceVolatile`, `castCount`, `lineCount`, enumeration order) —
   // which makes these rows outcome-inert but NOT publication-inert: the variation changes the C they
   // ship, the `bench diff` source-byte field this project has already paid for twice (#112/#113).
   // The cheap route is `grep`ping `winnerVariations` in `results/results.json` (27 rows carry it, 18

@@ -123,11 +123,10 @@ test('an entirely withheld fan throws the same class, with the withheld list on 
 // identical to a refusal of the DEFAULT spelling, which sends the reader at the one spelling
 // that did not fail — the wrong-cause attribution the channel exists to remove.
 //
-// This is the ONE assertion on the `[threw]` line's content anywhere, and NOT because no variation
-// throws over the corpus. `onEnumerationError` has exactly one caller — packages/cli/src/main.ts — and
-// the benchmark reaches `decompileRanked` (apps/benchmark/src/eval/asmlift.ts) without supplying
-// one, so a `pnpm bench run` cannot print the line at all. Its absence over the whole corpus is
-// evidence about the WIRING, not about the variations, which leaves nothing but this test pinning the reported variations.
+// A `pnpm bench run` cannot print the `[threw]` line at all: it reaches `decompileRanked`
+// (apps/benchmark/src/eval/asmlift.ts) without an `onEnumerationError`, and only the CLI and
+// `pnpm bench fan` supply one. Its absence over the whole corpus is evidence about the WIRING, not
+// about the variations, so this test and the next are what pin the variations a report carries.
 test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, not the default source', () => {
   // `if (c) { *A = 1; } else { *B = 2; }` as agbcc cross-jumps it: both arms leave an ADDRESS and a
   // VALUE in registers and the merged store follows the join — the shape `/unmerge` rewrites.
@@ -247,8 +246,8 @@ test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-res
     onEnumerationError: (variations) => seen.push(variations),
   }).map((c) => c.variations);
 
-  expect(kept.some((v) => hasVariation(v.slice(0, -1), 'unmerge'))).toBe(false); // the variations' candidates really died
+  expect(kept.some((v) => hasVariation(v.slice(0, -1), 'unmerge'))).toBe(false); // the candidates built on the pre-respell tree really died
   expect(seen.length).toBeGreaterThan(0);
-  // every report names the pre-fan spelling it was fanning, ahead of the variation that failed
+  // every report lists `unmerge` ahead of the respell variation that failed
   expect(seen.every((v) => hasVariation(v.slice(0, -1), 'unmerge'))).toBe(true);
 });

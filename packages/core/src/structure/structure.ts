@@ -1318,8 +1318,8 @@ export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
 //
 // WHAT A FIELD DOC BELOW HOLDS, narrowly: what the option MEANS to `structure()`, and the suffix of
 // the variation that enumerates it. A VARIATION's rationale, and any figure pricing its marginal value, live
-// ONCE at its `STRUCTURE_VARIATIONS` entry in rank.ts — restated here the two copies rot separately,
-// and only the rank.ts one sits next to the enumeration that could refute it. Figures pricing a
+// ONCE at its `STRUCTURE_VARIATIONS` entry in rank-variations.ts — restated here the two copies rot
+// separately, and only that one is the entry the enumeration reads. Figures pricing a
 // DEFAULT this pass owns (the edge-copy ordering, `spellDeclaredSubscripts`) do belong here.
 export interface StructureOptions {
   returnsVoid?: boolean;
@@ -1912,8 +1912,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // IS this target's compiler behaviors, so resetting one would probe a spelling asmlift never emits
   // here.
   //
-  // THREE OF rank.ts's TEN `STRUCTURE_VARIATIONS` ENTRIES ARE DELIBERATE NON-MEMBERS, each for its own reason,
-  // and the list here is the half of the split this side owns:
+  // FOUR OF THE ELEVEN `STRUCTURE_VARIATIONS` ENTRIES (rank-variations.ts) ARE DELIBERATE NON-MEMBERS,
+  // each for its own reason, and the list here is the half of the split this side owns:
+  //   - `/site-sense` (senseFromFoldEvidence) decides which way each folded branch is written. It
+  //     negates a branch sense per site and touches no copy, like the per-function sense booleans;
   //   - `/reread-globals` (rereadGlobals) is an ANALYSIS option, and it only ever RELAXES: it
   //     widens a load's render positions and narrows the write set that bars it, so it removes
   //     materializations rather than minting them. Extra materialization is what this guard is

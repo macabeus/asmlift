@@ -1,4 +1,4 @@
-// `/copy-defpos` — the EDGE-COPY ORDER variation (rank.ts STRUCTURE_VARIATIONS, structure.ts
+// `/copy-defpos` — the EDGE-COPY ORDER variation (rank-variations.ts STRUCTURE_VARIATIONS, structure.ts
 // `preferDefPosCopyOrder`).
 //
 // The frontend measures the order each predecessor wrote its successors' keys, and the default

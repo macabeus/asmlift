@@ -859,8 +859,8 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     note(`asmlift: [declined] annotate pass threw: ${(e as Error).message.split('\n')[0]}`);
   }
 
-  // A variation that THREW produced no candidate to drop, and the benchmark supplies no sink for that
-  // channel — cli/rank.ts says so at the field: "a whole pre-fan half of a row's fan can still
+  // A variation that THREW produced no candidate to drop, and `bench run` supplies no sink for that
+  // channel — cli/rank.ts says so at the field: "a whole pre-respell half of a row's fan can still
   // vanish from a `pnpm bench run` with nothing printed". Here it is printed.
   const enumerationErrors = new Map<string, string>();
   // ANNOTATED, for the same reason `rankOptionsFor`'s return type is: a mistyped option key is a

@@ -171,7 +171,7 @@ export interface EnumerateOptions {
   /** PROBE (`ASMLIFT_PERSITE_SENSE`, wired in the cli): fork the two per-FUNCTION branch-sense
    *  booleans into one bit per SITE, crossing every sense setting with all 2^n masks over the first
    *  `n` sense sites. Costs a factor of 2^n on the whole fan, which is the measurement — see the
-   *  `perSiteSense` block below. 0/absent = the shipped per-function sense. */
+   *  per-site sense measurement in the enumeration below. 0/absent = the shipped per-function sense. */
   perSiteSenseBits?: number;
 }
 
@@ -437,7 +437,7 @@ export function enumerateCandidates(
   // 2×2 cross: the fourth setting costs another quarter of the whole fan — the anchor dimension
   // multiplies everything below it — and no row has been shown to need it.
   //
-  // The four spelling booleans that PREDATE `STRUCTURE_VARIATIONS` and are still hand-carried
+  // The spelling booleans hand-carried outside `STRUCTURE_VARIATIONS`
   // (`bitfields`, `ptrElems`, `declRank` and the anchor pair) start from one record, so the
   // default setting lives in one place instead of six literals that can disagree. Each entry
   // states only what it VARIES — which is the whole content of the chain above.

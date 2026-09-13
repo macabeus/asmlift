@@ -655,8 +655,8 @@ export async function runCli(
       // also says what it SPENT (phase.ts). A run nobody is watching writes only what it computed.
       const clock = flags.has('progress') ? new PhaseClock() : undefined;
       // A variation that THREW is a defect and must not read as a variation that declined — core rank.ts
-      // makes that argument for its own channel, and this is the consumer it had been missing.
-      // Deduped by name: the enumeration walks a variation over every setting, so one broken pass
+      // makes that argument for its own channel.
+      // Deduped by the step that threw (`threwStep`): the enumeration walks a variation over every setting, so one broken pass
       // would otherwise print thousands of identical lines. Silent when nothing threw.
       const enumerationErrors = new Map<string, string>();
       const rankOpts = {

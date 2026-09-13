@@ -483,7 +483,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,
   `homeMergeFeeds`) are one `materialize.add(op)` behind shared refusals, differing only in an
-  eligibility predicate, and `rank.ts` already holds them as a data table (`STRUCTURE_VARIATIONS`) —
+  eligibility predicate, and `rank-variations.ts` already holds them as a data table (`STRUCTURE_VARIATIONS`) —
   only the consumer side is un-consolidated. What it can NOT absorb is `l3/basecse.ts`, on one
   premise: `coneHoldsAddr` excludes basecse's symbol bases through a refusal `analysis.ts` calls
   the soundness half of its own claim, and all four scopes carry it. The const exclusion is NOT a

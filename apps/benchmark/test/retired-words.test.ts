@@ -114,7 +114,7 @@ const RULES: Rule[] = [
   {
     id: 'enumeration phrases',
     pattern:
-      /\b(?:axis points?|sense points?|fan points?|base spelling|base lift|recorded spellings|shape products?|pre-fan products?|sanctioned product|product (?:mechanism|kind)|per-compiler default|respellings?)\b/i,
+      /\b(?:axis points?|sense points?|fan points?|base spelling|base lift|recorded spellings|shape products?|pre-fan|sanctioned product|product (?:mechanism|kind)|per-compiler default|respellings?)\b/i,
   },
 ];
 
