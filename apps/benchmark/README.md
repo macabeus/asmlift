@@ -331,8 +331,10 @@ Host prerequisites (macOS; verified empirically):
 
 - Xcode CLT (`/usr/bin/cc` — host tools build with `/usr/bin` ahead of homebrew, several
   projects' host tools miscompile under homebrew gcc), plus homebrew `gmake`, `wget`, `libpng`
-- an `arm-none-eabi` toolchain on PATH (GBA projects: pokeemerald, sa3, kleod)
-- python >= 3.11 first on PATH for kleod's `setup.sh`; any python3 for the others
+- an `arm-none-eabi` toolchain on PATH (GBA projects: pokeemerald, sa3, kleod). kleod builds
+  its ROM through `arm-none-eabi-cpp` as well: its headers act on `__APPLE__`, which every
+  host preprocessor here defines
+- any python3
 - big-endian `mips-linux-gnu` binutils under `/opt/cross` (af), and Rosetta
   (`softwareupdate --install-rosetta` — af's IDO recomp and marioparty3's KMC gcc are x86_64)
 - Docker (snowboardkids2 builds inside a linux/amd64 container; the `asmlift-elf` DWARF

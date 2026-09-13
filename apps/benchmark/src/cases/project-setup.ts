@@ -9,7 +9,8 @@
 // Host facts the recipes encode (verified empirically on macOS/arm64):
 //   - host-tool C builds run with /usr/bin ahead of homebrew, so `cc`/`gcc` is Apple clang
 //     (homebrew gcc miscompiles some of the projects' host tools);
-//   - kleod's setup.sh needs python >= 3.11 first in PATH;
+//   - kleod's ROM build must preprocess with the CROSS cpp (arm-none-eabi-cpp): every host
+//     preprocessor here defines __APPLE__, which the project's headers act on;
 //   - af needs mips-linux-gnu binutils under /opt/cross and Rosetta (x86_64 IDO recomp);
 //   - snowboardkids2 builds inside a linux/amd64 Docker container;
 //   - the KMC gcc 2.7.2 mac binaries (marioparty3) are x86_64 → Rosetta as well.
@@ -42,24 +43,6 @@ const afBuildEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
   PATH: `/usr/bin:/opt/cross/bin:${process.env.PATH}`,
 });
-
-/** A python3 >= 3.11 dir to prepend (kleod's setup.sh requires it first in PATH). */
-function python311Env(): NodeJS.ProcessEnv {
-  for (const cand of ['python3.13', 'python3.12', 'python3.11', 'python3']) {
-    try {
-      const out = execSync(`${cand} -c 'import sys; print(sys.executable, sys.version_info[:2] >= (3, 11))'`, {
-        encoding: 'utf8',
-      }).trim();
-      const [exe, ok] = out.split(' ');
-      if (ok === 'True') {
-        return { ...process.env, PATH: `${dirname(exe)}:${process.env.PATH}` };
-      }
-    } catch {
-      // try the next candidate
-    }
-  }
-  throw new Error('setup: no python3 >= 3.11 on PATH (kleod setup.sh requires it)');
-}
 
 const jobs = (): string => `-j${Math.min(8, cpus().length || 4)}`;
 
@@ -164,15 +147,25 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
     build: (dir) => sh(`gmake ${jobs()}`, dir, hostToolEnv()), // ends in `sha1sum -c sa3.sha1`
   },
 
+  // GOES LIVE WITH THE ROW SWAP: this recipe describes testyourmine/kleod (through the
+  // macabeus/kleod#asmlift-benchmark fork), the tree the kleod manifest names from the swap
+  // commit onward. That repo has no setup.sh and no agbcc submodule — its INSTALL.md says to
+  // install stock pret/agbcc, the same fork pokeemerald uses, so it comes from the same cache.
   kleod: {
     baseroms: ['baserom.gba'],
-    prepare: (dir) => {
-      // setup.sh: verifies the baserom, inits submodules, builds the agbcc submodule, extracts
-      if (!existsSync(join(dir, 'tools', 'agbcc', 'bin', 'agbcc')) || !existsSync(join(dir, 'asm', 'nonmatchings'))) {
-        sh('bash setup.sh', dir, python311Env());
-      }
+    prepare: (dir) => installAgbcc('pret/agbcc', dir),
+    build: (dir) => {
+      // CPP=arm-none-eabi-cpp, not the Makefile's default `$(CC) -E`: on macOS every host
+      // preprocessor defines __APPLE__, and include/gba/defines.h + include/global.h carry
+      // `#if defined(__APPLE__)` blocks that swap EWRAM_DATA/IWRAM_DATA to the Mach-O section
+      // spelling (the build then dies in m4a.s) and neuter INCBIN/_() to `{0}` (which would
+      // silently empty every INCBIN'd blob). The cross cpp defines no __APPLE__ — and it is
+      // the same preprocessor asmlift's own agbcc path uses (compile/agbcc.ts).
+      sh(`gmake compare ${jobs()} CPP=arm-none-eabi-cpp`, dir, hostToolEnv()); // ends in `kleod.gba: OK`
+      // the symbol-source ELF the fork branch's decomp.yaml names (tools.asmlift.elf): a copy
+      // of kleod.elf carrying the DWARF macro sidecar, so the map keeps the REG_* volatiles
+      sh('gmake asmlift-elf CPP=arm-none-eabi-cpp', dir, hostToolEnv());
     },
-    build: (dir) => sh(`gmake ${jobs()}`, dir, python311Env()), // ends in `sha1sum -c klonoa-eod.sha1`
   },
 
   af: {
