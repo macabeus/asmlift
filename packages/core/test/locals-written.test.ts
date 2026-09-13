@@ -93,7 +93,7 @@ describe('the RESPELL guard set', () => {
   test('and no respell variation in the offline corpus violates it — the invariant behind the guard', () => {
     // The guard is only useful if it is not already firing, and the corpus is where a placement
     // variation would show. `emit` is the choke point every spelling passes through, so wrapping the
-    // backend sees every tree the fan asks to render, products included.
+    // backend sees every tree the fan asks to render, pairings and compositions included.
     const seen: SFn[] = [];
     const probing = { ...cBackend, emit: (t: SFn) => (seen.push(t), cBackend.emit(t)) };
     const dir = join(import.meta.dirname, 'corpus');

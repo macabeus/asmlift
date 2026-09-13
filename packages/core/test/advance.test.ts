@@ -526,7 +526,7 @@ test('the plain /advance variation follows compilerBehaviors.foldsPointerAdvance
     compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, foldsPointerAdvance: undefined },
   };
   expect(plain(unmeasured)).toBe(true);
-  // and the qualified product rides on BOTH: `volatile` is what bars the fold
+  // and the `/advance/volatile` composition rides on BOTH: `volatile` is what bars the fold
   expect(swrCandidates(ARMV4T_AGBCC).some((c) => hasVariations(c.variations, ['advance', 'volatile']))).toBe(true);
   expect(swrCandidates(unmeasured).some((c) => hasVariations(c.variations, ['advance', 'volatile']))).toBe(true);
 });

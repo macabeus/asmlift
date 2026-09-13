@@ -60,7 +60,7 @@ test('the variation offers the def-position spelling beside the record-ordered o
   expect(sibling!.source).toContain('v0 = a1;\n    v1 = a0;');
 });
 
-test('…and it is a real pairing: every candidate gets the sibling, never just the default', () => {
+test('…and it is crossed with every candidate: each one gets a sibling, not just the default', () => {
   const names = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {}).map((c) => c.variations);
   const withVariation = names.filter((v) => hasVariation(v.slice(-1), 'copy-defpos'));
   expect(withVariation.length).toBeGreaterThan(0);
@@ -168,7 +168,7 @@ const LATCH_FOLD = `fn latchfold {
   ret %10
 }`;
 
-test('the latch fold changes the answer after the gate has been asked', () => {
+test('the latch fold changes the answer after the gate has been asked on the shared lift', () => {
   const fn = parse(LATCH_FOLD);
   verify(fn);
   const [entry, header, body, latch, exit] = fn.blocks;

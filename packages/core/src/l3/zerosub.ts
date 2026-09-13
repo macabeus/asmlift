@@ -36,7 +36,7 @@
 // SCOPE (decline over approximate). Only a `bin('-')` operand, and only a SHARED one. Neither
 // restriction is caution: over any other operand shape the fold rule does not apply and the two
 // spellings compile identically (verified for `-(a + b)`, `-(a >> 3)`, `-(a * 3)`, `-a`), so
-// firing there could only duplicate the primary. An EFFECTFUL subtraction is out of scope too —
+// firing there could only duplicate the default. An EFFECTFUL subtraction is out of scope too —
 // two textually equal calls are two calls, not one shared value, so the premise fails.
 import { type Expr, type SFn, exprEquals, exprHasEffect, mapExprChildren, mapStmtExprs, walkExprs } from './ast';
 

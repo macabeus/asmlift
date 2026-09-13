@@ -145,8 +145,8 @@
 // SINKING IS NECESSARY, NOT SUFFICIENT: `/flip-branch` was necessary on every inhabitant measured —
 // the 4 shapes the admission was built on (`if (x & 0x40) return 1; return 0;` and its inverse,
 // `if (x > 3) return 5; return 3;`, `if (x == 0) return 1; return 0;`), and the three synthetic rows
-// above (the loop one's winner is `signed/flip-branch/indexed`). Unranked, all four of the first
-// score 3 and none matches; the target row's own winner moved `unsigned` → `unsigned/flip-branch`. The mechanism is structural rather than a
+// above (the loop one's winner's variations are `signed/flip-branch/indexed`). Unranked, all four of the first
+// score 3 and none matches; the target row's own winner's variations moved `unsigned` → `unsigned/flip-branch`. The mechanism is structural rather than a
 // property of the sample: a sunk diamond has NO JOIN left, so the shipped joined-if default (the
 // layout reading) does not cover it, and on every diamond measured here agbcc puts the source's
 // taken arm in the FAR block, which makes the layout reading systematically inverted. "Both arms are

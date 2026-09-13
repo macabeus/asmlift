@@ -284,7 +284,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
 
   **And 2× is a LOWER bound, not the price.** A new variation doubles its own admitting rows, and it
   also UN-COLLAPSES sibling variations that `seenTrees` was deduping away on the base tree: a sibling
-  whose output was identical on the old tree can be distinct on the new one, and then it enumerates
+  whose output on the old tree was identical to a candidate already enumerated can be distinct on the new one, and then it enumerates
   where it did not before. So the real multiplier is 2 × (siblings the new tree makes non-inert),
   and it is measured, never assumed. `/fresh-merge` (structure.ts `freshParamMerge`, the parameter's
   merge home) is the counterexample that fixes this: `synthetic:max3:agbcc` goes **2 candidates to
@@ -808,7 +808,7 @@ they could not before (`/merge-home`, `/defsite`, `/loop-entry`) and pay for the
 `synthetic:sinkacc:agbcc` enumerates 36 -> 54 candidates and `kleod:CheckWorldCompletion:agbcc`
 2.69x as many, which is roughly 2x the wall clock on each real row. The fourth,
 `synthetic:fib:gcc2.7.2kmc`, is the two-sided control and gains NOTHING — 8 -> 8 candidates, the same
-eight names, and its winner was already `signed/defsite/loop-entry` at 12 on main — so it is a
+eight candidates, and its winner was already `signed/defsite/loop-entry` at 12 on main — so it is a
 reached row and not a paying one, and a census of either kind must say which it counts. Bounded today,
 but the triggering shape is `s = 0; ... if (c) s += 1;`, which is ordinary C, and candidate compiles
 have no timeout. When a change unblocks a variation, report the fan beside the score: a reach census

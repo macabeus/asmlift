@@ -186,7 +186,7 @@
 // was actually MISSING from that table (`volatile-counter`) is in it now, which is the part that
 // could not wait.
 //
-// Nothing qualifying ⇒ decline (null), never a duplicate of the primary.
+// Nothing qualifying ⇒ decline (null), never a duplicate of the default.
 import { type IrType } from '../ir/types';
 import { cellAddress, inRange, rootConst } from './address';
 import {

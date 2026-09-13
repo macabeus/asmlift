@@ -6,7 +6,7 @@
 // (`spellPtrMemberElements`, enumerated at rank.ts's `ptrElemSettings`), and the two are the same
 // ADDRESS and different OBJECTS — so the differ referees.
 //
-// No REAL row's winner carries a `ptr-elem` variation, and that is a fact about the CORPUS, not
+// No REAL row's winner carries `/no-ptr-elem`, and that is a fact about the CORPUS, not
 // about the variation: the enumeration gate needs a symbol map declaring a pointer member with a
 // pointee width of 1, 2 or 4, and klonoa's map holds exactly ONE such symbol — whose every
 // decompiled caller happens to have been written in the element form.

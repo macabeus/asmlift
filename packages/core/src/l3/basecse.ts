@@ -13,7 +13,7 @@
 // question the source answered per BASE — one register file spelled as a pointer local beside
 // scalar cells spelled as bare derefs. The `single-cell` gate is what makes the narrower answer
 // reachable: under `LIVEBASE_BLOCK_GATES` a base every access of which is ONE fixed offset stays
-// inline, and rank's LIVEBASE_HOISTS roster emits each table's hoist — and every product of
+// inline, and rank's LIVEBASE_HOISTS roster emits each table's hoist — and every composition onto
 // it — as its own candidate family, for the differ to referee between them. The unit is
 // the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
 // gate can leave one of them inline while the other binds.
@@ -744,7 +744,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
  *  IT WITHDRAWS A SPELLING RATHER THAN COLLAPSING A DUPLICATE, which is what the decline costs.
  *  `ORDERBASE_HOISTS` holds exactly two rows, `head` and `scope`, so nothing is ever enumerated
  *  at `first-use` for this table and the refused tree has no twin to fold into — its shape and
- *  `/volatile` products go with it. Over each project's whole `asm` tree, map-ful: of the 48
+ *  `/volatile` compositions go with it. Over each project's whole `asm` tree, map-ful: of the 48
  *  functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do not, and for
  *  29 of the 41 the refused spelling is one the `head` row does not already produce. Instrumented
  *  on two of those, both map-ful — the `kleod:StreamCmd_SetBGScroll` row (fan 11), and

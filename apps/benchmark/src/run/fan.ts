@@ -1,9 +1,9 @@
 // `pnpm bench fan <row>` — the candidate fan the harness ALREADY computes for one row, printed
 // instead of discarded.
 //
-// `eval/asmlift.ts` ranks every candidate spelling and then publishes four facts out of the
+// `eval/asmlift.ts` ranks every candidate and then publishes four facts out of the
 // result: the winner's variations, the winner's source, the dropped list and the withheld list.
-// `RankedResult.candidates` — every OTHER spelling, each carrying its own variations, its score and
+// `RankedResult.candidates` — every OTHER candidate, each carrying its own variations, its score and
 // the exact source it was scored from — is computed, paid for, and dropped on the floor. This is
 // the supported way to read it, taking a row id.
 //
@@ -493,7 +493,7 @@ export function optionRefusal(o: FanOptions): string | undefined {
     return (
       `--show winner names the WINNER and --enumerate scores nothing, so there is no winner to name ` +
       `(an enumerated fan is in enumeration order, not score order). Drop --enumerate to score the ` +
-      `fan and get a real winner, or pass --show <variations> for a spelling you can name.`
+      `fan and get a real winner, or pass --show <variations> for a candidate you can name.`
     );
   }
   if (o.enumerateOnly && o.force) {
@@ -516,7 +516,7 @@ function namesVariations(show: string): boolean {
   }
 }
 
-/** A candidate's source, with the header that says which spelling it is — a non-winning
+/** A candidate's source, with the header that says which candidate it is — a non-winning
  *  candidate's C is otherwise indistinguishable from the published row's. */
 function showSource(c: Candidate): string {
   return `/* candidate ${joinVariations(c.variations)} */\n${c.source.trimEnd()}`;
@@ -537,9 +537,9 @@ const stampFrom = (treeBefore: ReturnType<typeof sampleSourceTree>): string =>
  *
  *  Three different facts arrive at this function's two call sites, and they are not the same fact:
  *
- *  - `NoScorableCandidateError` — every spelling compiled-and-failed. That is `noncompile`, and
+ *  - `NoScorableCandidateError` — every candidate compiled-and-failed. That is `noncompile`, and
  *    the drop list riding on the error IS the row's whole fan, so it is printed in full: the one
- *    line the exception itself carries is the LAST spelling refused, neither the first nor a
+ *    line the exception itself carries is the LAST candidate refused, neither the first nor a
  *    representative one.
  *  - `NoSpellableCandidateError` — the backend refused every tree before any compile. Nothing was
  *    dropped because nothing was ever built.
@@ -584,7 +584,7 @@ export function noFanReport(rowId: string, e: unknown, show?: string): NoFanRepo
     );
   } else if (e instanceof NoSpellableCandidateError) {
     notes.push(
-      `asmlift: [fan] the backend refused every spelling this row enumerates, before anything was ` +
+      `asmlift: [fan] the backend refused every source this row enumerates, before anything was ` +
         `compiled — so the fan is empty by construction and nothing was dropped. The line above is ` +
         `the LAST refusal, not the only one.`,
     );
@@ -898,7 +898,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
       }
     }
   };
-  /** THE FAN-LESS EXIT, which is not always a count-less one. A `noncompile` row — every spelling
+  /** THE FAN-LESS EXIT, which is not always a count-less one. A `noncompile` row — every candidate
    *  refused — throws, and the error carries both refusal lists, so the run RECORDS a
    *  `fanSize` for exactly this class (`fanSizeOfError`). A DECLINE carries neither, and
    *  that is not a reason to say nothing: the base's recorded count IS the comparison there, on
@@ -988,7 +988,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   console.log(renderFan(ranked, { synthesized: synthesizedRefs(c.tier, ranked.winner), stamp: stampFrom(treeBefore) }));
   // `fanSize`, not `candidates.length`: the recorded count this is compared against is the whole
   // fan, refusals included, and comparing the published half against the whole would report a
-  // shrink on any row that dropped a spelling.
+  // shrink on any row that dropped a candidate.
   printFanDiff(fanSize(ranked));
   if (o.show) {
     const picked = pickCandidate(ranked.candidates, o.show);

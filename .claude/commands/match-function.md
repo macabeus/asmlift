@@ -97,8 +97,10 @@ them are not "add a feature":
 - **Missing capability** — asmlift cannot *represent* or *recover* something (an idiom, a type, a
   control-flow shape). This is the case the rest of this prompt is written for.
 - **Missing variation** — asmlift can represent it, but never chooses that spelling. A variation
-  adds candidates to the fan of every function it applies to, and new variations regress other rows
-  far more often than they help; each needs a gate (see Hard Rules).
+  adds candidates to the fan of every function it applies to. Run inside the enumeration's guards,
+  it cannot lose a match an existing candidate holds, but it multiplies the compile price of every
+  row it reaches, and where it wins a tie it changes a published winner; each needs a gate justified
+  by a row (see Hard Rules).
 - **Unmatchable source quirk** — the original C used a construct no honest recovery would produce
   (register-allocation intermediates, a hand-written temporary, an unusual build flag, a redundant
   expression the compiler then eliminates). Say so, prove it, and stop — do not invent machinery to
@@ -116,7 +118,7 @@ variations it applied, in a fixed order: its signedness (`unsigned` or `signed`,
 because both are tried), then its **lift** variations (the assembly lifted again: `/setup-args`,
 `/connective`), its **structure** variations (`structure()` re-run with other options: `/defsite`,
 `/flip-join`), its **respell** variations (the structured tree rewritten: `/unmerge`,
-`/offmember`), and last the **symbol-map** variation `/raw-globals`. Two respell variations applied
+`/offmember`), and last the **symbol-map** variation `/raw-globals`. Two or three respell variations applied
 together as one candidate are a **pairing**, enumerated only because a row demanded the joint
 spelling (`/inlinebase` with `/vol-slot`). Every word is defined in
 [`docs/vocabulary.md`](../../docs/vocabulary.md).
@@ -162,7 +164,7 @@ it prints `fan=N rank=Ns` off the artifact in seconds, and those fans move fast 
 `kleod:CountCollectedGems:agbcc` was 5,952 when this paragraph was written and had grown to 9,192
 by 2026-09-12. `LoadBGTilemapData`'s 225,792 is HARD-RULE forbidden to score and expensive even to
 `--enumerate`; **never start the scored run** (`docs/bench-cost.md` §1 prices both). **And the 2,000
-guard is not a cheap shield**: it is tested on `cands.length` AFTER the enumeration (`fan.ts:914`,
+guard is not a cheap shield**: it is tested on `cands.length` AFTER the enumeration (`fan.ts:951`,
 read 2026-09-12), so a bare `pnpm bench fan` on a row that size pays the whole enumeration and only
 then refuses.
 
@@ -426,7 +428,7 @@ launch anything long. What this command leans on:
   itself. Read its exit code as `diff`'s with one addition: 1 = something moved, 2 = it did NOT
   answer — an empty selection, or a row this shell could not lift at all (trap #6). And a moved
   line that opens `asm …` or `opts …` says the row's INPUT moved, not the decompiler. Prices in
-  `docs/bench-cost.md` §1, and §3 carries the measured example of the two modes disagreeing;
+  `docs/bench-cost.md` §1, and §3 carries the measured example of the lift-only sweep and `--fan` disagreeing;
 - background the long ones, wait on a bounded marker-AND-log-growth condition, keep only
   READ-ONLY work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree;
 - `kill -TERM` does not stop a bench, `kill -9` orphans its shards, and two full benches must never

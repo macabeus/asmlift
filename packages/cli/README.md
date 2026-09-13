@@ -105,8 +105,8 @@ just means fewer names, never a guess:
 | DWARF (`-g`)                            | Declaration shapes — array/struct/pointer, signedness, `volatile`/`const` — that drive typed spellings like `gCtx.frameCounter`, and signatures for the functions this ELF compiled from C: a callee's arity drives its call-argument recovery |
 | `.debug_macinfo` (`-g3`)                | Address-cast macro names (`#define gCounter (*(u16 *)0x03001234)`) — names no symbol table can carry. The macro spelling also matches the **numeric** literal-pool word the original build has, where an extern would emit a relocated one     |
 
-Every map fact is a ranked variation, never an override: naming a global can change an old
-compiler's codegen, so the named spelling and its raw-address sibling are both enumerated, and
+Every map fact is ranked, never an override: naming a global can change an old compiler's
+codegen, so the named spelling and its `/raw-globals` sibling are both enumerated, and
 `--score-against`'s byte-diff picks the winner — a tie goes to the name. Unmapped addresses
 (MMIO registers, unnamed cells) keep the honest cast spelling.
 

@@ -172,8 +172,8 @@ function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
     !tainted.has(l.name);
 }
 
-/** The proper non-empty SUBSETS of the qualifying locals (within `within`, when given) as
- *  alternative outputs — one candidate per subset, labeled by its member names. Empty above
+/** The proper non-empty SUBSETS of the qualifying locals (within `within`, when given) as the
+ *  results of a multi-result variation — one candidate per subset, its members named as the subject. Empty above
  *  three qualifiers: the arm is capped at 6 extra spellings, and the all-qualifiers form is the
  *  plain variation's own candidate. */
 export function volatileSubsetCandidates(sfn: SFn, within?: ReadonlySet<string>): { merged: string; sfn: SFn }[] {

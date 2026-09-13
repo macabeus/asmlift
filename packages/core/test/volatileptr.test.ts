@@ -155,7 +155,7 @@ const init = (name: string, addr: number): Stmt => ({
   value: { k: 'cast', to: T.ptr(T.s(32)), e: { k: 'const', value: addr } },
 });
 
-test('two qualifying locals yield the two proper subsets, labeled by member', () => {
+test('two qualifying locals yield the two proper subsets, each named by its members', () => {
   const cands = volatileSubsetCandidates(fn(twoPtrs, [init('p0', 0x3001048), init('p1', 0x40000d4)]));
   expect(cands.map((c) => c.merged).sort()).toEqual(['p0', 'p1']);
   const p1only = cands.find((c) => c.merged === 'p1')!.sfn;

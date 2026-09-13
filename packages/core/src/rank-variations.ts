@@ -51,8 +51,8 @@ import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure
  *  variation can change must exist at all); `perLiftGate` re-evaluates per symbol-map setting on
  *  that setting's own lifted fn (a map-lifted shared lift spells const bases as gaddr, which would
  *  blind the /raw-globals siblings — the /addr-home lesson). `strip` opts the variation into the
- *  dropped-sibling closure: a candidate with it ON is skipped when its OFF sibling failed the
- *  boundary contracts. Two variations are EXEMPT from structure()'s assertDefaultAccepts invariant:
+ *  dropped-sibling closure: a candidate that applies it is skipped when its default sibling (the
+ *  same setting without it) failed the boundary contracts. Two variations are EXEMPT from structure()'s assertDefaultAccepts invariant:
  *  `/reread-globals` only relaxes inlining barriers and `/uns-cmp` only changes spelling and
  *  declarations — neither adds materialization or merging, so neither can unlock a function the
  *  default declines (reread also skips the strip closure). Both exemptions are stated here
@@ -275,7 +275,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   //     `EntityGravityAndFloorCheck` answers false there and true after that fold.
   // Neither costs candidates today — over 192 klonoa functions enumerated with the map the fan is
   // 27,847 either way, 1,970 of them `/copy-defpos`. `strip` like its neighbours: a reordering
-  // cannot rescue a spelling whose OFF sibling failed the boundary contracts.
+  // cannot rescue a spelling whose default sibling failed the boundary contracts.
   {
     flag: 'copyDefPos',
     suffix: '/copy-defpos',
@@ -315,7 +315,7 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // two sites of OPPOSITE source sense (`kleod:CheckWorldCompletion:agbcc`, 45/191 and unmoved
   // because `/site-sense` is not its winner), so no constant is right there. Read the table in
   // structure.ts as the best per-site default, never as a decision procedure — the enumeration that
-  // does not have to pick is `rank.ts`'s per-site `/sense-N` probe.
+  // does not have to pick is `rank.ts`'s per-site `/sense-N` measurement.
   //
   // Gated on this lift's own fully-raised fn carrying a stamped branch at all, for
   // `/copy-defpos`'s reason one entry up: the `/connective` lift variation and the symbol-map
@@ -326,8 +326,8 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // NOT in the strip closure, like the two per-function sense variations it refines — which are not in
   // this table at all. `negateCond` is total (l3/ast.ts: a relational opcode swaps, a connective
   // distributes, anything else takes a `!`), so re-spelling a sense can neither throw nor let a
-  // candidate structure a function the default declines; there is no failing OFF sibling for an ON
-  // one to ride past.
+  // candidate structure a function the default declines; there is no failing default sibling for
+  // an alternative to ride past.
   {
     flag: 'siteSense',
     suffix: '/site-sense',
@@ -378,7 +378,8 @@ export const UNMERGE_SUFFIX = '/unmerge';
  *  (`p0[2] = …`), which only a base-hoisting variation running AFTER the un-merge can spell — hand-compiled,
  *  that source is byte-exact where the merged spelling the structurer produces is 9, and applying
  *  the un-merge to the WINNER's tree instead measures 14. Every other respell variation derives
- *  from the default tree, so the order can only be had this way.
+ *  from the structured tree it is handed, before any other respell variation, so the order can
+ *  only be had this way.
  *
  *  A pre-respell variation only ADDS candidates, so it cannot cost a match; its price is a second
  *  respell set on every tree where the rewrite fires, which is why the table is not a place to put
@@ -491,7 +492,7 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *
  *  `/basefold` is the third and fourth hoist and `/unfolded` the fifth; those three are the
  *  conditional set — `enumerateCandidates` appends them where the target declares
- *  `compilerBehaviors.foldsConstAddrOffset`. They need no second "did the primary already carry
+ *  `compilerBehaviors.foldsConstAddrOffset`. They need no second "did the default already carry
  *  this" test: `structureChecked` runs the DEFAULT hoist to its fixpoint before any tree reaches
  *  here, so a key still admissible is by construction one `BASECSE_GATES` rejected, and binding
  *  nothing is the whole of the decline.
@@ -660,9 +661,9 @@ export const BASEFOLD_HOISTS: readonly BaseHoist[] = [
  *  four configurations scored on `synthetic:unfoldpark`, cache off — the fan, then that fan's best
  *  score:
  *    first-use, unpaired  44   0  MATCH — shipped
- *    first-use, paired    44   0  no product emits a source the unpaired row does not
+ *    first-use, paired    44   0  no paired candidate emits a source the unpaired row does not
  *    head,      unpaired  44   9  the score the row already had without any of this
- *    head,      paired    48   0  reached only through the `/sinkinit` product
+ *    head,      paired    48   0  reached only through the `/sinkinit` pairing
  *  The head is where `/livebase` already offers a spelling for every base this table can bind —
  *  these are bases reached 2+ times — so what the hoist adds is the SUNK init, which is where a
  *  source that declares its base pointer beside the loop it feeds puts the pool load. On both

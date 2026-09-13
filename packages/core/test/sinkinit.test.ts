@@ -313,24 +313,23 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
     { prototypes: { mixpoll: { returnsVoid: true } } },
   );
   const names = fan.map((x) => x.variations);
-  const sourceOf = (label: string): string | undefined =>
-    fan.find((c) => joinVariations(c.variations) === label)?.source;
+  const sourceOf = (name: string): string | undefined => fan.find((c) => joinVariations(c.variations) === name)?.source;
 
   test('the joint spelling reaches the differ, over the whole admission roster', () => {
     expect(names).toContainEqual(['signed', 'livebase', 'sinkinit']);
     // PINNED AS A PROGRAM, because a candidate's variations are not an attribution (see the `seen` dedup in rank.ts).
     // WHICH route emits the sunk narrow program is exactly what `seen` decides, and it moves under
     // roster edits that change no program at all: on this fixture `/unfolded` binds the same
-    // register file `/livebase-block` does, its roster row runs before the `/livebase ×` product
-    // loops, and it places at first use — so it names the candidate today, and ablating that row leaves
+    // register file `/livebase-block` does, its hoist runs before the `/livebase ×` pairing
+    // loops, and it places at first use — so it names the candidate today, and ablating that hoist leaves
     // the same 60 distinct sources with the same sunk program renamed
     // `signed/livebase-block/volatile/sinkinit`. A name-keyed assertion goes red there for a
     // program that never moved. A substring one (`some name contains livebase-block`) fails the
     // other way: the twelve HEAD-placed narrow candidates satisfy it with the sunk spelling gone
     // entirely.
     //
-    // So SEARCH for the program and let whichever route produced it own the label. What has to hold
-    // is that the narrow admission's bases reach the differ SUNK: the same declarations and the same
+    // So SEARCH for the program and let whichever route produced it own the name. What has to hold
+    // is that the narrow hoist's bases reach the differ SUNK: the same declarations and the same
     // statements as the head-placed narrow candidate, differing only in where the base init sits
     // relative to the loop counter's `v0 = 0;`. Ablating the narrow family itself (`single-cell` out
     // of LIVEBASE_BLOCK_GATES) takes `head` away and this goes red, which is the regression it is
@@ -347,11 +346,11 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
         cand.source.indexOf('v0 = 0;') < cand.source.indexOf('p0 = (s32 *)'),
     );
     expect(sunk).toHaveLength(1);
-    // Its label today is `signed/unfolded/volatile`, and `signed/livebase-block/volatile/sinkinit`
-    // with that roster row ablated. Deliberately NOT asserted: either is the same program. That
-    // leaves the ROSTER ROW unpinned here by design — `basecse.test.ts`'s "and the ROSTER offers
-    // it" owns that subject, keyed on the base SET only that row parks. Two tests, two subjects;
-    // this one stays label-free.
+    // Its variations today are `signed/unfolded/volatile`, and `signed/livebase-block/volatile/sinkinit`
+    // with that hoist ablated. Deliberately NOT asserted: either is the same program. That
+    // leaves the HOIST unpinned here by design — `basecse.test.ts`'s "and the ROSTER offers
+    // it" owns that subject, keyed on the base SET only that hoist parks. Two tests, two subjects;
+    // this one asserts no name for the sunk candidate.
   });
 
   test('and it is reachable no other way: the plain variation finds nothing to sink here', () => {
@@ -472,7 +471,7 @@ describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', 
     expect(arm.k === 'if' && arm.then.map((s) => s.k)).toEqual(['assign', 'store', 'store', 'store']);
   });
 
-  test('no base admitted at all is a decline too, not the unhoisted tree under a scoped label', () => {
+  test('no base admitted at all is a decline too, not the unhoisted tree under a scoped name', () => {
     expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'scope')).toBeNull();
     expect(hoistBaseLocals(held([plain(), cuse(0)]), BASECSE_GATES, 'head').body).toHaveLength(2);
   });

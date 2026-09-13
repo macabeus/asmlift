@@ -181,7 +181,7 @@ export interface Candidate {
    *  the candidate's name; `joinVariations` prints it. */
   variations: readonly string[];
   source: string;
-  /** Which PREFERENCE this spelling carries — the symbol-map setting's index (0 = the map's own
+  /** Which PREFERENCE this candidate carries — the symbol-map setting's index (0 = the map's own
    *  named spellings, 1 = their `/raw-globals` siblings). Enumeration emits the settings in
    *  preference order, and a lower preference WINS a score tie: when both compile to the same bytes the
    *  reader should get `gCounter.field`, not a byte offset off a hoisted `(u8 *)` base.
@@ -473,8 +473,8 @@ export function enumerateCandidates(
     ...senseAnchor.map((s) => ({ ...s, join: false })),
     ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
   ];
-  // THE PER-SITE PROBE, and it is a probe rather than a variation: every mask over the sense sites,
-  // crossed with the whole fan. It exists to price the fork the two booleans above cannot express
+  // THE PER-SITE SENSE MEASUREMENT, a structure variation never enumerated by default: every mask
+  // over the sense sites, crossed with the whole fan. It exists to price the fork the two booleans above cannot express
   // — 2^n on a function with n sites, which is the number a decidable predicate would replace —
   // and to say whether the target's configuration is REACHABLE at all. Not enumerated unless the
   // caller asks; `structure()`'s own `branchSenseFlipSites` is the seam it drives.
@@ -725,9 +725,10 @@ export function enumerateCandidates(
     ? [...ptrElemSettings, ...ptrElemSettings.map((s) => ({ ...s, suffix: `${s.suffix}/flat-rank`, declRank: false }))]
     : ptrElemSettings;
   // The structure-variation chain, derived from STRUCTURE_VARIATIONS: each admitted variation doubles
-  // the list, OFF first — order is load-bearing for the dropped-default skip below (every OFF
-  // sibling enumerates before its ON sibling, so an ON sibling's stripped-key lookup always finds a
-  // sibling that has already run or been condemned). Each variation's rationale lives on its table
+  // the list, the settings without it first — order is load-bearing for the dropped-default skip
+  // below (every default sibling enumerates before the alternative that applies the variation, so
+  // an alternative's stripped-key lookup always finds a sibling that has already run or been
+  // condemned). Each variation's rationale lives on its table
   // entry; both settings are always emitted and the differ referees, never a fixed default — the
   // dedup below collapses a pair wherever the variation changed nothing.
   const sharedLiftDefs = defOpMap(sharedLift);
@@ -756,15 +757,15 @@ export function enumerateCandidates(
       ),
     ];
   }
-  /** Is this the setting where NO structure variation is on? The default-setting abort guard's
+  /** Is this a setting where no structure variation is on, other than a branch-sense flip? The default-setting abort guard's
    *  other half: at the default LIFT setting a failure here aborts the row, because it says the lift
    *  is broken rather than that one variation cannot spell this tree.
    *
    *  `s.suffix === ''` IS NOT THE SAME TEST, which is why this is a named predicate rather than
    *  the string compare it looks like. `/flip-branch` and `/flip-join` name a branch sense
-   *  RELATIVE to the target's default, so BOTH senses are default settings — the flipped one
-   *  carries a suffix and still has every structure variation off. The table's own flags decide, plus the four
-   *  shape booleans that predate the table. */
+   *  RELATIVE to the target's default, so BOTH senses pass this test — the flipped one carries a
+   *  suffix, and every `STRUCTURE_VARIATIONS` flag and hand-carried structure boolean is still off.
+   *  The table's own flags decide, plus the four shape booleans that predate the table. */
   const isDefaultSetting = (s: StructureSetting): boolean =>
     !s.anchor &&
     !s.join &&
@@ -876,7 +877,8 @@ export function enumerateCandidates(
     // by throwing — Pascal loud-fails unspellable shapes — drops the candidate, never aborts the
     // enumeration). A dropped respell variation loses nothing: the default remains.
     //
-    // POLICY: respell variations derive from the DEFAULT tree only — they do not compose unless
+    // POLICY: respell variations derive from the tree they are handed, un-respelled (its default
+    // source), only — they do not compose unless
     // one of these compositions sanctions it, each with its own admission bar: `/volatile`
     // narrowed onto a variation's own locals, the STACKED variations and the PAIRINGS, which all
     // derive from or compose onto a source, plus the PRE-RESPELL variations (PRE_RESPELL_VARIATIONS,
@@ -908,8 +910,8 @@ export function enumerateCandidates(
     // ground is narrower than it looks: it needs a committed decision INSIDE a variation with an
     // existing variation that expresses the alternative, not a variation one could imagine wanting
     // twice. Anything else stays un-composed. A pairing is admitted for a VARIATION, so it runs
-    // over that variation's whole hoist table (LIVEBASE_HOISTS): an entry on the table changes
-    // which bases the hoist binds, not what pairing it with /coalesce means.
+    // over that variation's whole hoist table (LIVEBASE_HOISTS): an entry on that table changes
+    // which bases `/livebase` binds, not what pairing `/livebase` with /coalesce means.
     // And a respell variation must PRESERVE SEMANTICS by construction: the differ referees
     // byte-exactness (a wrong candidate can never fake a score-0 match), but on a NONMATCH row the
     // best-scoring source is shown to the user — a semantically-wrong respelled source there is
@@ -1056,8 +1058,8 @@ export function enumerateCandidates(
     // register across a call, and which of the three ways a slot can arise (a volatile local,
     // an address-taken one, plain register pressure) the source used is not derivable from
     // the asm. A DECLARATION respell variation, not a structure variation (docs/level-tower.md's
-    // third fork): it changes nothing structure() decides, so it rides the default tree like its
-    // `/volatile` sibling rather than doubling every enumeration, and its frame-flag gate
+    // third fork): it changes nothing structure() decides, so it rides each structured tree as `structure()`
+    // produced it, like its `/volatile` sibling, rather than doubling every enumeration, and its frame-flag gate
     // costs nothing on a function with no slot.
     respell('/vol-slot', () => volatileValueLocals(sfn));
     /** `/vol-store`'s pass with the target's device-register window handed over — the window that
@@ -1105,9 +1107,10 @@ export function enumerateCandidates(
     // reads a struct field the un-reduce puts back inside the loop: 27 · 35 · 42 alone, 0
     // together. The intermediate pairs are not admitted, and the reason is that NO ROW DEMANDS
     // ONE — neither could win where they are reachable: compiled on synthetic:dmaptrsrc, VT TIES
-    // `/vol-store`'s 27 and RT LOSES to it at 32. Ranking a pair against the BEST already-admitted
-    // spelling is the comparison that holds: RT's 32 still beats the ADMITTED standalone
-    // `/unreduce`'s 35.
+    // `/vol-store`'s 27 and RT LOSES to it at 32. Rank a pair against the BEST already-admitted
+    // candidate, not against any admitted variation: RT's 32 beats the admitted standalone
+    // `/unreduce`'s 35, so "worse than an admitted variation" would not exclude it — it loses only to
+    // `/vol-store`'s 27.
     //
     // WHAT THE STANDALONE LINES COST, since neither of the two variations ever wins an artifact row
     // ALONE — every `/unreduce` and `/ptr-field` winner rides inside a `/vol-store` pairing, which
@@ -1180,9 +1183,11 @@ export function enumerateCandidates(
     // discards the winner. Every result is emitted and the differ referees, exactly as
     // `/regcopy` does for its allocator-ambiguous tail decision.
     //
-    // POLICY NOTE: coalescing here is a multi-result variation run on the `/scopebase` tree, in the
-    // one place that knows the hoist just happened, so each result applies two variations —
-    // `/scopebase`, then a coalesce — and is not a pairing the POLICY note has to admit. A
+    // POLICY NOTE: this is the multi-result branch of the POLICY, not a pairing: `respellEach` runs
+    // the coalesce's results on the tree `/scopebase` just produced, in the one place that knows the
+    // hoist happened. The name lists both variations because both were applied. It is admitted as
+    // the coalesce's own results over a hoisted tree, the same way `/coalesce` runs over the
+    // un-hoisted one, and needs no row to demand it. A
     // candidate's variations name what was applied, not a route a deletion must remove: these
     // results are minted by their own `respellEach` call, so deleting `respell('/scopebase', …)` does
     // not delete them. The un-coalesced `/scopebase` stays in the list, so nothing is lost.
@@ -1243,9 +1248,9 @@ export function enumerateCandidates(
     // per-pointer knowledge (an MMIO block and a plain RAM table sit side by side, and
     // qualifying the table blocks the read collapse its region wants), so each proper
     // non-empty subset is its own candidate — the same alternative-OUTPUTS mechanism as the
-    // coalesce merges, not a product (l3/volatileptr.ts volatileSubsetCandidates carries the
-    // ≤3 cap). The all-qualifiers form is plain `/volatile` above; the livebase product's
-    // subsets ride below with the product's own `only` scope.
+    // coalesce merges, not a pairing (l3/volatileptr.ts volatileSubsetCandidates carries the
+    // ≤3 cap). The all-qualifiers form is plain `/volatile` above; the `/livebase/volatile`
+    // composition's subsets ride below with that composition's own `only` scope.
     respellEach(
       '/volatile',
       () => sfn,
@@ -1512,8 +1517,8 @@ export function enumerateCandidates(
     // `adds r3,#2` between two accesses through one address register is produced by exactly one of
     // the four sources, so volatility and the advance are both determined once the stamp is there.
     // What the mapping is a function OF is one compiler — agbcc — and the accesses that carry the
-    // stamp: every access agbcc DID fold carries no stamp, so a compiler behavior would never see
-    // them, but nothing says the next compiler's fold has the same shape. It stays a variation for
+    // stamp: every access agbcc DID fold carries no stamp, so an always-on rewrite gated by a compiler
+    // behavior would never see them, but nothing says the next compiler's fold has the same shape. It stays a variation for
     // as long as agbcc is the only target that reaches the stamp (the corpus census below), and the
     // day a second one does, `compilerBehaviors` is where this belongs rather than a variation.
     //
@@ -1536,7 +1541,7 @@ export function enumerateCandidates(
     // ABSENT ⇒ FALSY ⇒ THE VARIATION SHIPS, so every compiler whose pair nobody has compiled keeps
     // exactly the coverage it had: a compiler that does not fold `p = p + 1; *p` back would score
     // the spelling apart, and that is the case the variation exists for. `/advance/volatile` is not
-    // gated — `volatile` is what bars the fold, and that product is this row's match.
+    // gated — `volatile` is what bars the fold, and that composition is this row's match.
     //
     // NO `/vol-store` COMPOSITION. That variation pins a store whose WHOLE ADDRESS is a device constant,
     // and this one has just replaced those constants with a local — so on the shape `/advance`
@@ -1907,7 +1912,7 @@ export function enumerateCandidates(
           //
           // The shared-tail passes read the DEFAULT pass's set as well: neither `X/shared-ret` nor
           // `X/shared-tail` ever ships where `X` was dropped. The follow and the sink each give the
-          // structurer a shape it can accept where the primary one declined — sound, but the same
+          // structurer a shape it can accept where the default declined — sound, but the same
           // trade one level up again.
           for (const s of settingsForLift) {
             if (alternative && droppedDefault.has(s.suffix)) {

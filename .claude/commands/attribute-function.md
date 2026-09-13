@@ -80,7 +80,7 @@ Three docs carry what this command shares with `/match-function`, and it does no
    `--show <variations>`, though not `--show winner`: nothing has been scored, so there is no winner to
    name. A fan over 2,000 is refused unless you pass `--force`, and the refusal quotes what
    `--force` would cost on THIS row — **but that refusal is not free**: it is checked after the
-   enumeration (`fan.ts:914`), so on a huge row it prints only once the half-hour of enumeration has
+   enumeration (`fan.ts:951`), so on a huge row it prints only once the half-hour of enumeration has
    been paid. `--base <ref>` adds one line — this tree's count against the
    one that ref's artifact recorded (`[fan-diff] <row>: 5952 → 11904 (2.00×) vs origin/main`), and
    it prints on the declined and noncompile paths too, where the recorded count IS the answer; an

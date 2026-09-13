@@ -86,7 +86,7 @@ export interface SweepRecord {
   marks?: number;
   /** the first line of what the lift threw, when it did */
   threw?: string;
-  /** `--fan` only: how many spellings enumeration produced (`enumerateRanked`) */
+  /** `--fan` only: how many candidates enumeration produced (`enumerateRanked`) */
   fan?: number;
   /** `--fan` only: sha1/12 over (variations, source) pairs IN ENUMERATION ORDER, each name `/`-joined. Ordered and not
    *  sorted: the order is what the ranker consumes, so a reorder with the same set is a real
@@ -748,7 +748,7 @@ export async function sweep(o: SweepOptions): Promise<number> {
   }
   for (const [id, n] of Object.entries(over)) {
     note(
-      `asmlift: [sweep] --fan skips ${id}: ${n} recorded fan, over SWEEP_FAN_LIMIT ${SWEEP_FAN_LIMIT} (--force to enumerate it anyway)`,
+      `asmlift: [sweep] --fan skips ${id}: its recorded fan of ${n} candidates is over SWEEP_FAN_LIMIT ${SWEEP_FAN_LIMIT} (--force to enumerate it anyway)`,
     );
   }
 

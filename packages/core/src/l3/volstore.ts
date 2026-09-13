@@ -36,7 +36,7 @@
 // that says WHICH half is missing — "this target declares no device page" and "this address is
 // IWRAM" are different facts about a row, and over the corpus they are 283 and 711 of the 1011
 // refusals against `outside-window`'s 17. Nothing qualifying ⇒ decline (null), never a duplicate
-// of the primary.
+// of the default.
 //
 // THE WINDOW IS A REACH GATE, PRICED — not a soundness one, which is why it is `sound: false`.
 // A `volatile` qualifier only restricts the compiler, so widening the range can never make a

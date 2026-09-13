@@ -27,7 +27,7 @@
 //     something about the pointee the tree never claimed.
 //   • `volatile` already set is the frontend's stamp for an object whose address was PUBLISHED
 //     to memory (frontend/thumb.ts stamps it there, on `published`, not on any escape) — the
-//     candidate would duplicate the primary.
+//     candidate would duplicate the default.
 //   • An address-TAKEN local already has a memory home in every spelling, so there is no home
 //     left for the qualifier to move: EReader_Reset's slot read and written through a pointer
 //     local compiles to IDENTICAL assembly with the qualifier and without (agbcc 2.9-arm-000512,

@@ -19,6 +19,9 @@ A candidate's name is its **variations**: the ordered list of variations it appl
 `["unsigned", "defsite", "raw-globals"]`. Every command prints that list joined with `/`, as
 `unsigned/defsite/raw-globals`, and `pnpm bench fan <row> --show` takes it back in that form.
 
+In prose and comments a variation is often written with a leading `/`, the way it follows another
+entry in a printed name: `` `/unmerge` `` is the variation `unmerge`.
+
 **Say which "variations" you mean.** The word names either the variations asmlift has, or the ones
 a single candidate applied. Write "the winner's variations" or "the variation `unmerge`" wherever a
 bare "the variations" could be read both ways.
@@ -36,8 +39,12 @@ bare "the variations" could be read both ways.
   variation that takes no subject, a `-` is part of the name (`livebase-block`, `vol-slot`,
   `orderbase-scoped`).
 - A variation that places something is named by the hoist it is: `orderbase` and `orderbase-scoped`
-  are one eligibility rule at two placements, each its own hoist. `basefold/sinkinit` is two
-  variations because `sinkinit` is one of its own, applied after `basefold`.
+  are one eligibility rule at two placements, each its own hoist. `basefold/sinkinit` is also one
+  hoist, `basefold`'s rule at first-use placement, but it is named as two variations: its result is
+  the one `sinkinit` makes when applied to `basefold`'s output, and `sinkinit` is a variation of its
+  own.
+- `sense-N` is a registered structure variation that is enumerated only when `ASMLIFT_PERSITE_SENSE`
+  asks for it, to measure the per-site branch sense; no default fan carries it.
 - Every variation, with its kind and its subject pattern, is registered in `VARIATION_TOKENS`
   ([`packages/core/src/variation-tokens.ts`](../packages/core/src/variation-tokens.ts)). A test asks
   whether a candidate carries one through `hasVariation` or `hasVariations`, both of which throw on a
@@ -97,12 +104,13 @@ already produced every source it made. A variation that threw prints an `asmlift
 
 ## Words with more than one sense
 
-| Word         | Dominant sense                                                                                     | Other senses you will meet                  |
-| ------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| **spelling** | How a piece of C writes something, and so why two sources compile differently.                     | —                                           |
-| **decline**  | A pass or a row refusing to act rather than emitting something wrong. `declined` is a row outcome. | —                                           |
-| **gate**     | A predicate deciding whether a rewrite or a variation fires.                                       | A check a round must pass before it merges. |
-| **base**     | A base pointer (`livebase`, `BaseKey`).                                                            | A git ref (`--base`).                       |
-| **arm**      | A branch or `switch` arm of recovered C (`switch-arms`).                                           | The ARM instruction set.                    |
-| **label**    | An assembly label or a C `goto` target. Never a candidate's name, which is its variations.         | A display label in the webapp or a chart.   |
-| **token**    | In code, a variation's registered spelling (`VARIATION_TOKENS`).                                   | Lexer, cache and objdiff tokens.            |
+| Word         | Dominant sense                                                                                     | Other senses you will meet                                                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **spelling** | How a piece of C writes something, and so why two sources compile differently.                     | —                                                                                                                                                                              |
+| **decline**  | A pass or a row refusing to act rather than emitting something wrong. `declined` is a row outcome. | —                                                                                                                                                                              |
+| **gate**     | A predicate deciding whether a rewrite or a variation fires.                                       | A check a round must pass before it merges.                                                                                                                                    |
+| **base**     | A base pointer (`livebase`, `BaseKey`).                                                            | A git ref (`--base`).                                                                                                                                                          |
+| **arm**      | A branch or `switch` arm of recovered C (`switch-arms`).                                           | The ARM instruction set.                                                                                                                                                       |
+| **label**    | An assembly label or a C `goto` target. Never a candidate's name, which is its variations.         | A display label in the webapp or a chart.                                                                                                                                      |
+| **token**    | In code, a variation's registered spelling (`VARIATION_TOKENS`).                                   | Lexer, cache and objdiff tokens.                                                                                                                                               |
+| **hoist**    | One entry of a base-hoist roster (above).                                                          | The L3 act of moving a local's declaration or init upward (`l3/hoist.ts`, `hoistBaseLocals`); a compiler moving code out of a branch (`compilerBehaviors.hoistsSingleSetArm`). |

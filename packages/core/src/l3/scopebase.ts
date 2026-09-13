@@ -760,14 +760,14 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
 
 /**
  * The re-spelling `regions` asks for — `/scopebase` or `/regionbase` — or null when nothing
- * qualifies (the caller then adds no candidate rather than a duplicate of the primary).
+ * qualifies (the caller then adds no candidate rather than a duplicate of the default).
  */
 export const hoistScopedBases = (sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null =>
   applyScopedBasePlan(sfn, planScopedBases(sfn, opts));
 
 /**
  * `plan` applied to the tree it was planned over — null when it decided nothing (the caller then
- * adds no candidate rather than a duplicate of the primary).
+ * adds no candidate rather than a duplicate of the default).
  *
  * IDENTITY-BOUND to that tree, and not by the type: `scope` is matched against statement LISTS and
  * `repoint` against access NODES, both by reference. A plan from a DIFFERENT tree therefore splices

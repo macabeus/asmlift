@@ -12,9 +12,9 @@
 // it cost this file its subject. `recip` fires the variation through R2 (const-expression staging)
 // instead, which keeps the seam covered.
 //
-// IT ALSO PINS THE LABEL, which nothing else does. `/regcopy-ret-fresh` wins exactly one corpus
+// IT ALSO PINS THE NAME, which nothing else does. `/regcopy-ret-fresh` wins exactly one corpus
 // row (`synthetic:ringread:ido7.1`), so a census over it is thin enough that a rename is easy to
-// miss — and with the labels unpinned, deleting the string from rank.ts's table is a SILENT
+// miss — and with the names unpinned, deleting the string from rank.ts's table is a SILENT
 // RENAME to `/regcopy-2`, a 0-flip change `bench regression` green-lights. The names are the
 // instrument (`winnerVariations` is a `bench diff` field), so they are asserted here as names, and
 // the tail-kind correspondence with them.

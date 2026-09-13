@@ -183,7 +183,7 @@ describe('the PER-KEY refusals, each priced by the spelling it keeps out of the 
     return fn([arms, { k: 'for', init, cond: { k: 'var', name: 'i' }, inc, body: [] }], [{ name: 'i', type: T.s(32) }]);
   };
 
-  test('homesplit-drops-device-volatile: a device READ left inline is qualified by neither pairing', () => {
+  test('homesplit-drops-device-volatile: a device READ left inline is qualified by neither /volatile nor /vol-store', () => {
     // `/volatile` reaches only MINTED POINTER LOCALS and `/vol-store` only a STORE at a fixed device
     // address, so a device read the region rule leaves inline carries no qualifier at all — and
     // withholding the key is what leaves it there.

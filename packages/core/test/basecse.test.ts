@@ -554,7 +554,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     });
   });
 
-  test('the /livebase/volatile pairing: the hoisted numeric base qualifies for the volatile variation', () => {
+  test('the /livebase/volatile composition: the hoisted numeric base qualifies for the volatile variation', () => {
     const out = hoistBaseLocals(poll(), LIVEBASE_GATES);
     const vol = volatilePtrLocals(out);
     expect(vol?.locals.find((l) => l.name === 'p0')?.pointeeVolatile).toBe(true);
@@ -857,7 +857,7 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
   });
 });
 
-describe('the block admission is WIRED into enumeration', () => {
+describe('the block hoist is WIRED into enumeration', () => {
   // Real agbcc outputs, so no toolchain: `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc —
   // one DMA register file at three offsets beside three IWRAM halfwords read-modified in place,
   // the shape that needs a proper subset of its bases bound — and `corpus/agbcc-onepoll.s` is its
@@ -870,7 +870,7 @@ describe('the block admission is WIRED into enumeration', () => {
   const cands = candsFor('mixpoll');
 
   test('the narrower hoist reaches the candidate list, plain and volatile', () => {
-    // the roster's own four labels — the pairings that ride on them are their own tests' business
+    // the roster's own four candidates — the pairings that ride on them are their own tests' business
     expect(
       cands
         .filter((x) => /^signed\/livebase(-block)?(\/volatile)?$/.test(joinVariations(x.variations)))
@@ -970,9 +970,9 @@ describe('the block admission is WIRED into enumeration', () => {
   });
 
   test('/basefold joins no PAIRING: no row demands the joint spelling', () => {
-    // The `/livebase ×` products fan over the rows that declared `pairings`, and this one does
-    // not — so the labels it contributes are its own family and nothing crossed with it. Read on
-    // `foldsink`, where BOTH roster rows fire and are distinct: on `basecell` they emit the same
+    // The `/livebase ×` pairings run over the hoists that declared `pairings`, and this one does
+    // not — so the candidates it contributes are its own family and nothing crossed with it. Read on
+    // `foldsink`, where BOTH of its hoists fire and are distinct: on `basecell` they emit the same
     // source and `seen` keeps only the head one, so `/basefold/sinkinit` is absent there for a
     // reason that has nothing to do with pairings and this test would pass without checking
     // anything.
@@ -981,7 +981,7 @@ describe('the block admission is WIRED into enumeration', () => {
       .filter((v) => hasVariation(v, 'basefold'));
     expect(basefold).toContainEqual(['unsigned', 'basefold']);
     expect(basefold).toContainEqual(['unsigned', 'basefold', 'sinkinit']);
-    // the roster's own two suffixes and nothing else — no product crossed with them
+    // the two basefold hoists' own candidates and nothing else — no pairing crossed with them
     for (const name of ['indexed', 'nearbase', 'coalesce']) {
       expect(basefold.filter((v) => hasVariation(v, name))).toEqual([]);
     }
@@ -990,7 +990,7 @@ describe('the block admission is WIRED into enumeration', () => {
     );
   });
 
-  test('every /livebase PRODUCT fans over the roster, and one of them is reachable no other way', () => {
+  test('every /livebase PAIRING runs over the roster, and one of them is reachable no other way', () => {
     // `corpus/agbcc-sizebound.s` is synthetic:sizebound:agbcc — a DMA register file beside a
     // halfword read as two loop bounds. The wide admission binds that halfword, which leaves
     // /nearbase no neighbour cells to cluster; only the narrow one leaves it inline, so the

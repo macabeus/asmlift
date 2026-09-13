@@ -211,8 +211,8 @@ Two things it can do that nothing else can:
   target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
   to LIST. Read a long enumeration as a big fan, not as a hang.
 
-  It also prints `[threw] <function>/<variations> threw (no candidate from it)`, a channel `bench run` supplies no
-  sink for at all — so the half of a row's fan a pre-respell variation produces can vanish from a
+  It also prints `[threw] <function>/<variations> threw (no candidate from it)`, a channel
+  `bench run` supplies no sink for at all — so the half of a row's fan a pre-respell variation produces can vanish from a
   benchmark run with nothing printed, and here it does not.
 
 - **`--base <ref>` prints the fan MULTIPLIER against what that artifact recorded.** Since each row
