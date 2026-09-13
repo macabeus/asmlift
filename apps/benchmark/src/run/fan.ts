@@ -28,7 +28,7 @@ import { isDecline } from '@asmlift/cli/decline';
 import { bakedBuild, sampleSourceTree, sourceStamp } from '@asmlift/cli/provenance';
 import type { RankOptions, RankedCandidate, RankedResult } from '@asmlift/cli/rank';
 import { enumerateRanked } from '@asmlift/cli/rank';
-import { rankedSummaryLine, scoreOf } from '@asmlift/cli/score-format';
+import { rankedSummaryLine, scoreOf, threwLine, threwStep } from '@asmlift/cli/score-format';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Candidate, DroppedCandidate, WithheldCandidate } from '@asmlift/core/rank';
@@ -733,12 +733,14 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
   let cands: Candidate[];
   try {
     cands = enumerateRanked(sym, asm, tc.targetDesc, {
-      onEnumerationError: (variations: readonly string[], error: string) =>
-        enumerationErrors.set([sym, ...variations].join('/'), error.split('\n')[0]),
+      onEnumerationError: (variations: readonly string[], error: string) => {
+        const step = threwStep(variations);
+        enumerationErrors.set(step, threwLine(sym, step, error.split('\n')[0]));
+      },
     });
   } catch (e) {
-    for (const [threw, error] of enumerationErrors) {
-      note(`asmlift: [threw] ${threw} threw (no candidate from it): ${error}`);
+    for (const line of enumerationErrors.values()) {
+      note(line);
     }
     const r = noFanReport(`${sym} (${asmPath})`, e, o.show);
     if (r.fan.length > 0) {
@@ -752,8 +754,8 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
     }
     return 2;
   }
-  for (const [threw, error] of enumerationErrors) {
-    note(`asmlift: [threw] ${threw} threw (no candidate from it): ${error}`);
+  for (const line of enumerationErrors.values()) {
+    note(line);
   }
   console.log(cands.map((cand) => `asmlift: [candidate] ${joinVariations(cand.variations)}`).join('\n'));
   console.log(`asmlift: [fan] ${cands.length} candidate(s) enumerated, none scored (--asm)`);
@@ -867,8 +869,10 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // excess-property checking fires on a literal only where that literal is itself annotated.
   const reportingOpts: RankOptions = {
     ...opts,
-    onEnumerationError: (variations: readonly string[], error: string) =>
-      enumerationErrors.set([c.sym, ...variations].join('/'), error.split('\n')[0]),
+    onEnumerationError: (variations: readonly string[], error: string) => {
+      const step = threwStep(variations);
+      enumerationErrors.set(step, threwLine(c.sym, step, error.split('\n')[0]));
+    },
   };
   // ONCE PER THROWING SETTING. Both the pre-count enumeration and the scoring pass enumerate, and
   // each re-runs every variation, so a variation that throws throws twice — reported twice, it reads
@@ -910,10 +914,10 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     return code;
   };
   const printThrows = (): void => {
-    for (const [threw, error] of enumerationErrors) {
-      if (!printedThrows.has(threw)) {
-        printedThrows.add(threw);
-        note(`asmlift: [threw] ${threw} threw (no candidate from it): ${error}`);
+    for (const [step, line] of enumerationErrors) {
+      if (!printedThrows.has(step)) {
+        printedThrows.add(step);
+        note(line);
       }
     }
   };

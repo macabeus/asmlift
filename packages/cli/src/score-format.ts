@@ -8,6 +8,19 @@
 // is the property to preserve when adding to it.
 import { joinVariations } from '@asmlift/core/variation-tokens';
 
+/** What a `[threw]` line says threw: the variations the throwing step applied, as core's
+ *  `onEnumerationError` reports them, or `(default source)` for `[]`. It is not a candidate's name
+ *  (it never starts with a signedness), so the line prints it after the function instead of
+ *  joining it onto one. Also the key a consumer dedups `[threw]` lines on: identical steps print once. */
+export function threwStep(variations: readonly string[]): string {
+  return variations.length === 0 ? '(default source)' : joinVariations(variations);
+}
+
+/** The `[threw]` line, which the CLI and `bench fan` both print. No trailing newline. */
+export function threwLine(fn: string, step: string, error: string): string {
+  return `asmlift: [threw] ${fn} ${step} threw (no candidate from it): ${error}`;
+}
+
 /** A score as `<score>/<rows>` — the numerator over the denominator it was measured against.
  *
  *  THE ONE RENDERER FOR EVERY SCORE ANY asmlift COMMAND PRINTS: the CLI's `[score]` table, the

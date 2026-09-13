@@ -1,6 +1,6 @@
 import type { BenchOutput } from '@asmlift/bench-schema';
 import type { RankedCandidate, RankedResult } from '@asmlift/cli/rank';
-import { rankedSummaryLine } from '@asmlift/cli/score-format';
+import { rankedSummaryLine, threwLine, threwStep } from '@asmlift/cli/score-format';
 import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
 import { NoScorableCandidateError, NoSpellableCandidateError } from '@asmlift/core/rank';
 import { describe, expect, it } from 'vitest';
@@ -201,6 +201,20 @@ describe('the [ranked] line', () => {
     expect(out.split('\n').at(-1)).toContain('1 synthesized');
     // …and the tree, on the same line, because a stamp anywhere else is a stamp nobody pastes.
     expect(out.split('\n').at(-1)).toContain('[asmlift source deadbee+dirty]');
+  });
+});
+
+// What a throwing step applied is not a candidate's name (no signedness leads it), so the line
+// must not print it shaped like one.
+describe('the [threw] line', () => {
+  it('prints the step after the function, not joined onto it', () => {
+    expect(threwLine('f', threwStep(['unmerge', 'vol-slot']), 'boom')).toBe(
+      'asmlift: [threw] f unmerge/vol-slot threw (no candidate from it): boom',
+    );
+  });
+
+  it('names a structured tree whose own source threw', () => {
+    expect(threwStep([])).toBe('(default source)');
   });
 });
 

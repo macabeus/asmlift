@@ -50,7 +50,7 @@ import type { RankedResult } from './rank';
 // must be able to reach it without importing this argv entry point — and `./score` is no home for
 // it either, because that module pulls objdiff-wasm and the note above `./rank` is about exactly
 // that edge.
-import { rankedSummaryLine, scoreOf } from './score-format';
+import { rankedSummaryLine, scoreOf, threwLine, threwStep } from './score-format';
 
 export { scoreOf } from './score-format';
 
@@ -180,6 +180,7 @@ function rankedStderr(a: {
   targetTrace: string;
   warn: string;
   ranked: RankedResult;
+  /** each `[threw]` line, keyed by its `threwStep` */
   enumerationErrors: Map<string, string>;
   /** the probe's verdict: `true` = candidates compiled in the SELF-DECLARED world */
   selfDeclared: boolean;
@@ -196,9 +197,7 @@ function rankedStderr(a: {
   // …and the same idea one stage EARLIER: `[dropped]` reports a candidate the SCORER refused,
   // which presumes the candidate was enumerated at all. A variation that threw produced no
   // candidate to drop.
-  const threw = [...a.enumerationErrors]
-    .map(([threw, error]) => `asmlift: [threw] ${threw} threw (no candidate from it): ${error}\n`)
-    .join('');
+  const threw = [...a.enumerationErrors.values()].map((line) => `${line}\n`).join('');
   const drops = ranked.dropped.length
     ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
       `${joinVariations(ranked.dropped[0].variations)}: ${ranked.dropped[0].error}\n`
@@ -667,9 +666,9 @@ export async function runCli(
         symbols,
         compile,
         onEnumerationError: (variations: readonly string[], error: string) => {
-          const threw = [name, ...variations].join('/');
-          if (!enumerationErrors.has(threw)) {
-            enumerationErrors.set(threw, error);
+          const step = threwStep(variations);
+          if (!enumerationErrors.has(step)) {
+            enumerationErrors.set(step, threwLine(name, step, error));
           }
         },
         ...(onProgress ? { onProgress } : {}),

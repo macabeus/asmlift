@@ -211,7 +211,7 @@ Two things it can do that nothing else can:
   target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
   to LIST. Read a long enumeration as a big fan, not as a hang.
 
-  It also prints `[threw] <function>/<variations> threw (no candidate from it)`, a channel
+  It also prints `[threw] <function> <variations> threw (no candidate from it)`, a channel
   `bench run` supplies no sink for at all — so the half of a row's fan a pre-respell variation produces can vanish from a
   benchmark run with nothing printed, and here it does not.
 
@@ -904,7 +904,7 @@ diff <(grep -F '[score]' a.err) <(grep -F '[score]' b.err)
 passes having compared nothing. A neutrality check that filters away what it is comparing is
 worse than none.
 
-**Every `[score]` line, and the `best …` on the `[ranked]` line, reads `<score>/<rows>`.** `rows`
+**Every `[score]` line, and the `winner …` on the `[ranked]` line, reads `<score>/<rows>`.** `rows`
 is objdiff's total row count for _that candidate's_ alignment against the target, so it belongs to
 the candidate and not to the target: a different spelling aligns differently and is scored against
 a different scale. **A run-to-run delta is therefore a pair of fractions, never a subtraction.**
