@@ -560,8 +560,8 @@ describe('docs/bench-cost.md', () => {
 
     const real = ranked('real');
     const synthetic = ranked('synthetic');
-    const piue = row('kleod:ProcessInputAndUpdateEntities:agbcc');
-    const ccg = row('kleod:CountCollectedGems:agbcc');
+    const piue = row('kleod:PauseMenuScreenHandler:agbcc');
+    const ccg = row('kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc');
 
     const expected = [
       `${group(sum(real))} s over ${real.length}`,

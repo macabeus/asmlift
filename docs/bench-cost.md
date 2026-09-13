@@ -12,13 +12,14 @@ one, move its date; if you cannot, delete the row rather than let it read as cur
 ## 1. The table
 
 Measured on this machine on **2026-09-12**, at `8599234d`, alone (no neighbour bench, no ranked
-run). Corpus: 1,062 rows — 810 synthetic + 252 real.
+run). Corpus: 1,062 rows — 810 synthetic + 252 real. The three `pnpm bench run` rows were re-measured on
+**2026-09-13** at `e641ae29`, after the kleod swap: 1,064 rows — 812 synthetic + 252 real.
 
 | command                                  | cost                                                                                                                 | what produced it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pnpm bench run` (all tiers)             | **~2,040 s ≈ 34 min** warm                                                                                           | the two tier lines of the 2026-09-12 ship run: `✓ synthetic: 810 results in 161.3s`, `✓ real: 252 results in 1879.5s`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `pnpm bench run --tier synthetic`        | **~161 s**                                                                                                           | same run, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `pnpm bench run --tier real`             | **~1,880 s** warm; **2,100–5,700 s** cold or contended                                                               | same run, 2026-09-12; the wide end from this repo's own run logs of 2026-09-05 (3,970 s), 2026-09-07 (5,720 s) and 2026-09-08 (2,941 s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `pnpm bench run` (all tiers)             | **~2,350 s ≈ 39 min** warm                                                                                           | the two tier lines of the 2026-09-13 kleod-swap ship run at `e641ae29`: `✓ synthetic: 812 results in 180.9s`, `✓ real: 252 results in 2169.1s`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `pnpm bench run --tier synthetic`        | **~181 s**                                                                                                           | same run, 2026-09-13                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `pnpm bench run --tier real`             | **~2,170 s** warm; **2,100–5,700 s** cold or contended                                                               | same run, 2026-09-13; the wide end, all measured before the kleod swap, from this repo's own run logs of 2026-09-05 (3,970 s), 2026-09-07 (5,720 s) and 2026-09-08 (2,941 s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `pnpm bench run --tier <t> --only <sym>` | **the row's own price**: 2.8 s on the cheapest real row, ~1,900 s on the most expensive — see §3                     | `time pnpm bench run --tier real --only ReadUnalignedU32` → 2.8 s, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `pnpm bench baseline <sym>`              | **~2.6 s**, no bench at all                                                                                          | `time pnpm bench baseline CountCollectedGems`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `pnpm bench fan <row> --enumerate`       | **~115 candidates/s**                                                                                                | 9,192 candidates in 80.2 s on `kleod:CountCollectedGems:agbcc`, 2026-09-12                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -45,6 +46,11 @@ Full runs of the real tier, minimum wall per day, over the window in which the t
 2026-08-31  1124.1 s      2026-09-06  1541.0 s      2026-09-12  1879.5 s
 ```
 
+The window ends at 2026-09-13. That day's stage-1 gate run of the kleod swap walled the real tier
+at **1898.1 s** on the same 252 rows. The same day, after the swap, the tier took **2169.1 s** on
+252 rows, 42 of them from another decompilation. That second figure is a different corpus, not a
+point on this curve.
+
 **4.3× in 17 days on an unchanged row count.** The synthetic tier over the same window went from
 642 rows / 192.8 s to 810 rows / 161.3 s — 26% more rows for 16% _less_ wall. So the growth is the
 real tier's candidate fan, and a cost figure for it older than about a week is fiction. Everything
@@ -60,7 +66,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:CountCollectedGems:agbcc  asmlift=match 0/344  m2c=noncompile -/-  fan=9192 rank=146.4s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=376.5s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -113,10 +119,10 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-12: the ranked pass alone is **2,808 s over 155
-real rows** and **817 s over 674 synthetic rows**; wall clock is lower because eight shards run in
-parallel. The single row `kleod:ProcessInputAndUpdateEntities:agbcc` is 1,916 s of that real
-total — **68% of the tier in one row.**
+Summed out of the committed artifact of 2026-09-13: the ranked pass alone is **3,920 s over 152
+real rows** and **366 s over 675 synthetic rows**; wall clock is lower because eight shards run in
+parallel. The single row `kleod:PauseMenuScreenHandler:agbcc` is 2,141 s of that real
+total — **55% of the tier in one row.**
 
 ## 4. How many full runs a round gets
 
@@ -174,20 +180,19 @@ until grep -q 'EXIT=' "$LOG"; do
   sleep 60; waited=$((waited + 60))
   now=$(wc -c < "$LOG")
   if [ "$now" -eq "$prev" ]; then still=$((still + 60)); else still=0; prev=$now; fi
-  # 2400 s of no growth is ~30% over this corpus's long-pole ROW — the 1,840 s of §3, not the
-  # 1,880 s the whole real tier walls at. Below that, a static log is normal, not a hang.
+  # 2800 s of no growth is ~30% over this corpus's long-pole ROW — the 2,141 s of §3, not the
+  # 2,169 s the whole real tier walls at. Below that, a static log is normal, not a hang.
   # Raise it, never lower it, as that row grows.
-  [ "$still" -ge 2400 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
+  [ "$still" -ge 2800 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
   [ "$waited" -ge 9000 ] && { echo "OVER BUDGET ${waited}s"; break; }
 done
 ```
 
-**A log that stopped growing was, until 2026-09-13, almost certainly `kleod:ProcessInputAndUpdateEntities:agbcc`**
-— one row, ~1,840 s of ranked pass, alone on one shard while the other seven sit finished. That row
-is retired with the kleod swap, and the row now at its address enumerates 27,360 spellings against
-77,760, so the tier's long pole after the swap is whatever the first post-swap artifact's
-`rankSeconds` says it is — re-read it there before trusting this signature. A single long pole is
-still the normal shape, not a hang. **Never kill a bench you have not proven
+**A log that stopped growing is almost certainly `kleod:PauseMenuScreenHandler:agbcc`** — one row,
+~2,141 s of ranked pass over 27,360 spellings, alone on one shard while the other seven sit finished.
+Before 2026-09-13 the row at that address was `kleod:ProcessInputAndUpdateEntities:agbcc`: 77,760
+spellings and ~1,840 s. The swap cut the fan by nearly two thirds, and the ranked pass still grew. That is
+this corpus's normal long-pole shape, not a hang. **Never kill a bench you have not proven
 hung.** A supervisor once killed a healthy gate run on exactly this signature and lost ~44 minutes.
 
 **Never wait on `pgrep -f "<pattern>"` when the pattern also matches your own waiting shell** —
