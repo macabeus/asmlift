@@ -10,7 +10,7 @@
 // Shape is VALIDATED at load time so a typo fails with the
 // file name, not mid-run with a compile error; projects missing on this machine are reported
 // once, aggregated, and skipped.
-import { ADDR_PATTERN } from '@asmlift/bench-schema';
+import { ADDR_PATTERN, type Identifiable } from '@asmlift/bench-schema';
 import type { Prototypes } from '@asmlift/core/proto';
 import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -290,4 +290,22 @@ export function loadManifests(): VendoredManifest[] {
 /** VENDOR/VERIFY loader: validated manifests, live checkouts required by the caller. */
 export function loadManifestsForVendor(): RealManifest[] {
   return loadRaw();
+}
+
+/** Every real row the dataset carries, as the fields row identity is computed from (bench-schema
+ *  `rowIdentity`/`joinArtifacts`) — read off the manifests alone, no vendored TU and no checkout, so
+ *  a guard that must join an artifact to the CURRENT rows can afford to ask. */
+export function realRowIdentities(): Identifiable[] {
+  return loadRaw().flatMap((man) =>
+    man.functions.map((f) => ({
+      id: `${man.project}:${f.sym}:${man.toolchain}`,
+      project: man.project,
+      sym: f.sym,
+      toolchain: man.toolchain,
+      tier: 'real' as const,
+      addr: f.addr,
+      ...(f.aliases !== undefined ? { aliases: f.aliases } : {}),
+      ...(f.sourceUrl !== undefined ? { sourceUrl: f.sourceUrl } : {}),
+    })),
+  );
 }

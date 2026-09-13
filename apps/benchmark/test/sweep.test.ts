@@ -28,6 +28,7 @@ import {
   compareSweeps,
   fanGuard,
   recordFileRefusal,
+  rekeyFans,
   renderDiff,
   selectsRow,
   sweepRefusal,
@@ -412,6 +413,59 @@ describe('the --fan size guard reads its own SELECTION, not just the artifact', 
     // DIFFERENT fact from an artifact that exists and prices nothing, and conflating them either
     // breaks a fresh clone or restores the fail-open.
     expect(fanGuard(sel, { fans: new Map() })).toEqual({ over: {} });
+  });
+});
+
+describe('the --fan guard prices the CURRENT rows, joined by identity', () => {
+  const OLD = 'https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f499/src/x.c#L1-L2';
+  const NEW = 'https://github.com/macabeus/kleod/blob/6f149e3/src/x.c#L1-L2';
+  const row = (sym: string, addr: string, sourceUrl: string, aliases?: string[]) => ({
+    id: `kleod:${sym}:agbcc`,
+    project: 'kleod',
+    sym,
+    toolchain: 'agbcc',
+    tier: 'real' as const,
+    addr,
+    sourceUrl,
+    ...(aliases ? { aliases } : {}),
+  });
+  const priced = (r: ReturnType<typeof row>, n: number) => ({ ...r, asmlift: { candidateCount: n } });
+
+  it('does not hand a removed row’s price to another decompilation’s row at the same address', () => {
+    // The kleod swap, measured before this join: the guard still "skipped" the no-longer-selected
+    // ProcessInputAndUpdateEntities by id, six rows that kept their names made the artifact look like
+    // it priced the selection, and PauseMenuScreenHandler — the new row at that address, 27,360
+    // spellings — was enumerated unguarded. Through identity the old prices reach no current row, so
+    // the kleod selection is priced by nothing and fanGuard refuses instead of failing open.
+    const fans = rekeyFans(
+      [
+        priced(row('ProcessInputAndUpdateEntities', '0x08010000', OLD), 77760),
+        priced(row('MultiplyQ8', '0x08000948', OLD), 1),
+      ],
+      [row('PauseMenuScreenHandler', '0x08010000', NEW), row('MultiplyQ8', '0x08000948', NEW)],
+    );
+    expect([...fans.keys()]).toEqual([]);
+    const g = fanGuard({ tiers: ['real'], project: 'kleod' }, { fans, path: '/r.json', rows: 2 });
+    expect(g.unreadable).toContain('prices no row at all');
+  });
+
+  it('keeps a renamed row’s price under its new id, and a synthetic row’s under its id', () => {
+    const synthetic = {
+      id: 'synthetic:add:agbcc',
+      project: 'synthetic',
+      sym: 'add',
+      toolchain: 'agbcc',
+      tier: 'synthetic' as const,
+      asmlift: { candidateCount: 2 },
+    };
+    const fans = rekeyFans(
+      [priced(row('sub_08010000', '0x08010000', NEW), 77760), synthetic],
+      [row('PauseMenuScreenHandler', '0x08010000', NEW, ['sub_08010000'])],
+    );
+    expect(Object.fromEntries(fans)).toEqual({ 'kleod:PauseMenuScreenHandler:agbcc': 77760, 'synthetic:add:agbcc': 2 });
+    expect(fanGuard({ tiers: ['real'], project: 'kleod' }, { fans, path: '/r.json', rows: 2 })).toEqual({
+      over: { 'kleod:PauseMenuScreenHandler:agbcc': 77760 },
+    });
   });
 });
 

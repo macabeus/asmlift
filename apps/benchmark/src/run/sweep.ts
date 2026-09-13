@@ -47,11 +47,13 @@
 // whether a row MATCHES — that is `bench run` (`docs/bench-cost.md` §1). It tells you which rows
 // your branch SPELLS differently, which is the question a round asks twenty times before it asks
 // the other one once.
+import { type Identifiable, joinArtifacts } from '@asmlift/bench-schema';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { realRowIdentities } from '../cases/manifests';
 import { REPO_ROOT, RESULTS_DIR } from '../config';
 import { TOOLCHAINS } from '../toolchains';
 import { ARMS, type SweepSelection, TREE_MODULES } from './sweep-driver';
@@ -225,6 +227,32 @@ export function renderDiff(d: SweepDiff): string[] {
  *  against the known giants and says so, rather than pretending to bound an unmeasured row. */
 export const SWEEP_FAN_LIMIT = 20000;
 
+type RecordedRow = Identifiable & { asmlift?: { candidateCount?: number } };
+
+/** The artifact's recorded fans, keyed by the CURRENT dataset's row ids — joined by row identity
+ *  (bench-schema `joinArtifacts`), never by the id the artifact happened to publish.
+ *
+ *  Keyed by the artifact's own ids, this guard failed OPEN across the kleod source swap, and loudly
+ *  in the wrong direction: `ProcessInputAndUpdateEntities` (77,760) was still "skipped" by name
+ *  although no longer selected, six unrelated rows that kept their names made the artifact look like
+ *  it priced the selection, and `PauseMenuScreenHandler` — the row now at that address, a different
+ *  decompilation's source — was enumerated unguarded. Through the join, a renamed row keeps its
+ *  recorded price, a row of another decompilation at the same address has none, and a real row the
+ *  dataset no longer carries prices nothing. Synthetic rows are keyed by id on both sides. */
+export function rekeyFans(recorded: readonly RecordedRow[], current: readonly Identifiable[]): Map<string, number> {
+  const priced = recorded.filter((r) => typeof r.asmlift?.candidateCount === 'number');
+  const join = joinArtifacts(priced, current);
+  const currentId = new Map(current.map((r) => [join.headKey(r), r.id]));
+  const out = new Map<string, number>();
+  for (const r of priced) {
+    const id = r.tier === 'real' ? currentId.get(join.baseKey(r)) : r.id;
+    if (id !== undefined) {
+      out.set(id, r.asmlift!.candidateCount!);
+    }
+  }
+  return out;
+}
+
 /** sym → the fan the committed artifact recorded, for the `--fan` guard. Read off the COMMITTED
  *  `results.json` in this worktree rather than through `git show`: the guard's job is to keep a
  *  diagnostic from becoming an overnight job, and a ref that will not resolve must not be able to
@@ -245,18 +273,11 @@ export function recordedFans(): { fans: Map<string, number>; unreadable?: string
   }
   const out = new Map<string, number>();
   try {
-    const { results } = JSON.parse(readFileSync(path, 'utf8')) as {
-      results: { id: string; asmlift: { candidateCount?: number } }[];
-    };
+    const { results } = JSON.parse(readFileSync(path, 'utf8')) as { results: RecordedRow[] };
     if (!Array.isArray(results)) {
       return { fans: out, path, unreadable: `${path} has no top-level \`results\` array` };
     }
-    for (const r of results) {
-      if (typeof r.asmlift?.candidateCount === 'number') {
-        out.set(r.id, r.asmlift.candidateCount);
-      }
-    }
-    return { fans: out, path, rows: results.length };
+    return { fans: rekeyFans(results, realRowIdentities()), path, rows: results.length };
   } catch (e) {
     return { fans: out, path, unreadable: `${path}: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}` };
   }
