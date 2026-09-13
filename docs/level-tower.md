@@ -138,8 +138,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   behavior owes an explicit refusal for every pass that moves the thing it is placing, and for every
   IR boundary the frontend invents where the machine had none (a block starts at every label, so a
   label nothing branches to makes one straight line of asm look like a dominating pair of blocks).
-  Getting that line backwards is expensive in both directions: a variation where a compiler behavior
-  belongs doubles every enumeration to referee a question with one answer, and a compiler behavior
+  Putting a question on the wrong side of that divide, variation or compiler behavior, is expensive
+  in both directions: a variation where a compiler behavior belongs doubles every enumeration to referee a question with one answer, and a compiler behavior
   where a variation belongs quietly degrades every function the differ would have rescued.
 
   A variation whose SIGN is base-dependent also cannot be a compiler behavior, but that is not a test you can run

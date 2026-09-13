@@ -164,8 +164,8 @@ it prints `fan=N rank=Ns` off the artifact in seconds, and those fans move fast 
 `kleod:CountCollectedGems:agbcc` was 5,952 when this paragraph was written and had grown to 9,192
 by 2026-09-12. `LoadBGTilemapData`'s 225,792 is HARD-RULE forbidden to score and expensive even to
 `--enumerate`; **never start the scored run** (`docs/bench-cost.md` §1 prices both). **And the 2,000
-guard is not a cheap shield**: it is tested on `cands.length` AFTER the enumeration (`fan.ts:951`,
-read 2026-09-12), so a bare `pnpm bench fan` on a row that size pays the whole enumeration and only
+guard is not a cheap shield**: it is tested on `cands.length` AFTER the enumeration
+(`grep -n "cands.length > FAN_SCORE_LIMIT" apps/benchmark/src/run/fan.ts`), so a bare `pnpm bench fan` on a row that size pays the whole enumeration and only
 then refuses.
 
 **A declined or noncompile row has NO fan, and the command says so** (`asmlift: [fan] no fan …`,

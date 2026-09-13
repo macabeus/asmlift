@@ -135,11 +135,13 @@ export interface EnumerateOptions {
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
    *  and without this it looks identical to a variation that correctly declined.
    *
-   *  `variations` names the setting that threw, in the order a candidate's `variations` lists them
-   *  but without a signedness variation, so a setting that throws under both signednesses is
-   *  reported twice with the same list: `['defsite',
-   *  'unmerge']` for a throw under `/defsite/unmerge`, and `[]` when the function's own tree could
-   *  not be spelled. */
+   *  `variations` is NOT a candidate's name: it lists what the throwing step itself applied, in
+   *  name order. A lift or structure setting reports its lift and structure variations
+   *  (`['defsite']`). A respell or pre-respell step reports only its pre-respell and respell
+   *  variations (`['unmerge', 'vol-slot']`), never the lift, structure, signedness or symbol-map
+   *  variations of the tree it ran on. So one failure is reported once per signedness, symbol-map
+   *  setting and structured tree it recurs on, each time with the same list, and `[]` means a
+   *  structured tree's own source could not be spelled. */
   onEnumerationError?: (variations: readonly string[], error: string) => void;
   /** Called once per (name, reason) when the declaration synthesis REFUSES a name the tree
    *  references (see `RefusedDeclarationReason`). The name then stays undeclared and the
@@ -757,15 +759,15 @@ export function enumerateCandidates(
       ),
     ];
   }
-  /** Is this a setting where no structure variation is on, other than a branch-sense flip? The default-setting abort guard's
+  /** Is this a setting where no structure variation is on, other than `/flip-branch`? The default-setting abort guard's
    *  other half: at the default LIFT setting a failure here aborts the row, because it says the lift
    *  is broken rather than that one variation cannot spell this tree.
    *
    *  `s.suffix === ''` IS NOT THE SAME TEST, which is why this is a named predicate rather than
-   *  the string compare it looks like. `/flip-branch` and `/flip-join` name a branch sense
-   *  RELATIVE to the target's default, so BOTH senses pass this test — the flipped one carries a
-   *  suffix, and every `STRUCTURE_VARIATIONS` flag and hand-carried structure boolean is still off.
-   *  The table's own flags decide, plus the four shape booleans that predate the table. */
+   *  the string compare it looks like. `/flip-branch` names a branch sense RELATIVE to the target's
+   *  default, so both of its senses pass this test: the flipped one carries a suffix, and `sense` is
+   *  not among the flags read here. `/flip-join` does not pass, because `join` is one of the five
+   *  hand-carried booleans below. The table's own flags decide, plus those five. */
   const isDefaultSetting = (s: StructureSetting): boolean =>
     !s.anchor &&
     !s.join &&
@@ -899,7 +901,8 @@ export function enumerateCandidates(
     // the same argument, not just a row. And a specific PAIRING is admitted on one of two
     // grounds, never on "it might help". FIRST, a row demands the joint spelling AND that
     // spelling is reachable from neither variation alone: /livebase × /indexed, × /sinkinit,
-    // × /nearbase and × /coalesce, plus /vol-store × /unreduce and that pair × /ptr-field —
+    // × /nearbase and × /coalesce, /scopebase × /coalesce, plus /vol-store × /unreduce and that
+    // pair × /ptr-field —
     // each with its demanding row at the respell site. (A TRIPLE is admitted on the same ground
     // and no weaker one: it is one joint spelling with one demanding row, and the pairs BELOW it
     // are not thereby admitted — on synthetic:dmaptrsrc the two intermediate pairs measure 27 and
@@ -909,9 +912,9 @@ export function enumerateCandidates(
     // pairing that decision decides a match with no candidate beside it to lose to. The second
     // ground is narrower than it looks: it needs a committed decision INSIDE a variation with an
     // existing variation that expresses the alternative, not a variation one could imagine wanting
-    // twice. Anything else stays un-composed. A pairing is admitted for a VARIATION, so it runs
-    // over that variation's whole hoist table (LIVEBASE_HOISTS): an entry on that table changes
-    // which bases `/livebase` binds, not what pairing `/livebase` with /coalesce means.
+    // twice. Anything else stays un-composed. A pairing is admitted for the hoist mechanism, not per
+    // entry, so it runs over every LIVEBASE_HOISTS entry that sets `pairings`: adding an entry
+    // changes which bases get bound, not what pairing a hoist with /coalesce means.
     // And a respell variation must PRESERVE SEMANTICS by construction: the differ referees
     // byte-exactness (a wrong candidate can never fake a score-0 match), but on a NONMATCH row the
     // best-scoring source is shown to the user — a semantically-wrong respelled source there is
@@ -1108,9 +1111,9 @@ export function enumerateCandidates(
     // together. The intermediate pairs are not admitted, and the reason is that NO ROW DEMANDS
     // ONE — neither could win where they are reachable: compiled on synthetic:dmaptrsrc, VT TIES
     // `/vol-store`'s 27 and RT LOSES to it at 32. Rank a pair against the BEST already-admitted
-    // candidate, not against any admitted variation: RT's 32 beats the admitted standalone
-    // `/unreduce`'s 35, so "worse than an admitted variation" would not exclude it — it loses only to
-    // `/vol-store`'s 27.
+    // candidate (on synthetic:dmaptrsrc the triple, at 0), not against any admitted variation: VT
+    // only ties `/vol-store`'s 27, and RT's 32 beats the admitted standalone `/unreduce`'s 35, so
+    // "worse than an admitted variation" would exclude neither.
     //
     // WHAT THE STANDALONE LINES COST, since neither of the two variations ever wins an artifact row
     // ALONE — every `/unreduce` and `/ptr-field` winner rides inside a `/vol-store` pairing, which
@@ -1183,11 +1186,11 @@ export function enumerateCandidates(
     // discards the winner. Every result is emitted and the differ referees, exactly as
     // `/regcopy` does for its allocator-ambiguous tail decision.
     //
-    // POLICY NOTE: this is the multi-result branch of the POLICY, not a pairing: `respellEach` runs
-    // the coalesce's results on the tree `/scopebase` just produced, in the one place that knows the
-    // hoist happened. The name lists both variations because both were applied. It is admitted as
-    // the coalesce's own results over a hoisted tree, the same way `/coalesce` runs over the
-    // un-hoisted one, and needs no row to demand it. A
+    // POLICY NOTE: this is a PAIRING, `/scopebase` × `/coalesce`, admitted for the row above, which
+    // demands the joint spelling (18 against the no-merge 21). `respellEach` makes the coalesce's
+    // results from the tree `/scopebase` produced, in the one place that knows the hoist happened.
+    // Unlike the `/livebase` × `/coalesce` pairings it takes `coalesceCandidates`' whole merge set,
+    // not the arm-disjoint subset. The name lists both variations because both were applied. A
     // candidate's variations name what was applied, not a route a deletion must remove: these
     // results are minted by their own `respellEach` call, so deleting `respell('/scopebase', …)` does
     // not delete them. The un-coalesced `/scopebase` stays in the list, so nothing is lost.

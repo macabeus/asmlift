@@ -775,7 +775,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
  *  a minted count is always ODD: 1, 3, 5, 7, 9. At 8 a FOUR-clause inner conjunct (7 ops) folds and
  *  a FIVE-clause one (9 ops) does not; 7 and 8 are therefore one gate, and so is 9 over everything
  *  measured here, the deepest cone in the 2,047 lifted klonoa+sa3 functions minting 5 (17
- *  connective negations, 0 refused). Clause COUNT is not the cause either: a FLAT `a || b || c || …`
+ *  connective negations, 0 refused). Clause COUNT is not the measure either: a FLAT `a || b || c || …`
  *  chain pays nothing at all, because ^g's condition is never a connective in that shape.
  *
  *  The bound is on ops KEPT, and the frontier is a NODE COUNT — not a shape. Pinned as such rather

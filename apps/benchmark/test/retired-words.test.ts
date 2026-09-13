@@ -1,8 +1,8 @@
-// The words candidate enumeration no longer uses, counted over every tracked text file.
+// Words and identifiers outside the enumeration vocabulary, counted over every tracked text file.
 //
 // The enumeration vocabulary is `docs/vocabulary.md`: a candidate, the fan, the winner, a variation
 // (a candidate's name is the list of variations it applied), dropped, withheld. The rules below
-// are the words and identifiers that vocabulary replaced. Each rule's `allow` list is the reviewed
+// are the words and identifiers that must not stand in for them. Each rule's `allow` list is the reviewed
 // set of lines where the same spelling means something else — an ECharts axis, a Tailwind variant,
 // an external file's name — and never the enumeration sense.
 //

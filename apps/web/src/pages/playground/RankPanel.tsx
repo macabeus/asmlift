@@ -1,10 +1,10 @@
 // asmlift webapp — ranking UI. Three views over the same Ranking state:
-//  • RankBadge — a one-line strip above the Source view: the best candidate's verdict (byte-exact
+//  • RankBadge — a one-line strip above the Source view: the winner's verdict (byte-exact
 //    at objdiff score 0, or the closest score). Only ever reflects the CURRENT input (the H1
 //    guard in useRanking).
 //  • RankDeclarations — the block the winning candidate was COMPILED WITH, shown under the badge.
 //  • RankCandidates — the Pipeline tab's final card: every scored candidate with its objdiff
-//    score, best first, plus the declarations asmlift refused to synthesize.
+//    score, in rank order, plus the declarations asmlift refused to synthesize.
 import { renderDeclarations } from '@asmlift/core/declare';
 import { joinVariations } from '@asmlift/core/variation-tokens';
 

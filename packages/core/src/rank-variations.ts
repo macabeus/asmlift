@@ -481,8 +481,8 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  WHAT BOUNDS IT. A hoist declines unless it binds a non-empty set of bases no earlier hoist
  *  already bound, and each composition declines wherever its own variation does, so the list widens
  *  only where an inhabitant exists — over the corpus the second hoist reaches 8 rows, its
- *  `/nearbase` pairing 3, and its `/indexed`, `/coalesce` and volatile-subset compositions none at
- *  all. A function
+ *  `/nearbase` pairing 3, and its `/indexed` and `/coalesce` pairings and its volatile subsets none
+ *  at all. A function
  *  inhabiting them all pays far more, and the fan is not always a win there: the mixpoll dataset
  *  entry prices one where the `/coalesce` pairing costs the most candidates of any and scores two
  *  points worse than going unpaired. THAT row fans anyway because on the `/livebase` hoists a
