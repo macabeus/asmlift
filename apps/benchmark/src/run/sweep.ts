@@ -645,9 +645,10 @@ export function fanGuard(
   }
   // AND PER PROJECT, because the count above is selection-wide: five priced projects masked one
   // unpriced one. Measured on the kleod source swap with the pre-swap artifact: `--project kleod
-  // --fan` refused (0 priced), while `--tier real --fan` priced 210 rows of the other five projects,
-  // so `over` came back empty and PauseMenuScreenHandler (27,360 spellings, over SWEEP_FAN_LIMIT)
-  // enumerated unguarded. Every re-pin of a project's source reopens exactly this until the artifact
+  // --fan` refused (0 priced), while `--tier real --fan` found 114 priced rows in the other five
+  // projects (af 10, marioparty3 24, pokeemerald 35, sa3 35, snowboardkids2 10) and 0 in kleod, so
+  // `over` came back empty and PauseMenuScreenHandler (27,360 spellings, over SWEEP_FAN_LIMIT)
+  // would have enumerated unguarded. Every re-pin of a project's source reopens exactly this until the artifact
   // is regenerated. Only the real tier can be checked this way — `current` is the dataset's REAL
   // rows — so a synthetic-only hole is still covered by the selection-wide count alone.
   if (path !== undefined && current !== undefined) {
