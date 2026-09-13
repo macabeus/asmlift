@@ -215,13 +215,24 @@ export function renderDiff(d: SweepDiff): string[] {
  *  docs/ranked-repro.md at 225,792 spellings and over five hours; the dataset does not carry it,
  *  so a SKIP regex naming it protects the corpus sweep from nothing):
  *
- *    kleod:PauseMenuScreenHandler:agbcc   77,760   EXCLUDED
- *    kleod:AthleticChallengeScrollUpdate:agbcc              13,728   admitted, measured 25.1 s
- *    kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc               9,192   admitted, measured 83.0 s — the slowest
+ *    kleod:ProcessInputAndUpdateEntities:agbcc   77,760   EXCLUDED
+ *    kleod:UpdateCameraScroll:agbcc              13,728   admitted, measured 25.1 s
+ *    kleod:CountCollectedGems:agbcc               9,192   admitted, measured 83.0 s — the slowest
  *
  *  20,000 sits between the one giant and the largest row a round actually enumerates. Lower would
  *  exclude `CountCollectedGems`, which is this project's most-enumerated row and therefore the
  *  sweep's best customer; higher admits a row whose price nobody has measured.
+ *
+ *  AFTER THE 2026-09-13 KLEOD SWAP the rows above are retired (dataset/retired-rows.json), and the
+ *  bracket was re-measured on the rows now at those addresses — `pnpm bench fan <row> --enumerate`,
+ *  wall clock including the target build, compile-free:
+ *
+ *    kleod:PauseMenuScreenHandler:agbcc               27,360   over the limit, 91.2 s
+ *    kleod:AthleticChallengeScrollUpdate:agbcc         8,416   16.6 s
+ *    kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc   3,600   50.5 s
+ *
+ *  20,000 still sits between them. The giant is a third of the old one and the tier's cost profile
+ *  moved with it: the NEXT artifact, not these numbers, is what prices the corpus.
  *
  *  A row the artifact does not carry has no recorded count and IS enumerated: the guard protects
  *  against the known giants and says so, rather than pretending to bound an unmeasured row. */
@@ -588,7 +599,7 @@ const selectionOf = (o: SweepOptions): SweepSelection => ({
  *  the comparison has silently paid five hours to produce one. */
 function overLimitRows(o: SweepOptions): { over: Record<string, number>; unreadable?: string } {
   // `--asm-dir` is excluded rather than merely empty: the guard keys on a DATASET row id, a raw
-  // `.s` has no recorded count, and printing "`--fan` skips kleod:PauseMenuScreenHandler"
+  // `.s` has no recorded count, and printing "`--fan` skips kleod:ProcessInputAndUpdateEntities"
   // over a selection that never iterates a dataset row told a reader a guard had fired when none
   // could. `sweepRefusal` refuses that combination; this keeps the note off the other paths too.
   if (o.fan !== true || o.force === true || o.asmDir !== undefined) {
@@ -710,7 +721,9 @@ export async function sweep(o: SweepOptions): Promise<number> {
     note(
       `asmlift: [sweep] --fan needs the committed artifact to size what it is about to enumerate, and it does not: ${unreadable}`,
     );
-    note(`asmlift: [sweep] --force enumerates every row anyway (kleod:PauseMenuScreenHandler is 77,760 spellings).`);
+    note(
+      `asmlift: [sweep] --force enumerates every row anyway, including any over SWEEP_FAN_LIMIT ${SWEEP_FAN_LIMIT}.`,
+    );
     return 2;
   }
   const sel = selectionOf({ ...o, overLimit: over });

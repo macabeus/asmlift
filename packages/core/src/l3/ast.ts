@@ -264,7 +264,7 @@ export type Stmt =
   // Recovery COMPUTES this flag rather than spelling it, so a source grep for `fallsThrough: true`
   // finds hand-written fixtures and nothing else, whatever the corpus does — count its inhabitants
   // by instrumenting the printer. Both regimes produce them: the jump table spells `case 4:` of
-  // `kleod:WorldMapScreenUnlockNewWorld`, the comparison tree `synthetic:sw_fallmem:agbcc`.
+  // `kleod:UpdateWorldMapNodeAnim`, the comparison tree `synthetic:sw_fallmem:agbcc`.
   | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[]; defaultAt?: number }
   | { k: 'return'; value?: Expr };
 

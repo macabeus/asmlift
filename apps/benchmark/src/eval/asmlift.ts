@@ -96,7 +96,7 @@ export function asmliftFan(
  *  `rankBy` (core rank.ts) puts each enumerated candidate into EXACTLY ONE of its three lists:
  *  scored, dropped (the scorer threw) or withheld (it scored and was refused publication). So the
  *  fan is their sum, and `candidates.length` alone is not it — on
- *  `kleod:PauseMenuScreenHandler:agbcc` the refused half is 51,840 spellings.
+ *  `kleod:ProcessInputAndUpdateEntities:agbcc` the refused half is 51,840 spellings.
  *
  *  Free: three lengths off an object the ranked pass already returned. */
 export function fanSize(r: { candidates: unknown[]; dropped: unknown[]; withheld: unknown[] }): number {

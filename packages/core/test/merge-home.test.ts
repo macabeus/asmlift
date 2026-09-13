@@ -613,7 +613,7 @@ test('a short-circuit-guarded value whose cone holds a divide is refused', () =>
 // ── the gate can be starved from ABOVE: an L1 fold that deletes the merge feed ────────────────
 // Everything above pins the SCOPE. This pins its REACH, which is a different failure and the one
 // that actually happened: the scope was right, the axis was shipped, and it never enumerated on
-// `sinkacc` or `kleod:WorldMapScreenCheckNewWorldUnlocked` because `raise/const.ts` folded the accumulator's
+// `sinkacc` or `kleod:CountCollectedGems` because `raise/const.ts` folded the accumulator's
 // `add(%s = const 0, const 1)` down to `const 1` before anything asked. The feed the scope looks
 // for was gone, so `hasMergeFeedHome` read false and `/merge-home` was never forked — a candidate
 // nothing reports, because it was never enumerated.

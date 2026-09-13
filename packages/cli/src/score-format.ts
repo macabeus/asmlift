@@ -16,7 +16,7 @@
  *  a property of the candidate and not of the target: a different spelling aligns differently and
  *  is scored on a different scale. Two runs' `[score]` lines are the project's standard
  *  before/after comparison (docs/ranked-repro.md), and printing the numerator alone makes that
- *  comparison read as a subtraction on a fixed scale. It is not one — `kleod:WorldMapScreenCheckNewWorldUnlocked`
+ *  comparison read as a subtraction on a fixed scale. It is not one — `kleod:CountCollectedGems`
  *  went 290/404 → 171/387 across two committed artifacts, 17 points of which were the scale, and
  *  an attribution round was spent explaining the difference.
  *

@@ -55,7 +55,7 @@ describe('a guessed argument that survived from an earlier block', () => {
 
   test('…and the narrowed lift carries the re-spelling cross, not one fixed spelling', () => {
     // A lift variant, not a re-spelling lever: dropping an argument changes the IR every
-    // structuring axis then reads, so the axes have to run under it. `kleod:InputHandler_Normal` matches
+    // structuring axis then reads, so the axes have to run under it. `kleod:ReadKeyInput` matches
     // on `/setup-args/derived-home`, a product of this variant and an axis run beneath it.
     const labels = cands(GUARDED_CALL, POOL).map((c) => c.label);
     expect(labels).toContain('unsigned/setup-args');

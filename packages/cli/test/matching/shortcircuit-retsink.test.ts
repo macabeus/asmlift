@@ -84,7 +84,7 @@ describe('F-CFG return-sinking gate: simple value-selects are NOT sunk (kept as 
 });
 
 describe('F-CFG return-sinking: a ONE-SET-ARM diamond IS sunk', () => {
-  // The capability `kleod:HeldUp:agbcc` bought, measured on shapes the corpus does
+  // The capability `kleod:IsSelectButtonPressed:agbcc` bought, measured on shapes the corpus does
   // not hold. Each of these scores 3 unranked and matches only through the fan, because the winning
   // candidate is `/flip-branch` in all four — a sunk diamond has no join for the joined-if default
   // to read, and for a constant-arm diamond agbcc puts the source's taken arm in the FAR block.

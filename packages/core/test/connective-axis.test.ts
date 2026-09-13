@@ -11,7 +11,7 @@
 // the `||` in general — that holds only for a switch with one case group plus `default:` (agbcc
 // 12 instructions each, IDO 64 bytes each), and a second group parts them (agbcc 20 against 16).
 // So the axis stays a real second spelling on a recovered multi-group switch, on top of the tree
-// switch recovery DECLINES on entirely — `kleod:WorldMapScreenCheckNewWorldUnlocked`, `kleod:WorldMapScreenIsValidPath`.
+// switch recovery DECLINES on entirely — `kleod:CountCollectedGems`, `kleod:CheckWorldCompletion`.
 import { describe, expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';

@@ -85,16 +85,16 @@
 //                                                8 cast, 1 plain leaf    9 cast, 1 plain leaf
 //
 // THE ARMS DIFFER BY ONE NAME, and not because the licence reads the map — it never does. The map
-// resolves a pool word the map-less lift leaves NUMERIC, so `kleod:sub_0804C7FC`'s
+// resolves a pool word the map-less lift leaves NUMERIC, so `kleod:StreamCmd_SetBGScroll`'s
 // `gBgInfo` is a named global on one arm and no global at all on the other. Every other name is
 // identical across the two.
 //
 // `interior-or-non-access` is the FIRST refusal of every name in that population, on both arms, and
 // it is the rule's TWO HALVES that make the two shapes rather than one half twice. The STRUCT
 // ELEMENT has no `intType` and reads its members at a displacement — the INTERIOR half;
-// `kleod:sub_0801F4D0`'s `gEntity` is a plain scalar leaf refused the same way (stores at +2, +8,
+// `kleod:EntityItemDrop`'s `gEntity` is a plain scalar leaf refused the same way (stores at +2, +8,
 // +9, +12, +15, +16 and +20). The other leaf is refused on the NON-ACCESS half instead:
-// `kleod:AthleticChallengeScrollUpdate`'s `gSineTable` is read once, cleanly, at width 2, and its element
+// `kleod:UpdateCameraScroll`'s `gSineTable` is read once, cleanly, at width 2, and its element
 // address is also an operand of three other `add`s, so nothing under that name is at a displacement
 // at all — which is why the ORDER consumer records ONE access there and no null width. Neither
 // shape says any less about the order than a clean access does. `ADDRESS_GATES` below is therefore
@@ -342,7 +342,7 @@ export const DECLARATION_ADDRESS_GATES: readonly Gate<AddressUse>[] = [
     // removing the rule records no access at all (an interior read is not evidence, and is
     // filtered out) and the symbol is refused anyway, while beside a clean access removing it
     // derives an element type off a name one of whose uses this spelling does not model.
-    // `kleod:AthleticChallengeScrollUpdate` is that shape on the corpus — `gSineTable` derives `elemSize 2`
+    // `kleod:UpdateCameraScroll` is that shape on the corpus — `gSineTable` derives `elemSize 2`
     // without this rule — which is why its fixture carries both accesses. Its rejected use there
     // is the NON-ACCESS half rather than the interior one (the element address is an operand of
     // another `add`, and nothing under that name is read at a displacement), which is a second
@@ -375,11 +375,11 @@ interface ShapeEvidence {
    *  whole symbol first.
    *
    *  Three named symbols on the dated artifact (see the module note) record a clean access and an
-   *  interior one under ONE name, in both symbol-map arms — `kleod:sub_0801DE44`'s
-   *  `gEntityArray` and `kleod:sub_0801F4D0`'s `gEntity` record the interior one first,
-   *  `kleod:sub_0800A5B8`'s `gUnk_03002920` records the clean one first. That last
+   *  interior one under ONE name, in both symbol-map arms — `kleod:EntityDeathAnimation`'s
+   *  `gEntityArray` and `kleod:EntityItemDrop`'s `gEntity` record the interior one first,
+   *  `kleod:TransformSingleEntityToScreen`'s `gUnk_03002920` records the clean one first. That last
    *  is the inhabitant a positional read gets wrong, which is why this is a summary and not a list.
-   *  `kleod:AthleticChallengeScrollUpdate` is NOT one of them: it is the DECLARATION half's worked example
+   *  `kleod:UpdateCameraScroll` is NOT one of them: it is the DECLARATION half's worked example
    *  (`interior-or-non-access` ablated derives `elemSize 2` there), and in the order consumer its
    *  `gSineTable` records no interior access at all. */
   readonly widths: {
@@ -1031,7 +1031,7 @@ export function arrayShapeRefusals(
  *  1. THE STRUCTURER ACTUALLY SPELLED THE NAME BARE. A derivation reaching a symbol does not
  *     make the source depend on it — every consumer of a shape can still refuse, and then the
  *     access keeps `((T *)&gSym)[i]`, which reproduces the bytes under ANY declaration and
- *     therefore assumes nothing. `kleod:ButtonConfigurationScreenInit` is that case on the corpus: the
+ *     therefore assumes nothing. `kleod:SetupBG3WindowOverlay` is that case on the corpus: the
  *     `gBgInfo` shape derives (element 4) and `arrayAccess` declines it (the access carries a
  *     field offset), so the emitted source casts and the reader has nothing to check.
  *  2. NO SYMBOL MAP DESCRIBED THE NAME. `structure()` asks the project's map FIRST, so on a

@@ -471,7 +471,7 @@ function spellablePointee(
  *  so it is the only spelling that both type-checks and keeps the bytes, which is a narrower claim
  *  than "the only spelling that type-checks". The `pmarrrow` synthetic row referees it (pass
  *  `subscriptsFromExtents` a `needRecovered` of true, as the global path does, and the row takes
- *  the cast form: MATCH → diff:5); `kleod:WorldMapScreenIsValidPath:agbcc` is its real-tier inhabitant;
+ *  the cast form: MATCH → diff:5); `kleod:CheckWorldCompletion:agbcc` is its real-tier inhabitant;
  *  at rank 3 the same merge spells `->x[0][0][k]`.
  *
  *  A VARIABLE SUBSCRIPT IS NEVER BOUNDED, here or anywhere. The member lookup bounds only the
@@ -5003,7 +5003,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // decides something. That is what admits the CHAINED fold, `scSharedOnFall` false, whose inner
     // fold left the head's taken edge pointing at the next test: reading the source arm alone
     // NEGATES it, `synthetic:chainsense` is 4/44 that way and MATCH this way, and the inner-loop
-    // site of `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` is the real-row inhabitant (39/352 → 18/344).
+    // site of `kleod:CountCollectedGems:agbcc` is the real-row inhabitant (39/352 → 18/344).
     //
     // `scEdgeRelayed` is the LONG BRANCH, and it is the stamp that keeps the premise honest rather
     // than absorbing it. agbcc inverts a conditional it cannot reach in ±256 bytes, so the layout
@@ -5016,7 +5016,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     //
     // WHAT IS STILL UNDECIDED, and it is a cell of this table rather than a hole beside it: at
     // `(onFall=true, isTaken=false)` the corpus holds a function with TWO sites of OPPOSITE source
-    // sense — `kleod:WorldMapScreenIsValidPath:agbcc`, whose own `refSource` wants the positive spelling
+    // sense — `kleod:CheckWorldCompletion:agbcc`, whose own `refSource` wants the positive spelling
     // at one and the negated one at the other. No CONSTANT is right for that cell; this table's
     // `positive` is right at one of the two and wrong at the other, and the row scores 45/191 with
     // the same winner either way because `/site-sense` is not its winner. If the cell is ever to be
@@ -5614,7 +5614,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // computation, a call. The count is then a floor rather than the access set, and it is read as
   // the access set (the l3/volatileval.ts gate), so it refuses instead of reporting a number that
   // undercounts. Reached rather than theoretical: an address-escaped frame scratch takes it —
-  // `synthetic:dma_fill_uninit` and `kleod:PauseMenuScreenHandler` both lose their record
+  // `synthetic:dma_fill_uninit` and `kleod:ProcessInputAndUpdateEntities` both lose their record
   // here.
   const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
     const off = at.attrs.off as number;

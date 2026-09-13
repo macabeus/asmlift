@@ -57,7 +57,7 @@
 //     `gBlendValue = v;` is an `assign` with an effect-free value that writes MEMORY. Not a
 //     corner of the corpus. Measured over a 957-row artifact (#140): 22 winning sources emit a
 //     statement-level assignment to a name they declare nowhere — 71 occurrences, 7 of them in
-//     `kleod:PauseMenuScreenHandler` alone.
+//     `kleod:ProcessInputAndUpdateEntities` alone.
 //     RE-DERIVE THIS RATHER THAN QUOTING IT: one pass over the artifact does it — collect each
 //     winning source's declared locals and parameters, then count its statement-level `name = `
 //     lines whose name is not among them. `exprHasEffect` answers "a call, or a marker" and cannot

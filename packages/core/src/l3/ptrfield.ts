@@ -58,7 +58,7 @@
 // nothing reaches" cannot arise — and a rule for it reads as one, then answers for the 78 corpus
 // WRITE-ONLY fields that `written` owns. Second, a field whose
 // BASE TYPE does not resolve is dropped by `plan` before any gate reads it — 151 of the corpus's
-// 820 field nodes, on 20 trees, all of them `[map]` configurations (kleod:sub_08014184,
+// 820 field nodes, on 20 trees, all of them `[map]` configurations (kleod:CheckTileCollisionVertical,
 // FreeAllDecompBuffers, TransformSingleEntityToScreen and ConfigureEntityBehavior among them).
 // Declining there is right; being unable to say which of the two happened is the defect.
 import { type IrType, T } from '../ir/types';

@@ -248,6 +248,15 @@ describe('the dataset cites only benchmark rows that exist', () => {
   ).results;
   // a row's id and its former names (`aliases`), each with and without the toolchain
   const CITABLE = new Set(rows.flatMap((r) => rowNames(r).flatMap((n) => [n, n.slice(0, n.lastIndexOf(':'))])));
+  // rows that no longer exist, citable by the name a dated measurement was taken under — the same
+  // register citations.test.ts reads, and the same rule (dataset/retired-rows.json)
+  const RETIRED = new Set(
+    (
+      JSON.parse(readFileSync(join(DATASET, 'retired-rows.json'), 'utf8')) as {
+        retirements: { rows: { id: string }[] }[];
+      }
+    ).retirements.flatMap((t) => t.rows.flatMap((r) => [r.id, r.id.slice(0, r.id.lastIndexOf(':'))])),
+  );
   const PROJECTS = [...new Set(rows.map((r) => r.project))].sort();
   const CITATION = new RegExp(`\\b(${PROJECTS.join('|')}):[A-Za-z_]\\w*(?::[\\w.]+)?`, 'g');
 
@@ -280,8 +289,8 @@ describe('the dataset cites only benchmark rows that exist', () => {
 
   it.each(found)('dataset/$file:$line cites $cited', ({ cited, file, line }) => {
     expect(
-      CITABLE.has(cited),
-      `dataset/${file}:${line} cites '${cited}', which is not a row in the committed results.json.\n` +
+      CITABLE.has(cited) || RETIRED.has(cited),
+      `dataset/${file}:${line} cites '${cited}', which is not a row in the committed results.json nor a retired row.\n` +
         `  Renamed? Update the citation. Not a benchmark row (a checkout function, a dogfooding\n` +
         `  find)? Write it in prose naming where to look, so the spelling stops promising a row.`,
     ).toBe(true);

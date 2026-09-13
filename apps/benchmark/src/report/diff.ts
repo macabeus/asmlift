@@ -35,7 +35,7 @@ import { rowsAddedSince } from './regression';
  *  `maxScore` is here because it is NOT a constant of the row. It is the objdiff row count of the
  *  winning candidate's alignment, so a different candidate gives a different denominator: 14 lines
  *  moved theirs between `eb6dec7d` and `2fed1e42` (12 asmlift, 2 m2c), and
- *  `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` by 17 (404 → 387). Its `290 → 171` was therefore never a
+ *  `kleod:CountCollectedGems:agbcc` by 17 (404 → 387). Its `290 → 171` was therefore never a
  *  subtraction on a fixed scale, and reading it as one produced a six-way "partition of the 290",
  *  a 297-predicted / 119-delivered shortfall, and a whole extra attribution round. The report
  *  publishes `score/maxScore` (the Explorer table and the detail view's objdiff badge), so a
@@ -58,7 +58,7 @@ import { rowsAddedSince } from './regression';
  *  The two `.length` entries are the exception the rule above describes: `droppedCandidates` and
  *  `withheldCandidates` are published as COUNTS by the `[ranked]` line, and the count is what is
  *  watched. Not a cosmetic saving — over `eb6dec7d`→`2fed1e42` the dropped count moved on 2 rows
- *  (`kleod:PauseMenuScreenHandler:agbcc`, `kleod:DrawLevelHud_DreamStones:agbcc`) that NO
+ *  (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`) that NO
  *  other watched field moves on: identical source, identical score, identical label, a fan that
  *  demonstrably changed, and a gate that answered "nothing moved".
  *

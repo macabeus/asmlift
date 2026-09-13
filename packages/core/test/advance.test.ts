@@ -9,7 +9,7 @@
 //   • `l3/advance.ts` reads it and offers the one C spelling that reproduces the `add`.
 //
 // WHY THE SPELLING IS A CANDIDATE AND NOT A DEFAULT — THE FOUR CORNERS, each compiled through the
-// benchmark's own agbcc command against `kleod:sub_0804E708`'s target object rather than
+// benchmark's own agbcc command against `kleod:StreamCmd_SetWindowRegs`'s target object rather than
 // reasoned about. The base local is `u16 *p = (u16 *)0x04000048`, qualified or not:
 //   volatile  ×  `*p = a; p++; *p = b;`   → byte-exact with the target
 //   volatile  ×  `*p = a; p[1] = b;`      → `strh [r3, #2]`, no add
@@ -465,7 +465,7 @@ test.each([...ADVANCE_HEAD_GATES, ...ADVANCE_MEMBER_GATES])(
 );
 
 // ── the row this exists for ──────────────────────────────────────────────────────────────────
-// `kleod:sub_0804E708` — two `REG_WININ` halfwords through one advanced register.
+// `kleod:StreamCmd_SetWindowRegs` — two `REG_WININ` halfwords through one advanced register.
 // Enumerated map-less, which is the configuration `/raw-globals` re-structures under: with a
 // symbol map the pool word promotes to `&REG_WININ` and `cellAddress` answers nothing.
 const KLEOD_SWR = `	thumb_func_start StreamCmd_SetWindowRegs

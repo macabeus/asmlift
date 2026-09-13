@@ -14,7 +14,7 @@
 // nothing: agbcc folds `p = p + 1; *p` straight back into `strh [r3, #2]`, byte for byte the
 // subscript's own object. What makes it visible is the CONJUNCTION with a `volatile` pointee,
 // which bars that fold and leaves the `add` the target records. Both halves are compiled against
-// `kleod:sub_0804E708`'s target object; the four corners are in test/advance.test.ts's
+// `kleod:StreamCmd_SetWindowRegs`'s target object; the four corners are in test/advance.test.ts's
 // header. So this pass emits a spelling and `compareScored` referees; nothing here claims the
 // source wrote it.
 //
@@ -356,7 +356,7 @@ export function advancedBases(sfn: SFn, gates: AdvanceGates = {}): SFn | null {
   // `prepend` for `l3/nearbase.ts`'s reason and a second one this pass owns: the init MATERIALISES
   // the register the chain advances, and the target's own instruction order is what says where the
   // pool word was loaded. Putting it in first-use order instead moves it below whatever else the
-  // function loads first, which on `kleod:sub_0804E708` swaps the two pool words and
+  // function loads first, which on `kleod:StreamCmd_SetWindowRegs` swaps the two pool words and
   // costs the match; test/advance.test.ts's `the base init leads` pins the emitted order.
   //
   // AND NO `/advance/sinkinit` TWIN, unlike `/nearbase`, which ships one for exactly this choice —
@@ -366,7 +366,7 @@ export function advancedBases(sfn: SFn, gates: AdvanceGates = {}): SFn | null {
   // l3/hoist.ts), and an advance IS a second assignment to this one — so the sink declines on every
   // tree this pass produces, by construction rather than by row: the sink returns null on the
   // advanced tree, and registering `/advance/sinkinit` adds no label to
-  // `kleod:sub_0804E708:agbcc`'s fan. The `prepend` choice above is therefore the only
+  // `kleod:StreamCmd_SetWindowRegs:agbcc`'s fan. The `prepend` choice above is therefore the only
   // placement this lever HAS, which is a stronger reason to record the compile behind it.
   const { body: placed } = placeBaseLocals({ ...sfn, locals, body }, [init], 'prepend');
   return { ...sfn, locals, body: placed };

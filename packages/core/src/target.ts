@@ -299,7 +299,7 @@ export interface TargetDescription {
     // `*p = a; p = p + 1; *p = b;` → `strh [r3, #0]` + `strh [r3, #2]`, no `add` — so the advanced
     // spelling is byte-identical to the indexed one wherever the pointee is not volatile? agbcc
     // does, on its own compiled evidence: the four corners in test/advance.test.ts's header, each
-    // built through the benchmark's agbcc against `kleod:sub_0804E708`'s object. True ⇒
+    // built through the benchmark's agbcc against `kleod:StreamCmd_SetWindowRegs`'s object. True ⇒
     // rank.ts withholds the UN-QUALIFIED `/advance` label, whose spelling this compiler cannot
     // distinguish from the indexed one it already offers; `/advance/volatile` still rides, because
     // `volatile` is what bars the fold and that product is the match on this row. Absent ⇒ falsy ⇒

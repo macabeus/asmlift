@@ -53,7 +53,7 @@
 // WHAT THE WINDOW IS NOT: A CLAIM THAT NOTHING ELSE MAY QUALIFY ORDINARY MEMORY. `/volatile`
 // (l3/volatileptr.ts) does exactly that, and a sweep over 834 corpus trees finds it qualifying an
 // address outside this window on 21 (tree, local, address) pairs, 16 of them on agbcc — including
-// `kleod:sub_0804C844:agbcc`, a published byte-exact MATCH whose winning source contains
+// `kleod:WritePaletteColor:agbcc`, a published byte-exact MATCH whose winning source contains
 // `*(volatile s32 *)50351492 = v2 + 5;` at 0x03004D84, which is IWRAM — the same minted-cast form
 // this lever produces, at an address this lever's window refuses.
 //
@@ -72,7 +72,7 @@
 // unifies the COUNT side, which is the half where one answer really is enough. Nor do they
 // COMPOSE over the tree's OWN locals: that pairing would qualify a function's existing pointer-local
 // homes and its raw-constant stores together, and over 834 corpus trees both levers fire on ONE —
-// `kleod:ButtonConfigurationScreenInit:agbcc`, which neither decompiler scores — and under two DIFFERENT
+// `kleod:SetupBG3WindowOverlay:agbcc`, which neither decompiler scores — and under two DIFFERENT
 // published classifications: asmlift `noncompile` (agbcc rejects its call to `m4aSoundVSyncOff`),
 // m2c `declined`. A pairing whose whole reach is a row asmlift cannot compile is one a row has yet
 // to demand.

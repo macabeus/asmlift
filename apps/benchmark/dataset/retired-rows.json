@@ -1,0 +1,192 @@
+{
+  "_": "Benchmark rows that no longer exist, kept so that a DATED measurement of one can keep citing it by the name it was measured under (apps/benchmark/test/citations.test.ts, dataset-symmetry.test.ts). A citation of a retired row guards nothing: no current row fails CI when the mechanism it names breaks. See apps/benchmark/README.md, 'Re-pinning or swapping a project'.",
+  "retirements": [
+    {
+      "project": "kleod",
+      "retired": "2026-09-13",
+      "why": "kleod's rows moved from Dream-Atelier/kl-eod-decomp to testyourmine/kleod (the macabeus/kleod fork). Both build the same ROM, so most new rows sit at an old row's address, but each is another author's source with its own context and symbol map: a number measured on one of these rows is not a number about the row now at its address. The six rows whose names both decomps share (MultiplyQ8, DivideQ8, ReciprocalQ8, Decompress, DecompressDma, DecompressAlloc) are current ids and cannot be listed here.",
+      "rows": [
+        {
+          "id": "kleod:ReturnOne:agbcc",
+          "addr": "0x0800045c",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L12-L14"
+        },
+        {
+          "id": "kleod:StrCpy:agbcc",
+          "addr": "0x08000460",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L16-L25"
+        },
+        {
+          "id": "kleod:MultiplyQ4:agbcc",
+          "addr": "0x08000990",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L25-L36"
+        },
+        {
+          "id": "kleod:DivideQ4:agbcc",
+          "addr": "0x080009a8",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L42-L44"
+        },
+        {
+          "id": "kleod:ReciprocalQ4:agbcc",
+          "addr": "0x080009c0",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L50-L53"
+        },
+        {
+          "id": "kleod:ReadKeyInput:agbcc",
+          "addr": "0x080006cc",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L44-L57"
+        },
+        {
+          "id": "kleod:VBlankHandlerMinimal:agbcc",
+          "addr": "0x08000ab0",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L71-L75"
+        },
+        {
+          "id": "kleod:ReadUnalignedU32:agbcc",
+          "addr": "0x0804b270",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L70-L72"
+        },
+        {
+          "id": "kleod:GetEntityLookupData:agbcc",
+          "addr": "0x0803d140",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L63-L69"
+        },
+        {
+          "id": "kleod:UpdateEntities:agbcc",
+          "addr": "0x0803b074",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L40-L48"
+        },
+        {
+          "id": "kleod:GameUpdate:agbcc",
+          "addr": "0x08045734",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L165-L173"
+        },
+        {
+          "id": "kleod:CheckTileCollisionVertical:agbcc",
+          "addr": "0x08014184",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_1.c#L43-L62"
+        },
+        {
+          "id": "kleod:ProcessHBlankWait:agbcc",
+          "addr": "0x0804dc64",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L536-L566"
+        },
+        {
+          "id": "kleod:WritePaletteColor:agbcc",
+          "addr": "0x0804c844",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L448-L454"
+        },
+        {
+          "id": "kleod:ReadUnalignedU16:agbcc",
+          "addr": "0x0804b254",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L54-L56"
+        },
+        {
+          "id": "kleod:FreeAllDecompBuffers:agbcc",
+          "addr": "0x080008dc",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L91-L110"
+        },
+        {
+          "id": "kleod:DmaSpriteToObjVram:agbcc",
+          "addr": "0x0804c1c0",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L349-L360"
+        },
+        {
+          "id": "kleod:StreamCmd_SetWindowRegs:agbcc",
+          "addr": "0x0804e708",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L667-L676"
+        },
+        {
+          "id": "kleod:RollRandomLevelVariant:agbcc",
+          "addr": "0x0803e8cc",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L80-L89"
+        },
+        {
+          "id": "kleod:TransformSingleEntityToScreen:agbcc",
+          "addr": "0x0800a5b8",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/9400132178f58db2d8b2638349ffa86155ed2e53/src/code_0.c#L1407-L1464"
+        },
+        {
+          "id": "kleod:CopyBGScrollTiles:agbcc",
+          "addr": "0x08025dd4",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_1.c#L1165-L1180"
+        },
+        {
+          "id": "kleod:UpdateHUDCounterDisplay:agbcc",
+          "addr": "0x08025e68",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_1.c#L1184-L1218"
+        },
+        {
+          "id": "kleod:CheckWorldCompletion:agbcc",
+          "addr": "0x0803ac18",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_3.c#L1752-L1791"
+        },
+        {
+          "id": "kleod:UpdateWorldMapNodeTile:agbcc",
+          "addr": "0x0803af38",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_3.c#L1849-L1870"
+        },
+        {
+          "id": "kleod:UpdateFadeEffect:agbcc",
+          "addr": "0x08000f70",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/engine.c#L48-L56"
+        },
+        {
+          "id": "kleod:StreamCmd_SetBGScroll:agbcc",
+          "addr": "0x0804c7fc",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L429-L440"
+        },
+        {
+          "id": "kleod:ProcessInputAndUpdateEntities:agbcc",
+          "addr": "0x0803a410",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L1495-L1630"
+        },
+        {
+          "id": "kleod:ConfigureEntityBehavior:agbcc",
+          "addr": "0x0803f68c",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L4121-L4214"
+        },
+        {
+          "id": "kleod:UpdateCameraScroll:agbcc",
+          "addr": "0x0800247c",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/engine.c#L571-L669"
+        },
+        {
+          "id": "kleod:CountCollectedGems:agbcc",
+          "addr": "0x0803b0a0",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L1891-L1975"
+        },
+        {
+          "id": "kleod:UpdateWorldMapNodeAnim:agbcc",
+          "addr": "0x0803b378",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L1980-L2055"
+        },
+        {
+          "id": "kleod:EntityItemDrop:agbcc",
+          "addr": "0x0801f4d0",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_1.c#L534-L597"
+        },
+        {
+          "id": "kleod:SetupBG3WindowOverlay:agbcc",
+          "addr": "0x0803a8b8",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L1635-L1690"
+        },
+        {
+          "id": "kleod:EntityDeathAnimation:agbcc",
+          "addr": "0x0801de44",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_1.c#L446-L495"
+        },
+        {
+          "id": "kleod:IsSelectButtonPressed:agbcc",
+          "addr": "0x080472b0",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L6394-L6398"
+        },
+        {
+          "id": "kleod:VBlankDMA_Level2:agbcc",
+          "addr": "0x08026f68",
+          "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_1.c#L1340-L1389"
+        }
+      ]
+    }
+  ]
+}

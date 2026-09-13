@@ -585,7 +585,7 @@ export function enumerateCandidates(
   // same edit against a different measurement. Its cross is censused below beside this one.)
   //
   // Where it DOES reach, the cross is the honest price of an arm the differ has to referee, and on
-  // the corpus's largest fan it is large: `kleod:PauseMenuScreenHandler` enumerates 58,752
+  // the corpus's largest fan it is large: `kleod:ProcessInputAndUpdateEntities` enumerates 58,752
   // candidates of which 23,040 carry this arm, so removing it leaves 35,712 — a factor of 1.65,
   // not a doubling. A ROUNDER NUMBER IS NOT A SAFER ONE: re-measure rather than reaching for a
   // vaguer word. The instrument is `decompileRanked`'s own enumeration, and a direct
@@ -623,8 +623,8 @@ export function enumerateCandidates(
   // so that framing hands back 151 labelled rows, which is the map-wide `some` this gate was
   // written to avoid. The gate is per-FUNCTION, so census the FUNCTIONS. Enumerating every real
   // case (candidates only, `ASMLIFT_CANDCACHE=0`, the harness's own inputs) and counting rows with
-  // any surviving `/no-ptr-elem` candidate: TWO — `kleod:PauseMenuScreenHandler` (23040 of
-  // its 58752) and `kleod:ButtonConfigurationScreenInit` (128 of 952), and only the first carries a
+  // any surviving `/no-ptr-elem` candidate: TWO — `kleod:ProcessInputAndUpdateEntities` (23040 of
+  // its 58752) and `kleod:SetupBG3WindowOverlay` (128 of 952), and only the first carries a
   // winning label at all, the second being `noncompile`. THE TWO-ROW REACH IS STABLE AND THE
   // COUNTS ARE NOT — they move with every fan-widening axis, so re-run the census rather than
   // quoting these. So the REAL tier's "0 winning labels" is 0 of ONE here, not 0 of 151 and not
@@ -681,7 +681,7 @@ export function enumerateCandidates(
   // superset — it does not know the access WIDTH, and it cannot know whether any residual carries
   // a row term — so where the axis changes nothing the tree dedup below collapses the pair and the
   // fan does not grow. OVER THE ARTIFACT'S 957 ROWS: 10 name such a symbol at all — 9 of them in
-  // their winning `symbolsUsed`, the tenth (`kleod:ButtonConfigurationScreenInit`) in a source its row
+  // their winning `symbolsUsed`, the tenth (`kleod:SetupBG3WindowOverlay`) in a source its row
   // cannot compile, which is why the count is taken off the emitted sources and not off
   // `symbolsUsed`, where a row with no winner is invisible. RE-DERIVE THIS PAIR RATHER THAN
   // RE-ANCHORING IT: adding one map-bearing row moves it, and one of the nine is exactly that —
@@ -1372,7 +1372,7 @@ export function enumerateCandidates(
       });
     }
     // The livebase × sinkinit PAIRINGS — the same admission again: row-demanded
-    // (kleod:DecompressDma), and the joint spelling is reachable from neither lever alone. The
+    // (kleod:DecompressDma, on kl-eod-decomp's source, before 2026-09-13), and the joint spelling is reachable from neither lever alone. The
     // bases whose placement moves the row are the ones only this lever's ablation binds, and
     // `/sinkinit` alone reads the DEFAULT hoist's head, which does not carry them.
     for (const { suffix, hoist, volatiles } of paired) {
@@ -1467,7 +1467,7 @@ export function enumerateCandidates(
     // the `add` the target performed on an address register that already held an address it used.
     //
     // THE `/volatile` PRODUCT IS THE ONE THAT PAYS, and both halves are measured on
-    // `kleod:sub_0804E708:agbcc`. Against the INDEXED spelling of the same minted local
+    // `kleod:StreamCmd_SetWindowRegs:agbcc`. Against the INDEXED spelling of the same minted local
     // the advance buys nothing — agbcc folds `p = p + 1; *p` back into `strh [r3, #2]`, so
     // `/advance` and `/nearbase` both score 15/23 there — and against the qualified one it is the
     // match: `/advance/volatile` 0/22, because `volatile` bars that fold and leaves the `add` the
@@ -1522,7 +1522,7 @@ export function enumerateCandidates(
     // AND IT IS MAP-LESS ONLY, which is what caps its reach: with a symbol map the pool word
     // promotes to `&REG_WININ` and `l3/address.ts`'s `cellAddress` answers null, so every
     // `/advance` candidate on this row carries `/raw-globals` (`bench fan
-    // kleod:sub_0804E708:agbcc --enumerate`, 2026-09-12: 17 candidates, the one
+    // kleod:StreamCmd_SetWindowRegs:agbcc --enumerate`, 2026-09-12: 17 candidates, the one
     // advanced candidate `unsigned/advance/volatile/raw-globals`). A capability that reads a CONST
     // address does not survive the symbol-map direction unless `cellAddress` learns the promoted
     // form; test/advance.test.ts records that at the row it exists for.
@@ -1653,7 +1653,7 @@ export function enumerateCandidates(
       // changes the IR every structuring axis then reads: the value the argument carried loses a
       // consumer, so what materializes changes with it, and a row whose callee arities are GUESSED
       // can need the narrowed lift to reach a spelling neither side reaches alone —
-      // `kleod:InputHandler_Normal` did, until its manifest declared those arities to asmlift as its own
+      // `kleod:ReadKeyInput` did, until its manifest declared those arities to asmlift as its own
       // `ctx` already declared them to m2c; it now matches on the base lift, at
       // `unsigned/derived-home`, enumerating no variant at all.
       // Only spellings the narrowing actually changed reach a compiler: one that changes nothing
@@ -1682,12 +1682,12 @@ export function enumerateCandidates(
       // spelling, and this axis is the only thing that reaches it.
       //
       // WHERE IT IS WORTH 0 POINTS IT IS STILL NOT WORTH NOTHING, and the two populations differ.
-      // On `kleod:PauseMenuScreenHandler` the grouping alone reaches the same score the
+      // On `kleod:ProcessInputAndUpdateEntities` the grouping alone reaches the same score the
       // axis reaches with it, yet the published winner there carries `/connective` and spells its
       // site `gUnk_030034C0 == 0 || gUnk_030034C0 == 2` — so deleting the axis moves that row's
       // SOURCE. It moves the SCORE on the other population, where switch recovery declined
-      // ENTIRELY and the tree came out as nested `if`s: `kleod:WorldMapScreenCheckNewWorldUnlocked` and
-      // `kleod:WorldMapScreenIsValidPath`, neither with a `switch` at all. Telling the two apart needs
+      // ENTIRELY and the tree came out as nested `if`s: `kleod:CountCollectedGems` and
+      // `kleod:CheckWorldCompletion`, neither with a `switch` at all. Telling the two apart needs
       // an L3 fact (did recovery produce a grouped arm?) at a raise-level hook, which is a level
       // inversion; the fan is the price instead. NO ABLATION PAIR IS QUOTED HERE: the artifact
       // carries only the with-axis score, so half a refreshed pair would manufacture a delta
@@ -2008,9 +2008,9 @@ export function enumerateCandidates(
               //
               // AND A LABEL CENSUS CANNOT EVEN SEPARATE A RENAME FROM A RESPELLING. Of those 5
               // winners, THREE changed the source they publish — `synthetic:unfoldpark`
-              // (402 → 397 bytes, score 9 → 0), `kleod:sub_0803F68C` (3677 → 3993,
+              // (402 → 397 bytes, score 9 → 0), `kleod:ConfigureEntityBehavior` (3677 → 3993,
               // 233 → 230) and `synthetic:livepark` (337 → 346, both MATCH) — while
-              // `synthetic:foldpark` and `kleod:DecompressDma` are byte-identical renames. The two
+              // `synthetic:foldpark` and `kleod:DecompressDma` (kl-eod-decomp's source, before 2026-09-13) were byte-identical renames. The two
               // look the same from here; only the emitted SOURCE tells them apart (`bench diff`
               // publishes that field, `bench regression` does not).
               //

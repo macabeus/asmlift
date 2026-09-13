@@ -84,7 +84,7 @@ a rule spelled twice is a rule with two chances to be lost:
    generated script is comparable with a harness outcome: `pnpm bench repro <sym|id> --run`. The
    **`[ranked]` line** is the comparison recipe for both — it carries `best …` and the
    `[asmlift source <sha>]` stamp. Never `grep '[score]' | tail -1`: that table is sorted
-   best-first, so the last line is the WORST candidate, and on `kleod:sub_0803D140:agbcc` it
+   best-first, so the last line is the WORST candidate, and on `kleod:GetEntityLookupData:agbcc` it
    reports `15/18` against a published `4/14`. That file is shared with `/attribute-function` — the
    last time this command was described in two prompts they drifted and a round published a number
    comparable to nothing, so correct it there and never here.
@@ -149,7 +149,7 @@ which is higher on a real row than a synthetic one because a real candidate esca
 three preludes where a synthetic one is a single small prelude. Both rates are rows of
 `docs/bench-cost.md` §1. **Ask `pnpm bench baseline <sym>` for the fan before you type `--force`**:
 it prints `fan=N rank=Ns` off the artifact in seconds, and those fans move fast —
-`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` was 5,952 when this paragraph was written and had grown to 9,192
+`kleod:CountCollectedGems:agbcc` was 5,952 when this paragraph was written and had grown to 9,192
 by 2026-09-12. `LoadBGTilemapData`'s 225,792 is HARD-RULE forbidden to score and expensive even to
 `--enumerate`; **never start the scored run** (`docs/bench-cost.md` §1 prices both). **And the 2,000
 guard is not a cheap shield**: it is tested on `cands.length` AFTER the enumeration (`fan.ts:914`,

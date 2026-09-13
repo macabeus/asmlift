@@ -42,7 +42,7 @@ endlabel getGlobal
 `;
 
 describe('the reported row: kleod UpdateWorldMapNodeTile, opened in the playground with no map', () => {
-  // The real benchmark row (`kleod:WorldMapScreenDrawPath:agbcc`). Its pool names three globals
+  // The real benchmark row (`kleod:UpdateWorldMapNodeTile:agbcc`). Its pool names three globals
   // in each of its two literal pools; the playground opens a row with no symbol map at all.
   const cands = enumerateCandidates('UpdateWorldMapNodeTile', corpus('agbcc-mapless-globals.s'), ARMV4T_AGBCC);
 

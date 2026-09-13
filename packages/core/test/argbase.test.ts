@@ -41,7 +41,7 @@ describe('the gate', () => {
   });
 
   test('ONE eligible base does NOT fire — a single hoist reproduces no reordering', () => {
-    // measured: hoisting only the first base on kleod:HBlankIntr_DeleteAllSaveDataScreen left the diff at 2
+    // measured: hoisting only the first base on kleod:UpdateFadeEffect left the diff at 2
     expect(
       materializeArgBases(fnWith([deref({ k: 'const', value: 0x4000006 }, 0), { k: 'const', value: 3 }])),
     ).toBeNull();

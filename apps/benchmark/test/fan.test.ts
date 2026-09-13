@@ -375,7 +375,7 @@ describe('estimatedScoreTime', () => {
   });
 
   // The second measurement, and the reason the constant is a per-tier record: ONE rate priced
-  // `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` — a REAL row, and the row the refusal's own example is — at
+  // `kleod:CountCollectedGems:agbcc` — a REAL row, and the row the refusal's own example is — at
   // 6 min, against two cold runs of 518 s and 483 s of scoring. A real candidate escalates through
   // up to three preludes in `makeRealCompile`; a synthetic one is one small prelude, so the gap is
   // structural. The bound is the two measurements, not a third decimal place.

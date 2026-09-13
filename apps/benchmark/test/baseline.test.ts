@@ -17,7 +17,7 @@ const row = (id: string, sym: string, over: Partial<FunctionResult> = {}): Funct
   }) as unknown as FunctionResult;
 
 const rows = [
-  row('kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc', 'WorldMapScreenCheckNewWorldUnlocked'),
+  row('kleod:CountCollectedGems:agbcc', 'CountCollectedGems'),
   row('af:_MtxF_to_Mtx:ido7.1', '_MtxF_to_Mtx'),
   row('synthetic:add:agbcc', 'add'),
   row('synthetic:addsub:agbcc', 'addsub'),
@@ -34,8 +34,8 @@ describe('selectRows', () => {
   // what it printed must work. Under a plain `.sym` match it would select nothing — and "nothing"
   // is the output that reads as "this symbol is measured outside the harness".
   test('a row id selects its row rather than nothing', () => {
-    expect(selectRows(rows, 'kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc').map((r) => r.id)).toEqual([
-      'kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc',
+    expect(selectRows(rows, 'kleod:CountCollectedGems:agbcc').map((r) => r.id)).toEqual([
+      'kleod:CountCollectedGems:agbcc',
     ]);
   });
 

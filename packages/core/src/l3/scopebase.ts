@@ -15,7 +15,7 @@
 //                  free either.
 //
 // The lever earns its place: returning `null` from `hoistScopedBases` costs
-// kleod:DrawLevelHud_DreamStones its match, so the benchmark's zero-lost gate guards this file.
+// kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.
 //
 // `l3/basecse.ts` already hoists a reused leaf base — at three positions now, of which two are in
 // the TOP-LEVEL statement list (the function top, or an init's first use where a roster row asks
@@ -31,7 +31,7 @@
 //   COUNT question (`REGION_RULES`), which no placement answers. That argument is why the lever is
 //   scope-aware; it is NOT a claim about what the lever achieves, and no committed measurement
 //   separates basecse's two flat placements (the one that did edited a reference source by hand and
-//   cannot be re-run). On kleod:DrawLevelHud_DreamStones the primary path declines outright (a later
+//   cannot be re-run). On kleod:UpdateHUDCounterDisplay the primary path declines outright (a later
 //   pass retired the phi it keyed on, so the base's uses span the function body), and the cluster
 //   fallback below is what recovers it. basecse's header names a LOOP-BODY base as left inline for
 //   a future scope-aware hoist, and this is that hoist: `scope` cannot serve one, because every
@@ -677,7 +677,7 @@ export function planScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): ScopedBaseP
    *  puts one `cond` object at two tree positions), and it is harmless today only because the shapes
    *  are derived AFTER this lever in `rank.ts`, an ordering nothing pins. A whole-function decline
    *  would make a future producer that shares one node silently delete every base this pass names —
-   *  including `kleod:DrawLevelHud_DreamStones`'s match, which returning `null` costs. Refusing the
+   *  including `kleod:UpdateHUDCounterDisplay`'s match, which returning `null` costs. Refusing the
    *  key that actually shares costs that key's spelling and nothing else, and the differ still has
    *  every other spelling in the list.
    *

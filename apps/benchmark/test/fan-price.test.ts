@@ -57,7 +57,7 @@ function rankInto(nDropped: number, nWithheld: number): void {
 describe('fanSize (pure)', () => {
   // core's `rankBy` puts every enumerated candidate into EXACTLY ONE of the three lists, so the
   // fan is their sum. Counting only `candidates` would under-report a row by its whole refused
-  // half — `kleod:PauseMenuScreenHandler:agbcc` publishes 51,840 dropped spellings.
+  // half — `kleod:ProcessInputAndUpdateEntities:agbcc` publishes 51,840 dropped spellings.
   test('is scored + dropped + withheld, the three lists rankBy partitions the fan into', () => {
     expect(fanSize({ candidates: [1, 2, 3], dropped: [4], withheld: [5, 6] })).toBe(6);
   });
@@ -193,12 +193,12 @@ describe('the per-row run line', () => {
 
   test('is index, id, both outcomes, then the cost — fan included', () => {
     const r = {
-      id: 'kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc',
+      id: 'kleod:CountCollectedGems:agbcc',
       asmlift: side({ score: 18, maxScore: 344, candidateCount: 5952 }),
       m2c: side({ decompiler: 'm2c', outcome: 'noncompile', compileErrors: 1 }),
     } as unknown as FunctionResult;
     expect(rowLine(7, 812, ' s3', r, '518.3')).toBe(
-      '[7/812] s3 kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=diff:18/344 m2c=noncompile(1)  (518.3s, fan 5952)',
+      '[7/812] s3 kleod:CountCollectedGems:agbcc  asmlift=diff:18/344 m2c=noncompile(1)  (518.3s, fan 5952)',
     );
   });
 

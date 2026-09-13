@@ -59,7 +59,7 @@ import { TOOLCHAINS, type Toolchain } from '../toolchains';
  *  A one-row diagnostic that can silently become an overnight job is a trap, and the cheap answer
  *  — `--enumerate`, which compiles nothing and still prints every label and, with `--show`, any
  *  candidate's source — is one flag away. It is CHEAP RELATIVE TO COMPILING and not cheap
- *  absolutely: `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`'s 5,952 labels take 50 s wall, target build
+ *  absolutely: `kleod:CountCollectedGems:agbcc`'s 5,952 labels take 50 s wall, target build
  *  included (~120 candidates/s), so LBG's fan is ~30 minutes to merely LIST — and this guard is
  *  checked after the pre-count enumeration, so the refusal itself pays that. */
 export const FAN_SCORE_LIMIT = 2000;
@@ -72,7 +72,7 @@ export const FAN_SCORE_LIMIT = 2000;
  *  | tier | row | candidates | SCORING wall | per candidate |
  *  |---|---|---|---|---|
  *  | synthetic | `synthetic:sizebound:agbcc` | 800 | 47.9 s | 60 ms |
- *  | real | `kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc` | 5,952 | 518 s | 87 ms |
+ *  | real | `kleod:CountCollectedGems:agbcc` | 5,952 | 518 s | 87 ms |
  *  | real | the same row, a second run on a quieter machine | 5,952 | 483 s | 81 ms |
  *
  *  (Both real-tier walls are the total minus a separately measured 50 s of target build plus
@@ -114,7 +114,7 @@ export interface FanOptions {
    *  spellings come to mean different things. */
   base?: string;
   /** List the fan without compiling anything. Cheap against the scoring pass and not free:
-   *  5,952 labels took 50 s wall here (`kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc`, target build included),
+   *  5,952 labels took 50 s wall here (`kleod:CountCollectedGems:agbcc`, target build included),
    *  so the biggest fans take minutes to merely list. */
   enumerateOnly?: boolean;
   /** score a fan larger than FAN_SCORE_LIMIT anyway */

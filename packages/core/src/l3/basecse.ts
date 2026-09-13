@@ -27,8 +27,8 @@
 // map-less, one tree per row over the 363 agbcc rows the artifact carried when the census ran
 // (23 unstructurable):
 // `admittedBases(sfn, UNFOLDED_GATES)` is a PROPER NONEMPTY SUBSET of
-// `admittedBases(sfn, LIVEBASE_GATES)` on THIRTEEN of them — `kleod:sub_0803F68C` 3→2,
-// `kleod:PauseMenuScreenHandler` 7→5, `kleod:AthleticChallengeScrollUpdate` 5→2,
+// `admittedBases(sfn, LIVEBASE_GATES)` on THIRTEEN of them — `kleod:ConfigureEntityBehavior` 3→2,
+// `kleod:ProcessInputAndUpdateEntities` 7→5, `kleod:UpdateCameraScroll` 5→2,
 // `sa3:Sio32MultiLoadIntr` 5→1 and `synthetic:unfoldpark` 3→2 among them — and on
 // `synthetic:dmascope`, a function with THREE bases `single-cell` does not reject, exactly ONE
 // binds. So "some of the several" is reachable wherever a PREDICATE separates the bases. What
@@ -63,7 +63,7 @@
 // against it. asmlift lifts that asm back to the correct `((u8 *)&gS)[3]` and then offers the
 // named-base respelling anyway. Measured reach: of the 21 keys the symbol half newly admits over
 // the artifact's agbcc rows in both symbol-map configurations, 4 are on a base whose address the
-// tree also uses as a value (2 distinct keys, on `kleod:PauseMenuScreenHandler` and
+// tree also uses as a value (2 distinct keys, on `kleod:ProcessInputAndUpdateEntities` and
 // `pokeemerald:TrySetCantSelectMoveBattleScript`).
 // So on the symbol half this is weaker than evidence-with-two-known-exceptions: it is a hint with
 // a live counterexample, which is precisely why it is a ROSTER ADMISSION and not a gate relaxation
@@ -342,7 +342,7 @@ export interface BaseKey {
    *  NOT "every access", whatever `Collected.ordered`'s `&&` looks like it enforces. The licence
    *  admits an access that carries no order fact at all — a scaling in another block is not
    *  comparable, so it answers `undefined` rather than `false` — and 4 of the corpus's licensed
-   *  symbols have one on both symbol-map arms (`kleod:sub_0801DE44`'s `gEntityArray` is 11
+   *  symbols have one on both symbol-map arms (`kleod:EntityDeathAnimation`'s `gEntityArray` is 11
    *  of 28 accesses). Per SYMBOL is the right grain here and not a shortcut:
    *  agbcc CSEs the pool word, so one `ldr` is shared by every access of the name and there is one
    *  order fact to have. WITHIN ONE STRUCTURING the `&&` therefore decides nothing:
@@ -513,9 +513,9 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  of them moves; the other 193 decline at the lift or structure seam and have no fan on either
  *  side, so they are vacuous rather than evidence. The claim is over the 400.
  *  Seven of the thirteen are the rows this note already names (the three matches above, plus the
- *  four re-run below); the other six are `kleod:sub_0803F68C` (fan 1248 → 864),
- *  `kleod:PauseMenuScreenHandler` (23040 → 19200), `kleod:ButtonConfigurationScreenInit`
- *  (696 → 640), `kleod:AthleticChallengeScrollUpdate` (15936 → 14272), `kleod:WorldMapScreenUnlockNewWorld`
+ *  four re-run below); the other six are `kleod:ConfigureEntityBehavior` (fan 1248 → 864),
+ *  `kleod:ProcessInputAndUpdateEntities` (23040 → 19200), `kleod:SetupBG3WindowOverlay`
+ *  (696 → 640), `kleod:UpdateCameraScroll` (15936 → 14272), `kleod:UpdateWorldMapNodeAnim`
  *  (216 → 192) and `synthetic:livepark` (32 → 24, a MATCH row). `ConfigureEntityBehavior` and
  *  `livepark` keep their published winning source in the ablated fan, so neither outcome nor score
  *  can move on them. THE OTHER FOUR ARE UNPRICED, not free: they are real-tier rows whose
@@ -565,7 +565,7 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
  *  and refused by this one, and a scalar cell at a surviving offset is the reverse. Censused at
  *  `decompile()`'s default structuring, map-less, over the 363 agbcc rows the artifact carried
  *  when the census ran (23 unstructurable): 8 keys on 7 functions go to `/livebase-block` alone and 5 keys on 5 functions
- *  to this table alone, and `kleod:PauseMenuScreenHandler` crosses BOTH ways on one tree.
+ *  to this table alone, and `kleod:ProcessInputAndUpdateEntities` crosses BOTH ways on one tree.
  *  That is why `sameBases` compares sets and never subsets (see COVERAGE in the header).
  *
  *  The evidence is not proof and the gate never treats it as such — what it produces is a
@@ -615,7 +615,7 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  A DERIVED DECLARATION IS NOT THE SAME AS A BARE SPELLING, which is the thing to know before
  *  reading the population: where `raise/globalshape.ts` shapes a name the structurer usually spells
  *  it bare and no key exists here at all — but a shape is ONE element type for the whole name, so an
- *  access that strides something else keeps its cast and its key. `kleod:ButtonConfigurationScreenInit`'s
+ *  access that strides something else keeps its cast and its key. `kleod:SetupBG3WindowOverlay`'s
  *  `gBgInfo` derives `elemSize 4` and still reaches this table at stride 28, in both arms.
  *
  *  What this table admits, censused over the artifact's 370 agbcc rows: map-less 8 rows / 10 keys,
@@ -623,11 +623,11 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *
  *    • the STRUCT ELEMENT — no `intType`, members read at a displacement — 9 keys map-less, 10
  *      map-ful, and the only shape `cast-base`'s ablation reaches. The map-ful extra is
- *      `kleod:sub_0804C7FC`'s `gBgInfo`, a pool word the map-less lift leaves NUMERIC: the
+ *      `kleod:StreamCmd_SetBGScroll`'s `gBgInfo`, a pool word the map-less lift leaves NUMERIC: the
  *      map is what makes it a named global, not anything the licence read from the map.
  *    • a PLAIN SCALAR LEAF with no cast anywhere, which only `single-use`'s ablation admits — and a
  *      reader deciding whether `single-use` can be put back needs it named. Both inhabitants reach
- *      this table for a reason that is NOT an interior read. `kleod:AthleticChallengeScrollUpdate`'s
+ *      this table for a reason that is NOT an interior read. `kleod:UpdateCameraScroll`'s
  *      `gSineTable` (both arms) is refused a declaration on `interior-or-non-access`'s NON-ACCESS
  *      half: one clean load, and the same element address feeding three other `add`s.
  *      `pokeemerald:Sin2`'s `gSineDegreeTable` (map-ful only) is refused nothing — it DERIVES
@@ -746,7 +746,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
  *  `/volatile` products go with it. Over each project's whole `asm` tree, map-ful: of the 48
  *  functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do not, and for
  *  29 of the 41 the refused spelling is one the `head` row does not already produce. Instrumented
- *  on two of those, both map-ful — the `kleod:sub_0804C7FC` row (fan 11), and
+ *  on two of those, both map-ful — the `kleod:StreamCmd_SetBGScroll` row (fan 11), and
  *  `sub_808A4EC` in the sa3 checkout, which is no row here (fan 40) — where the `head` source is
  *  among the candidates `enumerateCandidates` returns and the withheld `first-use` source is not. */
 export function hoistBaseLocals(sfn: SFn, gates?: readonly Gate<BaseKey>[], placement?: 'head' | 'first-use'): SFn;

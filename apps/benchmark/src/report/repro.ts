@@ -18,7 +18,7 @@
 //     a wrong map is worse than none — the names come out wrong, not absent.
 //   * `--run` reports the `[ranked]` line, which carries `best …` AND the source sha. A
 //     `grep -F '[score]' | tail -1` reports the WORST candidate, because that table is sorted
-//     best-first: on `kleod:sub_0803D140:agbcc` it gives `signed: 15/18` where the row is
+//     best-first: on `kleod:GetEntityLookupData:agbcc` it gives `signed: 15/18` where the row is
 //     `unsigned/raw-globals: 4/14`.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { spawn } from 'node:child_process';
