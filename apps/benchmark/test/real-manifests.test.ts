@@ -76,6 +76,23 @@ describe('committed real-tier manifests', () => {
       expect(wrong).toEqual([]);
     });
 
+    // AN ADDRESS IS AN IDENTITY ONLY IF ONE FUNCTION LIVES THERE. N64 VRAM is not unique by
+    // construction — overlays reuse it, and the linked ELFs carry addresses holding more than one
+    // FUNC name (marioparty3 1,605 of them, snowboardkids2 20, af 5). No row sits on one today, and
+    // this keeps it that way: a row added at an overlay address would otherwise join a removed row
+    // at the same VRAM across two artifacts without a word.
+    test(`${f} puts every row at an address holding exactly one code symbol`, () => {
+      const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
+      const map = JSON.parse(
+        gunzipSync(readFileSync(join(REAL_DIR, 'tu', man.project, 'symbols.json.gz'))).toString('utf8'),
+      ) as Record<string, { name: string; kind?: string }[]>;
+      const shared = man.functions
+        .map((fn) => ({ fn, code: (map[fn.addr] ?? []).filter((e) => e.kind !== 'data').map((e) => e.name) }))
+        .filter(({ code }) => code.length !== 1)
+        .map(({ fn, code }) => `${man.project}:${fn.sym} at ${fn.addr} shares it with ${JSON.stringify(code)}`);
+      expect(shared).toEqual([]);
+    });
+
     test(`${f} has vendored TUs for every function, free of machine paths`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
       const dir = join(REAL_DIR, 'tu', man.project);

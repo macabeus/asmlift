@@ -40,7 +40,8 @@ export interface RealFunction {
   /** A HAND-WRITTEN m2c `--context` for this row: callee prototypes the project's own vendored
    *  headers happen not to declare, so `m2cCtx` alone would lose them. Held symmetric with
    *  `proto` by test/authored-facts.test.ts — a callee named to one decompiler and not the other
-   *  is the defect that check exists to catch. Six kleod rows use it; every other real row takes
+   *  is the defect that check exists to catch. No row uses it today (six kleod rows did before the
+   *  2026-09-13 swap); every real row takes
    *  the vendored context below. */
   ctx?: string;
   /** Feed m2c the function's VENDORED project context: the exact bytes the project's own

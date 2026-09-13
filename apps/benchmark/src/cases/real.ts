@@ -45,8 +45,8 @@ export function realCases(filter: RealFilter = {}): Case[] {
         sourceUrl: f.sourceUrl,
         // m2cCtx rows get the vendored project context VERBATIM, plus at most the void-ness
         // `proto` already gives asmlift (m2cOwnPrototype). The row references the vendored blob
-        // (ctxRef) instead of embedding ~100 KB of text. Set on every real row except the six
-        // whose callees the vendored headers do not declare, which keep a hand-written `ctx`.
+        // (ctxRef) instead of embedding ~100 KB of text. Set on every real row; a row whose callees
+        // the vendored headers do not declare may keep a hand-written `ctx` instead (none does today).
         ctx: ctxI === null ? f.ctx : appendCtxProto(ctxI, ctxProto),
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
         ctxProto: ctxProto ?? undefined,

@@ -33,10 +33,11 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: 246 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's vendored
-project context verbatim (the row publishes the file as `ctxRef`); six kleod rows instead carry a
+context**: all 252 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's vendored
+project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry a
 hand-written `ctx` naming callees the project's headers do not declare, held symmetric with the
-`proto` hints asmlift gets by `test/authored-facts.test.ts`. Synthetic rows carry the prototype in
+`proto` hints asmlift gets by `test/authored-facts.test.ts`; none does since the 2026-09-13 kleod
+swap (six kleod rows did before it). Synthetic rows carry the prototype in
 the dataset (`ctx` — mirroring `proto`) and nothing else. The boundary is firm: a real context is
 what that translation unit preprocesses to, **never an invented type** (where a project types a
 global as a raw byte arena, a made-up struct would copy the answer out of the reference source),
@@ -104,7 +105,7 @@ moves no asmlift row.
 _Favouring m2c._
 
 1. **Struct field tables.** `layout` is a vendoring product and only pokeemerald carries it in
-   bulk (2179 of 41016 entries; af 26 of 61860, kleod 25, sa3 8, marioparty3 7, snowboardkids2 5).
+   bulk (2179 of 41016 entries; af 26 of 61860, kleod 7 of 676, sa3 8, marioparty3 7, snowboardkids2 5).
    Where m2c's context declares a record the map only sizes, m2c has field names asmlift must
    invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
    `.state/.frameCounter/.type/.datap` in the context.
@@ -114,12 +115,12 @@ _Favouring m2c._
 3. **`prependC` types.** A manifest's per-function `prependC` already feeds BOTH tools' compile,
    and m2c can READ it, so where it declares a struct type for a project static table
    (`pokeemerald:sBigMonSizeTable`) m2c learns field names the map gives only an element size for.
-4. **`prependC` forward declarations.** On 8 rows (7 kleod, `pokeemerald:AcroBikeHandleInputTurning`)
-   the declaration the reference needs to compile standalone IS the row's own signature, and it is
-   the only declaration of it in that context — the one place a signature fact still reaches m2c
-   and not asmlift. Measured by deleting the line and re-running m2c: 3 of the 8 change output
-   (`ConfigureEntityBehavior`, `IsSelectButtonPressed`, `AcroBikeHandleInputTurning`), none is a
-   match either way. Not closed because closing it means re-vendoring the blob asmlift's candidate
+4. **`prependC` forward declarations.** On 1 row (`pokeemerald:AcroBikeHandleInputTurning`; 8 before
+   the 2026-09-13 kleod swap, 7 of them kleod) the declaration the reference needs to compile
+   standalone IS the row's own signature, and it is the only declaration of it in that context — the
+   one place a signature fact still reaches m2c and not asmlift. Measured before the swap by deleting
+   the line and re-running m2c: 3 of the 8 changed output (`ConfigureEntityBehavior`,
+   `IsSelectButtonPressed`, `AcroBikeHandleInputTurning`), none a match either way. Not closed because closing it means re-vendoring the blob asmlift's candidate
    scorer also compiles against. Named by `test/authored-facts.test.ts`.
 
 _Favouring asmlift._
@@ -341,6 +342,31 @@ Host prerequisites (macOS; verified empirically):
   sidecar targets also fall back to Docker when no host `mips-linux-gnu-gcc` exists)
 - baseroms: setup copies them from the sibling user checkouts when found; otherwise place them
   manually (the status table names the missing file and destination)
+
+### Re-pinning or swapping a project
+
+The manifest is data a person regenerates, so the recipe is written down here rather than left in
+the round that first ran it.
+
+- **Identity is the address, within one decompilation.** `addr` is read off the project's linked ELF
+  (`readelf -sW`/`nm`, Thumb bit clear on agbcc) and `test/real-manifests.test.ts` holds it equal to
+  the committed `tu/<project>/symbols.json.gz`. Two rows at one address that cite different
+  repositories are different rows (bench-schema `joinArtifacts`): a source swap is removed + added.
+- **An upstream rename** is `sym` → the new name, the old name appended to `aliases`, `funcC`'s
+  identifier and the `proto` key renamed, then `pnpm bench vendor --project <p>` — `index.json` and
+  the TU file names are keyed by `sym`, so the alias table alone does not make a rename.
+- **A source swap retires rows.** Every dated measurement of a removed row keeps citing it by the name
+  it was measured under, and the row is listed in `dataset/retired-rows.json` so the citation gates
+  accept it. Never move such a citation to the row now at that address: its fan, outcome and cost
+  were measured on another author's source, context and symbol map. Only a claim RE-MEASURED on the
+  new row may name it. A current id shared by both decompilations (kleod's `MultiplyQ8`) cannot be
+  listed, so date its old citations in prose.
+- **Wiring a row from its own TU** (what kleod's 2026-09-13 rows used): `funcC` is the definition's
+  verbatim span at the pinned commit; `prependC` is that TU's file-scope declarations minus the row's
+  own prototype, plus a prototype for each same-TU callee no header declares; `headers` is the union
+  of the TUs' `#include`s; `proto` gives `returnsVoid` exactly where the return type is `void`; tags
+  are the judgement tags that pass `JUDGEMENT_FLOOR` on the new body. Then check fidelity the
+  harness's way: every row, compiled standalone, equals the ROM function bytes (relocations masked).
 
 ## Harness layout (`src/`)
 
