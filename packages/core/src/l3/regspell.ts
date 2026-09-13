@@ -124,8 +124,8 @@ function isConstExpr(e: Expr): boolean {
  *  var and only the fresh spelling exists — so the tails are a 1- OR 2-element list and the SECOND
  *  spelling is not at a fixed index.
  *
- *  This field exists because the caller labels these, and a label is the instrument every census
- *  in this repo reads (it is a `bench diff` FIELD). Index a `['/regcopy', '/regcopy-ret',
+ *  This field exists because the caller names these, and a candidate's variations are the instrument
+ *  every census in this repo reads (a `bench diff` FIELD). Index a `['/regcopy', '/regcopy-ret',
  *  '/regcopy-ret-fresh']` table by POSITION instead and an R1-less function publishes its fresh
  *  tail as `/regcopy-ret` — the dead-var-reuse name on the spelling that has no dead var to reuse
  *  — and a census over the token `/regcopy-ret-fresh` then censuses nothing wherever R1 declines,

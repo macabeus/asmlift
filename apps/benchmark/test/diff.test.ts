@@ -35,7 +35,7 @@ const row = (
 const out = (...results: FunctionResult[]): BenchOutput =>
   ({ meta: { generatedAt: 'whenever' }, results }) as unknown as BenchOutput;
 
-const drop = (label: string) => ({ label, error: 'did not build' });
+const drop = (name: string) => ({ variations: [name], error: 'did not build' });
 
 const at = (generatedAt: string): BenchOutput => ({ meta: { generatedAt }, results: [] }) as unknown as BenchOutput;
 
@@ -87,10 +87,10 @@ describe('compareMeasurements', () => {
 
   test('the ranked WINNER changing identity at an equal score is a change', () => {
     const r = compareMeasurements(
-      out(row('a', { winnerVariations: 'signed' })),
-      out(row('a', { winnerVariations: 'signed/flip-join' })),
+      out(row('a', { winnerVariations: ['signed'] })),
+      out(row('a', { winnerVariations: ['signed', 'flip-join'] })),
     );
-    expect(r.changed.map((c) => c.field)).toEqual(['asmlift.winnerVariations']);
+    expect(r.changed).toEqual([{ id: 'a', field: 'asmlift.winnerVariations', from: 'signed', to: 'signed/flip-join' }]);
   });
 
   test('both decompilers are watched, and source is reported by size not pasted', () => {
@@ -208,11 +208,12 @@ describe('compareMeasurements', () => {
 
   // THE FAN MOVED AND NOTHING ELSE DID. Over `eb6dec7d`→`2fed1e42` this is 2 real rows
   // (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`): identical
-  // source, identical score, identical label, a different number of spellings that failed to build.
+  // source, identical score, identical winner's variations, a different number of spellings that failed to build.
   // The COUNT is watched and the LIST is not — the list runs to 51,840 entries on one row of the
   // current artifact.
   test('a fan that grew is caught, by its count and not by pasting it', () => {
-    const many = (n: number) => Array.from({ length: n }, (_, i) => ({ label: `cand${i}`, error: 'did not build' }));
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ variations: [`cand${i}`], error: 'did not build' }));
     const r = compareMeasurements(
       out(row('a', { droppedCandidates: many(41472) })),
       out(row('a', { droppedCandidates: many(51840) })),

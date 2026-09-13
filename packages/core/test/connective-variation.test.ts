@@ -37,11 +37,11 @@ const TREE =
 describe('/connective is enumerated wherever the tree refusal has an inhabitant', () => {
   test('a same-scrutinee const-test chain emits BOTH spellings', () => {
     const all = cands(TREE);
-    expect(all.some((c) => hasVariation(c.label.split('/'), 'connective'))).toBe(true);
+    expect(all.some((c) => hasVariation(c.variations, 'connective'))).toBe(true);
     // Not a duplicate the dedup would have collapsed — dropping the variation drops a distinct
     // spelling, which is what makes the shape a question for the differ and not for a predicate.
-    expect(distinct(all)).toBeGreaterThan(distinct(all.filter((c) => !hasVariation(c.label.split('/'), 'connective'))));
-    expect(all.some((c) => hasVariation(c.label.split('/'), 'connective') && / \|\| |&&/.test(c.source))).toBe(true);
+    expect(distinct(all)).toBeGreaterThan(distinct(all.filter((c) => !hasVariation(c.variations, 'connective'))));
+    expect(all.some((c) => hasVariation(c.variations, 'connective') && / \|\| |&&/.test(c.source))).toBe(true);
   });
 
   test('…and the tree spelling survives beside it', () => {
@@ -50,7 +50,7 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
     // the tree spelling is still in the fan to win it. A variation that REPLACED the default rather
     // than joining it costs them.
     const all = cands(TREE);
-    expect(all.some((c) => !hasVariation(c.label.split('/'), 'connective') && !/ \|\| /.test(c.source))).toBe(true);
+    expect(all.some((c) => !hasVariation(c.variations, 'connective') && !/ \|\| /.test(c.source))).toBe(true);
   });
 
   // The scrutinee is a POOL-LOADED global, the one input that differs between the two lifts: the
@@ -84,10 +84,10 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
 
   test('…and each symbol-map setting enumerates the variation off its own answer', () => {
     const conn = enumerateCandidates('f', POOL_ASM, ARMV4T_AGBCC, { prototypes: P, symbols: POOL_SYMBOLS }).filter(
-      (c) => hasVariation(c.label.split('/'), 'connective'),
+      (c) => hasVariation(c.variations, 'connective'),
     );
-    expect(conn.some((c) => hasVariation(c.label.split('/'), 'raw-globals'))).toBe(true);
-    expect(conn.some((c) => !hasVariation(c.label.split('/'), 'raw-globals'))).toBe(true);
+    expect(conn.some((c) => hasVariation(c.variations, 'raw-globals'))).toBe(true);
+    expect(conn.some((c) => !hasVariation(c.variations, 'raw-globals'))).toBe(true);
   });
 
   test('a function whose fold never reaches the refusal pays nothing for it', () => {
@@ -97,6 +97,6 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
       '\tldr\tr0, [r1]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tldr\tr3, [r1, #4]\n\tcmp\tr3, #2\n\tbne\t.L4\n' +
       '.L2:\n\tmov\tr2, #5\n\tstr\tr2, [r1]\n\tb\t.L5\n' +
       '.L4:\n\tmov\tr2, #9\n\tstr\tr2, [r1]\n.L5:\n';
-    expect(cands(PLAIN).some((c) => hasVariation(c.label.split('/'), 'connective'))).toBe(false);
+    expect(cands(PLAIN).some((c) => hasVariation(c.variations, 'connective'))).toBe(false);
   });
 });

@@ -96,7 +96,7 @@
 //
 //   population                                                                           rules moved
 //   40,000 generated trees (unmerge-fuzz's `gen`/`gen2`, 20,000 seeds each, 13,099 firings)    0 of 6
-//   291 agbcc synthetic rows, through `enumerateRanked`, whole fan compared label+source        1 of 6
+//   291 agbcc synthetic rows, through `enumerateRanked`, whole fan compared variations+source   1 of 6
 //
 // The one is `site/no-merge-name`, and it moves exactly one row: `synthetic:mergeloop:agbcc`, whose
 // fan grows 16 -> 24 candidates when it is ablated, and which is also where it fires 40 of its 80

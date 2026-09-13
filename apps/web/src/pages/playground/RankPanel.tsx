@@ -6,6 +6,7 @@
 //  • RankCandidates — the Pipeline tab's final card: every scored candidate with its objdiff
 //    score, best first, plus the declarations asmlift refused to synthesize.
 import { renderDeclarations } from '@asmlift/core/declare';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 
 import { progressBar, progressLabel } from './progress-view';
 import type { RefusedDeclaration } from './score-wasm';
@@ -99,7 +100,8 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
   const assumed = synthesizedCount(ranking);
   return winner.score.score === 0 ? (
     <div className={`${base} border border-emerald-800 bg-emerald-950/40 text-emerald-300`}>
-      ✓ byte-exact match — objdiff score 0 <span className="text-emerald-500/80">({winner.label})</span>
+      ✓ byte-exact match — objdiff score 0{' '}
+      <span className="text-emerald-500/80">({joinVariations(winner.variations)})</span>
       {assumed > 0 && (
         <span className="text-emerald-500/80">
           {' '}
@@ -109,7 +111,8 @@ export function RankBadge({ ranking }: { ranking: Ranking }) {
     </div>
   ) : (
     <div className={`${base} border border-amber-900/60 bg-amber-950/30 text-amber-300`}>
-      closest candidate — objdiff score {winner.score.score} <span className="text-amber-500/80">({winner.label})</span>
+      closest candidate — objdiff score {winner.score.score}{' '}
+      <span className="text-amber-500/80">({joinVariations(winner.variations)})</span>
     </div>
   );
 }
@@ -195,14 +198,14 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
             const isWinner = c === winner;
             const exact = c.score.score === 0;
             return (
-              <tr key={c.label} className={isWinner ? 'text-slate-100' : 'text-slate-400'}>
+              <tr key={joinVariations(c.variations)} className={isWinner ? 'text-slate-100' : 'text-slate-400'}>
                 <td className="py-0.5">
                   {isWinner && (
                     <span className="mr-1 text-teal-400" title="winner (lowest score)">
                       ★
                     </span>
                   )}
-                  {c.label}
+                  {joinVariations(c.variations)}
                 </td>
                 <td className={`py-0.5 pl-2 ${exact ? 'text-emerald-400' : ''}`}>
                   {c.score.score}

@@ -189,9 +189,9 @@ const PAIR_ASM =
 test('a symbol map does not blind the raw sibling: /addr-home rides /raw-globals', () => {
   const symbols: SymbolMap = new Map([[0x8057acc, [{ name: 'gEntries', kind: 'data' }]]]);
   const cands = enumerateCandidates('f', PAIR_ASM, ARMV4T_AGBCC, { symbols });
-  const homed = cands.filter((c) => hasVariation(c.label.split('/'), 'addr-home'));
+  const homed = cands.filter((c) => hasVariation(c.variations, 'addr-home'));
   expect(homed.length).toBeGreaterThan(0);
-  expect(homed.every((c) => hasVariation(c.label.split('/'), 'raw-globals'))).toBe(true);
+  expect(homed.every((c) => hasVariation(c.variations, 'raw-globals'))).toBe(true);
 });
 
 // ── THE MERGE CLASS ────────────────────────────────────────────────────────────────────────

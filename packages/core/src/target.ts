@@ -300,10 +300,10 @@ export interface TargetDescription {
     // spelling is byte-identical to the indexed one wherever the pointee is not volatile? agbcc
     // does, on its own compiled evidence: the four corners in test/advance.test.ts's header, each
     // built through the benchmark's agbcc against `kleod:StreamCmd_SetWindowRegs`'s object. True ⇒
-    // rank.ts withholds the UN-QUALIFIED `/advance` label, whose spelling this compiler cannot
+    // rank.ts withholds the UN-QUALIFIED `/advance` variation, whose spelling this compiler cannot
     // distinguish from the indexed one it already offers; `/advance/volatile` still rides, because
     // `volatile` is what bars the fold and that product is the match on this row. Absent ⇒ falsy ⇒
-    // the plain label ships, which is the conservative reading for a compiler whose pair nobody has
+    // the plain variation ships, which is the conservative reading for a compiler whose pair nobody has
     // compiled — a compiler opts in on its own evidence and never by inheriting.
     foldsPointerAdvance?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction

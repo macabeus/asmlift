@@ -17,7 +17,7 @@ import { decompile } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { type SymbolInfo, type SymbolMap, type SymbolStructField } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
-import { hasVariation } from '../src/variation-tokens';
+import { hasVariation, joinVariations } from '../src/variation-tokens';
 
 // The kleod BgDataPtrs shape: a `void *` tiles pointer, then a `u16 *` tilemap pointer.
 const LAYOUT: SymbolStructField[] = [
@@ -229,8 +229,8 @@ describe('the element spelling is enumerated as a variation the differ referees'
 
   test('both arms are candidates, and they are DIFFERENT sources', () => {
     const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: mapWith(ptrsInfo()) });
-    const on = cands.find((c) => c.label === 'unsigned');
-    const off = cands.find((c) => c.label === 'unsigned/no-ptr-elem');
+    const on = cands.find((c) => joinVariations(c.variations) === 'unsigned');
+    const off = cands.find((c) => joinVariations(c.variations) === 'unsigned/no-ptr-elem');
     expect(on?.source).toContain('((u16 *)gBgPtrs.pMap)[a0 + 157]');
     expect(off?.source).toContain('(u8 *)gBgPtrs.pMap');
     expect(off?.source).not.toContain('pMap)[a0');
@@ -240,14 +240,14 @@ describe('the element spelling is enumerated as a variation the differ referees'
     // structure() normalizes the option to false without `symbols`, so a second arm would be the
     // identical tree — the decline is what keeps the fan from doubling for nothing
     const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, {});
-    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'no-ptr-elem'))).toHaveLength(0);
+    expect(cands.filter((c) => hasVariation(c.variations, 'no-ptr-elem'))).toHaveLength(0);
   });
 
   test('a map with no SIZED pointer field does not enumerate the variation either', () => {
     // `void *` sizes no element, so the rule could not fire and the 2x cross would buy nothing
     const voidOnly = ptrsInfo({ layout: [{ name: 'pTiles', offset: 0, size: 4, pointer: true }] });
     const cands = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: mapWith(voidOnly) });
-    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'no-ptr-elem'))).toHaveLength(0);
+    expect(cands.filter((c) => hasVariation(c.variations, 'no-ptr-elem'))).toHaveLength(0);
   });
 
   test('the variation follows the FUNCTION naming a container, not the map declaring one', () => {
@@ -263,10 +263,10 @@ describe('the element spelling is enumerated as a variation the differ referees'
       'f:\n\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tadd\tr0, #0x1\n\tstr\tr0, [r1]\n\tbx\tlr\n' +
       '.L1:\n\t.word\t0x03000200\n';
     const cands = enumerateCandidates('f', elsewhere, ARMV4T_AGBCC, { symbols: other });
-    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'no-ptr-elem'))).toHaveLength(0);
+    expect(cands.filter((c) => hasVariation(c.variations, 'no-ptr-elem'))).toHaveLength(0);
     // …and the variation IS enumerated for a function that does name it, off the very same map
     const reaching = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: other });
-    expect(reaching.filter((c) => hasVariation(c.label.split('/'), 'no-ptr-elem')).length).toBeGreaterThan(0);
+    expect(reaching.filter((c) => hasVariation(c.variations, 'no-ptr-elem')).length).toBeGreaterThan(0);
   });
 });
 

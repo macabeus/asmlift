@@ -58,13 +58,11 @@ describe('one throwing shape does not take the others with it', () => {
     // try per subset — the regression this pins is the shapes derived INSIDE `respell`, so the
     // assertion has to name a variation and a shape together.
     expect(
-      cands.filter(
-        (c) => hasVariation(c.label.split('/'), 'regionbase') && hasVariation(c.label.split('/'), 'pollguard'),
-      ).length,
+      cands.filter((c) => hasVariation(c.variations, 'regionbase') && hasVariation(c.variations, 'pollguard')).length,
     ).toBeGreaterThan(0);
   });
 
   test('…and the respelled sources the shapes derive FROM are untouched', () => {
-    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'regionbase')).length).toBeGreaterThan(0);
+    expect(cands.filter((c) => hasVariation(c.variations, 'regionbase')).length).toBeGreaterThan(0);
   });
 });

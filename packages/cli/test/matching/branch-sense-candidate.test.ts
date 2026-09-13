@@ -25,15 +25,15 @@ describe('branch-sense candidate: || short-circuit return matches via the flippe
   test('if (a || b) return X — the flip-branch candidate wins byte-exact', () => {
     const r = ranked('ifor', 'int ifor(int a, int b){ if (a || b) return 42; return 7; }');
     expect(r.winner.score.match).toBe(true);
-    expect(hasVariation(r.winner.label.split('/'), 'flip-branch')).toBe(true); // the non-default sense is what matched
+    expect(hasVariation(r.winner.variations, 'flip-branch')).toBe(true); // the non-default sense is what matched
     // the default sense is still in the set (never dropped) and does NOT match here
-    expect(r.candidates.some((c) => !hasVariation(c.label.split('/'), 'flip-branch'))).toBe(true);
+    expect(r.candidates.some((c) => !hasVariation(c.variations, 'flip-branch'))).toBe(true);
   });
 
   test('if (a && b) return X still matches on the DEFAULT sense (flip not needed)', () => {
     const r = ranked('ifand', 'int ifand(int a, int b){ if (a && b) return 42; return 7; }');
     expect(r.winner.score.match).toBe(true);
-    expect(hasVariation(r.winner.label.split('/'), 'flip-branch')).toBe(false);
+    expect(hasVariation(r.winner.variations, 'flip-branch')).toBe(false);
   });
 });
 

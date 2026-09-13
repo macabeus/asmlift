@@ -338,7 +338,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     defined by the enclosing loop header — and is UNBUILT.
 //     The relayed clause below is a different statement (see its own note: a blunt proxy that
 //     fires on an ordinary loop counter), it has NO inhabitant anywhere in the benchmark, and a
-//     candidate born there would carry a `/connective` label for a fold that answers
+//     candidate born there would carry a `/connective` variation for a fold that answers
 //     no connective-vs-tree question. It stays absolute.
 //   - the shared block was reached through a RELAY, and either test's scrutinee is compared against
 //     constants more than once in the function. This one is ABSOLUTE — `foldTreeOwned` does not

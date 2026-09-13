@@ -36,7 +36,7 @@ import { rowsAddedSince } from './regression';
  *  `source` is here because a change that moves no score can still rewrite what the report shows,
  *  `winnerVariations` because the ranked WINNER can change identity at an unchanged score (a
  *  tie-break moving is a real change), `quality` because the report publishes it — a row can move
- *  `quality.casts` 0 → 1 with score, outcome and label all unchanged — and `breakdown` for the
+ *  `quality.casts` 0 → 1 with score, outcome and winner all unchanged — and `breakdown` for the
  *  same reason (the web FunctionDetail renders its five numbers; it moved 17 lines over
  *  `eb6dec7d`→`2fed1e42`, none of them a row no other field already named).
  *
@@ -67,7 +67,7 @@ import { rowsAddedSince } from './regression';
  *  `withheldCandidates` are published as COUNTS by the `[ranked]` line, and the count is what is
  *  watched. Not a cosmetic saving — over `eb6dec7d`→`2fed1e42` the dropped count moved on 2 rows
  *  (`kleod:ProcessInputAndUpdateEntities:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`) that NO
- *  other watched field moves on: identical source, identical score, identical label, a fan that
+ *  other watched field moves on: identical source, identical score, identical winner's variations, a fan that
  *  demonstrably changed, and a gate that answered "nothing moved".
  *
  *  THE TWO COST FIELDS ARE DELIBERATELY OUT, for two different reasons. `rankSeconds` is wall
@@ -165,6 +165,10 @@ const show = (field: string, v: unknown, res: Record<string, unknown>): string =
   // as `171/404` — the fixed-scale misreading this rendering exists to stop. A side with no
   // `maxScore` key at all (hand-built objects; artifacts predating the field) keeps the bare
   // numerator, since `290/404 → 171/undefined` says less than `171`.
+  // A name is printed the way every command prints one: the winner's variations, `/`-joined.
+  if (field === 'winnerVariations' && Array.isArray(v)) {
+    return v.join('/');
+  }
   if (field === 'score' && 'maxScore' in res) {
     return `${String(v)}/${typeof res.maxScore === 'number' ? res.maxScore : '?'}`;
   }

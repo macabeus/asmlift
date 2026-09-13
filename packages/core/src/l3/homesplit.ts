@@ -19,9 +19,9 @@
 // over ONE input is the shape that would collide, and nothing here does it.
 //
 // WHICH KEY IS WITHHELD IS NOT DERIVABLE, so every admitted key is offered as its own candidate,
-// LABELLED WITH THAT KEY, and the differ referees — the same posture `/scopebase` and `/regionbase`
-// take toward each other. The label carries `homeSplitTag(key)` because a candidate label is an
-// IDENTITY: `bench diff` and docs/ranked-repro.md compare candidates by it, so one label over two
+// NAMED BY THAT KEY, and the differ referees — the same posture `/scopebase` and `/regionbase`
+// take toward each other. The variation carries `homeSplitTag(key)` because a candidate's variations are its
+// IDENTITY: `bench diff` and docs/ranked-repro.md compare candidates by them, so one name over two
 // withholds would hide a program swap from both. The withhold itself is DATA: one rejection
 // prepended to the caller's own admission table, in the `Gate<BaseKey>` type that table already
 // has, so `firstRejection` attributes a refusal to it, `without` ablates it, and the composed table
@@ -59,7 +59,7 @@ export const withholdingKey = (gates: readonly Gate<BaseKey>[], key: string): re
   ...gates,
 ];
 
-/** The withheld key as a LABEL token: `c:67109076 4 true` → `0x40000d4.4s`. Width and signedness
+/** The withheld key as a variation's SUBJECT: `c:67109076 4 true` → `0x40000d4.4s`. Width and signedness
  *  ride because they are part of the key — two keys over one address are two different spellings.
  *
  *  PARSED BY THE KEY'S PRODUCER (`l3/basecse.ts`'s `parseBaseKey`, beside `keyOf`), because a base
@@ -68,9 +68,9 @@ export const withholdingKey = (gates: readonly Gate<BaseKey>[], key: string): re
  *  separator rather than the type's. Split from the FRONT, the type reads as the width and the
  *  width as the signedness; split from the END, the `a:` form comes out right and the `c:` form
  *  runs `Number` over `67109076 <u16*>`, tagging every cast over a numeric base `0xNaN` and
- *  collapsing distinct keys onto one label. No shipped table admits a cast base outside
+ *  collapsing distinct keys onto one name. No shipped table admits a cast base outside
  *  `/orderbase`, and `/orderbase` carries `pairings: false`, so no such key reaches this function
- *  today — but a candidate LABEL is an identity (`bench diff` and docs/ranked-repro.md compare
+ *  today — but a candidate's variations are its identity (`bench diff` and docs/ranked-repro.md compare
  *  candidates by it), and one roster line is all that stands between the two. The sibling half of
  *  the same hazard is already guarded in `splitHomeBases`, which translates a cast base to no
  *  region key and declines. */
@@ -79,7 +79,7 @@ export function homeSplitTag(key: string): string {
   const base = leaf.startsWith('c:') ? `0x${Number(leaf.slice(2)).toString(16)}` : leaf.slice(leaf.indexOf(':') + 1);
   // The cast's element type stays in the token — it is part of the key's identity, since two casts
   // over one symbol are two locals that stride differently. Whitespace is squeezed defensively
-  // rather than because any type spells one: a label is one whitespace-free word everywhere it is
+  // rather than because any type spells one: a variation is one whitespace-free word everywhere it is
   // read, and that has to hold whatever `typeToString` grows.
   const type = castType === null ? '' : `<${castType}>`;
   return `${`${base}${type}`.replace(/\s+/g, '')}.${width}${signed ? 's' : 'u'}`;

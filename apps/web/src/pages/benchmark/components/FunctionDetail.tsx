@@ -282,7 +282,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
     digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
   }
   if (r.winnerVariations) {
-    digest.push(`winner ${r.winnerVariations}`);
+    digest.push(`winner ${r.winnerVariations.join('/')}`);
   }
 
   return (
@@ -351,7 +351,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
                 className="mt-1.5 font-mono text-slate-500"
                 title="the candidate spelling that won the differ ranking"
               >
-                winner: {r.winnerVariations}
+                winner: {r.winnerVariations.join('/')}
               </div>
             )}
           </ProvenanceRow>

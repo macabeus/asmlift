@@ -654,7 +654,7 @@ export const BASEFOLD_HOISTS: readonly BaseHoist[] = [
  *  Corpus-wide (map-less, candidates only, over the artifact's agbcc rows as they stood) 21 of the 333 rows
  *  whose distinct-source set is byte-identical either way carry candidates with `/unfolded`:
  *  21 pure renames against 7 rows that really gain sources, and 0 that lose one. What that costs
- *  any census taken over labels is at the `seen` dedup site below.
+ *  any census taken over candidates' variations is at the `seen` dedup site below.
  *
  *  ONE placement, unlike the `/basefold` pair, and by measurement rather than by symmetry. All
  *  four configurations scored on `synthetic:unfoldpark`, cache off — the fan, then that fan's best
@@ -724,13 +724,13 @@ export const UNFOLDED_HOISTS: readonly BaseHoist[] = [
  *  WITHDRAWAL and not a dedup, because on 29 of the 41 the flat spelling is one no other row here
  *  produces, which that file's header prices. Measured on
  *  `kleod:UpdateCameraScroll` map-ful, the row that priced the withheld one: 512 of its 512
- *  `/orderbase/scoped` sources placed the init at the top level, and all 512 are gone.
+ *  `/orderbase-scoped` sources placed the init at the top level, and all 512 are gone.
  *
  *  `pairings: false` on both for the field's own reason — a pairing is added for a row that demands
  *  the joint spelling, and neither row here demands one. */
 export const ORDERBASE_HOISTS: readonly BaseHoist[] = [
   { suffix: '/orderbase', gates: ORDERBASE_GATES, placement: 'head', pairings: false },
-  { suffix: '/orderbase/scoped', gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
+  { suffix: '/orderbase-scoped', gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
 ];
 
 export const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -751,8 +751,8 @@ export const sameBases = (a: readonly string[], b: readonly string[]): boolean =
  * displacement, so it reproduces the target's own split by construction. The measurements and the
  * conditions are in `raise/structs.ts`; nothing about them belongs in a roster comment. */
 export const SIGNEDNESS = [
-  { label: 'unsigned', signed: false },
-  { label: 'signed', signed: true },
+  { variation: 'unsigned', signed: false },
+  { variation: 'signed', signed: true },
 ];
 
 // A recovered POINTER/aggregate param must NOT be signedness-pinned: pinning a still-`unknown`

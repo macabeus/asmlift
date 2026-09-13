@@ -38,13 +38,13 @@ test('the register-copy candidates are enumerated and ranked through the ranked 
   // The variation fired, and the tail reached the candidate set under the name of the tail it IS.
   //
   // `recip` fires through R2 alone — no diamond, so R1 never runs and there is no dead value var
-  // for the tail to reuse. The only tail that exists here is the FRESH one. Label rank.ts's table
+  // for the tail to reuse. The only tail that exists here is the FRESH one. Name rank.ts's table
   // by list POSITION and the fresh spelling lands at index 1 and wears the reuse name — and this
-  // file is the only place the label is pinned at all, so it would pin the mislabel. Asserting the
-  // ABSENCE of the reuse name is the load-bearing half: without it, positional labelling passes.
-  expect(cands.some((x) => hasVariation(x.label.split('/'), 'regcopy', null))).toBe(true);
-  expect(cands.some((x) => hasVariation(x.label.split('/'), 'regcopy', 'ret-fresh'))).toBe(true);
-  expect(cands.filter((x) => hasVariation(x.label.split('/'), 'regcopy', 'ret'))).toEqual([]);
+  // file is the only place the name is pinned at all, so it would pin the wrong name. Asserting the
+  // ABSENCE of the reuse name is the load-bearing half: without it, positional naming passes.
+  expect(cands.some((x) => hasVariation(x.variations, 'regcopy', null))).toBe(true);
+  expect(cands.some((x) => hasVariation(x.variations, 'regcopy', 'ret-fresh'))).toBe(true);
+  expect(cands.filter((x) => hasVariation(x.variations, 'regcopy', 'ret'))).toEqual([]);
   // every regcopy candidate is emittable C, not a shape that throws downstream of the seam
   const r = rankBy(cands, 'recip', (src) => scoreC(src, 'recip', obj));
   expect(r.winner.score.match).toBe(true);

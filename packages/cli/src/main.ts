@@ -20,6 +20,7 @@ import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -187,7 +188,9 @@ function rankedStderr(a: {
   protoNote: string;
 }): string {
   const { ranked } = a;
-  const table = ranked.candidates.map((c) => `asmlift: [score] ${c.label}: ${scoreOf(c.score)}\n`).join('');
+  const table = ranked.candidates
+    .map((c) => `asmlift: [score] ${joinVariations(c.variations)}: ${scoreOf(c.score)}\n`)
+    .join('');
   // Candidates the scorer refused are recorded, not silent: a variation whose every candidate
   // fails to build looks identical to one that declined unless the drops are visible.
   // …and the same idea one stage EARLIER: `[dropped]` reports a candidate the SCORER refused,
@@ -198,7 +201,7 @@ function rankedStderr(a: {
     .join('');
   const drops = ranked.dropped.length
     ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
-      `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
+      `${joinVariations(ranked.dropped[0].variations)}: ${ranked.dropped[0].error}\n`
     : '';
   // WITHHELD is a different fact from dropped and gets its own line: these compiled and scored
   // and were then refused publication for want of a byte-exact proof (Candidate.matchOnly).
@@ -206,7 +209,7 @@ function rankedStderr(a: {
   // them out entirely would make `candidates scored` under-count the fan with no trace.
   const held = ranked.withheld.length
     ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
-      `${ranked.withheld[0].label} at ${scoreOf(ranked.withheld[0])}: ${ranked.withheld[0].why}\n`
+      `${joinVariations(ranked.withheld[0].variations)} at ${scoreOf(ranked.withheld[0])}: ${ranked.withheld[0].why}\n`
     : '';
   // THE ASSUMPTIONS THE SCORE RESTS ON. A candidate names globals the asm's own literal pool
   // named, and where no symbol map knows them asmlift synthesizes their declarations — width
@@ -329,7 +332,7 @@ async function loadProjectSymbolMap(
     // A file that PARSES and still declares nothing is the failure this key exists to prevent, and
     // it is the one an exception cannot report: `[]`, `{}` and `{"nope": []}` are all valid JSON
     // that reduce to an EMPTY map, which is byte-for-byte the state a map-less run is in. The run
-    // would then exit 0 having scored a different source under a different label — a silent wrong
+    // would then exit 0 having scored a different source under different variations — a silent wrong
     // answer wearing a published repro script's provenance. Both shapes are input errors here.
     if ('error' in parsed) {
       return failure({

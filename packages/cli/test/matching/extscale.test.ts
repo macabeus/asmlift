@@ -154,6 +154,6 @@ describe('the fused scale orders an array subscript — real agbcc, byte-exact',
       compile: (source) => compileCandAgbcc(decls + source),
     });
     expect(r.winner.score.match).toBe(true);
-    expect(hasVariation(r.winner.label.split('/'), 'orderbase')).toBe(true);
+    expect(hasVariation(r.winner.variations, 'orderbase')).toBe(true);
   });
 });

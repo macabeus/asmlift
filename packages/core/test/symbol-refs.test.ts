@@ -38,8 +38,8 @@ describe('value references are recorded with their SymbolInfo', () => {
         [0x03005678, [{ ...ELSEWHERE }]],
       ]),
     );
-    const named = cands.filter((c) => !hasVariation(c.label.split('/'), 'raw-globals'));
-    const raw = cands.filter((c) => hasVariation(c.label.split('/'), 'raw-globals'));
+    const named = cands.filter((c) => !hasVariation(c.variations, 'raw-globals'));
+    const raw = cands.filter((c) => hasVariation(c.variations, 'raw-globals'));
     expect(named.length).toBeGreaterThan(0);
     expect(raw.length).toBeGreaterThan(0);
     for (const c of named) {
@@ -74,7 +74,7 @@ describe('value references are recorded with their SymbolInfo', () => {
   test('a value-referenced CODE symbol ((u32)Func) is recorded with kind code', () => {
     const body = '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x08001001\n'; // odd Thumb pointer
     const cands = enumerate('f', body, new Map([[0x08001000, [{ name: 'DoThing', kind: 'code' }]]]));
-    const named = cands.filter((c) => !hasVariation(c.label.split('/'), 'raw-globals'));
+    const named = cands.filter((c) => !hasVariation(c.variations, 'raw-globals'));
     expect(named.length).toBeGreaterThan(0);
     for (const c of named) {
       expect(c.source).toContain('(u32)DoThing');
@@ -94,7 +94,7 @@ describe('call targets are NEVER recorded', () => {
     for (const c of enumerate('f', body, map)) {
       const names = (c.symbolRefs ?? []).map((r) => r.name);
       expect(names).not.toContain('DoThing'); // called ⇒ excluded
-      if (!hasVariation(c.label.split('/'), 'raw-globals')) {
+      if (!hasVariation(c.variations, 'raw-globals')) {
         expect(names).toContain('gCounter'); // the data ref still records
       }
     }

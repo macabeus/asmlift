@@ -16,6 +16,7 @@
 //    induction variable stays in its argument register, matching IDO's allocation exactly.
 import { decompile } from '@asmlift/core/pipeline';
 import { MIPS_IDO } from '@asmlift/core/target';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 import { compileMipsTarget, scoreCMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -109,7 +110,7 @@ describe('MIPS (IDO) ranked candidates — scoring dispatches to the right compi
   test('the differ picks the unsigned candidate for `x >> 1` on MIPS/IDO', () => {
     const { obj, asm } = compileMipsTarget('unsigned ushr(unsigned x){ return x >> 1; }', 'ushr');
     const ranked = decompileRanked('ushr', asm, MIPS_IDO, obj);
-    expect(ranked.winner.label).toBe('unsigned'); // srl ⇒ unsigned wins; agbcc-scoring couldn't tell
+    expect(joinVariations(ranked.winner.variations)).toBe('unsigned'); // srl ⇒ unsigned wins; agbcc-scoring couldn't tell
     expect(ranked.winner.score.match).toBe(true); // byte-exact via the IDO scorer, not agbcc
     // What this pins is the DISPATCH: an agbcc-scored MIPS candidate would be compiled by the
     // wrong compiler and could not score 0 at all. It no longer pins signedness discrimination —

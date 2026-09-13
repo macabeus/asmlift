@@ -29,7 +29,7 @@ import {
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
-import { hasVariation, hasVariations } from '../src/variation-tokens';
+import { hasVariation, hasVariations, joinVariations } from '../src/variation-tokens';
 
 const IWRAM = 0x03004000;
 const DEVICE = 0x040000d4;
@@ -124,7 +124,7 @@ describe('the pipe reaches the shape neither variation reaches alone', () => {
     expect(names).toHaveLength(4);
   });
 
-  test('withholding the OTHER key is a different spelling, not the same one relabelled', () => {
+  test('withholding the OTHER key is a different spelling, not the same one renamed', () => {
     const p = splitHomeBases(TWO_BASES, { ...OPTS, key: IWRAM_KEY })!;
     const addrs = Object.values(homes(p.split));
     expect(addrs.filter((a) => a === DEVICE)).toHaveLength(1);
@@ -242,7 +242,7 @@ describe('the PER-KEY refusals, each priced by the spelling it keeps out of the 
   });
 });
 
-describe('the label names the withheld key, because a label is an identity', () => {
+describe('the variation names the withheld key, because a name is an identity', () => {
   test('the tag spells the base and the access shape', () => {
     expect(homeSplitTag(DMA_KEY)).toBe('0x40000d4.4s');
     expect(homeSplitTag(IWRAM_KEY)).toBe('0x3004000.4s');
@@ -253,7 +253,7 @@ describe('the label names the withheld key, because a label is an identity', () 
   // `<leafId> <typeToString(to)>`, and `typeToString` emits `Elem5*` — no space, no `struct`
   // keyword — so the one space is the key grammar's own separator and it is there for a cast over
   // a NUMERIC base too. A tag read from the END gets the `a:` half right and runs `Number` over
-  // `67109076 <u16*>` for the `c:` half: every such key tagged `0xNaN`, two keys one label.
+  // `67109076 <u16*>` for the `c:` half: every such key tagged `0xNaN`, two keys one name.
   test('a cast base keeps its element type, over a symbol and over a numeric address', () => {
     expect(homeSplitTag(`a:gEnigmaBerries <${typeToString(T.ptr(T.struct('Elem5', [])))}> 28 false`)).toBe(
       'gEnigmaBerries<Elem5*>.28u',
@@ -261,7 +261,7 @@ describe('the label names the withheld key, because a label is an identity', () 
     expect(homeSplitTag(`c:${DEVICE} <${typeToString(T.ptr(T.u(16)))}> 2 false`)).toBe('0x40000d4<u16*>.2u');
   });
 
-  // The property the label has to have, asked of the REAL producer rather than of a literal: two
+  // The property the name has to have, asked of the REAL producer rather than of a literal: two
   // bases that `baseSites` keys apart must tag apart. A hand-written expectation cannot catch a
   // collision, because the collision is between two keys neither of which the assertion names.
   test("distinct keys tag distinctly, over `baseSites`' own output", () => {
@@ -327,15 +327,13 @@ describe('the pairing is OFFERED, and additively', () => {
   });
 
   test('`/livebase-block/homesplit` is in the fan', () => {
-    expect(
-      cands.filter((c) => hasVariations(c.label.split('/'), ['livebase-block', 'homesplit'])).length,
-    ).toBeGreaterThan(0);
+    expect(cands.filter((c) => hasVariations(c.variations, ['livebase-block', 'homesplit'])).length).toBeGreaterThan(0);
   });
 
   test('…and every spelling it composes from is STILL in the fan', () => {
     // Hard Rule 3: the pairing sits BESIDE its two halves and the un-hoisted primary, and the
     // differ settles the allocation. A pairing that replaced either half could cost `dmaflat`.
-    const last = (c: { label: string }, n: number) => c.label.split('/').slice(-n);
+    const last = (c: { variations: readonly string[] }, n: number) => c.variations.slice(-n);
     expect(
       cands.some(
         (c) =>
@@ -343,7 +341,7 @@ describe('the pairing is OFFERED, and additively', () => {
           (hasVariations(last(c, 2), ['livebase-block', 'volatile']) && hasVariation(last(c, 1), 'volatile', null)),
       ),
     ).toBe(true);
-    expect(cands.some((c) => hasVariation(c.label.split('/'), 'regionbase'))).toBe(true);
+    expect(cands.some((c) => hasVariation(c.variations, 'regionbase'))).toBe(true);
   });
 
   test('BOTH withholds are enumerated — which key the source homed is not derivable', () => {
@@ -353,19 +351,20 @@ describe('the pairing is OFFERED, and additively', () => {
     const count = (src: string, addr: number): number =>
       new Set([...src.matchAll(new RegExp(`(\\w+) = \\((?:volatile )?s32 \\*\\)${addr};`, 'g'))].map((m) => m[1])).size;
     const shapes = cands
-      .filter((c) => hasVariations(c.label.split('/'), ['livebase-block', 'homesplit']))
+      .filter((c) => hasVariations(c.variations, ['livebase-block', 'homesplit']))
       .map((c) => `${count(c.source, 0x03004000)}:${count(c.source, 0x040000d4)}`);
     expect(shapes).toContain('1:3');
     expect(shapes).toContain('3:1');
   });
 
-  test('…and each of them under its OWN label — no label carries two programs', () => {
-    // `bench diff` and docs/ranked-repro.md compare candidates BY LABEL, and the fan dedups by
-    // SOURCE, so one label over two withholds publishes a winning label that also names a
+  test('…and each of them under its OWN variations — no name carries two programs', () => {
+    // `bench diff` and docs/ranked-repro.md compare candidates BY NAME, and the fan dedups by
+    // SOURCE, so one name over two withholds publishes a winner whose variations also name a
     // non-match. Asserted over the WHOLE fan, not just this variation: it is a property of the list.
     const bySource = new Map<string, Set<string>>();
     for (const c of cands) {
-      bySource.set(c.label, (bySource.get(c.label) ?? new Set()).add(c.source));
+      const name = joinVariations(c.variations);
+      bySource.set(name, (bySource.get(name) ?? new Set()).add(c.source));
     }
     expect([...bySource].filter(([, s]) => s.size > 1).map(([l]) => l)).toEqual([]);
   });

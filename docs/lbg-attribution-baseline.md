@@ -19,8 +19,8 @@ RANKED_COMPLETE exit=1
 ```
 
 The `[ranked]` line carries one total; the raw/symbol split is not in it and lives in the same
-file's `raw_count`/`symbol_count`/`raw_min`/`symbol_min` fields — 179,712 raw labels at minimum
-376, 46,080 symbol labels at minimum 455.
+file's `raw_count`/`symbol_count`/`raw_min`/`symbol_min` fields — 179,712 raw candidates at minimum
+376, 46,080 symbol candidates at minimum 455.
 
 Exit 1 denotes the completed nonmatch; this was not a stale-object exit 3. Input hashes and the
 full completion lines are retained in [run-summary.json](lbg-attribution-evidence/baseline/run-summary.json).
@@ -39,8 +39,8 @@ capture discovery found a named-symbol object scoring 455, then fresh compilatio
 canonical flags reproduced **identical assembly and object bytes**, again scoring 455. The
 object has `R_ARM_ABS32` relocations for `gBgInfo` and `gUnk_03004DB0`.
 Its SHA-256 is `43110c6795cd60086a758bcc1d70f8b6af6b263ca4aa414d93a50440dc73aec1`.
-Four non-raw labels tie at 455 in the log; capture discovery does not map this object to one
-particular label. No cause for the historical seven-point discrepancy was established.
+Four non-raw candidates tie at 455 in the log; capture discovery does not map this object to one
+particular candidate. No cause for the historical seven-point discrepancy was established.
 See [symbol-confirmation.json](lbg-attribution-evidence/baseline/symbol-confirmation.json).
 
 ## Residual conventions and classification

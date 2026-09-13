@@ -84,6 +84,16 @@ const firstLine = (e: unknown): string =>
  *  would already break `--repeat`, which exists to catch exactly that class). */
 const serialized = new WeakMap<object, string>();
 
+/** One candidate as the enumeration of WHICHEVER tree this driver runs hands it back. Nothing is
+ *  imported from the tree (see the header), so the name arrives in the shape that tree's own
+ *  `Candidate` declares: its variations as a list, or that list already `/`-joined into `label`. */
+export type SweptCandidate = { source: string } & ({ variations: readonly string[] } | { label: string });
+
+/** A swept candidate's name as ONE string, `/`-joined — core's `joinVariations` spelling, restated
+ *  here because this file imports nothing from the tree it drives. Never `JSON.stringify` of the
+ *  list: that would hash the same names differently for the two shapes above. */
+const printedName = (c: SweptCandidate): string => ('variations' in c ? c.variations.join('/') : c.label);
+
 /** The `--fan` payload of one enumeration: its size and three ordered hashes over its candidates.
  *
  *  THREE HASHES AND NOT ONE, because a change to what a candidate is CALLED and a change to what it
@@ -100,7 +110,7 @@ const serialized = new WeakMap<object, string>();
  *
  *  Exported for `sweep.test.ts`, which pins what each hash can and cannot see: `collect` needs a
  *  compiler to build a row's target, and the CI mirror gate has none. */
-export function fanDigests(cands: readonly { label: string; source: string }[]): {
+export function fanDigests(cands: readonly SweptCandidate[]): {
   fan: number;
   fanHash: string;
   fanSourceHash: string;
@@ -110,9 +120,10 @@ export function fanDigests(cands: readonly { label: string; source: string }[]):
   const sources = createHash('sha1');
   const names = createHash('sha1');
   for (const c of cands) {
-    both.update(`${c.label}\0${c.source}\0`);
+    const name = printedName(c);
+    both.update(`${name}\0${c.source}\0`);
     sources.update(`${c.source}\0`);
-    names.update(`${c.label}\0`);
+    names.update(`${name}\0`);
   }
   const hex = (h: ReturnType<typeof createHash>): string => h.digest('hex').slice(0, 12);
   return { fan: cands.length, fanHash: hex(both), fanSourceHash: hex(sources), fanVariationsHash: hex(names) };
@@ -199,7 +210,7 @@ export const stable = (v: unknown): string => canon(v, new Set());
  *  one string in `dataset/synthetic.ts` and no line of `packages/` moved 6 records. `asm` and
  *  `opts` are what make that readable — a `[moved]` line naming them says the INPUT moved, and a
  *  line naming `src` alone says the decompiler did. This is the field `report/diff.ts` watches per
- *  side for the same reason (MEMORY #112/#113: label unchanged while the program changed).
+ *  side for the same reason (MEMORY #112/#113: the winner's variations unchanged while the program changed).
  *
  *  WHAT IT CAN SEE is decided entirely by `canon` above — a container it cannot render inside
  *  digests the same whatever it holds, so read that header before trusting this digest with a new

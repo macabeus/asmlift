@@ -16,7 +16,13 @@
 // A name that fails here is either a variation minted without a registry entry, or a registry entry
 // spelled differently from its mint site. Both are fixed in `variation-tokens.ts` or at the mint.
 import { enumerateRanked } from '@asmlift/cli/rank';
-import { VARIATION_KINDS, parseVariation, variationToken } from '@asmlift/core/variation-tokens';
+import {
+  VARIATION_KINDS,
+  joinVariations,
+  parseVariation,
+  splitVariations,
+  variationToken,
+} from '@asmlift/core/variation-tokens';
 import { agbccAvailable } from '@asmlift/toolchains';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,12 +32,13 @@ import { scrubObjectHeader } from '../src/asm-scrub';
 import { syntheticCases } from '../src/cases/synthetic';
 import { rankOptionsFor } from '../src/eval/asmlift';
 
-/** What is wrong with one candidate's name, or `undefined`: an unregistered part, a part out of
- *  kind order, or a first part that is not a signedness. */
+/** What is wrong with one candidate's name — its variations, `/`-joined as `name` — or `undefined`:
+ *  an unregistered variation, a variation out of kind order, or a first variation that is not a
+ *  signedness. */
 function nameDefect(name: string): string | undefined {
-  const parts = name.split('/');
+  const variations = splitVariations(name);
   let previous = -1;
-  for (const [i, part] of parts.entries()) {
+  for (const [i, part] of variations.entries()) {
     let kind: number;
     try {
       kind = VARIATION_KINDS.indexOf(variationToken(parseVariation(part).name).variationKind);
@@ -53,18 +60,22 @@ describe('closure over the names the committed artifact publishes', () => {
   const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
     id: string;
     asmlift?: {
-      winnerVariations?: string;
-      droppedCandidates?: { label: string }[];
-      withheldCandidates?: { label: string }[];
+      winnerVariations?: string[];
+      droppedCandidates?: { variations: string[] }[];
+      withheldCandidates?: { variations: string[] }[];
     };
   }[];
   const winners = rows.flatMap((r) => (r.asmlift?.winnerVariations === undefined ? [] : [r.asmlift.winnerVariations]));
-  const names = new Set([
-    ...winners,
-    ...rows
-      .flatMap((r) => [...(r.asmlift?.droppedCandidates ?? []), ...(r.asmlift?.withheldCandidates ?? [])])
-      .map((c) => c.label),
-  ]);
+  // Distinct names, keyed on the one join: it throws on an entry holding `/`, so two different
+  // lists can never collapse into one key here.
+  const names = new Set(
+    [
+      ...winners,
+      ...rows
+        .flatMap((r) => [...(r.asmlift?.droppedCandidates ?? []), ...(r.asmlift?.withheldCandidates ?? [])])
+        .map((c) => c.variations),
+    ].map(joinVariations),
+  );
 
   test('the artifact names candidates at all (the floor every assertion below rests on)', () => {
     // 821 winners and 336 distinct names at b1be5321; a floor, so a larger corpus never fails it.
@@ -72,12 +83,21 @@ describe('closure over the names the committed artifact publishes', () => {
     expect(names.size).toBeGreaterThanOrEqual(300);
   });
 
+  test('every published name is a list of variations, not one `/`-joined string', () => {
+    const lists = rows.flatMap((r) => [
+      r.asmlift?.winnerVariations,
+      ...(r.asmlift?.droppedCandidates ?? []).map((c) => c.variations),
+      ...(r.asmlift?.withheldCandidates ?? []).map((c) => c.variations),
+    ]);
+    expect(lists.filter((v) => v !== undefined && !Array.isArray(v))).toEqual([]);
+  });
+
   test('every published name parses into registered variations, signedness first, in kind order', () => {
     expect([...names].flatMap((n) => nameDefect(n) ?? [])).toEqual([]);
   });
 
   test('no published name uses `winner`, the word `bench fan --show` reserves', () => {
-    expect([...names].filter((n) => n.split('/').some((p) => p === 'winner'))).toEqual([]);
+    expect([...names].filter((n) => splitVariations(n).includes('winner'))).toEqual([]);
   });
 });
 
@@ -93,7 +113,7 @@ describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthe
       const asm = scrubObjectHeader(built.asm);
       for (const symbols of c.symbols === undefined ? [undefined] : [undefined, c.symbols]) {
         const opts = rankOptionsFor(c.toolchain, built.obj, c.proto, c.compile, symbols);
-        let cands: { label: string }[];
+        let cands: { variations: readonly string[] }[];
         try {
           cands = enumerateRanked(c.sym, asm, c.toolchain.targetDesc, { ...opts, onEnumerationError: () => {} });
         } catch {
@@ -101,7 +121,7 @@ describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthe
         }
         fans++;
         for (const x of cands) {
-          names.add(x.label);
+          names.add(joinVariations(x.variations));
         }
       }
     }
@@ -111,6 +131,6 @@ describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthe
     expect(fans).toBeGreaterThan(200);
     expect(names.size).toBeGreaterThan(2000);
     expect([...names].flatMap((n) => nameDefect(n) ?? [])).toEqual([]);
-    expect([...names].filter((n) => n.split('/').some((p) => p === 'winner'))).toEqual([]);
+    expect([...names].filter((n) => splitVariations(n).includes('winner'))).toEqual([]);
   }, 600_000);
 });

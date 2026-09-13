@@ -144,10 +144,10 @@ test('/fresh-merge is enumerated where a merge slot mixes a parameter with somet
     'max3:\n\tcmp\tr1, r0\n\tbge\t.L3\n\tadd\tr1, r0, #0\n.L3:\n\tadd\tr0, r2, #0\n' +
     '\tcmp\tr0, r1\n\tbge\t.L4\n\tadd\tr0, r1, #0\n.L4:\n\tbx\tlr\n';
   const all = enumerateCandidates('max3', MAX3_ASM, ARMV4T_AGBCC, {});
-  expect(all.some((c) => hasVariation(c.label.split('/'), 'fresh-merge'))).toBe(true);
+  expect(all.some((c) => hasVariation(c.variations, 'fresh-merge'))).toBe(true);
   // A spelling of its own, not a duplicate the dedup would have collapsed.
   const sources = (cs: typeof all) => new Set(cs.map((c) => c.source)).size;
-  expect(sources(all)).toBeGreaterThan(sources(all.filter((c) => !hasVariation(c.label.split('/'), 'fresh-merge'))));
+  expect(sources(all)).toBeGreaterThan(sources(all.filter((c) => !hasVariation(c.variations, 'fresh-merge'))));
 });
 
 test('…and a function whose only merge carries the SAME parameter on every edge pays nothing', () => {
@@ -155,7 +155,7 @@ test('…and a function whose only merge carries the SAME parameter on every edg
   // unchanged on both paths, so there is no conditional overwrite to re-home.
   const ALIAS_ASM = 'f:\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tmov\tr2, #0\n\tstr\tr2, [r1]\n.L2:\n\tbx\tlr\n';
   const all = enumerateCandidates('f', ALIAS_ASM, ARMV4T_AGBCC, {});
-  expect(all.some((c) => hasVariation(c.label.split('/'), 'fresh-merge'))).toBe(false);
+  expect(all.some((c) => hasVariation(c.variations, 'fresh-merge'))).toBe(false);
 });
 
 // ── a NARROWER carrier is never adopted, under either setting ─────────────────────────────────

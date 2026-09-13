@@ -73,10 +73,10 @@ export function rankOptionsFor(
   };
 }
 
-/** Phase 2 alone: the row's WHOLE ranked fan, every candidate carrying its label, its score and
+/** Phase 2 alone: the row's WHOLE ranked fan, every candidate carrying its variations, its score and
  *  the source it was scored from (`Scored extends Candidate`).
  *
- *  `runAsmlift` publishes four facts out of this object — the winner's label and source, the
+ *  `runAsmlift` publishes four facts out of this object — the winner's variations and source, the
  *  dropped list and the withheld list — and drops `candidates` on the floor. `bench fan` is the
  *  one supported way to read them, and it is deliberately the SAME call the harness makes rather
  *  than a parallel one: `decompileRankedParallel` would reorder nothing but is a different driver,
@@ -192,7 +192,7 @@ export function runAsmlift(
       // which map symbols its output references — best.symbolRefs is derived in core from the
       // exact tree the winning source was emitted from (post-DCE value refs only; call targets
       // excluded). A raw-globals winner names nothing ⇒ the honest empty list.
-      winnerVariations: best.label,
+      winnerVariations: best.variations,
       // …and WHAT THE FAN COST, which is the row's own share of what a `bench run` spends. The
       // count is every spelling enumerated (the two refusal lists below are the rest of it); the
       // seconds are this machine's price for that count, cache state included.

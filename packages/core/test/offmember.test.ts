@@ -292,6 +292,6 @@ test('rank offers /offmember on a fold-declaring target', () => {
     '\tbx\tlr\n' +
     '.L2:\n\t.align\t2, 0\n' +
     '.L1:\n\t.word\t0x3003468\n';
-  const labels = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.label);
-  expect(labels.some((l) => hasVariation(l.split('/'), 'offmember'))).toBe(true);
+  const names = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.variations);
+  expect(names.some((v) => hasVariation(v, 'offmember'))).toBe(true);
 });

@@ -104,7 +104,7 @@ describe('F-CFG return-sinking: a ONE-SET-ARM diamond IS sunk', () => {
     expect(scoreC(unranked.source, sym, obj).match).toBe(false); // …but the wrong sense
     const r = decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
     expect(r.winner.score.match).toBe(true);
-    expect(hasVariation(r.winner.label.split('/'), 'flip-branch')).toBe(true);
+    expect(hasVariation(r.winner.variations, 'flip-branch')).toBe(true);
   });
 });
 

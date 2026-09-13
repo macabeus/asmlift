@@ -1,20 +1,22 @@
 // asmlift — the VARIATION REGISTRY: every variation a candidate's name can carry, as data.
 //
-// A candidate is named by the variations it applied, in a fixed order: its signedness first, then
-// its lift, structure and respell variations, then the symbol-map variation. Each `/`-separated
-// part names exactly one variation, e.g. `unsigned/defsite/raw-globals`. A few variations are
-// applied to something the part has to name — `coalesce-v0-v1` merges `v0` into `v1`,
-// `volatile-p1` qualifies `p1` — and that trailing `-…` is the variation's SUBJECT.
+// A candidate is named by the variations it applied, an ordered list: its signedness first, then
+// its lift, structure and respell variations, then the symbol-map variation, e.g.
+// `['unsigned', 'defsite', 'raw-globals']`. Joined with `/` — `unsigned/defsite/raw-globals` — the
+// list is how a name is PRINTED and typed back (`bench fan --show`), and nothing else: the list is
+// the name. A few variations are applied to something the entry has to name — `coalesce-v0-v1`
+// merges `v0` into `v1`, `volatile-p1` qualifies `p1` — and that trailing `-…` is the variation's
+// SUBJECT.
 //
-// WHY A CLOSED TABLE. The parts are minted by string concatenation in `rank.ts` and
-// `rank-variations.ts`, several of them parameterized (`${label}-${c.merged}`, `homesplit-${tag}`,
+// WHY A CLOSED TABLE. The entries are minted as `/`-prefixed suffix strings in `rank.ts` and
+// `rank-variations.ts`, several of them parameterized (`${suffix}-${c.merged}`, `homesplit-${tag}`,
 // `sense-${m}`), so the set of names is open by construction and nothing but this table closes it.
 // Three checks hold the table to the code: a static scan of the mint literals
 // (`packages/core/test/variation-tokens.test.ts`), every name the committed benchmark artifact
 // publishes, and every name the enumerated corpus mints (both in `apps/benchmark/test`).
 //
 // WHY A TEST PREDICATE GOES THROUGH HERE. A predicate written as a substring —
-// `label.includes('/regcopy-ret')` inside `.toEqual([])` — keeps passing after the variation is
+// `name.includes('/regcopy-ret')` inside `.toEqual([])` — keeps passing after the variation is
 // spelled differently, and then asserts nothing. `hasVariation` throws on a name this table does
 // not register, so a stale predicate fails instead. It also compares whole variations, never
 // substrings: `hasVariation(v, 'livebase')` is false on `livebase-block`, so a predicate about a
@@ -82,7 +84,6 @@ export const VARIATION_TOKENS: readonly VariationToken[] = [
   { name: 'inlinebase', variationKind: 'respell' },
   { name: 'scopebase', variationKind: 'respell' },
   { name: 'regionbase', variationKind: 'respell' },
-  { name: 'scopebase-coalesce', variationKind: 'respell', subject: LOCALS },
   { name: 'coalesce', variationKind: 'respell', subject: LOCALS },
   { name: 'indexed', variationKind: 'respell' },
   { name: 'livebase', variationKind: 'respell' },
@@ -90,7 +91,7 @@ export const VARIATION_TOKENS: readonly VariationToken[] = [
   { name: 'basefold', variationKind: 'respell' },
   { name: 'unfolded', variationKind: 'respell' },
   { name: 'orderbase', variationKind: 'respell' },
-  { name: 'scoped', variationKind: 'respell' },
+  { name: 'orderbase-scoped', variationKind: 'respell' },
   { name: 'homesplit', variationKind: 'respell', subject: /[^/,\s]+/ },
   { name: 'mulfirst', variationKind: 'respell' },
   { name: 'nearbase', variationKind: 'respell' },
@@ -175,4 +176,27 @@ export function hasVariations(variations: readonly string[], names: readonly str
     }
   }
   return false;
+}
+
+/** A candidate's variations as ONE string, `/`-joined: how a name is printed, typed back, hashed
+ *  and used as a key. Throws on an empty entry and on an entry that contains `/`, so the join is
+ *  injective — `['a/b']` and `['a', 'b']` can never print, key or hash alike. */
+export function joinVariations(variations: readonly string[]): string {
+  if (variations.length === 0) {
+    throw new Error('a candidate applies at least its signedness variation');
+  }
+  for (const v of variations) {
+    if (v === '' || v.includes('/')) {
+      throw new Error(`'${v}' cannot be one variation: an entry is non-empty and holds no '/'`);
+    }
+  }
+  return variations.join('/');
+}
+
+/** The inverse of `joinVariations`: a printed name (`unsigned/defsite`) back to its variations.
+ *  Throws on an empty entry (`unsigned//defsite`, a leading or trailing `/`). */
+export function splitVariations(name: string): string[] {
+  const variations = name.split('/');
+  joinVariations(variations);
+  return variations;
 }

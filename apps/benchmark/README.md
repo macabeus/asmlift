@@ -193,7 +193,7 @@ pnpm bench fan <sym|id>               # every CANDIDATE the harness ranked for O
                                       #   the winner it published: the `[score]` table, the
                                       #   [dropped]/[withheld] lists, the `[ranked]` line.
                                       #   `--enumerate` lists the fan without compiling anything,
-                                      #   `--show <label>` prints one candidate's C, `--force`
+                                      #   `--show <variations>` prints one candidate's C, `--force`
                                       #   scores a fan over 2,000, `--base <ref>` prints the fan
                                       #   MULTIPLIER against what that artifact recorded for the
                                       #   same row -- and on a declined row, the count that LEFT.

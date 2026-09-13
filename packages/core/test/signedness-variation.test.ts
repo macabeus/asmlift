@@ -17,7 +17,7 @@ import { ARMV4T_AGBCC } from '../src/target';
 /** Lifts taken by the enumeration under test. The DECLINE's entire effect is a lift that never
  *  happens, and it is invisible everywhere downstream: a decline that stopped firing would re-lift,
  *  re-raise, re-structure, reach the tree the first pass already emitted, and be dropped by the tree
- *  skip — same candidates, same labels, same print count. So the guard counts lifts. */
+ *  skip — same candidates, same variations, same print count. So the guard counts lifts. */
 const lifts = vi.hoisted(() => ({ n: 0 }));
 vi.mock('../src/frontend/registry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/frontend/registry')>();
@@ -76,11 +76,11 @@ describe('the signedness variation declines where the pin writes nothing', () =>
   test('…and a scalar entry param keeps both passes', () => {
     // The counterpart, and what keeps the counts above about the PIN rather than only about the
     // tree skip: here the pin writes, the two passes reach two different trees, and both are
-    // spelled. A pin that wrote nothing would collapse this to one tree, one label and one lift.
+    // spelled. A pin that wrote nothing would collapse this to one tree, one candidate and one lift.
     const { backend, emitted } = recordingBackend();
     lifts.n = 0;
     const cands = enumerateCandidates('f', wrap('\tasr\tr0, r0, #2\n'), ARMV4T_AGBCC, { backend });
-    expect(cands.map((c) => c.label)).toEqual(['unsigned', 'signed']);
+    expect(cands.map((c) => c.variations)).toEqual([['unsigned'], ['signed']]);
     expect(emitted.length).toBe(2);
     expect(lifts.n).toBe(3);
   });
@@ -94,7 +94,12 @@ describe('the signedness variation declines where the pin writes nothing', () =>
   test('both symbol-map settings carry both passes', () => {
     const symbols: SymbolMap = new Map([[0x8057acc, [{ name: 'gCounter', kind: 'data' }]]]);
     const cands = enumerateCandidates('f', SCALAR_AND_GLOBAL, ARMV4T_AGBCC, { symbols });
-    expect(cands.map((c) => c.label)).toEqual(['unsigned', 'signed', 'unsigned/raw-globals', 'signed/raw-globals']);
+    expect(cands.map((c) => c.variations)).toEqual([
+      ['unsigned'],
+      ['signed'],
+      ['unsigned', 'raw-globals'],
+      ['signed', 'raw-globals'],
+    ]);
   });
 });
 

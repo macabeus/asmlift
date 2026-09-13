@@ -45,7 +45,7 @@ describe('the mover’s OWN minted local is judged', () => {
   });
 
   test('no `/nearbase` spelling reaches the fan', () => {
-    expect(cands.filter((c) => hasVariation(c.label.split('/'), 'nearbase'))).toEqual([]);
+    expect(cands.filter((c) => hasVariation(c.variations, 'nearbase'))).toEqual([]);
   });
 
   test('…and every one is REPORTED under a label naming it', () => {

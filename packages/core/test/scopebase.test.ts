@@ -9,6 +9,8 @@
 // differ-refereed, so its risk is spelling quality — except for the placement, where a base local
 // the assignment does not reach is a different variable and the differ REWARDS it.
 // test/regionbase.test.ts carries the second region rule.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { assertHoistsDominate, assertLocalsWritten, assertPlacementSurvives } from '../src/contracts';
@@ -18,7 +20,9 @@ import { without } from '../src/l3/gates';
 import { pollGuards } from '../src/l3/pollguard';
 import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { hasVariation, hasVariations } from '../src/variation-tokens';
 
 // `g` stands for an ARRAY-shaped global. `SFn.globals` entries carry a POINTER IrType because that
 // is the type of the decayed base, not because the symbol is a pointer global — a pointer-shaped
@@ -372,6 +376,54 @@ describe('what the cluster rule actually is', () => {
     const s = out!.body[0] as Extract<Stmt, { k: 'if' }>;
     expect(hoists(s.then)).toEqual(['p0']);
     expect(hoists(s.else)).toEqual([]); // arbitrary by first appearance, not principled
+  });
+});
+
+describe('the coalesced results of the hoist are named by both variations it applied', () => {
+  // `corpus/agbcc-scopecoalesce.s` is agbcc's output for
+  //   extern unsigned short gBgTilemapBufs[4][1024];
+  //   void scopecoalesce(int flag, int t){ unsigned int i;
+  //     if (flag != 0) { unsigned short *p = gBgTilemapBufs[0]; p[0x252] = t; p[0x272] = t + 1; p[0x292] = t + 2; }
+  //     for (i = 0; i < *(unsigned short *)0x03001048; i++){ *(unsigned char *)(i + 0x03002000) = *(unsigned char *)(i + 0x03003000); }
+  //     for (i = *(unsigned short *)0x03001048; i < (unsigned int)(16 << t); i++){ *(unsigned char *)(i + 0x03002000) = 0; } }
+  // — `synthetic:sbscope`'s guarded tilemap stores beside `synthetic:ucmp`'s two counter loops, so the
+  // hoist fires on a tree that also has locals to merge. No benchmark row mints this pair, so this is
+  // the one place its name is enumerated at all. The map is `sbscope`'s: the rank-aware `gSym[0][i]`
+  // spelling is the base this pass can see and basecse cannot.
+  const MAP: SymbolMap = new Map([
+    [
+      0x03000900,
+      [
+        {
+          name: 'gBgTilemapBufs',
+          kind: 'data' as const,
+          declared: true,
+          shape: 'array' as const,
+          elemSize: 2,
+          elemSigned: false,
+          size: 8192,
+          dims: [4, 1024],
+        },
+      ],
+    ],
+  ]);
+  const fan = enumerateCandidates(
+    'scopecoalesce',
+    readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-scopecoalesce.s'), 'utf8'),
+    ARMV4T_AGBCC,
+    { prototypes: { scopecoalesce: { returnsVoid: true } }, symbols: MAP },
+  ).map((c) => c.variations);
+
+  test('`/scopebase` followed by a coalesce, as two variations', () => {
+    expect(fan).toContainEqual(['unsigned', 'scopebase']);
+    expect(fan).toContainEqual(['unsigned', 'scopebase', 'coalesce-v0-v1']);
+    expect(fan.filter((v) => hasVariations(v, ['scopebase', 'coalesce'])).length).toBeGreaterThan(0);
+  });
+
+  test('every coalesce on a scoped tree comes directly after its hoist', () => {
+    const scoped = fan.filter((v) => hasVariation(v, 'scopebase') && hasVariation(v, 'coalesce'));
+    expect(scoped.length).toBeGreaterThan(0);
+    expect(scoped.filter((v) => !hasVariations(v, ['scopebase', 'coalesce']))).toEqual([]);
   });
 });
 

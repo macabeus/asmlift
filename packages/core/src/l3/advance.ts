@@ -68,7 +68,7 @@
 //
 // WHAT THIS PASS DOES NOT DO, both measured rather than assumed:
 //   • A function with TWO disjoint chains gets one candidate, spelling the FIRST BY POSITION — not
-//     the longest, and the second chain is unreachable by any label. ZERO of the 112 chain-bearing
+//     the longest, and the second chain is unreachable by any variation. ZERO of the 112 chain-bearing
 //     calls above held a second chain sharing no address with the first (the instrument kept
 //     scanning), so the second local this would need has no inhabitant to price it.
 //   • The init is `prepend`ed and there is no sunk twin; see the note at `placeBaseLocals` below.
@@ -365,7 +365,7 @@ export function advancedBases(sfn: SFn, gates: AdvanceGates = {}): SFn | null {
   // `localMentions` counts ONE assignment to its local ("or the move would cross the other write",
   // l3/hoist.ts), and an advance IS a second assignment to this one — so the sink declines on every
   // tree this pass produces, by construction rather than by row: the sink returns null on the
-  // advanced tree, and registering `/advance/sinkinit` adds no label to
+  // advanced tree, and registering `/advance/sinkinit` adds no candidate to
   // `kleod:StreamCmd_SetWindowRegs:agbcc`'s fan. The `prepend` decision above is therefore the only
   // placement this variation HAS, which is a stronger reason to record the compile behind it.
   const { body: placed } = placeBaseLocals({ ...sfn, locals, body }, [init], 'prepend');

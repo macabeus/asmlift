@@ -16,9 +16,12 @@ import { type ParamType, type Prototypes, declaredWidth, prototypesFromSymbols }
 import { enumerateCandidates } from '../src/rank';
 import { type SymbolMap, type SymbolTypeFacts } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
+import { joinVariations } from '../src/variation-tokens';
 
 const sources = (asm: string, prototypes: Prototypes): string[] =>
-  enumerateCandidates('f', asm, ARMV4T_AGBCC, { prototypes }).map((c) => `${c.label}\n${c.source}`);
+  enumerateCandidates('f', asm, ARMV4T_AGBCC, { prototypes }).map(
+    (c) => `${joinVariations(c.variations)}\n${c.source}`,
+  );
 
 /** The pointee spellings a DWARF thread would produce, against the `void *` it produces today and
  *  the bare COUNT that carries no type at all. Every candidate set below is asserted equal across

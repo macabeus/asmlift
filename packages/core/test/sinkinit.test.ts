@@ -11,7 +11,7 @@ import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
-import { hasVariation } from '../src/variation-tokens';
+import { hasVariation, joinVariations } from '../src/variation-tokens';
 import { c } from './helpers';
 
 const U8P = T.ptr(T.int(8, false));
@@ -141,7 +141,7 @@ describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)
 });
 
 // The `/sinkinit` SUFFIX has two producers in `rank.ts` — `/livebase*/sinkinit` composes a second
-// pass on top of a head hoist, `/basefold/sinkinit` is one hoist placed at first use — and a label
+// pass on top of a head hoist, `/basefold/sinkinit` is one hoist placed at first use — and a name
 // read out of a `[score]` log or an artifact row does not say which. They must therefore be the
 // SAME TRANSFORM, or one suffix names two things in the namespace cross-round attribution greps.
 describe('composition and argument are one transform: sink(head(x)) === firstUse(x)', () => {
@@ -312,19 +312,20 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
     ARMV4T_AGBCC,
     { prototypes: { mixpoll: { returnsVoid: true } } },
   );
-  const labels = fan.map((x) => x.label);
-  const sourceOf = (label: string): string | undefined => fan.find((c) => c.label === label)?.source;
+  const names = fan.map((x) => x.variations);
+  const sourceOf = (label: string): string | undefined =>
+    fan.find((c) => joinVariations(c.variations) === label)?.source;
 
   test('the joint spelling reaches the differ, over the whole admission roster', () => {
-    expect(labels).toContain('signed/livebase/sinkinit');
-    // PINNED AS A PROGRAM, because a label is not an attribution (see the `seen` dedup in rank.ts).
+    expect(names).toContainEqual(['signed', 'livebase', 'sinkinit']);
+    // PINNED AS A PROGRAM, because a candidate's variations are not an attribution (see the `seen` dedup in rank.ts).
     // WHICH route emits the sunk narrow program is exactly what `seen` decides, and it moves under
     // roster edits that change no program at all: on this fixture `/unfolded` binds the same
     // register file `/livebase-block` does, its roster row runs before the `/livebase ×` product
-    // loops, and it places at first use — so it takes the label today, and ablating that row leaves
-    // the same 60 distinct sources with the same sunk program relabelled
-    // `signed/livebase-block/volatile/sinkinit`. A label-keyed assertion goes red there for a
-    // program that never moved. A substring one (`some label contains livebase-block`) fails the
+    // loops, and it places at first use — so it names the candidate today, and ablating that row leaves
+    // the same 60 distinct sources with the same sunk program renamed
+    // `signed/livebase-block/volatile/sinkinit`. A name-keyed assertion goes red there for a
+    // program that never moved. A substring one (`some name contains livebase-block`) fails the
     // other way: the twelve HEAD-placed narrow candidates satisfy it with the sunk spelling gone
     // entirely.
     //
@@ -355,11 +356,8 @@ describe('the /livebase pairing is WIRED into enumeration', () => {
 
   test('and it is reachable no other way: the plain variation finds nothing to sink here', () => {
     expect(
-      labels.filter(
-        (l) =>
-          hasVariation(l.split('/'), 'sinkinit') &&
-          !hasVariation(l.split('/'), 'livebase') &&
-          !hasVariation(l.split('/'), 'livebase-block'),
+      names.filter(
+        (v) => hasVariation(v, 'sinkinit') && !hasVariation(v, 'livebase') && !hasVariation(v, 'livebase-block'),
       ),
     ).toEqual([]);
   });

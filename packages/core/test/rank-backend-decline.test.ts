@@ -41,15 +41,15 @@ const refusing = (refuse: RegExp): LanguageBackend => ({
 
 test('a tree the backend refuses drops its candidates and keeps the others', () => {
   const seen: string[] = [];
-  const all = enumerateCandidates('f', ASM, ARMV4T_AGBCC).map((c) => c.label);
+  const all = enumerateCandidates('f', ASM, ARMV4T_AGBCC).map((c) => c.variations);
   const kept = enumerateCandidates('f', ASM, ARMV4T_AGBCC, {
     backend: refusing(/\(s32\)/),
     onEnumerationError: (label, error) => seen.push(`${label}: ${error}`),
-  }).map((c) => c.label);
+  }).map((c) => c.variations);
   // the pin fires only under `unsigned`, so exactly the signed candidates survive
-  expect(all).toContain('unsigned');
+  expect(all).toContainEqual(['unsigned']);
   expect(kept.length).toBeGreaterThan(0);
-  expect(kept.every((l) => !hasVariation(l.split('/'), 'unsigned'))).toBe(true);
+  expect(kept.every((v) => !hasVariation(v, 'unsigned'))).toBe(true);
   // and the refusal is REPORTED, never swallowed — the same channel a dropped re-spelling uses
   expect(seen.some((s) => s.includes('refusing backend'))).toBe(true);
 });
@@ -94,7 +94,7 @@ test('every candidate failing to score throws the class, carrying both refusal l
   expect(thrown).toBeInstanceOf(NoScorableCandidateError);
   const e = thrown as NoScorableCandidateError;
   expect(e.message.startsWith("no scorable candidate for 'f': ")).toBe(true);
-  expect(e.dropped.map((d) => d.label)).toEqual(candidates.map((c) => c.label));
+  expect(e.dropped.map((d) => d.variations)).toEqual(candidates.map((c) => c.variations));
   expect(e.withheld).toEqual([]);
 });
 
@@ -113,7 +113,7 @@ test('an entirely withheld fan throws the same class, with the withheld list on 
   expect(thrown).toBeInstanceOf(NoScorableCandidateError);
   const e = thrown as NoScorableCandidateError;
   expect(e.dropped).toEqual([]);
-  expect(e.withheld.map((w) => w.label)).toEqual(candidates.map((c) => c.label));
+  expect(e.withheld.map((w) => w.variations)).toEqual(candidates.map((c) => c.variations));
   expect(e.message).toContain('2 candidate(s) withheld, none scored');
 });
 
@@ -127,7 +127,7 @@ test('an entirely withheld fan throws the same class, with the withheld list on 
 // throws over the corpus. `onEnumerationError` has exactly one caller — packages/cli/src/main.ts — and
 // the benchmark reaches `decompileRanked` (apps/benchmark/src/eval/asmlift.ts) without supplying
 // one, so a `pnpm bench run` cannot print the line at all. Its absence over the whole corpus is
-// evidence about the WIRING, not about the variations, which leaves nothing but this test pinning the label.
+// evidence about the WIRING, not about the variations, which leaves nothing but this test pinning the reported name.
 test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, not the default source', () => {
   // `if (c) { *A = 1; } else { *B = 2; }` as agbcc cross-jumps it: both arms leave an ADDRESS and a
   // VALUE in registers and the merged store follows the join — the shape `/unmerge` rewrites.
@@ -150,14 +150,14 @@ test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, 
     '\t.word\t0x03002000',
   ].join('\n');
 
-  const plain = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.label);
-  const unmerged = plain.filter((l) => hasVariation(l.split('/'), 'unmerge'));
+  const plain = enumerateCandidates('f', asm, ARMV4T_AGBCC).map((c) => c.variations);
+  const unmerged = plain.filter((v) => hasVariation(v, 'unmerge'));
   expect(unmerged.length).toBeGreaterThan(0); // the fixture really reaches the pre-respell variation
 
   // a backend that emits normally but refuses exactly the trees the pre-respell variation produced
   const refused = new Set(
     enumerateCandidates('f', asm, ARMV4T_AGBCC)
-      .filter((c) => hasVariation(c.label.split('/'), 'unmerge'))
+      .filter((c) => hasVariation(c.variations, 'unmerge'))
       .map((c) => c.source),
   );
   const seen: string[] = [];
@@ -173,9 +173,9 @@ test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, 
       },
     },
     onEnumerationError: (label) => seen.push(label),
-  }).map((c) => c.label);
+  }).map((c) => c.variations);
 
-  expect(kept.some((l) => hasVariation(l.split('/'), 'unmerge'))).toBe(false); // the half really was deleted
+  expect(kept.some((v) => hasVariation(v, 'unmerge'))).toBe(false); // the half really was deleted
   expect(seen.length).toBeGreaterThan(0);
   expect(seen.every((l) => hasVariation(l.split('/').slice(1), 'unmerge'))).toBe(true); // …and every report names it
 });
@@ -225,12 +225,12 @@ test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-res
 
   const all = enumerateCandidates('f', asm, ARMV4T_AGBCC);
   // the fixture really reaches a VARIATION's candidate built on the pre-respell tree
-  const deeper = all.filter((c) => hasVariation(c.label.split('/').slice(0, -1), 'unmerge'));
+  const deeper = all.filter((c) => hasVariation(c.variations.slice(0, -1), 'unmerge'));
   expect(deeper.length).toBeGreaterThan(0);
   // …and the pre-respell tree's own default source is NOT among what we refuse, so `respellTree` gets
   // past the early return and into the re-spellings
   const refused = new Set(deeper.map((c) => c.source));
-  expect(all.some((c) => hasVariation(c.label.split('/').slice(-1), 'unmerge') && !refused.has(c.source))).toBe(true);
+  expect(all.some((c) => hasVariation(c.variations.slice(-1), 'unmerge') && !refused.has(c.source))).toBe(true);
 
   const seen: string[] = [];
   const kept = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
@@ -245,9 +245,9 @@ test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-res
       },
     },
     onEnumerationError: (label) => seen.push(label),
-  }).map((c) => c.label);
+  }).map((c) => c.variations);
 
-  expect(kept.some((l) => hasVariation(l.split('/').slice(0, -1), 'unmerge'))).toBe(false); // the variations' candidates really died
+  expect(kept.some((v) => hasVariation(v.slice(0, -1), 'unmerge'))).toBe(false); // the variations' candidates really died
   expect(seen.length).toBeGreaterThan(0);
   // every report names the pre-fan spelling it was fanning, ahead of the variation that failed
   expect(seen.every((l) => hasVariation(l.split('/').slice(1, -1), 'unmerge'))).toBe(true);

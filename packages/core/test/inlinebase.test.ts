@@ -15,6 +15,7 @@ import { hoistScopedBases } from '../src/l3/scopebase';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { type Candidate, compareScored, enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
+import { joinVariations } from '../src/variation-tokens';
 
 const PTR = T.ptr(T.u(16));
 const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
@@ -160,7 +161,7 @@ test('a local fed a bare `0` is NULL, not an address', () => {
 
 // rank.ts's `/inlinebase/volatile` output narrows the qualifier variation to the locals this one
 // deletes, so the two gates have to agree about what an address is — a local either variation admits
-// alone would put an unqualified access under a label that says every one is qualified.
+// alone would put an unqualified access under a variation that says every one is qualified.
 test('every local the qualified output inlines is one the qualifier reached', () => {
   const s = fn([{ name: 'p', type: PTR }], twoUses());
   const only = new Set(inlinableConstBases(s));
@@ -317,34 +318,37 @@ const ereaderCandidates = (): ReturnType<typeof enumerateCandidates> =>
   });
 
 test('the default keeps the pointer local — the pool load is a fact, the name is not', () => {
-  const plain = ereaderCandidates().find((c) => c.label === 'unsigned')!;
+  const plain = ereaderCandidates().find((c) => joinVariations(c.variations) === 'unsigned')!;
   expect(plain.source).toContain('u16 * v0;');
   expect(plain.source).toContain('v0 = (u16 *)67109384;');
 });
 
 test('/inlinebase spells the constant at each access and drops the local', () => {
-  const c = ereaderCandidates().find((x) => x.label === 'unsigned/inlinebase')!;
+  const c = ereaderCandidates().find((x) => joinVariations(x.variations) === 'unsigned/inlinebase')!;
   expect(c.source).not.toContain('v0');
   expect(c.source).toContain('*(u16 *)67109384 = 0;');
 });
 
 test('the /inlinebase × /vol-slot pair spells both, and neither variation reaches it alone', () => {
-  const labels = ereaderCandidates().map((c) => c.label);
-  expect(labels).toContain('unsigned/inlinebase');
-  expect(labels).toContain('unsigned/vol-slot');
-  const pair = ereaderCandidates().find((c) => c.label === 'unsigned/inlinebase/vol-slot')!;
+  const names = ereaderCandidates().map((c) => c.variations);
+  expect(names).toContainEqual(['unsigned', 'inlinebase']);
+  expect(names).toContainEqual(['unsigned', 'vol-slot']);
+  const pair = ereaderCandidates().find((c) => joinVariations(c.variations) === 'unsigned/inlinebase/vol-slot')!;
   expect(pair.source).toContain('volatile u16 sp0;');
   expect(pair.source).toContain('*(u16 *)67109384 = sp0;');
   expect(pair.source).not.toContain('v0');
 });
 
 test('the qualified output is enumerated alongside the plain candidate', () => {
-  const labels = ereaderCandidates().map((c) => c.label);
-  for (const q of ['unsigned/inlinebase/volatile', 'unsigned/inlinebase/volatile/vol-slot']) {
-    expect(labels).toContain(q);
-    expect(labels).toContain(q.replace('/volatile', ''));
+  const names = ereaderCandidates().map((c) => c.variations);
+  for (const q of [
+    ['unsigned', 'inlinebase', 'volatile'],
+    ['unsigned', 'inlinebase', 'volatile', 'vol-slot'],
+  ]) {
+    expect(names).toContainEqual(q);
+    expect(names).toContainEqual(q.filter((v) => v !== 'volatile'));
   }
-  const q = ereaderCandidates().find((c) => c.label === 'unsigned/inlinebase/volatile/vol-slot')!;
+  const q = ereaderCandidates().find((c) => joinVariations(c.variations) === 'unsigned/inlinebase/volatile/vol-slot')!;
   expect(q.source).toContain('*(volatile u16 *)67109384 = sp0;');
   expect(q.source).toContain('volatile u16 sp0;');
 });
@@ -354,7 +358,7 @@ test('the qualified output is enumerated alongside the plain candidate', () => {
 // inside the target's device window, which is what admits the preference at all.
 test('at an exact tie the qualified spelling wins, from either enumeration order', () => {
   const cands = ereaderCandidates();
-  const pick = (label: string) => cands.find((c) => c.label === label)!;
+  const pick = (label: string) => cands.find((c) => joinVariations(c.variations) === label)!;
   const q = pick('unsigned/inlinebase/volatile/vol-slot');
   const plain = pick('unsigned/inlinebase/vol-slot');
   expect(q.deviceVolatile).toBeGreaterThan(0);
@@ -377,10 +381,10 @@ test('the same spelling over an IWRAM address earns no preference', () => {
       RestoreSerialTimer3IntrHandlers: VOID0,
     },
   });
-  const q = cands.find((c) => c.label === 'unsigned/inlinebase/volatile/vol-slot')!;
+  const q = cands.find((c) => joinVariations(c.variations) === 'unsigned/inlinebase/volatile/vol-slot')!;
   expect(q.source).toContain('*(volatile u16 *)50355396');
   expect(q.deviceVolatile).toBeUndefined();
-  const plain = cands.find((c) => c.label === 'unsigned/inlinebase/vol-slot')!;
+  const plain = cands.find((c) => joinVariations(c.variations) === 'unsigned/inlinebase/vol-slot')!;
   const scored = (c: Candidate, order: number) => ({ ...c, score: { score: 0 }, order });
   expect(compareScored(scored(q, 1), scored(plain, 0))).toBeGreaterThan(0);
 });

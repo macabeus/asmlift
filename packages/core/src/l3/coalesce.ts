@@ -217,7 +217,7 @@ export interface MergePair {
  *  `const-fed` is what keeps three of them (ablate it and the span path offers 273). A rule
  *  refusing every in-loop local would make that bound redundant; this one does not, so any further
  *  relaxation of `const-fed` is a multiplier, and two call sites pay it (`/coalesce` and
- *  `/scopebase-coalesce`; the `/livebase` pairings enumerate the ARM path and pay
+ *  `/scopebase/coalesce`; the `/livebase` pairings enumerate the ARM path and pay
  *  ARM_DISJOINT_GATES' `arm-init` instead). */
 export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   {
@@ -378,7 +378,7 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
 
 /** The arm-disjoint merges alone — the class the livebase pairings enumerate (rank.ts): the
  *  demanding row's shared counter is arm-disjoint, and the span-model merges already ride the
- *  plain /coalesce label, so pairing them too would multiply candidates with no row behind it. */
+ *  plain /coalesce variation, so pairing them too would multiply candidates with no row behind it. */
 export function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
   return armDisjointUnder(ARM_DISJOINT_GATES, sfn).candidates;
 }

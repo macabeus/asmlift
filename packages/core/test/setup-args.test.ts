@@ -30,7 +30,7 @@ describe('a guessed argument that survived from an earlier block', () => {
     const cs = cands(GUARDED_CALL, POOL);
     expect(cs.some((c) => c.source.includes('bar(v0)'))).toBe(true);
     expect(cs.some((c) => /bar\(\)/.test(c.source))).toBe(true);
-    expect(cs.some((c) => hasVariation(c.label.split('/'), 'setup-args'))).toBe(true);
+    expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(true);
   });
 
   test('…and inert where the block set up a LATER argument register for the call', () => {
@@ -39,14 +39,14 @@ describe('a guessed argument that survived from an earlier block', () => {
     // asserting the instruction two above the `bl` is dead code.
     const cs = cands('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n');
     expect(cs.every((c) => c.source.includes('__addsf3(__mulsf3(), '))).toBe(true);
-    expect(cs.some((c) => hasVariation(c.label.split('/'), 'setup-args'))).toBe(false);
+    expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(false);
   });
 
   test('the variation is inert where the calling block set every argument up itself', () => {
     // Nothing to disagree about: `mov r0,#1` is this block's own setup, so both readings are 1.
     const body = '\tmov\tr0, #1\n\tbl\tbar\n';
     expect(cands(body).every((c) => c.source.includes('bar(1)'))).toBe(true);
-    expect(cands(body).some((c) => hasVariation(c.label.split('/'), 'setup-args'))).toBe(false);
+    expect(cands(body).some((c) => hasVariation(c.variations, 'setup-args'))).toBe(false);
     // …and the lift records nothing, so the variation does not re-lift at all. Asserted on the gate and
     // not on the candidate list: the enumeration dedups by SOURCE, so an identical narrowing would
     // vanish there whether or not anything ran.
@@ -59,17 +59,15 @@ describe('a guessed argument that survived from an earlier block', () => {
     // structure variation then reads, so the structure variations have to run under it.
     // `kleod:ReadKeyInput` (retired 2026-09-13) matched on `/setup-args/derived-home`, a combination
     // of this variation and a structure variation run beneath it.
-    const labels = cands(GUARDED_CALL, POOL).map((c) => c.label);
-    expect(labels).toContain('unsigned/setup-args');
+    const names = cands(GUARDED_CALL, POOL).map((c) => c.variations);
+    expect(names).toContainEqual(['unsigned', 'setup-args']);
     expect(
-      labels.filter(
-        (l) => hasVariations(l.split('/').slice(0, 2), ['unsigned', 'setup-args']) && l.split('/').length > 2,
-      ).length,
+      names.filter((v) => hasVariations(v.slice(0, 2), ['unsigned', 'setup-args']) && v.length > 2).length,
     ).toBeGreaterThan(0);
     // both kinds of ranked variation run under the narrowing — a respell of the tree
     // (`/livebase`, and its own `/volatile` output) and a structure variation (`/flip-join`)
-    expect(labels).toContain('unsigned/setup-args/livebase');
-    expect(labels).toContain('unsigned/setup-args/flip-join');
+    expect(names).toContainEqual(['unsigned', 'setup-args', 'livebase']);
+    expect(names).toContainEqual(['unsigned', 'setup-args', 'flip-join']);
   });
 
   test('a DECLARED arity is not the variation’s to narrow', () => {
@@ -79,6 +77,6 @@ describe('a guessed argument that survived from an earlier block', () => {
       prototypes: { ...P, bar: { params: 1 } },
     });
     expect(cs.every((c) => c.source.includes('bar(v0)'))).toBe(true);
-    expect(cs.some((c) => hasVariation(c.label.split('/'), 'setup-args'))).toBe(false);
+    expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(false);
   });
 });

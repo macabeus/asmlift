@@ -45,7 +45,7 @@ describe('a def-moving pass composed onto a placing variation is judged', () => 
       ['nearbase', 'sinkinit'],
       ['nearbase', 'volatile', 'sinkinit'],
     ];
-    expect(cands.filter((c) => composed.some((run) => hasVariations(c.label.split('/'), run)))).toEqual([]);
+    expect(cands.filter((c) => composed.some((run) => hasVariations(c.variations, run)))).toEqual([]);
   });
 
   test('…and it is REPORTED, with the composed label naming it', () => {
@@ -60,8 +60,8 @@ describe('a def-moving pass composed onto a placing variation is judged', () => 
     expect(
       cands.some(
         (c) =>
-          hasVariation(c.label.split('/').slice(-1), 'sinkinit') &&
-          !['livebase', 'livebase-block', 'nearbase'].some((n) => hasVariation(c.label.split('/'), n)),
+          hasVariation(c.variations.slice(-1), 'sinkinit') &&
+          !['livebase', 'livebase-block', 'nearbase'].some((n) => hasVariation(c.variations, n)),
       ),
     ).toBe(true);
   });

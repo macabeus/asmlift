@@ -88,6 +88,7 @@ import {
 import { hasDivergentSharedRet } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, arrayInnerExtents, isPtrField, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
+import { splitVariations } from './variation-tokens';
 
 /** The shared-tail variations' suffixes (see their loop in `enumerateCandidates`): the follow alone,
  *  on the fn as raised, and the follow after the store-tail sink. */
@@ -170,7 +171,9 @@ export interface EnumerateOptions {
  *  def-site anchoring × bitfield spelling × symbol map, plus the respell variations) —
  *  emitted to source. */
 export interface Candidate {
-  label: string;
+  /** the variations this candidate applied, in enumeration order — signedness first. This list IS
+   *  the candidate's name; `joinVariations` prints it. */
+  variations: readonly string[];
   source: string;
   /** Which PREFERENCE this spelling carries — the symbol-map setting's index (0 = the map's own
    *  named spellings, 1 = their `/raw-globals` siblings). Enumeration emits the settings in
@@ -225,7 +228,7 @@ export interface Scored<S> extends Candidate {
  *  scoring harness that shows only the surviving sibling reports a clean win over a hidden
  *  failure. */
 export interface DroppedCandidate {
-  label: string;
+  variations: readonly string[];
   /** the scorer's first error line (a compiler diagnostic, usually) */
   error: string;
 }
@@ -235,7 +238,7 @@ export interface DroppedCandidate {
  *  compiled fine and simply did not earn publication is a different fact, and folding the two
  *  would make the `[dropped]` line report compile failures that never happened. */
 export interface WithheldCandidate {
-  label: string;
+  variations: readonly string[];
   score: number;
   /** the denominator that score was measured against — objdiff's row count for THIS candidate's
    *  alignment, so it moves with the spelling. Present whenever the injected scorer supplies one
@@ -1224,7 +1227,7 @@ export function enumerateCandidates(
         respell(`${suffix}-${c.merged}`, () => c.sfn);
       }
     };
-    respellEach('/scopebase-coalesce', () => hoistScopedBases(sfn));
+    respellEach('/scopebase/coalesce', () => hoistScopedBases(sfn));
     respellEach('/coalesce', () => sfn);
     // `/volatile`'s per-local SUBSETS: which pointers the source declared volatile is
     // per-pointer knowledge (an MMIO block and a plain RAM table sit side by side, and
@@ -2051,14 +2054,14 @@ export function enumerateCandidates(
               // look the same from here; only the emitted SOURCE tells them apart (`bench diff`
               // publishes that field, `bench regression` does not).
               //
-              // So "N rows win under this family" bounds nothing: a family can win zero labels and
+              // So "N rows win under this family" bounds nothing: a family can win zero winners and
               // still be the only route to a source, and a family can win five and have introduced
               // three. Price a family by ABLATING it and re-running the rows
               // (LIVEBASE_BLOCK_GATES carries the recipe); a zero census is not a death certificate,
               // and a nonzero one is not a mechanism.
               // THE SEAM FIX IS BOOKED AND NOT BUILT: keep the losing routes on the surviving
-              // candidate (`label` plus an `alsoReachedBy: string[]`) and a census by mechanism
-              // becomes one. It is not free — every consumer that reads `label` as the derivation
+              // candidate (`variations` plus an `alsoReachedBy`) and a census by mechanism
+              // becomes one. It is not free — every consumer that reads `variations` as the derivation
               // would have to say which it means, and the published `winnerVariations` must not
               // change — so build it when a round needs the census, not before. Until then the only
               // sound census is an ablation.
@@ -2074,7 +2077,9 @@ export function enumerateCandidates(
                 continue;
               }
               const made: Candidate = {
-                label: `${cand.label}${vsuffix}${s.suffix}${sp.suffix}${symbolSetting.suffix}`,
+                variations: splitVariations(
+                  `${cand.variation}${vsuffix}${s.suffix}${sp.suffix}${symbolSetting.suffix}`,
+                ),
                 source,
                 preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
@@ -2122,7 +2127,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
       const why = withheldReason(c, score);
       if (why !== null) {
         withheld.push({
-          label: c.label,
+          variations: c.variations,
           score: score.score,
           ...(score.rows === undefined ? {} : { rows: score.rows }),
           why,
@@ -2132,7 +2137,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
       results.push({ ...c, order, score });
     } catch (e) {
       lastScoreErr = e;
-      dropped.push({ label: c.label, error: firstLine(e) });
+      dropped.push({ variations: c.variations, error: firstLine(e) });
     }
   });
   if (results.length === 0) {

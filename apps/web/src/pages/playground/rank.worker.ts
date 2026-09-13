@@ -5,6 +5,7 @@
 // is enforced by the MAIN thread against the echoed `reqId` — the worker just processes each
 // request and echoes its id back.
 import { NoScorableCandidateError } from '@asmlift/core/rank';
+import { joinVariations } from '@asmlift/core/variation-tokens';
 
 import { throttleProgress, whileCurrent } from './rank-progress';
 import {
@@ -71,16 +72,16 @@ self.onmessage = async (e: MessageEvent<RankInbound>) => {
   }
 };
 
-/** The counts and a first few labels off a total refusal, appended to the message because the
+/** The counts and the first few refused candidates' variations off a total refusal, appended to the message because the
  *  message is all the worker protocol carries. Empty for every other error. */
 function refusalSummary(err: Error): string {
   if (!(err instanceof NoScorableCandidateError)) {
     return '';
   }
-  const labels = [...err.dropped.map((d) => d.label), ...err.withheld.map((w) => w.label)];
-  const shown = labels.slice(0, 3).join(', ');
+  const names = [...err.dropped, ...err.withheld].map((c) => joinVariations(c.variations));
+  const shown = names.slice(0, 3).join(', ');
   return (
     ` (${err.dropped.length} dropped, ${err.withheld.length} withheld` +
-    `${shown === '' ? '' : `: ${shown}${labels.length > 3 ? `, +${labels.length - 3} more` : ''}`})`
+    `${shown === '' ? '' : `: ${shown}${names.length > 3 ? `, +${names.length - 3} more` : ''}`})`
   );
 }

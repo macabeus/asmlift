@@ -48,7 +48,7 @@ The final captured counts exactly equal each CLI fan count. Every captured funct
 rescored through `packages/cli/src/objdiff.ts:137` (`scoreObjects`); minima equal the canonical
 CLI results stamped `asmlift source a56952a`.
 
-| Row      | Captured candidates | Best score | CLI best label                                  |
+| Row      | Captured candidates | Best score | CLI winner's variations                         |
 | -------- | ------------------: | ---------: | ----------------------------------------------- |
 | ereread  |                   4 |         11 | unsigned                                        |
 | ereadctl |                  72 |          2 | unsigned/fresh-merge/initfirst                  |
@@ -58,7 +58,7 @@ CLI results stamped `asmlift source a56952a`.
 The minima were analyzed as compiled objects with `rowdiff.mjs` and `residual.py`. Each row has
 exactly **one distinct object SHA-256 among all minimum-score captures**. The retained candidate
 assembly reassembles with the exact harness flags (`arm-none-eabi-as -mthumb -mthumb-interwork`)
-to that same SHA-256, so the analyzed object is the CLI winning object even when several labels
+to that same SHA-256, so the analyzed object is the CLI winning object even when several candidates
 tie. Each retained preprocessed candidate was also recompiled with the real compiler and exact
 benchmark flags; all four assembly files reproduced byte-for-byte. CLI stdout is not substituted
 for these compiled units.
@@ -104,7 +104,7 @@ the ordered base stopped winning once the subscript is inside a loop — **has s
 and the answer was not reach.** The licence reached the loop arm all along; the hoist had only one
 position to offer, the function head, and above the `if` the init is not instruction-identical to
 the target while inside the guard it is. The gap was `HoistPlacement`, which could not leave the
-top-level statement list. `/orderbase/scoped` closes the row (#159), so `ereadctl` MATCHes today.
+top-level statement list. `/orderbase-scoped` closes the row (#159), so `ereadctl` MATCHes today.
 
 None of that carries to LoadBGTilemapData: the `/livebase` roster note in `rank.ts`'s
 `enumerateCandidates` records the licence measured **empty on every lift setting of both symbol-map

@@ -6,9 +6,6 @@
 // set of lines where the same spelling means something else — an ECharts axis, a Tailwind variant,
 // an external file's name — and never the enumeration sense.
 //
-// MODE. `record` counts every surviving line per rule and writes the counts to
-// `.local/retired-words.json`, failing nothing. `enforce` fails on any surviving line.
-//
 // THE RULES MATCH WHOLE WORDS, and two of them are written against a near-miss on purpose:
 //   - `variant` retires and `variation` is the vocabulary's own word, so the rule is
 //     `\bvariants?\b`; a stem such as `variant\w*` would flag every renamed line.
@@ -16,13 +13,11 @@
 //     display labels, HTML and chart labels), so no rule matches the bare word: only the
 //     candidate-name identifiers and phrases are listed.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { REPO_ROOT } from '../src/config';
-
-const MODE = 'record' as 'record' | 'enforce';
 
 interface Allow {
   path: RegExp;
@@ -64,7 +59,21 @@ const RULES: Rule[] = [
   {
     id: 'variant',
     pattern: /\bvariants?\b/i,
-    allow: [{ path: /^apps\/web\/src\/index\.css$/, line: /motion-safe:/, why: 'a Tailwind variant' }],
+    allow: [
+      { path: /^apps\/web\/src\/index\.css$/, line: /motion-safe:/, why: 'a Tailwind variant' },
+      { path: /^packages\/core\/test\/determinism\.test\.ts$/, line: /alpha-variant/, why: 'a lambda-calculus term' },
+      {
+        path: /^packages\/core\/test\/thumb-pad-directives\.test\.ts$/,
+        line: /a case variant/,
+        why: 'a letter-case spelling of a directive',
+      },
+      { path: /^apps\/benchmark\/dataset\/synthetic\.ts$/, line: /main-variant type/, why: "gcc's own term" },
+      {
+        path: /^scripts\/(?:lbg-declarations\/generate\.py|regen-[a-z-]+-probes\.ts)$/,
+        line: /\bvariants\b|\bVARIANTS\b/,
+        why: "a study's set of hand-written source spellings",
+      },
+    ],
   },
   {
     id: 'candidate-name identifiers',
@@ -82,7 +91,7 @@ const RULES: Rule[] = [
   {
     id: 'enumeration identifiers',
     pattern:
-      /\b(?:STRUCTURING_AXES|StructuringAxis|probeGate|variantGate|SHAPE_PRODUCTS|SHAPE_SUBSETS|applyShapes|PRE_FAN_PRODUCTS|(?:LIVEBASE|BASEFOLD|UNFOLDED|ORDERBASE)_ADMISSIONS|BaseAdmission|SIGN_CANDS|LeverResult|composeLevers|onLeverError|onAxisGated|fanExitCode|rowKey|SPELLING_DEFAULTS|fanOut|FanResult|leverLabel|REGCOPY_LABEL|droppedPrimary|AxisCand|axisCands|axisFlagsOff|isBaseAxisPoint|bitfieldCands|ptrElemCands|declRankCands|svCands|variantCands|variantOff|symbolVariants|liftVariants|connectiveVariants|probeDefs|probeShapes|probeTreeOwned|ARMS|armsFor|Armed)\b/,
+      /\b(?:STRUCTURING_AXES|StructuringAxis|probeGate|variantGate|SHAPE_PRODUCTS|SHAPE_SUBSETS|applyShapes|PRE_FAN_PRODUCTS|(?:LIVEBASE|BASEFOLD|UNFOLDED|ORDERBASE)_ADMISSIONS|BaseAdmission|SIGN_CANDS|LeverResult|composeLevers|onLeverError|onAxisGated|fanExitCode|rowKey|SPELLING_DEFAULTS|fanOut|FanResult|leverLabel|REGCOPY_LABEL|droppedPrimary|AxisCand|axisCands|axisFlagsOff|isBaseAxisPoint|bitfieldCands|ptrElemCands|declRankCands|svCands|variantCands|variantOff|symbolVariants|liftVariants|connectiveVariants|probeDefs|probeShapes|probeTreeOwned|armsFor|Armed)\b/,
   },
   {
     id: 'enumeration phrases',
@@ -179,17 +188,9 @@ describe('the rules themselves', () => {
   });
 });
 
-describe(`retired words (${MODE} mode)`, () => {
-  test('surviving lines per rule', () => {
+describe('retired words', () => {
+  test('no tracked line spells one outside its allow list', () => {
     const found = survivors(RULES, trackedTextFiles());
-    if (MODE === 'enforce') {
-      expect(found.map((s) => `${s.file}:${s.line} [${s.rule}] ${s.text}`)).toEqual([]);
-      return;
-    }
-    const counts = Object.fromEntries(RULES.map((r) => [r.id, found.filter((s) => s.rule === r.id).length]));
-    const dir = join(REPO_ROOT, '.local');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'retired-words.json'), `${JSON.stringify({ counts, survivors: found }, null, 1)}\n`);
-    expect(Object.keys(counts)).toEqual(RULES.map((r) => r.id));
+    expect(found.map((s) => `${s.file}:${s.line} [${s.rule}] ${s.text}`)).toEqual([]);
   });
 });

@@ -144,13 +144,16 @@ describe('the three fan hashes', () => {
   );
 
   const fan = [
-    { label: 'unsigned', source: 'a;' },
-    { label: 'unsigned/defsite', source: 'b;' },
-    { label: 'signed', source: 'c;' },
+    { variations: ['unsigned'], source: 'a;' },
+    { variations: ['unsigned', 'defsite'], source: 'b;' },
+    { variations: ['signed'], source: 'c;' },
   ];
+  const joined = (c: { variations: string[] }): string => c.variations.join('/');
 
   it('a renamed variation moves the name hash and the pair hash, never the source hash', () => {
-    const renamed = fan.map((c) => (c.label === 'unsigned/defsite' ? { ...c, label: 'unsigned/anchored' } : c));
+    const renamed = fan.map((c) =>
+      joined(c) === 'unsigned/defsite' ? { ...c, variations: ['unsigned', 'anchored'] } : c,
+    );
     const [was, now] = [fanDigests(fan), fanDigests(renamed)];
     expect(now.fanSourceHash).toBe(was.fanSourceHash);
     expect(now.fanVariationsHash).not.toBe(was.fanVariationsHash);
@@ -159,7 +162,7 @@ describe('the three fan hashes', () => {
   });
 
   it('a changed source moves the source hash and the pair hash, never the name hash', () => {
-    const respelled = fan.map((c) => (c.label === 'signed' ? { ...c, source: 'd;' } : c));
+    const respelled = fan.map((c) => (joined(c) === 'signed' ? { ...c, source: 'd;' } : c));
     const [was, now] = [fanDigests(fan), fanDigests(respelled)];
     expect(now.fanSourceHash).not.toBe(was.fanSourceHash);
     expect(now.fanVariationsHash).toBe(was.fanVariationsHash);
@@ -172,6 +175,16 @@ describe('the three fan hashes', () => {
     expect(now.fanSourceHash).not.toBe(was.fanSourceHash);
     expect(now.fanVariationsHash).not.toBe(was.fanVariationsHash);
     expect(now.fanHash).not.toBe(was.fanHash);
+  });
+
+  it('a tree whose candidates carry the name `/`-joined hashes exactly like one that carries the list', () => {
+    // Both sides of `--base` run through this driver, each with its own tree's `Candidate` shape.
+    expect(fanDigests(fan.map((c) => ({ label: joined(c), source: c.source })))).toEqual(fanDigests(fan));
+  });
+
+  it('the name is hashed through its `/` join, so a list and its JSON text never hash alike', () => {
+    const asJson = fan.map((c) => ({ label: JSON.stringify(c.variations), source: c.source }));
+    expect(fanDigests(asJson).fanVariationsHash).not.toBe(fanDigests(fan).fanVariationsHash);
   });
 
   it('every fan record carries all three hashes, over an empty fan too', () => {

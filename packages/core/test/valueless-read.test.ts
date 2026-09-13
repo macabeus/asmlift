@@ -268,9 +268,7 @@ test('the `/volatile` candidate carries the read through a qualified pointer loc
     '\tbx\tlr\n' +
     pool('0x040000D4');
   const cands = enumerateCandidates('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } });
-  const vol = cands.filter(
-    (c) => hasVariation(c.label.split('/'), 'volatile') && !hasVariation(c.label.split('/'), 'vol-store'),
-  );
+  const vol = cands.filter((c) => hasVariation(c.variations, 'volatile') && !hasVariation(c.variations, 'vol-store'));
   expect(vol.length).toBeGreaterThan(0);
   for (const c of vol) {
     expect(c.source).toMatch(/volatile s32 \* p0;/);

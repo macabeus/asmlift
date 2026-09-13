@@ -27,7 +27,7 @@ import { enumerateCandidates } from '../src/rank';
 import { edgeCopyOrdersDiffer } from '../src/structure/structure';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
-import { hasVariation } from '../src/variation-tokens';
+import { hasVariation, joinVariations } from '../src/variation-tokens';
 
 const GCD = readFileSync(join(import.meta.dirname, 'corpus/agbcc-gcd.s'), 'utf8');
 // No CFG edge carries two copies at all, so the two orders cannot differ.
@@ -44,8 +44,8 @@ const HALF = [
 
 test('the variation offers the def-position spelling beside the record-ordered one', () => {
   const cands = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {});
-  const base = cands.find((c) => c.label === 'signed');
-  const sibling = cands.find((c) => c.label === 'signed/copy-defpos');
+  const base = cands.find((c) => joinVariations(c.variations) === 'signed');
+  const sibling = cands.find((c) => joinVariations(c.variations) === 'signed/copy-defpos');
   expect(base).toBeDefined();
   expect(sibling).toBeDefined();
   // The LOOP is a cyclic copy set, and agbcc's own `add r4, r0, #0` — the loop's first instruction
@@ -61,11 +61,11 @@ test('the variation offers the def-position spelling beside the record-ordered o
 });
 
 test('…and it is a real pairing: every candidate gets the sibling, never just the default', () => {
-  const labels = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {}).map((c) => c.label);
-  const withVariation = labels.filter((l) => hasVariation(l.split('/').slice(-1), 'copy-defpos'));
+  const names = enumerateCandidates('gcd', GCD, ARMV4T_AGBCC, {}).map((c) => c.variations);
+  const withVariation = names.filter((v) => hasVariation(v.slice(-1), 'copy-defpos'));
   expect(withVariation.length).toBeGreaterThan(0);
-  for (const l of withVariation) {
-    expect(labels).toContain(l.slice(0, -'/copy-defpos'.length));
+  for (const v of withVariation) {
+    expect(names).toContainEqual(v.slice(0, -1));
   }
 });
 
@@ -73,7 +73,7 @@ test('the gate withholds the sibling where the two orders cannot differ', () => 
   const fn = frontendFor(ARMV4T_AGBCC).lift('half', HALF, ARMV4T_AGBCC, {}, undefined, undefined);
   expect(edgeCopyOrdersDiffer(fn)).toBe(false);
   expect(
-    enumerateCandidates('half', HALF, ARMV4T_AGBCC, {}).some((c) => hasVariation(c.label.split('/'), 'copy-defpos')),
+    enumerateCandidates('half', HALF, ARMV4T_AGBCC, {}).some((c) => hasVariation(c.variations, 'copy-defpos')),
   ).toBe(false);
 });
 

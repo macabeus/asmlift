@@ -20,7 +20,7 @@
 //
 // COVERAGE: the roster (rank.ts) is SEVEN rows over FIVE gate tables — two PAIRS share a table and
 // differ only in placement, `/basefold` with `/basefold/sinkinit` and `/orderbase` with
-// `/orderbase/scoped` — and it is a set of hand-picked SUBSETS rather than a narrowness ranking;
+// `/orderbase-scoped` — and it is a set of hand-picked SUBSETS rather than a narrowness ranking;
 // only `/livebase` ⊇ `/livebase-block` are ordered by inclusion. A table
 // whose predicate cuts across the others therefore carves out a PARTIAL answer, which is what
 // `UNFOLDED_GATES` does. Measured at ONE stated scope, `decompile()`'s default structuring,
@@ -149,8 +149,8 @@ const keyOf = (base: HoistableBase, width: number, signed: boolean): string => `
 /** The key's own grammar, read back — `<leafId>[ <type>] <width> <signed>`.
  *
  *  IT LIVES BESIDE `keyOf` BECAUSE THAT IS THE ONLY THING THAT MAKES IT SAFE. The key is a string
- *  and its readers are elsewhere — `l3/homesplit.ts` builds a candidate LABEL out of it, and a
- *  label is a candidate's identity — so a second file knowing this grammar is a collision waiting
+ *  and its readers are elsewhere — `l3/homesplit.ts` builds a candidate's VARIATION out of it, and a
+ *  candidate's variations are its identity — so a second file knowing this grammar is a collision waiting
  *  for the next base kind (`homeSplitTag` states the one the cast form causes).
  *
  *  The one space inside a cast's base id is this grammar's own separator, not the type's: every
@@ -493,9 +493,9 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  running process reports ZEROES rather than crashing, which reads exactly like "the rule never
  *  fires"; if you use it, hash the tree either side of the window and quote both hashes.
  *
- *  A CENSUS OVER WINNING LABELS CANNOT STAND IN FOR THAT — "only a row whose winner carries
+ *  A CENSUS OVER WINNERS' VARIATIONS CANNOT STAND IN FOR THAT — "only a row whose winner carries
  *  `/livebase-block` can move" is unsound for the reason rank.ts's `seen` dedup spells out. This
- *  table's own winning-label census reads 5 rows and read 7 before `/unfolded` shipped, and the
+ *  table's own census over winners' variations reads 5 rows and read 7 before `/unfolded` shipped, and the
  *  two that left differ: `synthetic:foldpark` by RENAME (byte-identical source, MATCH either
  *  side), `synthetic:unfoldpark` because its winning SPELLING changed, 402 bytes at diff:9 to 397
  *  at MATCH.

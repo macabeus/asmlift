@@ -30,10 +30,10 @@ const row = (id: string): Case => ({ id }) as Case;
  *  `[ranked]` line carries that are claims rather than counts. */
 const NO_DECLS = { synthesized: [], stamp: 'asmlift source deadbee' };
 
-const cand = (label: string, score: number, rows: number, match = false): RankedCandidate =>
+const cand = (name: string, score: number, rows: number, match = false): RankedCandidate =>
   ({
-    label,
-    source: `/* ${label} */`,
+    variations: name.split('/'),
+    source: `/* ${name} */`,
     preference: 0,
     score: { symbol: 'f', score, rows, match, matching: rows - score, breakdown: {} },
   }) as unknown as RankedCandidate;
@@ -114,12 +114,12 @@ describe('renderFan', () => {
     const out = renderFan(
       ranked({
         dropped: [
-          { label: 'd1', error: 'error: x undeclared\nmore' },
-          { label: 'd2', error: 'error: y undeclared' },
+          { variations: ['d1'], error: 'error: x undeclared\nmore' },
+          { variations: ['d2'], error: 'error: y undeclared' },
         ],
         withheld: [
-          { label: 'w1', score: 2, why: 'needs a byte-exact proof' },
-          { label: 'w2', score: 5, why: 'needs a byte-exact proof' },
+          { variations: ['w1'], score: 2, why: 'needs a byte-exact proof' },
+          { variations: ['w2'], score: 5, why: 'needs a byte-exact proof' },
         ],
       }),
       NO_DECLS,
@@ -134,18 +134,21 @@ describe('renderFan', () => {
 });
 
 describe('pickCandidate', () => {
-  const cands = [cand('a', 0, 12, true), cand('b', 3, 12)];
+  const cands = [cand('a', 0, 12, true), cand('b', 3, 12), cand('b/c', 5, 12)];
 
-  it('finds a candidate by its exact label — the whole `--show` feature', () => {
+  it('finds a candidate by its exact variations — the whole `--show` feature', () => {
     expect(pickCandidate(cands, 'b')?.source).toBe('/* b */');
+    expect(pickCandidate(cands, 'b/c')?.source).toBe('/* b/c */');
+    // a longer name listed first is not the one asked for
+    expect(pickCandidate([cand('b/c', 5, 12), cand('b', 3, 12)], 'b')?.source).toBe('/* b */');
   });
 
-  it('names the winner `winner`, so the published row can be quoted without knowing its label', () => {
-    expect(pickCandidate(cands, 'winner')?.label).toBe('a');
+  it('names the winner `winner`, so the published row can be quoted without knowing its variations', () => {
+    expect(pickCandidate(cands, 'winner')?.variations).toEqual(['a']);
   });
 
   // A typo'd name and a variation that produced no candidate at all are the same silence otherwise.
-  it('returns undefined for a label nothing carries, so the caller can say so', () => {
+  it('returns undefined for variations nothing carries, so the caller can say so', () => {
     expect(pickCandidate(cands, 'nope')).toBeUndefined();
   });
 });
@@ -206,7 +209,7 @@ describe('the [ranked] line', () => {
 // block), a synthetic row has nothing but the block.
 describe('synthesizedRefs', () => {
   const withRefs = {
-    label: 'a',
+    variations: ['a'],
     symbolRefs: [
       { name: 'gA', synthesized: true },
       { name: 'gB', synthesized: false },
@@ -230,8 +233,15 @@ describe('optionRefusal', () => {
     expect(optionRefusal({ enumerateOnly: true, show: 'winner' })).toContain('no winner to name');
   });
 
-  it('allows --show <label> under --enumerate — an enumerated candidate carries its source', () => {
+  it('allows --show <variations> under --enumerate — an enumerated candidate carries its source', () => {
     expect(optionRefusal({ enumerateOnly: true, show: 'unsigned' })).toBeUndefined();
+    expect(optionRefusal({ enumerateOnly: true, show: 'unsigned/defsite' })).toBeUndefined();
+  });
+
+  it('refuses --show that names no variations, before any work', () => {
+    for (const show of ['unsigned//defsite', '/unsigned', 'unsigned/']) {
+      expect(optionRefusal({ show })).toContain('names no candidate');
+    }
   });
 
   it('allows --show winner on the scored path, which is sorted best-first', () => {
@@ -400,21 +410,25 @@ describe('estimatedScoreTime', () => {
 describe('unshowable', () => {
   const ranked = {
     candidates: [],
-    dropped: [{ label: 'raw-globals', error: 'gFoo undeclared' }],
-    withheld: [{ label: 'unreduce', score: 2, why: 'needs a byte-exact proof' }],
+    dropped: [{ variations: ['unsigned', 'raw-globals'], error: 'gFoo undeclared' }],
+    withheld: [{ variations: ['unsigned', 'unreduce'], score: 2, why: 'needs a byte-exact proof' }],
   } as unknown as RankedResult;
 
-  it('says a label was DROPPED, and names the flag that can still print its source', () => {
-    const msg = unshowable('raw-globals', ranked);
+  it('says a candidate was DROPPED, and names the flag that can still print its source', () => {
+    const msg = unshowable('unsigned/raw-globals', ranked);
     expect(msg).toContain('was dropped');
-    expect(msg).toContain('--enumerate --show raw-globals');
+    expect(msg).toContain('--enumerate --show unsigned/raw-globals');
   });
 
-  it('says a label was WITHHELD — it scored, so `no such candidate` would be a lie', () => {
-    expect(unshowable('unreduce', ranked)).toContain('was withheld');
+  it('says a candidate was WITHHELD — it scored, so `no such candidate` would be a lie', () => {
+    expect(unshowable('unsigned/unreduce', ranked)).toContain('was withheld');
   });
 
-  it('falls back to the fan listing for a label nothing carries', () => {
+  it('matches whole variations, never a part of a name', () => {
+    expect(unshowable('raw-globals', ranked)).toContain('no candidate with variations');
+  });
+
+  it('falls back to the fan listing for variations nothing carries', () => {
     expect(unshowable('nope', ranked)).toContain('see the [score] lines above');
   });
 
@@ -432,8 +446,8 @@ describe('unshowable', () => {
 // the published row's noncompile outcome means" under zero `[dropped]` lines. Both briefs tell a
 // round to pass `--force`.
 describe('noFanReport', () => {
-  const dropped = [{ label: 'unsigned', error: 'agbcc failed: c.c:12' }];
-  const withheld = [{ label: 'unreduce', score: 2, why: 'needs a byte-exact proof' }];
+  const dropped = [{ variations: ['unsigned'], error: 'agbcc failed: c.c:12' }];
+  const withheld = [{ variations: ['unsigned', 'unreduce'], score: 2, why: 'needs a byte-exact proof' }];
 
   it('reads NOTHING SCORED off the error class, and prints the drop list that rides on it', () => {
     const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, []);
@@ -487,7 +501,7 @@ describe('noFanReport', () => {
 
   // `--show` was silently dropped here — on a `noncompile` row, i.e. the one row class where
   // EVERY candidate is unshowable and the advice earns its keep.
-  it('answers --show instead of ignoring it, and names --enumerate for a dropped label', () => {
+  it('answers --show instead of ignoring it, and names --enumerate for a dropped candidate', () => {
     const e = new NoScorableCandidateError("no scorable candidate for 'f': agbcc failed", dropped, []);
     expect(noFanReport('sa3:f:agbcc', e, 'unsigned').notes.join('\n')).toContain('--enumerate --show unsigned');
   });

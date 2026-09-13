@@ -90,9 +90,9 @@ test.each([
         !hasVariation(reported(l), 'shared-tail'),
     ),
   ).toBe(true);
-  const alternative = cands.filter((c) => hasVariation(c.label.split('/'), suffix.slice(1)));
+  const alternative = cands.filter((c) => hasVariation(c.variations, suffix.slice(1)));
   expect(alternative.length).toBeGreaterThan(0);
-  expect(alternative.filter((c) => hasVariation(c.label.split('/'), 'defsite'))).toEqual([]);
+  expect(alternative.filter((c) => hasVariation(c.variations, 'defsite'))).toEqual([]);
 });
 
 test('a setting the `/shared-ret` alternative drops still ships in the `/shared-tail` alternative', () => {
@@ -103,9 +103,9 @@ test('a setting the `/shared-ret` alternative drops still ships in the `/shared-
     ),
   ).toBe(true);
   expect(
-    cands.filter((c) => hasVariation(c.label.split('/'), 'shared-ret') && hasVariation(c.label.split('/'), 'defsite')),
+    cands.filter((c) => hasVariation(c.variations, 'shared-ret') && hasVariation(c.variations, 'defsite')),
   ).toEqual([]);
-  expect(
-    cands.some((c) => hasVariation(c.label.split('/'), 'shared-tail') && hasVariation(c.label.split('/'), 'defsite')),
-  ).toBe(true);
+  expect(cands.some((c) => hasVariation(c.variations, 'shared-tail') && hasVariation(c.variations, 'defsite'))).toBe(
+    true,
+  );
 });

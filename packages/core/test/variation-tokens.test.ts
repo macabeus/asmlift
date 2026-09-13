@@ -13,7 +13,9 @@ import {
   VARIATION_TOKENS,
   hasVariation,
   hasVariations,
+  joinVariations,
   parseVariation,
+  splitVariations,
   variationToken,
 } from '../src/variation-tokens';
 
@@ -39,7 +41,7 @@ describe('the registry is well-formed', () => {
 
   test('the signedness variations are exactly the ones enumeration pins', () => {
     const signedness = VARIATION_TOKENS.filter((t) => t.variationKind === 'signedness').map((t) => t.name);
-    expect(signedness).toEqual(SIGNEDNESS.map((s) => s.label));
+    expect(signedness).toEqual(SIGNEDNESS.map((s) => s.variation));
   });
 
   // `rank.ts` strips one structure variation out of a structure suffix with a substring `replace`,
@@ -57,7 +59,6 @@ describe('the registry is well-formed', () => {
     const cases: [string, string, string | undefined][] = [
       ['coalesce-v0-v1', 'coalesce', 'v0-v1'],
       ['coalesce-v1-v0', 'coalesce', 'v1-v0'],
-      ['scopebase-coalesce-v2-v4', 'scopebase-coalesce', 'v2-v4'],
       ['volatile', 'volatile', undefined],
       ['volatile-p1', 'volatile', 'p1'],
       ['volatile-p0-p1-p2', 'volatile', 'p0-p1-p2'],
@@ -68,6 +69,7 @@ describe('the registry is well-formed', () => {
       ['homesplit-gFoo<u8*>.1u', 'homesplit', 'gFoo<u8*>.1u'],
       ['sense-3', 'sense', '3'],
       ['livebase-block', 'livebase-block', undefined],
+      ['orderbase-scoped', 'orderbase-scoped', undefined],
       ['vol-slot', 'vol-slot', undefined],
       ['site-sense', 'site-sense', undefined],
     ];
@@ -84,6 +86,8 @@ describe('the registry is well-formed', () => {
       'sense-a',
       'regcopy-fresh',
       'livebase-p1',
+      'scoped',
+      'scopebase-coalesce-v2-v4',
       'nosuch',
       '',
     ]) {
@@ -136,11 +140,35 @@ describe('hasVariation / hasVariations compare whole variations and refuse unreg
   });
 });
 
+// A name is printed, typed back, hashed and used as a key through its `/` join, so the join has to
+// be injective: two different lists must never print alike.
+describe('the `/` join names exactly one list of variations', () => {
+  test('a list joins to its printed name and splits back to itself', () => {
+    expect(joinVariations(['unsigned', 'defsite', 'raw-globals'])).toBe('unsigned/defsite/raw-globals');
+    expect(splitVariations('unsigned/defsite/raw-globals')).toEqual(['unsigned', 'defsite', 'raw-globals']);
+    expect(splitVariations(joinVariations(['signed']))).toEqual(['signed']);
+  });
+
+  test('an entry holding `/` cannot be joined, so `["a/b"]` and `["a", "b"]` never share a name', () => {
+    expect(joinVariations(['a', 'b'])).toBe('a/b');
+    expect(() => joinVariations(['a/b'])).toThrow(/cannot be one variation/);
+    expect(() => joinVariations(['unsigned', 'orderbase/scoped'])).toThrow(/cannot be one variation/);
+  });
+
+  test('an empty entry or an empty list is refused both ways', () => {
+    expect(() => joinVariations([])).toThrow();
+    expect(() => joinVariations(['unsigned', ''])).toThrow(/cannot be one variation/);
+    for (const name of ['', 'unsigned//defsite', '/unsigned', 'unsigned/']) {
+      expect(() => splitVariations(name)).toThrow(/cannot be one variation/);
+    }
+  });
+});
+
 // CLOSURE, POINT 1 OF 3: the mint literals. Every `/`-separated segment a string literal in the two
 // enumeration files spells must be a registered variation, and every registered variation must be
 // spelled by one — so a `respell('/foo', …)` added without a registry entry fails here, in the suite
 // CI runs, and so does an entry for a variation nothing mints any more. A parameterized subject
-// (`/sense-${m}`, `/homesplit-${tag}`, `${label}-${c.merged}`) contributes its registered prefix.
+// (`/sense-${m}`, `/homesplit-${tag}`, `${suffix}-${c.merged}`) contributes its registered prefix.
 // Blind spot, stated: a mint with no literal segment at all; the enumerated-corpus check sees it.
 describe('closure over the mint literals of rank.ts and rank-variations.ts', () => {
   const src = ['rank.ts', 'rank-variations.ts']
@@ -161,7 +189,7 @@ describe('closure over the mint literals of rank.ts and rank-variations.ts', () 
   ].sort();
 
   test('the scan sees the whole mint set (non-empty floor)', () => {
-    expect(segments.length).toBeGreaterThanOrEqual(57);
+    expect(segments.length).toBeGreaterThanOrEqual(56);
   });
 
   test('every minted segment is a registered variation', () => {
@@ -177,7 +205,7 @@ describe('closure over the mint literals of rank.ts and rank-variations.ts', () 
   });
 
   test('every registered variation is minted', () => {
-    const minted = new Set([...segments.map((s) => parseVariation(s).name), ...SIGNEDNESS.map((s) => s.label)]);
+    const minted = new Set([...segments.map((s) => parseVariation(s).name), ...SIGNEDNESS.map((s) => s.variation)]);
     expect(names.filter((n) => !minted.has(n))).toEqual([]);
   });
 });

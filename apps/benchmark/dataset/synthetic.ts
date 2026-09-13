@@ -43,7 +43,7 @@ export interface SynthSpec {
    *  manifest (`src/cases/real.ts`). Synthetic rows carry none by default and that is not a
    *  neutral default: `/no-bitfield`, `/no-ptr-elem` and `/raw-globals` are enumerated only when
    *  the map answers, so a map-less tier is structurally incapable of exercising them and their
-   *  zero winning labels measure the CORPUS rather than the capability. A row that sets this
+   *  zero winners carrying a variation measure the CORPUS rather than the capability. A row that sets this
    *  hand-writes the same `SymbolInfo` shape the ELF provider emits.
    *
    *  SETTING THIS ALSO FEEDS m2c. The map reaches asmlift alone, so a row that set it and stopped
@@ -1375,7 +1375,7 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int ifand_near(int,int,int*,int*);',
     note:
       "at this distance the fold lands on the source's own `&&`, so asmlift matches at the " +
-      'default joined sense with no axis. m2c prints the same orientation, and its output is ' +
+      'default joined sense with no variation. m2c prints the same orientation, and its output is ' +
       'byte-exact once the `->unkN` pointer spelling it declines on is legalised — so the ' +
       'noncompile beside this row is an unrelated defect of its own, not distance from a match',
   },
@@ -1409,8 +1409,8 @@ export const SYNTHETIC: SynthSpec[] = [
       'stamped sites, all MIPS rows where no ±256-byte range exists and none is a sense site ' +
       '(packages/core/test/site-sense.test.ts pins the cell). Like `ifand_far` its SCORE referees ' +
       'nothing: it MATCHes on `/flip-join` whichever way the fold spelled the site. Nor does ' +
-      'the FAN carry the axis here: measured, the row enumerates 4 candidates and no ' +
-      '`/site-sense` at all, because at one site the axis re-spells what `/flip-join` already ' +
+      'the FAN carry the variation here: measured, the row enumerates 4 candidates and no ' +
+      '`/site-sense` at all, because at one site the variation re-spells what `/flip-join` already ' +
       'spelled and the tree dedup drops the duplicate. A named row the fan never enumerates is ' +
       'worth saying out loud',
   },
@@ -1874,7 +1874,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // ONE base expression gets `str [rN, #imm]`).
   // `bg_area` groups three fields of one struct element and MATCHes on all four toolchains; the
   // operand order of the commutative multiply (the target loads .w then .h) is what `/mulfirst`
-  // referees, and it is the winning label on ido7.1. `bg_mix` adds a FIXED element of the same
+  // referees, and it is the winner's variation on ido7.1. `bg_mix` adds a FIXED element of the same
   // array: the target derives `[2].h` from the same base register (`add #0x38`), where a per-cell
   // spelling anchors a second absolute base and splits the object in two — recovered on
   // agbcc/gcc2.7.2kmc/mwcc_242_81, still 1 on ido7.1. `clamp_inplace` is a one-sided overwrite
@@ -1882,7 +1882,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // register, a callee-save push, and flips the branch polarity. `hipress` parks one byte across a
   // loop hot enough to fill r0-r7, so the target homes it in a call-saved HI register touched only
   // by `mov` (gcc's alternate-class allocation; hi regs cost 4 vs 2 to move but beat an 8-cost
-  // SImode reload) — `/parkfirst` is what reproduces that home and it is the winning label on
+  // SImode reload) — `/parkfirst` is what reproduces that home and it is the winner's variation on
   // agbcc; gcc2.7.2kmc is still 29 and ido7.1 declines in the frontend on `beql`.
   //
   // The placement question is universal (MIPS %hi/%lo anchoring, PPC @ha/@l pairs, all four
@@ -1890,13 +1890,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // shape free, the row is a control there rather than coverage.
   //
   // WHAT THESE ROWS DO NOT PIN, recorded here because no synthetic row can. `dma_wait:agbcc`
-  // MATCHes with candidate label `unsigned/livebase/volatile`, so the volatile-base capability
+  // MATCHes with the candidate `unsigned/livebase/volatile`, so the volatile-base capability
   // exists and that row pins it. What is NOT pinned is that the same capability is EXCLUDED once
   // the device base is spelled as a NAMED symbol rather than a numeric address. Measured on
   // LoadBGTilemapData in the kleod checkout with the project's symbol map on: of the 66,816 ranked candidates
   // 14,592 spell globals by name and 52,224 by raw address; 18,432 of the raw ones carry a
-  // `/volatile*` label and ZERO of the named ones do — counted both from the run's `[score]`
-  // labels and from the 66,816 captured candidate `.c` files, 18,432 of which declare a volatile
+  // `/volatile*` variation and ZERO of the named ones do — counted both from the run's `[score]`
+  // lines and from the 66,816 captured candidate `.c` files, 18,432 of which declare a volatile
   // pointer local, none in the named basin. Instrumented rather than read: `l3/volatileptr.ts`'s
   // eligibility prints `verdict=NOT-numericFed` for every pointer local there, and the FIRST veto
   // is `numericFed` — `rematerializableAddress` (l3/ast.ts) reaches its `default: ok = false` arm
@@ -3077,7 +3077,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // and not re-run since, the same command reported
   // `40320 candidate(s) scored, 0 dropped, best unsigned/flip-branch/defsite/merge-names/
   // addr-home/uns-cmp/livebase-block/volatile/coalesce-v17-v10/initfirst/raw-globals: 395`. What
-  // transfers between runs is the SHAPE of the edit, never the label.
+  // transfers between runs is the SHAPE of the edit, never the winner's variations.
   // The construct is cheap to carry when everything else is already wrong and a hard blocker once
   // it is not, which is why both directions are quoted rather than either alone.
   //
@@ -3297,7 +3297,7 @@ export const SYNTHETIC: SynthSpec[] = [
 
   // A DECLARED EXTERN ARRAY SUBSCRIPTED INSIDE A LOOP. `ereadctl` is the conjunction —
   // `extern struct Bg gReadBgs[];` reached as `gReadBgs[k].dst[i]` under a loop — and it MATCHes
-  // on `unsigned/fresh-merge/orderbase/scoped/initfirst`. `ername` keeps the loop and drops the
+  // on `unsigned/fresh-merge/orderbase-scoped/initfirst`. `ername` keeps the loop and drops the
   // array shape, reaching a named symbol through `&gReadBgsObj`; `erflat` keeps the array shape
   // and drops the loop; both MATCH too. The conjunction cost two points when this family was
   // authored and costs nothing now, so these three rows are MATCH controls and the family's open
@@ -3654,8 +3654,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // THE `/volatile` SUBSET CAP IS NOT A SECOND BLOCKER — measured, because it looks like one.
   // `volatileSubsetCandidates` (l3/volatileptr.ts) returns `[]` outside `2 <= eligible <= 3`, and
-  // this row has four eligible locals, so no `/volatile-<name>` label exists here. Raising the cap
-  // to 8 makes eleven subset labels appear and leaves the row at 11 — every one of them still
+  // this row has four eligible locals, so no `/volatile-<name>` variation exists here. Raising the cap
+  // to 8 makes eleven subset variations appear and leaves the row at 11 — every one of them still
   // binds all four bases, and even the subsets that qualify exactly the DMA base score 11. Subset
   // VOLATILITY on an all-or-nothing HOIST buys nothing. Do not spend a round on the cap.
   //
@@ -3680,8 +3680,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // NOT on rank.ts's roster, and what it would cost is measured rather than guessed: one gate table
   // with the complementary predicate plus one row there (a gate can only reject MORE, so it is
   // never an extra entry in LIVEBASE_BLOCK_GATES), and with it in the list the corpus enumerates
-  // 8141 candidates against 7405 while not one row changes outcome, score or winning
-  // label. It goes on the roster when a row asks for it.
+  // 8141 candidates against 7405 while not one row changes outcome, score or winner's
+  // variations. It goes on the roster when a row asks for it.
   //
   // `onepoll` is the control — byte-identical C with the three IWRAM statements deleted. One base,
   // no selectivity question, and `/livebase/volatile` MATCHes it. So the pair brackets the gap
@@ -3712,7 +3712,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //   with     26880 candidate(s) scored, 0 dropped, best …/addr-home/livebase-block/volatile/
   //            initfirst/raw-globals: 406
   //
-  // 419 → 406, attributed twice over: the with-gate log's best candidate carrying no `-block` label
+  // 419 → 406, attributed twice over: the with-gate log's best candidate carrying no `-block` variation
   // reads 419 exactly, which is what the without-gate log's winner scores. The 9728 extra
   // candidates are what fanning every `/livebase` product over both admissions costs on a function
   // that inhabits them, and 5120 of them are the `/coalesce` pairing — worth 21 points on
@@ -3779,7 +3779,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // `signguard` is the control, and it differs by ONE token: `s32 i` for `u32 i`. Nothing else in
   // the C changes, the halving keeps its `(u32)` cast so it stays an `lsr` on both, and asmlift
-  // MATCHes it with `/initfirst` in the label. So the pair brackets the gap exactly: the guard
+  // MATCHes it with `/initfirst` among its variations. So the pair brackets the gap exactly: the guard
   // re-spelling works, and it is the unsignedness that removes it.
   //
   // A SECOND blocker sits at the same precondition and has NO row: `/expr-home` can land its hoist
@@ -4411,8 +4411,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //   `compareScored` settles it on `lineCount`, the member spelling has one line fewer, and the
   //   published winner is `unsigned/offmember`. Deleting the sunk admission would leave this row
   //   MATCH. `basecell` is the same story at the head position (`/offmember` 0 ties `/basefold` 0
-  //   and wins the tie-break), which is why NEITHER old row puts a `basefold` token in a winning
-  //   label and why a census over winning labels reads the family as dead. A TIE IS NOT A
+  //   and wins the tie-break), which is why NEITHER old row puts `basefold` among a winner's
+  //   variations and why a census over winners' variations reads the family as dead. A TIE IS NOT A
   //   SUBSUMPTION: `foldhead` below is the same evidence answered where the two spellings are 0 and
   //   11, and there `/offmember` is not a tie but a worse program.
   //
@@ -4735,7 +4735,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // third store un-merge: all 188 `dmascope` candidates write it through a merge temp
   // (`…[2] = v1;`, spelled `p1[2] = v1;` in 136 of them) and 0 write the constant per arm.
   // Both absences are now reachable — `/regionbase` binds one base local per region and `/unmerge`
-  // un-merges the third store, and the two together are the winning label on `dmascope2` (184
+  // un-merges the third store, and the two together are the winner's variations on `dmascope2` (184
   // candidates) and `dmascope` (544).
   //
   // `dmascope1` is the CONTROL and asmlift MATCHes it (`best unsigned/volatile: 0 (match)`, 6
@@ -4766,7 +4766,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // per-region homes for a MASK and loop invariants, one home per arm of an `if`, and `sizebound`
   // (nonmatch 8) is one base's init placed at its own scope while a second base's stays at
   // function top. Both are about WHERE one home goes; this family is about HOW MANY there are.
-  // And NOT what `/livebase-block` names, whose label invites the wrong reading: `rank.ts:468-470`
+  // And NOT what `/livebase-block` names, whose name invites the wrong reading: `rank.ts:468-470`
   // gives `/livebase` and `/livebase-block` the same `placement: 'head'`, and "block" there is the
   // single-cell ELIGIBILITY gate, not a scope (`HoistPlacement = 'head' | 'first-use' | 'scope'`,
   // hoist.ts:215 — the two this pair uses are both function-scope). A winner carrying
@@ -4866,7 +4866,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // as well as `p3/p4/p5` for 0x040000D4) and `/livebase-block` binds both at the head, so the
   // region reading has to become per-BASE first — a third degree of freedom neither variation has.
   // THE PAIRING LANDED AND THE PREDICTION HELD: `dmapoll` is MATCH on
-  // `signed/livebase-block/homesplit-0x40000d4.4s/volatile` (l3/homesplit.ts) — the label names the
+  // `signed/livebase-block/homesplit-0x40000d4.4s/volatile` (l3/homesplit.ts) — the variation names the
   // WITHHELD key, which is the device base — and the commit before it reads
   // diff:11 — the one-sided ablation, run rather than argued. `dmaflat` stays MATCH, which is what
   // the additive posture below buys. Every number in this block that is not marked PREDICTION is a
@@ -4914,7 +4914,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // one gate leaves `LIVEBASE_BLOCK_GATES` binding exactly what `LIVEBASE_GATES` binds, so the
   // admission is refused before `hoistBaseLocals` runs. Watched with the ablation applied, all 52
   // of `/livebase-block`'s admission contexts on `dmapoll` report `shadowed=true` and it emits 0
-  // labels, against 0 shadowed / 24 labels at baseline.
+  // candidates, against 0 shadowed / 24 candidates at baseline.
   //
   // The pair's live gate before the pairing was the `/livebase-block` half, and it was the MATCH
   // FLIP on `dmaflat` (0 -> 10) rather than the single point on `dmapoll`. The `/regionbase` half is inert
@@ -4932,7 +4932,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // placement as an
   // earlier one, and `LIVEBASE_BLOCK_GATES` is `LIVEBASE_GATES` plus a REJECTS-ONLY gate, so
   // wherever `single-cell` rejects nothing the two tables admit the same set and the second is
-  // shadowed. Watched at the two sites rather than read off labels: on `dmascope`/`dmascope2`
+  // shadowed. Watched at the two sites rather than read off candidates' variations: on `dmascope`/`dmascope2`
   // `/livebase-block` BINDS (104 admission contexts each) and is SHADOWED in every one — drop the
   // `/livebase` row from `LIVEBASE_HOISTS` and 136 / 48 candidates carrying it appear, so that is
   // REACH. On `mixpoll`/`onepoll`/`sizebound` `/regionbase` really does emit nothing:
@@ -4968,7 +4968,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // of its 260 candidates there (the roster at `7e78d80c`; the next block's census re-enumerated
   // that fan at 544 at `acd64605`) bind the DMA base three times too — and they ride `/livebase`,
   // not
-  // `/livebase-block`, whose identical census at the same placement makes it the second label on
+  // `/livebase-block`, whose identical census at the same placement makes it the second variation on
   // one program. Of the three bases bound there exactly ONE withhold admits: the region rule splits
   // neither of the others (`homesplit-no-region`). That is why test/regionbase.test.ts asks about
   // the PASS rather than the variations. `synthetic:dmascope2` (MATCH) stays variation-clean: its census
@@ -4980,20 +4980,20 @@ export const SYNTHETIC: SynthSpec[] = [
   // `/livebase-block` the SAME
   // `placement: 'head'`: "block" is an eligibility gate, not a scope.
   //
-  // NO EXISTING ROW COVERS THIS, censused at the SITES rather than off the labels. Building every
+  // NO EXISTING ROW COVERS THIS, censused at the SITES rather than off the candidates' variations. Building every
   // agbcc synthetic row's target and enumerating it, at `7e78d80c` over the 220 the tier then
   // carried (278 today — re-run it rather than reading it): 212 rows enumerate, 8 decline on
   // unrelated
   // links (`uhalf`/`utag` overlapping struct fields, three `preupdate_*` do-while pre-update,
   // `lladd`/`llsub` unmodelled `adc`/`sbc`, `stkarg` stack-as-data) and 0 targets fail to build,
-  // the two failure modes counted apart. Fans carrying BOTH LABELS: 2, these two
+  // the two failure modes counted apart. Fans carrying BOTH VARIATIONS: 2, these two
   // rows. Rows where BOTH ADMISSIONS BIND: 4 — these two plus `dmascope` and `dmascope2`, where
   // `/livebase-block` is shadowed. So no existing row can change outcome when the pairing changes
   // TODAY. PREDICTION: `dmascope`/`dmascope2` are where a product
   // starts enumerating the moment one exists, so re-run them with the pairing and stop reading
   // either as a variation-clean control after; falsified by their fans carrying no candidate with both
   // variations on the commit that ships it. On the `/regionbase` side the census is already a reach
-  // count — no row in the tier holds a `/regionbase` tree whose labels the source dedup eats.
+  // count — no row in the tier holds a `/regionbase` tree whose candidates the source dedup eats.
   //
   // CUT FROM LoadBGTilemapData in the kleod checkout (agbcc), AND `dmapoll` DEMANDS STRICTLY MORE THAN IT DOES.
   // Enumerating all 117760 of that function's candidates: `/regionbase` splits 0x040000D4 into
@@ -5014,7 +5014,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // with no `winnerVariations`, its whole fan failing to build, so it can express no winner. The only
   // other row anywhere in the map-ful census is `kleod:UpdateHUDCounterDisplay`, and it is a
   // `/regionbase`-ONLY inhabitant there (map-less it is in neither set); it MATCHes on
-  // `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`, so its WINNER carries
+  // `unsigned/defsite/flip-join/derived-home/scopebase/coalesce-v2-v4`, so its WINNER carries
   // `/scopebase` and not `/regionbase` even though its fan holds one. Neither closes the hole. The
   // PRE-EXISTING row census this pair fills stays 2 / 4 / 0; with these two rows in it the
   // winner-carries counts read 2 `/regionbase` / 5 `/livebase-block` / 0 both
@@ -5115,7 +5115,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // (a temporary env read filtering the roster at its one use site), cache off.
   // `foldpark`'s 34 → 34 is a RENAME and not a spelling: the same source that
   // won as `signed/livebase-block/volatile/sinkinit` wins as `signed/unfolded/volatile`, because
-  // the roster loop runs before the `/livebase ×` product loops and `seen` keeps the first label.
+  // the roster loop runs before the `/livebase ×` product loops and `seen` keeps the first candidate's variations.
   //
   // WHAT EACH ROW ISOLATES.
   //   `livepark`   two bases, both wanted as locals, one of them read at a single fixed offset
@@ -5162,7 +5162,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // best (all five 0 at this commit; `dmascope` and `unfoldpark` read 9 when the counts above were
   // taken, under earlier rosters — re-run it rather than reading it). Measured
   // through the harness with the plain respell ablated, all five are UNMOVED — same outcome, same
-  // score, same label.
+  // score, same winner's variations.
   // A SIXTH ROW REACHES IT AND WINS: `synthetic:sbscope`, in this file, under
   // `unsigned/fresh-merge/scopebase` at 0, going NONMATCH 11 with the plain respell ablated. So
   // the reaching population is six and the plain admission wins one of them. A CENSUS SENTENCE IN
@@ -5178,7 +5178,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // WHAT IS DELETABLE THERE IS THE ROSTER ENTRY, NOT THE PASS: rank.ts also enumerates COALESCED
   // results of the same `hoistScopedBases` through their own `respellEach` call, and one of those won a
   // match — `kleod:UpdateHUDCounterDisplay:agbcc` (retired 2026-09-13), MATCH on
-  // `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`, the name it was measured under.
+  // `unsigned/defsite/flip-join/derived-home/scopebase/coalesce-v2-v4`.
   // A candidate's variations name what was applied, not a route a deletion must remove: deleting
   // `respell('/scopebase', …)` leaves those results in the fan, while a deletion aimed at
   // `l3/scopebase.ts` cost that match. A census keyed on the plain `/scopebase` variation and a
@@ -5214,11 +5214,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // carried before this family's last rebase and are NOT re-run here; the seven rows and the zero
   // losses are what reproduced in both. Either way the cost is CONCENTRATED —
   // `ProcessInputAndUpdateEntities`, the corpus's slowest row, takes +3456 of the map-ful +3724.
-  // A SECOND POPULATION MOVES WITHOUT THE FAN MOVING: 21 rows carry `/unfolded`-labelled
-  // candidates whose source set is byte-identical to the ablated arm's, `synthetic:foldpark` (4)
+  // A SECOND POPULATION MOVES WITHOUT THE FAN MOVING: 21 rows carry candidates named with
+  // `/unfolded` whose source set is byte-identical to the ablated arm's, `synthetic:foldpark` (4)
   // and `kleod:UpdateCameraScroll` (1024) among them. Those are renames, not spellings, and the
   // only thing they can move is a published `winnerVariations` — which is why the gate on this entry
-  // is `bench diff`'s label field and not `bench regression`.
+  // is `bench diff`'s `winnerVariations` field and not `bench regression`.
   // The one other guard that reads the field, `BASEFOLD_GATES`, reaches none of these keys: its
   // census is empty on all three rows here.
   //
@@ -5405,7 +5405,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // locals=v0, v1, sp0` on both rows and never prints OK: their default spelling has no pointer local
   // at all, so that variation has nothing to qualify, and hand-writing the local it would need
   // (`volatile u8 *p0` with volatile derefs) scores 25 on `dmafill` against a closing 0. The
-  // capability was ABSENT from the fan rather than losing in it — the whole fan was four labels,
+  // capability was ABSENT from the fan rather than losing in it — the whole fan was four candidates,
   // `{signed, unsigned} × {plain, /nearbase}`, every one carrying `v0 = v0 + 64;` and none
   // carrying `volatile`. `/vol-store` is the answer, because it qualifies the ACCESS and needs no
   // local at all; what keeps it off ordinary memory is the target's own declared window
@@ -5472,12 +5472,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // ENUMERABLE, and nothing reports a candidate never enumerated. "No second spelling exists for
   // the differ to referee" is false — the differ referees these two at 0 against 2.
   //
-  // AND THE WINNING LABEL DID NOT MOVE AT ALL. `signed/vol-store/initfirst` before and after, at 2
+  // AND THE WINNER'S VARIATIONS DID NOT MOVE AT ALL. `signed/vol-store/initfirst` before and after, at 2
   // and at 0, while the winning PROGRAM changed completely (615 → 559 source bytes, a folded pool
   // word for a struct view). `winnerVariations` names the VARIATIONS, not the program, so a check keyed on it
   // sees nothing here — the inverse of the #112 trap, where the winner gained `/vol-store` and
   // announced a change of winner. Only the `source` byte field caught it in `bench diff`. Print the
-  // fan and diff the winner's text; a label is not an identity in either direction. The claim that
+  // fan and diff the winner's text; a candidate's variations are not an identity of its program in either direction. The claim that
   // holds about the recovery is
   // stronger and is a property of the RECOVERY: it takes the base from the observed pool word and
   // the field offset from the observed load displacement, so it reproduces the target's own split
@@ -5608,7 +5608,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // whose reference source ends FIVE macro expansions in a bare read-back (`grep -c` over the
   // preprocessed reference: 5). SAID PLAINLY BECAUSE IT IS EASY TO ASSUME OTHERWISE: closing
   // these rows is not predicted to move that function. Its winner already declares the DMA base
-  // `volatile s32 *p0` and its label already carries `/volatile` — `/addr-home` makes the base a
+  // `volatile s32 *p0` and its variations already carry `/volatile` — `/addr-home` makes the base a
   // local there, so the reach problem this family measures does not arise. And the read-back gap
   // points the OTHER way on it: over a 16-point spelling lattice on that function, restoring the
   // five dropped read-backs is worth +7…+19 in the eight points that keep the reference's shared
@@ -5740,14 +5740,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // ablation 19, which is a different rig and not this row. So the second row buys no second
   // DELETION bracket — one row per direction is not what brackets the arm.
   //
-  // AT LABEL LEVEL THEY DO SPLIT, and that is what the second row is for. Guard the WRITE fold's
-  // `bitfieldStore.set` alone and `bfwordwrite` stays MATCH at 0 while its label moves
+  // AT THE LEVEL OF THE WINNER'S VARIATIONS THEY DO SPLIT, and that is what the second row is for. Guard the WRITE fold's
+  // `bitfieldStore.set` alone and `bfwordwrite` stays MATCH at 0 while its variations move
   // `unsigned/no-bitfield` → `unsigned`, with `bfwordread` untouched; guard the READ fold's
   // `bitfieldSpelling.set` alone and exactly the mirror happens. So each row responds to its own
   // direction and to nothing else — measured, one direction at a time, control beside each.
   //
   // THE CONSEQUENCE, stated because it is a gap and not a reassurance: deleting either FOLD is a
-  // label-only change on these rows. `bench regression` reports 0 lost and would green-light it;
+  // variations-only change on these rows. `bench regression` reports 0 lost and would green-light it;
   // only `bench diff`'s `winnerVariations` field catches it. The folds' match-level cost is on the
   // REAL tier — PR #136 measured the write fold alone at `kleod:ProcessInputAndUpdateEntities`
   // 284 → 248, and that row is 211 in the artifact under later unrelated changes, so RE-DERIVE the
@@ -5814,8 +5814,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // `var` rather than an address expression, so `isHoistableBase` never offers it to `basecse` at
   // all and the scoped pass is the only route to a named base here.
   // TWO-SIDED, and the second side is why the row is worth its compile: the SAME source with the
-  // declaration moved to the function top is a DIFFERENT object, and it is won by a different
-  // label — so the two placements bracket each other rather than one dominating. Measured on this
+  // declaration moved to the function top is a DIFFERENT object, and it is won by a candidate with different
+  // variations — so the two placements bracket each other rather than one dominating. Measured on this
   // row's own fan with `ASMLIFT_CANDCACHE=0`: `/scopebase` matches at 0 and the best spelling
   // without it is 11.
   // Like `bfwordread`/`bfwordwrite` this row carries a MAP, and for the same structural reason: run
@@ -6016,14 +6016,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // flattening the rank costs 4 points on its own, the same dimension the additivity gate measures.
   //
   // Today, agbcc only, map-less, fan 2 on every scored row, BOTH candidates of every fan scoring
-  // identically, winning label `unsigned` on every scored row, one declaration synthesized on
+  // identically, winner `unsigned` on every scored row, one declaration synthesized on
   // each. THOSE FIGURES COME FROM THREE DIFFERENT COMMANDS, and the row's score is the only one
   // `bench run` prints:
   //   • THE SCORE — `pnpm bench run --tier synthetic --only <sym> --toolchain agbcc --serial`.
   //     Note `--only` is a SUBSTRING filter. Run for all seven syms, `harr` is the ONE that does
   //     not isolate — it also runs `harridx`, printing `[1/2]` and `[2/2]`; the other six each
   //     print `[1/1]`.
-  //   • FAN SIZE, WINNING LABEL, SYNTHESIZED COUNT — the CLI against a built target:
+  //   • FAN SIZE, WINNER'S VARIATIONS, SYNTHESIZED COUNT — the CLI against a built target:
   //     `asmlift <sym>.s --config apps/benchmark/dataset/toolchains/agbcc/decomp.yaml
   //      --score-against <sym>.o`, with `$ASMLIFT_AGBCC` and `$ASMLIFT_ARM_AS` both exported.
   //     THE `--config` IS NOT OPTIONAL and a bare `--target agbcc` is not a substitute: run that
@@ -6430,8 +6430,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //    correctly loses.
   //    AND THE REAL ROW DOES NOT MOVE, which is this gap's pass: G6 alone makes the source WORSE
   //    (the winning spelling plus `/unmerge` costs more than the winner), so its candidate is
-  //    enumerated and correctly loses. `kleod:CountCollectedGems:agbcc` 171 → 171, same winning
-  //    label.
+  //    enumerated and correctly loses. `kleod:CountCollectedGems:agbcc` 171 → 171, same winner's
+  //    variations.
   //  • `sinkacc` 17 → **4, CLOSED**, and the L3 attribution above it was a true observation with a
   //    false conclusion attached. The fan dump was right — 36 candidates, winner
   //    `unsigned/reread-globals/uns-cmp` at 17, not one of the 36 carrying `sinkinit` or
@@ -6456,7 +6456,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //    `kleod:CheckWorldCompletion:agbcc` 2.69x as many (312 → 840 through a bare
   //    `enumerateCandidates`, 624 → 1680 through the runner, which sees more options — the RATIO is
   //    what reproduces), roughly 2x the wall clock on each real row. The fourth reached row, the
-  //    `fib` control above, pays NOTHING — 8 → 8 candidates, the same eight labels, winner already
+  //    `fib` control above, pays NOTHING — 8 → 8 candidates, the same eight names, winner already
   //    `signed/defsite/loop-entry` at 12 on main (measured on both trees) — so it is a reached row
   //    and not a paying one. Bounded to 4 rows today, but the triggering shape is
   //    `s = 0; ... if (c) s += 1;`, which is ordinary C, so a dogfooded project function is likely
@@ -6562,10 +6562,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // adds, `armcb` also wins on `/flip-join`
   // (fan of 8, the top three all `/flip-join` at 32 against 35 for the non-flip ones), so a G1
   // change must re-check `armcb` even though it is filed under G6 — re-checked when `/site-sense`
-  // shipped, and it holds at 32 on `unsigned/flip-join`. No other new row is
-  // flip-labelled — `joinsense`/`joinsame` win on `/unmerge` and `mixsense` on plain `unsigned`.
+  // shipped, and it holds at 32 on `unsigned/flip-join`. No other new row wins
+  // on a flip variation — `joinsense`/`joinsame` win on `/unmerge` and `mixsense` on plain `unsigned`.
   // Over the committed artifact: 17 rows have a winner
-  // label carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 17 MATCH — TWO of
+  // carrying `flip-join`/`flip-branch`, on FOUR toolchains, and 5 of the 17 MATCH — TWO of
   // those five REAL (`kleod:ProcessHBlankWait:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`), the
   // other three `synthetic:ifand_far:agbcc`, `synthetic:ifor_near:agbcc` and
   // `synthetic:ifor_near:mwcc_242_81`. Recompute the set by filtering `results.json` on
@@ -7201,7 +7201,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // `/unmerge` sibling scored 215, and the best `/unmerge`-carrying candidate in the fan was 192);
   // #169 published +24 against a third base. With the ladder flat (`arm-reread`) and the
   // accumulator copies gone (`enclosingCarrierName`) it PAYS −17 on the real row and is in the
-  // WINNING label — `unsigned/connective/defsite/loop-entry/flip-join/reread-globals/derived-home/
+  // WINNER'S variations — `unsigned/connective/defsite/loop-entry/flip-join/reread-globals/derived-home/
   // merge-home/uns-cmp/site-sense/unmerge/livebase`, 39/352. Two independent routes agree, both at
   // `d6b21ba`: `pnpm bench fan kleod:CountCollectedGems:agbcc --force` (5952 scored, 0 dropped)
   // gives best-WITH 39/352 against best-WITHOUT 56/352, the two candidates' variations differing only in the
@@ -7241,7 +7241,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // Converting any of this to a per-function PREDICATE is the separate and worse move that
   // [joined-branch-sense-decidable] records.
   //
-  // On the ladder rows it is in the winning label throughout, and FLATTENING THE LADDER WIDENED
+  // On the ladder rows it is among the winner's variations throughout, and FLATTENING THE LADDER WIDENED
   // WHAT DEPENDS ON IT. Same ablation, same cache-off re-run, all at `981bb0b9`: `ladder4`
   // MATCH -> 25/121, `ladder5` MATCH -> 38/152, `ladidx1` MATCH -> 10/29, `ladidx2`
   // MATCH -> 11/51, `revlad5s` MATCH -> 37/118, `armcb` MATCH -> 32/43, `armcb2` MATCH -> 18/21;
@@ -7271,19 +7271,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // load-bearing past this family: `synthetic:mergeldcast:gcc2.7.2kmc` 4/9 -> 5/9. That figure and
   // the five real non-MATCH rows that also worsen — `kleod:EntityItemDrop`,
   // `kleod:UpdateWorldMapNodeTile`, `sa3:GetInput`, `sa3:sa2__sub_8083504`,
-  // `marioparty3:func_800600C0_60CC0`, all five carrying `/unmerge` in their published label —
+  // `marioparty3:func_800600C0_60CC0`, all five carrying `/unmerge` among their published winner's variations —
   // were measured at `981bb0b9` and are NOT in #172, which names none of the five and no
-  // `mergeldcast`; quote them from here, not from that PR. They have not been re-measured since. `kleod:ProcessInputAndUpdateEntities:agbcc` carries the label and was NOT
+  // `mergeldcast`; quote them from here, not from that PR. They have not been re-measured since. `kleod:ProcessInputAndUpdateEntities:agbcc` carries the variation and was NOT
   // measured either (~2700 s): assume it at risk, not safe.
   //
-  // Rows that carry `/unmerge` in their winning label and are nevertheless INERT under the
+  // Rows that carry `/unmerge` among their winner's variations and are nevertheless INERT under the
   // ablation — `armshare`, `readshare`, `mergeloop`, `mergecast`, `mergecastu`, `mergeu16`,
   // `mergenarrow` — are why the winner's variations are a PRE-CHECK and not the evidence. The mechanism is NOT
   // `applyStacked` (never called on the pre-fan path — its two call sites, `rank.ts:951` and `:988`,
   // are `STACKED_SUBSETS`; the `/unmerge` suffix is built inline at `rank.ts:1801-1836`) and NOT the
-  // source dedup (the primary fan's spellings are pushed FIRST, so an identical source keeps the
-  // PRIMARY label and never surfaces as a carrier). Measured on `synthetic:armshare:agbcc`, cache
-  // off, one row each way: base MATCH 0/26 label `unsigned/unmerge`, ablated MATCH 0/26 label
+  // source dedup (the default fan's spellings are pushed FIRST, so an identical source keeps the
+  // default fan's variations and never surfaces as a carrier). Measured on `synthetic:armshare:agbcc`, cache
+  // off, one row each way: base MATCH 0/26 on `unsigned/unmerge`, ablated MATCH 0/26 on
   // `unsigned` — SAME SCORE, DIFFERENT SOURCE (the carrier spells `*(s32 *)50345024 = v1 << 3;` per
   // arm, the ablated winner hoists `v2`/`v3` and stores once after the join). So a carrier is a
   // DISTINCT spelling that ties on score and wins on `compareScored`'s within-tie quality keys

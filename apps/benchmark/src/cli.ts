@@ -14,9 +14,9 @@
 //                                        # paths filled in, under the gitignored .local/repro/,
 //                                        # and with --run executes it and reports `[ranked]`
 //   pnpm bench target <id> --out <dir>   # repro-script pre-step: target object + decomp.yaml
-//   pnpm bench fan <row> [--show <label>] [--enumerate] [--force] [--base <ref>]
+//   pnpm bench fan <row> [--show <variations>] [--enumerate] [--force] [--base <ref>]
 //   pnpm bench fan <sym> --asm <file.s> --toolchain <id>
-//                                        # ONE row's whole candidate fan — every spelling's label
+//                                        # ONE row's whole candidate fan — every spelling's variations
 //                                        # and score, not just the winner's — in the harness's own
 //                                        # configuration; --show prints a candidate's SOURCE and
 //                                        # --enumerate lists the fan without compiling anything;
@@ -473,7 +473,7 @@ switch (command) {
     break;
   }
   case 'fan': {
-    // fan <row> [--show <label>] [--enumerate] [--force] [--base <ref>] — print the ranked
+    // fan <row> [--show <variations>] [--enumerate] [--force] [--base <ref>] — print the ranked
     // candidate fan the harness computes for this row and then discards (run/fan.ts). ROW-SCOPED
     // by construction, and that is the point rather than an omission: a tier-wide form would write
     // tens of thousands of sources to answer a question that is always about one function.
@@ -486,8 +486,8 @@ switch (command) {
     // exactly what a row carries and a bare `.s` does not.
     const rowId = positionals[1];
     const usage =
-      'usage: pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force] [--base <ref>]\n' +
-      '   or: pnpm bench fan <sym> --asm <file.s> --toolchain <id> [--show <label>]';
+      'usage: pnpm bench fan <sym|project:sym:toolchain> [--show <variations>] [--enumerate] [--force] [--base <ref>]\n' +
+      '   or: pnpm bench fan <sym> --asm <file.s> --toolchain <id> [--show <variations>]';
     if (!rowId) {
       console.error(usage);
       process.exit(2);

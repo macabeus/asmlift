@@ -1038,9 +1038,14 @@ describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does',
   // choice determined, and nothing reports a candidate that was never enumerated.
   test('default and alternative are both enumerated, and they are genuinely different spellings', () => {
     const cands = enumerateCandidates('f', RANK2, ARMV4T_AGBCC);
-    expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/flat-rank', 'signed', 'signed/flat-rank']);
-    const on = cands.filter((c) => !hasVariation(c.label.split('/'), 'flat-rank'));
-    const off = cands.filter((c) => hasVariation(c.label.split('/'), 'flat-rank'));
+    expect(cands.map((c) => c.variations)).toEqual([
+      ['unsigned'],
+      ['unsigned', 'flat-rank'],
+      ['signed'],
+      ['signed', 'flat-rank'],
+    ]);
+    const on = cands.filter((c) => !hasVariation(c.variations, 'flat-rank'));
+    const off = cands.filter((c) => hasVariation(c.variations, 'flat-rank'));
     expect(on.every((c) => c.source.includes('gPtrTbl[a0][a1]'))).toBe(true);
     expect(off.every((c) => c.source.includes('(u32)&gPtrTbl'))).toBe(true);
     expect(off.every((c) => !c.source.includes('gPtrTbl[a0]'))).toBe(true);
@@ -1049,7 +1054,10 @@ describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does',
   test('a rank-1 derivation opens no alternative — the variation has nothing to turn off', () => {
     // The gate is asked of the EVIDENCE, not of the derivation's mere existence: a symbol with no
     // declared rank spells the same tree either way, and the pair would be dedup fodder.
-    expect(enumerateCandidates('f', BASE_FIRST, ARMV4T_AGBCC).map((c) => c.label)).toEqual(['unsigned', 'signed']);
+    expect(enumerateCandidates('f', BASE_FIRST, ARMV4T_AGBCC).map((c) => c.variations)).toEqual([
+      ['unsigned'],
+      ['signed'],
+    ]);
   });
 });
 

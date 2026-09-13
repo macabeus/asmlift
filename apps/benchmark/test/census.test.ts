@@ -1,5 +1,5 @@
-// rank.ts states several of its arguments as PROPERTIES of the published winner labels — "no
-// label carries both of these", "this arm's winners all ride inside that pairing", "exactly one
+// rank.ts states several of its arguments as PROPERTIES of the published winners' variations — "no
+// winner carries both of these", "this arm's winners all ride inside that pairing", "exactly one
 // row wins under this variation". Written as prose those decay silently: the corpus grows, a variation is
 // widened, and the paragraph still reads as verified because nothing re-derives it.
 //
@@ -18,19 +18,19 @@ import { describe, expect, it } from 'vitest';
 
 const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
   id: string;
-  asmlift?: { winnerVariations?: string };
+  asmlift?: { winnerVariations?: string[] };
 }[];
 
-/** Every row that published a winning label, as `id` → `winnerVariations`. A row with no winner
+/** Every row that published a winner, as `id` → `winnerVariations`. A row with no winner
  *  (declined, or every candidate failed to build) says nothing about any of these properties. */
 const winners = rows.flatMap((r) =>
-  r.asmlift?.winnerVariations !== undefined ? [{ id: r.id, label: r.asmlift.winnerVariations }] : [],
+  r.asmlift?.winnerVariations !== undefined ? [{ id: r.id, variations: r.asmlift.winnerVariations }] : [],
 );
 
-const carrying = (name: string) => winners.filter((w) => hasVariation(w.label.split('/'), name));
+const carrying = (name: string) => winners.filter((w) => hasVariation(w.variations, name));
 
-describe('the winner-label properties rank.ts argues from', () => {
-  it('nothing at all published a label, or the artifact is not the one these assertions are about', () => {
+describe("the properties of the winners' variations rank.ts argues from", () => {
+  it('nothing at all published a winner, or the artifact is not the one these assertions are about', () => {
     // The guard on every assertion below: they are all "no winner does X", which an empty list
     // satisfies vacuously.
     expect(winners.length).toBeGreaterThan(0);
@@ -39,13 +39,15 @@ describe('the winner-label properties rank.ts argues from', () => {
   it('no winner carries both /orderbase and /setup-args — the corpus gate cannot see the per-FUNCTION licence reading', () => {
     // Guards the paragraph at the `admissions` roster in rank.ts, "AND THE SAME SKIP KEYED ON THE
     // LICENCE ITSELF WOULD BUY NOTHING": three wrong readings of an `orderLicensedGlobals` skip
-    // delete the same four candidates, and a per-row label/source diff catches two of them. It
-    // cannot catch the PER-FUNCTION one, and this is why — that reading needs both tokens in one
-    // label to be observable, and no published winner carries both.
+    // delete the same four candidates, and a per-row variations/source diff catches two of them. It
+    // cannot catch the PER-FUNCTION one, and this is why — that reading needs both variations in one
+    // name to be observable, and no published winner carries both.
     const both = winners.filter(
-      (w) => hasVariation(w.label.split('/'), 'orderbase') && hasVariation(w.label.split('/'), 'setup-args'),
+      (w) =>
+        (hasVariation(w.variations, 'orderbase') || hasVariation(w.variations, 'orderbase-scoped')) &&
+        hasVariation(w.variations, 'setup-args'),
     );
-    expect(both.map((w) => `${w.id}  ${w.label}`)).toEqual([]);
+    expect(both.map((w) => `${w.id}  ${w.variations.join('/')}`)).toEqual([]);
   });
 
   it('every /unreduce and /ptr-field winner rides inside a /vol-store pairing', () => {
@@ -54,13 +56,13 @@ describe('the winner-label properties rank.ts argues from', () => {
     // variation can LOSE on its own terms, which is only observable while the single-variation candidate is
     // in the fan — but a winner would mean the note's premise had changed.
     const unpaired = [...carrying('unreduce'), ...carrying('ptr-field')].filter(
-      (w) => !hasVariation(w.label.split('/'), 'vol-store'),
+      (w) => !hasVariation(w.variations, 'vol-store'),
     );
-    expect(unpaired.map((w) => `${w.id}  ${w.label}`)).toEqual([]);
+    expect(unpaired.map((w) => `${w.id}  ${w.variations.join('/')}`)).toEqual([]);
   });
 
   it('exactly one winner carries /no-ptr-elem, and it is the synthetic row the variation was built for', () => {
-    // Guards the `/no-ptr-elem` census paragraph, "EXACTLY ONE WINNING LABEL IN THE ARTIFACT
+    // Guards the `/no-ptr-elem` census paragraph, "EXACTLY ONE WINNER IN THE ARTIFACT
     // CARRIES `/no-ptr-elem` — READ THAT ONE, NOT A ZERO". The paragraph's whole point is that a
     // zero over the REAL tier is 0 of ONE reaching row, so the variation's two-sidedness has to be read
     // off the synthetic row that inhabits it. A second winner would not be a failure of the variation,

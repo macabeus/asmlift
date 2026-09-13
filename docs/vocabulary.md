@@ -16,7 +16,8 @@ the dominant one.
 | **withheld**  | A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.                                                  |
 
 A candidate's name is its **variations**: the ordered list of variations it applied, e.g.
-`unsigned`, `defsite`, `raw-globals`, shown joined with `/` as `unsigned/defsite/raw-globals`.
+`["unsigned", "defsite", "raw-globals"]`. Every command prints that list joined with `/`, as
+`unsigned/defsite/raw-globals`, and `pnpm bench fan <row> --show` takes it back in that form.
 
 **Say which "variations" you mean.** The word names either the variations asmlift has, or the ones
 a single candidate applied. Write "the winner's variations" or "the variation `unmerge`" wherever a
@@ -24,11 +25,19 @@ bare "the variations" could be read both ways.
 
 ## A candidate's name
 
-- The first part is its signedness, `unsigned` or `signed`, because both are tried.
-- Each later `/`-separated part names one variation, in the order of the kinds below.
+- The first entry is its signedness, `unsigned` or `signed`, because both are tried.
+- Each later entry names exactly one variation, in the order of the kinds below.
+- No entry is empty or holds a `/`, so the `/` join names exactly one list: `joinVariations` and
+  `splitVariations` ([`packages/core/src/variation-tokens.ts`](../packages/core/src/variation-tokens.ts))
+  throw rather than join or split anything else. Where a name is hashed or used as a key, it is the
+  join that is hashed.
 - A few variations name what they were applied to after a `-`: `coalesce-v0-v1` merges `v0` into
   `v1`, and `volatile-p1` qualifies `p1`. That trailing part is the variation's **subject**. In a
-  variation that takes no subject, a `-` is part of the name (`livebase-block`, `vol-slot`).
+  variation that takes no subject, a `-` is part of the name (`livebase-block`, `vol-slot`,
+  `orderbase-scoped`).
+- A variation that places something is named by the hoist it is: `orderbase` and `orderbase-scoped`
+  are one eligibility rule at two placements, each its own hoist. `basefold/sinkinit` is two
+  variations because `sinkinit` is one of its own, applied after `basefold`.
 - Every variation, with its kind and its subject pattern, is registered in `VARIATION_TOKENS`
   ([`packages/core/src/variation-tokens.ts`](../packages/core/src/variation-tokens.ts)). A test asks
   whether a candidate carries one through `hasVariation` or `hasVariations`, both of which throw on a
@@ -57,10 +66,11 @@ already produced every source it made. A variation that threw prints an `asmlift
 
 ## Fields of the benchmark artifact
 
-| Field                      | Meaning                                                                                             |
-| -------------------------- | --------------------------------------------------------------------------------------------------- |
-| `asmlift.winnerVariations` | The winner's variations, e.g. `unsigned/defsite`. Present on every row that has a winner.           |
-| `asmlift.fanSize`          | How many candidates the row's fan holds: scored, dropped and withheld. Present on every ranked row. |
+| Field                                                                               | Meaning                                                                                                  |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `asmlift.winnerVariations`                                                          | The winner's variations, a list, e.g. `["unsigned", "defsite"]`. Present on every row that has a winner. |
+| `asmlift.fanSize`                                                                   | How many candidates the row's fan holds: scored, dropped and withheld. Present on every ranked row.      |
+| `asmlift.droppedCandidates[].variations`, `asmlift.withheldCandidates[].variations` | Each refused candidate's variations, a list.                                                             |
 
 ## Words the enumeration code uses
 
@@ -94,5 +104,5 @@ already produced every source it made. A variation that threw prints an `asmlift
 | **gate**     | A predicate deciding whether a rewrite or a variation fires.                                       | A check a round must pass before it merges. |
 | **base**     | A base pointer (`livebase`, `BaseKey`).                                                            | A git ref (`--base`).                       |
 | **arm**      | A branch or `switch` arm of recovered C (`switch-arms`).                                           | The ARM instruction set.                    |
-| **label**    | An assembly label or a C `goto` target.                                                            | A display label in the webapp or a chart.   |
+| **label**    | An assembly label or a C `goto` target. Never a candidate's name, which is its variations.         | A display label in the webapp or a chart.   |
 | **token**    | In code, a variation's registered spelling (`VARIATION_TOKENS`).                                   | Lexer, cache and objdiff tokens.            |

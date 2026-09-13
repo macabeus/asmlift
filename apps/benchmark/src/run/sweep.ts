@@ -5,7 +5,7 @@
 // sweep.ts, fanhash.ts, det.mts, c3-census.mts, rowhash.mts, kcensus.mts…), 31 driver calls by 14
 // agents, and a compile-free differential re-lift was reinvented in 37 rounds. Their scripts agree
 // on the payload almost exactly — per row, the emitted C's hash, its diagnostic count, and
-// optionally the enumerated fan's label/source hash — and disagree on everything that is not the
+// optionally the enumerated fan's variations/source hash — and disagree on everything that is not the
 // payload: where the script lives, how it resolves `@asmlift/*`, which tree it points at, whether
 // it shards, and which rows it skips. That remainder is what got rewritten, not the idea. The
 // three failure modes it produced, all measured in this project's own transcripts:
@@ -88,7 +88,7 @@ export interface SweepRecord {
   threw?: string;
   /** `--fan` only: how many spellings enumeration produced (`enumerateRanked`) */
   fan?: number;
-  /** `--fan` only: sha1/12 over `label\0source` pairs IN ENUMERATION ORDER. Ordered and not
+  /** `--fan` only: sha1/12 over (variations, source) pairs IN ENUMERATION ORDER, each name `/`-joined. Ordered and not
    *  sorted: the order is what the ranker consumes, so a reorder with the same set is a real
    *  change to what gets scored first, and `--repeat` exists to tell a reorder from a flake. */
   fanHash?: string;

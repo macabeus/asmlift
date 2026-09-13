@@ -6,7 +6,7 @@
 // (`spellPtrMemberElements`, enumerated at rank.ts's `ptrElemSettings`), and the two are the same
 // ADDRESS and different OBJECTS — so the differ referees.
 //
-// No REAL row wins under a label containing `ptr-elem`, and that is a fact about the CORPUS, not
+// No REAL row's winner carries a `ptr-elem` variation, and that is a fact about the CORPUS, not
 // about the variation: the enumeration gate needs a symbol map declaring a pointer member with a
 // pointee width of 1, 2 or 4, and klonoa's map holds exactly ONE such symbol — whose every
 // decompiled caller happens to have been written in the element form.
@@ -82,11 +82,12 @@ const SHAPES = [
   },
 ] as const;
 
-/** The best-scoring candidate's label and score for one reference source, lifted with the map. */
+/** The best-scoring candidate's variations and score for one reference source, lifted with the map,
+ *  beside the variations of every candidate in the fan. */
 interface Ranked {
-  label: string;
+  variations: readonly string[];
   score: number;
-  labels: string[];
+  fan: (readonly string[])[];
 }
 
 describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the bytes (checkout-gated)', () => {
@@ -103,14 +104,14 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
       symbols,
       prototypes: { f: { returnsVoid: src.startsWith('void ') } },
     });
-    let best: Ranked = { label: '', score: Number.POSITIVE_INFINITY, labels: cands.map((c) => c.label) };
+    let best: Ranked = { variations: [], score: Number.POSITIVE_INFINITY, fan: cands.map((c) => c.variations) };
     for (const c of cands) {
       // the per-candidate declaration block the CLI's scorer prepends (cli/src/rank.ts
       // `declarationsOf`) — a candidate names the map's symbols and does not declare them itself.
       const decls = c.symbolRefs?.length ? renderDeclarations(c.symbolRefs) : '';
       const s = scoreC(decls + c.source, 'f', obj);
       if (s.score < best.score) {
-        best = { label: c.label, score: s.score, labels: best.labels };
+        best = { variations: c.variations, score: s.score, fan: best.fan };
       }
     }
     return best;
@@ -132,21 +133,21 @@ describe.runIf(HAVE)('`/no-ptr-elem` is the winner wherever the source wrote the
   for (const s of SHAPES) {
     describe(s.name, () => {
       test('the variation is enumerated at all — default and alternative both present, so the comparison is real', () => {
-        expect(
-          ranked.get(`${s.name}/byte`)?.labels.filter((l) => hasVariation(l.split('/'), 'no-ptr-elem')).length,
-        ).toBeGreaterThan(0);
+        expect(ranked.get(`${s.name}/byte`)?.fan.filter((v) => hasVariation(v, 'no-ptr-elem')).length).toBeGreaterThan(
+          0,
+        );
       });
 
       test('BYTE target: `/no-ptr-elem` matches and the element default does not', () => {
         const r = ranked.get(`${s.name}/byte`);
         expect(r?.score).toBe(0);
-        expect(hasVariation(r!.label.split('/'), 'no-ptr-elem')).toBe(true);
+        expect(hasVariation(r!.variations, 'no-ptr-elem')).toBe(true);
       });
 
       test('ELEMENT target: the default matches — the variation is two-sided, not a better default', () => {
         const r = ranked.get(`${s.name}/elem`);
         expect(r?.score).toBe(0);
-        expect(hasVariation(r!.label.split('/'), 'no-ptr-elem')).toBe(false);
+        expect(hasVariation(r!.variations, 'no-ptr-elem')).toBe(false);
       });
     });
   }

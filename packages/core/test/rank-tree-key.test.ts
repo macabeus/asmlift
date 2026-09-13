@@ -155,5 +155,5 @@ test('the skip removes no candidate: the mapped ARM function enumerates the same
   expect(cands.length).toBeGreaterThan(1);
   expect(new Set(cands.map((c) => c.source)).size).toBe(cands.length); // still fully deduped
   expect(cands.some((c) => c.source.includes('dreamStones'))).toBe(true);
-  expect(cands.some((c) => hasVariation(c.label.split('/'), 'raw-globals'))).toBe(true);
+  expect(cands.some((c) => hasVariation(c.variations, 'raw-globals'))).toBe(true);
 });

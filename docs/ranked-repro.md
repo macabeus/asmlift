@@ -851,7 +851,7 @@ find nothing to disagree with and go green having audited nothing.
   writes:
 
   ```
-  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best <label>: 531/<rows> [asmlift source 7362050]
+  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, 0 synthesized, best <variations>: 531/<rows> [asmlift source 7362050]
   ```
 
   A score from a run that dropped candidates is not comparable to one that dropped none — and

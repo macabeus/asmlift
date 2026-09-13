@@ -48,8 +48,8 @@ function rankInto(nDropped: number, nWithheld: number): void {
     return {
       winner: scored[0],
       candidates: scored,
-      dropped: Array.from({ length: nDropped }, (_, i) => ({ label: `d${i}`, error: 'error: boom' })),
-      withheld: Array.from({ length: nWithheld }, (_, i) => ({ label: `w${i}`, score: 9, why: 'proof' })),
+      dropped: Array.from({ length: nDropped }, (_, i) => ({ variations: [`d${i}`], error: 'error: boom' })),
+      withheld: Array.from({ length: nWithheld }, (_, i) => ({ variations: [`w${i}`], score: 9, why: 'proof' })),
     };
   });
 }
@@ -70,8 +70,8 @@ describe('fanSizeOfError (pure)', () => {
   test('reads the fan off the error a fully-refused row throws', () => {
     const e = new NoScorableCandidateError(
       'no scorable candidate',
-      [{ label: 'a', error: 'x' }],
-      [{ label: 'b', score: 1, why: 'proof' }],
+      [{ variations: ['a'], error: 'x' }],
+      [{ variations: ['b'], score: 1, why: 'proof' }],
     );
     expect(fanSizeOfError(e)).toBe(2);
   });
@@ -115,8 +115,8 @@ describe('the ranked row records its own price', () => {
       throw new NoScorableCandidateError(
         'no scorable candidate',
         [
-          { label: 'a', error: 'error: boom' },
-          { label: 'b', error: 'error: boom' },
+          { variations: ['a'], error: 'error: boom' },
+          { variations: ['b'], error: 'error: boom' },
         ],
         [],
       );
