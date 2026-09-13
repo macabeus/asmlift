@@ -8,6 +8,7 @@
 //
 // `project:sym` is therefore reserved for rows. A checkout function or a dogfooding find is real
 // evidence but cannot be re-run that way, so it goes in prose naming where to look.
+import { type Identifiable, rowNames } from '@asmlift/bench-schema';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -25,13 +26,12 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
  *  not add `dataset` here: it would be a second assertion of one convention. */
 const SCANNED = ['packages/core/src', 'packages/core/test', 'packages/cli/src', 'packages/cli/test', 'docs'];
 
-const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
-  id: string;
-  project: string;
-  sym: string;
-}[];
+const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8'))
+  .results as Identifiable[];
 
-const CITABLE = new Set(rows.flatMap((r) => [`${r.project}:${r.sym}`, r.id]));
+/** Every name a row answers to, with and without its toolchain — its id AND its former names
+ *  (`aliases`), so an upstream rename leaves every citation of the old spelling resolving. */
+const CITABLE = new Set(rows.flatMap((r) => rowNames(r).flatMap((n) => [n, n.slice(0, n.lastIndexOf(':'))])));
 const PROJECTS = [...new Set(rows.map((r) => r.project))].sort();
 /** `project:sym`, optionally `:toolchain`. Matched on every line rather than comments only: a
  *  citation-shaped identifier in code is possible but has no inhabitant in these trees. */

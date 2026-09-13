@@ -73,7 +73,7 @@
 // `run` fans shard child processes by default (see run/orchestrate.ts); `--serial` runs
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
 // spawns `run --serial --shard i/N`, which writes `<tier>.part<i>.json` for the stitcher).
-import type { FunctionResult } from '@asmlift/bench-schema';
+import { type FunctionResult, resolveRow } from '@asmlift/bench-schema';
 import {
   CACHE_MISMATCH_EXIT,
   MISMATCH_LOG,
@@ -202,7 +202,7 @@ function publishedAsmliftSource(rowId: string): string | undefined {
     } catch {
       continue;
     }
-    const row = results.find((r) => r.id === rowId);
+    const row = resolveRow(results, rowId);
     if (row) {
       return row.asmlift.outcome === 'match' || row.asmlift.outcome === 'nonmatch' ? row.asmlift.source : undefined;
     }
@@ -390,7 +390,12 @@ switch (command) {
       console.error('usage: pnpm bench target <project:sym:toolchain> --out <dir> [--project-root <dir>]');
       process.exit(2);
     }
-    const c = [...syntheticCases(), ...realCases()].find((x) => x.id === rowId);
+    // resolved the way every row reference is (bench-schema resolveRow): a published repro script
+    // names the row by the id it had at publication, and an upstream rename since must not break it
+    const c = resolveRow(
+      [...syntheticCases(), ...realCases()].map((x) => ({ ...x, toolchain: x.toolchain.id, c: x })),
+      rowId,
+    )?.c;
     if (!c) {
       console.error(`no such function: ${rowId}`);
       process.exit(2);

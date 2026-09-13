@@ -1,4 +1,4 @@
-import type { DecompilerId, FunctionResult, Outcome } from '@asmlift/bench-schema';
+import { type DecompilerId, type FunctionResult, type Outcome, resolveRow, rowIdentity } from '@asmlift/bench-schema';
 import { parseAsString, useQueryState, useQueryStates } from 'nuqs';
 import { useMemo } from 'react';
 
@@ -81,7 +81,13 @@ export function Explorer({
   const [filters, setFilters] = useQueryStates(FILTER_PARSERS, { urlKeys: FILTER_URL_KEYS });
   const [{ sort: sortKey, dir: sortDir }, setSort] = useQueryStates(SORT_PARSERS);
   const [selectedId, setSelectedId] = useQueryState('fn', parseAsString.withOptions({ history: 'push' }));
-  const selected = useMemo(() => rows.find((r) => r.id === selectedId) ?? null, [rows, selectedId]);
+  // `fn=` names a row by its IDENTITY (a real row's address), so a link survives the upstream
+  // renaming the function. A link written before identities — `fn=<project:sym:toolchain>` — and a
+  // link naming a row's former symbol resolve through the same lookup (bench-schema resolveRow).
+  const selected = useMemo(
+    () => (selectedId === null ? null : (resolveRow(rows, selectedId) ?? null)),
+    [rows, selectedId],
+  );
 
   const projects = useMemo(() => distinct(rows, (r) => r.project), [rows]);
   const isas = useMemo(() => distinct(rows, (r) => r.isa), [rows]);
@@ -319,7 +325,7 @@ export function Explorer({
             {filtered.map((r) => (
               <tr
                 key={r.id}
-                onClick={() => void setSelectedId(r.id)}
+                onClick={() => void setSelectedId(rowIdentity(r))}
                 className="cursor-pointer border-t border-slate-800 hover:bg-slate-800/40"
               >
                 <td className="px-3 py-2 font-mono text-slate-100">{r.sym}</td>

@@ -9,12 +9,12 @@
 // So every branch that had to prove neutrality wrote its own comparator, against its own idea of
 // which fields count. This is that comparison, once: for every row in the base artifact, every
 // field a published claim is made of, named individually when it moves.
-import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
+import { type BenchOutput, type FunctionResult, joinArtifacts } from '@asmlift/bench-schema';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { RESULTS_DIR } from '../config';
-import { RESULTS_PATH, byId, headContains, readCommitted, sameRun, scrub, shortSha } from './committed';
+import { RESULTS_PATH, headContains, readCommitted, sameRun, scrub, shortSha } from './committed';
 import { rowsAddedSince } from './regression';
 
 /** The fields a published claim is made of, named individually when they move.
@@ -159,13 +159,15 @@ const show = (field: string, v: unknown, res: Record<string, unknown>): string =
 };
 
 export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): DiffReport {
-  const freshById = byId(fresh);
-  const baseIds = new Set(base.results.map((r) => r.id));
+  // joined by IDENTITY (bench-schema joinArtifacts): a renamed real row is the same row
+  const join = joinArtifacts(base.results, fresh.results);
+  const freshByKey = new Map(fresh.results.map((r) => [join.headKey(r), r]));
+  const baseKeys = new Set(base.results.map(join.baseKey));
   const changed: FieldChange[] = [];
   const removed: string[] = [];
 
   for (const was of base.results) {
-    const now = freshById.get(was.id);
+    const now = freshByKey.get(join.baseKey(was));
     if (!now) {
       removed.push(was.id);
       continue;
@@ -190,12 +192,12 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
                 : v;
         const [x, y] = [norm(a), norm(b)];
         if (x !== y) {
-          changed.push({ id: was.id, field: `${side}.${f}`, from: show(f, a, wasSide), to: show(f, b, nowSide) });
+          changed.push({ id: now.id, field: `${side}.${f}`, from: show(f, a, wasSide), to: show(f, b, nowSide) });
         }
       }
     }
   }
-  const added = fresh.results.filter((r: FunctionResult) => !baseIds.has(r.id)).map((r) => r.id);
+  const added = fresh.results.filter((r: FunctionResult) => !baseKeys.has(join.headKey(r))).map((r) => r.id);
   return {
     changed,
     added,
@@ -261,15 +263,16 @@ export function comparePerRow(
   fresh: BenchOutput,
   pick: (r: FunctionResult) => number | undefined,
 ): PairReport {
-  const freshById = byId(fresh);
-  const baseIds = new Set(base.results.map((r) => r.id));
+  const join = joinArtifacts(base.results, fresh.results);
+  const freshByKey = new Map(fresh.results.map((r) => [join.headKey(r), r]));
+  const baseKeys = new Set(base.results.map(join.baseKey));
   const pairs: FanChange[] = [];
   const vanished: FanChange[] = [];
   const appeared: FanChange[] = [];
   let baseTotal = 0;
   let freshTotal = 0;
   for (const was of base.results) {
-    const now = freshById.get(was.id);
+    const now = freshByKey.get(join.baseKey(was));
     if (now === undefined) {
       continue;
     }
@@ -277,15 +280,15 @@ export function comparePerRow(
     const to = pick(now);
     if (to === undefined) {
       if (from !== undefined) {
-        vanished.push({ id: was.id, from, to: 0 });
+        vanished.push({ id: now.id, from, to: 0 });
       }
       continue;
     }
     if (from === undefined) {
-      appeared.push({ id: was.id, from: 0, to });
+      appeared.push({ id: now.id, from: 0, to });
       continue;
     }
-    pairs.push({ id: was.id, from, to });
+    pairs.push({ id: now.id, from, to });
     baseTotal += from;
     freshTotal += to;
   }
@@ -294,7 +297,7 @@ export function comparePerRow(
   // over ALL fresh rows, so without this the "N more counted here" clause under-reports on
   // exactly the rounds that add benchmark rows.
   for (const now of fresh.results) {
-    if (!baseIds.has(now.id)) {
+    if (!baseKeys.has(join.headKey(now))) {
       const to = pick(now);
       if (to !== undefined) {
         appeared.push({ id: now.id, from: 0, to });

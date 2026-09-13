@@ -7,7 +7,7 @@
 //
 // Toolchain-free (the dataset sources plus the committed artifact), so CI runs it on a hosted
 // runner with no compilers: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`.
-import { FEATURES } from '@asmlift/bench-schema';
+import { FEATURES, type Identifiable, rowNames } from '@asmlift/bench-schema';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -243,10 +243,11 @@ describe('the dataset cites only benchmark rows that exist', () => {
   const DATASET = join(import.meta.dirname, '..', 'dataset');
   const rows = (
     JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')) as {
-      results: { id: string; project: string; sym: string }[];
+      results: Identifiable[];
     }
   ).results;
-  const CITABLE = new Set(rows.flatMap((r) => [`${r.project}:${r.sym}`, r.id]));
+  // a row's id and its former names (`aliases`), each with and without the toolchain
+  const CITABLE = new Set(rows.flatMap((r) => rowNames(r).flatMap((n) => [n, n.slice(0, n.lastIndexOf(':'))])));
   const PROJECTS = [...new Set(rows.map((r) => r.project))].sort();
   const CITATION = new RegExp(`\\b(${PROJECTS.join('|')}):[A-Za-z_]\\w*(?::[\\w.]+)?`, 'g');
 

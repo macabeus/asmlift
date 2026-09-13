@@ -20,8 +20,39 @@ const base: RealManifest = {
   branch: 'asmlift-benchmark',
   cppIncludes: [],
   headers: [],
-  functions: [{ sym: 'f', features: [], funcC: 'int f(void) { return 1; }' }],
+  functions: [{ sym: 'f', addr: '0x08000000', features: [], funcC: 'int f(void) { return 1; }' }],
 };
+
+describe('validateManifest: row identity', () => {
+  const fn = (sym: string, addr: unknown, aliases?: string[]) =>
+    ({
+      sym,
+      addr,
+      aliases,
+      features: [],
+      funcC: `int ${sym}(void) { return 1; }`,
+    }) as RealManifest['functions'][number];
+
+  test('an address must be spelled 0x + 8 lowercase hex, as the symbol map keys it', () => {
+    for (const bad of [undefined, '0800045c', '0x0800045C', '0x800045c', 0x0800045c]) {
+      const p = validateManifest({ ...base, functions: [fn('f', bad)] }, 'x.json');
+      expect(p.join('\n'), JSON.stringify(bad)).toMatch(/"addr" must be the ELF address/);
+    }
+  });
+
+  test('two rows of one project at the same address are one function listed twice', () => {
+    const p = validateManifest({ ...base, functions: [fn('f', '0x08000000'), fn('g', '0x08000000')] }, 'x.json');
+    expect(p.join('\n')).toMatch(/shares addr 0x08000000/);
+  });
+
+  test('a name — current or former — may answer to only one row, or a citation of it is ambiguous', () => {
+    const p = validateManifest(
+      { ...base, functions: [fn('ReadU16', '0x08000000', ['sub_0804B270']), fn('sub_0804B270', '0x08000004')] },
+      'x.json',
+    );
+    expect(p.join('\n')).toMatch(/"sub_0804B270" answers to two rows/);
+  });
+});
 
 describe('validateManifest: repo/branch pins', () => {
   test('a well-formed manifest validates', () => {

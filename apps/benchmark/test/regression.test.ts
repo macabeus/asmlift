@@ -73,6 +73,59 @@ describe('compareOutcomes (the mechanical zero-lost gate)', () => {
       out(row('a', 'match', 'match'), row('new', 'failed', 'failed')),
     );
     expect(r.ok).toBe(true);
+    expect(r.added).toEqual(['new']);
+  });
+});
+
+// THE ADDRESS MIGRATION. A real row is joined by its address (bench-schema rowIdentity). The base a
+// branch compares against may predate addresses entirely, and a gate that keyed the two sides
+// differently would print every real row MISSING and every real row ADDED — and still exit 0 on
+// "0 lost". These pin that it joins instead, and says it did.
+describe('compareOutcomes across row identity', () => {
+  const realRow = (sym: string, a: Outcome, m: Outcome, over: Partial<FunctionResult> = {}): FunctionResult =>
+    ({
+      ...row(`kleod:${sym}:agbcc`, a, m),
+      project: 'kleod',
+      sym,
+      toolchain: 'agbcc',
+      tier: 'real',
+      sourceUrl: 'https://github.com/macabeus/kleod/blob/6f149e3/src/x.c#L1-L2',
+      ...over,
+    }) as FunctionResult;
+
+  test('a name-keyed base against an address-keyed fresh run: 0 missing, 0 added, every row bridged', () => {
+    const r = compareOutcomes(
+      out(realRow('MultiplyQ8', 'match', 'nonmatch'), realRow('DivideQ8', 'match', 'match')),
+      out(
+        realRow('MultiplyQ8', 'match', 'nonmatch', { addr: '0x08000948' }),
+        realRow('DivideQ8', 'match', 'match', { addr: '0x08000960' }),
+      ),
+    );
+    expect({ missing: r.missing, added: r.added, bridged: r.bridged, ok: r.ok }).toEqual({
+      missing: [],
+      added: [],
+      bridged: 2,
+      ok: true,
+    });
+  });
+
+  test('a bridged row is still POLICED: its lost match fails the gate', () => {
+    const r = compareOutcomes(
+      out(realRow('MultiplyQ8', 'match', 'nonmatch')),
+      out(realRow('MultiplyQ8', 'nonmatch', 'nonmatch', { addr: '0x08000948' })),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.lost).toEqual([{ id: 'kleod:MultiplyQ8:agbcc', decompiler: 'asmlift', from: 'match', to: 'nonmatch' }]);
+  });
+
+  test('an upstream rename is the same row — and a lost match on it is reported under the NEW name', () => {
+    const r = compareOutcomes(
+      out(realRow('sub_0804B254', 'match', 'noncompile', { addr: '0x0804b254' })),
+      out(realRow('ReadU16', 'nonmatch', 'noncompile', { addr: '0x0804b254', aliases: ['sub_0804B254'] })),
+    );
+    expect(r.missing).toEqual([]);
+    expect(r.added).toEqual([]);
+    expect(r.lost).toEqual([{ id: 'kleod:ReadU16:agbcc', decompiler: 'asmlift', from: 'match', to: 'nonmatch' }]);
   });
 });
 

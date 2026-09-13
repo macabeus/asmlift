@@ -6,7 +6,7 @@
 // eyeball over a 600-row JSON. Here it is mechanical: any match→non-match flip, or any committed
 // row missing from the fresh run (a silently-skipped toolchain reads as "no regression" without
 // this), exits non-zero.
-import type { BenchOutput, DecompilerId, Outcome } from '@asmlift/bench-schema';
+import { type BenchOutput, type DecompilerId, type Outcome, joinArtifacts } from '@asmlift/bench-schema';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -23,6 +23,14 @@ export interface OutcomeFlip {
 export interface RegressionReport {
   /** committed row ids absent from the fresh run — coverage silently shrank; NEVER "no regression" */
   missing: string[];
+  /** fresh row ids no committed row joins. Informational, never a failure — but a change that
+   *  claims to move no row must print 0 here, and a join that silently failed prints every row
+   *  twice: once `missing`, once here. */
+  added: string[];
+  /** committed rows that carried no address and joined an address-keyed fresh row through their
+   *  name (bench-schema `joinArtifacts`). Printed so a comparison across the address migration
+   *  shows it JOINED rather than merely found nothing to compare. */
+  bridged: number;
   /** match → anything-else, either decompiler. asmlift losses mean the code regressed; m2c is
    *  pinned, so an m2c loss means the HARNESS regressed. Both fail the gate. */
   lost: OutcomeFlip[];
@@ -35,14 +43,18 @@ export interface RegressionReport {
 }
 
 export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): RegressionReport {
-  const freshById = new Map(fresh.results.map((r) => [r.id, r]));
+  // Rows are joined by IDENTITY (a real row's address), not by id: an upstream rename changes the
+  // id and must not read as one row lost and another added.
+  const join = joinArtifacts(committed.results, fresh.results);
+  const freshByKey = new Map(fresh.results.map((r) => [join.headKey(r), r]));
+  const committedKeys = new Set(committed.results.map(join.baseKey));
   const missing: string[] = [];
   const lost: OutcomeFlip[] = [];
   const gained: OutcomeFlip[] = [];
   const changed: OutcomeFlip[] = [];
 
   for (const was of committed.results) {
-    const now = freshById.get(was.id);
+    const now = freshByKey.get(join.baseKey(was));
     if (!now) {
       missing.push(was.id);
       continue;
@@ -53,7 +65,7 @@ export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): Reg
       if (from === to) {
         continue;
       }
-      const flip: OutcomeFlip = { id: was.id, decompiler: d, from, to };
+      const flip: OutcomeFlip = { id: now.id, decompiler: d, from, to };
       if (from === 'match') {
         lost.push(flip);
       } else if (to === 'match') {
@@ -63,7 +75,16 @@ export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): Reg
       }
     }
   }
-  return { missing, lost, gained, changed, ok: missing.length === 0 && lost.length === 0 };
+  const added = fresh.results.filter((r) => !committedKeys.has(join.headKey(r))).map((r) => r.id);
+  return {
+    missing,
+    added,
+    bridged: join.bridged,
+    lost,
+    gained,
+    changed,
+    ok: missing.length === 0 && lost.length === 0,
+  };
 }
 
 /** The rows the branch's OWN committed artifact holds that `base` does not.
@@ -81,8 +102,9 @@ export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): Reg
  *  narrowed to the rows the base lacks. Rows present in both are already policed by the base
  *  comparison; asking them twice would only report the same flip twice. */
 export function rowsAddedSince(base: BenchOutput, self: BenchOutput): BenchOutput {
-  const baseIds = new Set(base.results.map((r) => r.id));
-  return { ...self, results: self.results.filter((r) => !baseIds.has(r.id)) };
+  const join = joinArtifacts(base.results, self.results);
+  const baseKeys = new Set(base.results.map(join.baseKey));
+  return { ...self, results: self.results.filter((r) => !baseKeys.has(join.headKey(r))) };
 }
 
 /** CLI entry: the committed results.json at `base` vs the freshly merged one, PLUS the branch's own
@@ -107,10 +129,14 @@ export function regressionGate(base = 'HEAD'): number {
   for (const f of report.lost) {
     console.error(`LOST    ${f.id} [${f.decompiler}] match → ${f.to}`);
   }
-  const { lost, missing, gained, changed } = report;
+  for (const id of report.added) {
+    console.log(`added   ${id} — no committed row joins it`);
+  }
+  const { lost, missing, gained, changed, added, bridged } = report;
   console.log(
-    `regression: ${lost.length} lost, ${missing.length} missing, ${gained.length} gained, ` +
-      `${changed.length} other flips (${committed.results.length} committed rows)`,
+    `regression: ${lost.length} lost, ${missing.length} missing, ${added.length} added, ${gained.length} gained, ` +
+      `${changed.length} other flips (${committed.results.length} committed rows` +
+      `${bridged > 0 ? `; ${bridged} carried no address and joined by name` : ''})`,
   );
 
   // The branch's OWN rows, which the comparison above cannot see (see rowsAddedSince). The

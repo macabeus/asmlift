@@ -32,6 +32,7 @@
   "functions": [
     {
       "sym": "func_800600C0_60CC0",
+      "addr": "0x800600c0",
       "features": [
         "struct",
         "pointer",
@@ -51,6 +52,7 @@
     },
     {
       "sym": "func_80045350_45F50",
+      "addr": "0x80045350",
       "features": [
         "struct",
         "pointer",
@@ -70,6 +72,7 @@
     },
     {
       "sym": "func_800123F4_12FF4",
+      "addr": "0x800123f4",
       "features": [
         "global"
       ],
@@ -85,6 +88,7 @@
     },
     {
       "sym": "func_8000F088_FC88",
+      "addr": "0x8000f088",
       "features": [
         "global",
         "pointer"
@@ -101,6 +105,7 @@
     },
     {
       "sym": "HuMemUsedMemorySizeGet",
+      "addr": "0x80036310",
       "features": [
         "struct",
         "pointer",
@@ -113,6 +118,7 @@
     },
     {
       "sym": "func_800570A8_57CA8",
+      "addr": "0x800570a8",
       "features": [
         "struct",
         "pointer",
@@ -133,6 +139,7 @@
     },
     {
       "sym": "func_8001D330_1DF30",
+      "addr": "0x8001d330",
       "features": [
         "global"
       ],
@@ -148,6 +155,7 @@
     },
     {
       "sym": "func_8001FBBC_207BC",
+      "addr": "0x8001fbbc",
       "features": [
         "struct",
         "pointer",
@@ -165,6 +173,7 @@
     },
     {
       "sym": "HuMemUsedMemoryBlockGet",
+      "addr": "0x80036344",
       "features": [
         "struct",
         "pointer",
@@ -176,6 +185,7 @@
     },
     {
       "sym": "func_80045BF0_467F0",
+      "addr": "0x80045bf0",
       "features": [
         "branch",
         "global",
@@ -188,6 +198,7 @@
     },
     {
       "sym": "func_8002FD48_30948",
+      "addr": "0x8002fd48",
       "features": [
         "struct",
         "pointer"
@@ -203,6 +214,7 @@
     },
     {
       "sym": "func_80071B40_72740",
+      "addr": "0x80071b40",
       "features": [
         "struct",
         "pointer"
@@ -218,6 +230,7 @@
     },
     {
       "sym": "func_8006014C_60D4C",
+      "addr": "0x8006014c",
       "features": [
         "global"
       ],
@@ -228,6 +241,7 @@
     },
     {
       "sym": "func_8005FA90_60690",
+      "addr": "0x8005fa90",
       "features": [
         "pointer",
         "branch",
@@ -241,6 +255,7 @@
     },
     {
       "sym": "func_80047E90_48A90",
+      "addr": "0x80047e90",
       "features": [
         "struct",
         "pointer"
@@ -256,6 +271,7 @@
     },
     {
       "sym": "func_80056254_56E54",
+      "addr": "0x80056254",
       "features": [
         "struct",
         "pointer",
@@ -272,6 +288,7 @@
     },
     {
       "sym": "func_800560D8_56CD8",
+      "addr": "0x800560d8",
       "features": [
         "struct",
         "pointer",
@@ -284,6 +301,7 @@
     },
     {
       "sym": "func_8008A0D0_8ACD0",
+      "addr": "0x8008a0d0",
       "features": [
         "pointer",
         "union",
@@ -301,6 +319,7 @@
     },
     {
       "sym": "func_8004A444_4B044",
+      "addr": "0x8004a444",
       "features": [
         "global"
       ],
@@ -316,6 +335,7 @@
     },
     {
       "sym": "func_80056260_56E60",
+      "addr": "0x80056260",
       "features": [
         "struct",
         "pointer",
@@ -333,6 +353,7 @@
     },
     {
       "sym": "func_8000F04C_FC4C",
+      "addr": "0x8000f04c",
       "features": [
         "pointer",
         "global",
@@ -350,6 +371,7 @@
     },
     {
       "sym": "func_8005614C_56D4C",
+      "addr": "0x8005614c",
       "features": [
         "struct",
         "pointer",
@@ -368,6 +390,7 @@
     },
     {
       "sym": "GWMgNoSet",
+      "addr": "0x80035aa8",
       "features": [
         "global",
         "struct",
@@ -385,6 +408,7 @@
     },
     {
       "sym": "func_8004A468_4B068",
+      "addr": "0x8004a468",
       "features": [
         "global"
       ],
@@ -400,6 +424,7 @@
     },
     {
       "sym": "CameraScissorSet",
+      "addr": "0x800124bc",
       "features": [
         "struct",
         "pointer",
@@ -418,6 +443,7 @@
     },
     {
       "sym": "func_8000F024_FC24",
+      "addr": "0x8000f024",
       "features": [
         "global",
         "store",
@@ -435,6 +461,7 @@
     },
     {
       "sym": "func_80045314_45F14",
+      "addr": "0x80045314",
       "features": [
         "branch",
         "arithmetic"
@@ -446,6 +473,7 @@
     },
     {
       "sym": "func_80056C98_57898",
+      "addr": "0x80056c98",
       "features": [
         "pointer",
         "arithmetic"
@@ -456,6 +484,7 @@
     },
     {
       "sym": "UnlinkProcess",
+      "addr": "0x8004ebc8",
       "features": [
         "struct",
         "pointer",
@@ -473,6 +502,7 @@
     },
     {
       "sym": "func_80011460_12060",
+      "addr": "0x80011460",
       "features": [
         "pointer",
         "arithmetic"
@@ -483,6 +513,7 @@
     },
     {
       "sym": "func_80052E14_53A14",
+      "addr": "0x80052e14",
       "features": [
         "struct",
         "pointer"
@@ -498,6 +529,7 @@
     },
     {
       "sym": "GWBoardRecordGet",
+      "addr": "0x80035c90",
       "features": [
         "pointer",
         "branch",
@@ -509,6 +541,7 @@
     },
     {
       "sym": "ContDataUpdate",
+      "addr": "0x800098fc",
       "features": [
         "array",
         "global",
@@ -526,6 +559,7 @@
     },
     {
       "sym": "func_80012B14_13714",
+      "addr": "0x80012b14",
       "features": [
         "float",
         "array",
@@ -544,6 +578,7 @@
     },
     {
       "sym": "Hu3DCam3DToScreen",
+      "addr": "0x8001291c",
       "features": [
         "float",
         "array",
@@ -562,6 +597,7 @@
     },
     {
       "sym": "DecodeData",
+      "addr": "0x8000b000",
       "features": [
         "pointer",
         "branch"
@@ -578,6 +614,7 @@
     },
     {
       "sym": "func_800230F8_23CF8",
+      "addr": "0x800230f8",
       "features": [
         "struct",
         "pointer",
@@ -595,6 +632,7 @@
     },
     {
       "sym": "HuSprGrpCreate",
+      "addr": "0x8005279c",
       "features": [
         "struct",
         "pointer",
@@ -607,6 +645,7 @@
     },
     {
       "sym": "FileSeek",
+      "addr": "0x8000a150",
       "features": [
         "branch",
         "struct",
@@ -624,6 +663,7 @@
     },
     {
       "sym": "HuMemAllocTag",
+      "addr": "0x80019a14",
       "features": [
         "pointer",
         "struct",
@@ -642,6 +682,7 @@
     },
     {
       "sym": "func_80047D4C_4894C",
+      "addr": "0x80047d4c",
       "features": [
         "struct",
         "field",
@@ -668,6 +709,7 @@
     },
     {
       "sym": "HuPrcChildUnlink",
+      "addr": "0x8004ed84",
       "features": [
         "struct",
         "field",

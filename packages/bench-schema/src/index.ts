@@ -3,6 +3,7 @@
 // range over in ./features. Zero dependencies, no I/O, browser-safe by construction.
 
 export * from './features';
+export * from './identity';
 
 export type ToolchainId = 'agbcc' | 'ido7.1' | 'gcc2.7.2kmc' | 'gcc2.7.2' | 'mwcc_242_81';
 
@@ -132,8 +133,18 @@ export interface GapSize {
 
 /** One benchmark row: one (function × toolchain) case with both decompilers' outcomes. */
 export interface FunctionResult {
-  id: string; // stable unique id: `${project}:${sym}:${toolchain}`
+  /** `${project}:${sym}:${toolchain}` — the row's READABLE name, unique within one artifact. It is
+   *  what a person reads and cites. It is NOT what joins rows across artifacts: see `rowIdentity`
+   *  in ./identity, which keys a real row by `addr`. */
+  id: string;
   sym: string;
+  /** REAL tier only: the function's address in the project's linked ELF (`0x` + 8 lowercase hex;
+   *  GBA ROM-mapped with the Thumb bit clear, N64 VRAM). The row's identity. Synthetic rows have
+   *  no address and are identified by `id`. */
+  addr?: string;
+  /** REAL tier only: names the row was published under before its upstream renamed the function,
+   *  so a citation or a permalink of the old spelling still resolves to it. */
+  aliases?: string[];
   project: string; // "synthetic" | "kleod" | "pokeemerald" | ...
   tier: 'synthetic' | 'real';
   toolchain: ToolchainId;

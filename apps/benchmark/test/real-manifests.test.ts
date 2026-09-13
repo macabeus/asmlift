@@ -56,6 +56,26 @@ describe('committed real-tier manifests', () => {
       }
     });
 
+    // A row's `addr` is its identity, so it is a MEASUREMENT: the address the project's own ELF gives
+    // the symbol, read here back out of the committed symbol map that ELF was vendored into — no
+    // checkout needed, so CI holds it. A typo'd or guessed address would join the wrong rows.
+    test(`${f} keys every row by the address its vendored symbol map gives the symbol`, () => {
+      const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
+      const mapPath = join(REAL_DIR, 'tu', man.project, 'symbols.json.gz');
+      expect(existsSync(mapPath), `${man.project} has no vendored symbol map to check addr against`).toBe(true);
+      const map = JSON.parse(gunzipSync(readFileSync(mapPath)).toString('utf8')) as Record<string, { name: string }[]>;
+      const at = new Map<string, string[]>();
+      for (const [addr, entries] of Object.entries(map)) {
+        for (const e of entries) {
+          at.set(e.name, [...(at.get(e.name) ?? []), addr]);
+        }
+      }
+      const wrong = man.functions
+        .filter((fn) => JSON.stringify(at.get(fn.sym)) !== JSON.stringify([fn.addr]))
+        .map((fn) => `${man.project}:${fn.sym} addr ${fn.addr}, map ${JSON.stringify(at.get(fn.sym) ?? null)}`);
+      expect(wrong).toEqual([]);
+    });
+
     test(`${f} has vendored TUs for every function, free of machine paths`, () => {
       const man = JSON.parse(readFileSync(join(REAL_DIR, f), 'utf8')) as RealManifest;
       const dir = join(REAL_DIR, 'tu', man.project);

@@ -58,6 +58,7 @@
 //   - Outside `.claude/commands/**` the rule is still "dated or deferred", and a date in a dated
 //     LOG is not checked for freshness — a historical incident is not a stale price, and no
 //     measured threshold separates them.
+import { type Identifiable, resolveRow } from '@asmlift/bench-schema';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -349,13 +350,13 @@ describe('the unmatchable register is falsified by the artifact', () => {
         'its table shape moved and this check went blind',
     ).toBeGreaterThan(0);
 
-    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as {
-      id: string;
+    const artifact = JSON.parse(readFileSync(ARTIFACT, 'utf8')).results as (Identifiable & {
       asmlift?: { outcome?: string };
-    }[];
+    })[];
     const falsified: string[] = [];
     for (const id of ids) {
-      const row = artifact.find((r) => r.id === id);
+      // resolved as every row reference is — a row renamed upstream still answers to the id written here
+      const row = resolveRow(artifact, id);
       // `citations.test.ts` also resolves this id, and this assertion is KEPT anyway rather than
       // deferred to it: an id that stops resolving leaves `row?.asmlift?.outcome` undefined, which
       // is not `'match'`, so without this line the check below passes over an empty set and this
@@ -526,7 +527,12 @@ describe('docs/bench-cost.md', () => {
         return r.tier === tier && typeof r.asmlift?.rankSeconds === 'number';
       });
     const sum = (rows: { asmlift: { rankSeconds: number } }[]) => rows.reduce((a, r) => a + r.asmlift.rankSeconds, 0);
-    const row = (id: string) => artifact.results.find((r: { id: string }) => r.id === id);
+    type CostRow = Identifiable & { asmlift: { rankSeconds: number; candidateCount: number } };
+    const row = (id: string): CostRow => {
+      const r = resolveRow(artifact.results as CostRow[], id);
+      expect(r, `docs/bench-cost.md §3 names ${id}, which is not a row of the artifact`).toBeDefined();
+      return r!;
+    };
     const group = (n: number) => Math.round(n).toLocaleString('en-US');
 
     const real = ranked('real');

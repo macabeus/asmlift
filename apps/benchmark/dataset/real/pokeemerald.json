@@ -25,6 +25,7 @@
   "functions": [
     {
       "sym": "MathUtil_Mul16",
+      "addr": "0x08151534",
       "features": [
         "arithmetic",
         "fixed-point"
@@ -35,6 +36,7 @@
     },
     {
       "sym": "MathUtil_Mul16Shift",
+      "addr": "0x08151550",
       "features": [
         "arithmetic",
         "fixed-point"
@@ -45,6 +47,7 @@
     },
     {
       "sym": "MathUtil_Mul32",
+      "addr": "0x08151574",
       "features": [
         "arithmetic",
         "fixed-point",
@@ -56,6 +59,7 @@
     },
     {
       "sym": "MathUtil_Div16",
+      "addr": "0x081515b0",
       "features": [
         "arithmetic",
         "branch"
@@ -66,6 +70,7 @@
     },
     {
       "sym": "MathUtil_Div16Shift",
+      "addr": "0x081515d4",
       "features": [
         "arithmetic",
         "branch"
@@ -76,6 +81,7 @@
     },
     {
       "sym": "MathUtil_Inv16",
+      "addr": "0x08151624",
       "features": [
         "arithmetic"
       ],
@@ -85,6 +91,7 @@
     },
     {
       "sym": "StoreWordInTwoHalfwords",
+      "addr": "0x0806f67c",
       "features": [
         "memory",
         "pointer",
@@ -101,6 +108,7 @@
     },
     {
       "sym": "LoadWordFromTwoHalfwords",
+      "addr": "0x0806f684",
       "features": [
         "memory",
         "pointer",
@@ -117,6 +125,7 @@
     },
     {
       "sym": "CountTrailingZeroBits",
+      "addr": "0x0806f8a8",
       "features": [
         "branch"
       ],
@@ -126,6 +135,7 @@
     },
     {
       "sym": "CalcByteArraySum",
+      "addr": "0x0806f96c",
       "features": [
         "arithmetic",
         "pointer",
@@ -137,6 +147,7 @@
     },
     {
       "sym": "CalcCRC16",
+      "addr": "0x0806f8d0",
       "features": [
         "branch"
       ],
@@ -146,6 +157,7 @@
     },
     {
       "sym": "Random",
+      "addr": "0x0806f5cc",
       "features": [
         "global",
         "arithmetic"
@@ -157,6 +169,7 @@
     },
     {
       "sym": "StringLength",
+      "addr": "0x08008c24",
       "features": [
         "pointer",
         "array",
@@ -169,6 +182,7 @@
     },
     {
       "sym": "StringCompare",
+      "addr": "0x08008c44",
       "features": [
         "branch",
         "pointer",
@@ -181,6 +195,7 @@
     },
     {
       "sym": "StringCompareN",
+      "addr": "0x08008c68",
       "features": [
         "branch",
         "pointer",
@@ -193,6 +208,7 @@
     },
     {
       "sym": "StringCopy",
+      "addr": "0x08008ba0",
       "features": [
         "pointer",
         "branch"
@@ -204,6 +220,7 @@
     },
     {
       "sym": "StringAppend",
+      "addr": "0x08008bc0",
       "features": [
         "pointer",
         "branch"
@@ -215,6 +232,7 @@
     },
     {
       "sym": "IsStringLengthAtLeast",
+      "addr": "0x08008c94",
       "features": [
         "branch",
         "pointer",
@@ -227,6 +245,7 @@
     },
     {
       "sym": "StringCopyN",
+      "addr": "0x08008bd8",
       "features": [
         "pointer",
         "array"
@@ -237,6 +256,7 @@
     },
     {
       "sym": "CalcCRC16WithTable",
+      "addr": "0x0806f928",
       "features": [
         "array",
         "cast",
@@ -249,6 +269,7 @@
     },
     {
       "sym": "ModifyStatByNature",
+      "addr": "0x0806d8d4",
       "features": [
         "branch",
         "arithmetic",
@@ -260,6 +281,7 @@
     },
     {
       "sym": "GetGenderFromSpeciesAndPersonality",
+      "addr": "0x0806a020",
       "features": [
         "branch",
         "global",
@@ -271,6 +293,7 @@
     },
     {
       "sym": "Sin2",
+      "addr": "0x0806f570",
       "features": [
         "arithmetic",
         "branch",
@@ -283,6 +306,7 @@
     },
     {
       "sym": "Cos2",
+      "addr": "0x0806f5b4",
       "features": [
         "arithmetic"
       ],
@@ -293,6 +317,7 @@
     },
     {
       "sym": "PutMemBlockHeader",
+      "addr": "0x08000988",
       "features": [
         "memory",
         "pointer",
@@ -310,6 +335,7 @@
     },
     {
       "sym": "PutFirstMemBlockHeader",
+      "addr": "0x080009a4",
       "features": [
         "pointer",
         "struct"
@@ -326,6 +352,7 @@
     },
     {
       "sym": "StopScript",
+      "addr": "0x08098d08",
       "features": [
         "memory",
         "pointer",
@@ -343,6 +370,7 @@
     },
     {
       "sym": "SetupBytecodeScript",
+      "addr": "0x08098cf4",
       "features": [
         "memory",
         "pointer",
@@ -355,6 +383,7 @@
     },
     {
       "sym": "TranslateBigMonSizeTableIndex",
+      "addr": "0x080f986c",
       "features": [
         "branch",
         "array",
@@ -368,6 +397,7 @@
     },
     {
       "sym": "FeebasRandom",
+      "addr": "0x080b4a98",
       "features": [
         "global",
         "macro"
@@ -379,6 +409,7 @@
     },
     {
       "sym": "CalculatePPWithBonus",
+      "addr": "0x0806b960",
       "features": [
         "arithmetic",
         "global",
@@ -391,6 +422,7 @@
     },
     {
       "sym": "GiveBerryPowder",
+      "addr": "0x08024700",
       "features": [
         "branch",
         "memory",
@@ -403,6 +435,7 @@
     },
     {
       "sym": "TrySetCantSelectMoveBattleScript",
+      "addr": "0x0803fb4c",
       "features": [
         "array",
         "branch",
@@ -417,6 +450,7 @@
     },
     {
       "sym": "SetMauvilleOldManLanguage",
+      "addr": "0x08120c0c",
       "features": [
         "union",
         "struct",
@@ -434,6 +468,7 @@
     },
     {
       "sym": "AcroBikeHandleInputTurning",
+      "addr": "0x081194c8",
       "features": [
         "branch",
         "global",
@@ -448,6 +483,7 @@
     },
     {
       "sym": "DoForcedMovement",
+      "addr": "0x0808abe0",
       "features": [
         "fnptr",
         "branch",
@@ -460,6 +496,7 @@
     },
     {
       "sym": "GetMoveTarget",
+      "addr": "0x080458e0",
       "features": [
         "array",
         "global"
@@ -471,6 +508,7 @@
     },
     {
       "sym": "Cmd_tryconversiontypechange",
+      "addr": "0x08051424",
       "features": [
         "array",
         "struct"
@@ -487,6 +525,7 @@
     },
     {
       "sym": "AnimTask_FlashHealthboxOnLevelUp_Step",
+      "addr": "0x08170a38",
       "features": [
         "struct",
         "field",
@@ -504,6 +543,7 @@
     },
     {
       "sym": "UpdateShoalTideFlag",
+      "addr": "0x08137988",
       "features": [
         "table",
         "array",
@@ -522,6 +562,7 @@
     },
     {
       "sym": "GetAnchorCoord",
+      "addr": "0x08007e28",
       "features": [
         "arithmetic",
         "branch",
@@ -547,6 +588,7 @@
     },
     {
       "sym": "EReader_Reset",
+      "addr": "0x081d4db8",
       "features": [
         "value-home",
         "macro"

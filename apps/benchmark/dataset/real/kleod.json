@@ -20,6 +20,7 @@
   "functions": [
     {
       "sym": "ReturnOne",
+      "addr": "0x0800045c",
       "features": [
         "baseline"
       ],
@@ -29,6 +30,7 @@
     },
     {
       "sym": "StrCpy",
+      "addr": "0x08000460",
       "features": [
         "memory",
         "pointer"
@@ -44,6 +46,7 @@
     },
     {
       "sym": "MultiplyQ8",
+      "addr": "0x08000948",
       "features": [
         "arithmetic",
         "fixed-point",
@@ -55,6 +58,7 @@
     },
     {
       "sym": "MultiplyQ4",
+      "addr": "0x08000990",
       "features": [
         "arithmetic",
         "fixed-point",
@@ -66,6 +70,7 @@
     },
     {
       "sym": "DivideQ8",
+      "addr": "0x08000960",
       "features": [
         "arithmetic"
       ],
@@ -75,6 +80,7 @@
     },
     {
       "sym": "ReciprocalQ8",
+      "addr": "0x08000978",
       "features": [
         "arithmetic"
       ],
@@ -84,6 +90,7 @@
     },
     {
       "sym": "DivideQ4",
+      "addr": "0x080009a8",
       "features": [
         "arithmetic"
       ],
@@ -93,6 +100,7 @@
     },
     {
       "sym": "ReciprocalQ4",
+      "addr": "0x080009c0",
       "features": [
         "arithmetic"
       ],
@@ -102,6 +110,7 @@
     },
     {
       "sym": "ReadKeyInput",
+      "addr": "0x080006cc",
       "features": [
         "global",
         "branch"
@@ -123,6 +132,7 @@
     },
     {
       "sym": "VBlankHandlerMinimal",
+      "addr": "0x08000ab0",
       "features": [
         "global"
       ],
@@ -145,6 +155,7 @@
     },
     {
       "sym": "ReadUnalignedU32",
+      "addr": "0x0804b270",
       "features": [
         "pointer",
         "memory"
@@ -155,6 +166,7 @@
     },
     {
       "sym": "GetEntityLookupData",
+      "addr": "0x0803d140",
       "features": [
         "array",
         "pointer",
@@ -173,6 +185,7 @@
     },
     {
       "sym": "UpdateEntities",
+      "addr": "0x0803b074",
       "features": [
         "branch",
         "cast"
@@ -206,6 +219,7 @@
     },
     {
       "sym": "GameUpdate",
+      "addr": "0x08045734",
       "features": [
         "branch",
         "global"
@@ -241,6 +255,7 @@
     },
     {
       "sym": "Decompress",
+      "addr": "0x08043af4",
       "features": [
         "branch",
         "cast",
@@ -284,6 +299,7 @@
     },
     {
       "sym": "DecompressDma",
+      "addr": "0x08043b34",
       "features": [
         "cast",
         "memory"
@@ -319,6 +335,7 @@
     },
     {
       "sym": "CheckTileCollisionVertical",
+      "addr": "0x08014184",
       "features": [
         "struct",
         "branch",
@@ -332,6 +349,7 @@
     },
     {
       "sym": "ProcessHBlankWait",
+      "addr": "0x0804dc64",
       "features": [
         "branch",
         "memory",
@@ -343,6 +361,7 @@
     },
     {
       "sym": "DecompressAlloc",
+      "addr": "0x08043b80",
       "features": [
         "cast",
         "memory",
@@ -355,6 +374,7 @@
     },
     {
       "sym": "WritePaletteColor",
+      "addr": "0x0804c844",
       "features": [
         "global",
         "pointer",
@@ -372,6 +392,7 @@
     },
     {
       "sym": "ReadUnalignedU16",
+      "addr": "0x0804b254",
       "features": [
         "pointer",
         "memory"
@@ -382,6 +403,7 @@
     },
     {
       "sym": "FreeAllDecompBuffers",
+      "addr": "0x080008dc",
       "features": [
         "global",
         "pointer",
@@ -399,6 +421,7 @@
     },
     {
       "sym": "DmaSpriteToObjVram",
+      "addr": "0x0804c1c0",
       "features": [
         "pointer",
         "cast",
@@ -415,6 +438,7 @@
     },
     {
       "sym": "StreamCmd_SetWindowRegs",
+      "addr": "0x0804e708",
       "features": [
         "pointer",
         "global"
@@ -430,6 +454,7 @@
     },
     {
       "sym": "RollRandomLevelVariant",
+      "addr": "0x0803e8cc",
       "features": [
         "arithmetic",
         "global"
@@ -446,6 +471,7 @@
     },
     {
       "sym": "TransformSingleEntityToScreen",
+      "addr": "0x0800a5b8",
       "features": [
         "global",
         "struct",
@@ -458,6 +484,7 @@
     },
     {
       "sym": "CopyBGScrollTiles",
+      "addr": "0x08025dd4",
       "features": [
         "global",
         "array",
@@ -469,6 +496,7 @@
     },
     {
       "sym": "UpdateHUDCounterDisplay",
+      "addr": "0x08025e68",
       "features": [
         "global",
         "array",
@@ -480,6 +508,7 @@
     },
     {
       "sym": "CheckWorldCompletion",
+      "addr": "0x0803ac18",
       "features": [
         "global",
         "struct",
@@ -491,6 +520,7 @@
     },
     {
       "sym": "UpdateWorldMapNodeTile",
+      "addr": "0x0803af38",
       "features": [
         "global",
         "array",
@@ -503,6 +533,7 @@
     },
     {
       "sym": "UpdateFadeEffect",
+      "addr": "0x08000f70",
       "features": [
         "global"
       ],
@@ -512,6 +543,7 @@
     },
     {
       "sym": "StreamCmd_SetBGScroll",
+      "addr": "0x0804c7fc",
       "features": [
         "global",
         "struct",
@@ -523,6 +555,7 @@
     },
     {
       "sym": "ProcessInputAndUpdateEntities",
+      "addr": "0x0803a410",
       "features": [
         "array",
         "branch",
@@ -540,6 +573,7 @@
     },
     {
       "sym": "ConfigureEntityBehavior",
+      "addr": "0x0803f68c",
       "features": [
         "table",
         "pointer",
@@ -558,6 +592,7 @@
     },
     {
       "sym": "UpdateCameraScroll",
+      "addr": "0x0800247c",
       "features": [
         "struct",
         "branch",
@@ -575,6 +610,7 @@
     },
     {
       "sym": "CountCollectedGems",
+      "addr": "0x0803b0a0",
       "features": [
         "array",
         "branch",
@@ -592,6 +628,7 @@
     },
     {
       "sym": "UpdateWorldMapNodeAnim",
+      "addr": "0x0803b378",
       "features": [
         "array",
         "global"
@@ -608,6 +645,7 @@
     },
     {
       "sym": "EntityItemDrop",
+      "addr": "0x0801f4d0",
       "features": [
         "bitfield",
         "array",
@@ -626,6 +664,7 @@
     },
     {
       "sym": "SetupBG3WindowOverlay",
+      "addr": "0x0803a8b8",
       "features": [
         "array",
         "global",
@@ -643,6 +682,7 @@
     },
     {
       "sym": "EntityDeathAnimation",
+      "addr": "0x0801de44",
       "features": [
         "struct",
         "global"
@@ -659,6 +699,7 @@
     },
     {
       "sym": "IsSelectButtonPressed",
+      "addr": "0x080472b0",
       "features": [
         "bool",
         "branch",
@@ -679,6 +720,7 @@
     },
     {
       "sym": "VBlankDMA_Level2",
+      "addr": "0x08026f68",
       "features": [
         "macro",
         "global",

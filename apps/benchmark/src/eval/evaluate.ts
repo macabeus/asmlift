@@ -19,6 +19,8 @@ import { assessQuality } from './quality';
 
 export interface EvalSpec {
   sym: string;
+  addr?: string; // real tier: the row's identity, published verbatim (bench-schema rowIdentity)
+  aliases?: string[]; // real tier: earlier upstream names, published verbatim
   project: string;
   tier: 'synthetic' | 'real';
   language: 'c' | 'c++';
@@ -239,6 +241,8 @@ export function evaluate(
   return {
     id: `${spec.project}:${spec.sym}:${tc.id}`,
     sym: spec.sym,
+    ...(spec.addr === undefined ? {} : { addr: spec.addr }),
+    ...(spec.aliases === undefined || spec.aliases.length === 0 ? {} : { aliases: spec.aliases }),
     project: spec.project,
     tier: spec.tier,
     toolchain: tc.id,

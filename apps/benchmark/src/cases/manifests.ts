@@ -10,6 +10,7 @@
 // Shape is VALIDATED at load time so a typo fails with the
 // file name, not mid-run with a compile error; projects missing on this machine are reported
 // once, aggregated, and skipped.
+import { ADDR_PATTERN } from '@asmlift/bench-schema';
 import type { Prototypes } from '@asmlift/core/proto';
 import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -20,7 +21,18 @@ import { WORKSPACE } from '../config';
 import { TOOLCHAINS, type ToolchainId } from '../toolchains';
 
 export interface RealFunction {
+  /** The upstream project's name for the function, as-is — presentation, and the row id's middle. */
   sym: string;
+  /** The function's address in the project's linked ELF — the row's IDENTITY (bench-schema
+   *  `rowIdentity`). `0x` + 8 lowercase hex, the spelling the vendored symbol map keys by; GBA
+   *  ROM-mapped with the Thumb bit clear, N64 VRAM. MEASURED from the build artifact, never
+   *  typed from a name: `test/real-manifests.test.ts` holds it equal to the address the
+   *  committed `tu/<project>/symbols.json.gz` gives `sym`. */
+  addr: string;
+  /** Earlier upstream names of this function, oldest first. An upstream rename is a data change:
+   *  `sym` takes the new name, the old one is appended here, and every citation, permalink and
+   *  brief that named the old spelling keeps resolving to this row. */
+  aliases?: string[];
   features: string[];
   funcC: string; // the extracted function source (verbatim from the decomp)
   sourceUrl?: string; // commit-pinned GitHub permalink to funcC's span in the project
@@ -161,9 +173,38 @@ export function validateManifest(m: unknown, file: string): string[] {
   if (!Array.isArray(man.functions) || man.functions.length === 0) {
     problems.push(`${file}: "functions" must be a non-empty array`);
   } else {
+    const addrs = new Map<string, string>();
+    const names = new Map<string, string>();
     for (const f of man.functions) {
       if (typeof f.sym !== 'string' || typeof f.funcC !== 'string' || !Array.isArray(f.features)) {
         problems.push(`${file}: function entry missing sym/funcC/features (${JSON.stringify(f.sym)})`);
+      }
+      // identity: one address per row, and no two rows of a project at the same one
+      if (typeof f.addr !== 'string' || !ADDR_PATTERN.test(f.addr)) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} "addr" must be the ELF address as 0x + 8 lowercase hex (got ${JSON.stringify(f.addr)})`,
+        );
+      } else if (addrs.has(f.addr)) {
+        problems.push(
+          `${file}: ${JSON.stringify(f.sym)} shares addr ${f.addr} with ${JSON.stringify(addrs.get(f.addr))}`,
+        );
+      } else {
+        addrs.set(f.addr, f.sym);
+      }
+      // a name — current or former — answers to exactly one row, or a citation of it is ambiguous
+      if (
+        f.aliases !== undefined &&
+        (!Array.isArray(f.aliases) || f.aliases.some((a) => typeof a !== 'string' || !a))
+      ) {
+        problems.push(`${file}: ${JSON.stringify(f.sym)} "aliases" must be an array of names when present`);
+      }
+      for (const n of [f.sym, ...(Array.isArray(f.aliases) ? f.aliases : [])]) {
+        if (names.has(n)) {
+          problems.push(
+            `${file}: the name ${JSON.stringify(n)} answers to two rows (${JSON.stringify(names.get(n))}, ${JSON.stringify(f.sym)})`,
+          );
+        }
+        names.set(n, f.sym);
       }
     }
   }

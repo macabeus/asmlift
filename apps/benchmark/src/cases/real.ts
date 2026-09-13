@@ -34,6 +34,8 @@ export function realCases(filter: RealFilter = {}): Case[] {
         id: `${man.project}:${f.sym}:${man.toolchain}`,
         tier: 'real',
         sym: f.sym,
+        addr: f.addr,
+        aliases: f.aliases,
         project: man.project,
         language: 'c',
         features: f.features,

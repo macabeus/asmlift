@@ -151,6 +151,8 @@ export function runCases(
     }
     const spec: EvalSpec = {
       sym: c.sym,
+      addr: c.addr,
+      aliases: c.aliases,
       project: c.project,
       tier: c.tier,
       language: c.language,

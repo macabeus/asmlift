@@ -6,7 +6,7 @@
 //   - coverage shrank (fewer rows, or a toolchain vanished — e.g. Docker was down and its rows
 //     were skipped): committing would destroy data, not refresh it
 //   - dirty provenance: numbers from uncommitted code must never be published
-import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
+import { type BenchOutput, type FunctionResult, joinArtifacts } from '@asmlift/bench-schema';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -60,9 +60,11 @@ export function staleCheck(base = 'HEAD'): 'stale' | 'fresh' {
     }
   }
 
-  const committedRows = new Map(committed.results.map((r) => [r.id, rowKey(r)]));
+  // joined by identity (bench-schema joinArtifacts), the same join the regression and diff gates use
+  const joined = joinArtifacts(committed.results, fresh.results);
+  const committedRows = new Map(committed.results.map((r) => [joined.baseKey(r), rowKey(r)]));
   for (const r of fresh.results) {
-    if (committedRows.get(r.id) !== rowKey(r)) {
+    if (committedRows.get(joined.headKey(r)) !== rowKey(r)) {
       return 'stale';
     }
   }
