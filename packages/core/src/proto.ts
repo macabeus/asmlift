@@ -16,7 +16,7 @@ import type { SymbolMap, SymbolTypeFacts } from './symbols';
  *  the extension is an inference off an encoding two different C sources produce. Where the asm
  *  carries no extension, this list is NOT consulted: pinning there would type every parameter of
  *  every row from the declaration, and a declared `u32` kills rank.ts's signed arm before the
- *  differ ever sees it. That half is an axis question and is not answered here. */
+ *  differ ever sees it. That half is a variation question and is not answered here. */
 export type ParamType = string;
 
 /** What the headers know about one function. All fields optional: a partial table (only

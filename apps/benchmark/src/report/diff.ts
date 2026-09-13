@@ -349,7 +349,7 @@ export const fanMove = (from: number, to: number): string =>
   `${from} → ${to}${from > 0 ? ` (${(to / from).toFixed(2)}×)` : ''}`;
 
 /** How many rows the fan section names before it summarises. The whole point is the biggest movers
- *  plus the total; an axis that touches 600 rows must not bury the totals line under 600 lines. */
+ *  plus the total; a variation that touches 600 rows must not bury the totals line under 600 lines. */
 export const FAN_ROWS_SHOWN = 15;
 
 /** The rows whose fan LEFT — named, biggest first, under the same cap as the movers. Written as

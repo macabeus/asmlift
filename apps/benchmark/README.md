@@ -241,7 +241,7 @@ A SECOND cache sits a level below that one and is **on by default**: it serves t
 objects a previous run of the same toolchain already compiled (`packages/cli/src/candcache.ts`).
 It changes no result — the same rows, the same scores — and on a compile-dominated run it is the
 difference between minutes and tens of minutes. It is not a historical archive: hit rate decays as
-the axes accumulate. `ASMLIFT_CANDCACHE=0` (or `off`, or SET-BUT-EMPTY) bypasses it, so does
+the variations accumulate. `ASMLIFT_CANDCACHE=0` (or `off`, or SET-BUT-EMPTY) bypasses it, so does
 `ASMLIFT_BENCH_CACHE=0`; `ASMLIFT_CANDCACHE=verify` compiles everything anyway and audits the store
 against it, failing the run on any disagreement. Serving mode audits itself too, on a sampled 2% of
 the keys it serves — the `[candcache]` line carries `sample=…%/seed=…`, and a shard that finds a

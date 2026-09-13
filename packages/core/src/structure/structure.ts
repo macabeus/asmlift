@@ -7,7 +7,7 @@
 //     the clamp0 diamond becomes `if (x < 0) x = 0; return x;` rather than a temp copy).
 //     NOTE the coupled INVERSE: l3/regspell.ts re-derives the UN-coalesced copy-carrying
 //     spelling as a ranked candidate — its R1 template matches THIS pass's diamond output
-//     shape, so a change to coalescing here can silently stop that lever firing (the
+//     shape, so a change to coalescing here can silently stop that respell variation firing (the
 //     matching-suite regspell gate is what makes the coupling loud).
 //     Coalescing is INTERFERENCE-CHECKED against per-block value liveness, and
 //     inline-at-use rendering carries an effect-ordering model: a call/load that cannot
@@ -365,7 +365,7 @@ function ptrMemberBase(e: Expr, sym: SymRenderCtx): PtrMemberBase | null {
  *  rather than widened, because this rule is not byte-neutral (see `spellPtrMemberElements`) and
  *  widening a non-neutral spelling's reach is a separate question a row has to ask.
  *
- *  And the whole rule refuses when `/no-ptr-elem` turns it off — the axis, not a preference. */
+ *  And the whole rule refuses when `/no-ptr-elem` turns it off — the variation, not a preference. */
 function ptrMemberElement(
   baseExpr: Expr,
   carried: Expr | null,
@@ -451,10 +451,10 @@ function spellablePointee(
  *  the identical `add r1, #0x8` · `add r1, r1, r0` · `ldrb r0, [r1]`, while `*((u8 *)gBlob + 8 + i)`
  *  and `((u8 *)gBlob + i)[8]` take the displacement — and the base-local form is a spelling three
  *  shipped passes exist to emit (basecse/nearbase/scopebase). It is a per-site DEFAULT and not a
- *  ranked axis for the OTHER reason of the two docs/level-tower.md gives: those two forms TIE in
- *  bytes, so an axis would enumerate a candidate that can never win. Contrast the GLOBAL rank
+ *  ranked variation for the OTHER reason of the two docs/level-tower.md gives: those two forms TIE in
+ *  bytes, so a variation would enumerate a candidate that can never win. Contrast the GLOBAL rank
  *  recovery one indirection up (`cli/test/matching/array-rank-axis.test.ts`, `/flat-rank`), which
- *  IS an axis because its two spellings do not tie. Do not read this gate as "the asm decided" and
+ *  IS a variation because its two spellings do not tie. Do not read this gate as "the asm decided" and
  *  carry that reading to a case where the alternatives differ in bytes.
  *
  *  THE RANK IS PART OF THE SPELLING, not a later fidelity polish. The declaration this access has
@@ -839,7 +839,7 @@ function arrayAccess(
     //     input asm.
     //   u32 g[6][9] — a NON-power-of-two row stride: `g[a][b]` and `g[0][a*9+b]` are BYTE-
     //     IDENTICAL, because agbcc reassociates `(a*36)+(b*4)` into `((a*9)+b)*4` itself. Nothing
-    //     referees the choice, which is the same reason `scaledBy` refuses a CONSTANT row term.
+    //     referees the question, which is the same reason `scaledBy` refuses a CONSTANT row term.
     //
     // Both cases say decline: in the first the evidence points the other way, in the second there
     // is none. The recovery therefore lives on the byte residual alone (memAccess), where the two
@@ -1014,7 +1014,7 @@ const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, numbe
  *
  *  A SUPERSET of the real sort, on purpose and in the safe direction — and the direction only
  *  holds because rank asks this of the SAME fn it then structures (a `variantGate`, evaluated on
- *  the variant's own fully-raised fn). Two gaps remain, both of which only say YES where the sort
+ *  that lift's own fully-raised fn). Two gaps remain, both of which only say YES where the sort
  *  says nothing: `keepSlot`/`suppressedArgs` drop copies this still counts, and this asks of every
  *  edge where `preferDefPosCopyOrder` reorders only the acyclic ones (`copySetIsCyclic` needs the
  *  built copy list, which is not available here). So it can answer true for a pair that later
@@ -1101,12 +1101,12 @@ export interface FreshMergeCarrier {
  *  `max3` (agbcc -O2, scored against its own target) only the SECOND of the two chained merges is
  *  load-bearing: re-homing just the first is byte-identical to re-homing neither (score 5), and
  *  re-homing just the second is byte-identical to re-homing both (score 0, MATCH). Splitting the
- *  choice per slot would be a fan of 2^slots, so the axis offers the whole-function spelling.
+ *  decision per slot would be a fan of 2^slots, so the variation offers the whole-function spelling.
  *
  *  `param-rooted` is a SCOPE, not a derivation. A chain rooted in an ordinary merge home is left
- *  alone, and widening to one is a different, unmeasured axis: 293 of 721 map-less corpus rows
+ *  alone, and widening to one is a different, unmeasured variation: 293 of 721 map-less corpus rows
  *  carry at least one conditional merge slot (925 slots), of which the param rooting admits 109 —
- *  `LoadBGTilemapData` is one of the other 184, which is why the axis has no reach there — a RECORD
+ *  `LoadBGTilemapData` is one of the other 184, which is why the variation has no reach there — a RECORD
  *  of a measurement, not a live check: that function is in no corpus row and no fixture here (its
  *  attribution evidence is docs/lbg-attribution.md), so it cannot be re-run from this repo.
  *
@@ -1163,7 +1163,7 @@ function reHomesParamMerge(
  *
  *  THE FIELDS ARE LAZY, and that is a cost decision rather than a style one. `canTakeName` runs per
  *  merge slot per carrier over every named value in the function, and `NAME_COALESCE_GATES`' eager
- *  record is affordable only because its pass is an opt-in axis. Laziness changes nothing about
+ *  record is affordable only because its pass is an opt-in variation. Laziness changes nothing about
  *  BLAME: `firstRejection` reports the first gate in TABLE order that rejects, whichever fields
  *  were computed to get there. What it does mean is that the table's order also decides what runs,
  *  so the two whole-function walks sit at the bottom. */
@@ -1306,7 +1306,7 @@ export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
   },
 ];
 
-// Structuring levers, threaded as DATA so a new one is a field here + its consumer, not a new
+// Structuring options, threaded as DATA so a new one is a field here + its consumer, not a new
 // positional boolean widened across every call site:
 //   returnsVoid                    — from the function's own prototype (suppress phantom r0 return);
 //   coalesceLoopInit               — keep the induction var in its arg register;
@@ -1317,7 +1317,7 @@ export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
 // booleans, never a compiler name.
 //
 // WHAT A FIELD DOC BELOW HOLDS, narrowly: what the option MEANS to `structure()`, and the suffix of
-// the axis that enumerates it. An AXIS's rationale, and any figure pricing its marginal value, live
+// the variation that enumerates it. A VARIATION's rationale, and any figure pricing its marginal value, live
 // ONCE at its `STRUCTURING_AXES` entry in rank.ts — restated here the two copies rot separately,
 // and only the rank.ts one sits next to the enumeration that could refute it. Figures pricing a
 // DEFAULT this pass owns (the edge-copy ordering, `spellDeclaredSubscripts`) do belong here.
@@ -1332,9 +1332,9 @@ export interface StructureOptions {
   // both arms reconverge. Defaults to preserveDivergentBranchSense rather than to a constant, so a
   // target that opts out of the divergent claim opts out of this one; target.ts says how.
   //
-  // This is the ZERO POINT of rank.ts's `/flip-join` axis, not a per-compiler fact that closes
+  // This is the ZERO POINT of rank.ts's `/flip-join` variation, not a per-compiler fact that closes
   // the question — docs/level-tower.md wants a default only where the mapping is a FUNCTION, and
-  // benchmark rows still reach their winning spelling through the axis rather than through this
+  // benchmark rows still reach their winning spelling through the variation rather than through this
   // default. Read it forward only: it says which sense to emit ABSENT evidence of an inversion,
   // never that the asm's layout WAS the source's sense. What agbcc contributes is the refusals —
   // its gcc Makefile SRCS compiles neither sched.c nor reorg.c and toplev.c never sets
@@ -1342,7 +1342,7 @@ export interface StructureOptions {
   // toplev.c sets for -Os alone — so no scheduler and no hoister moves an arm's body across the
   // branch after stmt.c laid the arms out in source order.
   //
-  // Three mechanisms DO invert the sense, and each is per-SITE where this lever is per-function,
+  // Three mechanisms DO invert the sense, and each is per-SITE where this option is per-function,
   // so no value here is right in every `if` of a function that holds several: a short-circuit
   // fold picks which successor is `taken` from the asm's branch polarity, which on Thumb the
   // branch RANGE decides (raise/shortcircuit.ts); a relay past a branch's reach inverts to jump
@@ -1364,7 +1364,7 @@ export interface StructureOptions {
    *  either.
    *
    *  A site the fold did not touch carries no stamp and keeps its boolean, so this changes nothing
-   *  on a function with no short-circuit chain. rank.ts's `/site-sense` axis; it is an AXIS and not
+   *  on a function with no short-circuit chain. rank.ts's `/site-sense` variation; it is a VARIATION and not
    *  a default because the source-order premise under `scSharedOnFall` is a claim about gcc's
    *  layout that the differ referees per row — and because one cell of the table is genuinely
    *  undecided by these three facts (see the census at the read). */
@@ -1386,16 +1386,16 @@ export interface StructureOptions {
    *  on an unmeasured pred, where the proxy is already what runs. */
   preferDefPosCopyOrder?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
-  // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
+  // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A compiler behavior, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
   // Comparison-tree switch recovery: treat a relational test whose BRANCH admits exactly one
-  // scrutinee value as that case rather than as navigation. A per-compiler DATA lever declared in
+  // scrutinee value as that case rather than as navigation. A compiler behavior declared in
   // TargetDescription.compilerBehaviors — a compiler opts in on evidence that its dispatch jumps
   // straight to a bounded subtree's body. Default false: absent, every relational edge navigates.
   switchAllowsBoundCase?: boolean;
   // Comparison-tree switch recovery: emit the case arms in the order the ASSEMBLY lays their
-  // bodies out, rather than sorted by ascending case value. A per-compiler DATA lever declared in
+  // bodies out, rather than sorted by ascending case value. A compiler behavior declared in
   // TargetDescription.compilerBehaviors — a compiler opts in on evidence that it neither reorders
   // basic blocks nor schedules across them, so the layout it produced IS the order the source
   // wrote. Default false: absent, the arms keep the ascending spelling.
@@ -1427,7 +1427,7 @@ export interface StructureOptions {
   // to if-recovery when it is false; Regime B, having no fallback, fails loud. Default true.
   spellSwitchFallthrough?: boolean;
   // Which way this compiler hands out frame slots against DECLARATION RANK: `ascending` = the
-  // earlier-declared spilled local takes the LOWER `[sp,#k]`. A per-compiler DATA lever declared
+  // earlier-declared spilled local takes the LOWER `[sp,#k]`. A compiler behavior declared
   // in TargetDescription.compilerBehaviors, carried to the backend on `SFn.slotOrder` and applied
   // by `l3/slotorder.ts` at emit time. ABSENT means the ordering refuses — there is no default
   // direction, because a wrong one reorders declarations for no reason.
@@ -1440,26 +1440,26 @@ export interface StructureOptions {
   // (target.ts), which is where the target-to-structurer mapping lives.
   spillSlotOrder?: 'ascending' | 'descending';
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
-  // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
+  // true; verified byte-exact on agbcc and IDO. A compiler behavior declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
   // independent loads flips it there, not in a code branch. A per-FUNCTION machine-order fallback
   // candidate is deliberately deferred until a row demands it.
   defOrderLoadPairs?: boolean;
   // Anchor a constant merge copy at its const op's ORIGINAL position instead of at the CFG edge:
   // `movs r9, #0` at entry ahead of a single-armed overwrite emits as a pre-initialization above
-  // the `if`, not as its else-arm. A differ-refereed candidate axis (rank.ts `/defsite`), never a
+  // the `if`, not as its else-arm. A differ-refereed candidate variation (rank.ts `/defsite`), never a
   // default — see the refusal conditions where it is computed.
   anchorConstCopies?: boolean;
   // WIDEN `anchorConstCopies` to a LOOP HEADER's entry constant — `int s = 0;` hoisted above the
   // `if` that guards the loop, rather than written on the edge into it. A second placement
-  // decision, so a second axis point (rank.ts `/defsite/loop-entry`) rather than a widening of
+  // decision, so a second structure setting (rank.ts `/defsite/loop-entry`) rather than a widening of
   // the first: on a function carrying both kinds of anchorable const, folding them into one flag
   // would make "anchor the plain ones, leave the loop's at its edge" — a spelling `/defsite`
   // emits today — unreachable. Inert unless `anchorConstCopies` is also on.
   //
-  // AN AXIS RATHER THAN AN EXTENSION OF `l3/initfirst.ts`, whose header opens on the same rewrite
+  // A VARIATION RATHER THAN AN EXTENSION OF `l3/initfirst.ts`, whose header opens on the same rewrite
   // (`if (0 < n) { v = 0; … }` → `v = 0; if (v < n) { … }`) at a fraction of the price: a
-  // re-spelling adds candidates only where it fires, while this multiplies every candidate below
+  // respell variation adds candidates only where it fires, while this multiplies every candidate below
   // it. The fork is REACH, and it is a hard one. `initfirst` MOVES A STATEMENT, and an edge copy
   // is not a statement — structuring mints it, choosing between the edge and the const op's own
   // position, and the IR that holds those positions is gone by the time L3 runs. So the shapes
@@ -1467,9 +1467,9 @@ export interface StructureOptions {
   // re-spelling wants an ELSE-LESS `if` and rewrites the condition to read the hoisted variable
   // (`if (v < n)`), where anchoring leaves the condition alone, so the two emit different sources.
   // Measured, not argued: `/initfirst` rides every spelling rank.ts enumerates, so it is scored on
-  // every benchmark row already, and on each row this axis wins its `/initfirst`-only sibling is
+  // every benchmark row already, and on each row this variation wins its `/initfirst`-only sibling is
   // either not enumerated at all or not byte-identical to the anchored source — the substitution
-  // reaches none of them. Take the axis only while rows demand that; the price is in rank.ts.
+  // reaches none of them. Take the variation only while rows demand that; the price is in rank.ts.
   anchorLoopEntryConsts?: boolean;
   // HARDWARE fact from TargetDescription.capabilities.endianness, threaded by structureOptionsFor:
   // the bitfield extract recognizer solves an LSB-first equation, so it only runs on little-endian
@@ -1485,16 +1485,16 @@ export interface StructureOptions {
   // at a literal address is dropped.
   deviceRegisters?: readonly [number, number];
   // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
-  // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` axis, because the named
+  // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` variation, because the named
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
   // width the honest shift spelling is the one that matches, and the differ referees. Only the map
   // carries the names, so with no `symbols` this is normalized to false whatever a caller passes.
   spellBitfieldMembers?: boolean;
   // Spell an element-scaled offset through a map-declared POINTER MEMBER as a whole-element
   // subscript of it (`gBg.pMap[i + 157]`) rather than as the byte arithmetic it replaces. On by
-  // default; rank.ts enumerates the OFF spelling as the `/no-ptr-elem` axis.
+  // default; rank.ts enumerates the OFF spelling as the `/no-ptr-elem` variation.
   //
-  // IT IS AN AXIS AND NOT A DEFAULT BECAUSE IT IS NOT BYTE-NEUTRAL — the bar the block comment
+  // IT IS A VARIATION AND NOT A DEFAULT BECAUSE IT IS NOT BYTE-NEUTRAL — the bar the block comment
   // above `spellablePointee` sets for a member spelling. Compiled against agbcc (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
   // -fprologue-bugfix`), `((u16 *)gB.pMap)[i + K]` and `*(u16 *)((i << 1) + (u8 *)gB.pMap + 2K)`
   // are the same address and the same instruction COUNT at K = 0, 1 and 157 — and different
@@ -1505,9 +1505,9 @@ export interface StructureOptions {
   // Recover a multidimensional array global's DECLARED subscripts (`g[r][i]`) from a byte residual
   // carrying a term at the declared ROW stride, rather than spelling the whole residual as the
   // `*(T *)(… + (u32)&g)` cast it replaces. On by default; rank.ts enumerates the OFF spelling as
-  // the `/flat-rank` axis.
+  // the `/flat-rank` variation.
   //
-  // IT IS AN AXIS AND NOT A DEFAULT BECAUSE THE ASM DOES NOT DETERMINE IT, and the evidence that
+  // IT IS A VARIATION AND NOT A DEFAULT BECAUSE THE ASM DOES NOT DETERMINE IT, and the evidence that
   // it does not is the same compile the recovery's own premise rests on, read against the spelling
   // the recovery DISPLACES rather than against the flat one it refuses. For `u16 g[4][0x400]`:
   //
@@ -1531,34 +1531,34 @@ export interface StructureOptions {
   spellDeclaredSubscripts?: boolean;
   // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
   // (a store to a different named global), instead of caching it in a local. Off by default;
-  // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
-  // AnalyzeOptions for why this is a differ-refereed lever and not a fix.
+  // rank.ts enumerates the ON spelling as the `/reread-globals` variation — see analysis.ts
+  // AnalyzeOptions for why this is a differ-refereed variation and not a fix.
   rereadGlobals?: boolean;
   // Materialize a load that feeds a `cond_br` join arg, so the naming walk can home the join in
   // it and the identity arm elides to a one-sided in-place `if`. Off by default; rank.ts
-  // enumerates the ON spelling as the `/inplace` axis — see analysis.ts AnalyzeOptions.
+  // enumerates the ON spelling as the `/inplace` variation — see analysis.ts AnalyzeOptions.
   materializeJoinFeeds?: boolean;
   // Materialize a pure computed address shared by 2+ memory accesses, and the multi-render loads
   // through it, reproducing the source's pointer-local + scalar-temp spelling. Off by default;
-  // rank.ts enumerates the ON spelling as the `/addr-home` axis — see analysis.ts AnalyzeOptions.
+  // rank.ts enumerates the ON spelling as the `/addr-home` variation — see analysis.ts AnalyzeOptions.
   homeSharedAddresses?: boolean;
   // Materialize a pure value with 2+ distinct consumers, at least one of them inside a loop the
   // def sits outside — the register the compiler holds across the iterations. Off by default;
-  // rank.ts enumerates the ON spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
+  // rank.ts enumerates the ON spelling as the `/expr-home` variation — see analysis.ts AnalyzeOptions.
   homeLoopExprs?: boolean;
   // Materialize a pure value with 2+ consumers standing on a memory read — the register the asm
   // carried the DERIVED value in, where the read's own home is a register that died at the
-  // computation. Off by default; rank.ts enumerates the ON spelling as the `/derived-home` axis —
+  // computation. Off by default; rank.ts enumerates the ON spelling as the `/derived-home` variation —
   // see analysis.ts AnalyzeOptions.
   homeDerivedReads?: boolean;
   // Materialize a pure value that one join's incoming edges render into the SAME parameter slot
   // from 2+ places — the value the source computed once above the branch and the copy machinery
   // sinks into every arm. Off by default; rank.ts enumerates the ON spelling as the `/merge-home`
-  // axis — see analysis.ts AnalyzeOptions.
+  // variation — see analysis.ts AnalyzeOptions.
   homeMergeFeeds?: boolean;
   // Emit a memory read as a named temp in ITS OWN block when every place it renders sits in a
-  // block that block strictly dominates. A per-compiler DATA lever (TargetDescription
-  // .compilerBehaviors), not a differ-refereed axis: where the compiler has neither a scheduler
+  // block that block strictly dominates. A compiler behavior (TargetDescription
+  // .compilerBehaviors), not a differ-refereed variation: where the compiler has neither a scheduler
   // nor a code hoister, the sunk spelling is one it could not have emitted from this asm, so there
   // is nothing to referee. Absent ⇒ off — the target field carries the evidence a compiler owes,
   // analysis.ts AnalyzeOptions the refusals.
@@ -1568,20 +1568,20 @@ export interface StructureOptions {
   // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
   // the compiler (it emits the unsigned branch from signed compares only then), so which spelling
   // the source used is genuinely ambiguous at emission — rank.ts enumerates the ON spelling as
-  // the `/uns-cmp` axis and the differ referees.
+  // the `/uns-cmp` variation and the differ referees.
   unsignedCompareSpelling?: boolean;
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
-  // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
+  // `/merge-names` variation. Which variables the compiler's own coalescer shared is not derivable from
   // the naming, and removing a copy is worth less than it looks — the compiler coalesces most of
   // them itself. What moves the score is which values share a register, and that splits per
   // function.
   coalesceMergeNames?: boolean;
   // Give a merge whose carrier is a FUNCTION PARAMETER its own local, instead of assigning back
   // into the parameter's name. Off by default; rank.ts enumerates the ON spelling as the
-  // `/fresh-merge` axis, and `FRESH_MERGE_GATES` holds the admission and the argument for it.
+  // `/fresh-merge` variation, and `FRESH_MERGE_GATES` holds the admission and the argument for it.
   //
-  // NOT `materializeJoinFeeds` widened to parameters. That axis reaches its shape by giving the
+  // NOT `materializeJoinFeeds` widened to parameters. That variation reaches its shape by giving the
   // join's feed a NAME to adopt, and materialization is keyed on the defining `Op` — a parameter
   // has none, so there is nothing to key.
   freshParamMerge?: boolean;
@@ -1608,7 +1608,7 @@ export interface StructureOptions {
    *  A SEPARATE FIELD rather than a pre-merged map, and the separation is load-bearing twice.
    *  `spellBitfieldMembers` is normalized against `symbols` alone, so a derived shape can never
    *  switch the named-bitfield spelling on for a map-less row (which would silently delete the
-   *  `/no-bitfield` axis's decline — see bitfield-members.test.ts). And it keeps the derivation
+   *  `/no-bitfield` variation's decline — see bitfield-members.test.ts). And it keeps the derivation
    *  ATTRIBUTABLE: everything the map does stays keyed on the map. */
   inferredSymbols?: Map<string, SymbolInfo>;
   /** THE ORDER HALF of the same derivation (raise/globalshape.ts `orderLicensedGlobals`): the
@@ -1688,7 +1688,7 @@ export interface StructureHooks {
  *  how values are spelled — the loop emitters' hazard predicates read it, and several ask "does
  *  this edge copy survive identity elision", which merging two names quietly answers `no`. A pass
  *  that made a hazard invisible would trade a loud decline for a silent wrong answer, so the
- *  lever-less structuring runs first and its refusal stands. That is the whole invariant, rather
+ *  structuring with no variation on runs first and its refusal stands. That is the whole invariant, rather
  *  than a list of individually patched guards, and it costs one extra structuring — nothing next to
  *  the compile the candidate exists to feed.
  *
@@ -1898,29 +1898,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           has: (n) => mapSymbols?.has(n) === true || inferredSymbols?.has(n) === true,
         }
       : undefined;
-  // Only the MAP makes the named bitfield spelling available, so with no map this is not a choice.
+  // Only the MAP makes the named bitfield spelling available, so with no map this is not a question.
   // Normalized once here rather than left to each reader's own `symCtx &&` guard, because rank.ts's
   // `/no-bitfield` decline rests on both arms structuring the IDENTICAL tree without a map — a
   // second reader added outside that guard would otherwise delete a candidate silently, and nothing
   // reports a candidate that was never enumerated (bitfield-members.test.ts).
   // Against the PROJECT MAP alone, never the derived shapes: only a map carries bitfield members,
-  // and keying this on the union would flip the `/no-bitfield` axis's zero point on a map-less row.
+  // and keying this on the union would flip the `/no-bitfield` variation's zero point on a map-less row.
   const spellBitfieldMembers = mapSymbols !== undefined && bitfieldSpellingWanted;
-  // These levers all change which edge copies elide as identities (extra materialization does
+  // These options all change which edge copies elide as identities (extra materialization does
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
-  // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this
-  // target's defaults, so resetting one would probe a spelling asmlift never emits here.
+  // A compiler behavior is not among them, however much it materializes: the default structuring
+  // IS this target's compiler behaviors, so resetting one would probe a spelling asmlift never emits
+  // here.
   //
-  // THREE OF rank.ts's TEN `STRUCTURING_AXES` ARE DELIBERATE NON-MEMBERS, each for its own reason,
+  // THREE OF rank.ts's TEN `STRUCTURING_AXES` ENTRIES ARE DELIBERATE NON-MEMBERS, each for its own reason,
   // and the list here is the half of the split this side owns:
   //   - `/reread-globals` (rereadGlobals) is an ANALYSIS option, and it only ever RELAXES: it
   //     widens a load's render positions and narrows the write set that bars it, so it removes
   //     materializations rather than minting them. Extra materialization is what this guard is
-  //     about (see above), and this axis adds none;
+  //     about (see above), and this variation adds none;
   //   - `/uns-cmp` (unsignedCompareSpelling) writes `varType` and inserts casts at compares. It
   //     touches no name and no copy, so no edge copy changes its elision under it;
   //   - `/copy-defpos` (preferDefPosCopyOrder) REORDERS the copies of one edge and adds or drops
-  //     none. rank.ts states the same thing from the axis side, in the terms that matter there: a
+  //     none. rank.ts states the same thing from the variation side, in the terms that matter there: a
   //     reordering cannot rescue a spelling whose OFF sibling failed the boundary contracts.
   if (
     coalesceMergeNames ||
@@ -2948,7 +2949,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame)) {
             continue;
           }
-          // `freshParamMerge` (the `/fresh-merge` axis): this merge takes its own home rather
+          // `freshParamMerge` (the `/fresh-merge` variation): this merge takes its own home rather
           // than the carrier's name — `FRESH_MERGE_GATES` above holds the admission and the
           // argument for it. Absent the option nothing changes.
           if (
@@ -3066,7 +3067,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     // Params never reconcile: their declarations come from p.type, not varType, so a flip here
     // would only desync the cast site's view from the emitted declaration — and param signedness
-    // is the sign-pin axis's dimension.
+    // is the signedness variation's dimension.
     const paramNames = new Set(entry.params.map((_, i) => `a${i}`));
     const claimants = new Map<string, Value[]>();
     for (const [v, n] of [...varName, ...backArgName]) {
@@ -3349,13 +3350,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           l = { k: 'cast', to: T.u(32), e: l };
         }
       }
-      // The SIGNED direction of the same hole, and a DEFAULT rather than an arm of that axis —
+      // The SIGNED direction of the same hole, and a DEFAULT rather than an alternative of that variation —
       // not because nothing underdetermines, but because the underdetermination is INERT. An
       // unsigned source compare can reach a signed opcode when the compiler proves the test is
       // the sign bit (`u32 a; a < 0x80000000` compiles to `cmp r0, #0; bge`; kmc-gcc and gcc
       // 2.7.2 fold it to `slti`), so an icmp_s* has more than one source — but the pinned
       // spelling reproduces that branch too (`(s32)a >= 0` is the same `cmp r0, #0; bge`), so
-      // both sources reach ONE candidate and an axis would have doubled the fan to referee a
+      // both sources reach ONE candidate and a variation would have doubled the fan to referee a
       // question with one answer. Where the spellings genuinely diverge they diverge the way the
       // opcode says, on every toolchain: an operand that renders unsigned makes C compare
       // unsigned (agbcc `bls`, IDO/kmc-gcc/gcc 2.7.2 `sltu`/`sltiu` against `slt`/`slti`, mwcc
@@ -3795,7 +3796,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // written at the const's own def site instead of on the edges (anchorConstCopies, above), and
   // that site dominates them. Its block is a write site for the name like any other, and without it
   // `v0 = 0; if (c) { } store v0;` drops the undefined arm's copy and stores 0 where the machine
-  // stores whatever the arm left — the same substitution the parameter case makes, one axis over.
+  // stores whatever the arm left — the same substitution the parameter case makes, one step over.
   //
   // THE SECOND RELOCATION goes the other way, and this test cannot see it at all. A SUNK pre-update
   // exit copy (preUpdateCopies) writes the loop EXIT's param at the top of the loop BODY, so the
@@ -3951,7 +3952,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  PER NAME the dispatch binds — which is not once per machine write: `sw_fall`'s three arms
    *  each take the accumulator under a name of their own, so this tree emits `v0 = 0; v1 = 0;
    *  v2 = 0;` where agbcc has a single `mov r1, #0`, and the one-local spelling that byte-matches
-   *  comes from the `/merge-home` ranked axis, not from here. What the position is for is the
+   *  comes from the `/merge-home` ranked variation, not from here. What the position is for is the
    *  fall-through chain: per-arm copies RE-RUN on the fall path and overwrite what the falling arm
    *  computed, the hazard Regime B states at its own `switch_br` refusal.
    *
@@ -4111,7 +4112,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  the declaration says. The member arm asks the CONTAINER's qualifier and not the member's own
    *  (`SymbolStructField.volatile`), which looks backwards and is not: `memberQualsAllow` above
    *  refuses to NAME a volatile member at all, so a `vu16` member is spelled `((s32 *)&gSym)[k]`
-   *  with nothing in the spelling for a lever to hold, while `volatile struct S gSym;` qualifies
+   *  with nothing in the spelling for a variation to hold, while `volatile struct S gSym;` qualifies
    *  every member and `gSym.ctl;` really is an observable read. Every other map spelling refuses —
    *  `gPtr->member`, a bare-name array element, a multidimensional subscript — because
    *  over-refusing costs a SPELLING and admitting wrongly costs an ANSWER, this file's standing
@@ -4183,12 +4184,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  no statement at all (measured on agbcc, IDO and mwcc). What it does is put the access where a
    *  qualifier can reach it — and `volatileQualifiable` is the condition under which one can.
    *
-   *  WHICH LEVER REACHES IT, because "a qualifier" is two levers and only one of them does:
+   *  WHICH VARIATION REACHES IT, because "a qualifier" is two variations and only one of them does:
    *  l3/volatileptr.ts's `/volatile` qualifies the pointer LOCAL the read is spelled through, and
    *  that is the arm every match here rides. l3/volstore.ts's `/vol-store` mints `volatile` at an
    *  inline cast STORE and never visits an `exprstmt`, so on a tree with no base local it emits the
    *  cell qualified for its writes and plain for this read — a candidate that cannot reproduce the
-   *  surviving `ldr`. Wasted rather than wrong (the differ refuses it); teaching that lever the
+   *  surviving `ldr`. Wasted rather than wrong (the differ refuses it); teaching that variation the
    *  read is a widening with its own window census to pay for, priced in its header.
    *
    *  TWO THINGS DELIBERATELY NOT DONE HERE, priced rather than left for a reader to rediscover.
@@ -4975,7 +4976,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // A BRANCH-SENSE SITE: both arms real, so the swapped-and-negated spelling is a genuine
     // sibling rather than noise on a one-armed if. Which boolean owns it is `ipd`: divergent arms
     // (both terminate, no reconvergence) belong to preserveDivergentBranchSense, a reconverging
-    // pair to negateJoinedBranchSense — and the split has to stay, or a /flip-branch variant would
+    // pair to negateJoinedBranchSense — and the split has to stay, or a /flip-branch candidate would
     // fall into the joined case and get flipped BACK, collapsing the {divergent × joined}
     // combination. Sense TRUE = the asm branched forward to the `taken` block and fell through to
     // `fall`, so a compiler that PRESERVES source branch direction saw the FALL-THROUGH arm as
@@ -5035,7 +5036,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     //   consumer reads    99 taken-slot, 8 long-branch, 2 chained
     //
     // The chained cell has ZERO inhabitants with `/connective` off, so that half of the capability
-    // is reachable only through the `/connective` lift variant — both real inhabitants and
+    // is reachable only through the `/connective` lift variation — both real inhabitants and
     // `chainsense` carry it in their winner. And `scEdgeRelayed`'s own cell `(false,true,true)`
     // carries 9 stamped sites at each setting and **0 consumer reads** there: all 9 are MIPS rows
     // (`ido7.1`/`gcc2.7.2kmc`, where no ±256 range exists and a relay means something else), and
@@ -5688,7 +5689,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
         // the asm materialized this slot's address, and this is how many times it
         // loaded and stored through it — both asm facts, and the gate the
-        // l3/volatileval.ts lever reads (see the SFn.locals doc)
+        // l3/volatileval.ts variation reads (see the SFn.locals doc)
         ...frameRecord(op),
         // an ESCAPED address makes every store observable (the DMA hardware reads it), and
         // the source spells the scratch volatile for that reason — see the stamp site in

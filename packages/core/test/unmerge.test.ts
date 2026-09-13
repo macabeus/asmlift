@@ -1,5 +1,5 @@
-// The un-merge lever (l3/unmerge.ts): a join statement pushed back into the arms agbcc
-// cross-jumped it out of — the dual of tailmerge.test.ts's pass, and a lever where that one is
+// The un-merge variation (l3/unmerge.ts): a join statement pushed back into the arms agbcc
+// cross-jumped it out of — the dual of tailmerge.test.ts's pass, and a variation where that one is
 // unconditional.
 //
 // The refusals are the whole argument, because the rewrite DUPLICATES a statement and DELETES the
@@ -243,7 +243,7 @@ describe('what refuses — each one would read a different value', () => {
   // a join that lands AFTER `q = Foo();`, so a load the lifted tree performed before the call is
   // performed after it — a candidate that reads memory at a different point than the asm does,
   // with no contract downstream that models evaluation order (`assertEffectsPreserved` does not
-  // run on lever trees).
+  // run on respelled trees).
   test('an intervening assignment whose VALUE is a CALL refuses — the kind test is not the effect test', () => {
     declines(
       [
@@ -361,7 +361,7 @@ describe('an observable access is never the thing that moves', () => {
   test('THE CONTROL: the same shape with PLAIN reads still un-merges — the gate is the qualifier', () => {
     // Identical statement kinds, identical positions; only the `volatile` is gone. If this
     // refused too, the rule would be "a definition may not read memory", which is not the rule
-    // and would delete the corpus shape the lever exists for.
+    // and would delete the corpus shape the variation exists for.
     const plain = (addr: number): Expr => ({
       k: 'index',
       base: { k: 'cast', to: T.ptr(T.u(16)), e: c(addr) },
@@ -562,7 +562,7 @@ describe('what the ladder refuses', () => {
 // for. Under that same ablation the only red in the repo is the single test below.
 //
 // `contracts.ts`'s `assertNoOrphanedLocals` is a second net and not a substitute: it fires on this
-// tree (verified under the ablation), but it lives at rank.ts's lever boundary, so it turns a
+// tree (verified under the ablation), but it lives at rank.ts's respell-variation boundary, so it turns a
 // wrong rewrite into a DROPPED CANDIDATE, not into the merged spelling this gate preserves.
 describe('a stale mention count is caught by re-reading the result', () => {
   test('a definition an earlier rewrite duplicated leaves the count agreeing, and the tree still names `y`', () => {

@@ -923,8 +923,8 @@ function extentsOf(strides: number[]): number[] | null {
  *  same addresses whichever one a consumer picked up.
  *
  *  This exists because the SPELLING and the DECLARATION are decided from different derivations —
- *  rank.ts derives the declaration dictionary once off the probe's lift and the spelling per
- *  symbol variant off that variant's own — and a candidate that spells from one and declares from
+ *  rank.ts derives the declaration dictionary once off the shared lift and the spelling per
+ *  lift off that lift's own — and a candidate that spells from one and declares from
  *  the other addresses a different object than the assembly did, compiling either way. */
 export function sameDerivedShape(a: SymbolInfo | undefined, b: SymbolInfo | undefined): boolean {
   if (a === undefined || b === undefined) {

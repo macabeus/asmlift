@@ -51,7 +51,7 @@ reproduces the target's pattern AND the asmlift-style spelling reproduces the di
 This applies to claims about two SOURCE spellings too. "These two spellings are underdetermined" is
 a claim about a compiler: compile both, diff the objects, and do it on the shape you intend to
 GENERALIZE over — an identity that holds in a degenerate one-case shape is not the identity you are
-about to build an axis on.
+about to build a variation on.
 
 ## 3. Name a refusing site by INSTRUMENTING or ABLATING it, never by reading
 
@@ -83,13 +83,13 @@ what a voided tier costs you today is `docs/bench-cost.md` §1).
 Three different failures, three different next moves, and they are routinely reported as one word
 ("it didn't work"):
 
-| what happened                                                     | how you tell                                                  | what it means                                                                                                                              |
-| ----------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **NO REACH** — 0 candidates enumerated                            | the label is absent from `pnpm bench fan <row> --enumerate`   | the lever never produced a candidate; a lever that THREW prints `[lever] … threw (no candidate from it)`, which `bench run` prints nowhere |
-| **LOSES** — it fired and scored worse                             | the label is in the fan with its own score                    | the spelling exists and the ranker rejected it; `--enumerate --show <label>` prints its source so you can read why instead of inferring    |
-| **DOES NOT COMPOSE** — it fires alone and not beside another axis | present in a one-axis fan, absent or worse in the stacked one | an interaction, not a missing capability                                                                                                   |
+| what happened                                                          | how you tell                                                                               | what it means                                                                                                                                      |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **NO REACH** — 0 candidates enumerated                                 | no candidate `pnpm bench fan <row> --enumerate` lists carries the variation                | the variation never produced a candidate; a variation that THREW prints `[lever] … threw (no candidate from it)`, which `bench run` prints nowhere |
+| **LOSES** — it fired and scored worse                                  | a candidate carrying it is in the fan with its own score                                   | the spelling exists and the ranker rejected it; `--enumerate --show <variations>` prints its source so you can read why instead of inferring       |
+| **DOES NOT COMPOSE** — it fires alone and not beside another variation | present in a fan where it is the only variation, absent or worse where the two are stacked | an interaction, not a missing capability                                                                                                           |
 
-Say which one you measured. An axis discarded as "no reach" that actually loses is a different
+Say which one you measured. A variation discarded as "no reach" that actually loses is a different
 round's worth of work.
 
 ## 5. A score carries a denominator, and the denominator MOVES

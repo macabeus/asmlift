@@ -1,11 +1,11 @@
-// The address-home axis (structure.ts homeSharedAddresses, rank.ts `/addr-home`): a pure computed
+// The address-home variation (structure.ts homeSharedAddresses, rank.ts `/addr-home`): a pure computed
 // address dereferenced at 2+ sites materializes into a local, and so do the multi-render loads
 // through it — the source's `u8 *entry = ...; type = entry[1]; idx = entry[0];` spelling, where
 // the default re-derives the address (a pool literal per folded offset) and re-reads per use.
 // Off by default.
 //
 // The scope conditions are what these tests pin — base-slot-only consumption, 2+ distinct memory
-// accesses, no gaddr/laddr in the cone, loads homed only through an axis-homed base — plus the
+// accesses, no gaddr/laddr in the cone, loads homed only through a variation-homed base — plus the
 // enumeration gate's two contracts: a void `ret` phantom never disqualifies a base, and a symbol
 // map never blinds the `/raw-globals` sibling's own gate.
 import { expect, test } from 'vitest';
@@ -76,7 +76,7 @@ test('the enumeration gate sees the pair shape', () => {
   expect(hasHomeableSharedAddress(parse(PAIR))).toBe(true);
 });
 
-// The base ALSO escapes into arithmetic (returned as a value) — not base-slot-only, so the axis
+// The base ALSO escapes into arithmetic (returned as a value) — not base-slot-only, so the variation
 // must stay silent: the home is justified by shared-base reuse alone.
 const ESCAPES = PAIR.replace('  %12: s32 = add %9, %10', '  %12: s32 = add %8, %10');
 
@@ -133,7 +133,7 @@ test('a base whose cone holds a gaddr is not homed', () => {
 // A base that is ALSO the `ret` operand. For a void-prototyped function the ret operand is a
 // phantom (the register just happens to hold the base at `bx lr` — common agbcc output), so the
 // gate must not count it: analyze() skips it under returnsVoid, which the gate cannot know. For
-// a non-void function the axis's own rule still refuses — the gate's true is then the documented
+// a non-void function the variation's own rule still refuses — the gate's true is then the documented
 // duplicate-collapsed-candidate over-approximation.
 const RETBASE = `fn retbase {
 ^bb0(%0: u32):
@@ -172,10 +172,10 @@ test('the same base genuinely returned is refused by the axis — gate over-appr
   expect(emitRet(true)).toBe(emitRet(false));
 });
 
-// The per-variant enumeration gate: a symbol map naming the base constant makes the MAP-lifted
-// fn's cone hold a gaddr (axis refused), while the `/raw-globals` sibling lifts the plain const
-// the axis serves. A probe-level gate would blind the raw sibling — every `/addr-home` candidate
-// must therefore ride the raw variant, and at least one must exist.
+// The per-lift enumeration gate: a symbol map naming the base constant makes the MAP-lifted
+// fn's cone hold a gaddr (variation refused), while the `/raw-globals` sibling lifts the plain const
+// the variation serves. A gate on the shared lift would blind the raw sibling — every `/addr-home` candidate
+// must therefore ride the raw setting, and at least one must exist.
 const PAIR_ASM =
   'f:\n' +
   '\tlsls\tr0, r0, #0x2\n\tlsls\tr1, r1, #0x1\n\tadds\tr0, r0, r1\n' +
@@ -195,7 +195,7 @@ test('a symbol map does not blind the raw sibling: /addr-home rides /raw-globals
 });
 
 // ── THE MERGE CLASS ────────────────────────────────────────────────────────────────────────
-// The axis's scope counts base uses over the merge class (ir/core.ts `mergeClasses`), not over
+// The variation's scope counts base uses over the merge class (ir/core.ts `mergeClasses`), not over
 // the SSA value: a base each arm derives and the join then dereferences is one register spelled
 // as N values, and per value none of them reaches the 2-access threshold — while the edge
 // argument that makes it shared is itself a non-memory consumer, so the per-value rule refuses on
@@ -232,7 +232,7 @@ test('a base the arms derive and the join dereferences homes over the merge clas
 });
 
 // ONE member escaping refuses the WHOLE class — here the join parameter, which the per-value rule
-// never looks at (the axis only ever homes a def). The home is justified by shared-base reuse
+// never looks at (the variation only ever homes a def). The home is justified by shared-base reuse
 // alone, exactly as before the scope widened.
 const MERGED_ESCAPES = MERGED.replace(
   '  %12: s32 = add %10, %11\n  ret %12',
@@ -285,7 +285,7 @@ test('mergeClasses unions an edge argument with the parameter it binds, transiti
 // which is a strictly smaller population than the functions where a new VALUE is admitted) over
 // the four checkouts, both symbol-map configurations: 1487 lifting functions, 25 with newly
 // admitted values map-less and 8 map-ful; ONE has a class touching a loop-header parameter
-// (marioparty3, 2 values, map-less only), and ZERO of those values are ones the axis could
+// (marioparty3, 2 values, map-less only), and ZERO of those values are ones the variation could
 // materialize. The two tests below say why that is structural rather than lucky.
 
 // A loop-carried pointer INDUCTION — the shape the guard was written for. The walk's own `+ 4` is
@@ -315,9 +315,9 @@ test('a loop-carried pointer induction is refused by its own increment, not by a
 });
 
 // The loop-header class that DOES survive: the back-edge value is read from memory, so no member
-// feeds arithmetic. All three values are in scope — and nothing homes, because the axis only ever
+// feeds arithmetic. All three values are in scope — and nothing homes, because the variation only ever
 // materializes a DEF and the only def here is a `load`, which its enumeration gate excludes. A
-// name therefore never spans two iterations: every home the axis mints is a def's own local.
+// name therefore never spans two iterations: every home the variation mints is a def's own local.
 const LOOP_CHASE = `fn chase {
 ^bb0(%0: u32):
   %1: s32 = const {value=0}

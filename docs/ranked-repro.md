@@ -178,8 +178,8 @@ that, the number is `bench run`'s.
 #### The whole FAN, and any candidate's source: `pnpm bench fan`
 
 ```sh
-pnpm bench fan <sym|project:sym:toolchain> [--show <label>] [--enumerate] [--force] [--base <ref>]
-pnpm bench fan <sym> --asm <file.s> --toolchain <id> [--show <label>]
+pnpm bench fan <sym|project:sym:toolchain> [--show <variations>] [--enumerate] [--force] [--base <ref>]
+pnpm bench fan <sym> --asm <file.s> --toolchain <id> [--show <variations>]
 ```
 
 The third vehicle, and the only one that answers **"which spellings did asmlift consider"** rather
@@ -198,22 +198,22 @@ printed the published source byte-for-byte.
 
 Two things it can do that nothing else can:
 
-- **`--show <label>` prints a NON-WINNING candidate's source.** `results.json` carries the winner's
-  C and no other's, while `RankedResult.candidates` — every other spelling, each with its own
+- **`--show <variations>` prints a NON-WINNING candidate's source.** `results.json` carries the winner's
+  C and no other's, while `RankedResult.candidates` — every other candidate, each with its own
   `source` — is computed on every run and discarded. "The near-miss spelling is right and only
   loses on X" is a thing to read here rather than infer.
-- **`--enumerate` lists the fan without compiling anything**, and still serves `--show <label>`
+- **`--enumerate` lists the fan without compiling anything**, and still serves `--show <variations>`
   (not `--show best` — nothing is scored, so there is no winner to name, and that combination is
   refused rather than answered with whatever enumeration emitted first). That is the cheap
   configuration-identification this file's "Getting the fan alone is cheap" section describes,
   without killing the run after its first `[progress]` line. **Cheap relative to compiling, not
-  cheap absolutely**: `kleod:CountCollectedGems:agbcc`'s 5,952 labels take 50 s wall with the
+  cheap absolutely**: `kleod:CountCollectedGems:agbcc`'s 5,952 candidates take 50 s wall with the
   target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
   to LIST. Read a long enumeration as a big fan, not as a hang.
 
   It also prints `[lever] <label> threw (no candidate from it)`, a channel `bench run` supplies no
-  sink for at all — so a whole pre-fan half of a row's fan can vanish from a benchmark run with
-  nothing printed, and here it does not.
+  sink for at all — so the half of a row's fan a pre-respell variation produces can vanish from a
+  benchmark run with nothing printed, and here it does not.
 
 - **`--base <ref>` prints the fan MULTIPLIER against what that artifact recorded.** Since each row
   carries its own `candidateCount`, this is a comparison rather than archaeology:
@@ -222,7 +222,7 @@ Two things it can do that nothing else can:
   `rankOptionsFor`, and this enumerates under those same options for the same row id. It prints at
   whichever of FOUR exits the run reaches: the `--enumerate` listing, the scored table, the
   over-limit refusal (on the rows that refuse, you learn what the fan did without compiling any of
-  it), and the `noncompile` path — where every spelling was refused and the two refusal lists ARE
+  it), and the `noncompile` path — where every candidate was refused and the two refusal lists ARE
   the fan, so it is the one row class whose count the artifact knows. It prints on the **declined**
   path too, which has no count of its own at all — the 234-row class both briefs send rounds to,
   where "the artifact recorded 26,880 for this row and this run has no fan" is the answer rather
@@ -345,7 +345,7 @@ falls back to the **richest** rung unconditionally (`cli.ts`, `publishedAsmliftS
 escalation stopped earlier, because a richer context can REJECT what a poorer one accepts". The
 stdout line names the rung either way and never says which case you are in.
 
-Everything below — the checkout, the axis set, the loader, the cache, the flags — is part of both
+Everything below — the checkout, the variation set, the loader, the cache, the flags — is part of both
 numbers. Pick the vehicle first, then read the rest.
 
 ## The CHECKOUT is part of the number, and it is the one that bit
@@ -374,14 +374,14 @@ observed at 603,648 against 271,872 for the same tree with its map present.
 which branch and whether a symbol map was loaded in the same breath as the number.** Two numbers
 from two trees are not a before/after pair — they are two different questions. A round once
 published a 10-point improvement measured in one tree against a baseline taken in another, and
-another round reported a fan "4.4x larger" that was simply its own tree, map-less, after an axis
+another round reported a fan "4.4x larger" that was simply its own tree, map-less, after a variation
 had merged.
 
-## The AXIS SET is part of the number
+## The VARIATION SET is part of the number
 
-The fan is a product over enumeration axes, so **one merged axis multiplies it**. Between
+The fan is a product over the variations enumerated, so **one merged variation multiplies it**. Between
 `4fd59555` and `3ebe810d` the fan on a fixed corpus went **112,896 to 225,792 — exactly 2x** —
-because #148 shipped `/copy-defpos` (`rank.ts`), the edge-copy-order axis, as a ranked sibling.
+because #148 shipped `/copy-defpos` (`rank.ts`), the edge-copy-order variation, as a ranked sibling.
 That was disclosed in its own PR and still invalidated every carried LBG number, because nobody
 re-stated the baseline against it.
 
@@ -399,7 +399,7 @@ Two consequences, and they are cheap:
 
 - **A fan size that changed is a fact to explain, not noise.** Factor it: the counts above are all
   `2^8 * 3^2 * k`, and only `k` — a per-site count — moves with the recovered structure. A clean
-  power-of-two jump is a new axis; a change in `k` is the function being recovered differently.
+  power-of-two jump is a new variation; a change in `k` is the function being recovered differently.
 - **Quote the asmlift commit with the fan.** The `[ranked]` line already carries
   `[asmlift source <sha>]`; a number without it cannot be placed.
 
@@ -510,7 +510,7 @@ find nothing to disagree with and go green having audited nothing.
   one**: a wall quoted as `warm` is only reproducible from the store filled at the same commit, so
   name that commit beside the wall.
   This is the cold-start direction and therefore sound, but it decides how to pair runs: `docs`
-  above tells you to rebuild before any run you intend to quote, so **a base run and a lever run
+  above tells you to rebuild before any run you intend to quote, so **a base run and a head run
   with a rebuild between them share nothing** and both are cold. Build once, then run the pair —
   or expect the first of them to pay full price.
 - **Never compare a warm wall against a cold one and call the difference a code change.** This is
@@ -518,7 +518,7 @@ find nothing to disagree with and go green having audited nothing.
   break because nothing on the command line says which state you were in. The run itself does:
   with the cache on, an `asmlift: [candcache]` line prints next to `[ranked]` with the mode and
   the hit/miss/stored counts. **Paste it whenever you paste a wall.**
-- **The cache is a throughput lever and never a result lever.** The `[score]` lines, the winner
+- **The cache changes throughput and never a result.** The `[score]` lines, the winner
   and the stdout are identical in all three states by construction — a cache miss is
   indistinguishable in RESULT from no cache at all. If a `[score]` line moves between a cold run
   and a warm one, the cache is wrong; run the `diff` below, then re-run with `ASMLIFT_CANDCACHE=0`
@@ -864,12 +864,12 @@ find nothing to disagree with and go green having audited nothing.
   source; the block itself is printed on the `asmlift: [declared]` lines just above.
 
   **WITHHELD is a third count and a different fact.** `dropped` means the scorer refused a
-  spelling; `withheld` means one compiled, scored, and was refused PUBLICATION because it is
+  candidate; `withheld` means one compiled, scored, and was refused PUBLICATION because it is
   proof-gated (`Candidate.matchOnly` — a spelling whose semantics no gate over the C can settle, so
   only a byte-exact score licenses it). Without the count, `candidates scored` silently
   under-reports the fan. On the LBG command below it is 0, because `/unreduce` declines there.
 
-  **The candidate COUNT belongs to the tree, not to the function.** Every axis admitted multiplies
+  **The candidate COUNT belongs to the tree, not to the function.** Every variation admitted multiplies
   it, so the counts quoted in the anecdotes above are each an A/B against themselves and none of
   them is a figure to reproduce. Quote your own `[ranked]` line.
 

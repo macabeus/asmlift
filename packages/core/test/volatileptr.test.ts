@@ -1,4 +1,4 @@
-// The `/volatile` lever (l3/volatileptr.ts): a pointer local assigned a numeric address is
+// The `/volatile` variation (l3/volatileptr.ts): a pointer local assigned a numeric address is
 // re-declared as pointing to volatile data. The gate conditions are what these tests pin:
 // a rematerializable numeric address only — any encoding of one, since which the compiler picked
 // is not a property of the source, and a bare `0` is NULL rather than an address — a symbol feed

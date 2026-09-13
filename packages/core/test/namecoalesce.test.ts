@@ -1,4 +1,4 @@
-// UNIT tests for the merge-copy coalescer (structure/namecoalesce.ts) — the `/merge-names` axis.
+// UNIT tests for the merge-copy coalescer (structure/namecoalesce.ts) — the `/merge-names` variation.
 //
 // Most of these run the REAL pass through `structure()` on parsed IR, because what a gate protects
 // is only visible in the emitted C: a merge the gate would have refused does not throw, it prints a
@@ -26,7 +26,7 @@ import { structure } from '../src/structure/structure';
 import { traceOf, tracesDiffer } from './helpers';
 import { INNER_CLOBBERS_OUTER } from './loop-escape-witnesses';
 
-/** The structured tree with the axis ON, optionally with one gate ablated. Split out of `emit`
+/** The structured tree with the variation ON, optionally with one gate ablated. Split out of `emit`
  *  because `traceOf` needs the tree, not the emitted text. */
 const tree = (ir: string, gate?: string): SFn => {
   const fn = parse(ir);
@@ -38,7 +38,7 @@ const tree = (ir: string, gate?: string): SFn => {
     gate ? { nameCoalesceGates: without(NAME_COALESCE_GATES, gate) } : {},
   );
 };
-/** The same IR with the axis OFF — the reference spelling every assertion here is against. */
+/** The same IR with the variation OFF — the reference spelling every assertion here is against. */
 const treeOff = (ir: string): SFn => {
   const fn = parse(ir);
   verify(fn);
@@ -258,7 +258,7 @@ test('two parameters of one block never share a name', () => {
 test('a candidate never unlocks a function the primary declines', () => {
   // `varName` is an input to the loop emitters' hazard predicates, not only to spelling: merging
   // two names turns a real edge copy into an identity one, and a guard that asks "does this edge
-  // write anything" stops seeing the hazard. Structuring without the axis first is what makes that
+  // write anything" stops seeing the hazard. Structuring without the variation first is what makes that
   // structural rather than a list of patched guards — this function is one the fuzz found.
   expect(() => uncoalesced(UNLOCKS_A_DECLINE)).toThrow(/pre-update loop variable/);
   expect(() => emit(UNLOCKS_A_DECLINE)).toThrow(/pre-update loop variable/);
@@ -275,7 +275,7 @@ test.each(INNER_CLOBBERS_OUTER)(
     expect(emit(ir)).toContain(escapeCopy);
     expect(emit(ir, 'loop-escape')).not.toContain(escapeCopy);
     // and that copy is not cosmetic — two-sided, so this asserts the GATE's work and not a
-    // difference the axis would make regardless
+    // difference the variation would make regardless
     const off = traceOf(treeOff(ir), seed);
     expect(tracesDiffer({ off, on: traceOf(tree(ir), seed) })).toBe(false);
     expect(tracesDiffer({ off, on: traceOf(tree(ir, 'loop-escape'), seed) })).toBe(true);

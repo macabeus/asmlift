@@ -229,7 +229,7 @@ describe('composition and argument are one transform: sink(head(x)) === firstUse
 
 describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
   // It consults neither the first-use query nor the ordering sort. Stated in l3/hoist.ts and
-  // pinned here so a reader who takes the enum for one axis is corrected by a failing test rather
+  // pinned here so a reader who takes the enum for one dimension is corrected by a failing test rather
   // than by a compiled row: `l3/nearbase.ts` relies on the run beneath it keeping its own order
   // (synthetic:dmafield), and `l3/basecse.ts` is typed out of reaching this value at all.
   const named = (name: string, sym: string): BaseInit => ({
@@ -291,7 +291,7 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
       'p0',
       'exprstmt',
     ]);
-    // the contrast: `head` sits in the same POSITION and reorders, so the two are not one axis
+    // the contrast: `head` sits in the same POSITION and reorders, so the two are not one dimension
     expect(placeBaseLocals(sfn, minted, 'head').body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual([
       'q0',
       'p0',
@@ -305,7 +305,7 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
 
 describe('the /livebase pairing is WIRED into enumeration', () => {
   // `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc — an MMIO poll whose bases the DEFAULT
-  // hoist refuses outright, so the tree this lever reads on its own carries no init at all.
+  // hoist refuses outright, so the tree this variation reads on its own carries no init at all.
   const fan = enumerateCandidates(
     'mixpoll',
     readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-mixpoll.s'), 'utf8'),

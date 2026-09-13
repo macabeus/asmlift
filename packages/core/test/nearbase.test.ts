@@ -1,4 +1,4 @@
-// The /nearbase lever (l3/nearbase.ts): neighbor absolute deref addresses re-spell as offsets
+// The /nearbase variation (l3/nearbase.ts): neighbor absolute deref addresses re-spell as offsets
 // from one shared u8* base local holding the cluster's lowest address; the differ referees.
 import { expect, test } from 'vitest';
 
@@ -173,7 +173,7 @@ test('declined: a hostile span (negative or NaN) instead of a stalled cluster wi
 //
 // Its POLICY stays its own, and it is `prepend`: the cluster base goes ABOVE a run already there,
 // not merged into it in first-use order. That is not an oversight to correct against basecse's
-// "blindly prepending is wrong" note — it is this lever's DEFAULT, and its demanding row is what
+// "blindly prepending is wrong" note — it is this variation's DEFAULT, and its demanding row is what
 // picked it: re-placing the cluster bases in first-use order was measured on 2026-08-26 and turns
 // `synthetic:dmafield` (won by `signed/livebase/volatile/nearbase/initfirst`) from a MATCH into
 // diff:5. A row and not a mechanism, so `rank.ts` offers the other ordering beside it

@@ -71,7 +71,7 @@ export function fmt(d: DecompilerResult): string {
  *
  *  The seconds alone say a row took 400 s and not that it compiled 5,952 spellings to get there.
  *  The pair is the only thing on this line that is not an outcome, and it is what a round watching
- *  a run scroll past steers by when it asks whether an axis it just shipped is affordable.
+ *  a run scroll past steers by when it asks whether a variation it just shipped is affordable.
  *
  *  Absent on a row that never ranked (declined, failed): a bare `(1.2s)` rather than `fan 0`, which
  *  would read as a claim about the row's enumeration instead of about the run. */

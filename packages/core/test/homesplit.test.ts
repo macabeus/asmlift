@@ -362,7 +362,7 @@ describe('the pairing is OFFERED, and additively', () => {
   test('…and each of them under its OWN label — no label carries two programs', () => {
     // `bench diff` and docs/ranked-repro.md compare candidates BY LABEL, and the fan dedups by
     // SOURCE, so one label over two withholds publishes a winning label that also names a
-    // non-match. Asserted over the WHOLE fan, not just this axis: it is a property of the list.
+    // non-match. Asserted over the WHOLE fan, not just this variation: it is a property of the list.
     const bySource = new Map<string, Set<string>>();
     for (const c of cands) {
       bySource.set(c.label, (bySource.get(c.label) ?? new Set()).add(c.source));

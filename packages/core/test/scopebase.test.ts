@@ -1,11 +1,11 @@
-// The `/scopebase` lever (l3/scopebase.ts): name a reused global base at the INNERMOST scope that
+// The `/scopebase` variation (l3/scopebase.ts): name a reused global base at the INNERMOST scope that
 // holds its uses.
 //
 // It exists because `basecse.ts` hoists only to a POSITION IN THE TOP-LEVEL STATEMENT LIST — the
 // function top or an init's first use, never inside a nested scope — and only for an `addr`/`const`
 // base. Both limits cost real bytes: neither of those positions is inside the `if` arm that holds
 // the uses, and the rank-aware bare spelling `gSym[0][i]` has a `var` base basecse cannot see.
-// These pin the scope choice, every refusal, and the two POSTCONDITIONS. The lever is
+// These pin the scope choice, every refusal, and the two POSTCONDITIONS. The variation is
 // differ-refereed, so its risk is spelling quality — except for the placement, where a base local
 // the assignment does not reach is a different variable and the differ REWARDS it.
 // test/regionbase.test.ts carries the second region rule.
@@ -377,15 +377,15 @@ describe('what the cluster rule actually is', () => {
 
 describe('a throwing lever is reported, not swallowed', () => {
   test('onLeverError fires with the label and the first error line', () => {
-    // `dropped` records only spellings the SCORER refused, so a lever that throws or fails a
-    // boundary contract used to vanish with no trace — indistinguishable from one that correctly
-    // declined — so a lever that always throws looks identical to one that never applies.
+    // `dropped` records only candidates the SCORER refused, so without this hook a variation that
+    // throws or fails a boundary contract would vanish with no trace — indistinguishable from one
+    // that correctly declined, and one that always throws would look identical to one that never applies.
     const asm = 'f:\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgSeed\n';
     const seen: string[] = [];
     enumerateCandidates('f', asm, ARMV4T_AGBCC, {
       onLeverError: (label, error) => seen.push(`${label}: ${error}`),
     });
-    // no lever throws on this input, so nothing is reported — the hook exists and is wired
+    // no variation throws on this input, so nothing is reported — the hook exists and is wired
     expect(seen).toEqual([]);
   });
 });
@@ -497,8 +497,8 @@ describe('a structurally SHARED access node refuses ITS KEY, and only its key', 
 
   test('`pollGuards` ALREADY shares a node, so the ordering it relies on is pinned here', () => {
     // `l3/pollguard.ts` returns `{ k: 'if', cond: s.cond, then: [s], else: [] }` — one `cond`
-    // object at two tree positions. It is harmless only because `rank.ts` derives the statement
-    // shapes AFTER this lever, an ordering nothing else pins. Run in the other order, the key in
+    // object at two tree positions. It is harmless only because `rank.ts` derives the stacked
+    // variations AFTER this variation, an ordering nothing else pins. Run in the other order, the key in
     // the shared condition drops out and every other key survives.
     const poll = ix(2, { idx: { k: 'var', name: 'i' }, base: { k: 'const', value: 0x40000d4 } });
     const body: Stmt[] = [
@@ -567,8 +567,8 @@ describe('the dominance POSTCONDITION, checked on the pass`s own output', () => 
 });
 
 describe('a statement SHAPE may not move a placed def below the use it serves', () => {
-  // `rank.ts` derives the statement-shape products (`/initfirst`, `/pollguard`, `/pollread`) onto
-  // EVERY spelling, AFTER a lever has placed its defs — `pollReads` folds a materialized re-read
+  // `rank.ts` derives the stacked variations (`/initfirst`, `/pollguard`, `/pollread`) onto
+  // EVERY source, AFTER a variation has placed its defs — `pollReads` folds a materialized re-read
   // back into a loop condition, which is a move ACROSS the placement this pass computed. The
   // postcondition inside the pass cannot see that; this is the differential that can.
   const pAt = (i: number): Expr => ({

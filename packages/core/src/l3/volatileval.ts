@@ -1,11 +1,11 @@
-// L3 re-spelling lever: declare a stack-homed scalar local `volatile` (`volatile u16 sp0;`).
+// L3 respell variation: declare a stack-homed scalar local `volatile` (`volatile u16 sp0;`).
 //
 // `volatile` on a scalar VALUE local FORCES the value into memory: agbcc's allocator is
 // otherwise free to keep it in a callee-saved register across a call, and no other qualifier
 // or type spelling takes that freedom away. Whether the source spelled it is not derivable from
 // the asm — a slot-homed value can equally come from an address-taken local or from plain
 // register pressure — so both spellings are emitted and the differ referees, exactly as the
-// sibling pointee lever (volatileptr.ts) does for a numeric-address pointer.
+// sibling pointee variation (volatileptr.ts) does for a numeric-address pointer.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION, as they are there: `volatile` only RESTRICTS what a
 // compiler may do with the accesses, so every execution of the qualified spelling is an
@@ -15,7 +15,7 @@
 // ENVELOPE — narrower than "a source-level volatile scalar": an `laddr`-recovered frame object,
 // which under Thumb is a SUB-WORD one (see the `frame` note on SFn.locals). A `volatile s32`
 // local spills straight to `[sp,#imm]` and is recovered as an ordinary value with no local of
-// its own, so this lever cannot reach it. The flag is the set of slots asmlift PROVED, not the
+// its own, so this variation cannot reach it. The flag is the set of slots asmlift PROVED, not the
 // set of values a source could have qualified.
 //
 // GATE — VOL_SLOT_GATES holds the rules; the argument behind each is here, where there is room:
@@ -38,14 +38,14 @@
 //     condition the tree alone cannot answer. `volatile` asserts that every access written is an
 //     access performed; the passes between the asm and here break that in both directions and
 //     leave no trace. eliminateDeadStores drops a store to a local it can see is dead — licensed
-//     by the ABSENCE of the flag this lever adds — so a source that stores the slot twice
+//     by the ABSENCE of the flag this variation adds — so a source that stores the slot twice
 //     arrives with one store. And the structurer emits one C read per USE rather than per
 //     machine load, so one `ldrh` feeding two uses arrives as two reads. Either way the
 //     qualified spelling would declare an access set asmlift did not preserve, so both DECLINE.
 //
-// No qualifying local ⇒ decline (null), so the lever never emits a duplicate of the primary.
+// No qualifying local ⇒ decline (null), so the variation never emits a duplicate of the default.
 //
-// ALL ELIGIBLE SLOTS OR NONE, where the sibling pointee lever enumerates per-local SUBSETS on the
+// ALL ELIGIBLE SLOTS OR NONE, where the sibling pointee variation enumerates per-local SUBSETS on the
 // argument that volatility is per-pointer knowledge. It is per-slot knowledge here too; the
 // subsets are simply uninhabited — across the 311 agbcc benchmark rows no function reaches this
 // gate with two eligible slots. How many reach it at all depends on the sweep's configuration, so

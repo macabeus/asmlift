@@ -1,4 +1,4 @@
-// L3 re-spelling lever: a pointer local the source ADVANCED between two accesses, rather than two
+// L3 respell variation: a pointer local the source ADVANCED between two accesses, rather than two
 // addresses the compiler derived from one.
 //
 // `ldr r3,=X; strh [r3]; adds r3,#2; strh [r3]` — the machine held an address in a register, used
@@ -57,7 +57,7 @@
 // instrumented on `firstRejection` (2026-09-12), which is HAND INSTRUMENTATION and reproduced by
 // wrapping both tables in `tallying()` (l3/gates.ts) at this pass's one call site in rank.ts,
 // passing `.gates` to `advancedBases`, and printing `.refusals()` when the sweep ends. The numbers
-// count CALLS, and enumeration calls this pass about eleven times per record, once per outer-axis
+// count CALLS, and enumeration calls this pass about eleven times per record, once per structure setting's
 // tree:
 //     23,322 calls · 112 found a chain · 23,210 declined
 //     head-second-site 872 · member-no-evidence 664 · head-nested-site 256 · head-already-advanced 144
@@ -75,7 +75,7 @@
 //   • IT IS MAP-LESS ONLY. Every member is reached through `cellAddress`, which answers null once
 //     a symbol map promotes the pool word to `&REG_WININ` — so with a map this pass enumerates
 //     nothing, and every `/advance` candidate the corpus carries is a `/raw-globals` one. That is
-//     what caps the lever at the six rows `bench sweep --fan --base origin/main` names
+//     what caps the variation at the six rows `bench sweep --fan --base origin/main` names
 //     (apps/benchmark/dataset/synthetic.ts, at `volwalk`), and it is the question to ask of it the
 //     day the symbol-map direction lands: this capability survives only if `cellAddress` learns
 //     the promoted form.
@@ -359,15 +359,15 @@ export function advancedBases(sfn: SFn, gates: AdvanceGates = {}): SFn | null {
   // function loads first, which on `kleod:StreamCmd_SetWindowRegs` swaps the two pool words and
   // costs the match; test/advance.test.ts's `the base init leads` pins the emitted order.
   //
-  // AND NO `/advance/sinkinit` TWIN, unlike `/nearbase`, which ships one for exactly this choice —
-  // not because the choice is better determined here (the generator cannot see the target either
+  // AND NO `/advance/sinkinit` ALTERNATIVE, unlike `/nearbase`, which ships one for exactly this decision —
+  // not because the decision is better determined here (the generator cannot see the target either
   // way) but because the twin CANNOT EXIST. `sinkInitsToFirstUse` sinks an init only when
   // `localMentions` counts ONE assignment to its local ("or the move would cross the other write",
   // l3/hoist.ts), and an advance IS a second assignment to this one — so the sink declines on every
   // tree this pass produces, by construction rather than by row: the sink returns null on the
   // advanced tree, and registering `/advance/sinkinit` adds no label to
-  // `kleod:StreamCmd_SetWindowRegs:agbcc`'s fan. The `prepend` choice above is therefore the only
-  // placement this lever HAS, which is a stronger reason to record the compile behind it.
+  // `kleod:StreamCmd_SetWindowRegs:agbcc`'s fan. The `prepend` decision above is therefore the only
+  // placement this variation HAS, which is a stronger reason to record the compile behind it.
   const { body: placed } = placeBaseLocals({ ...sfn, locals, body }, [init], 'prepend');
   return { ...sfn, locals, body: placed };
 }

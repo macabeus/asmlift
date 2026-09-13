@@ -1,4 +1,4 @@
-// `||`-guarded-return short-circuit recovery as a differ-ranked candidate axis (rank.ts), NOT a
+// `||`-guarded-return short-circuit recovery as a differ-ranked candidate variation (rank.ts), NOT a
 // global structurer heuristic. A divergent `if` can be spelled with either branch sense; which one
 // the source compiler emitted is genuinely ambiguous from asm, and there is no safe global rule
 // (`ifor` wants positive, `simpleif` wants negated, `diamond` wants positive). So `decompileRanked`

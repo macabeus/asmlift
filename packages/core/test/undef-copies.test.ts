@@ -2,7 +2,7 @@
 // whose only writer is this function and which none of its stores reached on this path, so
 // `w = uninit_sp0;` spells a read of storage that was never written — an assignment the asm has no
 // instruction for, and one that pins whatever register the undefined value was allocated across the
-// merge. Not an axis: no source spells a read of a local it has not written, so there is nothing
+// merge. Not a variation: no source spells a read of a local it has not written, so there is nothing
 // for a differ to referee.
 //
 // The guard is what makes it sound, and it is the half these tests pin hardest. Dropping the copy
@@ -131,7 +131,7 @@ test('a store of an undefined value still emits', () => {
   );
 });
 
-// THE REFUSAL, ONE AXIS OVER. `/defsite` (anchorConstCopies) MOVES a merge copy off the edge to the
+// THE REFUSAL, ONE STEP OVER. `/defsite` (anchorConstCopies) MOVES a merge copy off the edge to the
 // const's own def site, which dominates it — so the name is written before the undefined arm runs
 // even though no member of its class has a def-block that reaches this predecessor. Dropping the
 // arm's copy there stores 0 where the machine stores whatever the arm left.

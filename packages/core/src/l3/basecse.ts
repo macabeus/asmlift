@@ -61,7 +61,7 @@
 // and `ldrb r0, [r4, #0x3]` — agbcc CSEs the symbol reference where it re-materializes the integer
 // — so the inline subscript spelling produces exactly the shape this rule reads as evidence
 // against it. asmlift lifts that asm back to the correct `((u8 *)&gS)[3]` and then offers the
-// named-base respelling anyway. Measured reach: of the 21 keys the symbol half newly admits over
+// spelling through a named base anyway. Measured reach: of the 21 keys the symbol half newly admits over
 // the artifact's agbcc rows in both symbol-map configurations, 4 are on a base whose address the
 // tree also uses as a value (2 distinct keys, on `kleod:ProcessInputAndUpdateEntities` and
 // `pokeemerald:TrySetCantSelectMoveBattleScript`).
@@ -78,10 +78,10 @@
 // the same thing. Promoting the hint to a default would need this paragraph to say something it
 // does not.
 //
-// It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a
+// It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below backs a variation rather than a
 // relaxation of the default table. agbcc folds a subscript but keeps an aggregate MEMBER offset in
 // the memory operand: `((struct S *)0x3001100)->b` emits `.word 0x3001100` + `ldr [r0, #0x4]`,
-// byte-identical to the named-base spelling, and the same holds for a union member and for a
+// byte-identical to the spelling through a named base, and the same holds for a union member and for a
 // store. So the shape has two sources and asmlift can spell only one of them; rank.ts offers both
 // and the differ referees.
 //
@@ -97,7 +97,7 @@
 // AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is never an `index`-of-leaf, so
 // scalar recovery is untouched). Non-leaf bases (a local, a struct-element `p[a0]`,
 // arithmetic) are excluded: agbcc may re-derive those, so hoisting them can
-// MISMATCH (empirically confirmed) — the differ-refereed `/addr-home` axis
+// MISMATCH (empirically confirmed) — the differ-refereed `/addr-home` variation
 // (structure/analysis.ts homeSharedAddresses) serves the shared gaddr-free ARITHMETIC bases
 // instead.
 // The hoisted local carries the access's pointer type, so the
@@ -357,7 +357,7 @@ export interface BaseKey {
    *  what a pointer local's own initializer STATEMENT produces (see raise/globalshape.ts's header
    *  for the compile that separates the two), while the inline cast produces the other order — so
    *  it is evidence a home is what the source wrote. Read only by `ORDERBASE_GATES` (rank.ts);
-   *  false for every base a compiler that has not opted in produced, which is what keeps the axis
+   *  false for every base a compiler that has not opted in produced, which is what keeps the variation
    *  off those targets. */
   orderLicensed: boolean;
 }
@@ -453,7 +453,7 @@ export const BASEFOLD_GATES: readonly Gate<BaseKey>[] = [
   ...ablateHeuristic(BASECSE_GATES, 'single-use'),
 ];
 
-/** The `/livebase` lever's admission (rank.ts): the default rules with both PLACEMENT heuristics
+/** The `/livebase` variation's admission (rank.ts): the default rules with both PLACEMENT heuristics
  *  ablated, keeping only `single-use`. `loop` and `repeated-const-offset` predict which spelling
  *  the compiler chose, and both predictions have a counterexample — an MMIO poll (`p[2] = go;
  *  while (p[2] & BUSY) {}`) stores and re-reads a fixed offset through ONE register the whole
@@ -466,7 +466,7 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
 
 /** `/livebase-block`'s admission (rank.ts): `/livebase` plus `single-cell`. The two tables differ
  *  by exactly one gate, so `without(LIVEBASE_BLOCK_GATES, 'single-cell')` is `/livebase`'s own
- *  admission and this selectivity axis prices by ablation like every other.
+ *  admission and this selectivity rule prices by ablation like every other.
  *
  *  `single-cell` GENERATES a narrower candidate; it does not classify, and taking it for a compiler
  *  fact is the way to misuse it. Its counterexample is in this corpus: `synthetic:sizebound`'s
@@ -644,8 +644,8 @@ export const UNFOLDED_GATES: readonly Gate<BaseKey>[] = [
  *  exemption cannot have.
  *
  *  `loop` and `repeated-const-offset` STAY. Neither is about the base's identity and both are fan
- *  control; ablating them is `/livebase`'s axis, already on the roster, and a row that wants the
- *  product is one roster line. THE PRICE OF THAT IS A HOLE, and it is named rather than left for a
+ *  control; ablating them is `/livebase`'s variation, already on the roster, and a row that wants the
+ *  pairing is one hoist. THE PRICE OF THAT IS A HOLE, and it is named rather than left for a
  *  reader to find: a licensed base with a use inside a loop is admitted by NO table on the roster —
  *  this one refuses it on `loop`, and every table that ablates `loop` refuses it on `cast-base` or
  *  `single-use` — which is the "a base set that is no row's stays unreachable" debt
@@ -805,13 +805,13 @@ export function hoistBaseLocals(
   }
   const out = { ...sfn, body, locals };
   // The two FLAT placements can only put the run in the top-level list, above every use of it by
-  // construction. `scope` puts an init inside a nested list, which is where a placing lever can ship
+  // construction. `scope` puts an init inside a nested list, which is where a placing variation can ship
   // the one failure the byte differ rewards — a read of a local whose assignment does not reach it —
   // so the tree it emits is checked rather than argued (contracts.ts).
   //
   // THE POPULATION IS THE MOTION, and `moved` is what the placer says it moved rather than what this
   // function minted. The leading run this pass inherits is the DEFAULT hoist's, committed by
-  // `structureChecked` before rank's levers see the tree (pipeline.ts), and `scope` moves those
+  // `structureChecked` before rank's variations see the tree (pipeline.ts), and `scope` moves those
   // inits too — so `newLocals` names less than half of what has to be judged. Real inhabitants, in the
   // CHECKOUTS rather than in a benchmark row — `DecompressAndLoadLevel` in klonoa and `sub_8052474`
   // in sa3, both map-ful — each sink one inherited `p0` beside the minted `p1`.

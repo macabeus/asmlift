@@ -50,7 +50,7 @@ describe('the emitted orientation decides the match, and only one orientation is
   });
 
   test('the same shape written `||` matches, so the fold itself is not the defect', () => {
-    // The control that keeps the claim honest, and the axis's own reason to exist: an `||`'s first
+    // The control that keeps the claim honest, and the variation's own reason to exist: an `||`'s first
     // test branches INTO the then-arm, so the fall-through reading is inverted here and the source
     // orientation is /flip-join's.
     const { rk } = ranked(src('||'));
@@ -78,7 +78,7 @@ describe('the emitted orientation decides the match, and only one orientation is
 
   test('each if class carries its own orientation axis: /flip-branch divergent, /flip-join joined', () => {
     // Asserted on the CANDIDATE LIST, not on the winner: the default sense already spells `&&`
-    // for the divergent shape, so a winner assertion would pass with the axis deleted.
+    // for the divergent shape, so a winner assertion would pass with the variation deleted.
     const divergent = compileTargetAsm(
       `int f(int a, int b, int *p, int *q){ if (a && b) { ${ARM} return 2; } return 3; }`,
     );
@@ -86,7 +86,7 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(dv.candidates.some((c) => hasVariation(c.label.split('/'), 'flip-branch'))).toBe(true);
     expect(dv.best.score.match).toBe(true);
     // the reconverging sibling, which differs only in that its arms rejoin, is /flip-join's:
-    // its flipped spelling is a distinct candidate where the divergent axis never fires
+    // its flipped spelling is a distinct candidate where the divergent-sense variation never fires
     const reconverging = compileTargetAsm(src('&&'));
     const rc = decompileRanked('f', reconverging, ARMV4T_AGBCC, assembleTarget(reconverging));
     expect(rc.candidates.some((c) => hasVariation(c.label.split('/'), 'flip-branch'))).toBe(false);
@@ -129,7 +129,7 @@ describe('a three-clause short-circuit chain folds flat', () => {
 
   test('the `llcmp` shape — a 64-bit `<`, mixed compare signedness, 11 without the second fold', () => {
     // synthetic:llcmp:agbcc's own body. The unsigned half is spelled as a per-SITE cast by the
-    // existing `/uns-cmp` axis, NOT as a parameter type: the winner is `signed/defsite/uns-cmp` with
+    // existing `/uns-cmp` variation, NOT as a parameter type: the winner is `signed/defsite/uns-cmp` with
     // four `s32` params, so the fan reaches the bytes with no per-parameter signedness candidate.
     const b = best(
       'int f(unsigned a,int b,unsigned c,int d){ int r=0; if (d > b || (d == b && c > a)) r=1; return r; }',

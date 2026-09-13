@@ -188,10 +188,10 @@ function rankedStderr(a: {
 }): string {
   const { ranked } = a;
   const table = ranked.candidates.map((c) => `asmlift: [score] ${c.label}: ${scoreOf(c.score)}\n`).join('');
-  // Spellings the scorer refused are recorded, not silent: a lever whose every candidate
+  // Candidates the scorer refused are recorded, not silent: a variation whose every candidate
   // fails to build looks identical to one that declined unless the drops are visible.
-  // …and the same idea one stage EARLIER: `[dropped]` reports a spelling the SCORER refused,
-  // which presumes the spelling was enumerated at all. A lever that threw produced no
+  // …and the same idea one stage EARLIER: `[dropped]` reports a candidate the SCORER refused,
+  // which presumes the candidate was enumerated at all. A variation that threw produced no
   // candidate to drop.
   const levers = [...a.leverErrors]
     .map(([label, error]) => `asmlift: [lever] ${label} threw (no candidate from it): ${error}\n`)
@@ -652,9 +652,9 @@ export async function runCli(
       // Under `--progress` — the flag that already says "report on this run as it goes" — the run
       // also says what it SPENT (phase.ts). A run nobody is watching writes only what it computed.
       const clock = flags.has('progress') ? new PhaseClock() : undefined;
-      // A lever that THREW is a defect and must not read as a lever that declined — core rank.ts
+      // A variation that THREW is a defect and must not read as a variation that declined — core rank.ts
       // makes that argument for its own channel, and this is the consumer it had been missing.
-      // Deduped by label: the enumeration walks a lever over every axis point, so one broken pass
+      // Deduped by name: the enumeration walks a variation over every setting, so one broken pass
       // would otherwise print thousands of identical lines. Silent when nothing threw.
       const leverErrors = new Map<string, string>();
       const rankOpts = {

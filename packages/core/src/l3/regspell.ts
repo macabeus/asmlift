@@ -1,4 +1,4 @@
-// asmlift L3 — the REGISTER-COPY re-spelling, a differ-ranked representation lever (the fourth,
+// asmlift L3 — the REGISTER-COPY respell variation, differ-ranked like the three before it (the fourth,
 // after signedness / branch sense / walk-vs-index).
 //
 // A compiler's register allocation leaves SOURCE-visible footprints the coalescing structurer
@@ -26,7 +26,7 @@
 //        a bin operand materializes into its own fresh local first (`v = 128 << 9; … v / x …`) —
 //        the register the compiler staged the constant in.
 //   R3 — return assign-back: a non-var return expression lands in a fresh local first
-//        (`r = E; return r`). Emitted as a SEPARATE variant (with/without R3) when R1/R2 fired:
+//        (`r = E; return r`). Emitted as a SEPARATE result (with/without R3) when R1/R2 fired:
 //        which tail the source spelled is itself ambiguous.
 import { IrType, T } from '../ir/types';
 import { Expr, SFn, Stmt, exprEquals, mapExprChildren } from './ast';
@@ -133,7 +133,7 @@ function isConstExpr(e: Expr): boolean {
 export type RegcopyTail = 'none' | 'reuse' | 'fresh';
 
 export interface RegcopySpelling {
-  /** which R3 tail this variant carries — `none` is the un-tailed base */
+  /** which R3 tail this result carries — `none` is the un-tailed base */
   tail: RegcopyTail;
   sfn: SFn;
 }
@@ -213,7 +213,7 @@ function renameSubexpr(e: Expr, E: Expr, name: string): Expr {
   return mapExprChildren(e, (c) => renameSubexpr(c, E, name));
 }
 
-/** Apply the register-copy re-spelling. Returns 0–3 variants — the base, plus the R3 tail in each
+/** Apply the register-copy re-spelling. Returns 0–3 results — the base, plus the R3 tail in each
  *  spelling that exists (reuse needs R1 to have fired, fresh always does) — and an EMPTY list when
  *  nothing fired. Pure — never mutates the input. */
 export function registerishSpellings(sfn: SFn): RegcopySpelling[] {
@@ -247,7 +247,7 @@ export function registerishSpellings(sfn: SFn): RegcopySpelling[] {
         if (m) {
           const { v, E, updArm, upd, cond } = m;
           // GUARDS BEFORE ALLOCATION (a declined shape must leave no residue — the leaked
-          // dead `w` even perturbed the live-name count this lever exists to reproduce):
+          // dead `w` even perturbed the live-name count this variation exists to reproduce):
           //   • E and the cond pure; the cond's non-E operand must NOT mention v (a clamp's
           //     `if (a < v)` would compare against the POST-assignment v — reproduced);
           //   • the copy w carries E's RENDERED type, not v's declared one (retyping a u32
@@ -327,7 +327,7 @@ export function registerishSpellings(sfn: SFn): RegcopySpelling[] {
   }
   const base: SFn = { ...sfn, locals: [...locals], body: afterR2 };
 
-  // R3 variants: the tail assign-back — a non-var return lands in a local first. WHICH local is
+  // R3 results: the tail assign-back — a non-var return lands in a local first. WHICH local is
   // itself allocator-ambiguous (gcc 2.9 wanted R1's dead value var — live-name-count sensitive;
   // another allocator may want the fresh one), so BOTH tails are emitted as candidates rather
   // than asserting one compiler's preference; the source dedupe collapses them when identical.

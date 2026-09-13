@@ -184,7 +184,7 @@ Your incremental window starts at **${lastSha}**.
 
 1. **Wall-clock.** The ranked LBG run is the expensive path (now ~21m pooled, was 36m). Where does
    the remaining time go? Candidate dedup before compiling, cache misses, an objdiff handle rebuilt
-   per call, work repeated across candidates differing in one axis. **Count the work before
+   per call, work repeated across candidates differing in one variation. **Count the work before
    proposing** — do not guess.
 2. **A recurring correctness trap** a prompt or a fail-loud check would prevent. Several agents have
    quoted an LBG number without \`--proto\`; one shipped a false compiler premise; one compared a

@@ -1,9 +1,9 @@
-// The derived-read-home axis (structure.ts homeDerivedReads, rank.ts `/derived-home`): a pure
+// The derived-read-home variation (structure.ts homeDerivedReads, rank.ts `/derived-home`): a pure
 // non-const value with 2+ consumers standing on a memory read materializes, and the read then
 // renders exactly once inside it — the register the asm carried the DERIVED value in, where the
 // default homes the read and re-derives the computation at every use. Off by default.
 //
-// What these tests pin is the SCOPE, since the sibling homing axes already own the neighbouring
+// What these tests pin is the SCOPE, since the sibling homing variations already own the neighbouring
 // shapes: the read is what admits a straight-line value at all (nothing else in the cone is
 // evidence the compiler kept a register), and the refusals hold — a cone crossing a `call`, a
 // standalone address in the cone, a value that is itself an address, a write (a store or a call)
@@ -107,7 +107,7 @@ test('a cone crossing a call is not homed', () => {
 
 // A gaddr reached OUTSIDE a read's address: rendered standalone the address computation loses the
 // memAccess's inline byte-stride cast, so the value it names is not the value the uses see. (The
-// same gaddr UNDER a read is this axis's own clientele — the DERIVED fixture's `/raw-globals`
+// same gaddr UNDER a read is this variation's own clientele — the DERIVED fixture's `/raw-globals`
 // sibling — because the address stays inline at the deref.) The sum is INT-typed, so the
 // pointer-value refusal cannot pre-empt this one: without the cone's gaddr arm it homes as
 // `v0 = (u32)&gTable + *(u8 *)134576844;`.
@@ -253,7 +253,7 @@ test('a value in a block its read sits above is not homed', () => {
 });
 
 // ── the read renders ONCE ────────────────────────────────────────────────────────────────────
-// The axis's whole claim. Homing resolves a render position for a read that had none, so any
+// The variation's whole claim. Homing resolves a render position for a read that had none, so any
 // SECOND consumer of that read resolves a second one and the multi-render load rule inlines it at
 // both — two accesses where the asm has one `ldrh`.
 
@@ -336,7 +336,7 @@ test('a read outside the cone bars the move, so two accesses keep their order', 
 
 // ── the enumeration gate ─────────────────────────────────────────────────────────────────────
 // A derived value consumed once as an operand and once as a successor ARG. `analyze` counts both,
-// so the axis homes it (this is ReadKeyInput's own shape with the uses split across an edge) — a
+// so the variation homes it (this is ReadKeyInput's own shape with the uses split across an edge) — a
 // gate blind to successor args would enumerate no candidate for it at all.
 const ARGUSE = `fn arguse {
 ^bb0():

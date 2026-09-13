@@ -175,7 +175,7 @@ the exact differing instructions plus a hypothesis class — never a vague "regi
 
 1. asmlift both arms; keep the raw output verbatim for the defect log.
 2. Hand-fix asmlift's mistakes one at a time, **recording each as a category + what it cost**.
-3. **Declaration-level levers** — struct bitfields, array-typed `extern`s, typed pointers over byte
+3. **Declaration-level source changes** — struct bitfields, array-typed `extern`s, typed pointers over byte
    arithmetic, a `#define` becoming a real object, the right alias for the access shape. These decided
    most of round 2's matches and **all ten of round 3's**, and Transmuter *cannot* invent them, so
    try them before it. Round 3's catalogue, each measured by ablation: a named extern vs a cast
@@ -359,7 +359,7 @@ Then update the memory files under
 9. **Never use an `asm("")` barrier, and never count a function that carries one as matched.** A
    barrier is never load-bearing — it is a workaround for not having found the right C, and it can
    *always* be made to work, which is exactly the trap: it ends the search and leaves behind
-   something the original source could not have contained. The plain-C levers to try instead are
+   something the original source could not have contained. The plain-C source changes to try instead are
    catalogued in `<klonoa>/docs/learnings/agbcc-source-shape-levers.md`. Same reason Transmuter's
    `asm-barrier` rule must be treated as inadmissible: it is that tool's highest-yield rule by
    construction and can only produce source you cannot ship.

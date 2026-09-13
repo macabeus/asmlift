@@ -1,7 +1,7 @@
 // The `/livebase-block × /regionbase` PAIRING (rank.ts `/livebase-block/homesplit`): one base kept
 // at the function head and a SECOND base split into one local per region, in the same function.
 //
-// WHY IT IS NOT REACHABLE FROM EITHER LEVER. Both are whole-FUNCTION policies over the bases they
+// WHY IT IS NOT REACHABLE FROM EITHER VARIATION. Both are whole-FUNCTION policies over the bases they
 // bind: `hoistBaseLocals` homes every key its table admits at one placement, and
 // `hoistScopedBases` splits every key its region rule admits. A function whose two bases want
 // OPPOSITE answers is spelled by neither. `synthetic:dmapoll` is that function and its endpoint is
@@ -30,7 +30,7 @@
 // EXACTLY ONE KEY IS WITHHELD, and the arity is a claim rather than an oversight. A two-key withhold
 // exists only where the caller's table binds three — `homesplit-fan-cap` admits no more — and there
 // it is the three further pairs, each carrying the three respells rank.ts derives from one pipe:
-// NINE more candidates per axis point on those functions alone, before any shape product, and no
+// NINE more candidates per structure setting on those functions alone, before any stacked variation, and no
 // row asks for one. `l3/volatileptr.ts`'s `volatileSubsetCandidates` enumerates every proper subset
 // under the same cap; it does that because a row demanded each of them. Widen this the same way,
 // on a row.

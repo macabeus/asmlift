@@ -1,4 +1,4 @@
-// The `/vol-store` lever (l3/volstore.ts): a store whose whole address is a constant inside the
+// The `/vol-store` variation (l3/volstore.ts): a store whose whole address is a constant inside the
 // target's declared device-register window is spelled through a `volatile` lvalue. What these
 // tests pin is the gate table — the window is the eligibility predicate and not a hint, a runtime
 // address names no cell, a constant subscript is part of the address, and an access that already
@@ -44,7 +44,7 @@ test('a store at a constant address inside the device window is qualified', () =
 
 test('a store to ordinary memory declines — the window is the eligibility predicate', () => {
   // IWRAM. Over the corpus the range excludes a const-address store on 7 rows; it is a reach
-  // gate, not a soundness one, and the lever's header carries the price.
+  // gate, not a soundness one, and the variation's header carries the price.
   expect(volatileDeviceStores(fn([store(cell(0x03001048))]), GBA)).toBeNull();
 });
 

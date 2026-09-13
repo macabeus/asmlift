@@ -474,7 +474,7 @@ describe('leaf-base hoisting', () => {
       expect(
         admittedBases(input, BASEFOLD_GATES).filter((k) => !admittedBases(input, BASECSE_GATES).includes(k)),
       ).toHaveLength(1);
-      // the use-count rule, alone — unchanged by the lever's existence
+      // the use-count rule, alone — unchanged by the variation's existence
       expect(hoistBaseLocals(input, without(BASECSE_GATES, 'single-use')).locals).toHaveLength(1);
       // ...and dropping the exemption's gate drops `reachedOnce` with it, landing on that exact
       // table, which is why the exemption's own price is the diff and not an ablation.
@@ -524,7 +524,7 @@ describe('leaf-base hoisting', () => {
 describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', () => {
   // The MMIO poll: three stores plus a busy-wait re-read of the same fixed offset, all through
   // one constant base. `loop` and `repeated-const-offset` both reject it, yet the compiler holds
-  // the base in ONE register throughout — the shape the lever exists for.
+  // the base in ONE register throughout — the shape the variation exists for.
   const poll = (): SFn =>
     fn([
       { k: 'store', lval: cidx(0x40000d4, c(0)), value: { k: 'var', name: 'a0' } },
@@ -565,7 +565,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(hoistBaseLocals(input, LIVEBASE_GATES)).toBe(input);
   });
 
-  // Mixed admitted+refused bases: the lever re-runs on a tree whose head already holds the
+  // Mixed admitted+refused bases: the variation re-runs on a tree whose head already holds the
   // default run's init, and pool-load order is FIRST-USE order across both — whichever base the
   // body touches first gets its init first, not whichever pass hoisted it.
   const admitted = (v: string): Stmt[] => [
@@ -829,8 +829,8 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
   });
 
   test('and the ROSTER offers it — where the target declares the fold, and only there', () => {
-    // THE TABLE IS NOT THE LEVER — `rank.ts`'s `UNFOLDED_ADMISSIONS` is, and it needs its own pin:
-    // delete that one roster row and the whole `/unfolded` family leaves the ranked path
+    // THE TABLE IS NOT THE VARIATION — `rank.ts`'s `UNFOLDED_ADMISSIONS` is, and it needs its own pin:
+    // delete that one hoist and the whole `/unfolded` family leaves the ranked path
     // (`synthetic:unfoldpark`'s fan 44 → 36) without any table in `basecse.ts` changing its answer.
     // `sinkinit.test.ts` owns the sunk PROGRAM and must stay label-free to do it, so it cannot own
     // this: whichever route emits that program satisfies it. Two tests, two subjects.

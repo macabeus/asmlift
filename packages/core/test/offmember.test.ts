@@ -7,7 +7,7 @@
 // subscript (the addend form, which is `synthetic:bgbaked`'s shape, declines); each gate is
 // load-bearing under ablation; the synthesized declaration cannot collide with the two passes
 // that already mint struct names; and the respelled tree satisfies the boundary contracts a
-// ranked lever is re-checked against.
+// respell variation is re-checked against.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -282,7 +282,7 @@ describe('the declaration cannot collide with the two passes that already mint s
   });
 });
 
-// The roster wiring, end to end: the axis is offered only where the target declares the fold, and
+// The roster wiring, end to end: the variation is offered only where the target declares the fold, and
 // it produces a candidate on the shape it was built for.
 test('rank offers /offmember on a fold-declaring target', () => {
   const asm =

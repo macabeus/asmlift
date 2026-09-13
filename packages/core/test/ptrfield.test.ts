@@ -1,4 +1,4 @@
-// The `/ptr-field` lever (l3/ptrfield.ts): a recovered word field is re-declared `void *` and cast
+// The `/ptr-field` variation (l3/ptrfield.ts): a recovered word field is re-declared `void *` and cast
 // back at each read. What these tests pin is that the two places a struct type lives — inline in
 // each `(struct S *)` cast and again in `SFn.structs`, which is what a backend prints — stay in
 // step, and that every field the ACCESS EVIDENCE does not support a pointer for declines.

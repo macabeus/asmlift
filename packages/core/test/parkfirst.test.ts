@@ -1,6 +1,6 @@
-// The /parkfirst lever (l3/parkfirst.ts): incoming-argument parks move to the head of the entry
+// The /parkfirst variation (l3/parkfirst.ts): incoming-argument parks move to the head of the entry
 // straight-line prefix. The park's `mov` lifts to pure SSA aliasing — no op, no position — so
-// the default order is emission's, and this lever emits the park-first sibling for the differ.
+// the default order is emission's, and this variation emits the park-first sibling for the differ.
 import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';

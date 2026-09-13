@@ -10,8 +10,8 @@ If `$1` is empty, ask which function before doing anything else. Do not guess.
 This is the counterpart of `/match-function`. That command *builds* a missing capability; this one
 *names* them. Your job is: decompose the row's residual diff into distinct capability gaps, verify
 each one against the project's real compiler, and leave behind a benchmark row for every gap that
-no existing row exercises. You do **not** implement levers here — if a fix looks obvious, record
-it as "the lever this row gates" and stop. A finding without a row (or a reason it cannot have
+no existing row exercises. You do **not** implement fixes here — if a fix looks obvious, record
+it as "the fix this row gates" and stop. A finding without a row (or a reason it cannot have
 one) is an unfinished finding.
 
 **Read this file from YOUR OWN worktree, by absolute path.** A relative path resolves into whatever
@@ -69,15 +69,15 @@ Three docs carry what this command shares with `/match-function`, and it does no
    and it goes into your report verbatim, **naming the vehicle**. Never a `[score] … | tail -1`:
    that table is sorted best-first, so the last line is the WORST candidate.
 3. **Read the FAN before you name a missing capability**: `pnpm bench fan $1` prints every
-   candidate spelling the harness ranked for this row — label, score over its own denominator,
-   dropped, withheld — and `--show <label>` prints any one of their SOURCES, which `results.json`
+   candidate the harness ranked for this row — its variations, score over its own denominator,
+   dropped, withheld — and `--show <variations>` prints any one of their SOURCES, which `results.json`
    does not carry for a non-winner. An attribution that says "asmlift never considers X" is a claim
    about this list, so read it. Its `[ranked]` line carries the same `synthesized` count and
    `[asmlift source <sha>]` stamp as the vehicles above, so it is quotable in the same way.
-   `--enumerate` lists the same candidates' LABELS without compiling anything — no scores, because
+   `--enumerate` lists the same candidates' VARIATIONS without compiling anything — no scores, because
    nothing was compiled — the rate, and what a huge fan therefore costs to merely LIST, is a row of
    `docs/bench-cost.md` §1; a long enumeration is a big fan, not a hang. It still serves
-   `--show <label>`, though not `--show best`: nothing has been scored, so there is no winner to
+   `--show <variations>`, though not `--show best`: nothing has been scored, so there is no winner to
    name. A fan over 2,000 is refused unless you pass `--force`, and the refusal quotes what
    `--force` would cost on THIS row — **but that refusal is not free**: it is checked after the
    enumeration (`fan.ts:914`), so on a huge row it prints only once the half-hour of enumeration has
@@ -122,8 +122,9 @@ address — which is codegen-visible. Compare compiled asm to compiled asm, neve
 - Temp compile dirs (`asmlift-usercc-*`) are deleted. To capture them, copy `decomp.yaml` to an
   UNTRACKED file, append `cp "$PRE_FILE" / cp "$ASM_FILE"` capture lines to its compiler template,
   and rerun with `--config` pointing at the copy. Delete the copy afterwards.
-- Every candidate axis gets compiled, so the capture dir holds many variants. Find the winner by
-  its axis markers (param signedness, named vs raw globals) or by normalized-body similarity —
+- Every candidate in the fan gets compiled, so the capture dir holds many sources. Find the winner
+  by what its variations change (param signedness, named vs raw globals) or by normalized-body
+  similarity —
   exact string match against stdout will fail for the reason above.
 
 ## Phase 2 — Attribute the diff structurally
@@ -208,7 +209,7 @@ One family, one block comment, modeled on the existing families in `dataset/synt
 uninit-local block is the reference): what each row isolates, which are controls, and an
 attribution line for every decline naming its first blocker. Constraints learned the hard way:
 
-- **Extern data globals are fine, and respelling them to absolute addresses destroys the row.**
+- **Extern data globals are fine, and rewriting them as absolute addresses destroys the row.**
   A candidate synthesizes its declarations from the target asm's own relocations (the CLI says
   `[declared] N declaration(s) synthesized from the target asm`), so a named global compiles. The
   earlier rule here said the opposite; obeying it collapses the very distinctions such a family
@@ -254,7 +255,7 @@ attribution line for every decline naming its first blocker. Constraints learned
    `--only`, which scopes both tiers. `--project` alone scopes only real and `--toolchain` alone
    only synthetic, so pair either with its `--tier` or the other tier is run whole and refused. A
    scoped run is not read-only either: it rewrites `results/<tier>.json` with only its own rows.
-   The `cpp` probe is on a DIFFERENT axis and this exemption does NOT cover it: **every run that
+   The `cpp` probe answers a DIFFERENT question, and this exemption does NOT cover it: **every run that
    touches the real tier is probed, `--only` included** — that is where TRAP 6 bites. A refusal
    there means your shell resolved `cpp` to Apple clang, which a LOGIN shell does; a WARNING means
    no MIPS toolchain is installed, so those rows would SKIP. A synthetic-only run is never probed —
@@ -280,10 +281,10 @@ attribution line for every decline naming its first blocker. Constraints learned
 
 - Research doc in `research/` (untracked — never cite its path in commits, PR bodies, or the
   dataset): the compiler facts with file:line, the experiment pairs, the per-row outcome matrix,
-  the levers each row gates in expected-impact order, and every finding you EXCLUDED with the
+  the fixes each row gates in expected-impact order, and every finding you EXCLUDED with the
   machinery it actually belongs to.
 - Correct any stale attribution the investigation falsified (memory files, earlier research docs).
-  An attribution that has silently gone stale sends the next session down the wrong lever.
+  An attribution that has silently gone stale sends the next session down the wrong fix.
 - Report: baseline, the named gap classes with their verified causes, the row matrix, and what
   a future `/match-function` should build first. Push the branch and open the PR.
 - Then **`scripts/pr-wait.sh <pr>`** for the merge state (`docs/measurement-discipline.md` §8).
@@ -306,7 +307,7 @@ a copy that drifts silently, which is the defect this whole section exists to cl
 - **An ablation's blast radius is `pnpm bench sweep --base-dir <the unablated worktree>`.** You
   already build that second tree; this reads it. Every row re-lifted in both trees and both
   symbol-map arms, nothing compiled, the moved rows named — with `--fan` when what you ablated
-  changes which spellings are enumerated rather than which one is emitted, and `--repeat` when you
+  changes which candidates are enumerated rather than which one is emitted, and `--repeat` when you
   need to know a difference is not the rig's. It also takes `--asm-dir <tree> --toolchain <id>`,
   so the population can be a project's raw `.s` files rather than dataset rows. Prices: same table.
 - Background the long ones, wait on a bounded marker-AND-log-growth condition, keep only READ-ONLY
@@ -344,7 +345,7 @@ a copy that drifts silently, which is the defect this whole section exists to cl
    are fixed or documented as their own labelled change.
 4. **Rows, not fixes.** Implementation belongs to `/match-function`, gated by the rows this
    command leaves behind. If you cannot resist sketching the fix, put it in the research doc's
-   lever list.
+   fix list.
 5. **Attribute declines to their first blocker** and pre-existing links to their own families.
    A family whose rows all decline on an unrelated link has measured that link, not itself —
    say so in the block comment.

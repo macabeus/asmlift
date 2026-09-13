@@ -1,7 +1,7 @@
 // M4 — prove BOTH seams.
 //  (a) Language-backend seam: the SAME L3 AST emits C *and* Pascal; every language
 //      divergence (`:=`, `div`, name-assignment return) lives in the backend.
-//  (b) The COMPILER axis is CONSUMED, not decorative: flipping `target.compiler` — with the
+//  (b) The COMPILER field is CONSUMED, not decorative: flipping `target.compiler` — with the
 //      ISA and asm held constant — changes the output, because the soft-div idiom pattern is
 //      gated on the compiler, not on an `arch ==` branch or on hwDivide (KMC GCC has hardware
 //      divide yet still strength-reduces `/2` to the shift idiom, so the compiler is the true

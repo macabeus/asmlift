@@ -3,7 +3,7 @@
 // lives: a read whose every render sits in a block its own block STRICTLY DOMINATES emits as a
 // named temp in its own block, instead of sinking and being re-read per arm.
 //
-// Not a differ-refereed axis: where the compiler neither hoists a read to a dominator nor
+// Not a differ-refereed variation: where the compiler neither hoists a read to a dominator nor
 // schedules one across a branch, the sunk spelling is one it could not have emitted from this asm.
 // agbcc is such a compiler at -O2; the evidence, and what a compiler owes before declaring it, is
 // at TargetDescription.compilerBehaviors.
@@ -290,9 +290,9 @@ test('a read through a named global homes at its def block, address still inline
   expect(count(emit(CONE, false), 'gTable')).toBe(2);
 });
 
-// Which is where this rule and the `/reread-globals` axis meet: the axis spells a named global's
+// Which is where this rule and the `/reread-globals` variation meet: the variation spells a named global's
 // read at each of its uses, this rule spells it once at the def block, and the rule runs first —
-// so on a declaring target the axis reaches only reads whose renders sit in their own block.
+// so on a declaring target the variation reaches only reads whose renders sit in their own block.
 test('the def-block rule pre-empts the value-home axis on a strictly dominated read', () => {
   expect(count(emit(CONE, false, true, true), 'gTable')).toBe(2);
   expect(emit(CONE, true, true, true)).toBe(emit(CONE, true));

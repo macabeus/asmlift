@@ -20,7 +20,7 @@ import { readCommitted, scrub } from './committed';
  *  sharper case: it is wall clock, so it differs on EVERY row of EVERY run — machine load, docker,
  *  and ~5× between a cold and a warm candidate cache. Left in, this file would answer `stale`
  *  unconditionally and stop being a question at all. `candidateCount` STAYS: enumeration is a
- *  deterministic cross over axes, so a fan that moved is a real change and exactly the one this
+ *  deterministic cross over variations, so a fan that moved is a real change and exactly the one this
  *  artifact started recording in order to stop losing.
  *
  *  DELETED rather than blanked, so an artifact that predates the field still compares equal to a

@@ -1,6 +1,6 @@
 // THE PREMISE OF THE STRUCTURED-TREE SKIP (rank.ts enumerateCandidates).
 //
-// The enumerator skips the whole re-spelling fan when an earlier axis point already produced the
+// The enumerator skips the whole respell set when an earlier structure setting already produced the
 // same structured tree, and it decides "same" on `JSON.stringify(sfn)`. That is a value comparison
 // over strings, so it can never merge two trees by collision — but it CAN merge two trees whose
 // difference JSON cannot express: a `Map`, a `Set`, a function or a class instance anywhere under
@@ -149,7 +149,7 @@ test('the round-trip check would catch the fields JSON cannot express', () => {
 
 test('the skip removes no candidate: the mapped ARM function enumerates the same set either way', () => {
   // A behavioural cross-check of the same premise, at the level the skip actually runs: with a map
-  // that carries a bitfield member, `/no-bitfield` doubles the axis cross, and the fold does fire
+  // that carries a bitfield member, `/no-bitfield` doubles the cross, and the fold does fire
   // here — so this fixture exercises both a tree that repeats and one that does not.
   const cands = enumerateCandidates('f', ARM_ASM, ARMV4T_AGBCC, { symbols: MAP });
   expect(cands.length).toBeGreaterThan(1);

@@ -87,7 +87,7 @@ test('a const base an arm carries still folds when the result is a memory base',
 // agbcc's `s = 0; if (c) s += 1;`. `%2` is the accumulator's zero-init, handed to the join on the
 // not-taken edge; the taken arm's `add %2, 1` is an INCREMENT of that register, not a literal. Fold
 // it and `%2` has no use left, the join sees an arm that materialises `1`, and `/merge-home` — the
-// axis that would hoist the init — never enumerates because its merge feed is gone.
+// variation that would hoist the init — never enumerates because its merge feed is gone.
 const ACC = `fn acc {
 ^bb0(%0: s32, %1: s32*):
   %2: s32 = const {value=0}
@@ -232,7 +232,7 @@ test('an init and its updated copy feeding one merge is an accumulator, high hal
 
 // ── (f) the residue's SPELLING: a refused pair must still print as the literal it is ─────────
 // Case (c) leaves `add(const 0, const 1)` in the IR on purpose, so that `/merge-home` can enumerate
-// `v = 0; if (c) v = v + 1;`. Every candidate that does NOT take that axis inlines both operands,
+// `v = 0; if (c) v = v + 1;`. Every candidate that does NOT take that variation inlines both operands,
 // and without a print-time fold the winning source ships `v = 0 + 1;` — `synthetic:fib:gcc2.7.2kmc`
 // emits exactly that, and stays diff:12 either way, because the target compiler folds the constant
 // expression and no score gate can see the difference. What is at stake is the artifact a decomp

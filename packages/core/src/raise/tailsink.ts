@@ -19,7 +19,7 @@
 // reached only by `br`) is seen through to its own predecessors, so the arms that branch into the
 // tail through a shared base reload are sources like any other (`synthetic:gcsefwd`).
 //
-// A LIFT VARIANT, NEVER A DEFAULT: `synthetic:gcsepre` and `synthetic:gcsepredup` compile to
+// A LIFT VARIATION, NEVER A DEFAULT: `synthetic:gcsepre` and `synthetic:gcsepredup` compile to
 // different objects (an r4/r5 swap) and lift to byte-identical IR, the first written with the
 // shared tail and the second with the default duplicated into each arm — no IR rule tells them
 // apart, so rank.ts enumerates this beside the unsunk lift and the differ referees.

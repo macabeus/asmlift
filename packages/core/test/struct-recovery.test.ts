@@ -7,7 +7,7 @@
 // (the struct is declared, fields are named by offset). Toolchain-free: it drives the raise tower
 // on hand-written IR and asserts the emitted source — the same style as struct-harden.test.ts.
 //
-// WHY NO objdiff SCORE HERE: this first axis is BYTE-NEUTRAL (`a0->field_8` and `a0[2]` compile
+// WHY NO objdiff SCORE HERE: this first representation is BYTE-NEUTRAL (`a0->field_8` and `a0[2]` compile
 // identically), so a real-toolchain fixture would score 0 for EITHER representation and prove
 // nothing about the discriminator. The discriminator is a source-shape decision, so it is tested
 // at the source. (A live byte-exact fixture belongs with the layout-MOVES-bytes cases — padding /

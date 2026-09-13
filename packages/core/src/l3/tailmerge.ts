@@ -25,7 +25,7 @@
 // above covers only below-vs-in-arms.
 //
 // KNOWN INTERACTIONS, both byte-level rather than soundness. This pass is unconditional like
-// `dce.ts` and `basecse.ts` rather than a differ-refereed lever, and the argument those files each
+// `dce.ts` and `basecse.ts` rather than a differ-refereed variation, and the argument those files each
 // state for themselves applies here too and was missing: a wrong merge changes recompiled bytes and
 // surfaces as a LOST match under the zero-lost gate, never as wrong C.
 //
@@ -49,7 +49,7 @@
 //     ways in `test/tailmerge.test.ts`.
 //     A ranked row is not stuck with either order: `/copy-defpos` (rank.ts) enumerates the
 //     def-position spelling beside the record's, so the merged form is a candidate the differ can
-//     pick on bytes — on `CountCollectedGems` its gate admits the axis on the map-ful and map-less
+//     pick on bytes — on `CountCollectedGems` its gate admits the variation on the map-ful and map-less
 //     lifts alike. What no arm of the fan spells is the third form, the hidden statement merged
 //     while KEEPING the record's order.
 //

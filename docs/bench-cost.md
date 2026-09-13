@@ -80,13 +80,13 @@ readers, none of which compiles anything:
   cost" but "which rows does my branch decompile differently from that revision". It re-lifts every
   row in both trees, map-ful and map-less, and compiles nothing.
 
-  **Read the arm you asked for.** Measured 2026-09-12 over the same commit pair (`910fd416` →
+  **Read the mode you asked for.** Measured 2026-09-12 over the same commit pair (`910fd416` →
   `bd7ad596`, four PRs apart, one of them a real transform): the default lift-only sweep reported
   **0 rows moved** and two head-only records (the row #191 added), while `--fan --tier synthetic`
   on the same pair reported **28 records moved over 14 rows**, fans 1.3x–2.7x. Most of this
-  project's axes ADD CANDIDATES, and a new candidate is invisible to the default lift. Lift-only
+  project's variations ADD CANDIDATES, and a new candidate is invisible to the default lift. Lift-only
   answers "did I regress the default spelling"; `--fan` answers "did I change what gets ranked",
-  which is the question a match round is asked before it merges an axis.
+  which is the question a match round is asked before it merges a variation.
 
   `--repeat N` asks the same question of this tree against ITSELF, alternating iteration direction:
   2,124 records x 3 runs, 0 disagreements, 2026-09-12. Five rounds rebuilt that check by hand.
@@ -115,7 +115,7 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   guard reads `candidateCount` off `results.json`, so an artifact that parses and prices nothing —
   `results: []` from a shard that wrote no rows, a schema move under `asmlift.candidateCount`, or a
   whole-corpus artifact with no row of the project you selected — bounds nothing, and used to turn
-  the guard off with no output at all (still enumerating the 77,760-spelling row at 25 s, against
+  the guard off with no output at all (still enumerating the 77,760-candidate row at 25 s, against
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 

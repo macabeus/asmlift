@@ -6,7 +6,7 @@
 //     where they are declared — the N-at-function-top spelling and the N-block-scoped one
 //     assemble byte-identically.
 //
-// That is why the lever mints N locals at function top and places only their ASSIGNMENTS per
+// That is why the variation mints N locals at function top and places only their ASSIGNMENTS per
 // region, and it is why the round did not build a nested declaration block in the emitter. The
 // fact lived in a scratch directory and in two prose headers, with nothing to run: this repo's own
 // idiom for a load-bearing compiler fact is a pinned test (test/sign-axis.test.ts,
@@ -15,7 +15,7 @@
 //
 // BOTH DIRECTIONS. The placement being free is only half the claim; the other half is that the
 // COUNT is not free. A third case collapses the three region locals into one function-scope local
-// and must produce DIFFERENT bytes — otherwise the lever would be re-spelling nothing and the
+// and must produce DIFFERENT bytes — otherwise the variation would be re-spelling nothing and the
 // whole capability would be decoration.
 //
 // GATE: needs the bench-owned klonoa checkout (`pnpm bench setup --project kleod --build`) plus
@@ -51,7 +51,7 @@ ${tail0}
 }
 `;
 
-// A — three locals, all DECLARED at function top, assigned per region (what the lever emits)
+// A — three locals, all DECLARED at function top, assigned per region (what the variation emits)
 const TOP3 = body(
   '    volatile unsigned int *p0;\n    volatile unsigned int *p1;\n    volatile unsigned int *p2;',
   '        p0 = (volatile unsigned int *)0x040000D4;',

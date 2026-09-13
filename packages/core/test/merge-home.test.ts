@@ -1,4 +1,4 @@
-// The merge-feed-home axis (structure.ts homeMergeFeeds, rank.ts `/merge-home`): a pure value one
+// The merge-feed-home variation (structure.ts homeMergeFeeds, rank.ts `/merge-home`): a pure value one
 // join's incoming edges render into the SAME parameter slot from 2+ places materializes in the
 // block that dominates them — the value the source computed once above the branch, where the
 // default has no name to reference on an edge and re-derives the whole expression per arm. Off by
@@ -111,7 +111,7 @@ test('a feeder inside another feeder’s cone does not get a home of its own', (
 
 // ── THE OVER-FIRE CONTROL: armkeep ───────────────────────────────────────────────────────────
 // The same pure expression computed in BOTH arms and consumed inside each. agbcc keeps both
-// copies, so hoisting is wrong here — and the axis cannot see it: the two `(b << 3) + 7`s are
+// copies, so hoisting is wrong here — and the variation cannot see it: the two `(b << 3) + 7`s are
 // separate SSA values with per-arm defs, and the only value their cones share is a block
 // PARAMETER, which has no def op to materialize.
 const ARMKEEP = `fn armkeep {
@@ -327,7 +327,7 @@ test('a shared subexpression no edge carries is refused', () => {
 // ── refusal: a def the join's arms do not all reach ──────────────────────────────────────────
 // The def block dominates TWO of the join's three predecessors, not the join. The value is shared
 // and carried, and homing it is well-formed C — but a definition the third arm never runs is not
-// one definition above the branch, which is the spelling the axis claims to recover.
+// one definition above the branch, which is the spelling the variation claims to recover.
 const NODOM = `fn nodom {
 ^bb0(%0: s32, %1: s32, %9: s32*):
   %z: s32 = const {value=0}
@@ -504,7 +504,7 @@ test('a value rendered UNDER a divide at one copy site still counts as rendered 
 });
 
 // ── refusal: an `undef` ──────────────────────────────────────────────────────────────────────
-// The axis's premise is a value the source COMPUTED once above the branch. An uninitialised
+// The variation's premise is a value the source COMPUTED once above the branch. An uninitialised
 // register was never computed, so homing it spells `v0 = uninit_r5;` — a copy of a value nothing
 // wrote, which no asm can have.
 const UNDEFFEED = `fn undeffeed {
@@ -612,7 +612,7 @@ test('a short-circuit-guarded value whose cone holds a divide is refused', () =>
 
 // ── the gate can be starved from ABOVE: an L1 fold that deletes the merge feed ────────────────
 // Everything above pins the SCOPE. This pins its REACH, which is a different failure and the one
-// that actually happened: the scope was right, the axis was shipped, and it never enumerated on
+// that actually happened: the scope was right, the variation was shipped, and it never enumerated on
 // `sinkacc` or `kleod:CountCollectedGems` because `raise/const.ts` folded the accumulator's
 // `add(%s = const 0, const 1)` down to `const 1` before anything asked. The feed the scope looks
 // for was gone, so `hasMergeFeedHome` read false and `/merge-home` was never forked — a candidate

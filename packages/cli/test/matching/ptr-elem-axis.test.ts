@@ -7,7 +7,7 @@
 // ADDRESS and different OBJECTS — so the differ referees.
 //
 // No REAL row wins under a label containing `ptr-elem`, and that is a fact about the CORPUS, not
-// about the axis: the enumeration gate needs a symbol map declaring a pointer member with a
+// about the variation: the enumeration gate needs a symbol map declaring a pointer member with a
 // pointee width of 1, 2 or 4, and klonoa's map holds exactly ONE such symbol — whose every
 // decompiled caller happens to have been written in the element form.
 //
@@ -17,7 +17,7 @@
 //
 // SO WHAT IS THIS FILE FOR, given the row exists. Two things the row cannot do. It runs against
 // the PROJECT'S OWN map and toolchain rather than an authored map, so it would catch a divergence
-// between what an ELF really says and what the dataset hand-writes; and it pins the axis TWO-SIDED
+// between what an ELF really says and what the dataset hand-writes; and it pins the variation TWO-SIDED
 // on four shapes at once — on the byte target the arm is the only match, on the element target the
 // default is — where a benchmark row can only ever pin the side it was compiled from.
 //

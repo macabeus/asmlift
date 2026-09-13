@@ -1,4 +1,4 @@
-// The `/vol-slot` lever (l3/volatileval.ts): a stack-homed scalar local is re-declared
+// The `/vol-slot` variation (l3/volatileval.ts): a stack-homed scalar local is re-declared
 // `volatile`. The gate conditions are what these tests pin: only a `frame` local (the machine
 // really gave it a slot), only a scalar, never one already carrying a volatility flag, never an
 // address-taken one, and never one whose accesses in the tree are not the machine's — and no
@@ -143,7 +143,7 @@ test('one machine load rendered as two reads declines — the same rule, other d
 // The counts are the machine's only while every access goes through the address DIRECTLY. Here
 // the second store PUBLISHES the address, so counting direct accesses would report 1 load and 1
 // store for an object reachable from anywhere — the tree can then satisfy the equality and the
-// lever would declare an access set the asm does not have.
+// variation would declare an access set the asm does not have.
 test('a frame object whose address escapes the direct form carries no counts', () => {
   const fn = parse(`fn f {
 ^bb0(%0: s32*):
@@ -162,7 +162,7 @@ test('a frame object whose address escapes the direct form carries no counts', (
   expect(volatileValueLocals(sfn)).toBeNull();
 });
 
-// A halfword spilled to the stack across a call — the shape the lever was built for, and the
+// A halfword spilled to the stack across a call — the shape the variation was built for, and the
 // same fixture frame-base-copy.test.ts uses for the frame-object split.
 const SPILL = `f:
 \tpush\t{r4, lr}

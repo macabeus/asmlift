@@ -1,8 +1,8 @@
-// The `/argbase` lever (l3/argbase.ts): name a call's argument bases before the call.
+// The `/argbase` variation (l3/argbase.ts): name a call's argument bases before the call.
 //
 // A compiler loading two fixed addresses for one call emits BOTH pool loads before either deref;
 // the inline argument spelling makes it finish argument 0 first. Same instructions, different
-// order, and a nonmatch. These pin the GATE and the semantics-preservation rules — the lever is
+// order, and a nonmatch. These pin the GATE and the semantics-preservation rules — the variation is
 // emitted as an extra candidate, so its risk is spelling quality, not correctness of the winner.
 import { describe, expect, test } from 'vitest';
 

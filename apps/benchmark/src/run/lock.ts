@@ -130,7 +130,7 @@ function parseRecord(text: string): BenchLockRecord | undefined {
       command: String(r.command ?? 'unknown'),
       tiers: Array.isArray(r.tiers) ? r.tiers.map(String) : [],
       root: typeof r.root === 'string' ? r.root : undefined,
-      // Unknown is not a clearance, on this axis too: a record that does not say gets treated as
+      // Unknown is not a clearance, on this question too: a record that does not say gets treated as
       // the run that collides.
       whole: r.whole !== false,
     };

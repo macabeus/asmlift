@@ -1,11 +1,11 @@
-// asmlift L3 — the walk→index RE-SPELLING, a differ-ranked representation lever.
+// asmlift L3 — the walk→index RESPELL VARIATION, differ-ranked.
 //
 // A compiler strength-reduces a source-level `arr[i]` loop into a pointer WALK (`*p; p += 1`),
 // so asmlift's faithful lift of the machine form emits the walk — but recompiling the walk
 // rarely reproduces the bytes the INDEXED source produced (different induction variable,
 // different regalloc). Which representation the source used is genuinely ambiguous from asm —
 // exactly the class of ambiguity asmlift resolves by CANDIDATES, not guesses (rank.ts: "types
-// are differ-ranked levers"). This module produces the indexed re-spelling of a structured
+// are differ-ranked variations"). This module produces the indexed re-spelling of a structured
 // function; enumerateCandidates emits BOTH and the objdiff score referees.
 //
 // v1 SCOPE (decline over approximate): a loop is re-spelled only when ALL hold —
@@ -29,7 +29,7 @@
 // it (its statements are the loop-preceding subset of the else arm, now unconditionally hoisted).
 // The walk pointers KEEP their init and lose their step — gcc folds a loop-invariant pointer
 // local into addressing, so `p = B; … p[i]` and `B[i]` compile identically, and keeping the
-// local is what lets the `/volatile` lever qualify a numeric B. Several walk pointers share the
+// local is what lets the `/volatile` variation qualify a numeric B. Several walk pointers share the
 // one counter (`dotprod`'s a/b pair). Its OWN rules, on top of the shared table below —
 //   • the guard tests THE SAME var the counter is initialised from, against 0, in the sense that
 //     skips the loop; the do-while exit is exactly `k != 0`;
@@ -658,8 +658,8 @@ function tryExprWalk(
  *  one loop re-spelled, or null (no candidate) when nothing fired — callers emit the extra
  *  candidate only on non-null. Pure: never mutates the input SFn. `keptWalks` collects the names
  *  of the pointers each fired loop kept as its base — v1 the walk's base (a param lands in the
- *  set too, inertly: the volatile lever marks only declared locals), v2 the walk pointers
- *  themselves — the locals the /indexed/volatile product (rank.ts) narrows the volatile lever
+ *  set too, inertly: the volatile variation marks only declared locals), v2 the walk pointers
+ *  themselves — the locals the /indexed/volatile composition (rank.ts) narrows the volatile variation
  *  to. A v3 loop contributes nothing: it DELETES its pointer, and its base is qualified through
  *  the /livebase pairings instead. `gates` is the shared countdown admission table — a parameter
  *  so a test can ablate one entry and re-run the real pass. */
@@ -671,7 +671,7 @@ export function reindexWalks(
   const ptrVars = new Map<string, IrType>();
   const declTypes = declaredTypes(sfn);
   // BOTH volatility facts (ast.ts SFn.locals): the object-volatile counter, and the pointer whose
-  // POINTEE is volatile — which is the one the `/volatile` lever mints, and the one a walk carries.
+  // POINTEE is volatile — which is the one the `/volatile` variation mints, and the one a walk carries.
   const volatileLocals = new Set(
     sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
   );

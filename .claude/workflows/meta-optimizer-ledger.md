@@ -55,7 +55,7 @@
 - **Machine-wide job budget.** Every track gets a flat `--jobs`, on a 10-core box running 4-6
   workflows; the pool delivered **1.68x of its achievable 2.83x** under self-inflicted contention.
 - **39% of agent Bash wall-clock is spent blocking on jobs the agent itself backgrounded.**
-- `onLeverError` is wired nowhere in the CLI or benchmark, so a lever that always throws is
+- `onLeverError` is wired nowhere in the CLI or benchmark, so a variation that always throws is
   invisible there.
 - `regression` and `stale-check` read the same committed artifact through the same
   `readCommitted` and have the SAME vacuity #87 closed in `diff`; only `diff` is guarded.

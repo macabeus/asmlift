@@ -12,7 +12,7 @@ The family's two points are a **conjunction**, priced from both sides. `ereadctl
 `extern struct Bg gReadBgs[];` and subscripts it inside a loop, and scores 2. Drop the array shape
 and keep the loop (`ername`, the same named symbol reached as `&gReadBgsObj` through a pointer
 macro): MATCH. Drop the loop and keep the array shape (`erflat`): MATCH. Spelling the bound
-`gReadBgs[4]` instead of `[]` also scores 2, so the incomplete type is not the axis. The named
+`gReadBgs[4]` instead of `[]` also scores 2, so the incomplete type is not the cause. The named
 data relocation is therefore free — it is what distinguishes this family from the raw
 `reread`/`rereadctl` pair, and it is not what costs anything.
 
@@ -97,7 +97,7 @@ that nomination into a sharper question rather than settling it.** `globalshape.
 candidate cast spelling and the observed load/shift order alone; no guard was watched fire, so it
 was a hypothesis at the time this study was measured.
 
-What the controls add is that the axis **is** admitted in this basin. `erflat` — the array shape
+What the controls add is that the variation **is** admitted in this basin. `erflat` — the array shape
 without the loop — MATCHes carrying `unsigned/orderbase`, while at the time of measurement the loop
 arm's winner was `unsigned/fresh-merge/initfirst` and scored 2. The question that left open — why
 the ordered base stopped winning once the subscript is inside a loop — **has since been answered,
@@ -107,7 +107,7 @@ the target while inside the guard it is. The gap was `HoistPlacement`, which cou
 top-level statement list. `/orderbase/scoped` closes the row (#159), so `ereadctl` MATCHes today.
 
 None of that carries to LoadBGTilemapData: the `/livebase` roster note in `rank.ts`'s
-`enumerateCandidates` records the licence measured **empty on every lift variant of both symbol-map
+`enumerateCandidates` records the licence measured **empty on every lift setting of both symbol-map
 arms of the target**. What is measured here is a price and its two sides. The site that would pay
 it on the large function is still not identified, and this study does not claim one.
 

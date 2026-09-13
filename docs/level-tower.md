@@ -86,15 +86,15 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   registers, no `goto`. Structuring ([`structure/`](../packages/core/src/structure)) recovers it
   from the L2 CFG and destroys SSA (assigning merge values back to named variables).
 - **The L3 rewrites** ([`l3/`](../packages/core/src/l3)) then improve that tree _within_ the
-  level — no lowering, so this is a stage rather than a fourth level. They come in two
-  populations, and the difference is architectural, not incidental:
+  level — no lowering, so this is a stage rather than a fourth level. They are either committed or
+  ranked, and the difference is architectural, not incidental:
   - **Committed**, inside `structureChecked`: tail-merge → dead-store elimination → base-CSE.
     Every path gets these, which is why the boundary contracts run on both sides of them (below).
-  - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
-    `decompileRanked` path only. Two populations of them: SPELLING re-writes of one structured
+  - **Ranked variations**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
+    `decompileRanked` path only. Two kinds of them: RESPELL variations, which rewrite one structured
     tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/unfolded`, `/volatile`, `/vol-store`,
-    `/unreduce`, `/ptr-field`, `/offmember`, `/mulfirst`, `/regcopy`, `/coalesce`, `/unmerge`) and STRUCTURING axes, which re-run `structure()` under a different
-    lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
+    `/unreduce`, `/ptr-field`, `/offmember`, `/mulfirst`, `/regcopy`, `/coalesce`, `/unmerge`), and STRUCTURE variations, which re-run `structure()` under
+    different options (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
     `/merge-names`, `/fresh-merge`) — plus `/raw-globals`, the signedness pin, `/setup-args` and
     `/connective`, which re-run the lift itself.
     The roster is illustrative; `rank.ts` is the source of truth.
@@ -115,40 +115,40 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     `synthetic:bgfixed` wants `/offmember` on its one key, and `synthetic:dmapoll` (booked in
     PR #124) wants a per-base split of a different pair. It is a CONJUNCTION — shipped additively
     or it costs the rows each half already wins alone.
-    Each emits an _alternative candidate_ rather than replacing the primary, and the differ
+    Each emits an _alternative candidate_ rather than replacing the default, and the differ
     referees — the
     [ranked-candidate idea](asmlift-101.md#26-types-as-ranked-candidates-judged-by-the-differ)
     applied to spelling instead of types.
 
-  A third population sits underneath both: **per-compiler defaults**, declared as data in
+  Underneath both sit the **compiler behaviors**, declared as data in
   `TargetDescription.compilerBehaviors` ([`target.ts`](../packages/core/src/target.ts)) and spread
   onto `StructureOptions` by `structureOptionsFor`, so a compiler fact is one field rather than an
-  `arch ==` branch. The line between one of these and a ranked axis is not how confident the author
-  feels — it is whether the ASM UNDERDETERMINES THE SOURCE. An axis is right when some pass
+  `arch ==` branch. The line between a compiler behavior and a ranked variation is not how confident
+  the author feels — it is whether the ASM UNDERDETERMINES THE SOURCE. A variation is right when some pass
   genuinely collapses two source spellings onto one output, so nothing but the differ can tell them
   apart (`/uns-cmp`: a signed compare emits the unsigned branch only once the compiler has PROVED
-  the operand non-negative, and emission's provable set is smaller than the compiler's). A default
-  is right when the mapping is a function — `readsStayWhereWritten` says a compiler with neither an
+  the operand non-negative, and emission's provable set is smaller than the compiler's). A compiler
+  behavior is right when the mapping is a function — `readsStayWhereWritten` says a compiler with neither an
   instruction scheduler nor a code hoister emits a memory read in the block the source spelled it
   in, so re-spelling a read at the block the asm performed it in reproduces that asm, while the sunk
   per-arm spelling is one this compiler emits only for a source that read per arm. Note which way
   that claim runs: it is emission-from-spelling, not spelling-from-emission. The converse would be
   false even here (agbcc's PRE does move a load into a block the source never read in), and a
-  default read backwards is how a compiler fact turns into a wrong answer — so a per-compiler
-  default owes an explicit refusal for every pass that moves the thing it is placing, and for every
+  compiler behavior read backwards is how a compiler fact turns into a wrong answer — so a compiler
+  behavior owes an explicit refusal for every pass that moves the thing it is placing, and for every
   IR boundary the frontend invents where the machine had none (a block starts at every label, so a
   label nothing branches to makes one straight line of asm look like a dominating pair of blocks).
-  Getting the population backwards is expensive in both directions: an axis where a default belongs
-  doubles every enumeration to referee a question with one answer, and a default where an axis
-  belongs quietly degrades every function the differ would have rescued.
+  Getting that line backwards is expensive in both directions: a variation where a compiler behavior
+  belongs doubles every enumeration to referee a question with one answer, and a compiler behavior
+  where a variation belongs quietly degrades every function the differ would have rescued.
 
-  A lever whose SIGN is base-dependent also cannot be a default, but that is not a test you can run
+  A variation whose SIGN is base-dependent also cannot be a compiler behavior, but that is not a test you can run
   here: settling it needs two bases and therefore two rounds, where the criterion above is one you
   apply before building. It is really a rule about reading a PRICE, so it lives with the other
-  pricing rules below — see **AN AXIS'S PRICE IS ONLY VALID AT THE BASE IT WAS TAKEN AT**, which
+  pricing rules below — see **A VARIATION'S PRICE IS ONLY VALID AT THE BASE IT WAS TAKEN AT**, which
   carries `/unmerge`'s six numbers and says which three are grafts.
 
-  **A default may read the map BACKWARDS when the backwards mapping is ITSELF a function, the
+  **A compiler behavior may read the map BACKWARDS when the backwards mapping is ITSELF a function, the
   reach is measured, and being wrong then costs a SPELLING and not an answer — in that order.**
   `switchRequiresFrontLoadedTests` (`structure/switch-recover.ts`, PRE5) is the worked case, and it
   is the exception the paragraph above would otherwise forbid. It clears the section's PRIMARY
@@ -169,13 +169,13 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
      below is not a substitute for it. (RE-READABLE IS NOT RE-MEASURABLE: the two MIPS pairs are
      byte-identical FILES, so without a regen path nothing committed could tell "compiled by this
      toolchain and it agreed" from "copied from the sibling".)
-  2. THE REACH IS MEASURED, which settles the COST of the axis here — item 1 is what decides
-     default-vs-axis, and no reach number rescues a mapping that is not a function. An axis was
-     POSSIBLE (`StructuringAxis.options` is `(on: boolean) => StructureOptions` and this flag is one
+  2. THE REACH IS MEASURED, which settles the COST of a variation here — item 1 is what decides
+     compiler behavior versus variation, and no reach number rescues a mapping that is not a
+     function. A structure variation was POSSIBLE (`StructuringAxis.options` is `(on: boolean) => StructureOptions` and this flag is one
      more entry), so the absent dual is a fact about what Regime A enumerates today rather than an
-     impossibility. What rules the axis out is the term the fork below already prices: lifting every
+     impossibility. What rules the variation out is the term the fork below already prices: lifting every
      synthetic and real row twice, once with the field and once with it deleted, moves the emitted
-     source of **5 rows out of 1026**. An axis inert on 99.5% of the corpus buys a dual only where
+     source of **5 rows out of 1026**. A variation inert on 99.5% of the corpus buys a dual only where
      the default is already right, and pays a second `structure()` everywhere.
   3. ONLY THEN the failure direction. The gate exclusively DECLINES, and Regime A's decline is
      if-recovery — behaviourally identical. A premise that breaks (a scheduler that hoists a body
@@ -192,55 +192,58 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
 
   READ 3 WITHOUT 1 AND 2 AND IT LICENSES THE WRONG THING. A silent refusal that loses a spelling is
   this project's own failure mode, not a free action — this repo has shipped and reverted a prune
-  measured at ZERO regressions that still cost six rows, and the paragraph above says a default
-  where an axis belongs "quietly degrades every function the differ would have rescued". So
-  "it only refuses" is what makes a MEASURED, FUNCTIONAL backwards mapping safe to ship as a
-  default. It is not what makes an unmeasured one admissible, and a future round citing this
+  measured at ZERO regressions that still cost six rows, and the paragraph above says a compiler
+  behavior where a variation belongs "quietly degrades every function the differ would have
+  rescued". So "it only refuses" is what makes a MEASURED, FUNCTIONAL backwards mapping safe to
+  ship as a compiler behavior. It is not what makes an unmeasured one admissible, and a future round citing this
   paragraph owes its own compiled pair and its own reach number.
 
-  A **third fork sits inside the ranked population**, and the underdetermination criterion does not
-  decide it: a question the asm underdetermines can be answered by RE-RUNNING `structure()` under a
-  different lever (a structuring axis) or by RE-SPELLING the tree `structure()` already produced.
-  Both are ranked, both are refereed by the differ, so the deciding terms are COST and REACH. An
-  axis doubles the enumeration wherever it CHANGES THE TREE, and costs one more `structure()` call
-  and nothing else wherever it does not — `rank.ts` fans a structured tree once and skips a tree an
-  earlier axis point already spelled, so an inert axis pays no re-spellings and no compiles. What is
-  expensive is therefore an axis that fires broadly, and a ranked run is already minutes:
+  A **third fork sits inside the ranked variations**, and the underdetermination criterion does not
+  decide it: a question the asm underdetermines can be answered by a STRUCTURE variation, which
+  RE-RUNS `structure()` under different options, or by a RESPELL variation, which REWRITES the tree
+  `structure()` already produced. Both are ranked, both are refereed by the differ, so the deciding
+  terms are COST and REACH. A structure variation doubles the enumeration wherever it CHANGES THE
+  TREE, and costs one more `structure()` call and nothing else wherever it does not — `rank.ts`
+  respells a structured tree once and skips a tree an earlier setting already produced, so an inert
+  structure variation pays no respell work and no compiles. What is expensive is therefore a
+  structure variation that fires broadly, and a ranked run is already minutes:
   `/inlinebase` inverts `structure/analysis.ts`'s const value-home decision — the same question
-  `/reread-globals`, `/addr-home`, `/expr-home` and `/derived-home` each answer as a
-  `STRUCTURING_AXES` entry — and answering it by substitution instead costs **766 extra candidates
-  over 47058, +1.6%**, on the 33 of 69 klonoa functions that lift with no symbol map, where an axis
-  over the same population would have doubled every candidate on each of those 33. What a
+  `/reread-globals`, `/addr-home`, `/expr-home` and `/derived-home` each answer as a structure
+  variation (a `STRUCTURING_AXES` entry) — and answering it by substitution instead costs **766
+  extra candidates over 47058, +1.6%**, on the 33 of 69 klonoa functions that lift with no symbol
+  map, where a structure variation over the same functions would have doubled every candidate on
+  each of those 33. What a
   substitution pays for that is REACH: it can only rewrite the use shapes it can reach
   (`/inlinebase` re-spells `index` bases, so a home passed to a callee or standing as a `field` base
-  is out of its grasp), where the axis would never have created the local at all. So re-spell while
-  the shapes the substitution cannot reach have no row demanding them, take the axis when one
-  appears — and name the fork in the lever's header, because otherwise the gap left behind reads as
+  is out of its grasp), where the structure variation would never have created the local at all. So
+  respell while the shapes the substitution cannot reach have no row demanding them, take the
+  structure variation when one appears — and name the fork in the respell variation's header,
+  because otherwise the gap left behind reads as
   an oversight rather than as the price of the mechanism.
 
-  **AN AXIS'S PRICE IS ONLY VALID AT THE BASE IT WAS TAKEN AT — the #161 dating rule, generalised
+  **A VARIATION'S PRICE IS ONLY VALID AT THE BASE IT WAS TAKEN AT — the #161 dating rule, generalised
   from counts to prices.** A number here is a delta between two candidate sets, and a round that
-  changes the structurer changes both sets; so an axis measured as expensive is not refuted, it is
+  changes the structurer changes both sets; so a variation measured as expensive is not refuted, it is
   dated. `/unmerge` (`l3/unmerge.ts`, enumerated by `PRE_FAN_PRODUCTS` in `rank-axes.ts`) is the
-  worked case — one axis, one row (`kleod:CountCollectedGems:agbcc`), the axis untouched throughout,
+  worked case — one variation, one row (`kleod:CountCollectedGems:agbcc`), the variation untouched throughout,
   **+44** against the #172-era winner and **+24** at #169's base, both MEASURED, then **−17/352**
   once #184 and #185 flattened the ladder and dropped the accumulator copies. It was the most
-  expensive axis on that row for three rounds and is in its winning label now. Three more points
+  expensive variation on that row for three rounds and is among its winner's variations now. Three more points
   exist and are GRAFTS, kept labelled because this chain's standing lesson is that a graft is a lower
   bound whose sign and magnitude both mislead: **+2** at a flat ladder, **−3** at flat+no-copies —
   #172 published that one as this round's prediction and the build delivered −17, under-read by
   5.7× — and **+4** at flat+no-copies+connective, the only point where the sign goes back POSITIVE
   at a base strictly closer to the reference, which is to say the −17 may not survive the next rung
-  either. Two consequences: **a lever measured expensive on today's winner is not refuted**, and a
-  lever whose sign is base-dependent can never be a per-compiler default, because its value is read
+  either. Two consequences: **a variation measured expensive on today's winner is not refuted**, and
+  a variation whose sign is base-dependent can never be a compiler behavior, because its value is read
   off a base no predicate in the pass has. The delta such a measurement produces is a whole-FUNCTION
   one, and enumeration is what makes that honest — it buys no per-SITE reach, and saying otherwise is
   the trap this project has paid for three times wearing its opposite face; `PRE_FAN_PRODUCTS`' own
   header in `rank-axes.ts` prices that refusal with a measured k.
 
-  **The corollary a "shrink the fan" round wants, and it is that round's whole answer: an axis's own
-  LICENCE cannot prune it for CPU.** Skipping an axis wherever a predicate proves it cannot fire is
-  sound exactly where the axis would have emitted no candidate — so a sound licence skip shrinks the
+  **The corollary a "shrink the fan" round wants, and it is that round's whole answer: a variation's
+  own LICENCE cannot prune it for CPU.** Skipping a variation wherever a predicate proves it cannot
+  fire is sound exactly where the variation would have emitted no candidate — so a sound licence skip shrinks the
   fan by zero, and the fan is what compiles. All it can save is the enumeration-time gate walk, and
   enumeration is a small fraction of a ranked run beside one compile per candidate: on
   `LoadBGTilemapData` the one such skip that was built fires on every tree and leaves 112,896
@@ -255,8 +258,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `switch (x) { case 0: case 2: … }` are two spellings of one asm shape that only a differ can
   choose between, and the row it was built for turned out to want neither: what was missing was a
   ten-line grouping in the structurer, which took
-  `kleod:ProcessInputAndUpdateEntities:agbcc` from 367 to 306 with the axis ON and to 306 with it
-  OFF — same breakdown, half the wall clock.
+  `kleod:ProcessInputAndUpdateEntities:agbcc` from 367 to 306 with the variation ON and to 306 with
+  it OFF — same breakdown, half the wall clock.
 
   The rule that follows is cheap: **an underdetermination claim about two source spellings is a
   COMPILER claim, so compile both and diff the objects before building anything.** A score table
@@ -273,45 +276,45 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   | IDO, 1 group + `default:`        | 64 bytes each, **one object**                                            | IDO does **not** merge: 224 bytes against 144                                                                                                              |
   | IDO, 2 groups                    | 80 bytes each, **different bytes**                                       | the two placements also differ (689f34ec vs ec39af99)                                                                                                      |
 
-  So the identity is a property of the DEGENERATE shape, on both compilers, and the axis is a real
+  So the identity is a property of the DEGENERATE shape, on both compilers, and the variation is a real
   second spelling on every recovered multi-group switch. What makes the grouping right is an
   argument about the ROM rather than about which source is prettier: under agbcc the duplicated
   source is unreachable as a ROM shape, and under IDO it is a different ROM, so a shared block means
   stacked labels on either compiler.
 
-  **And 2× is a LOWER bound, not the price.** A new axis doubles its own admitting rows, and it
-  also UN-COLLAPSES sibling axes that `seenTrees` was deduping away on the base tree: a sibling
-  whose re-spelling was inert on the old tree can be distinct on the new one, and then it enumerates
+  **And 2× is a LOWER bound, not the price.** A new variation doubles its own admitting rows, and it
+  also UN-COLLAPSES sibling variations that `seenTrees` was deduping away on the base tree: a sibling
+  whose output was identical on the old tree can be distinct on the new one, and then it enumerates
   where it did not before. So the real multiplier is 2 × (siblings the new tree makes non-inert),
   and it is measured, never assumed. `/fresh-merge` (structure.ts `freshParamMerge`, the parameter's
   merge home) is the counterexample that fixes this: `synthetic:max3:agbcc` goes **2 candidates to
   10, ×5** — `signed/flip-join` and `signed/merge-names` do not appear at all on the base tree, both
   deduped as identical to `signed`, while `signed/flip-join/fresh-merge` and
-  `signed/merge-names/fresh-merge` are distinct spellings. Over the 39 map-less corpus rows the axis
+  `signed/merge-names/fresh-merge` are distinct candidates. Over the 39 map-less corpus rows the variation
   admits, distinct sources go 5449 → 10028 (mean ×1.84, histogram {×1.5:1, ×1.8:1, ×2:12, ×2.33:2,
   ×3:17, ×4:1, ×4.5:1, ×5:4}); below 2× where the new tree instead makes a sibling inert, above it
   where it wakes one. Priced in the unit that costs compiles — surviving candidates over every row's
-  own `targetAsm`, map-less — `/fresh-merge` is **+4579 over an axis-free fan of 18106, +25.3%**,
+  own `targetAsm`, map-less — `/fresh-merge` is **+4579 over a fan of 18106 without it, +25.3%**,
   and **94% of that is two klonoa functions**: `kleod:ProcessInputAndUpdateEntities:agbcc` 4800 →
   8640 and `kleod:ConfigureEntityBehavior:agbcc` 480 → 960. Quote the concentration, not just the
   total: a row count ("105 rows pay ×2") understates the dominant row by two orders of magnitude,
   because rows are not the unit that compiles.
 
-  **And an axis can widen a gate it never mentions — price that too.** The un-collapse above is an
+  **And a variation can widen a gate it never mentions — price that too.** The un-collapse above is an
   ENUMERATION cost; the same tree change can also satisfy an existing rule's precondition and admit
   where that rule used to refuse. `anchorConstCopies` declines a merge whose variable names another
   SSA value, so a merge that adopted its parameter is never anchored — and `/fresh-merge`, which
   mints a home for exactly those merges, makes them sole claimants by construction: sole-claimant
   admissions go **196 → 245** over 679 corpus rows, 34 rows gaining 49 merges, and
   `synthetic:clampu8:mwcc_242_81` reaches MATCH through the pair (`signed/defsite` is inert on the
-  base tree and absent from its fan). So a new axis is priced over its own refusals AND over the
+  base tree and absent from its fan). So a new variation is priced over its own refusals AND over the
   refusals it removes elsewhere; the second is the one nothing reports, because the widened gate
   does not know it was widened.
 
-  **An axis's 2× is intrinsic, and cannot be bought back by predicting which half is redundant.**
-  The signedness pin is the worked example, because it is the axis that fires most broadly:
-  `LoadBGTilemapData`'s 40320 candidates are 20160 twin pairs, every one of which ties in score. The
-  fan grows with every axis admitted, so quote your own `[ranked]` line. The recurring proposal is to drop the
+  **A variation's 2× is intrinsic, and cannot be bought back by predicting which half is redundant.**
+  The signedness pin is the worked example, because it is the variation that fires most broadly:
+  `LoadBGTilemapData`'s 40320 candidates are 20160 `unsigned`/`signed` pairs, every one of which ties
+  in score. The fan grows with every variation admitted, so quote your own `[ranked]` line. The recurring proposal is to drop the
   redundant spelling of each pair by asking the RENDERED TYPE which one it is, and that design space
   turns out to be two points with nothing between them. Compare the pin's effect at every node
   _including_ the `var` leaves and the predicate is sound — and is exactly "no pinned param is read
@@ -338,8 +341,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   declared parameter type is consulted for exactly two things, and neither asks what a `*` points
   at: `declaredWidth` answers **32 for every pointer**, and its ONE call site
   (`raise/paramwidth.ts`) reads only the function's OWN list; a callee's list is read by
-  `protoArity` for its LENGTH. So the thread would add a fact nothing consumes — the signedness
-  twin's shape, one level down. Nor is the capability missing: asmlift already recovers a
+  `protoArity` for its LENGTH. So the thread would add a fact nothing consumes — the shape of the
+  redundant signedness candidate above, one level down. Nor is the capability missing: asmlift already recovers a
   parameter's pointee FROM THE ASM, synthesizing `struct Struct0 *` and spelling `a1->field_6`
   off the access widths alone, and what DWARF would add is field NAMES — which `declare.ts`'s
   pointer arm already states cannot move bytes, because the cell is 4 bytes whatever it addresses
@@ -357,7 +360,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   commit is an upstream release and a re-vendor before any threading. Pinned in
   [`test/param-pointee-axis.test.ts`](../packages/core/test/param-pointee-axis.test.ts).
 
-  THE NEXT STEP THIS MEASUREMENT NAMES IS NOT THIS AXIS. There is one shape where a pointee is
+  THE NEXT STEP THIS MEASUREMENT NAMES IS NOT A DECLARED POINTEE. There is one shape where a pointee is
   byte-load-bearing — a whole-struct assignment, `*dst = *src` through two `struct S *`, which
   agbcc emits as one `ldmia`/`stmia` pair while asmlift lifts it to three word copies and scores
   **7** against the real object, identically under `void *` and `struct S *`. It needs a SIZED
@@ -365,7 +368,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   and it has **0 inhabitants in the real tier** — no row's `targetAsm` carries the pair. Build it
   as a synthetic row before anyone prices it.
 
-  Which population a pass belongs to decides how much its opinions cost. Several passes answer
+  Whether a pass is committed or ranked decides how much its opinions cost. Several passes answer
   "is this address a local?", and what separates them is PLACEMENT: never (`raise/gvn.ts`), a
   position in the top-level statement list — the function top, the minted inits above a run already
   there, or each init at its first use (`l3/basecse.ts`, `l3/nearbase.ts`, `l3/sinkinit.ts`) — the
@@ -374,12 +377,13 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   call (`l3/argbase.ts`). The two scope-aware ones are separated by what they can SEE rather than by
   where they put it: `scopebase` plans its own locals over `addr`/`const`/`var` leaf bases, while the
   `scope` placement moves a run already minted, over the cast base no leaf pass can spell. A
-  placement that lands nothing in a nested list has emitted the flat spelling under a second label,
-  so `hoistBaseLocals` declines there rather than offering it. That is the roster's dedup rule for
-  base SETS read onto positions, but a WITHDRAWAL in effect rather than a collapse: the roster
-  carries no row at the spelling being refused, so the candidate has no twin to fold into.
-  `l3/scopebase.ts` also answers a SECOND question the others do not have, and it is a different
-  axis from placement: HOW MANY locals one address gets. Its `REGION_RULES` carry both readings —
+  placement that lands nothing in a nested list has emitted the flat spelling under different
+  variations, so `hoistBaseLocals` declines there rather than offering it. That is the roster's dedup
+  rule for base SETS read onto positions, but a WITHDRAWAL in effect rather than a collapse: the
+  roster carries no hoist at the spelling being refused, so the candidate has no identical candidate
+  to fold into.
+  `l3/scopebase.ts` also answers a SECOND question the others do not have, and it is independent of
+  placement: HOW MANY locals one address gets. Its `REGION_RULES` carry both readings —
   `'whole'` gives a key one local (`/scopebase`), `'per-region'` one per disjoint region
   (`/regionbase`) — and the count, not the declaration scope, is what agbcc discriminates on
   ([`decl-scope-axis.test.ts`](../packages/cli/test/matching/decl-scope-axis.test.ts) compiles both
@@ -397,8 +401,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `placeBaseLocals(sfn, minted, placement)` owns the leading base-init run, the first-use query and
   the rebuild. `head`, `first-use` and `scope` are three positions for a run this file has already
   ordered — that is `HoistPlacement`, the only thing `l3/basecse.ts` accepts and the only thing a
-  roster admission may state, so a row in `rank.ts` says WHERE its locals go beside WHICH bases it
-  binds. `scope` is the first of the three that leaves the top-level statement list: it continues
+  hoist may state, so a hoist in `rank.ts` says WHERE its locals go beside WHICH bases it binds. `scope` is the first of the three that leaves the top-level statement list: it continues
   the first-use query downward while exactly one statement mentions the local, that statement
   mentions it nowhere outside the lists it opens, and exactly one of those lists holds it — and it
   reproduces `first-use` exactly where no nested list holds every mention, which is what keeps it a
@@ -415,9 +418,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `l3/advance.ts` is the SECOND caller of that same `prepend`, for nearbase's reason plus one it
   owns: its init materialises the register the chain then advances, so the target's own pool-word
   order is what says where it goes. It differs from nearbase in the one way this section is about —
-  it has no `/sinkinit` twin and cannot have one, because `sinkInitsToFirstUse` moves an init only
-  where its local is assigned ONCE and an advance is a second assignment, so `prepend` is not a
-  choice there but the only placement that lever has.
+  it has no `/sinkinit` alternative and cannot have one, because `sinkInitsToFirstUse` moves an init
+  only where its local is assigned ONCE and an advance is a second assignment, so `prepend` is not a
+  decision there but the only placement that respell variation has.
 
   Placement being an ARGUMENT is worth stating carefully, because two things about it are easy to
   overclaim. It is not what a single row needed, and it is not what made one reachable:
@@ -425,12 +428,12 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   emit the same C on `sa3:sub_803213C`'s own tree and on all 105 (observation, gate table) pairs
   where any base binds over the artifact's agbcc rows in both symbol-map configurations — 74 of
   them with something actually moving. That is a lemma about the two SPELLINGS and nothing more.
-  It does not say the row was already reachable: the `/sinkinit` pairing loop fans only over rows
+  It does not say the row was already reachable: the `/sinkinit` pairing loop runs only over hoists
   carrying `pairings`, which is `/livebase` and `/livebase-block`, and neither admits this row's
   base — run `origin/main`'s core on `test/corpus/agbcc-tailmerge.s` and every gate table admits
-  `[]`, the standalone lever declines, and 0 of 12 candidates carry a `/sinkinit` or `/basefold`
-  label. What made the row reachable is the SYMBOL half of `unfoldedOffset`; reaching it then cost
-  a roster line, spelled as a placement argument here and spellable as `pairings: true` instead.
+  `[]`, the standalone `/sinkinit` declines, and 0 of 12 candidates carry `/sinkinit` or `/basefold`
+  among their variations. What made the row reachable is the SYMBOL half of `unfoldedOffset`;
+  reaching it then cost one hoist, spelled as a placement argument here and spellable as `pairings: true` instead.
   What the fold is actually worth is that the two spellings are the same transform BY
   CONSTRUCTION (`placeBaseLocals` orders the run by first use before consulting the policy) rather
   than by corpus luck. Two places let them drift apart before that, and both are cheap to
@@ -443,7 +446,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   That is a row and not a mechanism, so it is a DEFAULT and the differ referees it like any other —
   `rank.ts` offers `/nearbase/sinkinit` beside `/nearbase` (+590 candidate sources on 15 of 1140
   observations). "Placement is refereed by the differ per pass" is a claim about the ROSTER, not
-  about the passes: a lever that emits one tree referees nothing, and its ordering then decides a
+  about the passes: a respell variation that emits one tree referees nothing, and its ordering then decides a
   match with no candidate beside it to lose to.
 
   The eligibility half is separate and stays separate. `gates` and `placement` are independent
@@ -470,10 +473,10 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   sunk one. A bracket is a claim about the WHOLE tree and not about the rule it names, so it
   expires whenever anything else learns to reach the same spelling: the rows this pair was bought
   with win under `/offmember`, which is a TIE broken on `lineCount` rather than a subsumption, and
-  exactly one artifact row carries a `basefold` token in its winning label — `foldhead`, the one
+  exactly one artifact row carries `basefold` among its winner's variations — `foldhead`, the one
   authored to bracket the head entry. `rank.ts`'s BASEFOLD_ADMISSIONS note
   carries the ablation, the per-configuration fan counts that prove it reached, and the recipe —
-  there is no shipped ablation knob, so pricing a roster row means filtering the roster at its one
+  there is no shipped ablation knob, so pricing a hoist means filtering the roster at its one
   use site behind a temporary env read and reverting, with a row that DOES move
   (`synthetic:livepark` under `/livebase`) run as the positive control.
 
@@ -498,7 +501,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   the gate stays looser than `analyze` it is loose in TWO places, not one, and only the first is a
   parameter: `ignoreRet`, because a `ret` operand may be a void phantom the gate cannot know
   about; and the loop-header SEAT refusal (`multiBlockHeaders`), which the gate omits because it
-  needs the loop model. The second is the one to watch — it is a clause of the axis's third scope
+  needs the loop model. The second is the one to watch — it is a clause of the variation's third scope
   rather than an argument to the shared predicate, so calling `sharedBaseClasses` does not carry
   it, and what makes the omission safe is that the seat refusal is applied in the scope on every
   candidate the gate enumerates (an over-admitting gate costs one duplicate-collapsed candidate,
@@ -517,7 +520,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `variantGate` predicate; that step is smaller than the ~200 lines above and is not paid here.
 
 The **backends** ([`backend/`](../packages/core/src/backend)) then print L3 as concrete source —
-C, Pascal, and a scoped C++ — one neutral tree, three spellings. Every language-specific decision
+C, Pascal, and a scoped C++ — one neutral tree, three output languages. Every language-specific decision
 (Pascal's `:=`, C's `?:`) lives in a backend, never in the tower.
 
 ## The contracts are the point
@@ -552,10 +555,10 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
 **Where they run matters as much as what they say.** The three post-structuring contracts fire
 _before_ the committed L3 rewrites, so a readability pass cannot hide a structuring defect by
 deleting the statement that carries it; deref-typing and effect-preservation then fire _again_
-after, so those passes cannot introduce one either. And each ranked re-spelling gets its own
+after, so those passes cannot introduce one either. And each respell variation's tree gets its own
 `assertResolved` + `assertDerefsTyped` inside `respell`'s guard ([`rank.ts`](../packages/core/src/rank.ts)),
 where a failure costs that one candidate and is reported through `onLeverError` — never silently
-dropped, which would be indistinguishable from a lever that correctly declined.
+dropped, which would be indistinguishable from a respell variation that correctly declined.
 
 This is the concrete meaning of "build the tower for real." It needs no per-op level tag and no
 level enum (asmlift deliberately has neither) — the contracts are plain functions on `Fn` / `SFn`
@@ -692,7 +695,7 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   convention for reporting both columns (`grep -n "ON ITS OWN" packages/core/src/raise/globalshape.ts`)
   and `l3/unmerge.ts` now carries the worked example
   (`grep -n "TWO COLUMNS, AND THEY DISAGREE HERE" packages/core/src/l3/unmerge.ts`). Measure the
-  MOVED column before building an axis on a big refusal count.
+  MOVED column before building a variation on a big refusal count.
 
 **And converting a pass whose refusals nobody has had to instrument buys nothing.** What a table
 removes is the edit-instrument-revert loop — patch a `return null` to log, re-run, revert — so the
@@ -786,7 +789,7 @@ two-instruction materialisation is a pool word plus an immediate `add`, and abla
 costs three agbcc byte-matches — `dmafield` MATCH -> diff:29, `fieldbase` MATCH -> diff:22,
 `bgfixed` MATCH -> diff:2. A clientele is a SHAPE, not a target, and reading this one as "Thumb has
 no such instruction pair" is what would lead the next reader to gate the pass off ARM and lose those
-three.) The `/merge-home` axis that would have hoisted the init has a correct scope and a correct
+three.) The `/merge-home` variation that would have hoisted the init has a correct scope and a correct
 `variantGate` — and the gate read FALSE on both owned rows, because the merge feed it looks for had
 been deleted two levels below it. Nothing reported anything: a candidate that was never enumerated
 is not a candidate that lost. **So a pass whose refusals are load-bearing states its CLIENTELE, not
@@ -795,20 +798,20 @@ across a branch is not a literal being materialised — unless the pair is a rec
 literal or its result is an address), **and the test that proves a gate's reach runs
 the real upstream pipeline rather than parsing IR straight into the gate**
 ([`test/merge-home.test.ts`](../packages/core/test/merge-home.test.ts), "the accumulator's init
-survives pre-recovery"). Otherwise the next widening of an unrelated fold takes the axis off the fan
+survives pre-recovery"). Otherwise the next widening of an unrelated fold takes the variation off the fan
 again, silently.
 
 **AND UN-STARVING A GATE COSTS THE FAN ITS FORK.** The paragraph above reads as a pure win, because
 the reach census it rests on counts OUTCOMES: 4 rows of the 806 that lift can move, 3 better and 1
-neutral. What that census does not say is that THREE of those rows now enumerate axes
+neutral. What that census does not say is that THREE of those rows now enumerate variations
 they could not before (`/merge-home`, `/defsite`, `/loop-entry`) and pay for them:
 `synthetic:sinkacc:agbcc` enumerates 36 -> 54 candidates and `kleod:CheckWorldCompletion:agbcc`
 2.69x as many, which is roughly 2x the wall clock on each real row. The fourth,
 `synthetic:fib:gcc2.7.2kmc`, is the two-sided control and gains NOTHING — 8 -> 8 candidates, the same
-eight labels, and its winner was already `signed/defsite/loop-entry` at 12 on main — so it is a
+eight names, and its winner was already `signed/defsite/loop-entry` at 12 on main — so it is a
 reached row and not a paying one, and a census of either kind must say which it counts. Bounded today,
 but the triggering shape is `s = 0; ... if (c) s += 1;`, which is ordinary C, and candidate compiles
-have no timeout. When a change unblocks an axis, report the fan beside the score: a reach census
+have no timeout. When a change unblocks a variation, report the fan beside the score: a reach census
 answers "which rows can move" and says nothing about what they cost.
 
 **A refusal at one level can owe a repair at another, and the tower is where that debt is written
@@ -849,7 +852,7 @@ narrowest — it exists because the alternative, barring the spelling outright, 
 whose reference source has exactly that shape, and the sound alternative to it measures 16. The same field is the eligibility predicate for
 `l3/volstore.ts` — a REACH gate there rather than a sound one, since a `volatile` qualifier only
 restricts the compiler: widening the range to admit every constant address adds candidates on two
-corpus rows and moves no score, so what the declaration buys is that the lever never claims
+corpus rows and moves no score, so what the declaration buys is that `/vol-store` never claims
 volatility of ordinary memory, which the differ could only referee by luck.
 
 ## How the architecture came to be: earning L2
@@ -881,7 +884,7 @@ accessWidth`, which the patterns-as-data idiom engine (fixed-constant and equali
 2. **The new ops appear with inhabitants and a differ-proven payoff** — byte-exact on real
    codegen for scaled loads and stores at element sizes 2 and 4 — not as reserved scaffolding.
 
-The compiler axis of `TargetDescription` was earned the same way. Holding the ISA constant and
+The compiler field of `TargetDescription` was earned the same way. Holding the ISA constant and
 adding a second MIPS compiler (KMC GCC beside IDO) produced a concrete divergence — the same `x /
 2` shift idiom that one compiler emits with hardware divide and the other without — which proved
 the predicate for that idiom is the _compiler_, not a hardware capability. Only then did

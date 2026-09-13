@@ -5,7 +5,7 @@
 // (`bareGlobalAccessFacts`), which names exist at all (`bareGlobalSymbols`), and which of them a
 // declaration must REFUSE to claim (`makeRefCollector`, via `RefusedDeclarationReason`).
 //
-// It knows nothing about axes, levers or ranking: the enumeration driver hands it a dictionary and
+// It knows nothing about variations or ranking: the enumeration driver hands it a dictionary and
 // asks each emitted tree for its references. A SIBLING MODULE, never a `rank/` directory — see the
 // same note on rank-axes.ts.
 import { type Fn, type Value, defOpMap } from './ir/core';

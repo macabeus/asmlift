@@ -1,4 +1,4 @@
-// asmlift — the Target: (isa, compiler) as first-class axes. ABI + capabilities are DATA
+// asmlift — the Target: (isa, compiler) as first-class fields. ABI + capabilities are DATA
 // consumed generically by shared passes — never a target-name branch inside a shared pass
 // (m2c's `arch.arch ==` leakage).
 //
@@ -17,7 +17,7 @@
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
 //   • capabilities.deviceRegisters → five readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
-//     approximate: the `/vol-store` lever's eligibility (l3/volstore.ts), rank.ts's volatility
+//     approximate: the `/vol-store` variation's eligibility (l3/volstore.ts), rank.ts's volatility
 //     tie-break between two byte-identical spellings, the first half of `/unreduce`'s
 //     disjointness gate (l3/unreduce.ts), the `/homesplit` pairing's refusal to leave a device
 //     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), and
@@ -29,13 +29,13 @@
 //     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
 //     Five exceptions are read off the target directly, their consumers not being the
-//     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 levers),
+//     structurer: `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread` (raise/pre-recovery.ts), `hoistsSingleSetArm` (two raising passes —
 //     raise/narrowlocal.ts and raise/retsink.ts) and
 //     `arrayShapeFromStride` (raise/globalshape.ts, run on the LIFTED fn). The field names are a
 //     SUPERSET of StructureOptions' — see `structureOptionsFor`.
 //
-// `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
+// `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization decisions) are
 // deliberately separate bags: a new compiler must set its behaviors EXPLICITLY instead of
 // silently inheriting a universal that is really per-compiler. `coalesceLoopInit` already
 // differs across targets (IDO true, agbcc/GCC false).
@@ -46,10 +46,10 @@ import type { StructureOptions } from './structure/structure';
 
 export interface TargetDescription {
   id: string; // the ISA — 'armv4t' / 'mips' / 'ppc'. Selects the frontend (registry.ts).
-  // The COMPILER is a first-class axis distinct from the ISA (matching = deoptimize to a specific
+  // The COMPILER is a first-class field distinct from the ISA (matching = deoptimize to a specific
   // compiler): two targets can share an ISA (⇒ one frontend) yet differ here — e.g. MIPS_IDO vs
   // MIPS_GCC. Consumed by pattern gating (patternApplies) and the report. (version/flags/language
-  // are future axes, added when earned.)
+  // are future fields, added when earned.)
   compiler: string; // 'agbcc' / 'ido' / 'gcc' / 'mwcc'
   argRegs: string[];
   returnReg: string;
@@ -94,7 +94,7 @@ export interface TargetDescription {
     // the same SPELLING question — "would a source have written `volatile` here" — and the file
     // header's ledger names them and what each does with the answer. None of them decides for the
     // reader: which cells a source qualified is not derivable from the asm, so both spellings are
-    // enumerated and the differ referees. ABSENT ⇒ the lever declines everywhere and the tie-break
+    // enumerated and the differ referees. ABSENT ⇒ the variation declines everywhere and the tie-break
     // has no preference, which is the neutral direction — outside a declared window the qualifier
     // is a claim about ordinary memory that the target does not support.
     //
@@ -119,7 +119,7 @@ export interface TargetDescription {
     // possible memory write — the conservative direction, and what every non-GBA target takes.
     deviceMemoryWriters?: readonly (readonly [number, number])[];
   };
-  // COMPILER BEHAVIORS — the specific compiler's canonicalization choices, distinct from
+  // COMPILER BEHAVIORS — the specific compiler's canonicalization decisions, distinct from
   // hardware `capabilities`. Mostly consumed by the structurer (threaded through StructureOptions);
   // the exceptions are listed at the top of this file and each says so at its own field.
   compilerBehaviors: {
@@ -144,7 +144,7 @@ export interface TargetDescription {
     // where that copy sits, not by where its value was computed. Uniform (true) across all current
     // compilers; absent ⇒ true, and a compiler that opts OUT turns the sort off entirely and emits
     // in source/param order. WHICH order a measured edge takes is not this flag's question and
-    // cannot be: the benchmark has rows on both sides inside one compiler (mwcc), so that choice is
+    // cannot be: the benchmark has rows on both sides inside one compiler (mwcc), so that decision is
     // refereed per row by `/copy-defpos` (rank.ts), never declared per compiler here.
     orderArgCopiesByWriteOrder?: boolean;
     // Regime-A switch recovery: accept an `x != K` test as a case (the EQUAL side is the case
@@ -174,7 +174,7 @@ export interface TargetDescription {
     // (`packages/core/test/corpus/agbcc-select-{merge,early}.s`). NOT set on MIPS_GCC despite it
     // being the same compiler family: nothing has measured the pair there, the clause reaches 0 of
     // its benchmark rows on either reader, and `docs/level-tower.md`'s rule for an unmeasured
-    // per-compiler default is to claim nothing. The evidence a future round needs is one run of
+    // compiler behavior is to claim nothing. The evidence a future round needs is one run of
     // `scripts/regen-select-spelling-probes.ts` retargeted at the compiler in question.
     hoistsSingleSetArm?: boolean;
     // A subscript over a DECLARED ARRAY OBJECT expands its base ahead of the index, where every
@@ -189,7 +189,7 @@ export interface TargetDescription {
     // so `u16 *p = (u16 *)&gTbl; p[i]` is base-first in the object while `(p = (u16 *)&gTbl)[i]` is
     // index-first, both through this same fork (compiled; raise/globalshape.ts's header carries the
     // four-way table). This flag is therefore NARROWER than that consumer's mechanism — statement
-    // ordering needs no fork, only a compiler that does not schedule — so the home axis is denied
+    // ordering needs no fork, only a compiler that does not schedule — so the home variation is denied
     // to ido/kmc/mwcc for a reason that is not its own. Under-reach, unmeasured, and the fix when a
     // row asks for it is a datum of its own rather than a widening of this one.
     //
@@ -197,7 +197,7 @@ export interface TargetDescription {
     // `TREE_CODE (TREE_TYPE (array)) == ARRAY_TYPE && TREE_CODE (array) != INDIRECT_REF` and both
     // spellings were compiled against the same target. NOT set anywhere else: whether ido, kmc or
     // mwcc distinguish them at all is unmeasured, and `docs/level-tower.md`'s rule for an
-    // unmeasured per-compiler default is to claim nothing. Read off the target by a raising pass
+    // unmeasured compiler behavior is to claim nothing. Read off the target by a raising pass
     // (`inferGlobalArrays`), not by the structurer.
     arrayShapeFromStride?: boolean;
     // Which way this compiler hands out FRAME SLOTS against a spilled local's DECLARATION RANK:
@@ -223,7 +223,7 @@ export interface TargetDescription {
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation.
     //
-    // A DEFAULT rather than a candidate axis because for agbcc the asm determines the source: at
+    // A DEFAULT rather than a candidate variation because for agbcc the asm determines the source: at
     // -O2 fold-const rewrites a bounded unsigned comparison into an equality before codegen, so
     // `x < 1u` compiles to `cmp r0, #0 / bne` and `x > 0u` to `cmp r0, #0 / beq` — no source-level
     // comparison chain emits a bound test at all. `emit_case_nodes` runs after folding and does:
@@ -281,9 +281,9 @@ export interface TargetDescription {
     // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown
     // re-ordering independent loads opts OUT here.
     defOrderLoadPairs?: boolean;
-    // The single-add-immediate derivation reach for the /nearbase lever (l3/nearbase.ts):
+    // The single-add-immediate derivation reach for the /nearbase variation (l3/nearbase.ts):
     // neighbor absolute addresses within this many bytes may share one base local. Thumb's
-    // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
+    // `add rd, #imm8` reaches 255. Absent ⇒ the variation stands down for this target.
     nearBaseSpan?: number;
     // Does this compiler CONSTANT-FOLD a constant SUBSCRIPT into the literal address it
     // materializes for an inline constant-address access? agbcc does: `((u8 *)0x3001100)[3]`
@@ -465,7 +465,7 @@ export const MIPS_GCC: TargetDescription = {
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,
   // and the row it comes from matches only with the parameters as the loop's homes. The other
-  // structuring levers take the universal default until a KMC fixture says otherwise.
+  // structuring compiler behaviors take the universal default until a KMC fixture says otherwise.
   //
   // THIS IS A COMPILER-WIDE GUESS STANDING IN FOR A PER-FUNCTION OBSERVATION the assembly states
   // outright: whether the compiler kept a loop's induction variable in its argument register. What
@@ -545,7 +545,7 @@ export const PPC_MWCC: TargetDescription = {
   argRegs: ['r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10'],
   returnReg: 'r3',
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: true },
-  // CodeWarrior's structuring levers are UNKNOWN until fixtures reveal them — safe universal
+  // CodeWarrior's structuring compiler behaviors are UNKNOWN until fixtures reveal them — safe universal
   // defaults; coalesceLoopInit false until a CW loop fixture says otherwise — the second of the
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
   compilerBehaviors: {
@@ -569,8 +569,8 @@ export const PPC_MWCC: TargetDescription = {
 };
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every
- *  `compilerBehaviors` lever. The ONE place a target's compiler behaviors flow into the
- *  target-agnostic structurer — a new behavior lever is a field in `compilerBehaviors`, consumed
+ *  `compilerBehaviors` field. The ONE place a target's compiler behaviors flow into the
+ *  target-agnostic structurer — a new compiler behavior is a field in `compilerBehaviors`, consumed
  *  automatically.
  *
  *  The spread is over the WHOLE bag, so a behavior whose reader is not the structurer rides along

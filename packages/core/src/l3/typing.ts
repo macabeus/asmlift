@@ -21,7 +21,7 @@ import { IrType, T, scalarTypeForAccess } from '../ir/types';
 import { type Expr, type SFn, exprChildren } from './ast';
 
 /** The declared type of a printed variable — the env `exprCType` judges rendered C against.
- *  THE one copy of the SFn→env derivation — printers, contracts and L3 levers alike: each
+ *  THE one copy of the SFn→env derivation — printers, contracts and L3 respell variations alike: each
  *  consumer judging against anything but the declarations it emits would let them disagree. */
 export type VarTypes = (name: string) => IrType | undefined;
 
@@ -133,7 +133,7 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
  *
  * THE one rendered-signedness judgment, and it lives beside the declarations it judges against
  * because every consumer shares it: the C-family backend's operand pin, structure.ts's
- * unsigned-compare gate (the /uns-cmp axis) and its signed-compare pin, and — through
+ * unsigned-compare gate (the /uns-cmp variation) and its signed-compare pin, and — through
  * `arithConversionSignedness` above — initfirst's compare-meaning gate. Two of those models
  * disagreeing about one expression is the drift this placement prevents.
  *
@@ -149,7 +149,7 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
  * instruction-for-instruction the same where `f` really returns `int`); a missing one is a
  * miscompile — with `u32 f(void);` in scope `f() / a` calls `__udivsi3` where the machine called
  * `__divsi3`, and `if (f() >= 0)` compiles to `bl f; mov r0, #0`, comparison and both arms gone.
- * The one consumer that reads `undefined` the other way is the /uns-cmp axis's own gate, which is
+ * The one consumer that reads `undefined` the other way is the /uns-cmp variation's own gate, which is
  * asking whether an operand is ALREADY unsigned.
  *
  * Anything narrower than 32 bits promotes to `int` and is therefore SIGNED, whatever it was

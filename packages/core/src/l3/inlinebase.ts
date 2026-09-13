@@ -1,4 +1,4 @@
-// L3 re-spelling lever: DELETE a pointer local holding a CONSTANT address and spell each access
+// L3 respell variation: DELETE a pointer local holding a CONSTANT address and spell each access
 // through it as the cast constant (`*(u16 *)0x4000208` rather than `p = (u16 *)0x4000208; *p`).
 //
 // The local is structure/analysis.ts's value-home spelling for a `const` with 2+ consumers that
@@ -25,34 +25,34 @@
 // separate at 11 against 12 on their own, and are BYTE-IDENTICAL once the slot qualifier is
 // there too — the shape that matches (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit
 // -fhex-asm -fprologue-bugfix`; `.s` diff empty, `.o` identical under cmp). So rank.ts emits
-// the qualified spelling as a second OUTPUT of this lever, `/volatile` narrowed to the locals
+// the qualified spelling as a second OUTPUT of this variation, `/volatile` narrowed to the locals
 // it deletes. Each cast this mints carries the qualifier; a use whose width does not stride the
 // declared pointee renders through the C-family printer's reinterpret cast instead, which
 // carries it too (backend/cfamily.ts) — in C the access takes the OUTER type, so a plain cast
 // there would spell exactly the silent drop this paragraph exists to prevent.
 //
 // GATE (INLINEBASE_GATES) — the local must be all of: pointer-typed; initialized by a bare
-// NONZERO `const` (a `(T *)base` CAST initializer is l3/basecse.ts's reuse hoist, whose own lever
+// NONZERO `const` (a `(T *)base` CAST initializer is l3/basecse.ts's reuse hoist, whose own variation
 // family owns that question; `0` is NULL, never an address, which is also the sibling qualifier
-// lever's rule); assigned exactly once, by a statement at the body's TOP LEVEL that no earlier
+// variation's rule); assigned exactly once, by a statement at the body's TOP LEVEL that no earlier
 // statement's mention precedes; never address-taken; used only as the base of an `index`, at 2+
 // sites (one use is not the reused address this exists for); not object-`volatile` (a
 // `T *volatile p` has no inhabitant, and cfamily.ts prints that flag in the pointee's position);
 // and not `frame` (a slot is an asm fact — see the SFn.locals doc). Anything else, and nothing
 // qualifying at all, DECLINES (null) rather than approximating.
 //
-// A RE-SPELLING RATHER THAN A STRUCTURING AXIS, which is a cost choice and not the
-// underdetermination one (docs/level-tower.md, "a third fork sits inside the ranked population").
+// A RESPELL VARIATION RATHER THAN A STRUCTURE VARIATION, which is a cost decision and not the
+// underdetermination one (docs/level-tower.md, "a third fork sits inside the ranked variations").
 // The question — does a `const` with 2+ consumers live across a call in a named local — is the one
 // `/reread-globals`, `/addr-home`, `/expr-home` and `/derived-home` each answer as a
-// STRUCTURING_AXES entry. An axis here would double the enumeration on every function it admits;
+// STRUCTURING_AXES entry. A structure variation here would double the enumeration on every function it admits;
 // substituting on the already-homed tree costs 766 candidates over 47058 (+1.6%) across the 33 of
 // 69 klonoa functions that lift with no symbol map.
 //
 // KNOWN GAP, and it is the price of that choice rather than an oversight: only `index` bases are
 // re-spelled, so the same L2 home passed to a callee or standing as a `field` base is out of
 // reach — `otherUses` refuses it. Reaching those needs the un-homed tree, which is
-// structure/analysis.ts's decision; the day a row demands one, this becomes the axis.
+// structure/analysis.ts's decision; the day a row demands one, this becomes a structure variation.
 //
 // The idiom it recovers is every GBA project's register macro: `*(vu16 *)0x4000208` is what
 // `REG_IME` expands to, so the deleted local is not merely an undone home.
@@ -164,8 +164,8 @@ function plan(sfn: SFn): Map<string, Extract<Expr, { k: 'cast' }>> {
   return out;
 }
 
-/** Which locals this lever would delete — rank.ts narrows `/volatile` to exactly these before
- *  pairing, so the qualified output never qualifies a pointer the lever leaves standing. */
+/** Which locals this variation would delete — rank.ts narrows `/volatile` to exactly these before
+ *  pairing, so the qualified output never qualifies a pointer the variation leaves standing. */
 export function inlinableConstBases(sfn: SFn): string[] {
   return [...plan(sfn).keys()];
 }

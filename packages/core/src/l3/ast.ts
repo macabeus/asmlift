@@ -74,7 +74,7 @@ export type Expr =
   //   • a local (`var`)   — nothing to reassociate into; already right, and no reader fires.
   //   • a plus tree       — the fold pulls the displacement into the tree, costing an `add` and a
   //                         register. The repair is to home the base in a local so it becomes a
-  //                         `var`, which is the ADDRESS-HOME axis and lives one level down at L2
+  //                         `var`, which is the ADDRESS-HOME variation and lives one level down at L2
   //                         (`structure/analysis.ts`'s `sharedBaseClasses`) because materializing
   //                         a value is a structuring decision, not a spelling.
   //   • a leaf const/addr — the fold bakes the displacement into the literal, changing the `.word`.
@@ -182,7 +182,7 @@ export type Expr =
 //
 // The COMPARISONS stay collapsed, and that asymmetry is the rule applying rather than an omission:
 // which side a compare was spelled from genuinely underdetermines — a signed spelling that
-// byte-matched was proved non-negative by the compiler — so it is refereed as an axis, while a
+// byte-matched was proved non-negative by the compiler — so it is refereed as a variation, while a
 // division helper is a pure function of the expression's C type with no such proof available.
 export type BinOp =
   | '+'
@@ -282,7 +282,7 @@ export interface SFn {
   /** Recovered locals, declared at function top. Two INDEPENDENT volatility facts, mirroring
    *  symbols.ts's cell-vs-pointee split: `volatile` = the local OBJECT is volatile (the
    *  address-escaped frame scratch; dce.ts treats reads of it as observable), `pointeeVolatile`
-   *  = the local is a pointer TO volatile data (the l3/volatileptr.ts lever; a declaration
+   *  = the local is a pointer TO volatile data (the l3/volatileptr.ts variation; a declaration
    *  spelling only — nothing about the local itself is observable).
    *
    *  `frame` is present on a local the structurer recovered from an `laddr` — the asm
@@ -291,7 +291,7 @@ export interface SFn {
    *  SUB-WORD frame object: `strh/ldrh/strb/ldrb` have no `[sp,#imm]` form, so a compiler must
    *  copy `sp` first, while a word spill goes straight to `[sp,#imm]` and is recovered as an
    *  SSA value with no local of its own. So `frame` is NOT the set of every value the machine
-   *  slotted. `loads`/`stores` are the yardstick a qualifier lever must match before it may
+   *  slotted. `loads`/`stores` are the yardstick a qualifier variation must match before it may
    *  declare every access to the object observable: the readability passes between here and L3
    *  may drop a store or render one machine load as two reads, and `volatile` over an access
    *  set asmlift did not preserve is a source that contradicts itself. ABSENT where the counts
@@ -349,7 +349,7 @@ export interface SFn {
    *  exists to keep it out of. So the tree is neutral in its NODES — every node still spells the
    *  same thing in C, C++ and Pascal — and not in its emission policy, which this field is.
    *  `ascending` = the earlier-declared spilled local takes the LOWER `[sp,#k]`. Set by the
-   *  structurer from `StructureOptions.spillSlotOrder`, itself a per-compiler default declared in
+   *  structurer from `StructureOptions.spillSlotOrder`, itself a compiler behavior declared in
    *  `TargetDescription.compilerBehaviors`. ABSENT means the direction is unknown for this target
    *  and `l3/slotorder.ts` is the identity — never "ascending by default". */
   slotOrder?: 'ascending' | 'descending';
@@ -433,7 +433,7 @@ export function exprEquals(a: Expr, b: Expr): boolean {
       const bb = b as typeof a;
       // `volatile` is part of the SPELLING, compared for the same reason `lead` and `dot` are: a
       // CSE or dedup that treats these as equal keeps one node and drops the other, silently
-      // respelling a volatile access as a plain one.
+      // rewriting a volatile access as a plain one.
       return (
         JSON.stringify(a.to) === JSON.stringify(bb.to) &&
         (a.volatile ?? false) === (bb.volatile ?? false) &&
@@ -472,7 +472,7 @@ export function exprEquals(a: Expr, b: Expr): boolean {
     case 'field': {
       const bb = b as typeof a;
       // `dot` is part of the SPELLING, and for the same reason `lead` is compared above: a CSE or
-      // dedup that treats these as equal keeps one node and discards the other, silently respelling
+      // dedup that treats these as equal keeps one node and discards the other, silently rewriting
       // `p->field_4` as `p.field_4` (or the reverse). Both compile only for the base type each
       // belongs to, so collapsing them is how a valid access becomes an invalid one — or worse, a
       // valid one against a different object.
@@ -577,7 +577,7 @@ export function stmtExprs(s: Stmt): Expr[] {
  *  heads included, nested statements recursively. The rewrite dual of stmtExprs/stmtChildren, for
  *  the PURE 1:1 case: one expression in, one expression out, every statement kept.
  *
- *  A LEVER THAT HAND-ROLLS ITS OWN MAPPER IS NOT A MISSED MIGRATION. Several do, because their
+ *  A PASS THAT HAND-ROLLS ITS OWN MAPPER IS NOT A MISSED MIGRATION. Several do, because their
  *  contract is not this one — a rewrite that may DECLINE, one that INSERTS statements, one that
  *  rewrites assign TARGETS as well as expressions, one that turns a statement into a list. Check
  *  the contract before pointing one of them here. */
@@ -627,13 +627,13 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
  *  one admits and the other refuses can be re-indexed but never qualified, so the paired
  *  `/indexed/volatile` spelling is unreachable at exactly the hardware addresses it is for.
  *
- *  Two levers reading the same initializers are deliberately NOT here: l3/inlinebase.ts
+ *  Two respell variations reading the same initializers are deliberately NOT here: l3/inlinebase.ts
  *  substitutes the address at each use, l3/nearbase.ts clusters neighbours by distance, and both
  *  need the VALUE, which is the evaluator above. Declining a shift-encoded base there costs a
- *  lever that does not fire, and the population is small: over klonoa's 531 lifting functions,
+ *  variation that does not fire, and the population is small: over klonoa's 531 lifting functions,
  *  one inlinebase-shaped local with no symbol map and none with it; a folded nearbase would form
  *  a new cluster in 4 functions mapless and 1 with the map. Both counts were zero over the agbcc
- *  benchmark rows that lifted when the levers landed — a MEASUREMENT over a corpus that grows, so
+ *  benchmark rows that lifted when the variations landed — a MEASUREMENT over a corpus that grows, so
  *  re-take it rather than quoting it: a new row falsifies the number, not the argument. */
 export function rematerializableAddress(e: Expr): boolean {
   let nonZero = false;
@@ -670,8 +670,8 @@ export function exprHasEffect(e: Expr): boolean {
  *  about a QUALIFIER, and a pass that asks the first where it means the second reorders device
  *  accesses while its gate reports clean.
  *
- *  Three spellings assert one thing, and all three are here because a lever that knew only the cast
- *  would miss the two a later lever writes: a `volatile` cast (where a raw address carries it), a
+ *  Three spellings assert one thing, and all three are here because a pass that knew only the cast
+ *  would miss the two a later variation writes: a `volatile` cast (where a raw address carries it), a
  *  read through a pointer local declared to point at volatile data (l3/volatileptr.ts), and a read
  *  of a `volatile` local object (l3/volatileval.ts). A bare cast counts even with no deref under it
  *  — the qualifier is on the ACCESS the cast exists to spell, and every caller so far is asking
@@ -845,14 +845,14 @@ export function* walkExprs(body: Stmt[]): Generator<Expr> {
 // so this must never be used to negate a general integer expression — only an `if`/loop test or an
 // operand of one of the connectives above.
 //
-// SCOPE of rule 2: it fires wherever a branch-sense lever negates the condition, which is both `if`
+// SCOPE of rule 2: it fires wherever a branch-sense variation negates the condition, which is both `if`
 // classes — `preserveDivergentBranchSense` on divergent ifs, `negateJoinedBranchSense` on
 // reconverging ones — and on the joined class it is a DEFAULT emission, not a differ-only
-// alternative, so a source `&&` can come out as its `||` dual with no lever asked for
+// alternative, so a source `&&` can come out as its `||` dual with no variation asked for
 // (`synthetic:ifand_far`, where the branch range put the fold on the other arm). Neither
-// lever reaches a LOOP test, so a connective that ended up as one has no dual candidate at all —
+// variation reaches a LOOP test, so a connective that ended up as one has no dual candidate at all —
 // the differ never sees the other form, and on such a row this rule changes how the code READS and
-// nothing else. Widening a branch-sense lever to loop tests is what would make it a matching lever
+// nothing else. Widening a branch-sense variation to loop tests is what would make it a matching variation
 // there, and that is a separate change.
 export const NEGATE_REL: Partial<Record<BinOp, BinOp>> = {
   '<': '>=',

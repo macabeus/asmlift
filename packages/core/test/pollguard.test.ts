@@ -1,4 +1,4 @@
-// The poll-shape products (l3/pollguard.ts): /pollguard regrows an EMPTY bottom-tested loop's
+// The poll-shape stacked variations (l3/pollguard.ts): /pollguard regrows an EMPTY bottom-tested loop's
 // guard, and /pollread folds a materialized poll's re-read back into its while condition. Both
 // spellings of each pair evaluate their condition — and read their cell — the same number of
 // times, so only bytes differ and the differ referees.

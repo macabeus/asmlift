@@ -477,7 +477,7 @@ describe('the fan section', () => {
     expect(lines[0]).not.toContain('series starts here');
   });
 
-  // An axis that touches 600 rows must not bury the totals line under 600 lines.
+  // A variation that touches 600 rows must not bury the totals line under 600 lines.
   test('caps the named rows and says how many more moved', () => {
     const changed = Array.from({ length: FAN_ROWS_SHOWN + 3 }, (_, i) => ({ id: `r${i}`, from: 10, to: 20 + i }));
     const lines = fanLines(rep({ changed }), 'origin/main', 900);

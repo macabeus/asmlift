@@ -137,7 +137,7 @@ test('a loop header still coalesces onto its init parameter', () => {
   expect(on).toMatch(/a0 = a0 - 1;/);
 });
 
-// ── the axis, and what it costs a function that has no such merge ────────────────────────────
+// ── the variation, and what it costs a function that has no such merge───────────────────────
 test('/fresh-merge is enumerated where a merge slot mixes a parameter with something else', () => {
   // `max3` at agbcc -O2: two `cmp`/conditional-copy pairs over the three argument registers.
   const MAX3_ASM =
@@ -160,7 +160,7 @@ test('…and a function whose only merge carries the SAME parameter on every edg
 
 // ── a NARROWER carrier is never adopted, under either setting ─────────────────────────────────
 // Adoption declares the merged value with the CARRIER's type and refusal with the merge's own, so a
-// carrier narrower than the merge would make this axis two PROGRAMS — every assignment truncates on
+// carrier narrower than the merge would make this variation two PROGRAMS — every assignment truncates on
 // one side — rather than two spellings, and `scoreObjects` has no standing to referee that. It
 // cannot happen, and the guard is `canTakeName`'s carrier width/sign check running on the same
 // carrier one step earlier, NOT anything in this rule: the merge takes a fresh home either way.
@@ -186,7 +186,7 @@ test('a merge WIDER than its parameter carrier takes a fresh home under BOTH set
   expect(off).not.toMatch(/a0 = /);
 });
 
-// …and the guard does not swallow the whole axis: at EQUAL width the carrier is adopted by default
+// …and the guard does not swallow the whole variation: at EQUAL width the carrier is adopted by default
 // and re-homed under the rule, which is the case the corpus actually inhabits.
 const WIDECARRIER = NARROWCARRIER.replace('%0: u8', '%0: u16');
 
@@ -195,11 +195,11 @@ test('…while an equal-width carrier is adopted by default and re-homed by the 
   expect(emit(WIDECARRIER, true)).toMatch(/v0 = a0;/);
 });
 
-// ── the axis widens `anchorConstCopies` ───────────────────────────────────────────────────────
+// ── the variation widens `anchorConstCopies` ──────────────────────────────────────────────────
 // Anchoring a constant edge copy at its def site needs the merge's name to claim no other SSA
 // value; adopting the parameter always leaves two claimants, so the default is never anchored, and
 // a minted home clears that one refusal (the placement rules still apply). That is a SECOND thing
-// the axis buys, and what makes `/defsite` non-inert on `synthetic:clampu8:mwcc_242_81`, whose
+// the variation buys, and what makes `/defsite` non-inert on `synthetic:clampu8:mwcc_242_81`, whose
 // winner is `signed/defsite/fresh-merge`.
 const CLAMPISH = `fn clampish {
 ^bb0(%0: s32):

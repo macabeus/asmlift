@@ -119,7 +119,7 @@ describe('the sweep comparison', () => {
 
   it('reports a fan that is the same SIZE and a different SET', () => {
     // The move a count-only census cannot see, and the reason the record carries a hash of the
-    // candidate SOURCES and not just `candidateCount`: an axis that swaps one spelling for another
+    // candidate SOURCES and not just `candidateCount`: a variation that swaps one spelling for another
     // leaves the count identical and is exactly the kind of change a round ships.
     const b = [rec({ id: 'r:s:agbcc', arm: 'harness', fan: 32, fanHash: '111111111111' })];
     const h = [rec({ id: 'r:s:agbcc', arm: 'harness', fan: 32, fanHash: '222222222222' })];

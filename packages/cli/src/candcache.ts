@@ -3,7 +3,7 @@
 // A candidate compile is a pure function of (translation-unit bytes, symbol) GIVEN a fixed
 // toolchain — so the same TU compiled by a later run of the same toolchain can be served from
 // disk instead of re-run. Within ONE run there is nothing to reuse (`rank.ts` dedups candidate
-// sources by value before any compile); the reuse is ACROSS runs, because admitting an axis
+// sources by value before any compile); the reuse is ACROSS runs, because admitting a variation
 // preserves the flag-off branch verbatim.
 //
 // Everything hard about this module is the word "GIVEN". A stored object served after the

@@ -60,7 +60,7 @@ test('no spurious match on a non-idiom function', () => {
 });
 
 test('patternApplies gates on the COMPILER (the /2 idiom fires for agbcc + gcc, not ido)', () => {
-  // compiler is a LIVE axis: the same shift-sequence for `/2` is emitted by agbcc AND gcc (across
+  // compiler is a LIVE field: the same shift-sequence for `/2` is emitted by agbcc AND gcc (across
   // two ISAs), so the pattern is tagged by a compiler LIST — and excluded for a compiler (ido)
   // that isn't in it, even on a matching ISA. This is what distinguishes MIPS+IDO from MIPS+GCC.
   const caps = { hwDivide: false, hwFloat: false };
@@ -131,7 +131,7 @@ test('the fold covers every comparison, in BOTH operand orders, and is involutiv
 test('the fold is SEMANTIC, not compiler-pinned: it applies to every target', () => {
   // unlike the shift-pair/rotate folds (which trade one spelling for another and are only
   // byte-safe on the compilers measured), `xor(icmp, 1)` cannot mean anything but the negated
-  // compare — an icmp result is 0/1 by construction — so no `applies` axis is declared
+  // compare — an icmp result is 0/1 by construction — so no `applies` field is declared
   const targets = [
     { id: 'armv4t', compiler: 'agbcc', capabilities: { hwDivide: false, hwFloat: false } },
     { id: 'mips', compiler: 'ido', capabilities: { hwDivide: true, hwFloat: true } },
@@ -316,7 +316,7 @@ test('hwmod refuses a different dividend or a different divisor', () => {
 });
 
 test('hwmod applies to PPC/mwcc only — not to the hardware-divide ISA that HAS a remainder', () => {
-  // Not the `hwDivide` axis: MIPS divides in hardware too, and needs no fold because `div` leaves
+  // Not the `hwDivide` field: MIPS divides in hardware too, and needs no fold because `div` leaves
   // the remainder in `hi` for the frontend to read out as `smod` directly.
   const mips = { id: 'mips', compiler: 'ido', capabilities: { hwDivide: true, hwFloat: true } };
   const arm = { id: 'armv4t', compiler: 'agbcc', capabilities: { hwDivide: false, hwFloat: false } };

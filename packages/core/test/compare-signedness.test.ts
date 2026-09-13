@@ -1,7 +1,7 @@
-// The /uns-cmp axis (structure.ts unsignedCompareSpelling): an icmp_u* whose operands both
+// The /uns-cmp variation (structure.ts unsignedCompareSpelling): an icmp_u* whose operands both
 // render as signed-promoting C compiles to a signed compare — the u32-ness dies when a local
 // declares with its first claimant's s32 type or when the operand is an inline `int`-typed
-// tree. With the axis on, one operand takes a (u32) cast (the side whose recovered value type
+// tree. With the variation on, one operand takes a (u32) cast (the side whose recovered value type
 // is unsigned) and a mixed-claimant declaration reconciles to u32. Off by default: a signed
 // spelling that byte-matched was proved non-negative by the compiler, so the differ referees.
 //
@@ -10,7 +10,7 @@
 // value-faithful spelled signed, and the compiler picks the unsigned branch itself (the ult5
 // matching fixture). ==/!= never cast.
 //
-// The SIGNED direction is not the axis and is pinned at the end of this file: there the opcode
+// The SIGNED direction is not the variation and is pinned at the end of this file: there the opcode
 // names the compare, so every operand short of a proof that it already renders signed takes a
 // cast — a pointer-rendered side excepted, where the cast would compare two addresses signed.
 import { expect, test } from 'vitest';
@@ -234,7 +234,7 @@ test('a signed guard over the loop-init arg blocks the flip through the substitu
 });
 
 // ── the SIGNED direction ───────────────────────────────────────────────────────────────────
-// Not the axis, and not a spelling choice: an icmp_s* operand that renders UNSIGNED makes C
+// Not the variation, and not a spelling choice: an icmp_s* operand that renders UNSIGNED makes C
 // compare unsigned, which is the compare the machine did not do. Where the other side is a
 // constant the test folds away entirely — agbcc compiles `(u32)a / b < 0` to `mov r0, #0`,
 // deleting the divide call with it. Always on, and it fires only where the rendering provably

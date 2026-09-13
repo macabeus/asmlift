@@ -96,9 +96,9 @@ them are not "add a feature":
 
 - **Missing capability** — asmlift cannot *represent* or *recover* something (an idiom, a type, a
   control-flow shape). This is the case the rest of this prompt is written for.
-- **Missing lever** — asmlift can represent it, but never chooses that spelling. A lever is a
-  candidate-generation change, and levers regress other rows far more often than they help; it
-  needs a gate (see Hard Rules).
+- **Missing variation** — asmlift can represent it, but never chooses that spelling. A variation
+  adds candidates to the fan of every function it applies to, and new variations regress other rows
+  far more often than they help; each needs a gate (see Hard Rules).
 - **Unmatchable source quirk** — the original C used a construct no honest recovery would produce
   (register-allocation intermediates, a hand-written temporary, an unusual build flag, a redundant
   expression the compiler then eliminates). Say so, prove it, and stop — do not invent machinery to
@@ -111,29 +111,39 @@ them are not "add a feature":
   not use (the `old_agbcc` class of bug). Then the fix is in the manifest/toolchain, not the
   decompiler, and it may *remove* the row rather than match it.
 
-**"Missing capability" vs "missing lever" is decided by the FAN, and the harness computes it for
-you.** `pnpm bench fan <sym|row-id>` prints every spelling asmlift considered for that row — each
-one's label, its score against its own denominator, the ones the scorer dropped, the ones withheld
-— in the harness's own configuration (the row's target object, prototypes, context compile and
+A variation is one way asmlift can write a function differently, and a candidate is named by the
+variations it applied, in a fixed order: its signedness (`unsigned` or `signed`, always first,
+because both are tried), then its **lift** variations (the assembly lifted again: `/setup-args`,
+`/connective`), its **structure** variations (`structure()` re-run with other options: `/defsite`,
+`/flip-join`), its **respell** variations (the structured tree rewritten: `/unmerge`,
+`/offmember`), and last the **symbol-map** variation `/raw-globals`. Two respell variations applied
+together as one candidate are a **pairing**, enumerated only because a row demanded the joint
+spelling (`/inlinebase` with `/vol-slot`). Every word is defined in
+[`docs/vocabulary.md`](../../docs/vocabulary.md).
+
+**"Missing capability" vs "missing variation" is decided by the FAN, and the harness computes it
+for you.** `pnpm bench fan <sym|row-id>` prints every candidate asmlift considered for that row —
+each one's variations, its score against its own denominator, the ones the scorer dropped, the
+ones withheld — in the harness's own configuration (the row's target object, prototypes, context compile and
 symbol map), so it is comparable with the published row rather than with a checkout. The flags:
 
-- `--show <label>` prints that candidate's SOURCE. Nothing else can: `results.json` carries the
+- `--show <variations>` prints that candidate's SOURCE. Nothing else can: `results.json` carries the
   winner's C and no other's, so "the near-miss spelling is right and only loses on X" is a claim
   you can now read instead of infer. `--show best` is the winner (on the SCORED path only — under
   `--enumerate` nothing has been scored, so `--enumerate --show best` is refused rather than
   answered with whatever came out of the enumerator first). A DROPPED candidate's source — usually
-  the one worth reading — is reachable only as `--enumerate --show <label>`, and the command says
+  the one worth reading — is reachable only as `--enumerate --show <variations>`, and the command says
   so when you ask for it the other way.
-- `--enumerate` lists the fan without compiling anything and still serves `--show <label>`. Use it
-  to answer "did my new lever produce a candidate at all" — a label that is absent was never
-  enumerated, and a lever that THREW prints as `[lever] … threw (no candidate from it)`, which a
-  `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely — the
+- `--enumerate` lists the fan without compiling anything and still serves `--show <variations>`.
+  Use it to answer "did my new variation produce a candidate at all" — a variation no listed
+  candidate carries was never enumerated, and a variation that THREW prints as
+  `[lever] … threw (no candidate from it)`, which a `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely — the
   rate and what the biggest fans therefore cost to merely LIST are in `docs/bench-cost.md` §1, and
   that rate is the figure §2 shows moving fastest of all. A long enumeration is a big fan, not a
   hang.
 - `--base <ref>` prints one line — this tree's enumeration against the count that ref's artifact
   recorded for the same row: `[fan-diff] <row>: 5952 → 11904 (2.00×) vs origin/main`. **That is the
-  multiplier a round is asked to report before it merges an axis**, and it costs an enumeration
+  multiplier a round is asked to report before it merges a variation**, and it costs an enumeration
   rather than a bench run. It prints at every exit, including the over-limit refusal and a declined
   row — where the recorded count IS the answer. An unreadable or empty ref is refused at exit 2
   before the enumeration, not diagnosed after it.
@@ -240,7 +250,7 @@ still refused. A scoped run is not read-only either: it REWRITES
 `apps/benchmark/results/<tier>.json` with only the rows it selected, so always run whole before
 `bench:merge`.
 
-The `cpp` probe is on a DIFFERENT axis and that scoping does not exempt it: **every run that
+The `cpp` probe answers a DIFFERENT question, and that scoping does not exempt it: **every run that
 touches the real tier is probed, `--only` included**, because the scoped loop is where TRAP 6
 bites. If it refuses, your shell resolved `cpp` to Apple clang — a LOGIN shell does — and the run
 would have failed every real ido/kmc/gcc272 row while reporting `✓` and exit 0; if it only WARNS,
@@ -260,14 +270,14 @@ move nothing it is the gate. The fields it watches are `report/diff.ts`'s `FIELD
 rather than from memory, they are wider than the score. Expect lines you did not predict: from
 `maxScore` and `breakdown` (the denominator and the shape of the gap moving), and from the dropped
 count, which moves when the FAN changed even though every score held. If a match is lost, either
-tighten the gate on your lever or drop the lever — do not rationalize a trade unless the user
+tighten the gate on your rewrite or drop the rewrite — do not rationalize a trade unless the user
 explicitly approves it. Report the totals (asmlift vs m2c) before and after.
 
 Since #192 `diff` also prints a **FAN** section and a **COST** section under the verdict — the rows
 whose candidate count or ranked seconds moved most, with their multipliers, and a total over the
 rows both artifacts could answer for. **Both are INFORMATIONAL: neither moves an exit code**, and
 `candidateCount` is deliberately not in `FIELDS`. Read them anyway and put the fan multiplier in the
-PR body: an axis that moves no row and multiplies the confirming gate's own price by four is exactly
+PR body: a variation that moves no row and multiplies the confirming gate's own price by four is exactly
 what every gate this repo runs was blind to for three weeks. A row that stopped ranking is reported
 as `vanished` with the count that left, not silently dropped from the total.
 
@@ -285,7 +295,7 @@ Four things this gate does not catch by itself:
   ranked run from Phase 0 measures the commit it ran at, and when the target is not a benchmark
   row the regression gate cannot see it move — so remediation rewrites what it measures with
   nothing to notice. Re-run it at the branch's final commit and publish *that* number; "the
-  primary output is byte-identical" is a claim about one candidate out of tens of thousands, not
+  default candidate is byte-identical" is a claim about one candidate out of tens of thousands, not
   about the best score. Launch it beside the final `pnpm bench run`, not after it, with the same
   `docs/ranked-repro.md` flags **of whichever vehicle you ran** — the two carry different ones, and
   only the project-checkout command has `--progress`. Skipping it is unquotable on that vehicle:
@@ -384,7 +394,7 @@ this phase is the only pass they get.
 ## Phase 7 — Report and write back
 
 - Summary: baseline → final for $1, full-bench totals before/after, one line per commit.
-- What you did **not** do and why (blocked capability, unmatchable quirk, rejected lever).
+- What you did **not** do and why (blocked capability, unmatchable quirk, rejected variation).
 - Update the relevant memory file under
   `~/.claude/projects/-Users-macabeus-ApenasMeu-decompiler-asmlift/memory/` (usually
   `asmlift-adversarial-validation.md`) with the round's outcome and any gate that turned out to be
@@ -410,13 +420,13 @@ launch anything long. What this command leans on:
 - **`pnpm bench sweep --base origin/main` is the corpus A/B**, and it is the one to reach for
   whenever you would otherwise write a throwaway census script: it re-lifts every row in both
   trees, map-ful and map-less, compiles nothing, and prints the rows whose emitted C moved. `--fan`
-  does the same for the whole enumerated candidate set, which is the arm an axis actually moves —
+  does the same for the whole enumerated candidate set, which is what a variation actually moves —
   a corpus whose DEFAULT spelling is unchanged can still have had its fan doubled, and that is the
   multiplier this command asks you to report. `--repeat N` asks the same of this tree against
   itself. Read its exit code as `diff`'s with one addition: 1 = something moved, 2 = it did NOT
   answer — an empty selection, or a row this shell could not lift at all (trap #6). And a moved
   line that opens `asm …` or `opts …` says the row's INPUT moved, not the decompiler. Prices in
-  `docs/bench-cost.md` §1, and §3 carries the measured example of the two arms disagreeing;
+  `docs/bench-cost.md` §1, and §3 carries the measured example of the two modes disagreeing;
 - background the long ones, wait on a bounded marker-AND-log-growth condition, keep only
   READ-ONLY work beside a bench, and `pnpm bench in-flight` before any phase that edits the tree;
 - `kill -TERM` does not stop a bench, `kill -9` orphans its shards, and two full benches must never
@@ -428,8 +438,8 @@ launch anything long. What this command leans on:
 
 1. **Never trade a loud failure for a silent wrong answer.** `declined` / an `ASMLIFT_ERROR` marker
    beats plausible-but-wrong C. Every new transform must state the condition under which it refuses.
-2. **Every lever needs a gate**, and the gate must be justified by a row it protects. Ungated levers
-   have regressed matches here repeatedly (multi-use const → `sum_to`; base-CSE without the
+2. **Every new rewrite needs a gate** — a new default and a new variation alike — and the gate must
+   be justified by a row it protects. Ungated rewrites have regressed matches here repeatedly (multi-use const → `sum_to`; base-CSE without the
    loop-gate; const-MMIO RMW without the scalar-fixed-offset gate).
 3. **Never edit the benchmark to make a row look better** — no manifest tweaks, no results.json
    edits, no adding context that a real user of the published repro script would not have. If the

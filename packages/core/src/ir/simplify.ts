@@ -105,7 +105,7 @@ function trivialPhiValue(incoming: readonly Successor[], i: number, param: Value
 export function firstTrivialPhi(fn: Fn): { block: Block; param: Value } | null {
   // ONE pass over the successor edges, indexed by target — `simplifyTrivialPhis` rescans the
   // whole function per block, which is fine for a mutating fixpoint and not for a check on the
-  // raising tower's hot path (a candidate fan re-raises the same function once per lift variant).
+  // raising tower's hot path (a candidate fan re-raises the same function once per lift).
   const incomingOf = new Map<Block, Successor[]>();
   for (const pb of fn.blocks) {
     for (const op of pb.ops) {

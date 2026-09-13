@@ -1,4 +1,4 @@
-// The register-copy re-spelling (l3/regspell.ts) — the fourth differ-ranked lever. Pins: the
+// The register-copy respell variation (l3/regspell.ts) — the fourth differ-ranked variation. Pins: the
 // three rewrites' goldens (R1 diamond→copy+in-place, R2 const staging, R3 tail assign-back with
 // the dead-var reuse the match depends on); decline shapes; purity.
 import { describe, expect, test } from 'vitest';
@@ -191,7 +191,7 @@ describe('adversarial-round guards', () => {
     const fresh = cBackend.emit(out[2].sfn);
     expect(reuse).toContain('v0 = w0 << 8 >> 16;');
     expect(fresh).toContain('w1 = w0 << 8 >> 16;');
-    // and each variant SAYS which tail it is — rank.ts labels off this, never off the index
+    // and each result SAYS which tail it is — rank.ts names it off this, never off the index
     expect(out.map((v) => v.tail)).toEqual(['none', 'reuse', 'fresh']);
   });
 

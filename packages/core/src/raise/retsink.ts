@@ -1,6 +1,6 @@
 // asmlift — return-sinking (F-CFG-class structural pass; successor-aware, ISA-neutral).
 //
-// A short-circuit `if (a && b) return X; return Y;` (and the `||` / value-returning variants) compiles to
+// A short-circuit `if (a && b) return X; return Y;` (and the `||` / value-returning forms) compiles to
 // a diamond whose arms converge on a single RETURN block: `br ^merge(X)` / `br ^merge(Y)` into
 // `^merge(v): ret v`. The structurer lowers that merge as a shared VARIABLE — `v0 = X … v0 = Y … return v0`
 // — which is byte-exact-CORRECT but recompiles DIFFERENTLY from the source: agbcc/gcc, given the natural
@@ -138,7 +138,7 @@
 // corpus has one, not because the rule is shaped to it: the three synthetic rows minted for this
 // admission (`selconst`, `selhead` — a body in the HEAD, arms still one SET each — and `selloop`, a
 // loop ahead of the diamond; see `apps/benchmark/dataset/synthetic.ts`) are MATCH on agbcc as well,
-// the last of them composing with another axis. FAILURE DIRECTION: a wrong admission costs
+// the last of them composing with another variation. FAILURE DIRECTION: a wrong admission costs
 // a SPELLING and never an answer — the transform is a tail duplication, every arm keeps the value it
 // carried — which is why every clause here is `sound: false`.
 //
@@ -156,16 +156,16 @@
 // its own regression surface (`regression.test.ts`'s fixtures, the byte-pinned playground preset)
 // and is booked rather than bundled.
 //
-// WHY A GATE AND NOT AN AXIS, since `l3/unmerge.ts` is this tree's other "duplicate a join back
-// into the arms" pass and IS one. `unmerge.ts` is an axis on the stated grounds that the mapping
+// WHY A GATE AND NOT A VARIATION, since `l3/unmerge.ts` is this tree's other "duplicate a join back
+// into the arms" pass and IS one. `unmerge.ts` is a variation on the stated grounds that the mapping
 // from its tree back to a source is not a function and not uniformly many-to-one — which way it
 // goes is a property of the SHAPE, and no gate there can read that off the tree. This admission
 // asserts the opposite for its own shape, and the assertion is what `arms-are-one-set` IS: on the
-// axis that clause reads, the mapping is a function, the differ never has to referee it, and the fan
-// does not grow (4 candidates before, 4 after). An axis where a default belongs doubles every
+// question that clause reads, the mapping is a function, the differ never has to referee it, and the fan
+// does not grow (4 candidates before, 4 after). A variation where a default belongs doubles every
 // enumeration to referee a question with one answer.
 //
-// WHAT MOVES THE THING THIS DEFAULT PLACES. `docs/level-tower.md`: a per-compiler default read
+// WHAT MOVES THE THING THIS DEFAULT PLACES. `docs/level-tower.md`: a compiler behavior read
 // backwards "owes an explicit refusal for every pass that moves the thing it is placing".
 // The thing placed is a TWO-ARMED DIAMOND, and asmlift manufactures one. `raise/shortcircuit.ts`'s
 // `branch-shortcircuit` builds diamonds out of condition trees the ROM never merged — measured in

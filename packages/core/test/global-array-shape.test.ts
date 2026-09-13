@@ -808,7 +808,7 @@ describe('every gate: which rule decides, and whether it is uniquely load-bearin
   });
 });
 
-// ── the map always wins, on BOTH symbol-variant arms ─────────────────────────────────────────
+// ── the map always wins, on BOTH symbol-map settings ─────────────────────────────────────────
 
 describe('a name the project map describes is never claimed by the derivation', () => {
   // The hazard is the `/raw-globals` arm, which STRUCTURES with no map and DECLARES with one:
@@ -1003,7 +1003,7 @@ describe('the assumed declaration is never hidden', () => {
 // ── the spelling and the declaration are never derived from different lifts ───────────────────
 
 describe('sameDerivedShape: what "the declaration will carry this" means', () => {
-  // rank.ts spells from a per-variant derivation and declares from a probe-derived dictionary. The
+  // rank.ts spells from a per-lift derivation and declares from the shared lift's dictionary. The
   // `/raw-globals` arm structures with NO map and declares with one, so the two can be read off
   // different lifts — and a candidate that spells `gTbl[i][j]` beside `extern u32 gTbl[][8];`
   // addresses a different object than the assembly did, compiling either way. This is the
@@ -1028,7 +1028,7 @@ describe('sameDerivedShape: what "the declaration will carry this" means', () =>
   });
 });
 
-// ── the axes the derived rank re-opens ───────────────────────────────────────────────────────
+// ── the variations the derived rank re-opens ─────────────────────────────────────────────────
 
 describe('a derived rank enumerates `/flat-rank`, exactly as a mapped one does', () => {
   // `/flat-rank` exists BECAUSE the asm underdetermines the choice between `g[r][i]` and the flat
@@ -1383,7 +1383,7 @@ describe('the order licence: which rule decides, and whether it is uniquely load
 // HOME), so it travels on the access node — `index.baseOrdered`, stamped once at the structure
 // seam. These pin the route rather than the rule: that the stamp lands where the licence says and
 // nowhere else, and that it is still there after the rewrites `structureChecked` runs on its own
-// output — which is the tree rank hands the lever.
+// output — which is the tree rank hands the respell variations.
 
 /** Every `index` node in the emitted tree, as `<base symbol or shape> ordered=<bool>`. */
 const stamps = (name: string, asm: string): string[] => {

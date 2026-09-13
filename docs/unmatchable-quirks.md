@@ -268,7 +268,7 @@ assignment. Everything tried so far still costs more than it saves — twelve ro
 forms (`for(;;){…;if(!c)break;}`, `while(1){…;if(c==0)return;}` and `goto`, each in
 `u32`/`s32`/`int`/`u8`) all re-emit the leading `021c` and give
 `021c08781070013201310028f9d17047`, and the test-at-top form above pays an extra tail store — but
-this is the axis where a falsification would not require the unsound part, and it is squarely
+this is the dimension where a falsification would not require the unsound part, and it is squarely
 asmlift's business.
 
 If either arrives, delete this entry and re-run the sweep.

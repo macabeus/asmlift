@@ -1,4 +1,4 @@
-// The `/inlinebase` lever (l3/inlinebase.ts): a pointer local holding a CONSTANT address is
+// The `/inlinebase` variation (l3/inlinebase.ts): a pointer local holding a CONSTANT address is
 // deleted and each access through it re-spelled as the cast constant. The gate conditions are
 // what these tests pin — one bare, nonzero `const` assignment at the body's top level that
 // nothing mentions earlier, no address taken, every use an `index` base, 2+ of them — and nothing
@@ -24,7 +24,7 @@ const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
   retType: T.void(),
   body,
 });
-/** `*p` — the one use shape the lever re-spells */
+/** `*p` — the one use shape the variation re-spells */
 const deref = (name: string): Expr => ({
   k: 'index',
   base: { k: 'var', name },
@@ -158,8 +158,8 @@ test('a local fed a bare `0` is NULL, not an address', () => {
   expect(inlinableConstBases(s)).toEqual(['p']);
 });
 
-// rank.ts's `/inlinebase/volatile` output narrows the qualifier lever to the locals this one
-// deletes, so the two gates have to agree about what an address is — a local either lever admits
+// rank.ts's `/inlinebase/volatile` output narrows the qualifier variation to the locals this one
+// deletes, so the two gates have to agree about what an address is — a local either variation admits
 // alone would put an unqualified access under a label that says every one is qualified.
 test('every local the qualified output inlines is one the qualifier reached', () => {
   const s = fn([{ name: 'p', type: PTR }], twoUses());
@@ -188,14 +188,14 @@ test('`inlinableConstBases` names exactly the locals the gate admits', () => {
   expect(inlinableConstBases(fn([{ name: 'p', type: PTR }], twoUses().slice(0, 2)))).toEqual([]);
 });
 
-// THE CROSS-MODULE PROMISE: no base-hoist lever may produce a local this one would eat. Pinned
-// behaviourally, on each lever's own smallest firing shape, because it is a constraint neither
+// THE CROSS-MODULE PROMISE: no base-hoist variation may produce a local this one would eat. Pinned
+// behaviourally, on each variation's own smallest firing shape, because it is a constraint neither
 // side's own tests state. Only `basecse` rests on the CAST — patching it to hoist the bare base
-// fails this test, so the separation from that one lever really is a spelling agreement. The
+// fails this test, so the separation from that one variation really is a spelling agreement. The
 // other three are separated structurally and would survive the same edit: `scopebase` hoists
 // `(T *)&gSym`, whose initializer is an `addr` and not a const at all; `nearbase` spells every
 // member but the lowest as `(p0 + k)[0]`, an `otherUses`; `argbase` names one base per call
-// argument, so a hoist has one use where this lever wants two.
+// argument, so a hoist has one use where this variation wants two.
 test('no base-hoist lever produces a local this one would eat', () => {
   const cidx = (value: number, i: number, width = 4): Expr => ({
     k: 'index',

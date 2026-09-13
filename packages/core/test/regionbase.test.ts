@@ -288,7 +288,7 @@ describe('a rule the region rule makes VACUOUS is dropped, not left reading as s
 
 describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
   // The real `synthetic:dmascope` disassembly. Its DMA base 0x040000D4 is spelled in three disjoint
-  // regions — each `if` arm of a loop body, and the post-loop tail — and no lever asmlift ships
+  // regions — each `if` arm of a loop body, and the post-loop tail — and no variation asmlift ships
   // binds it to more than ONE local: `basecse`/`/livebase`/`/scopebase` all place at most one.
   const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
@@ -306,7 +306,7 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
   });
 
   test('`/regionbase/volatile` is in the fan too — the device base keeps its qualifier', () => {
-    // The lever's own shape is a DEVICE block (0x040000D4). Without this product every region
+    // The variation's own shape is a DEVICE block (0x040000D4). Without this composition every region
     // local it wins with is published UNqualified, and `compareScored`'s deviceVolatile tie-break
     // has no qualified twin to prefer — the qualifier would be given up by an absence in the fan
     // rather than by a measurement.
@@ -317,11 +317,11 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
   });
 
   test('…and the store the lever leaves INLINE keeps its qualifier too', () => {
-    // The lever homes the regions that hold two or more direct uses and leaves every other
+    // The variation homes the regions that hold two or more direct uses and leaves every other
     // spelling of the same device address inline — here `((s32 *)67109076)[2] = v1;`, the write to
     // REG_DMA0CNT that starts the transfer. `/volatile` qualifies a pointer LOCAL and cannot reach
     // a store that stays inline; `/vol-store` is the pass that can, and until it was paired with
-    // this lever the winning source dropped a device qualifier the un-hoisted spelling carries.
+    // this variation the winning source dropped a device qualifier the un-hoisted spelling carries.
     const triple = cands.filter((c) => hasVariations(c.label.split('/'), ['regionbase', 'volatile', 'vol-store']));
     expect(triple.length).toBeGreaterThan(0);
     expect(triple.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
@@ -339,7 +339,7 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
   test('and every label that binds the base three times is this pass, or a pipe THROUGH it', () => {
     // The `/homesplit` pairing (l3/homesplit.ts) pipes a head hoist into this pass with one key
     // withheld, so the region reading it applies is this one — which is why the claim is about the
-    // PASS and not about a label. `dmascope` stopped being a lever-clean control for `/regionbase`
+    // PASS and not about a candidate's variations. `dmascope` stopped being a variation-clean control for `/regionbase`
     // the moment that pairing existed; the dataset block comment predicted exactly this.
     const three = cands.filter((c) => dmaLocals(c.source) >= 3);
     expect(three.length).toBeGreaterThan(0);

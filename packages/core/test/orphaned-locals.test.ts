@@ -1,11 +1,11 @@
-// UNIT tests for the lever boundary contract (contracts.ts assertNoOrphanedLocals): a local a pass
+// UNIT tests for the respell-variation boundary contract (contracts.ts assertNoOrphanedLocals): a local a pass
 // DELETED from the declaration list is named nowhere in the tree it produced.
 //
 // The mirror of assertLocalsWritten, and the three contracts beside it do not see this one. A pass
 // that CONSUMES a local — l3/unmerge.ts substituting a merge temp into the arms, l3/coalesce.ts
 // folding two names into one, l3/inlinebase.ts deleting a const-address pointer — drops the name
-// on the strength of an in-lever count that nothing mentions it any more. When that count is wrong
-// the candidate is not a loud lever error: it is C with an undeclared identifier, which in the
+// on the strength of an in-pass count that nothing mentions it any more. When that count is wrong
+// the candidate is not a loud variation error: it is C with an undeclared identifier, which in the
 // REAL tier compiles inside the project's vendored translation unit, where an orphaned name that
 // collides with a context symbol compiles and SCORES.
 //

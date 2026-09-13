@@ -1,4 +1,4 @@
-// L3 re-spelling lever: UN-REDUCE a loop-carried accumulator — delete `v = INIT; … v = v + K;`
+// L3 respell variation: UN-REDUCE a loop-carried accumulator — delete `v = INIT; … v = v + K;`
 // and spell each read as the closed form `INIT[start := counter]`.
 //
 //     v0 = (a0 << 6) + a1;                    while (v1 <= 31) {
@@ -91,8 +91,8 @@
 //     left. Refused function-wide, because a stashed pointer outlives the statement that made it.
 //   • MOVED-EFFECT — a call or a marker would run once per read instead of once. Refused.
 //   • MOVED-VOLATILE — a `volatile` access is one the source pinned precisely so it would not be
-//     duplicated or moved. Refused. No corpus row reaches it today (nothing on the base spelling
-//     this lever rides carries a qualifier on a READ), so it is guarded by its unit test alone.
+//     duplicated or moved. Refused. No corpus row reaches it today (nothing on the default spelling
+//     this variation rides carries a qualifier on a READ), so it is guarded by its unit test alone.
 //   • MOVED-READ-ALIASABLE — an ordinary memory read moved down the region sees whatever the
 //     region wrote. asmlift can only rule that out for writes it can NAME, so a moved read is
 //     admitted on one configuration: every write the region evaluates goes to a compile-time
@@ -111,7 +111,7 @@
 // is FALSE. "A write to a hardware register is not a write to any object a C program declares" is
 // true, and it does not finish the argument: a DMA controller READS a control word and then WRITES
 // ordinary memory on the program's behalf. On the GBA, storing `0x84000020` to `DMA3CNT`
-// (0x040000DC) starts a 32-word transfer into `[DMA3DAD]` — and every row this lever reaches
+// (0x040000DC) starts a 32-word transfer into `[DMA3DAD]` — and every row this variation reaches
 // drives exactly that register. Modelled and executed, the admitted candidate turns a clean walk
 // over a destination table into wild writes: the first transfer clobbers the table the init reads,
 // and every later iteration recomputes its destination from the garbage.
@@ -147,12 +147,12 @@
 // `firstRejection` call site over both — 750 synthetic trees and all 252 real-tier rows, the real
 // tier being the SYMBOL-MAPPED configuration since every row carries its authored map —
 // `unitsDisagree` is true on NO row in either, and `/unreduce` fires on no real-tier row at all,
-// so no zero-flip gate reaches this lever. Its one known inhabitant is outside the benchmark:
+// so no zero-flip gate reaches this variation. Its one known inhabitant is outside the benchmark:
 // klonoa's `UpdateHUDTimePanel`, where WITH a symbol map the accumulator lifts `u16 *` against an
 // integer init and the gate refuses it, and with RAW ADDRESSES the same asm lifts all-integer and
 // the candidate is correct and survives (`50335396 + (v15 << 6)`, 64 bytes an iteration, which is
 // the ROM's own `adds r1, #0x40`). Same assembly, same loop, same stride — a raw-address sweep is
-// BLIND to the defect and reports the lever as correct. The checkout sweep behind that datum
+// BLIND to the defect and reports the variation as correct. The checkout sweep behind that datum
 // covered klonoa's 467 functions in BOTH configurations; a second checkout was swept raw-only and
 // found nothing, and since raw-only is the blind arm that null result carries no weight. Only the
 // klonoa half of the sweep is evidence, and it is quoted here without the other.
@@ -426,7 +426,7 @@ function arithScale(t: IrType | undefined): number | null {
 /** Does this local's DECLARATION pin it against deletion? Every flag `SFn.locals` can carry, because
  *  each is a fact about the ASM that only the declaration states: two qualifiers (deleting a
  *  `volatile u16 *` local re-spells `*p = 0` as a raw cast with no qualifier on it — l3/inlinebase.ts
- *  carries it onto the minted cast instead, and this lever has no local left to carry anything), a
+ *  carries it onto the minted cast instead, and this variation has no local left to carry anything), a
  *  frame home, an `undef` whose whole content is the assignment that is MISSING, and the SPILL HOMES.
  *
  *  WHY `slots` PINS, which is not the obvious reading. Deleting a slot-carrying local does not
@@ -537,7 +537,7 @@ function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Relat
     return null; // anything else between the root and the counter, and the stride is not `k`
   };
   // THE SUBSTITUTIONAL FORM FIRST, unchanged: it is the shipped spelling every corpus inhabitant
-  // of this lever rides, and trying it first makes the branch below strictly additive — it is
+  // of this variation rides, and trying it first makes the branch below strictly additive — it is
   // reached only where the old rule already declined, so it can admit candidates but never
   // re-spell one.
   //
@@ -796,7 +796,7 @@ export interface UnreduceResult {
 
 /** The `/unreduce` candidate, or null when no accumulator qualifies. `window` is the target's
  *  declared device-register range (TargetDescription.capabilities.deviceRegisters) — absent, the
- *  lever still fires on a closed form that reads no memory. `triggers` is
+ *  variation still fires on a closed form that reads no memory. `triggers` is
  *  `capabilities.deviceMemoryWriters`; absent, EVERY device store is treated as one. */
 export function unreduceAccumulators(
   sfn: SFn,

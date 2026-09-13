@@ -108,7 +108,7 @@ export const PASSES: Record<string, CensusablePass> = {
     // raise/shortcircuit.ts's `ARM_REREAD_GATES` — the branch fold's re-read admission. ONE table,
     // asked only at a site where nothing cheaper refused (below `sameArgs` and the negatability
     // check). The pass list runs once per LIFT, and `enumerateRanked` lifts a row more than once
-    // (the pin probe, then each lift variant), so a count here is per evaluation, as the footer
+    // (the shared lift, then each lift), so a count here is per evaluation, as the footer
     // says, and a site can be counted once per lift that reaches it.
     tables: [['site', ARM_REREAD_GATES as readonly Gate<never>[]]],
     install: (w) => {

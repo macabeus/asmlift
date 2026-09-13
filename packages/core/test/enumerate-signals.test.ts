@@ -4,7 +4,7 @@
 // which is the failure the channels exist to make visible, reproduced one level up.
 //
 // So this pins that they FIRE, over asm the corpus already carries. It asserts the direction and
-// not a count: the counts move with every axis added and with every fixture, and a count is what
+// not a count: the counts move with every variation added and with every fixture, and a count is what
 // would make this test fail for reasons it is not about.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -40,7 +40,7 @@ describe('the enumeration reports its own silent deletions', () => {
       }
     }
     expect(enumerated).toBeGreaterThan(0);
-    // several DISTINCT axes stand down, not one gate firing repeatedly on one function
+    // several DISTINCT variations stand down, not one gate firing repeatedly on one function
     expect(new Set(gated).size).toBeGreaterThan(1);
     expect(deduped).toBeGreaterThan(0);
   });

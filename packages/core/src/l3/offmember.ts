@@ -38,7 +38,7 @@
 //   displacement. A window refusal removes ZERO further bases in either configuration.
 //
 //   PREMISE. It would be refusing a dropped qualifier, and there is none to drop: `/volatile`
-//   wraps the base in a CAST that `non-leaf-base` refuses, so the two levers cannot compose and
+//   wraps the base in a CAST that `non-leaf-base` refuses, so the two variations cannot compose and
 //   the tree this pass is handed is unqualified in both configurations. Nor is a tie-break lost —
 //   `deviceVolatileClaims` counts only qualifiers a tree already asserts, so an unqualified tree
 //   scores zero whichever way it is spelled.
@@ -222,7 +222,7 @@ function membersOf(sites: readonly Site[]): Site[] {
  *  THE FOURTH IS NOT ABOUT PLACEMENT, and it is the easy one to leave out: two views of one
  *  offset at one width but
  *  DIFFERENT SIGNEDNESS (`ldrb` and `ldrsb` at the same address). One member has one type, so
- *  respelling both through it changes what one of the two READS — `scalarTypeForAccess` honours
+ *  spelling both through it changes what one of the two READS — `scalarTypeForAccess` honours
  *  signedness at widths 1 and 2, so an unsigned read becomes sign-extending. That is a value
  *  change rather than a spelling change, and the differ can referee it only by luck: a masked or
  *  compared result compiles to the same bytes while the published C says something the asm does
@@ -328,7 +328,7 @@ function admit(
 
 /** The gate table an ablation swaps out. Optional, so a caller gets the shipped table by default.
  *  The pass needs nothing else from the target: the fold this exists for is `foldsConstAddrOffset`
- *  and rank.ts asks that before offering the axis at all. */
+ *  and rank.ts asks that before offering the variation at all. */
 export interface OffmemberOpts {
   readonly gates?: readonly Gate<OffmemberBase>[];
 }
@@ -339,7 +339,7 @@ export function offmemberBases(sfn: SFn, opts: OffmemberOpts = {}): readonly str
 }
 
 /** Re-spell every admitted base's constant subscripts as members of a synthesized struct.
- *  `null` when nothing is admitted — the axis then contributes no candidate. */
+ *  `null` when nothing is admitted — the variation then contributes no candidate. */
 export function spellOperandMembers(sfn: SFn, opts: OffmemberOpts = {}): SFn | null {
   // Past EVERY `Off<N>` the tree already carries, never the first free one (`ir/struct-names.ts`,
   // shared with the other two minters, which also records that this scan returns 0 on every

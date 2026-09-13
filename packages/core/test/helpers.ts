@@ -7,7 +7,7 @@
 // independent sweeps, so every seed stays at its call site.
 //
 // The SSA generator and the tree interpreter below are the same three functions two differential
-// fuzzes need — `namecoalesce-fuzz` for the `/merge-names` axis and `carrier-name-fuzz` for the
+// fuzzes need — `namecoalesce-fuzz` for the `/merge-names` variation and `carrier-name-fuzz` for the
 // naming walk's own admission table. They ask different questions of the same oracle: generate a
 // function, structure it two ways, interpret both, and compare what they observed. `irTraceOf` is
 // the oracle for the question neither can ask — whether EVERY spelling is wrong the same way.
@@ -32,7 +32,7 @@ export const count = (s: string, needle: string): number => s.split(needle).leng
  *  seeds this rather than reaching for `Math.random`, and a failing seed is a reproduction on its
  *  own.
  *
- *  ONE SPELLING serves every sweep, the `| 0` variant included: `(x + k) | 0` and
+ *  ONE SPELLING serves every sweep, the `| 0` form included: `(x + k) | 0` and
  *  `(x + k) >>> 0` differ only in how the 32-bit pattern is signed, and every operator downstream
  *  (`Math.imul`, `>>>`, `|`, `^`) reads the pattern rather than the sign. Checked draw for draw,
  *  10,000 draws on six seeds including `contract-invariant.test.ts`'s 0xa5c1f70d: no
@@ -420,7 +420,7 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
  *  ONE QUANTITY, TWO READERS. Both naming fuzzes read this same list, and their failing-seed lists
  *  are IDENTICAL seed for seed at all four depths — not a coincidence of two populations: the
  *  residual is an EMISSION defect of the SHIPPED spelling, which both files structure, and each
- *  file's axis varies only a naming choice on top of it. The populations do differ (2,502 vs 2,508
+ *  file's variation varies only a naming decision on top of it. The populations do differ (2,502 vs 2,508
  *  at depth 1), for the reason each file's `JUDGED` states; the DEFECTS do not.
  *
  *  A LIST, NOT A COUNT. A count is green on a change that fixes one defect and adds another, and it

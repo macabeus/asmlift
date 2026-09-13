@@ -278,7 +278,7 @@ export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
  *  memory-touching opcode is `call`, whose variadic operands are arguments and not a base.
  *
  *  Two consumers ask two different questions of it and both need the same answer, which is why it
- *  is here and not next to either: `structure/analysis.ts` uses it for the address-home axis's slot
+ *  is here and not next to either: `structure/analysis.ts` uses it for the address-home variation's slot
  *  model, and `raise/const.ts` to recognise a folded literal that IS an address. */
 export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aload', 'astore']);
 

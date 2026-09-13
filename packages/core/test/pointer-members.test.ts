@@ -216,7 +216,7 @@ describe('refusals — anything that does not land on an element boundary keeps 
   });
 });
 
-// ── `/no-ptr-elem`: the element spelling is an AXIS, not a default ──────────────────────────────
+// ── `/no-ptr-elem`: the element spelling is a VARIATION, not a default─────────────────────────
 // The subscript and the byte arithmetic it replaces are the same address and DIFFERENT objects —
 // compiled against agbcc they differ in which register the `add` targets, at every constant
 // tested. So both are emitted and the differ referees, exactly as `/no-bitfield` does for the
@@ -252,7 +252,7 @@ describe('the element spelling is enumerated as an axis the differ referees', ()
 
   test('the axis follows the FUNCTION naming a container, not the map declaring one', () => {
     // What the gate saves is structuring work, which no assertion here can see: the dedup
-    // collapses the pair wherever the axis changed nothing, so the candidate count is the same
+    // collapses the pair wherever the variation changed nothing, so the candidate count is the same
     // either way. What this pins is the pair — absent where the function does not name a
     // container, PRESENT off the very same map where it does.
     const other: SymbolMap = new Map([
@@ -264,7 +264,7 @@ describe('the element spelling is enumerated as an axis the differ referees', ()
       '.L1:\n\t.word\t0x03000200\n';
     const cands = enumerateCandidates('f', elsewhere, ARMV4T_AGBCC, { symbols: other });
     expect(cands.filter((c) => hasVariation(c.label.split('/'), 'no-ptr-elem'))).toHaveLength(0);
-    // …and the axis IS enumerated for a function that does name it, off the very same map
+    // …and the variation IS enumerated for a function that does name it, off the very same map
     const reaching = enumerateCandidates('f', ELEM_WALK, ARMV4T_AGBCC, { symbols: other });
     expect(reaching.filter((c) => hasVariation(c.label.split('/'), 'no-ptr-elem')).length).toBeGreaterThan(0);
   });

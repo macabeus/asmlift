@@ -601,7 +601,7 @@ describe('the alignment directives are a FAMILY, not three literal spellings', (
   // at 0x8 and `_end` at 0xc, and the raw halfword 0xE003 at 0x2 branches to 2 + 4 + 6 = 0xc —
   // `_end`, so the function returns 1. The same three lines assemble the same way under
   // `.balignw 4, 0x0000`, `.p2alignw 2, 0x0000` and `.ALIGN 2, 0`: gas directives are
-  // case-insensitive, and the `w`/`l` variants fill with a repeated halfword/word pattern.
+  // case-insensitive, and the `w`/`l` forms fill with a repeated halfword/word pattern.
   const bw = (dir: string) => `	thumb_func_start bw
 bw:
 	movs r1, #0x01

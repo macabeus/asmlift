@@ -6,11 +6,11 @@
  * global declarations below follow its include/structs/variables.h.
  *
  * The two trailing FAKE-marked lines are the study's own marks, not upstream annotations:
- * generate.py drops them to build each variant's `-minus` arm, which is what the FAKE column of
+ * generate.py drops them to build each generated source's `-minus` arm, which is what the FAKE column of
  * the curve measures.
  *
  * TWO PROPERTIES OF THE GENERATOR THIS FILE HAS TO RESPECT. It copies this text VERBATIM into
- * every generated variant, header included, so an edit here rides into all 29 of them. And it
+ * every generated source, header included, so an edit here rides into all 29 of them. And it
  * builds a `-minus` arm by dropping every line that CONTAINS the marker as a substring — so
  * nothing above may spell the marker out, including in prose, or the comment saying so is the
  * line that disappears.

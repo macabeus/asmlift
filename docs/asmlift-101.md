@@ -56,7 +56,7 @@ compiler+assembler; the same function is tried against several) — see the
 ### 1.1 From C to machine code (and the road back)
 
 A **compiler** (like GCC) translates C source into **machine code**: raw bytes a CPU executes.
-**Assembly** ("asm") is the human-readable spelling of machine code — one line per CPU
+**Assembly** ("asm") is the human-readable form of machine code — one line per CPU
 instruction, like `cmp r0, #0` ("compare **register** r0 — one of the CPU's handful of named
 storage slots — with 0"). That's enough to read `clamp0` above: `cmp` compares, `bge` is a
 **branch** (a jump to another instruction) taken if the comparison came out ≥, `.L4:` is the
@@ -213,7 +213,7 @@ One consequence you'll feel immediately when contributing: you cannot "just push
 through" — malformed IR fails loudly at the next gate, which is by design.
 
 Language **backends** then print L3 as concrete source: C, Pascal, and a deliberately scoped
-C++ (`packages/core/src/backend/`). One neutral AST, three spellings — every language-specific
+C++ (`packages/core/src/backend/`). One neutral AST, three output languages — every language-specific
 decision (Pascal's `:=`, C's `?:`) lives in a backend, never in the tower.
 
 ### 2.5 Idioms — when the compiler writes riddles
@@ -247,10 +247,10 @@ that an automated loop can eventually _propose_ new patterns and have the oracle
 Assembly rarely proves a type. `x >> 1` compiles to a _logical_ shift (fill with zeros) if `x`
 is unsigned and an _arithmetic_ shift (copy the sign bit) if signed — JavaScript's `>>>` vs
 `>>` — so from the C side, signedness changes the bytes. asmlift's rule:
-when the choice is real, **emit both candidates, compile both, and let objdiff pick** (the
+when the question is real, **emit both candidates, compile both, and let objdiff pick** (the
 score is 0 for exactly one of them). That's `decompileRanked` in
-[`packages/cli/src/rank.ts`](../packages/cli/src/rank.ts) — types are _differ-ranked levers_, not
-guesses. This is only possible because matching decompilation has an oracle; it's the single
+[`packages/cli/src/rank.ts`](../packages/cli/src/rank.ts) — types are _variations the differ ranks_,
+not guesses. This is only possible because matching decompilation has an oracle; it's the single
 biggest philosophical difference from a traditional decompiler.
 
 ### 2.7 Structuring — from CFG back to `if`/`while`/`switch`
@@ -416,7 +416,7 @@ packages/core/            @asmlift/core — the pipeline
                           data), and the C / C++ / Pascal printers
   src/contracts.ts        the boundary contracts — the checks that make the levels real
   src/pipeline.ts         decompile() — the one shared stage spine
-  src/rank.ts             candidate enumeration: the type and re-spelling levers the differ judges
+  src/rank.ts             candidate enumeration: every variation the differ judges
   src/trace.ts            decompileTraced() — the same spine, recorded per stage
   test/                   offline suites + corpus/ (real committed disassembly)
 packages/cli/             @asmlift/cli — the user-facing asmlift interface
@@ -448,32 +448,37 @@ checked-in expected output, snapshot-test style) is a particularly good guided t
 
 ## Glossary
 
-| Term                      | Meaning                                                                                                                                                               |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **ISA**                   | Instruction Set Architecture — a CPU family's instruction vocabulary (Thumb, MIPS, PowerPC)                                                                           |
-| **Frontend**              | The per-ISA stage that decodes assembly into L1 IR                                                                                                                    |
-| **Backend**               | The per-language printer from the neutral L3 AST to C / C++ / Pascal                                                                                                  |
-| **IR**                    | Intermediate representation — the data structure passes analyze and transform                                                                                         |
-| **Basic block / CFG**     | Straight-line instruction run / the graph of blocks and branch edges                                                                                                  |
-| **SSA**                   | Static single assignment — every value defined exactly once                                                                                                           |
-| **Block argument**        | MLIR-style alternative to φ-functions: merge blocks take parameters, branches pass arguments                                                                          |
-| **φ (phi) function**      | Classic SSA's merge construct — "this value is X from edge A, Y from edge B"                                                                                          |
-| **MLIR**                  | LLVM's multi-level IR framework; source of the tower + block-argument ideas                                                                                           |
-| **L1 / L2 / L3**          | asmlift's tower: machine-shaped SSA → typed SSA → neutral structured AST                                                                                              |
-| **Lift / raise**          | Decode asm into IR / move IR up the tower (recognizers + type recovery)                                                                                               |
-| **Structuring**           | Recovering `if`/`while`/`switch` from a CFG                                                                                                                           |
-| **Idiom**                 | A compiler's cheap-instruction spelling of an expensive operation (magic division, soft-div)                                                                          |
-| **Magic division**        | Constant division compiled to multiply+shift (Granlund–Montgomery)                                                                                                    |
-| **Delay slot**            | MIPS: the instruction after a branch executes before the branch takes effect                                                                                          |
-| **Branch-likely**         | MIPS branch variant that _annuls_ its delay slot when not taken (currently declined)                                                                                  |
-| **Matching / byte-exact** | The reconstructed source recompiles to the identical bytes                                                                                                            |
-| **objdiff**               | The community object-file differ; score 0 = match; asmlift's only scorer                                                                                              |
-| **Decline**               | asmlift's typed refusal when it cannot be byte-faithful                                                                                                               |
-| **Annotate mode**         | `onGap: "annotate"` — emit best-effort source with `ASMLIFT_ERROR` markers instead of throwing                                                                        |
-| **Toolchain**             | The exact vintage compiler+assembler that is the spec (agbcc, IDO, KMC GCC, mwcc)                                                                                     |
-| **Target**                | asmlift's ID for one ISA+toolchain pair (`agbcc`, `ido7.1`, `gcc2.7.2kmc`, `mwcc_242_81`); "target object" = the original object a candidate is byte-compared against |
-| **Case / row**            | The benchmark's measurement unit: one function × one toolchain — a "case" before the run, a "row" of `results.json` after                                             |
-| **Prototype (here)**      | Caller-supplied callee arity/void-ness, standing in for a project's headers                                                                                           |
+| Term                      | Meaning                                                                                                                                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ISA**                   | Instruction Set Architecture — a CPU family's instruction vocabulary (Thumb, MIPS, PowerPC)                                                                                                                                                                                                                                     |
+| **Frontend**              | The per-ISA stage that decodes assembly into L1 IR                                                                                                                                                                                                                                                                              |
+| **Backend**               | The per-language printer from the neutral L3 AST to C / C++ / Pascal                                                                                                                                                                                                                                                            |
+| **IR**                    | Intermediate representation — the data structure passes analyze and transform                                                                                                                                                                                                                                                   |
+| **Basic block / CFG**     | Straight-line instruction run / the graph of blocks and branch edges                                                                                                                                                                                                                                                            |
+| **SSA**                   | Static single assignment — every value defined exactly once                                                                                                                                                                                                                                                                     |
+| **Block argument**        | MLIR-style alternative to φ-functions: merge blocks take parameters, branches pass arguments                                                                                                                                                                                                                                    |
+| **φ (phi) function**      | Classic SSA's merge construct — "this value is X from edge A, Y from edge B"                                                                                                                                                                                                                                                    |
+| **MLIR**                  | LLVM's multi-level IR framework; source of the tower + block-argument ideas                                                                                                                                                                                                                                                     |
+| **L1 / L2 / L3**          | asmlift's tower: machine-shaped SSA → typed SSA → neutral structured AST                                                                                                                                                                                                                                                        |
+| **Lift / raise**          | Decode asm into IR / move IR up the tower (recognizers + type recovery)                                                                                                                                                                                                                                                         |
+| **Structuring**           | Recovering `if`/`while`/`switch` from a CFG                                                                                                                                                                                                                                                                                     |
+| **Idiom**                 | A compiler's cheap-instruction spelling of an expensive operation (magic division, soft-div)                                                                                                                                                                                                                                    |
+| **Magic division**        | Constant division compiled to multiply+shift (Granlund–Montgomery)                                                                                                                                                                                                                                                              |
+| **Delay slot**            | MIPS: the instruction after a branch executes before the branch takes effect                                                                                                                                                                                                                                                    |
+| **Branch-likely**         | A MIPS branch that _annuls_ its delay slot when not taken (currently declined)                                                                                                                                                                                                                                                  |
+| **Matching / byte-exact** | The reconstructed source recompiles to the identical bytes                                                                                                                                                                                                                                                                      |
+| **objdiff**               | The community object-file differ; score 0 = match; asmlift's only scorer                                                                                                                                                                                                                                                        |
+| **Candidate**             | One complete C source asmlift emits for a function; each is compiled and scored against the target object                                                                                                                                                                                                                       |
+| **Fan**                   | Every candidate asmlift enumerated for one function, whether it built or not; `pnpm bench fan` lists it                                                                                                                                                                                                                         |
+| **Winner**                | The best-scoring candidate that may be published; its source is the function's result                                                                                                                                                                                                                                           |
+| **Variation**             | One way asmlift can write a function differently (`/defsite`, `/unmerge`, `/raw-globals`); signedness (`unsigned` / `signed`) is one too, and always comes first. A candidate's **variations** are the ordered list it applied, shown as `unsigned/defsite/raw-globals`. Every word here is in [`vocabulary.md`](vocabulary.md) |
+| **Dropped / withheld**    | Dropped: the scorer refused the candidate. Withheld: it compiled and scored, but was refused publication for want of a byte-exact proof                                                                                                                                                                                         |
+| **Decline**               | asmlift's typed refusal when it cannot be byte-faithful                                                                                                                                                                                                                                                                         |
+| **Annotate mode**         | `onGap: "annotate"` — emit best-effort source with `ASMLIFT_ERROR` markers instead of throwing                                                                                                                                                                                                                                  |
+| **Toolchain**             | The exact vintage compiler+assembler that is the spec (agbcc, IDO, KMC GCC, mwcc)                                                                                                                                                                                                                                               |
+| **Target**                | asmlift's ID for one ISA+toolchain pair (`agbcc`, `ido7.1`, `gcc2.7.2kmc`, `mwcc_242_81`); "target object" = the original object a candidate is byte-compared against                                                                                                                                                           |
+| **Case / row**            | The benchmark's measurement unit: one function × one toolchain — a "case" before the run, a "row" of `results.json` after                                                                                                                                                                                                       |
+| **Prototype (here)**      | Caller-supplied callee arity/void-ness, standing in for a project's headers                                                                                                                                                                                                                                                     |
 
 ## References
 

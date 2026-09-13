@@ -91,8 +91,8 @@ describe('a `lead` is walked like every other sub-expression', () => {
     };
     const m = localMentions(f);
     expect(readsOf(m.get('r')!)).toBe(1);
-    // …and it is NOT counted as an `index` base: only `g` stands in that position, and the base
-    // levers re-spell exactly that use shape.
+    // …and it is NOT counted as an `index` base: only `g` stands in that position, and the base-hoisting
+    // variations re-spell exactly that use shape.
     expect(m.get('r')!.baseUses).toBe(0);
     expect(m.get('r')!.otherUses).toBe(1);
     // the sibling positions still count as they always did
@@ -300,12 +300,11 @@ describe('the LOGICAL right shift has no IDO Pascal spelling — it declines, ne
 // THE PROPAGATION RULE, which is the other half of the mechanism above. `withheldReason` decides
 // what a proof-gated spelling may publish AT; this decides which spellings are proof-gated at all.
 //
-// The obligation is created by ONE lever (`/unreduce`, when it cannot settle a device-memory fact
-// from inside the pass) and has to survive every lever composed after it. That carry used to be
-// hand-written per pairing — `return { sfn: t, needsProof: u.needsProof }` — and the union type
-// made `return t;` a type-correct way to delete it: ablated, tsc stayed clean and every offline and
-// matching suite stayed green, and the triple would have published an unprovable spelling as
-// asmlift's answer. Composing through one combinator makes that inexpressible, so the combinator is
+// The obligation is created by ONE variation (`/unreduce`, when it cannot settle a device-memory fact
+// from inside the pass) and has to survive every variation composed after it. Written by hand per
+// pairing — `return { sfn: t, needsProof: u.needsProof }` — the union type makes `return t;` a
+// type-correct way to delete it: ablated, tsc stays clean and every offline and matching suite stays
+// green, and the triple publishes an unprovable spelling as asmlift's answer. Composing through one combinator makes that inexpressible, so the combinator is
 // the thing to pin.
 describe('a proof obligation survives every lever composed after it (rank.ts composeLevers)', () => {
   const tree = (name: string): SFn => ({ name, params: [], locals: [], globals: [], retType: T.u(32), body: [] });
@@ -335,8 +334,8 @@ describe('a proof obligation survives every lever composed after it (rank.ts com
     expect(proofOf(composeLevers(tree('in'), [plain('a'), plain('b')]))).toBe(false);
   });
 
-  // REQUIRE-ALL, not skip-on-decline: the label names the levers that fired, so a composition
-  // missing one of them must not be emitted under the full label.
+  // REQUIRE-ALL, not skip-on-decline: a candidate's variations name the ones that fired, so a
+  // composition missing one of them must not be emitted under all of their names.
   test('one declining stage declines the whole composition, wherever it sits', () => {
     const decline = () => null;
     expect(composeLevers(tree('in'), [decline, proving('b')])).toBeNull();

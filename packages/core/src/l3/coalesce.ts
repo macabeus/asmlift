@@ -271,14 +271,14 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   },
 ];
 
-/** Every legal single merge, each as its own tree — NOT one committed choice.
+/** Every legal single merge, each as its own tree — NOT one committed decision.
  *
  *  Which pair a register allocator coalesced is not derivable from the L3 tree, and first-fit gets
  *  it wrong. Run kleod:UpdateHUDCounterDisplay's published repro script (results.json carries it)
  *  and read the candidate table: of its two legal merges, one scores WORSE than not merging at all
  *  and declaration order is the one that picks it. Emitting no merges at all costs that row its
  *  match, which is what guards this file. `rank.ts` already has the idiom for exactly this —
- *  `/regcopy`'s "the tail choice is allocator-ambiguous, so both are ranked" — so every candidate is
+ *  `/regcopy`'s "the tail decision is allocator-ambiguous, so both are ranked" — so every candidate is
  *  emitted and the differ referees.
  *
  *  ACCEPTED, NOT FIXED: a survivor assigned only on SOME paths still absorbs the other's value on

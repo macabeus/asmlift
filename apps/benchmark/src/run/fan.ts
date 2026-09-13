@@ -47,7 +47,7 @@ import { TOOLCHAINS, type Toolchain } from '../toolchains';
 
 /** How many candidates this command will COMPILE before refusing without `--force`.
  *
- *  The scope guard, and it is not decorative: a fan is a product over enumeration axes, so row
+ *  The scope guard, and it is not decorative: a fan is a product over the variations enumerated, so row
  *  sizes are not on ONE scale. `synthetic:sizebound:agbcc` enumerates 800 and scores them here in
  *  **48 s cold, 10 s once the candidate cache holds them** (both measured on this machine) — a
  *  fine price for a diagnostic, and the limit has to sit well above it or the command refuses the
@@ -108,7 +108,7 @@ export interface FanOptions {
   /** print this candidate's SOURCE (its label, or `best`) after the table */
   show?: string;
   /** COMPARE this row's fan against the count the artifact at this ref recorded for it — the
-   *  fan multiplier a round is asked to report before it merges an axis. Spelled `--base` rather
+   *  fan multiplier a round is asked to report before it merges a variation. Spelled `--base` rather
    *  than a second word for "which committed artifact to compare against": `diff`, `regression`,
    *  `baseline` and `stale-check` all already take it, and two names for one ref is how the two
    *  spellings come to mean different things. */
@@ -127,7 +127,7 @@ export interface FanOptions {
 }
 
 /** THE FAN MULTIPLIER, against what the artifact at `base` recorded for this same row — one line,
- *  and the number a round that ships an axis is asked to report before it merges.
+ *  and the number a round that ships a variation is asked to report before it merges.
  *
  *  It is a comparison of THIS TREE's enumeration against a RECORDED one, which is sound only
  *  because both are the same call: the run wrote `candidateCount` out of `rankOptionsFor`'s
@@ -428,7 +428,7 @@ export function synthesizedRefs(tier: Case['tier'], best: RankedCandidate): Symb
 }
 
 /** `--show`: the named candidate, or the winner under the reserved name `best`. Undefined ⇒ the
- *  caller lists what there was, because a typo'd label and a lever that produced no candidate at
+ *  caller lists what there was, because a typo'd name and a variation that produced no candidate at
  *  all are the same silence otherwise.
  *
  *  `best` IS `candidates[0]` and only because the caller hands it a SCORED list: `rankBy` sorts
@@ -830,7 +830,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     note(`asmlift: [declined] annotate pass threw: ${(e as Error).message.split('\n')[0]}`);
   }
 
-  // A lever that THREW produced no candidate to drop, and the benchmark supplies no sink for that
+  // A variation that THREW produced no candidate to drop, and the benchmark supplies no sink for that
   // channel — cli/rank.ts says so at the field: "a whole pre-fan half of a row's fan can still
   // vanish from a `pnpm bench run` with nothing printed". Here it is printed.
   const leverErrors = new Map<string, string>();
@@ -843,8 +843,8 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     onLeverError: (label: string, error: string) => leverErrors.set(label, error.split('\n')[0]),
   };
   // ONCE PER LABEL. Both the pre-count enumeration and the scoring pass enumerate, and each
-  // re-runs every lever, so a lever that throws throws twice — reported twice, it reads as two
-  // broken levers.
+  // re-runs every variation, so a variation that throws throws twice — reported twice, it reads as two
+  // broken variations.
   const printedLevers = new Set<string>();
   // THE MULTIPLIER, on stdout beside the fan it is about — printed at every exit this run can
   // reach, whether or not it has a count: the `--enumerate` listing, the over-limit refusal (which

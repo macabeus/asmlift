@@ -1,4 +1,4 @@
-// The walk→index re-spelling (l3/reindex.ts) — the third differ-ranked lever. Pins: the golden
+// The walk→index respell variation (l3/reindex.ts) — the third differ-ranked variation. Pins: the golden
 // while-walk re-spells with the bound simplified; every out-of-scope shape DECLINES (returns
 // null) rather than approximating; the transform never mutates its input.
 import { describe, expect, test } from 'vitest';
@@ -840,7 +840,7 @@ const GATE_ABLATIONS: { id: string; title: string; fixture: () => SFn }[] = [
   {
     id: 'volatile-walk',
     title: 'a volatile walk pointer declines',
-    // `pointeeVolatile`, the flag the `/volatile` lever mints — an object-volatile POINTER has no
+    // `pointeeVolatile`, the flag the `/volatile` variation mints — an object-volatile POINTER has no
     // inhabitant (cfamily.ts), and `/volatile/indexed` (rank.ts) is what reaches this gate.
     fixture: () => constCountdown((fn) => (fn.locals[1].pointeeVolatile = true)),
   },

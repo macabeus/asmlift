@@ -230,8 +230,8 @@ describe('declaration shapes (P2)', () => {
   test('the axis is INERT where the recovery never fires — no arm, no fan', () => {
     // The gate is a superset (it asks whether the FUNCTION names a multidimensional array, not
     // whether any residual carries a row term), so the flat spelling's own codegen still admits
-    // the axis — and both arms then structure the identical tree, which the tree dedup collapses.
-    // Pinned because an axis that doubled the fan for nothing would be a price with no question.
+    // the variation — and both arms then structure the identical tree, which the tree dedup collapses.
+    // Pinned because a variation that doubled the fan for nothing would be a price with no question.
     const flat =
       '\tlsl\tr0, r0, #0xa\n\tadd\tr0, r0, r1\n\tlsl\tr0, r0, #0x1\n' +
       '\tldr\tr1, .L1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03000900\n';

@@ -144,7 +144,7 @@ describe('pickCandidate', () => {
     expect(pickCandidate(cands, 'best')?.label).toBe('a');
   });
 
-  // A typo'd label and a lever that produced no candidate at all are the same silence otherwise.
+  // A typo'd name and a variation that produced no candidate at all are the same silence otherwise.
   it('returns undefined for a label nothing carries, so the caller can say so', () => {
     expect(pickCandidate(cands, 'nope')).toBeUndefined();
   });
@@ -520,7 +520,7 @@ describe('fanDiffLine', () => {
     expect(line).toBe('asmlift: [fan-diff] proj:Fn:agbcc: 59904 → 225792 (3.77×) vs origin/main');
   });
 
-  // A fan that SHRANK is the same line under 1 — a round that prunes an axis is reporting a
+  // A fan that SHRANK is the same line under 1 — a round that prunes a variation is reporting a
   // multiplier too, and a renderer that only knows growth makes it invisible.
   it('reports a shrink as a multiplier under 1', () => {
     expect(fanDiffLine('r', 48, 'origin/main', artifact([{ id: 'r', candidateCount: 96 }]))).toContain(

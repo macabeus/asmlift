@@ -4,7 +4,7 @@
 // itself (gcc/fold-const.c:5085), so over a SHARED value the two spellings are a computation and
 // a register apart — six instructions against five, compiled with agbcc.
 //
-// The refusals carry the lever: every operand shape the fold rule does not reach compiles the
+// The refusals carry the variation: every operand shape the fold rule does not reach compiles the
 // same either way, so firing there could only duplicate the primary.
 import { expect, test } from 'vitest';
 
@@ -46,7 +46,7 @@ test('a negate over a shared subtraction re-spells as `0 - x`', () => {
 });
 
 // The same negate over a subtraction nothing else computes: RTL combine folds the negate back in
-// and both spellings emit `sub r0, r1, r0`, so the lever declines rather than offer a duplicate.
+// and both spellings emit `sub r0, r1, r0`, so the variation declines rather than offer a duplicate.
 const SINGLE = `fn singlesub {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = sub %1, %0
@@ -60,7 +60,7 @@ test('a negate over a single-use subtraction declines', () => {
 });
 
 // A shared ADD under the negate: `-(a + b)` has no fold rule to dodge, so both spellings compile
-// identically and the lever must not fire.
+// identically and the variation must not fire.
 const SHAREDADD = `fn sharedadd {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = add %1, %0

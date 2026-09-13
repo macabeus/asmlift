@@ -10,7 +10,7 @@
 //     evidence that a row was computed and not a preference;
 //   • …and so do `g[r][i]` and the byte CAST the recovery displaces, which produces the same
 //     row-stride term — so the residual says nothing about which of THOSE two was written, and a
-//     default would be answering a question the asm does not ask. That pair is why this is an axis;
+//     default would be answering a question the asm does not ask. That pair is why this is a variation;
 //   • where the compiler reassociates the flat sum into the same separate scales, nothing referees
 //     any of it, which is why the recovery refuses the already-divided element index that
 //     `arrayAccess` holds (see the note at that site).
@@ -91,7 +91,7 @@ describe.runIf(HAVE)('the DECLARED-SUBSCRIPT premise (checkout-gated)', () => {
     expect(hex.get('pow2-two')).not.toBe(hex.get('pow2-flat'));
   });
 
-  // THE PAIR THAT MAKES THE RECOVERY AN AXIS RATHER THAN A DEFAULT, and it is the pair the two
+  // THE PAIR THAT MAKES THE RECOVERY A VARIATION RATHER THAN A DEFAULT, and it is the pair the two
   // tests above do not cover. The evidence the recovery reads is a term at the ROW stride, and the
   // cast spelling produces one too — its agbcc output is
   //

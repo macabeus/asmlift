@@ -1,4 +1,4 @@
-// The in-place-join axis (structure.ts materializeJoinFeeds, rank.ts `/inplace`): a load whose
+// The in-place-join variation (structure.ts materializeJoinFeeds, rank.ts `/inplace`): a load whose
 // result rides a `cond_br` edge as a successor arg is materialized, so the naming walk homes the
 // merge in the load's own variable, the identity arm elides, and the `if` renders one-sided —
 // `v = *p; if (v > 31) v = 32;`. Off by default.
@@ -69,7 +69,7 @@ test('off by default: the same IR keeps the fresh-variable two-armed spelling', 
   expect(emit(CLAMP, false)).toBe(off);
 });
 
-// A const feeding the same merge shape is NOT this axis's case — /defsite owns constant
+// A const feeding the same merge shape is NOT this variation's case — /defsite owns constant
 // placement, and the load gate must leave it exactly as the default renders it.
 const CONSTFED = `fn constfed {
 ^bb0(%0: s32):
@@ -90,7 +90,7 @@ test('a const-fed merge is untouched (that placement is /defsite)', () => {
 });
 
 // A load riding a PLAIN `br` arg is a loop-carried value: its home is the loop-param
-// machinery's question, so the axis leaves it alone.
+// machinery's question, so the variation leaves it alone.
 const BRFED = `fn brfed {
 ^bb0(%0: s32*):
   %1: s32 = load %0 {off=0, signed=true, width=4}

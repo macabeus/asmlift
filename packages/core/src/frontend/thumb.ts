@@ -932,7 +932,7 @@ function decode(
       const ad = rest.match(/^\.(align|balign|p2align)([wl]?)\b\s*(.*)$/i);
       if (ad) {
         const kind = ad[1].toLowerCase();
-        const patternFill = ad[2] !== ''; // the `w`/`l` variants
+        const patternFill = ad[2] !== ''; // the `w`/`l` forms
         const am = ad[3].trim().match(/^(\d{1,3})(?:\s*,\s*([^,]*?))?\s*$/); // N [, fill]; max-skip → no match
         const n = am ? Number(am[1]) : NaN;
         const pow = kind === 'balign' ? Math.log2(n) : n;
@@ -3416,7 +3416,7 @@ export function lift(
   // handed to a callee arrives there through a frame this conjunct never looks at, and what bounds
   // its extent is the audit's frame-accounting rule rather than anything here.
   //
-  // WHY IT IS NOT WIDENED anyway, since a wider frame is the obvious next lever. Three shapes,
+  // WHY IT IS NOT WIDENED anyway, since a wider frame is the obvious next change. Three shapes,
   // each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
   // -fprologue-bugfix`, and only the first is about extent at all:
   //

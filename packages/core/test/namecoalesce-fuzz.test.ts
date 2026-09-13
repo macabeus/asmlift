@@ -3,7 +3,7 @@
 // The benchmark cannot see this pass's failure mode. A byte score rewards a MATCH, and a candidate
 // that merged two variables it should not have still compiles, still scores, and simply computes
 // something else — every defect this file has caught moved zero benchmark rows. So the oracle has
-// to be the program's own behaviour: structure the same IR twice — once with the axis, once
+// to be the program's own behaviour: structure the same IR twice — once with the variation, once
 // without — interpret both emitted trees, and require the same observable trace.
 //
 // Arm A: no merge the pass makes changes what the function does. Arm B drops each gate the table
@@ -47,7 +47,7 @@ const SEEDS = 4000;
 
 /** Both spellings of one seed and what the IR itself does, or null when the shape is not one this
  *  can judge. `ir` is the ORACLE — the observables read off the IR rather than off a structured
- *  tree, so an EMISSION defect the axis-off spelling shares is visible to it and invisible to
+ *  tree, so an EMISSION defect the variation-off spelling shares is visible to it and invisible to
  *  `off`. It found one: a call whose only consumer was itself dropped vanished from every spelling
  *  at once (`dead-effect.test.ts`). */
 function spellings(
@@ -70,7 +70,7 @@ function spellings(
     off = structure(fn, {});
     on = structure(fn, { coalesceMergeNames: true }, hooks);
   } catch {
-    // a decline is not a difference — and with the axis on it can only be the primary's own,
+    // a decline is not a difference — and with the variation on it can only be the primary's own,
     // which `structure` re-checks first
     return null;
   }
@@ -159,7 +159,7 @@ describe.each([
 // attached, so a rule added later is still held to the bar unless someone argues it out.
 const OUT_OF_REACH = new Set(['type']);
 
-// AGAINST THE IR, not against the axis-off spelling. "Dropping it changes what some function does"
+// AGAINST THE IR, not against the variation-off spelling. "Dropping it changes what some function does"
 // was measured as "the two spellings differ", which a rule could satisfy by producing a DIFFERENT
 // RIGHT ANSWER, and which cannot tell a gate that prevents a wrong program from one that prevents
 // an unusual one. The bar here is the harder one a `sound` claim actually makes: some function the

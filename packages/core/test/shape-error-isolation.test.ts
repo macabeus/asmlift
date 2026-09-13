@@ -1,9 +1,9 @@
 // A SHAPE IS ITS OWN CANDIDATE — and it must fail as its own candidate.
 //
 // `rank.ts`'s `respell` derives the statement shapes (`/initfirst`, `/pollguard`, `/pollread`, and
-// all of them together) onto every lever tree. Each subset gets its own try, so two facts hold of
+// all of them together) onto every respelled tree. Each subset gets its own try, so two facts hold of
 // that loop: a throw deriving one subset leaves the later ones in the fan, and the report names
-// `name + suffix + shapeSuffix` — the shape that failed, not the base lever's label.
+// `name + suffix + shapeSuffix` — the shape that failed, not the respell variation's suffix.
 //
 // The shapes are mocked because no committed disassembly fires more than `/initfirst`: the fixture
 // that would exercise this naturally is a compiler fact nobody has, and the isolation is a
@@ -56,7 +56,7 @@ describe('one throwing shape does not take the others with it', () => {
   test('…while the LATER subsets are still derived ONTO THE LEVER TREES', () => {
     // `/pollguard` on its own comes from the base-tree shape loop, which has always had its own
     // try per subset — the regression this pins is the shapes derived INSIDE `respell`, so the
-    // assertion has to name a lever and a shape together.
+    // assertion has to name a variation and a shape together.
     expect(
       cands.filter(
         (c) => hasVariation(c.label.split('/'), 'regionbase') && hasVariation(c.label.split('/'), 'pollguard'),

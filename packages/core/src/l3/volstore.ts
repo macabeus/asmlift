@@ -1,9 +1,9 @@
-// L3 re-spelling lever: pin a STORE at a fixed DEVICE-REGISTER address `volatile`
+// L3 respell variation: pin a STORE at a fixed DEVICE-REGISTER address `volatile`
 // (`*(volatile s32 *)0x40000d4 = x` rather than `*(s32 *)0x40000d4 = x`).
 //
 // A numeric address has no declaration anywhere, so whether the original source wrote through a
 // `volatile` lvalue is not derivable from the asm — the same gap l3/volatileptr.ts's header
-// argues. That lever answers it for a pointer LOCAL holding the address; this one answers it
+// argues. That variation answers it for a pointer LOCAL holding the address; this one answers it
 // where there is no local at all, which is the spelling a `#define REG(x) *(vu32 *)(x)` macro
 // produces and the shape structure.ts leaves when the address re-materializes at each use.
 //
@@ -42,7 +42,7 @@
 // A `volatile` qualifier only restricts the compiler, so widening the range can never make a
 // candidate WRONG; what it would make is a claim about ordinary memory that the target denies
 // (IWRAM, EWRAM, palette, VRAM and OAM are memory a source does not qualify — target.ts) and that
-// the differ can only referee by luck. Measured by running the lever twice, once with the declared
+// the differ can only referee by luck. Measured by running the variation twice, once with the declared
 // range and once with one admitting every constant address: 8 trees over 7 rows carry a
 // const-address store the window excludes, and the fan moves on two of them —
 // `synthetic:readarm` 6 candidates → 8 (the extra one TIES its match at 0) and
@@ -55,29 +55,29 @@
 // address outside this window on 21 (tree, local, address) pairs, 16 of them on agbcc — including
 // `kleod:WritePaletteColor:agbcc` (retired 2026-09-13), then a published byte-exact MATCH whose winning source contained
 // `*(volatile s32 *)50351492 = v2 + 5;` at 0x03004D84, which is IWRAM — the same minted-cast form
-// this lever produces, at an address this lever's window refuses.
+// this variation produces, at an address this variation's window refuses.
 //
 // THE TWO ARE SEPARATED BY THEIR DERIVATION AND NOT BY WHAT THEY EMIT, which is the trap in
 // reading that spelling as a contradiction. `/inlinebase` alone mints no qualifier at all —
 // enumerated on that row, `unsigned/inlinebase` carries zero `volatile` casts and
 // `unsigned/inlinebase/volatile` carries three. The qualifier comes from `/volatile`, which put it
 // on a pointer LOCAL the asm shows the compiler re-materializing rather than keeping; inlining
-// then carries that codegen fact onto each cast it leaves behind. This lever runs where no such
+// then carries that codegen fact onto each cast it leaves behind. This variation runs where no such
 // local ever existed, so its only input is the number — and outside a range the target has
-// declared, a number supports nothing. The window is where THIS lever's evidence runs out, not
+// declared, a number supports nothing. The window is where THIS variation's evidence runs out, not
 // where the target's permission does.
 //
 // (So the two are not foldable on the window, and the fold is not free: adopting it for `/volatile`
 // would delete the WritePaletteColor spelling. `deviceVolatileClaims` in volatileptr.ts already
 // unifies the COUNT side, which is the half where one answer really is enough. Nor do they
 // COMPOSE over the tree's OWN locals: that pairing would qualify a function's existing pointer-local
-// homes and its raw-constant stores together, and over 834 corpus trees both levers fire on ONE —
+// homes and its raw-constant stores together, and over 834 corpus trees both variations fire on ONE —
 // `kleod:SetupBG3WindowOverlay:agbcc`, which neither decompiler scores — and under two DIFFERENT
 // published classifications: asmlift `noncompile` (agbcc rejects its call to `m4aSoundVSyncOff`),
 // m2c `declined`. A pairing whose whole reach is a row asmlift cannot compile is one a row has yet
 // to demand.
 //
-// A lever that MINTS the locals is a different question with a different answer, and `rank.ts`
+// A variation that MINTS the locals is a different question with a different answer, and `rank.ts`
 // pairs this pass with one: `/regionbase` homes the regions holding two or more direct uses of a
 // device base and leaves every other spelling of the same address inline, so both qualifiers have
 // something to claim in one function. `synthetic:dmascope` is that row.)
@@ -85,11 +85,11 @@
 // SCOPE: STORES only. A device READ is a different question with a different answer — the idiom
 // fold's DCE drops a use-less device load outright (synthetic:dmaback), so a read that survives to
 // L3 is one whose value the function consumes, and whether THAT may be CSEd is the question
-// `/reread-globals` referees as a structuring axis. The price of pinning one is real and is
+// `/reread-globals` referees as a structure variation. The price of pinning one is real and is
 // measured on `synthetic:ucmp:agbcc`, a byte-exact match whose loop test READS 0x3001048: qualify
-// that read and the row scores 15. This lever does not reach it — ucmp's stores go through a
+// that read and the row scores 15. This variation does not reach it — ucmp's stores go through a
 // runtime address (`*(u8 *)(v1 + 0x3002000)`), so it declines there on `non-const-address`, in
-// both configurations and with any window. No row demands the read spelling, and a lever with no
+// both configurations and with any window. No row demands the read spelling, and a variation with no
 // inhabitant is what "earn the level" forbids.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import { cellAddress, inRange } from './address';
@@ -127,7 +127,7 @@ export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
   {
     // NOT "the target denies this address may be volatile" — `/volatile` qualifies IWRAM on eleven
     // agbcc rows, one of them a published match, and it is right to: see the header's last
-    // paragraph. This gate is about what THIS lever has evidence for, which is the address alone.
+    // paragraph. This gate is about what THIS variation has evidence for, which is the address alone.
     id: 'outside-window',
     why: 'the address is the only evidence this lever has, and outside the window it supports nothing',
     sound: false,

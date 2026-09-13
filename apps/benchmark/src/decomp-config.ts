@@ -144,7 +144,7 @@ export function scoreViaBenchConfig(
  *  Nothing here decides whether a reproduction CACHES. The candidate-object cache needs no
  *  per-project declaration — everything the command reads is measured — and it is on by default,
  *  so a reader running one of these scripts gets the same store the harness does unless they say
- *  ASMLIFT_CANDCACHE=0. Sound either way: a cache is a throughput lever and never a result lever, so a miss is
+ *  ASMLIFT_CANDCACHE=0. Sound either way: a cache changes throughput and never a result, so a miss is
  *  indistinguishable in RESULT from no cache at all. */
 export function writeScoreConfig(
   id: ToolchainId,

@@ -7,8 +7,8 @@
 // declares which one it means instead of restating four lines and drifting.
 //
 //   • baseConst   — a deref BASE, through SCALAR pointer casts only. A cast to a STRUCT pointer is
-//     the dot-form's base and is refused, because a lever that re-spells THROUGH it collapses the
-//     stride (`((struct S *)K)[i].f` is not `((u8 *)K)[…]`). This is the reading a lever that
+//     the dot-form's base and is refused, because a respell variation that re-spells THROUGH it collapses the
+//     stride (`((struct S *)K)[i].f` is not `((u8 *)K)[…]`). This is the reading a respell variation that
 //     REWRITES the base needs: l3/nearbase.ts's clusters, l3/volstore.ts's qualifier.
 //   • addrConst   — the address an expression IS, through ANY pointer cast. Wider, and safe
 //     because nothing re-spells through it: l3/volatileptr.ts counts volatility claims with it.

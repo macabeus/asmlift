@@ -624,7 +624,7 @@ registerCandidateCompiler('mwcc', (source, _symbol, backendId) =>
 // symbol is MANGLED (`Vec::dot(Vec*)` → `dot__3VecFP3Vec`), so the scoring symbol is the mangled
 // string, and objdiff aligns the candidate to the target by exactly that name. Same container,
 // same flags — only the source extension differs: the compiler is one binary, the language is a
-// flag (a future `target.language` axis).
+// flag (a future `target.language` field).
 
 /** Compile reference C++ (`.cp`) with CodeWarrior → {obj (scoring target), disasm (frontend input)}. */
 export function compilePpcCppTarget(cppSource: string, _symbol: string): { obj: string; asm: string } {

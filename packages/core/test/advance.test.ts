@@ -19,8 +19,8 @@
 // the memory operand — and only the CONJUNCTION reproduces the target.
 //
 // READ AS A MAPPING FROM THE ASM these four corners say `adds` ⇒ volatile-and-advanced, which is a
-// FUNCTION, and the level tower says a function is a default. The answer to that — why it is an
-// axis anyway, and what would turn it into a `compilerBehaviors` default — is at the `/advance`
+// FUNCTION, and the level tower says a function is a default. The answer to that — why it is a
+// variation anyway, and what would turn it into a `compilerBehaviors` default — is at the `/advance`
 // roster entry in rank.ts. It is not "the subscript spelling is right for every access the compiler
 // folded": those accesses carry no stamp, so the rule below never sees them.
 import { expect, test } from 'vitest';
@@ -146,7 +146,7 @@ test('the advanced access still denotes the cell its absolute address names', ()
   expect(out).toContain('67108938');
 });
 
-// ── the lever ────────────────────────────────────────────────────────────────────────────────
+// ── the variation ────────────────────────────────────────────────────────────────────────────
 // The decline cases build trees directly rather than lifting asm: each one differs from the
 // admitted shape in exactly ONE of the pass's rules, which an IR fixture cannot isolate (the
 // evidence and the addresses are produced together by the fold).

@@ -1,4 +1,4 @@
-// L3 poll-shape re-spelling levers: `pollGuards` regrows an empty bottom-tested loop's guard;
+// L3 poll-shape respell variations: `pollGuards` regrows an empty bottom-tested loop's guard;
 // `pollReads` folds a materialized poll's re-read back into its while condition. Each carries
 // its own trace argument below.
 //
@@ -6,7 +6,7 @@
 //
 // For an empty body the two forms compile to the SAME instructions — gcc collapses the guard
 // into the bottom test late (jump optimization), AFTER flow has counted the guard's reads — so
-// the choice leaves no instruction trace, only a register-allocation ripple: the extra
+// the decision leaves no instruction trace, only a register-allocation ripple: the extra
 // source-level read raises the condition operands' ref counts, which re-orders the allocator's
 // priorities for the WHOLE function (the busy-wait's base landing in a low reg vs `ip`). Which
 // form the source spelled is unrecoverable from the bytes; both are emitted and the differ
@@ -34,7 +34,7 @@ export function pollGuards(sfn: SFn): SFn | null {
   return changed ? { ...sfn, body } : null;
 }
 
-// L3 re-spelling lever: a materialized POLL re-reads in its own condition.
+// L3 respell variation: a materialized POLL re-reads in its own condition.
 //
 //     v = dma[2]; while ((v & BUSY) != 0) { v = dma[2]; }   →   while ((dma[2] & BUSY) != 0) {}
 //

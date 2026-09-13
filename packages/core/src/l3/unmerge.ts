@@ -1,5 +1,5 @@
-// L3 re-spelling lever: duplicate a join statement back into the arms the compiler merged it out
-// of — the dual of l3/tailmerge.ts, and a LEVER where that one is unconditional.
+// L3 respell variation: duplicate a join statement back into the arms the compiler merged it out
+// of — the dual of l3/tailmerge.ts, and a VARIATION where that one is unconditional.
 //
 // agbcc cross-jumps a store the source wrote in both arms into the join block, so the lifted CFG
 // carries the address and the value on merge parameters and SSA destruction mints a temp per
@@ -12,20 +12,20 @@
 // `*(u16 *)A2 = B2;` inside the other — two whole statements, no temps. Substituting each arm's
 // own definitions into the join statement and duplicating it back recovers that spelling.
 //
-// A LEVER, NOT A DEFAULT, and the reason is the tower's: the LIFTED TREE underdetermines the
+// A VARIATION, NOT A DEFAULT, and the reason is the tower's: the LIFTED TREE underdetermines the
 // source. This is a compiler claim, so it was compiled — agbcc `gcc 2.9-arm-000512` at
 // `TOOLCHAIN.agbccFlags`, both spellings, `diff` on the `.s`:
 //
 //   - the example above (an ADDRESS temp and a VALUE temp, against `*gA1 = gB1;` in one arm and
 //     `*gA2 = gB2;` in the other, `v17` typed as the store's own type) is BYTE-IDENTICAL. There
-//     the merge really is the compiler's own, and the lever costs one candidate to say so.
+//     the merge really is the compiler's own, and the variation costs one candidate to say so.
 //   - `synthetic:armcb2`'s shape is NOT. Only the VALUE merges there — the store's address,
 //     `gSlot[1]`, is common to both arms — and the per-arm spelling keeps TWO literal-pool
 //     islands and a `b` to the join where the merged one has a single island and no `b`.
 //
 // So the mapping from this tree back to a source is not a function, and it is not uniformly
 // many-to-one either: which way it goes is a property of the SHAPE, which no gate here can read
-// off the tree. That is exactly the tower's test for an axis rather than a default. Both
+// off the tree. That is exactly the tower's test for a variation rather than a default. Both
 // spellings are emitted and the differ referees.
 //
 // Re-compile before restating either half: the VALUE TEMP'S TYPE alone changes the answer. Give
@@ -106,8 +106,8 @@
 // rule or `pushJoin`'s own narrowing refuses the same sites: `empty-arm` 168, `tail-is-not-an-if`
 // 40, `empty-arm-has-no-tail` 16. The two VALUE gates never fire at all — the census prints
 // `value: (never fired)`, and each of them carries the proof below that it cannot. So
-// `ablateHeuristic` has reach into exactly one rule here, and an axis built on any of the other five
-// would measure 0 rows moved for a reason that has nothing to do with the axis. RE-RUN BOTH before
+// `ablateHeuristic` has reach into exactly one rule here, and a variation built on any of the other five
+// would measure 0 rows moved for a reason that has nothing to do with the variation. RE-RUN BOTH before
 // quoting either: the generated population says 0 of 6 and the corpus says 1 of 6, which is itself
 // the lesson — a fuzz generator's shapes are not the corpus's.
 //
@@ -146,7 +146,7 @@
 // reading `*p` and a kept assignment to an address-taken local can name the same object under two
 // spellings, and the name-keyed refusal below (an intervening assignment writes a name one of
 // those values READS) cannot see it. That is one question further out than this pass models —
-// every other lever here defers it to the same name-keyed model — and the sweep behind this note
+// every other respell variation here defers it to the same name-keyed model — and the sweep behind this note
 // found no inhabitant: 0 arms this pass ACCEPTS hold a kept assignment to an address-taken local
 // after the first definition, the same sweep that found 0 holding one to a global. That sweep's
 // population was the agbcc rows whose BASE TREE the rig could build, which is not the corpus's
@@ -558,7 +558,7 @@ function pushJoin(
 }
 
 /** The tree with every eligible join statement pushed back into its arms, or null when no site
- *  qualified — the lever declines rather than re-emitting the primary spelling. */
+ *  qualified — the variation declines rather than re-emitting the default spelling. */
 export function unmergeJoins(sfn: SFn, gates: UnmergeGates = {}): SFn | null {
   const mentions = localMentions(sfn);
   const localNames = new Set(sfn.locals.map((l) => l.name));

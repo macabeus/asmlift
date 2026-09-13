@@ -479,7 +479,7 @@ switch (command) {
     // tens of thousands of sources to answer a question that is always about one function.
     //
     // `--base <ref>` adds one line: this row's fan against the count the artifact at that ref
-    // recorded — the multiplier a round reports before merging an axis, without a bench run.
+    // recorded — the multiplier a round reports before merging a variation, without a bench run.
     //
     // `--asm <file.s> --toolchain <id>` swaps the row for a raw `.s`, and then the positional is
     // the SYMBOL rather than a row id. Enumeration only: scoring needs a target object, which is

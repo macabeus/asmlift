@@ -1,6 +1,6 @@
 // A DEF-MOVING PASS MINTS TOO, and the placement differential has to judge what it minted.
 //
-// `rank.ts`'s `survives` is handed the OUTER lever's name diff. For a standalone mover
+// `rank.ts`'s `survives` is handed the OUTER variation's name diff. For a standalone mover
 // (`/nearbase`, `/nearbase/sinkinit`) that diff is EMPTY — `before` is the primary tree — and
 // `assertPlacementSurvives` returns on its first line while the pass mints and places a cluster
 // base of its own. `reindexWalks` mints an induction variable the same way. So the guard built to

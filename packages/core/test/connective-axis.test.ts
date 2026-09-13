@@ -5,12 +5,12 @@
 // connective spelling is a DISTINCT source, enumerated only on a function whose fold actually
 // reaches the refusal. Toolchain-free.
 //
-// WHAT THIS AXIS IS NOT. The stacked arm `switch (x) { case 0: case 2: … }` is the structurer's
+// WHAT THIS VARIATION IS NOT. The stacked arm `switch (x) { case 0: case 2: … }` is the structurer's
 // job and is now its DEFAULT (switch-recover.ts groups case values that share a body), which is
-// why the row this axis was built for scores the same with it off. It is NOT the same object as
+// why the row this variation was built for scores the same with it off. It is NOT the same object as
 // the `||` in general — that holds only for a switch with one case group plus `default:` (agbcc
 // 12 instructions each, IDO 64 bytes each), and a second group parts them (agbcc 20 against 16).
-// So the axis stays a real second spelling on a recovered multi-group switch, on top of the tree
+// So the variation stays a real second spelling on a recovered multi-group switch, on top of the tree
 // switch recovery DECLINES on entirely — `kleod:CountCollectedGems`, `kleod:CheckWorldCompletion`.
 import { describe, expect, test } from 'vitest';
 
@@ -38,7 +38,7 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
   test('a same-scrutinee const-test chain emits BOTH spellings', () => {
     const all = cands(TREE);
     expect(all.some((c) => hasVariation(c.label.split('/'), 'connective'))).toBe(true);
-    // Not a duplicate the dedup would have collapsed — dropping the axis drops a distinct
+    // Not a duplicate the dedup would have collapsed — dropping the variation drops a distinct
     // spelling, which is what makes the shape a question for the differ and not for a predicate.
     expect(distinct(all)).toBeGreaterThan(distinct(all.filter((c) => !hasVariation(c.label.split('/'), 'connective'))));
     expect(all.some((c) => hasVariation(c.label.split('/'), 'connective') && / \|\| |&&/.test(c.source))).toBe(true);
@@ -47,7 +47,7 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
   test('…and the tree spelling survives beside it', () => {
     // `pokeemerald:IsStringLengthAtLeast` and `pokeemerald:TrySetCantSelectMoveBattleScript` are
     // the corpus rows this protects: both reach the refusal and both keep their score only because
-    // the tree spelling is still in the fan to win it. An axis that REPLACED the default rather
+    // the tree spelling is still in the fan to win it. A variation that REPLACED the default rather
     // than joining it costs them.
     const all = cands(TREE);
     expect(all.some((c) => !hasVariation(c.label.split('/'), 'connective') && !/ \|\| /.test(c.source))).toBe(true);
@@ -67,9 +67,9 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
     // The obligation is on the PREDICATE, so this asks the predicate rather than the candidate
     // labels — a single boolean shared by both arms satisfies those either way, which is what makes
     // them unable to fail on this. Lift the same function twice, with the map and without, and
-    // count the sites each lift's OWN refusal reports; rank.ts reads one answer per symbol variant
+    // count the sites each lift's OWN refusal reports; rank.ts reads one answer per symbol-map setting
     // for the same reason. Over the 164 real rows that lift they agree, 21 sites each way with no
-    // per-row divergence, and the failure mode if a lift-time change splits them is a variant never
+    // per-row divergence, and the failure mode if a lift-time change splits them is a setting never
     // enumerated.
     const sites = (symbols?: SymbolMap): number => {
       const fn = frontendFor(ARMV4T_AGBCC).lift('f', POOL_ASM, ARMV4T_AGBCC, P, undefined, symbols);
@@ -92,7 +92,7 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
 
   test('a function whose fold never reaches the refusal pays nothing for it', () => {
     // Two different scrutinees: an ordinary `||` the fold already takes, so there is no second
-    // spelling to referee and no variant to enumerate.
+    // spelling to referee and no alternative to enumerate.
     const PLAIN =
       '\tldr\tr0, [r1]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tldr\tr3, [r1, #4]\n\tcmp\tr3, #2\n\tbne\t.L4\n' +
       '.L2:\n\tmov\tr2, #5\n\tstr\tr2, [r1]\n\tb\t.L5\n' +

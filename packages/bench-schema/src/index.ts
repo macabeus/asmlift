@@ -65,19 +65,19 @@ export interface DecompilerResult {
    *  absent for name-only symbols). Sorted by name, uncapped. Present exactly when a scored
    *  row ran with the map; EMPTY ⇒ the winning spelling (e.g. '/raw-globals') named none. */
   symbolsUsed?: { name: string; shape?: string }[];
-  /** asmlift only, scored rows: the label of the candidate spelling that won the differ
-   *  ranking (e.g. "unsigned/raw-globals") — which lever combination produced `source`. */
+  /** asmlift only, scored rows: the variations of the candidate that won the differ
+   *  ranking (e.g. "unsigned/raw-globals") — which combination of variations produced `source`. */
   candidateLabel?: string;
   /** asmlift only, RANKED rows: HOW BIG THIS ROW'S FAN WAS — every candidate spelling
    *  enumeration emitted, i.e. `scored + dropped + withheld`. The row's own share of what a
-   *  `bench run` costs, and the number that says whether an axis a round shipped multiplied it.
+   *  `bench run` costs, and the number that says whether a variation a round shipped multiplied it.
    *
    *  Nothing else in the artifact carries it: `droppedCandidates.length +
    *  withheldCandidates.length` is the REFUSED part of a fan and on most rows is 0. Without the
    *  whole count, a fan that goes 59,904 → 225,792 (`LoadBGTilemapData`, in six days) and a real
    *  tier whose wall clock rises 6.0× on an unchanged 252 rows are invisible to every gate.
    *
-   *  DETERMINISTIC GIVEN THE ENUMERATION SETTINGS — it is a cross over axes, not a measurement —
+   *  DETERMINISTIC GIVEN THE ENUMERATION SETTINGS — it is a cross over variations, not a measurement —
    *  so unlike `rankSeconds` it is comparable between two artifacts and belongs in `stale-check`'s
    *  row key. The qualification is not decorative: `ASMLIFT_PERSITE_SENSE=<n>` (packages/cli
    *  rank.ts) forks the branch-sense booleans one bit per site and multiplies this by 2^n, read

@@ -1,5 +1,5 @@
 // M3 — type recovery as RANKED CANDIDATES re-ranked by the differ: "types are differ-ranked
-// levers", demonstrated end-to-end. The asm alone cannot say whether a value is signed; asmlift
+// variations", demonstrated end-to-end. The asm alone cannot say whether a value is signed; asmlift
 // emits every candidate and the objdiff score, not a guess, picks the one that matches.
 //
 // Both shapes below recompile byte-exact under BOTH candidates, and that is the point they make.
@@ -32,7 +32,7 @@ test('M3: the spelling carries the division signedness, so both candidates match
   expect(ranked.best.label).toBe('unsigned'); // the simpler spelling still wins the tie
   expect(ranked.best.score.match).toBe(true);
   // Both match because the signed candidate spells `(u32)a0 / 3`, which is the same bytes — the
-  // operand pin working, not the lever failing. A bare `a0 / 3` is C's SIGNED division and would
+  // operand pin working, not the variation failing. A bare `a0 / 3` is C's SIGNED division and would
   // call `__divsi3` where the target calls `__udivsi3`.
   expect(ranked.candidates.every((c) => c.score.match)).toBe(true);
 });

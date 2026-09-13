@@ -1,4 +1,4 @@
-// The VALUE-HOME axis (structure.ts `rereadGlobals`, rank.ts `/reread-globals`): may a read of a
+// The VALUE-HOME variation (structure.ts `rereadGlobals`, rank.ts `/reread-globals`): may a read of a
 // named global render at each of its uses, instead of being cached in a local the source never had?
 //
 // Two mechanisms invent that local, and both are here:
@@ -8,7 +8,7 @@
 //      every read feeding it is materialized, however harmless re-reading would be.
 //
 // Materializing a global's READ is always sound (the deref cast renders at the def's position), so
-// the default spelling is never WRONG — it is just often not the one the compiler was given. Hence an axis the differ referees, and hence the refusal tests: a
+// the default spelling is never WRONG — it is just often not the one the compiler was given. Hence a variation the differ referees, and hence the refusal tests: a
 // same-global store, an unresolvable base, a call, and a volatile declaration must all keep the
 // local.
 import { describe, expect, test } from 'vitest';

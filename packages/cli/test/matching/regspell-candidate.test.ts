@@ -1,4 +1,4 @@
-// The register-copy lever's GATE (mirrors branch-sense-candidate.test.ts): the offline pins call
+// The register-copy variation's GATE (mirrors branch-sense-candidate.test.ts): the offline pins call
 // registerishSpellings directly, so a wiring regression in rank.ts's respell seam (a contract
 // change rejecting the SFn, an emit throw) would silently drop the candidate with every offline
 // test green. This pins the seam END-TO-END: the ranked path must actually produce the regcopy
@@ -9,7 +9,7 @@
 // taught divpow2 to fold the branching signed-division diamond, so `modpow2` now lifts straight
 // to `a0 - (a0 / 8 << 3)` and matches at score 0 by itself — R1 has no diamond left to re-spell,
 // so no regcopy candidate is emitted for it at all. That is an improvement, not a regression, but
-// it cost this file its subject. `recip` fires the lever through R2 (const-expression staging)
+// it cost this file its subject. `recip` fires the variation through R2 (const-expression staging)
 // instead, which keeps the seam covered.
 //
 // IT ALSO PINS THE LABEL, which nothing else does. `/regcopy-ret-fresh` wins exactly one corpus
@@ -35,7 +35,7 @@ test('the register-copy candidates are enumerated and ranked through the ranked 
   const asm = compileTargetAsm(c);
   const obj = assembleTarget(asm);
   const cands = enumerateCandidates('recip', asm, ARMV4T_AGBCC, {});
-  // The lever fired, and the tail reached the candidate set under the name of the tail it IS.
+  // The variation fired, and the tail reached the candidate set under the name of the tail it IS.
   //
   // `recip` fires through R2 alone — no diamond, so R1 never runs and there is no dead value var
   // for the tail to reuse. The only tail that exists here is the FRESH one. Label rank.ts's table

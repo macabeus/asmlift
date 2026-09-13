@@ -31,9 +31,9 @@
 // SELF-VERIFYING. asmlift emits a plain `x / 2^k` and the target compiler regenerates ITS own
 // lowering; a wrong divisor recompiles to different bytes and shows up as a nonmatch, never as a
 // false match. The residual exposure is a lost match, not a miscompile — on a compiler that lowers
-// `/2^k` branchlessly, a diamond of this shape came from hand-written biasing, and respelling it
+// `/2^k` branchlessly, a diamond of this shape came from hand-written biasing, and rewriting it
 // costs a match that used to land. Measured positive on ido7.1 (two flips), agbcc and gcc2.7.2kmc
-// (modpow2 stays byte-exact through the respelling); mwcc_242_81 and gcc2.7.2 have no inhabitant, so
+// (modpow2 stays byte-exact through the rewrite); mwcc_242_81 and gcc2.7.2 have no inhabitant, so
 // they are unmeasured rather than clean.
 //
 // It is deliberately IDENTITY-OR-DECLINE about the shape (the bias constant must be exactly

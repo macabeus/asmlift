@@ -90,7 +90,7 @@ const CASES: OfflineCase[] = [
   // ── Sibling pair: SAME C source, DIFFERENT compiler → different codegen (compiler-as-spec) ─
   // ido-clamp0 above lowered `if(x<0)…` to a real branch; KMC-GCC lowers the identical source
   // branchlessly (`nor`/shift). One offline pair pins that the frontend recovers BOTH shapes,
-  // and that the divergence is the compiler axis, not a decode accident.
+  // and that the divergence is the compiler field, not a decode accident.
   {
     file: 'gcc-clamp0.asm',
     sym: 'clamp0',

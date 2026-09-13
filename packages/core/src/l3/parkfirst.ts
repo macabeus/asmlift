@@ -1,18 +1,18 @@
-// L3 re-spelling lever: park incoming ARGUMENTS first in the entry straight-line prefix.
+// L3 respell variation: park incoming ARGUMENTS first in the entry straight-line prefix.
 //
 // A copy of an incoming parameter into a local (`v = a1`) reproduces the register park the
 // compiler performed to free a caller-save register (`mov ip, r1`). The park instruction lifts
 // to pure SSA aliasing — no op, no position — so the emitted order falls out of block emission
 // (materialized statements first, edge copies last), while the compiler may have parked BEFORE
 // any of those statements ran (hipress homes its counter in ip before loading a byte into the
-// vacated r1). Both orders are legitimate C for the same asm; this lever emits the park-first
+// vacated r1). Both orders are legitimate C for the same asm; this variation emits the park-first
 // sibling and the differ referees.
 //
 // SCOPE (decline over approximate): only plain assigns in the ENTRY straight-line prefix (the
 // leading run of assigns) move; a park's RHS must be pure over PARAMETERS AND CONSTANTS through
 // scalar nodes only (var/const/un/bin/cast — a memory read or a call would be re-scheduled, not
 // re-spelled), so a constant initializer qualifies as a park and a param leaf is NOT required —
-// what this lever moves is the leading run's ORDER, and a constant is as free of position as a
+// what this variation moves is the leading run's ORDER, and a constant is as free of position as a
 // parked register is; and a park never crosses a statement that writes a name it reads, reads or
 // writes its destination (`&v` counts as touching v), or carries an effect. Relative order — of the
 // parks and of everything else — is preserved. Declines (null) when nothing moves.
@@ -22,11 +22,11 @@
 // spells a store to a bare scalar GLOBAL as an `assign` like any other, so such a store parks too.
 // The crossing checks are NAME-KEYED, so a crossed statement that reaches the destination (or a
 // name the park reads) through an ALIAS rather than by name is invisible to them — the same
-// name-keyed model every lever at this level defers aliasing to.
+// name-keyed model every respell variation at this level defers aliasing to.
 //
-// The kmc hipress residual is this axis's OTHER projection — its keep-load renders first while
+// The kmc hipress residual is this variation's OTHER projection — its keep-load renders first while
 // gcc2.7.2 schedules it last — so a second inhabitant consolidates both into one entry-prefix
-// ordering lever rather than growing a sibling.
+// ordering variation rather than growing a sibling.
 import type { Expr, SFn, Stmt } from './ast';
 import { exprChildren, exprHasEffect } from './ast';
 

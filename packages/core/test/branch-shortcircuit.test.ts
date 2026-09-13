@@ -318,7 +318,7 @@ describe('the four orientations', () => {
     // HERE because a producer that stopped agreeing with the successor list it rides on would turn
     // every chained and long-branch site's spelling over with nothing else in the tree noticing:
     // the consumer's own tests hand-stamp their fixtures, and the rows that inhabit those layouts
-    // MATCH on other axes.
+    // MATCH on other variations.
     for (const gOnTaken of [false, true]) {
       for (const sharedOnGTaken of [false, true]) {
         const fn = chain({ gOnTaken, sharedOnGTaken });
@@ -895,7 +895,7 @@ function comparisonTree(): Fn {
 
 // The tree-ownership refusal chooses a SPELLING where every other refusal in this pass guards
 // soundness, so it is the one with a second arm: `foldTreeOwned` takes the fold, `onTreeOwned`
-// reports the site either way, and rank.ts gates its axis on that report.
+// reports the site either way, and rank.ts gates its variation on that report.
 describe('the connective-vs-tree axis', () => {
   test('`foldTreeOwned` takes the fold the tree refusal owns, and the result verifies', () => {
     const fn = comparisonTree();
@@ -907,14 +907,14 @@ describe('the connective-vs-tree axis', () => {
   test('the relayed clause does NOT move with the flag — it is a different statement', () => {
     // The pairwise clause is switch-recover.ts's own PRE1, a NECESSARY condition for recovery, so
     // it refuses "a switch could not be ruled out here" — close enough to a spelling question that
-    // an axis can referee it. The relayed clause is a blunt function-wide COUNT that fires on an
+    // a variation can referee it. The relayed clause is a blunt function-wide COUNT that fires on an
     // ordinary loop counter (see the REFUSALS note) with no second legitimate spelling behind it.
     // It has no inhabitant in any benchmark row, so widening it would be scaffolding.
     const fn = relayedComparisonTree();
     let seen = 0;
     expect(recognizeBranchShortCircuit(fn, { foldTreeOwned: true, onTreeOwned: () => seen++ })).toBe(false);
     expect(connective(fn)).toBeNull();
-    expect(seen).toBe(0); // and it is not reported either — the axis has no inhabitant here
+    expect(seen).toBe(0); // and it is not reported either — the variation has no inhabitant here
     verify(fn);
   });
 
@@ -943,7 +943,7 @@ describe('the connective-vs-tree axis', () => {
 
   test('…and stays silent where the fold was going to happen anyway', () => {
     // A RELATIONAL pair shares a scrutinee and is not a dispatch tree, so it never reaches the
-    // refusal — reporting it would enumerate the axis on a function with no inhabitant for it.
+    // refusal — reporting it would enumerate the variation on a function with no inhabitant for it.
     let seen = 0;
     const fn = chain({ gOnTaken: false, sharedOnGTaken: true });
     expect(recognizeBranchShortCircuit(fn, { onTreeOwned: () => seen++ })).toBe(true);

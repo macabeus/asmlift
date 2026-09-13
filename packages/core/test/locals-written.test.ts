@@ -70,9 +70,9 @@ test('an `uninit` local reads unwritten by construction, and a `frame` local may
   expect(() => assertLocalsWritten(fnWith({ ...plain, frame: { loads: 1, stores: 0 } }))).not.toThrow();
 });
 
-// …AND IT RUNS ON LEVER TREES. `structureChecked` runs all four boundary contracts on the tree it
-// produces (pipeline.ts); `rank.ts`'s `respell` then re-runs the ones a LEVER can break on every
-// re-spelling, because a lever that loses an assignment produces exactly what this contract names —
+// …AND IT RUNS ON RESPELLED TREES. `structureChecked` runs all four boundary contracts on the tree it
+// produces (pipeline.ts); `rank.ts`'s `respell` then re-runs the ones a VARIATION can break on every
+// respelled tree, because a variation that loses an assignment produces exactly what this contract names —
 // C that compiles, scores, and can WIN, which is the one wrongness the byte differ rewards rather
 // than catches (#106 shipped it). The population that can produce it is the placement passes:
 // l3/sinkinit.ts, l3/basecse.ts's first-use policy, l3/nearbase.ts, l3/scopebase.ts, l3/argbase.ts.
@@ -92,7 +92,7 @@ describe('the LEVER guard set', () => {
 
   test('and no lever in the offline corpus violates it — the invariant behind the guard', () => {
     // The guard is only useful if it is not already firing, and the corpus is where a placement
-    // lever would show. `emit` is the choke point every spelling passes through, so wrapping the
+    // variation would show. `emit` is the choke point every spelling passes through, so wrapping the
     // backend sees every tree the fan asks to render, products included.
     const seen: SFn[] = [];
     const probing = { ...cBackend, emit: (t: SFn) => (seen.push(t), cBackend.emit(t)) };

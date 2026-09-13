@@ -4,7 +4,7 @@
 // Each twin structures a fn the primary pass did not: `/shared-ret` the raised fn with the follow
 // on, `/shared-tail` the SUNK fn with it. The structurer can accept either where the primary failed
 // a boundary contract. Both are sound, and that is why only the enumeration can refuse it: each
-// twin's axis point reads the primary pass's dropped set. And each twin keeps its OWN drops apart,
+// shared-tail pass's setting reads the default pass's dropped set. And each keeps its OWN drops apart,
 // so a follow the unsunk fn cannot carry does not take the sunk fn's candidate with it.
 // `structureChecked` is mocked to fail chosen `/defsite` points and to mark every other one, because
 // no committed disassembly makes a contract fail on one of these passes and pass on another — the

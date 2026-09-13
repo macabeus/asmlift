@@ -1,4 +1,4 @@
-// `/copy-defpos` — the EDGE-COPY ORDER axis (rank.ts STRUCTURING_AXES, structure.ts
+// `/copy-defpos` — the EDGE-COPY ORDER variation (rank.ts STRUCTURING_AXES, structure.ts
 // `preferDefPosCopyOrder`).
 //
 // The frontend measures the order each predecessor wrote its successors' keys, and the default
@@ -12,7 +12,7 @@
 //
 // What this file pins: the sibling exists and is a genuinely different program where the two orders
 // differ, the gate withholds it where they do not — and the gate is a question about ONE lift, not
-// about the function, which is why rank asks it per symbol variant on the fn it is about to
+// about the function, which is why rank asks it per symbol-map setting on the fn it is about to
 // structure.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -94,9 +94,9 @@ test('an UNMEASURED fn has no question to ask: parsed IR never admits the axis',
 
 // WHY THE GATE IS A `variantGate` AND NOT A `probeGate`: the answer is a fact about one LIFT at one
 // STAGE, and both of those move under it. Neither costs a candidate today, so what these pin is the
-// facts a reader checking the axis entry's argument needs.
+// facts a reader checking the variation entry's argument needs.
 
-// (1) THE SYMBOL VARIANT. One asm, two lifts: with a map naming its two pool addresses the record
+// (1) THE SYMBOL-MAP SETTING. One asm, two lifts: with a map naming its two pool addresses the record
 // and the proxy agree, without one they do not. rank enumerates both lifts, so a gate asked once on
 // the map-ful probe answers for a program the `/raw-globals` sibling is not.
 const HUD = readFileSync(join(import.meta.dirname, 'corpus/agbcc-hudcount.s'), 'utf8');
@@ -133,8 +133,8 @@ const HUD_MAP: SymbolMap = new Map([
 ]);
 
 test('the same function answers the gate differently with and without a symbol map', () => {
-  // Asked where rank asks it: on the variant's own FULLY RAISED fn, which is what structure()
-  // reads. (On the bare lift both variants answer true — the disagreement is made by the tower.)
+  // Asked where rank asks it: on that setting's own FULLY RAISED fn, which is what structure()
+  // reads. (On the bare lift both settings answer true — the disagreement is made by the tower.)
   const raised = (symbols: SymbolMap | undefined) => {
     const fn = frontendFor(ARMV4T_AGBCC).lift('UpdateHUDCollectibleCount', HUD, ARMV4T_AGBCC, {}, undefined, symbols);
     applyIdiomPatterns(fn, ARMV4T_AGBCC);

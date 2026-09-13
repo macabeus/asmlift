@@ -1,4 +1,4 @@
-// FLIP-JOIN: why the joined-if sense stays a differ-refereed axis rather than a decided default.
+// FLIP-JOIN: why the joined-if sense stays a differ-refereed variation rather than a decided default.
 // The DEFAULT is the layout reading (structure.ts negateJoinedBranchSense, pinned in
 // struct-harden.test.ts); these tests pin the other half — that the flipped spelling is a DISTINCT
 // source on an ordinary two-armed joined `if`, so nothing may prune it on a per-function
@@ -23,7 +23,7 @@ describe('/flip-join is enumerated wherever a two-armed joined if exists', () =>
   test('an ordinary joined if emits BOTH senses, and the flipped one is a source of its own', () => {
     const all = cands(PLAIN);
     expect(all.some((c) => hasVariation(c.label.split('/'), 'flip-join'))).toBe(true);
-    // Not a duplicate the dedup would have collapsed: dropping the axis drops a distinct spelling,
+    // Not a duplicate the dedup would have collapsed: dropping the variation drops a distinct spelling,
     // which is what makes the sense a question for the differ and not for a predicate.
     const sources = (cs: typeof all) => new Set(cs.map((c) => c.source)).size;
     expect(sources(all)).toBeGreaterThan(sources(all.filter((c) => !hasVariation(c.label.split('/'), 'flip-join'))));

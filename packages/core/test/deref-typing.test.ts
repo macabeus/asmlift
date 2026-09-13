@@ -222,19 +222,19 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
       retType: T.void(),
       body: [{ k: 'store', lval: { k: 'index', base, idx: v('n'), width: 4, signed: true }, value: c(0) }],
     });
-    // a pointee-volatile DECLARATION (the /volatile lever's local)
+    // a pointee-volatile DECLARATION (the /volatile variation's local)
     expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true }], v('p')))).toContain(
       '((volatile s32 *)p)[n] = 0;',
     );
-    // a volatile CAST (the /inlinebase lever's re-spelled raw address)
+    // a volatile CAST (the /inlinebase variation's re-spelled raw address)
     const raw: Expr = { k: 'cast', to: T.ptr(T.u(16)), volatile: true, e: c(67109384) };
     expect(cBackend.emit(mk([], raw))).toContain('((volatile s32 *)(volatile u16 *)67109384)[n] = 0;');
     // …and a base that declares nothing volatile is not over-qualified
     expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)) }], v('p')))).toContain('((s32 *)p)[n] = 0;');
   });
 
-  // Two lever gates rest on this: `volatile` on a POINTER local would read as pointee volatility,
-  // so neither lever may produce one.
+  // Two variations' gates rest on this: `volatile` on a POINTER local would read as pointee volatility,
+  // so neither variation may produce one.
   test('a pointer local prints one `volatile` prefix, and it binds to the pointee', () => {
     const mk = (l: SFn['locals'][number]): string =>
       cBackend.emit({ name: 'f', params: [], locals: [l], retType: T.void(), body: [] });

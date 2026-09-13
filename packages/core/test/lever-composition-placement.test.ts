@@ -1,8 +1,8 @@
 // THE PLACEMENT DIFFERENTIAL, one composition inwards.
 //
-// `rank.ts`'s `respell` re-checks a lever's placement across the statement SHAPES derived onto it.
-// The lever-on-lever products in the same file were outside that check: `sinkInitsToFirstUse(…)`
-// and `nearBaseClusters(…)` run on a tree a PLACING lever already built, and the composition
+// `rank.ts`'s `respell` re-checks a variation's placement across the stacked variations derived onto it.
+// The variation-on-variation compositions in the same file were outside that check: `sinkInitsToFirstUse(…)`
+// and `nearBaseClusters(…)` run on a tree a PLACING variation already built, and the composition
 // happens INSIDE one `make()` thunk, so the intermediate tree never reached the differential. A
 // def-MOVING pass can move a def below a use exactly as a shape can — and a base local whose
 // assignment does not reach its use is a DIFFERENT VARIABLE, C that compiles, scores and can win.

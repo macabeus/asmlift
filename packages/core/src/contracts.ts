@@ -278,14 +278,14 @@ export function assertLocalsWritten(sfn: SFn): void {
   }
 }
 
-/** Post-lever: a local a pass DELETED from the declaration list is named nowhere in the tree it
+/** After a respell variation: a local a pass DELETED from the declaration list is named nowhere in the tree it
  *  produced.
  *
  *  THE FAILURE THIS CATCHES is the mirror of `assertLocalsWritten` above, and the three contracts
  *  beside it do not see it. A pass that consumes a local — l3/unmerge.ts substituting a merge temp
  *  into the arms, l3/coalesce.ts folding two names into one, l3/inlinebase.ts deleting a
- *  const-address pointer — drops the name from `sfn.locals` on the strength of an in-lever count
- *  that it is no longer mentioned. If that count is ever wrong the result is not a loud lever
+ *  const-address pointer — drops the name from `sfn.locals` on the strength of an in-pass count
+ *  that it is no longer mentioned. If that count is ever wrong the result is not a loud variation
  *  error: it is a candidate handed to the compiler with an undeclared identifier. Normally that is
  *  a dropped candidate, but in the REAL tier the candidate is compiled inside the project's
  *  vendored translation unit, where an orphaned name that collides with a context symbol compiles
@@ -294,7 +294,7 @@ export function assertLocalsWritten(sfn: SFn): void {
  *  is neither `?` nor `undefined`, it is well-typed, and the question the third one asks is the
  *  OPPOSITE one (read but never written).
  *
- *  A DIFFERENTIAL, and that is what makes it safe to run on every lever tree. "Every name the tree
+ *  A DIFFERENTIAL, and that is what makes it safe to run on every respelled tree. "Every name the tree
  *  mentions is declared" is NOT the invariant and would refuse correct output everywhere:
  *  structure.ts spells a write to a scalar global as a bare `assign` whose name is declared in the
  *  project's headers and nowhere in the tree (`gBlendValue = v;` — 71 such occurrences across 22
@@ -312,7 +312,7 @@ export function assertNoOrphanedLocals(before: SFn, after: SFn): void {
   }
   // `l3/mentions.ts`'s walk, not a third copy of the node vocabulary — this is the LOUD BACKSTOP
   // for the mistake that predicate guards, so it is the last place that should own its own.
-  // Locals only, deliberately: no L3 lever drops `SFn.params` (`pruneDeadParams` is L1 block
+  // Locals only, deliberately: no L3 respell variation drops `SFn.params` (`pruneDeadParams` is L1 block
   // params, ir/simplify.ts), so a params arm here would be a refusal with no inhabitant.
   const found = mentionedLocals(after.body, dropped);
   if (found.size) {
@@ -326,10 +326,10 @@ export function assertNoOrphanedLocals(before: SFn, after: SFn): void {
   }
 }
 
-/** Post-lever: every read of a MINTED local — its ADDRESS being taken included — must sit where
+/** After a respell variation: every read of a MINTED local — its ADDRESS being taken included — must sit where
  *  that local's assignment has already run.
  *
- *  THE failure a placing lever can ship, and the only one the byte differ rewards: a base local whose
+ *  THE failure a placing variation can ship, and the only one the byte differ rewards: a base local whose
  *  assignment does not reach a use is a DIFFERENT VARIABLE — C that compiles, scores, and can win
  *  (the shape #106 shipped). `contracts.ts`'s `assertLocalsWritten` does not see it: it accumulates
  *  reads and writes as SETS over the whole body, so a local assigned in one arm and read after the
@@ -337,16 +337,16 @@ export function assertNoOrphanedLocals(before: SFn, after: SFn): void {
  *
  *  Checked on the EMITTED tree rather than argued from the plan, because the plan is what a bug
  *  would be in. `rank.ts`'s `respell` catches the throw and drops the candidate, so the wrong
- *  answer becomes a reported lever error instead of a scored spelling.
+ *  answer becomes a reported variation error instead of a scored spelling.
  *
  *  IT LIVES HERE, beside `assertLocalsWritten`, because it has that check's population and that
- *  check's call site: levers that place a def — l3/sinkinit.ts, l3/basecse.ts's first-use policy,
+ *  check's call site: respell variations that place a def — l3/sinkinit.ts, l3/basecse.ts's first-use policy,
  *  l3/nearbase.ts, l3/reindex.ts, l3/scopebase.ts, l3/argbase.ts — are the population that can
- *  produce the failure, so the check belongs on every lever tree rather than on one lever's.
+ *  produce the failure, so the check belongs on every respelled tree rather than on one variation's.
  *
- *  Called ABSOLUTELY by the placing levers that put an init inside a nested list, each over its own
+ *  Called ABSOLUTELY by the placing variations that put an init inside a nested list, each over its own
  *  plan; everywhere else it is reached through `assertPlacementSurvives` below, which is a
- *  DIFFERENTIAL — so a placement no lever's tree ever satisfied is not judged, and a lever that
+ *  DIFFERENTIAL — so a placement no respelled tree ever satisfied is not judged, and a variation that
  *  mints nothing is not judged at all.
  *
  *  A nested list gets a COPY of the reaching set, so an assignment inside one arm does not count as
@@ -406,13 +406,13 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
 }
 
 /** The same guarantee across a re-spelling that MOVES statements over a placement another pass
- *  already made — `rank.ts`'s statement shapes (`/initfirst`, `/pollguard`, `/pollread`), derived
- *  onto every lever tree after the lever placed its defs, and the lever-on-lever compositions in
+ *  already made — `rank.ts`'s stacked variations (`/initfirst`, `/pollguard`, `/pollread`), derived
+ *  onto every respelled tree after the variation placed its defs, and the variation-on-variation compositions in
  *  the same file where a def-moving pass (`sinkInitsToFirstUse`, `nearBaseClusters`,
- *  `reindexWalks`) runs on a tree a placing lever built. `pollReads` folds a materialized re-read
+ *  `reindexWalks`) runs on a tree a placing variation built. `pollReads` folds a materialized re-read
  *  back into a loop condition, which is exactly such a move.
  *
- *  A DIFFERENTIAL, which is what makes it safe on every lever: the walk judges the reshaped tree
+ *  A DIFFERENTIAL, which is what makes it safe on every variation: the walk judges the reshaped tree
  *  only where it already described the unshaped one, so a placement it cannot model (a def inside
  *  a loop body read earlier in the same body is assigned on every iteration but the first) is not
  *  judged either way. `minted` may name a local `before` does not carry — a mover mints its own —

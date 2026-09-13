@@ -68,7 +68,7 @@ export function rankOptionsFor(
     ...(asmData ? { asmData } : {}),
     ...(compile ? { compile } : {}),
     // the project's vendored symbol map (names + declaration shapes). The '/raw-globals'
-    // ranked lever rides along, so a symbol-fed row can never score worse than without.
+    // ranked variation rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
   };
 }
@@ -120,7 +120,7 @@ export function fanSizeOfError(e: unknown): number | undefined {
  *  synthetic tier. */
 const secondsSince = (t0: number): number => Number(((Date.now() - t0) / 1000).toFixed(2));
 
-// asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous levers
+// asmlift runs in its differ-ranked production mode (decompileRanked): genuinely-ambiguous variations
 // (param signedness, divergent-if branch sense) become candidates and the objdiff score picks the
 // winner — single-shot `decompile` would under-score what asmlift can match. decompileRanked
 // scores internally via the target-dispatched `scoreSource` (the same per-toolchain scorer).

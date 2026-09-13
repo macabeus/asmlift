@@ -101,7 +101,7 @@ describe('MIPS (IDO) control flow: compile → disasm → decompile → recompil
   }
 });
 
-// The differ-ranked-lever mechanism must work for a NON-agbcc target: routing all candidate
+// The differ-ranked-variation mechanism must work for a NON-agbcc target: routing all candidate
 // scoring through `scoreC` (agbcc/ARM-only) compiles MIPS candidates with the wrong compiler and
 // mis-scores them. `scoreSource` dispatches by target.compiler, so the ranked path genuinely
 // selects the matching type on MIPS.
@@ -114,7 +114,7 @@ describe('MIPS (IDO) ranked candidates — scoring dispatches to the right compi
     // What this pins is the DISPATCH: an agbcc-scored MIPS candidate would be compiled by the
     // wrong compiler and could not score 0 at all. It no longer pins signedness discrimination —
     // since the shift-direction fix the signed candidate spells `(u32)a0 >> 1`, the same bytes.
-    // The signedness lever itself is pinned on a shape that cannot be spelled away (m3.test.ts,
+    // The signedness variation itself is pinned on a shape that cannot be spelled away (m3.test.ts,
     // division: `__udivsi3` vs `__divsi3` is a different relocation).
     expect(ranked.candidates.every((c) => c.score.match)).toBe(true);
   });

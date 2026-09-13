@@ -274,7 +274,7 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
 // `proto`, the channel whose absence of a gate once cost a real row its match (a manifest
 // declaring `returnsVoid: true` for a function whose own reference returns `void *`). A map states
 // member offsets, bitfield bit offsets, pointee widths and array rank — and the rows that carry
-// one exist precisely to defend the axes those facts enumerate, so a map that quietly disagreed
+// one exist precisely to defend the variations those facts enumerate, so a map that quietly disagreed
 // with its own source would flatter exactly what it was authored to measure.
 //
 // TWO THINGS ARE CHECKED, and neither is a restatement of the other.

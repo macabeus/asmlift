@@ -1,6 +1,6 @@
 // rank.ts states several of its arguments as PROPERTIES of the published winner labels — "no
 // label carries both of these", "this arm's winners all ride inside that pairing", "exactly one
-// row wins under this axis". Written as prose those decay silently: the corpus grows, an axis is
+// row wins under this variation". Written as prose those decay silently: the corpus grows, a variation is
 // widened, and the paragraph still reads as verified because nothing re-derives it.
 //
 // So each property is asserted here, against the COMMITTED artifact, and each message names the
@@ -9,7 +9,7 @@
 // the property the paragraph's argument rests on.
 //
 // WHAT THIS CANNOT DO, the same limit citations.test.ts states for itself: results.json holds
-// each row's winner, not what the row would win with an axis ablated. A green assertion here says
+// each row's winner, not what the row would win with a variation ablated. A green assertion here says
 // the property still holds, never that the mechanism behind it is still load-bearing.
 import { hasVariation } from '@asmlift/core/variation-tokens';
 import { readFileSync } from 'node:fs';
@@ -50,8 +50,8 @@ describe('the winner-label properties rank.ts argues from', () => {
 
   it('every /unreduce and /ptr-field winner rides inside a /vol-store pairing', () => {
     // Guards the `/vol-store` × `/unreduce` (× `/ptr-field`) pairing note: "neither of the two
-    // levers ever wins one of the artifact's rows alone". The standalone `respell`s are kept so a
-    // lever can LOSE on its own terms, which is only observable while the single-lever spelling is
+    // variations ever wins one of the artifact's rows alone". The standalone `respell`s are kept so a
+    // variation can LOSE on its own terms, which is only observable while the single-variation candidate is
     // in the fan — but a winner would mean the note's premise had changed.
     const unpaired = [...carrying('unreduce'), ...carrying('ptr-field')].filter(
       (w) => !hasVariation(w.label.split('/'), 'vol-store'),
@@ -62,8 +62,8 @@ describe('the winner-label properties rank.ts argues from', () => {
   it('exactly one winner carries /no-ptr-elem, and it is the synthetic row the axis was built for', () => {
     // Guards the `/no-ptr-elem` census paragraph, "EXACTLY ONE WINNING LABEL IN THE ARTIFACT
     // CARRIES `/no-ptr-elem` — READ THAT ONE, NOT A ZERO". The paragraph's whole point is that a
-    // zero over the REAL tier is 0 of ONE reaching row, so the axis's two-sidedness has to be read
-    // off the synthetic row that inhabits it. A second winner would not be a failure of the axis,
+    // zero over the REAL tier is 0 of ONE reaching row, so the variation's two-sidedness has to be read
+    // off the synthetic row that inhabits it. A second winner would not be a failure of the variation,
     // but it would make that paragraph's framing wrong.
     expect(carrying('no-ptr-elem').map((w) => w.id)).toEqual(['synthetic:ptrelem:agbcc']);
   });

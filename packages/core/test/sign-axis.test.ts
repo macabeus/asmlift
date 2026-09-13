@@ -1,4 +1,4 @@
-// THE SIGNEDNESS AXIS and what it costs. The axis itself — pin the entry scalars signed, then
+// THE SIGNEDNESS VARIATION and what it costs. The variation itself — pin the entry scalars signed, then
 // unsigned, and let the differ referee — is pinned by the rows that win on each side; this file
 // pins the two halves nothing else can: where a second pass produces no candidate at all, and why
 // the candidates it does produce cannot be thinned out by predicting which of them are redundant.
@@ -64,7 +64,7 @@ describe('the signedness axis declines where the pin writes nothing', () => {
     const { backend, emitted } = recordingBackend();
     lifts.n = 0;
     const cands = enumerateCandidates('f', wrap(PTR_ONLY), ARMV4T_AGBCC, { backend });
-    // Eight axis points, one structured tree, one spelling printed — which is what the tree skip
+    // Eight structure settings, one structured tree, one spelling printed — which is what the tree skip
     // produces whether the decline fires or not. The count that answers for the DECLINE is below.
     expect(cands.length).toBe(1);
     expect(new Set(emitted).size).toBe(1);
@@ -85,7 +85,7 @@ describe('the signedness axis declines where the pin writes nothing', () => {
     expect(lifts.n).toBe(3);
   });
 
-  // The per-variant decline, the shape addr-home.test.ts pins for its own gate: the `/raw-globals`
+  // The per-setting decline, the shape addr-home.test.ts pins for its own gate: the `/raw-globals`
   // sibling lifts WITHOUT the map, so it decides for itself whether the pin has a param. A decline
   // read from one shared probe would answer for a lift it is not the lift of.
   const SCALAR_AND_GLOBAL =
@@ -101,8 +101,8 @@ describe('the signedness axis declines where the pin writes nothing', () => {
 // ────────────────────────────────────────────────────────────────────────────────────────────
 // WHY THE FAN CANNOT BE THINNED.
 //
-// Where the pin changes the tree the axis doubles the candidate set, and much of that set is the
-// same program twice: klonoa's LoadBGTilemapData enumerates 40320 candidates as 20160 twin pairs,
+// Where the pin changes the tree the variation doubles the candidate set, and much of that set is the
+// same program twice: klonoa's LoadBGTilemapData enumerates 40320 candidates as 20160 unsigned/signed pairs,
 // every pair tying in score. The recurring
 // proposal is a predicate over the RENDERED TYPE — does any expression's type move under the pin?
 // — that would drop the redundant spelling of each pair before it is compiled. It cannot exist,
@@ -116,7 +116,7 @@ describe('the signedness axis declines where the pin writes nothing', () => {
 // direction below shows the model does not give that for free.
 
 /** Every node of one emitted expression, with what `renderedIntSignedness` reports for it under
- *  each pin. `pinned` names the entry params the axis writes; anything else takes `declared`. */
+ *  each pin. `pinned` names the entry params the variation writes; anything else takes `declared`. */
 function underBothPins(root: Expr, pinned: readonly string[], declared: Record<string, IrType> = {}) {
   const varType =
     (signed: boolean): VarTypes =>

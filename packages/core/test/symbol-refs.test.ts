@@ -4,7 +4,7 @@
 // Pins the derivation's contracts: a map-derived VALUE reference (data global, `(u32)Func`) is
 // recorded with its SymbolInfo; a CALL target is NEVER recorded — not even when the same symbol
 // is also value-referenced (prototyping a called symbol is C89 poison, verified fact 3 of the
-// research doc); the '/raw-globals' lever names nothing so it carries no refs; and INERTNESS —
+// research doc); the '/raw-globals' variation names nothing so it carries no refs; and INERTNESS —
 // no map ⇒ the field is absent everywhere.
 import { describe, expect, test } from 'vitest';
 
