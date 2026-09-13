@@ -276,7 +276,7 @@ explicitly approves it. Report the totals (asmlift vs m2c) before and after.
 Since #192 `diff` also prints a **FAN** section and a **COST** section under the verdict — the rows
 whose candidate count or ranked seconds moved most, with their multipliers, and a total over the
 rows both artifacts could answer for. **Both are INFORMATIONAL: neither moves an exit code**, and
-`candidateCount` is deliberately not in `FIELDS`. Read them anyway and put the fan multiplier in the
+`fanSize` is deliberately not in `FIELDS`. Read them anyway and put the fan multiplier in the
 PR body: a variation that moves no row and multiplies the confirming gate's own price by four is exactly
 what every gate this repo runs was blind to for three weeks. A row that stopped ranking is reported
 as `vanished` with the count that left, not silently dropped from the total.

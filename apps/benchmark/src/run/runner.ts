@@ -76,7 +76,7 @@ export function fmt(d: DecompilerResult): string {
  *  Absent on a row that never ranked (declined, failed): a bare `(1.2s)` rather than `fan 0`, which
  *  would read as a claim about the row's enumeration instead of about the run. */
 export function costNote(d: DecompilerResult, secs: string): string {
-  return d.candidateCount === undefined ? `(${secs}s)` : `(${secs}s, fan ${d.candidateCount})`;
+  return d.fanSize === undefined ? `(${secs}s)` : `(${secs}s, fan ${d.fanSize})`;
 }
 
 /** THE PER-ROW LINE, assembled — a round's whole live view of a run. Pinning `costNote` alone

@@ -216,7 +216,7 @@ export function renderDiff(d: SweepDiff): string[] {
  *
  *  Not a wall-clock guard, because a wall-clock guard cannot pre-empt: enumerating one row is a
  *  single call that returns when it returns. So the guard reads the committed artifact's own
- *  `candidateCount` for the row and refuses BEFORE paying, the way `bench fan`'s `FAN_SCORE_LIMIT`
+ *  `fanSize` for the row and refuses BEFORE paying, the way `bench fan`'s `FAN_SCORE_LIMIT`
  *  refuses before compiling.
  *
  *  WHAT IT EXCLUDES, off the committed artifact at bd7ad596 — checked, not assumed, because every
@@ -248,7 +248,7 @@ export function renderDiff(d: SweepDiff): string[] {
  *  against the known giants and says so, rather than pretending to bound an unmeasured row. */
 export const SWEEP_FAN_LIMIT = 20000;
 
-type RecordedRow = Identifiable & { asmlift?: { candidateCount?: number } };
+type RecordedRow = Identifiable & { asmlift?: { fanSize?: number } };
 
 /** The artifact's recorded fans, keyed by the CURRENT dataset's row ids — joined by row identity
  *  (bench-schema `joinArtifacts`), never by the id the artifact happened to publish.
@@ -261,14 +261,14 @@ type RecordedRow = Identifiable & { asmlift?: { candidateCount?: number } };
  *  recorded price, a row of another decompilation at the same address has none, and a real row the
  *  dataset no longer carries prices nothing. Synthetic rows are keyed by id on both sides. */
 export function rekeyFans(recorded: readonly RecordedRow[], current: readonly Identifiable[]): Map<string, number> {
-  const priced = recorded.filter((r) => typeof r.asmlift?.candidateCount === 'number');
+  const priced = recorded.filter((r) => typeof r.asmlift?.fanSize === 'number');
   const join = joinArtifacts(priced, current);
   const currentId = new Map(current.map((r) => [join.headKey(r), r.id]));
   const out = new Map<string, number>();
   for (const r of priced) {
     const id = r.tier === 'real' ? currentId.get(join.baseKey(r)) : r.id;
     if (id !== undefined) {
-      out.set(id, r.asmlift!.candidateCount!);
+      out.set(id, r.asmlift!.fanSize!);
     }
   }
   return out;
@@ -536,7 +536,7 @@ export function sweepRefusal(o: SweepOptions): string | undefined {
   }
   if (o.asmDir !== undefined && o.fan === true && o.force !== true) {
     // THE GUARD CANNOT REACH THIS POPULATION. `SWEEP_FAN_LIMIT` is read off the committed
-    // artifact's `candidateCount`, which exists for dataset rows only, so `--asm-dir --fan`
+    // artifact's `fanSize`, which exists for dataset rows only, so `--asm-dir --fan`
     // enumerates every file unbounded — and the tree this flag exists to sweep,
     // `checkouts/<project>/asm/nonmatchings`, is where the five-hour functions live. Measured on
     // this branch: one 1.6 KB klonoa `.s` in a directory of its own had not finished enumerating
@@ -660,7 +660,7 @@ export function fanGuard(
       over: {},
       unreadable:
         fans.size === 0
-          ? `${path} prices no row at all — 0 of its ${rows ?? 0} result(s) carry an \`asmlift.candidateCount\`, which is what a schema move under that key, or an artifact from a shard that wrote no rows, looks like`
+          ? `${path} prices no row at all — 0 of its ${rows ?? 0} result(s) carry an \`asmlift.fanSize\`, which is what a schema move under that key, or an artifact from a shard that wrote no rows, looks like`
           : `${path} prices ${fans.size} row(s) and not one of the rows this selection names, so it bounds nothing here`,
     };
   }

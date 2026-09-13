@@ -5011,7 +5011,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // functions, while the harness's real rows and the canonical ranked command run MAP-FUL, where
   // it is 24 / 49 / 16, and WHICH SET a row inhabits is itself configuration-dependent. Exactly ONE
   // of the 16 map-ful BOTH inhabitants is a benchmark row — `kleod:UpdateCameraScroll`, `noncompile`
-  // with no `candidateLabel`, its whole fan failing to build, so it can express no winner. The only
+  // with no `winnerVariations`, its whole fan failing to build, so it can express no winner. The only
   // other row anywhere in the map-ful census is `kleod:UpdateHUDCounterDisplay`, and it is a
   // `/regionbase`-ONLY inhabitant there (map-less it is in neither set); it MATCHes on
   // `unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4`, so its WINNER carries
@@ -5217,7 +5217,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // A SECOND POPULATION MOVES WITHOUT THE FAN MOVING: 21 rows carry `/unfolded`-labelled
   // candidates whose source set is byte-identical to the ablated arm's, `synthetic:foldpark` (4)
   // and `kleod:UpdateCameraScroll` (1024) among them. Those are renames, not spellings, and the
-  // only thing they can move is a published `candidateLabel` — which is why the gate on this entry
+  // only thing they can move is a published `winnerVariations` — which is why the gate on this entry
   // is `bench diff`'s label field and not `bench regression`.
   // The one other guard that reads the field, `BASEFOLD_GATES`, reaches none of these keys: its
   // census is empty on all three rows here.
@@ -5474,7 +5474,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // AND THE WINNING LABEL DID NOT MOVE AT ALL. `signed/vol-store/initfirst` before and after, at 2
   // and at 0, while the winning PROGRAM changed completely (615 → 559 source bytes, a folded pool
-  // word for a struct view). `candidateLabel` names the VARIATIONS, not the program, so a check keyed on it
+  // word for a struct view). `winnerVariations` names the VARIATIONS, not the program, so a check keyed on it
   // sees nothing here — the inverse of the #112 trap, where the winner gained `/vol-store` and
   // announced a change of winner. Only the `source` byte field caught it in `bench diff`. Print the
   // fan and diff the winner's text; a label is not an identity in either direction. The claim that
@@ -5748,7 +5748,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // THE CONSEQUENCE, stated because it is a gap and not a reassurance: deleting either FOLD is a
   // label-only change on these rows. `bench regression` reports 0 lost and would green-light it;
-  // only `bench diff`'s `candidateLabel` field catches it. The folds' match-level cost is on the
+  // only `bench diff`'s `winnerVariations` field catches it. The folds' match-level cost is on the
   // REAL tier — PR #136 measured the write fold alone at `kleod:ProcessInputAndUpdateEntities`
   // 284 → 248, and that row is 211 in the artifact under later unrelated changes, so RE-DERIVE the
   // fold's own value rather than quoting either number — and nothing here brackets it. A row where
@@ -6569,7 +6569,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // those five REAL (`kleod:ProcessHBlankWait:agbcc`, `kleod:UpdateHUDCounterDisplay:agbcc`), the
   // other three `synthetic:ifand_far:agbcc`, `synthetic:ifor_near:agbcc` and
   // `synthetic:ifor_near:mwcc_242_81`. Recompute the set by filtering `results.json` on
-  // `asmlift.candidateLabel` matching `(^|/)(flip-join|flip-branch)(/|$)`. For G2 the exposure is
+  // `asmlift.winnerVariations` matching `(^|/)(flip-join|flip-branch)(/|$)`. For G2 the exposure is
   // the 9 MATCHing `nested-loop` rows — all synthetic, all agbcc, all the DMA/`livebase` poll
   // family — plus `fib`, `nestedloop` and `sumto`.
   //
@@ -7290,7 +7290,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`rank.ts:2010-2021`: group, `deviceVolatile`, `castCount`, `lineCount`, enumeration order) —
   // which makes these rows outcome-inert but NOT publication-inert: the variation changes the C they
   // ship, the `bench diff` source-byte field this project has already paid for twice (#112/#113).
-  // The cheap route is `grep`ping `candidateLabel` in `results/results.json` (27 rows carry it, 18
+  // The cheap route is `grep`ping `winnerVariations` in `results/results.json` (27 rows carry it, 18
   // of them MATCH); the ablation is what decides which of those 18 actually depend on it.
   //
   // WHAT EACH MAP BUYS, MEASURED (`symbols:` deleted, re-run, cache off):

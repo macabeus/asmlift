@@ -281,8 +281,8 @@ function Provenance({ fn }: { fn: FunctionResult }) {
   if (r.symbolMap && scored) {
     digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
   }
-  if (r.candidateLabel) {
-    digest.push(`winner ${r.candidateLabel}`);
+  if (r.winnerVariations) {
+    digest.push(`winner ${r.winnerVariations}`);
   }
 
   return (
@@ -346,12 +346,12 @@ function Provenance({ fn }: { fn: FunctionResult }) {
                 ))}
               </div>
             )}
-            {r.candidateLabel && (
+            {r.winnerVariations && (
               <div
                 className="mt-1.5 font-mono text-slate-500"
                 title="the candidate spelling that won the differ ranking"
               >
-                winner: {r.candidateLabel}
+                winner: {r.winnerVariations}
               </div>
             )}
           </ProvenanceRow>

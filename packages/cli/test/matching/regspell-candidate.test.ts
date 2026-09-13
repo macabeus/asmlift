@@ -16,7 +16,7 @@
 // row (`synthetic:ringread:ido7.1`), so a census over it is thin enough that a rename is easy to
 // miss — and with the labels unpinned, deleting the string from rank.ts's table is a SILENT
 // RENAME to `/regcopy-2`, a 0-flip change `bench regression` green-lights. The names are the
-// instrument (`candidateLabel` is a `bench diff` field), so they are asserted here as names, and
+// instrument (`winnerVariations` is a `bench diff` field), so they are asserted here as names, and
 // the tail-kind correspondence with them.
 //
 // SCOPE, stated so it is not mistaken for more than it is: this pins that the candidates are

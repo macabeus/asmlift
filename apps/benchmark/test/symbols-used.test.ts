@@ -1,4 +1,4 @@
-// symbolsUsed / candidateLabel PROVENANCE CAPTURE (eval/asmlift.ts): a scored row records which
+// symbolsUsed / winnerVariations PROVENANCE CAPTURE (eval/asmlift.ts): a scored row records which
 // candidate spelling won the differ and — on map rows — every map symbol the winner's output
 // references, shape pre-formatted for the report. The ranking itself is mocked (no compiler in
 // this suite); the refs it hands back are REAL — derived by core's enumeration from the exact
@@ -59,15 +59,15 @@ const LOADH = 'f:\n\tldr\tr0, .L1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x
 const COUNTER: SymbolInfo = { name: 'gCounter', kind: 'data', shape: 'scalar', size: 2, signed: false };
 const MAP: SymbolMap = new Map([[0x03001234, [COUNTER]]]);
 
-describe('symbolsUsed / candidateLabel capture (pinned)', () => {
+describe('symbolsUsed / winnerVariations capture (pinned)', () => {
   test('a symbol-fed row records the winning refs with pre-formatted shapes, plus the label', () => {
     rankPicking((l) => !hasVariation(l.split('/'), 'raw-globals'));
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('nonmatch');
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([{ name: 'gCounter', shape: 'scalar u16' }]);
-    expect(r.candidateLabel).toBeDefined();
-    expect(hasVariation(r.candidateLabel!.split('/'), 'raw-globals')).toBe(false);
+    expect(r.winnerVariations).toBeDefined();
+    expect(hasVariation(r.winnerVariations!.split('/'), 'raw-globals')).toBe(false);
   });
 
   test('a CALL target is never recorded, even alongside a recorded data ref', () => {
@@ -89,7 +89,7 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.symbolMap).toBe(true);
     expect(r.symbolsUsed).toEqual([]);
-    expect(hasVariation(r.candidateLabel!.split('/'), 'raw-globals')).toBe(true); // the label says which spelling won
+    expect(hasVariation(r.winnerVariations!.split('/'), 'raw-globals')).toBe(true); // the label says which spelling won
   });
 
   test('no map ⇒ no symbolsUsed field at all; the label still records the winner', () => {
@@ -97,7 +97,7 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r).not.toHaveProperty('symbolMap');
     expect(r).not.toHaveProperty('symbolsUsed');
-    expect(r.candidateLabel).toBeDefined();
+    expect(r.winnerVariations).toBeDefined();
   });
 
   test('an unscored row (noncompile) carries neither provenance field', () => {
@@ -107,7 +107,7 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('noncompile');
     expect(r).not.toHaveProperty('symbolsUsed');
-    expect(r).not.toHaveProperty('candidateLabel');
+    expect(r).not.toHaveProperty('winnerVariations');
   });
 
   test('BACKSTOP RETIRED: a gapped map row declines WITH the map — one decompile, no retry, no fell-back marker', () => {

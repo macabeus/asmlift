@@ -96,7 +96,7 @@
 // "PROTECTS NO ROW" IS A CENSUS AND NOT A SAMPLE, and the population is small because this is an
 // extra GATE: it only ever removes candidates, so only a row whose winner carries `/offmember` can
 // move at all. THAT POPULATION IS A QUERY, not a count to keep in step by hand — the rows of
-// `apps/benchmark/results/results.json` whose `asmlift.candidateLabel` contains `offmember` — and
+// `apps/benchmark/results/results.json` whose `asmlift.winnerVariations` contains `offmember` — and
 // it grows with the corpus, so re-run it before repeating the result. It held eight rows besides
 // `ProcessInputAndUpdateEntities` when the census ran, all unmoved with the rule on:
 // `synthetic:basecell`, `synthetic:bgfixed`, `synthetic:foldsink`, `sa3:sub_802DFC8` and

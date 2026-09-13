@@ -53,12 +53,12 @@ describe('closure over the names the committed artifact publishes', () => {
   const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
     id: string;
     asmlift?: {
-      candidateLabel?: string;
+      winnerVariations?: string;
       droppedCandidates?: { label: string }[];
       withheldCandidates?: { label: string }[];
     };
   }[];
-  const winners = rows.flatMap((r) => (r.asmlift?.candidateLabel === undefined ? [] : [r.asmlift.candidateLabel]));
+  const winners = rows.flatMap((r) => (r.asmlift?.winnerVariations === undefined ? [] : [r.asmlift.winnerVariations]));
   const names = new Set([
     ...winners,
     ...rows

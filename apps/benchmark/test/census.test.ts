@@ -18,13 +18,13 @@ import { describe, expect, it } from 'vitest';
 
 const rows = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'results', 'results.json'), 'utf8')).results as {
   id: string;
-  asmlift?: { candidateLabel?: string };
+  asmlift?: { winnerVariations?: string };
 }[];
 
-/** Every row that published a winning label, as `id` → `candidateLabel`. A row with no winner
+/** Every row that published a winning label, as `id` → `winnerVariations`. A row with no winner
  *  (declined, or every candidate failed to build) says nothing about any of these properties. */
 const winners = rows.flatMap((r) =>
-  r.asmlift?.candidateLabel !== undefined ? [{ id: r.id, label: r.asmlift.candidateLabel }] : [],
+  r.asmlift?.winnerVariations !== undefined ? [{ id: r.id, label: r.asmlift.winnerVariations }] : [],
 );
 
 const carrying = (name: string) => winners.filter((w) => hasVariation(w.label.split('/'), name));

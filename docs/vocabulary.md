@@ -55,6 +55,13 @@ candidates**, or it **threw**. N can be 0: the variation did not apply, or an ea
 already produced every source it made. A variation that threw prints an `asmlift: [threw] …` line from
 `pnpm bench fan` and `pnpm asmlift --score-against`.
 
+## Fields of the benchmark artifact
+
+| Field                      | Meaning                                                                                             |
+| -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `asmlift.winnerVariations` | The winner's variations, e.g. `unsigned/defsite`. Present on every row that has a winner.           |
+| `asmlift.fanSize`          | How many candidates the row's fan holds: scored, dropped and withheld. Present on every ranked row. |
+
 ## Words the enumeration code uses
 
 | Word                            | Meaning                                                                                                                                                                                                                                                  |

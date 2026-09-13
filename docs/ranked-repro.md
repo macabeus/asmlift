@@ -216,7 +216,7 @@ Two things it can do that nothing else can:
   benchmark run with nothing printed, and here it does not.
 
 - **`--base <ref>` prints the fan MULTIPLIER against what that artifact recorded.** Since each row
-  carries its own `candidateCount`, this is a comparison rather than archaeology:
+  carries its own `fanSize`, this is a comparison rather than archaeology:
   `asmlift: [fan-diff] <row-id>: 5952 → 11904 (2.00×) vs <ref>`, with no bench run behind it.
   It is sound because both sides are the SAME call — the run wrote its count out of
   `rankOptionsFor`, and this enumerates under those same options for the same row id. It prints at
@@ -256,7 +256,7 @@ the field, or the row never ranked there). And this run enumerates 32; the serie
   and a bare `.s` does not — a score from one would be a number against a target nobody named. And
   it is NOT the harness's configuration: no prototypes, no `asmData` side table, no symbol map. So
   its count compares with another `.s` run and with itself across two revisions, and NOT with a
-  row's recorded `candidateCount`: the same function priced both ways gives two counts, because the
+  row's recorded `fanSize`: the same function priced both ways gives two counts, because the
   side tables are half of what the fan is a cross over. The command says so on stderr every time.
 
   It is runnable on anything in the repo, not only on functions nobody has:

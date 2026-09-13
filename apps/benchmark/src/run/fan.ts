@@ -130,7 +130,7 @@ export interface FanOptions {
  *  and the number a round that ships a variation is asked to report before it merges.
  *
  *  It is a comparison of THIS TREE's enumeration against a RECORDED one, which is sound only
- *  because both are the same call: the run wrote `candidateCount` out of `rankOptionsFor`'s
+ *  because both are the same call: the run wrote `fanSize` out of `rankOptionsFor`'s
  *  options, and this command enumerates under those same options for the same row id. A fan
  *  enumerated under options assembled a second time is a fan of a different configuration —
  *  docs/ranked-repro.md documents a 112,896-vs-135,936 spread from exactly that.
@@ -175,7 +175,7 @@ export function fanDiffLine(
       `there is no earlier fan to compare. And ${here}.`
     );
   }
-  const from = was.asmlift.candidateCount;
+  const from = was.asmlift.fanSize;
   if (from === undefined) {
     return (
       `asmlift: [fan-diff] the artifact at ${base} records no candidate count for ${rowId} ` +
@@ -648,7 +648,7 @@ export function unshowable(
  *
  *  It is also NOT the harness's configuration: no prototypes, no side-table `asmData`, no symbol
  *  map. So its count is comparable with another `.s` run, and with itself across two revisions —
- *  which is what it is for — and not with a row's recorded `candidateCount`. Said out loud, because
+ *  which is what it is for — and not with a row's recorded `fanSize`. Said out loud, because
  *  a number that looks like the row's and is not is worse than no number. */
 export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: FanOptions = {}): number {
   const tc = (TOOLCHAINS as Record<string, Toolchain | undefined>)[toolchainId];
@@ -689,7 +689,7 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
     `${sym} from ${asmPath} — toolchain ${toolchainId}, ENUMERATION ONLY: no target object, so ` +
       `nothing is compiled or scored, and no prototypes, asm-data side table or symbol map are in ` +
       `scope. This count is comparable with another .s run of the same file, NOT with a benchmark ` +
-      `row's recorded candidateCount.`,
+      `row's recorded fanSize.`,
   );
 
   // The same phase-1 verdict the row path states first: a gap here is what would make a published
@@ -872,7 +872,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   };
   /** THE FAN-LESS EXIT, which is not always a count-less one. A `noncompile` row — every spelling
    *  refused — throws, and the error carries both refusal lists, so the run RECORDS a
-   *  `candidateCount` for exactly this class (`fanSizeOfError`). A DECLINE carries neither, and
+   *  `fanSize` for exactly this class (`fanSizeOfError`). A DECLINE carries neither, and
    *  that is not a reason to say nothing: the base's recorded count IS the comparison there, on
    *  all 234 declined rows — the row class both briefs send rounds to. `fanDiffLine` takes
    *  `undefined` and has a sentence for it. */

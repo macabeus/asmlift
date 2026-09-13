@@ -42,7 +42,7 @@ const score = (s: number | null | undefined, m: number | null | undefined): stri
 
 /** THE COST FIELDS, in the reader that already exists.
  *
- *  `candidateCount` and `rankSeconds` are published on every ranked row, and this is the command
+ *  `fanSize` and `rankSeconds` are published on every ranked row, and this is the command
  *  whose job is to report what the artifact says. The alternative reader is `bench fan <row>
  *  --base <ref>`, which enumerates to answer and carries no CURRENT / NOT CURRENT verdict — and
  *  that verdict below is this repo's own answer to quoting a stale artifact number.
@@ -52,8 +52,8 @@ const score = (s: number | null | undefined, m: number | null | undefined): stri
  *  `cost` section of `bench diff` says at length and this line has no room for. */
 const cost = (r: FunctionResult): string => {
   const bits: string[] = [];
-  if (r.asmlift.candidateCount !== undefined) {
-    bits.push(`fan=${r.asmlift.candidateCount}`);
+  if (r.asmlift.fanSize !== undefined) {
+    bits.push(`fan=${r.asmlift.fanSize}`);
   }
   if (r.asmlift.rankSeconds !== undefined) {
     bits.push(`rank=${r.asmlift.rankSeconds.toFixed(1)}s`);

@@ -192,11 +192,11 @@ export function runAsmlift(
       // which map symbols its output references — best.symbolRefs is derived in core from the
       // exact tree the winning source was emitted from (post-DCE value refs only; call targets
       // excluded). A raw-globals winner names nothing ⇒ the honest empty list.
-      candidateLabel: best.label,
+      winnerVariations: best.label,
       // …and WHAT THE FAN COST, which is the row's own share of what a `bench run` spends. The
       // count is every spelling enumerated (the two refusal lists below are the rest of it); the
       // seconds are this machine's price for that count, cache state included.
-      candidateCount: fanSize(ranked),
+      fanSize: fanSize(ranked),
       rankSeconds: secondsSince(rankT0),
       // Spellings that FAILED TO BUILD. rankBy drops them so a broken sibling cannot sink a
       // candidate that compiles — but dropping them SILENTLY published a clean win over a
@@ -228,7 +228,7 @@ export function runAsmlift(
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'noncompile',
-      ...(fan === undefined ? {} : { candidateCount: fan }),
+      ...(fan === undefined ? {} : { fanSize: fan }),
       rankSeconds: secondsSince(rankT0),
       source: annotated,
       score: null,

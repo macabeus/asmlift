@@ -91,8 +91,8 @@ describe('the ranked row records its own price', () => {
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('nonmatch');
     // the count is the fan, not the published candidate list
-    expect(r.candidateCount).toBe((r.droppedCandidates?.length ?? 0) + (r.withheldCandidates?.length ?? 0) + 1);
-    expect(r.candidateCount).toBeGreaterThan(1);
+    expect(r.fanSize).toBe((r.droppedCandidates?.length ?? 0) + (r.withheldCandidates?.length ?? 0) + 1);
+    expect(r.fanSize).toBeGreaterThan(1);
     expect(typeof r.rankSeconds).toBe('number');
     expect(r.rankSeconds).toBeGreaterThanOrEqual(0);
   });
@@ -107,7 +107,7 @@ describe('the ranked row records its own price', () => {
   test('the count a run records is the count --enumerate would print, over the same enumeration', () => {
     rankInto(0, 0);
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
-    expect(r.candidateCount).toBe(enumerateCandidates('f', LOADH, ARMV4T_AGBCC, {}).length);
+    expect(r.fanSize).toBe(enumerateCandidates('f', LOADH, ARMV4T_AGBCC, {}).length);
   });
 
   test('a NONCOMPILE row — every spelling refused — still carries its fan and its seconds', () => {
@@ -123,7 +123,7 @@ describe('the ranked row records its own price', () => {
     });
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('noncompile');
-    expect(r.candidateCount).toBe(2);
+    expect(r.fanSize).toBe(2);
     expect(typeof r.rankSeconds).toBe('number');
   });
 
@@ -134,7 +134,7 @@ describe('the ranked row records its own price', () => {
     });
     const r = runAsmlift(TC, 'f', LOADH, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('noncompile');
-    expect(r).not.toHaveProperty('candidateCount');
+    expect(r).not.toHaveProperty('fanSize');
     expect(typeof r.rankSeconds).toBe('number');
   });
 
@@ -143,7 +143,7 @@ describe('the ranked row records its own price', () => {
   test('a declined row carries NEITHER field — it never ranked', () => {
     const r = runAsmlift(TC, 'f', GAPPED, '/nonexistent.o', undefined, noCompile);
     expect(r.outcome).toBe('declined');
-    expect(r).not.toHaveProperty('candidateCount');
+    expect(r).not.toHaveProperty('fanSize');
     expect(r).not.toHaveProperty('rankSeconds');
   });
 });
@@ -167,25 +167,21 @@ describe('what the gates do with a recorded cost', () => {
   // candidate cache. Compared, `stale-check` would answer `stale` unconditionally and stop being
   // a question.
   test('stale-check ignores rankSeconds — otherwise every run is stale by construction', () => {
-    expect(comparableRow(row(side({ candidateCount: 96, rankSeconds: 1.2 })))).toBe(
-      comparableRow(row(side({ candidateCount: 96, rankSeconds: 41.7 }))),
+    expect(comparableRow(row(side({ fanSize: 96, rankSeconds: 1.2 })))).toBe(
+      comparableRow(row(side({ fanSize: 96, rankSeconds: 41.7 }))),
     );
   });
 
   // …and an artifact written before the field existed must compare equal to a fresh run carrying
   // it, or the first run after this lands reports every row stale over a value nobody can read.
   test('stale-check reads an artifact that predates rankSeconds as unchanged', () => {
-    expect(comparableRow(row(side({ candidateCount: 96 })))).toBe(
-      comparableRow(row(side({ candidateCount: 96, rankSeconds: 3.3 }))),
-    );
+    expect(comparableRow(row(side({ fanSize: 96 })))).toBe(comparableRow(row(side({ fanSize: 96, rankSeconds: 3.3 }))));
   });
 
   // The fan is deterministic, so a fan that moved IS a change worth committing — and is the change
   // this artifact started recording in order to stop losing.
-  test('stale-check DOES compare candidateCount', () => {
-    expect(comparableRow(row(side({ candidateCount: 96 })))).not.toBe(
-      comparableRow(row(side({ candidateCount: 384 }))),
-    );
+  test('stale-check DOES compare fanSize', () => {
+    expect(comparableRow(row(side({ fanSize: 96 })))).not.toBe(comparableRow(row(side({ fanSize: 384 }))));
   });
 });
 
@@ -198,7 +194,7 @@ describe('the per-row run line', () => {
   test('is index, id, both outcomes, then the cost — fan included', () => {
     const r = {
       id: 'kleod:CountCollectedGems:agbcc',
-      asmlift: side({ score: 18, maxScore: 344, candidateCount: 5952 }),
+      asmlift: side({ score: 18, maxScore: 344, fanSize: 5952 }),
       m2c: side({ decompiler: 'm2c', outcome: 'noncompile', compileErrors: 1 }),
     } as unknown as FunctionResult;
     expect(rowLine(7, 812, ' s3', r, '518.3')).toBe(
@@ -218,7 +214,7 @@ describe('the per-row run line', () => {
 
 describe('costNote', () => {
   test('prints the fan beside the seconds, so a run says what it is paying for', () => {
-    expect(costNote({ candidateCount: 5952 } as DecompilerResult, '518.3')).toBe('(518.3s, fan 5952)');
+    expect(costNote({ fanSize: 5952 } as DecompilerResult, '518.3')).toBe('(518.3s, fan 5952)');
   });
 
   // A row that never ranked has no fan. `fan 0` would read as a claim about its enumeration.

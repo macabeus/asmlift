@@ -67,7 +67,7 @@ export interface DecompilerResult {
   symbolsUsed?: { name: string; shape?: string }[];
   /** asmlift only, scored rows: the variations of the candidate that won the differ
    *  ranking (e.g. "unsigned/raw-globals") — which combination of variations produced `source`. */
-  candidateLabel?: string;
+  winnerVariations?: string;
   /** asmlift only, RANKED rows: HOW BIG THIS ROW'S FAN WAS — every candidate spelling
    *  enumeration emitted, i.e. `scored + dropped + withheld`. The row's own share of what a
    *  `bench run` costs, and the number that says whether a variation a round shipped multiplied it.
@@ -86,9 +86,9 @@ export interface DecompilerResult {
    *
    *  Absent ⇒ the row never reached the ranked pass (`declined` on a phase-1 gap, or `failed`).
    *  `0` is not a possible value: a fan with no candidates throws before it can be counted. */
-  candidateCount?: number;
+  fanSize?: number;
   /** asmlift only, RANKED rows: wall seconds of the ranked pass — enumerate, then compile and
-   *  objdiff-score every candidate. The price `candidateCount` predicts, as this machine actually
+   *  objdiff-score every candidate. The price `fanSize` predicts, as this machine actually
    *  paid it.
    *
    *  NOT A MEASUREMENT OF THE DECOMPILER and never comparable between two artifacts as a claim

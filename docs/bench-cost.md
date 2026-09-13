@@ -60,7 +60,7 @@ This is also why the cheap questions in §3 matter more each month, not less.
 
 ## 3. Answer the cost question without running a bench
 
-Since #192 the committed artifact records, per row, `candidateCount` and `rankSeconds`. Three
+Since #192 the committed artifact records, per row, `fanSize` and `rankSeconds`. Three
 readers, none of which compiles anything:
 
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
@@ -112,8 +112,8 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   25 of them read `src`/`len` ALONE, which is a dataset edit reported as a decompiler change.
 
   **`--fan` refuses when the committed artifact prices none of the rows it selected.** The size
-  guard reads `candidateCount` off `results.json`, so an artifact that parses and prices nothing —
-  `results: []` from a shard that wrote no rows, a schema move under `asmlift.candidateCount`, or a
+  guard reads `fanSize` off `results.json`, so an artifact that parses and prices nothing —
+  `results: []` from a shard that wrote no rows, a schema move under `asmlift.fanSize`, or a
   whole-corpus artifact with no row of the project you selected — bounds nothing, and used to turn
   the guard off with no output at all (still enumerating the 77,760-candidate row at 25 s, against
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused

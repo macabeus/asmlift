@@ -1594,7 +1594,7 @@ export function enumerateCandidates(
     // NAMED BY THE TAIL THE RESULT CARRIES, NEVER BY ITS INDEX. The reuse tail exists only
     // where R1 fired, so the list is 1, 2 or 3 long and the fresh tail sits at no fixed position;
     // an index-keyed suffix table names the fresh spelling `/regcopy-ret` on every R1-less function
-    // — the dead-var-reuse name on the one spelling that has no dead var — and `candidateLabel` is
+    // — the dead-var-reuse name on the one spelling that has no dead var — and `winnerVariations` is
     // what every census in this repo counts, `bench diff` included. The exhaustive record is the
     // pin: a new tail kind is a type error here rather than a silent `/regcopy-3`.
     // `cli/test/matching/regspell-candidate.test.ts` holds the correspondence.
@@ -2059,7 +2059,7 @@ export function enumerateCandidates(
               // THE SEAM FIX IS BOOKED AND NOT BUILT: keep the losing routes on the surviving
               // candidate (`label` plus an `alsoReachedBy: string[]`) and a census by mechanism
               // becomes one. It is not free — every consumer that reads `label` as the derivation
-              // would have to say which it means, and the published `candidateLabel` must not
+              // would have to say which it means, and the published `winnerVariations` must not
               // change — so build it when a round needs the census, not before. Until then the only
               // sound census is an ablation.
               const dup = seen.get(source);
@@ -2170,7 +2170,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
  *
  *  IT IS A PREFERENCE, AND EVERY NEW MINTER INHERITS IT. `deviceVolatileClaims` only ever ADDS a
  *  claim, so any variation that qualifies a device access wins its own tie by construction: when
- *  `/vol-store` joined the roster, six rows changed their published `candidateLabel` and `source`
+ *  `/vol-store` joined the roster, six rows changed their published `winnerVariations` and `source`
  *  with no score and no outcome moving. That is a judgement about the source rather than a
  *  measurement of it — the differ never refereed those six — and it is the same judgement this
  *  term was declared to make, taken on the same evidence. What it must never do is change WHICH

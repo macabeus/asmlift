@@ -119,7 +119,7 @@ describe('the sweep comparison', () => {
 
   it('reports a fan that is the same SIZE and a different SET', () => {
     // The move a count-only census cannot see, and the reason the record carries a hash of the
-    // candidate SOURCES and not just `candidateCount`: a variation that swaps one spelling for another
+    // candidate SOURCES and not just `fanSize`: a variation that swaps one spelling for another
     // leaves the count identical and is exactly the kind of change a round ships.
     const b = [rec({ id: 'r:s:agbcc', mapMode: 'harness', fan: 32, fanHash: '111111111111' })];
     const h = [rec({ id: 'r:s:agbcc', mapMode: 'harness', fan: 32, fanHash: '222222222222' })];
@@ -413,7 +413,7 @@ describe('the sweep refusals', () => {
   });
 
   it('refuses --fan over --asm-dir, where the size guard cannot reach', () => {
-    // `SWEEP_FAN_LIMIT` is read off the committed artifact's `candidateCount`, which exists for
+    // `SWEEP_FAN_LIMIT` is read off the committed artifact's `fanSize`, which exists for
     // DATASET ROWS ONLY — so in `--asm-dir` mode the guard is structurally unreachable, and the
     // population this flag exists to sweep (`checkouts/<project>/asm/nonmatchings`) is where the
     // five-hour functions live. Measured: one 1.6 KB klonoa `.s` alone in a directory had not
@@ -455,7 +455,7 @@ describe('the --fan size guard reads its own SELECTION, not just the artifact', 
   it('refuses an artifact that prices plenty of rows and none of THIS selection', () => {
     // Selection-scoped and not corpus-wide: an artifact that prices 787 rows and no `kleod` row
     // bounds `--project kleod --fan` exactly as little as an empty one does. Measured by stripping
-    // `candidateCount` from the 42 kleod rows: the kleod selection refuses, an `sa3` selection off
+    // `fanSize` from the 42 kleod rows: the kleod selection refuses, an `sa3` selection off
     // the SAME artifact still sweeps.
     const r = fanGuard({ tiers: ['real'], project: 'kleod' }, artifact([small]));
     expect(r.unreadable).toContain('not one of the rows this selection names');
@@ -489,7 +489,7 @@ describe('the --fan guard prices the CURRENT rows, joined by identity', () => {
     sourceUrl,
     ...(aliases ? { aliases } : {}),
   });
-  const priced = (r: ReturnType<typeof row>, n: number) => ({ ...r, asmlift: { candidateCount: n } });
+  const priced = (r: ReturnType<typeof row>, n: number) => ({ ...r, asmlift: { fanSize: n } });
 
   it('does not hand a removed row’s price to another decompilation’s row at the same address', () => {
     // The kleod swap, measured before this join: the guard still "skipped" the no-longer-selected
@@ -516,7 +516,7 @@ describe('the --fan guard prices the CURRENT rows, joined by identity', () => {
       sym: 'add',
       toolchain: 'agbcc',
       tier: 'synthetic' as const,
-      asmlift: { candidateCount: 2 },
+      asmlift: { fanSize: 2 },
     };
     const fans = rekeyFans(
       [priced(row('sub_08010000', '0x08010000', NEW), 77760), synthetic],

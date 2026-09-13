@@ -502,11 +502,11 @@ describe('noFanReport', () => {
 // the same row. `LoadBGTilemapData` went 59,904 → 225,792 in six days and that series exists only
 // because rounds happened to type it into commit subjects; this is the command that asks.
 describe('fanDiffLine', () => {
-  const artifact = (rows: { id: string; candidateCount?: number }[]): BenchOutput =>
+  const artifact = (rows: { id: string; fanSize?: number }[]): BenchOutput =>
     ({
       results: rows.map((r) => ({
         id: r.id,
-        asmlift: r.candidateCount === undefined ? {} : { candidateCount: r.candidateCount },
+        asmlift: r.fanSize === undefined ? {} : { fanSize: r.fanSize },
       })),
     }) as unknown as BenchOutput;
 
@@ -515,7 +515,7 @@ describe('fanDiffLine', () => {
       'proj:Fn:agbcc',
       225792,
       'origin/main',
-      artifact([{ id: 'proj:Fn:agbcc', candidateCount: 59904 }]),
+      artifact([{ id: 'proj:Fn:agbcc', fanSize: 59904 }]),
     );
     expect(line).toBe('asmlift: [fan-diff] proj:Fn:agbcc: 59904 → 225792 (3.77×) vs origin/main');
   });
@@ -523,9 +523,7 @@ describe('fanDiffLine', () => {
   // A fan that SHRANK is the same line under 1 — a round that prunes a variation is reporting a
   // multiplier too, and a renderer that only knows growth makes it invisible.
   it('reports a shrink as a multiplier under 1', () => {
-    expect(fanDiffLine('r', 48, 'origin/main', artifact([{ id: 'r', candidateCount: 96 }]))).toContain(
-      '96 → 48 (0.50×)',
-    );
+    expect(fanDiffLine('r', 48, 'origin/main', artifact([{ id: 'r', fanSize: 96 }]))).toContain('96 → 48 (0.50×)');
   });
 
   // Three ways there is no comparison, and they are three different facts. A silence would let a
@@ -537,14 +535,14 @@ describe('fanDiffLine', () => {
   });
 
   it('says a row the base never had was ADDED since, not that its fan grew from nothing', () => {
-    const line = fanDiffLine('r', 96, 'origin/main', artifact([{ id: 'other', candidateCount: 4 }]));
+    const line = fanDiffLine('r', 96, 'origin/main', artifact([{ id: 'other', fanSize: 4 }]));
     expect(line).toContain('is not in the artifact at origin/main');
   });
 
   it('does not compare against another decompilation’s row at the same address', () => {
     // `fan --base` across a source swap: the base's row at this address is a different author's
     // source, so its count is not this row's earlier fan. A renamed row of the SAME decomp still is.
-    const at = (id: string, sym: string, repo: string, candidateCount: number) => ({
+    const at = (id: string, sym: string, repo: string, fanSize: number) => ({
       id,
       sym,
       project: 'kleod',
@@ -552,7 +550,7 @@ describe('fanDiffLine', () => {
       tier: 'real',
       addr: '0x08010000',
       sourceUrl: `https://github.com/${repo}/blob/abc/src/x.c#L1-L2`,
-      asmlift: { candidateCount },
+      asmlift: { fanSize },
     });
     const now = {
       id: 'kleod:PauseMenuScreenHandler:agbcc',
@@ -582,7 +580,7 @@ describe('fanDiffLine', () => {
   // so there is no count on THIS side, on all 234 of them — the row class `attribute-function.md`
   // sends rounds to. The base's recorded count is the answer there.
   it('says the fan LEFT when the base counted and this run has none', () => {
-    const line = fanDiffLine('r', undefined, 'origin/main', artifact([{ id: 'r', candidateCount: 26880 }]));
+    const line = fanDiffLine('r', undefined, 'origin/main', artifact([{ id: 'r', fanSize: 26880 }]));
     expect(line).toContain('records 26880 candidate(s) for r');
     expect(line).toContain('that fan LEFT, it did not shrink to zero');
   });
@@ -592,8 +590,8 @@ describe('fanDiffLine', () => {
   it('never renders a missing count as a number, on any of the four sentences', () => {
     for (const committed of [
       artifact([{ id: 'r' }]),
-      artifact([{ id: 'other', candidateCount: 4 }]),
-      artifact([{ id: 'r', candidateCount: 8 }]),
+      artifact([{ id: 'other', fanSize: 4 }]),
+      artifact([{ id: 'r', fanSize: 8 }]),
     ]) {
       const line = fanDiffLine('r', undefined, 'origin/main', committed);
       expect(line).not.toContain('undefined');

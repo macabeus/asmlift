@@ -34,7 +34,7 @@ import { rowsAddedSince } from './regression';
  *  line.
  *
  *  `source` is here because a change that moves no score can still rewrite what the report shows,
- *  `candidateLabel` because the ranked WINNER can change identity at an unchanged score (a
+ *  `winnerVariations` because the ranked WINNER can change identity at an unchanged score (a
  *  tie-break moving is a real change), `quality` because the report publishes it — a row can move
  *  `quality.casts` 0 → 1 with score, outcome and label all unchanged — and `breakdown` for the
  *  same reason (the web FunctionDetail renders its five numbers; it moved 17 lines over
@@ -73,7 +73,7 @@ import { rowsAddedSince } from './regression';
  *  THE TWO COST FIELDS ARE DELIBERATELY OUT, for two different reasons. `rankSeconds` is wall
  *  clock: it moves on every row of every run (machine load, docker, ~5× cold vs warm candidate
  *  cache), so watching it here would report every row as changed and retire this gate. And
- *  `candidateCount` is watched — but by the FAN SECTION below rather than by this list, because
+ *  `fanSize` is watched — but by the FAN SECTION below rather than by this list, because
  *  this list decides the exit code and the artifact at `origin/main` predates the field: reading
  *  `undefined → 96` as a field change would paint every scored row red on the first comparison
  *  after it lands, on a run where nothing moved. The fan section states what moved, names the
@@ -83,7 +83,7 @@ import { rowsAddedSince } from './regression';
  *
  *  `symbolsUsed` is the one published field still left out, and NOT for size — it is at most 1,108
  *  chars on any row of the current artifact. It is derived from the winning candidate, which
- *  `source` and `candidateLabel` already name, and it moved on 0 rows over `eb6dec7d`→`2fed1e42`;
+ *  `source` and `winnerVariations` already name, and it moved on 0 rows over `eb6dec7d`→`2fed1e42`;
  *  a run where a symbol's declared SHAPE moves under an unchanged winner would slip past. */
 const FIELDS = {
   asmlift: [
@@ -93,7 +93,7 @@ const FIELDS = {
     'compileErrors',
     'errorMarkers',
     'breakdown',
-    'candidateLabel',
+    'winnerVariations',
     'source',
     'quality',
     'droppedCandidates.length',
@@ -336,7 +336,7 @@ export interface FanReport extends PairReport {
 }
 
 export function compareFans(base: BenchOutput, fresh: BenchOutput): FanReport {
-  const r = comparePerRow(base, fresh, (x) => x.asmlift.candidateCount);
+  const r = comparePerRow(base, fresh, (x) => x.asmlift.fanSize);
   const changed = r.pairs
     .filter((c) => c.from !== c.to)
     .sort((a, b) => Math.abs(b.to - b.from) - Math.abs(a.to - a.from));
@@ -590,7 +590,7 @@ export function diffGate(base = 'HEAD'): number {
   for (const line of fanLines(
     compareFans(committed, fresh),
     base,
-    fresh.results.filter((r) => r.asmlift.candidateCount !== undefined).length,
+    fresh.results.filter((r) => r.asmlift.fanSize !== undefined).length,
   )) {
     console.log(line);
   }
