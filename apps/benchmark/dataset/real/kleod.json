@@ -4,6 +4,7 @@
   "repoDir": "klonoa-empire-of-dreams",
   "repo": "Dream-Atelier/kl-eod-decomp",
   "branch": "asmlift-benchmark",
+  "elfMake": "asmlift-elf",
   "cppIncludes": [
     "-nostdinc",
     "-I",

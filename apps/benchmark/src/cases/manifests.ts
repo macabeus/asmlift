@@ -81,8 +81,13 @@ export interface RealManifest {
   /** The pinned integration branch on that fork (provenance base + one integration commit);
    *  `bench vendor`/`bench fidelity` verify the checkout sits on its remote head. */
   branch: string;
-  /** Make target that derives the ELF `decomp.yaml` names (DWARF types-sidecar projects:
-   *  af/marioparty3/snowboardkids2). Absent ⇒ the plain project build produces the ELF. */
+  /** Make target that derives the ELF `decomp.yaml` names — every real project has one today,
+   *  because every one of them declares a DERIVED `tools.asmlift.elf` (a copy of the linked ELF
+   *  carrying a DWARF sidecar). Absent ⇒ the plain project build produces the ELF. NOT optional
+   *  decoration: the published repro script prints the derive step only when this is set
+   *  (`src/report/repro-scripts.ts`), so an unset field silently tells every reader of those rows
+   *  to reproduce them from a map the rows were not measured with. Gated in
+   *  `test/real-manifests.test.ts` against the checkout's own Makefile. */
   elfMake?: string;
   cppIncludes: string[]; // preprocessor flags (e.g. ["-nostdinc","-I","tools/agbcc/include"])
   headers: string[]; // project headers to #include so types resolve
