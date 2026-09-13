@@ -45,7 +45,7 @@
 // underdetermination one (docs/level-tower.md, "a third fork sits inside the ranked variations").
 // The question — does a `const` with 2+ consumers live across a call in a named local — is the one
 // `/reread-globals`, `/addr-home`, `/expr-home` and `/derived-home` each answer as a
-// STRUCTURING_AXES entry. A structure variation here would double the enumeration on every function it admits;
+// STRUCTURE_VARIATIONS entry. A structure variation here would double the enumeration on every function it admits;
 // substituting on the already-homed tree costs 766 candidates over 47058 (+1.6%) across the 33 of
 // 69 klonoa functions that lift with no symbol map.
 //
@@ -71,7 +71,7 @@ interface BaseCtx {
 export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
   {
     id: 'non-pointer',
-    why: 'the lever re-spells an address; a scalar value home is a different question',
+    why: 'the variation re-spells an address; a scalar value home is a different question',
     sound: false,
     rejects: (c) => !c.isPointer,
   },
@@ -104,7 +104,7 @@ export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
   },
   {
     id: 'null-base',
-    why: '`0` is NULL, never an address — the sibling qualifier lever (volatileptr.ts) refuses it too',
+    why: '`0` is NULL, never an address — the sibling qualifier variation (volatileptr.ts) refuses it too',
     sound: false,
     rejects: (c) => c.m.constValue === 0,
   },
@@ -131,7 +131,7 @@ export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
   },
   {
     id: 'single-use',
-    why: 'one use is not the reused address this lever exists for',
+    why: 'one use is not the reused address this variation exists for',
     sound: false,
     rejects: (c) => c.m.baseUses < 2,
   },

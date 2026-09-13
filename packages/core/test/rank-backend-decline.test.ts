@@ -44,7 +44,7 @@ test('a tree the backend refuses drops its candidates and keeps the others', () 
   const all = enumerateCandidates('f', ASM, ARMV4T_AGBCC).map((c) => c.label);
   const kept = enumerateCandidates('f', ASM, ARMV4T_AGBCC, {
     backend: refusing(/\(s32\)/),
-    onLeverError: (label, error) => seen.push(`${label}: ${error}`),
+    onEnumerationError: (label, error) => seen.push(`${label}: ${error}`),
   }).map((c) => c.label);
   // the pin fires only under `unsigned`, so exactly the signed candidates survive
   expect(all).toContain('unsigned');
@@ -117,14 +117,14 @@ test('an entirely withheld fan throws the same class, with the withheld list on 
   expect(e.message).toContain('2 candidate(s) withheld, none scored');
 });
 
-// …AND IT MUST SAY WHICH SPELLING IT REFUSED. The pre-respell variations (rank.ts PRE_FAN_PRODUCTS)
+// …AND IT MUST SAY WHICH SPELLING IT REFUSED. The pre-respell variations (rank.ts PRE_RESPELL_VARIATIONS)
 // rewrite the TREE and then run this same respell set over the result, so a backend refusal there deletes
 // the variation's whole half of the row's candidates. Reported under the bare function name it is
 // byte-identical to a refusal of the DEFAULT spelling, which sends the reader at the one spelling
 // that did not fail — the wrong-cause attribution the channel exists to remove.
 //
-// This is the ONE assertion on the `[lever]` line's content anywhere, and NOT because no variation
-// throws over the corpus. `onLeverError` has exactly one caller — packages/cli/src/main.ts — and
+// This is the ONE assertion on the `[threw]` line's content anywhere, and NOT because no variation
+// throws over the corpus. `onEnumerationError` has exactly one caller — packages/cli/src/main.ts — and
 // the benchmark reaches `decompileRanked` (apps/benchmark/src/eval/asmlift.ts) without supplying
 // one, so a `pnpm bench run` cannot print the line at all. Its absence over the whole corpus is
 // evidence about the WIRING, not about the variations, which leaves nothing but this test pinning the label.
@@ -172,7 +172,7 @@ test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, 
         return source;
       },
     },
-    onLeverError: (label) => seen.push(label),
+    onEnumerationError: (label) => seen.push(label),
   }).map((c) => c.label);
 
   expect(kept.some((l) => hasVariation(l.split('/'), 'unmerge'))).toBe(false); // the half really was deleted
@@ -182,7 +182,7 @@ test('a refusal on a PRE-RESPELL tree is reported under the pre-respell suffix, 
 
 // …AND THE PRE-RESPELL NAME HAS TO REACH THE VARIATION REFUSALS TOO, not just the default emit's. The
 // test above refuses the pre-respell tree's DEFAULT source, which makes `respellTree` report and return
-// before a single re-spelling runs — so it cannot see the four other `onLeverError` sites inside
+// before a single re-spelling runs — so it cannot see the four other `onEnumerationError` sites inside
 // that function, each of which is reachable from both fans and each of which already carries a
 // suffix naming a VARIATION. On a pre-respell tree that variation is a variation applied to the REWRITE, so a
 // refusal of `/unmerge/volatile` reported as `/volatile` sends the reader at a spelling that did
@@ -244,7 +244,7 @@ test('a refusal of a RESPELL VARIATION on a pre-respell tree carries the pre-res
         return source;
       },
     },
-    onLeverError: (label) => seen.push(label),
+    onEnumerationError: (label) => seen.push(label),
   }).map((c) => c.label);
 
   expect(kept.some((l) => hasVariation(l.split('/').slice(0, -1), 'unmerge'))).toBe(false); // the variations' candidates really died

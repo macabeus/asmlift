@@ -4,7 +4,7 @@
 // driver reads it without a second hand-edited site.
 //
 // DECLARATION ORDER IS PUBLISHED BEHAVIOUR. `compareScored` breaks a score tie by enumeration
-// order, so the order of `STRUCTURING_AXES`, `SHAPE_PRODUCTS` and every `*_ADMISSIONS` roster
+// order, so the order of `STRUCTURE_VARIATIONS`, `STACKED_VARIATIONS` and every `*_HOISTS` roster
 // decides which of two byte-identical candidates wins and gets its variations into
 // `results.json`. Reordering one of these arrays is a behaviour change wearing a cleanup's
 // clothes — never do it as tidying.
@@ -47,8 +47,8 @@ import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure
  *  StructureOptions, and the default-setting abort guard all derive from this table, so a new
  *  structure variation is one entry — not four hand-edited sites that can drift.
  *
- *  `probeGate` gates the alternative's ENUMERATION on the shared lift (the only thing the
- *  variation can change must exist at all); `variantGate` re-evaluates per symbol-map setting on
+ *  `sharedGate` gates the alternative's ENUMERATION on the shared lift (the only thing the
+ *  variation can change must exist at all); `perLiftGate` re-evaluates per symbol-map setting on
  *  that setting's own lifted fn (a map-lifted shared lift spells const bases as gaddr, which would
  *  blind the /raw-globals siblings — the /addr-home lesson). `strip` opts the variation into the
  *  dropped-sibling closure: a candidate with it ON is skipped when its OFF sibling failed the
@@ -57,7 +57,7 @@ import { edgeCopyOrdersDiffer, hasParamRootedMerge } from './structure/structure
  *  declarations — neither adds materialization or merging, so neither can unlock a function the
  *  default declines (reread also skips the strip closure). Both exemptions are stated here
  *  rather than left implicit in a missing `||` arm or trigger term. */
-export interface StructuringAxis {
+export interface StructureVariation {
   flag:
     | 'reread'
     | 'inplace'
@@ -72,11 +72,11 @@ export interface StructuringAxis {
     | 'siteSense';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
-  probeGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
-  variantGate?: (fn: Fn) => boolean;
+  sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
+  perLiftGate?: (fn: Fn) => boolean;
   strip: boolean;
 }
-export const STRUCTURING_AXES: readonly StructuringAxis[] = [
+export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // `/reread-globals` — the VALUE-HOME variation (structure/analysis.ts AnalyzeOptions). Whether the
   // source read a global once into a variable or re-read it at each use is not derivable from
   // asm: the compiler CSEs the second spelling back into one load, and the round-5 dogfood
@@ -87,7 +87,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'reread',
     suffix: '/reread-globals',
     options: (on) => ({ rereadGlobals: on }),
-    probeGate: (sharedLift, defs) =>
+    sharedGate: (sharedLift, defs) =>
       sharedLift.blocks.some((b) =>
         b.ops.some((op) => op.opcode === 'load' && globalCellOf(defs, op.operands[0], op.attrs.off as number) !== null),
       ),
@@ -102,7 +102,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'inplace',
     suffix: '/inplace',
     options: (on) => ({ materializeJoinFeeds: on }),
-    probeGate: (sharedLift, defs) =>
+    sharedGate: (sharedLift, defs) =>
       sharedLift.blocks.some((b) =>
         b.ops.some(
           (op) =>
@@ -119,7 +119,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'mergeNames',
     suffix: '/merge-names',
     options: (on) => ({ coalesceMergeNames: on }),
-    probeGate: (sharedLift) =>
+    sharedGate: (sharedLift) =>
       sharedLift.blocks
         .slice(1)
         .some(
@@ -137,7 +137,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'addrHome',
     suffix: '/addr-home',
     options: (on) => ({ homeSharedAddresses: on }),
-    variantGate: hasHomeableSharedAddress,
+    perLiftGate: hasHomeableSharedAddress,
     strip: true,
   },
   // `/expr-home` — the loop-expression-home variation (structure/analysis.ts AnalyzeOptions
@@ -150,7 +150,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'exprHome',
     suffix: '/expr-home',
     options: (on) => ({ homeLoopExprs: on }),
-    variantGate: hasLoopSharedPureValue,
+    perLiftGate: hasLoopSharedPureValue,
     strip: true,
   },
   // `/derived-home` — the derived-read-home variation (structure/analysis.ts AnalyzeOptions
@@ -166,7 +166,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'derivedHome',
     suffix: '/derived-home',
     options: (on) => ({ homeDerivedReads: on }),
-    variantGate: hasDerivedReadHome,
+    perLiftGate: hasDerivedReadHome,
     strip: true,
   },
   // `/merge-home` — the merge-feed-home variation (structure/analysis.ts AnalyzeOptions
@@ -199,7 +199,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'mergeHome',
     suffix: '/merge-home',
     options: (on) => ({ homeMergeFeeds: on }),
-    variantGate: hasMergeFeedHome,
+    perLiftGate: hasMergeFeedHome,
     strip: true,
   },
   // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
@@ -213,7 +213,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'unsCmp',
     suffix: '/uns-cmp',
     options: (on) => ({ unsignedCompareSpelling: on }),
-    probeGate: (sharedLift) => sharedLift.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
+    sharedGate: (sharedLift) => sharedLift.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
     strip: true,
   },
   // `/fresh-merge` — the parameter-merge-home variation (structure.ts `freshParamMerge`, whose
@@ -240,7 +240,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'freshMerge',
     suffix: '/fresh-merge',
     options: (on) => ({ freshParamMerge: on }),
-    probeGate: (sharedLift) => hasParamRootedMerge(sharedLift),
+    sharedGate: (sharedLift) => hasParamRootedMerge(sharedLift),
     strip: true,
   },
   // `/copy-defpos` — the EDGE-COPY ORDER variation (structure.ts `preferDefPosCopyOrder`). The frontend
@@ -280,7 +280,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     flag: 'copyDefPos',
     suffix: '/copy-defpos',
     options: (on) => ({ preferDefPosCopyOrder: on }),
-    variantGate: edgeCopyOrdersDiffer,
+    perLiftGate: edgeCopyOrdersDiffer,
     strip: true,
   },
   // `/site-sense` — spell a folded short-circuit `if` from the FOLD'S own orientation evidence
@@ -337,7 +337,7 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
     // The fold writes the three in one object literal, so this is the same set of functions today —
     // measured, 0 partially-stamped sites over the 1037 committed rows at both `/connective`
     // settings.
-    variantGate: (fn) =>
+    perLiftGate: (fn) =>
       fn.blocks.some((b) =>
         b.ops.some(
           (op) =>
@@ -354,21 +354,21 @@ export const STRUCTURING_AXES: readonly StructuringAxis[] = [
  *  a statement-order/shape respell variation orthogonal to every other respell variation, derived
  *  onto every source. Each fires alone, plus
  *  all of them together in table order — not the full subset lattice; the pairs question is
- *  settled by applyShapes' skip-on-decline below, and a row demanding a true EXCLUSION pair —
+ *  settled by applyStacked' skip-on-decline below, and a row demanding a true EXCLUSION pair —
  *  all three fire, the match needs exactly two — is what would earn the lattice. */
-export const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
+export const STACKED_VARIATIONS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
   { suffix: '/initfirst', apply: initFirstGuards },
   { suffix: '/pollguard', apply: pollGuards },
   { suffix: '/pollread', apply: pollReads },
 ];
 
-/** `/unmerge`'s suffix, exported so a caller that has to find its entry in `PRE_FAN_PRODUCTS` reads
+/** `/unmerge`'s suffix, exported so a caller that has to find its entry in `PRE_RESPELL_VARIATIONS` reads
  *  the constant the entry is built from instead of a second copy of the string. */
 export const UNMERGE_SUFFIX = '/unmerge';
 
 /** The PRE-RESPELL variations (sanctioned in the POLICY note at rank.ts's respell site): a tree
  *  rewrite applied BEFORE the respell set, so the whole set derives from its output instead of
- *  composing onto it. Same record type as SHAPE_PRODUCTS above, and deliberately so — the only difference is
+ *  composing onto it. Same record type as STACKED_VARIATIONS above, and deliberately so — the only difference is
  *  WHERE it is applied, and that is the whole admission bar.
  *
  *  ADMITTED on one ground: the spelling a row demands needs a downstream respell variation to run on this
@@ -430,11 +430,11 @@ export const UNMERGE_SUFFIX = '/unmerge';
  *  OUTCOME gate over all tiers, so every one of them turns it red — but `benchmark.yml` is
  *  `workflow_dispatch`, manual, with no cron, so nothing runs that gate on a PR. The scores and the
  *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block. */
-export const PRE_FAN_PRODUCTS: typeof SHAPE_PRODUCTS = [{ suffix: UNMERGE_SUFFIX, apply: unmergeJoins }];
+export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [{ suffix: UNMERGE_SUFFIX, apply: unmergeJoins }];
 
-export const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
-  ...SHAPE_PRODUCTS.map((x) => [x]),
-  ...(SHAPE_PRODUCTS.length > 1 ? [SHAPE_PRODUCTS] : []),
+export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = [
+  ...STACKED_VARIATIONS.map((x) => [x]),
+  ...(STACKED_VARIATIONS.length > 1 ? [STACKED_VARIATIONS] : []),
 ];
 
 /** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
@@ -443,8 +443,8 @@ export const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
  *  members that actually FIRED, so a suffix never names a variation that declined; a fired-set that
  *  duplicates a smaller subset emits identical source and the dedup collapses it. Null when
  *  nothing fired. */
-export const applyShapes = (
-  subset: readonly (typeof SHAPE_PRODUCTS)[number][],
+export const applyStacked = (
+  subset: readonly (typeof STACKED_VARIATIONS)[number][],
   from: SFn,
 ): { out: SFn; suffix: string } | null => {
   let cur = from;
@@ -525,7 +525,7 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  where this census builds one tree per observation.
  *
  *  WHAT THE PAIR COSTS, through the HARNESS's own enumeration and re-runnable from the recipe in
- *  the BASEFOLD_ADMISSIONS note below: enumerate every agbcc row with the pair on and off,
+ *  the BASEFOLD_HOISTS note below: enumerate every agbcc row with the pair on and off,
  *  `ASMLIFT_CANDCACHE=0`, candidates only. The pair adds 3921
  *  distinct candidate sources over 14 observations — 3911 over 12 real rows and 10 over 2
  *  synthetic ones (`foldsink` 4 → 12, `basecell` 2 → 4) — and every per-row delta equals that
@@ -546,9 +546,9 @@ export const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  `kleod:ProcessInputAndUpdateEntities` 211 either way and `kleod:CountCollectedGems` 290 either
  *  way. A SCORE QUOTED HERE IS THE ARTIFACT'S: it moves whenever anything at all moves the row,
  *  a basefold change or not, so re-read it off the artifact rather than off this line. Read the
- *  ablation in the note on BASEFOLD_ADMISSIONS, which carries the fan counts that prove it
+ *  ablation in the note on BASEFOLD_HOISTS, which carries the fan counts that prove it
  *  reached. */
-export interface BaseAdmission {
+export interface BaseHoist {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
   /** WHERE the locals this hoist binds are initialized (l3/hoist.ts). Eligibility and placement are
@@ -572,7 +572,7 @@ export interface BaseAdmission {
   pairings: boolean;
 }
 
-export const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
+export const LIVEBASE_HOISTS: readonly BaseHoist[] = [
   { suffix: '/livebase', gates: LIVEBASE_GATES, placement: 'head', pairings: true },
   { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES, placement: 'head', pairings: true },
 ];
@@ -626,7 +626,7 @@ export const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  variation going dead: `/unfolded` binds the same base there. Any positive control naming ONE
  *  hoist expires the next time a hoist is added — re-run it, and if it no longer moves, widen the
  *  ablation until it does before concluding anything from a null. */
-export const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
+export const BASEFOLD_HOISTS: readonly BaseHoist[] = [
   { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
   { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
 ];
@@ -684,7 +684,7 @@ export const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
  *  the `false` buys 1.92% of the agbcc fan for a measured zero, on the whole corpus rather than on
  *  the row that earned the entry. Flip it when a row scores better with it, and re-run that
  *  census when one does. */
-export const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
+export const UNFOLDED_HOISTS: readonly BaseHoist[] = [
   { suffix: '/unfolded', gates: UNFOLDED_GATES, placement: 'first-use', pairings: false },
 ];
 
@@ -728,7 +728,7 @@ export const UNFOLDED_ADMISSIONS: readonly BaseAdmission[] = [
  *
  *  `pairings: false` on both for the field's own reason — a pairing is added for a row that demands
  *  the joint spelling, and neither row here demands one. */
-export const ORDERBASE_ADMISSIONS: readonly BaseAdmission[] = [
+export const ORDERBASE_HOISTS: readonly BaseHoist[] = [
   { suffix: '/orderbase', gates: ORDERBASE_GATES, placement: 'head', pairings: false },
   { suffix: '/orderbase/scoped', gates: ORDERBASE_GATES, placement: 'scope', pairings: false },
 ];
@@ -750,7 +750,7 @@ export const sameBases = (a: readonly string[], b: readonly string[]): boolean =
  * reads the base from the observed pool word and the field offset from the observed load
  * displacement, so it reproduces the target's own split by construction. The measurements and the
  * conditions are in `raise/structs.ts`; nothing about them belongs in a roster comment. */
-export const SIGN_CANDS = [
+export const SIGNEDNESS = [
   { label: 'unsigned', signed: false },
   { label: 'signed', signed: true },
 ];

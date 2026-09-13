@@ -76,8 +76,8 @@ describe('closure over the names the committed artifact publishes', () => {
     expect([...names].flatMap((n) => nameDefect(n) ?? [])).toEqual([]);
   });
 
-  test('no published name uses `winner` or `best`, the words `bench fan --show` reserves', () => {
-    expect([...names].filter((n) => n.split('/').some((p) => p === 'winner' || p === 'best'))).toEqual([]);
+  test('no published name uses `winner`, the word `bench fan --show` reserves', () => {
+    expect([...names].filter((n) => n.split('/').some((p) => p === 'winner'))).toEqual([]);
   });
 });
 
@@ -95,7 +95,7 @@ describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthe
         const opts = rankOptionsFor(c.toolchain, built.obj, c.proto, c.compile, symbols);
         let cands: { label: string }[];
         try {
-          cands = enumerateRanked(c.sym, asm, c.toolchain.targetDesc, { ...opts, onLeverError: () => {} });
+          cands = enumerateRanked(c.sym, asm, c.toolchain.targetDesc, { ...opts, onEnumerationError: () => {} });
         } catch {
           continue; // a row that declines mints nothing to check
         }
@@ -111,6 +111,6 @@ describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthe
     expect(fans).toBeGreaterThan(200);
     expect(names.size).toBeGreaterThan(2000);
     expect([...names].flatMap((n) => nameDefect(n) ?? [])).toEqual([]);
-    expect([...names].filter((n) => n.split('/').some((p) => p === 'winner' || p === 'best'))).toEqual([]);
+    expect([...names].filter((n) => n.split('/').some((p) => p === 'winner'))).toEqual([]);
   }, 600_000);
 });

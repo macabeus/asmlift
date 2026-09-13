@@ -79,8 +79,8 @@ describe('F-CFG return-sinking gate: simple value-selects are NOT sunk (kept as 
   test('lor (return a || b) keeps its match — a value-merge, not a two-armed diamond', () => {
     const asm = compileTargetAsm('int lor(int a, int b){ return a || b; }');
     const r = decompileRanked('lor', asm, ARMV4T_AGBCC, assembleTarget(asm));
-    expect(r.best.score.match).toBe(true);
-    expect(r.best.source).toContain('v0'); // still the merge variable, not sunk to returns
+    expect(r.winner.score.match).toBe(true);
+    expect(r.winner.source).toContain('v0'); // still the merge variable, not sunk to returns
   });
 });
 
@@ -103,8 +103,8 @@ describe('F-CFG return-sinking: a ONE-SET-ARM diamond IS sunk', () => {
     expect(unranked.source).not.toContain('v0'); // sunk: no merge variable
     expect(scoreC(unranked.source, sym, obj).match).toBe(false); // …but the wrong sense
     const r = decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
-    expect(r.best.score.match).toBe(true);
-    expect(hasVariation(r.best.label.split('/'), 'flip-branch')).toBe(true);
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.label.split('/'), 'flip-branch')).toBe(true);
   });
 });
 

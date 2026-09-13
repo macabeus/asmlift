@@ -13,7 +13,7 @@
 // question the source answered per BASE — one register file spelled as a pointer local beside
 // scalar cells spelled as bare derefs. The `single-cell` gate is what makes the narrower answer
 // reachable: under `LIVEBASE_BLOCK_GATES` a base every access of which is ONE fixed offset stays
-// inline, and rank's LIVEBASE_ADMISSIONS roster emits each table's hoist — and every product of
+// inline, and rank's LIVEBASE_HOISTS roster emits each table's hoist — and every product of
 // it — as its own candidate family, for the differ to referee between them. The unit is
 // the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
 // gate can leave one of them inline while the other binds.
@@ -74,7 +74,7 @@
 // `synthetic:foldhead` its match — which is why `index.operandOff` is carried from the lift
 // instead of re-derived, and why a committed pass that can drop it is worth a test
 // (test/basecse.test.ts, the "`operandOff` is provenance" describe). WHAT EACH ROW IS WORTH is
-// measured in rank.ts's note on `BASEFOLD_ADMISSIONS`, not here, and the two rows are not worth
+// measured in rank.ts's note on `BASEFOLD_HOISTS`, not here, and the two rows are not worth
 // the same thing. Promoting the hint to a default would need this paragraph to say something it
 // does not.
 //
@@ -489,7 +489,7 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  whenever an admission is added to or removed from the roster.
  *  HOW: prefer the edit-free form — import this array and `splice` the gate out of it before the
  *  first `enumerateCandidates` call, since the roster holds a reference to this very object. The
- *  env-read recipe on BASEFOLD_ADMISSIONS edits files instead, and a tap reverted underneath a
+ *  env-read recipe on BASEFOLD_HOISTS edits files instead, and a tap reverted underneath a
  *  running process reports ZEROES rather than crashing, which reads exactly like "the rule never
  *  fires"; if you use it, hash the tree either side of the window and quote both hashes.
  *
@@ -738,11 +738,11 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
  *  `scope` DECLINES, and the overload is how a caller is told: `null` means the placement had
  *  nothing to say about this function, because no init landed inside a nested list. That tree is
  *  byte-for-byte the `first-use` spelling (l3/hoist.ts's `nested`), and the roster withholds the
- *  `first-use` row for this table deliberately (rank.ts, ORDERBASE_ADMISSIONS) — so returning it
+ *  `first-use` row for this table deliberately (rank.ts, ORDERBASE_HOISTS) — so returning it
  *  ships the withheld candidate under the scoped row's name.
  *
  *  IT WITHDRAWS A SPELLING RATHER THAN COLLAPSING A DUPLICATE, which is what the decline costs.
- *  `ORDERBASE_ADMISSIONS` holds exactly two rows, `head` and `scope`, so nothing is ever enumerated
+ *  `ORDERBASE_HOISTS` holds exactly two rows, `head` and `scope`, so nothing is ever enumerated
  *  at `first-use` for this table and the refused tree has no twin to fold into — its shape and
  *  `/volatile` products go with it. Over each project's whole `asm` tree, map-ful: of the 48
  *  functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do not, and for

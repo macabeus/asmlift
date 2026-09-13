@@ -193,7 +193,7 @@ It prints the `[score]` table this file's comparison recipe is written for, then
 `[withheld]`, the `[declared]` block and `[ranked]` — all through the CLI's own renderers, the same
 functions `pnpm asmlift` prints them with, so the `[ranked]` line here carries the `synthesized`
 count and the `[asmlift source <sha>]` stamp this file tells you to quote. Measured on
-`kleod:StrCpy:agbcc`: `unsigned: 5/8` in **9 s**, the published row exactly, and `--show best`
+`kleod:StrCpy:agbcc`: `unsigned: 5/8` in **9 s**, the published row exactly, and `--show winner`
 printed the published source byte-for-byte.
 
 Two things it can do that nothing else can:
@@ -203,7 +203,7 @@ Two things it can do that nothing else can:
   `source` — is computed on every run and discarded. "The near-miss spelling is right and only
   loses on X" is a thing to read here rather than infer.
 - **`--enumerate` lists the fan without compiling anything**, and still serves `--show <variations>`
-  (not `--show best` — nothing is scored, so there is no winner to name, and that combination is
+  (not `--show winner` — nothing is scored, so there is no winner to name, and that combination is
   refused rather than answered with whatever enumeration emitted first). That is the cheap
   configuration-identification this file's "Getting the fan alone is cheap" section describes,
   without killing the run after its first `[progress]` line. **Cheap relative to compiling, not
@@ -211,7 +211,7 @@ Two things it can do that nothing else can:
   target build included (~120 candidates/s), so `LoadBGTilemapData`'s 225,792 is ~30 minutes just
   to LIST. Read a long enumeration as a big fan, not as a hang.
 
-  It also prints `[lever] <label> threw (no candidate from it)`, a channel `bench run` supplies no
+  It also prints `[threw] <label> threw (no candidate from it)`, a channel `bench run` supplies no
   sink for at all — so the half of a row's fan a pre-respell variation produces can vanish from a
   benchmark run with nothing printed, and here it does not.
 

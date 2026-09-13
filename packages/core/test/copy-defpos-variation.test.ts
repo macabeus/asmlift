@@ -1,4 +1,4 @@
-// `/copy-defpos` — the EDGE-COPY ORDER variation (rank.ts STRUCTURING_AXES, structure.ts
+// `/copy-defpos` — the EDGE-COPY ORDER variation (rank.ts STRUCTURE_VARIATIONS, structure.ts
 // `preferDefPosCopyOrder`).
 //
 // The frontend measures the order each predecessor wrote its successors' keys, and the default
@@ -92,7 +92,7 @@ test('an UNMEASURED fn has no question to ask: parsed IR never admits the variat
   expect(edgeCopyOrdersDiffer(fn)).toBe(false);
 });
 
-// WHY THE GATE IS A `variantGate` AND NOT A `probeGate`: the answer is a fact about one LIFT at one
+// WHY THE GATE IS A `perLiftGate` AND NOT A `sharedGate`: the answer is a fact about one LIFT at one
 // STAGE, and both of those move under it. Neither costs a candidate today, so what these pin is the
 // facts a reader checking the variation entry's argument needs.
 

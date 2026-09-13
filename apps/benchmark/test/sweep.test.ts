@@ -17,9 +17,9 @@
 //
 // The CI mirror gate (`vitest run apps/benchmark/test`) runs where no compiler is available, so
 // nothing here builds a target. That is why the PRODUCER is pinned through the pure functions
-// `collect` is assembled from (`armsFor`, `optsDigest`) rather than by calling `collect`: every
+// `collect` is assembled from (`mapModesFor`, `optsDigest`) rather than by calling `collect`: every
 // assertion on a hand-built record is blind to what the producer actually emits, so a sweep that
-// collapsed its two arms onto one key would pass a suite made only of those.
+// collapsed its two map modes onto one key would pass a suite made only of those.
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -35,9 +35,9 @@ import {
   sweepRefusal,
   unmeasuredCounts,
 } from '../src/run/sweep';
-import { armsFor, fanDigests, optsDigest, stable } from '../src/run/sweep-driver';
+import { fanDigests, mapModesFor, optsDigest, stable } from '../src/run/sweep-driver';
 
-const rec = (over: Partial<SweepRecord> & Pick<SweepRecord, 'id' | 'arm'>): SweepRecord => ({
+const rec = (over: Partial<SweepRecord> & Pick<SweepRecord, 'id' | 'mapMode'>): SweepRecord => ({
   src: 'aaaaaaaaaaaa',
   len: 100,
   diag: 0,
@@ -46,9 +46,9 @@ const rec = (over: Partial<SweepRecord> & Pick<SweepRecord, 'id' | 'arm'>): Swee
 });
 
 const base = () => [
-  rec({ id: 'synthetic:a:agbcc', arm: 'harness' }),
-  rec({ id: 'synthetic:a:agbcc', arm: 'nomap' }),
-  rec({ id: 'kleod:B:agbcc', arm: 'harness' }),
+  rec({ id: 'synthetic:a:agbcc', mapMode: 'harness' }),
+  rec({ id: 'synthetic:a:agbcc', mapMode: 'nomap' }),
+  rec({ id: 'kleod:B:agbcc', mapMode: 'harness' }),
 ];
 
 describe('the sweep comparison', () => {
@@ -59,14 +59,14 @@ describe('the sweep comparison', () => {
     expect(renderDiff(d)).toEqual([]);
   });
 
-  it('keys on the ROW AND THE ARM, so a change in one arm is not attributed to the other', () => {
+  it('keys on the ROW AND THE MAP MODE, so a change in one map mode is not attributed to the other', () => {
     // The defect this pins: a rig keyed by row id alone reports the map-ful and map-less records
-    // of one row as a single moved row, and a change that moves ONLY the map-less arm — which is
+    // of one row as a single moved row, and a change that moves ONLY the map-less map mode — which is
     // most naming and global-recovery work — then reads as "the benchmark configuration moved".
-    const head = base().map((r) => (r.arm === 'nomap' ? { ...r, src: 'bbbbbbbbbbbb' } : r));
+    const head = base().map((r) => (r.mapMode === 'nomap' ? { ...r, src: 'bbbbbbbbbbbb' } : r));
     const d = compareSweeps(base(), head);
     expect(d.moved).toHaveLength(1);
-    expect(d.moved[0]).toMatchObject({ id: 'synthetic:a:agbcc', arm: 'nomap' });
+    expect(d.moved[0]).toMatchObject({ id: 'synthetic:a:agbcc', mapMode: 'nomap' });
     expect(d.same).toBe(2);
   });
 
@@ -89,7 +89,7 @@ describe('the sweep comparison', () => {
     // reports as "0 moved" — the most convincing wrong answer this command can give.
     const head = [
       ...base().filter((r) => r.id !== 'kleod:B:agbcc'),
-      rec({ id: 'synthetic:new:agbcc', arm: 'harness' }),
+      rec({ id: 'synthetic:new:agbcc', mapMode: 'harness' }),
     ];
     const d = compareSweeps(base(), head);
     expect(d.baseOnly).toEqual(['kleod:B:agbcc harness']);
@@ -100,7 +100,7 @@ describe('the sweep comparison', () => {
 
   it('treats a throw and a lift as different, both ways', () => {
     const head = base().map((r) =>
-      r.id === 'kleod:B:agbcc' ? { id: r.id, arm: r.arm, threw: 'no frontend for this target' } : r,
+      r.id === 'kleod:B:agbcc' ? { id: r.id, mapMode: r.mapMode, threw: 'no frontend for this target' } : r,
     );
     const d = compareSweeps(base(), head);
     expect(d.moved[0].fields.map((f) => f.field).sort()).toEqual(['diag', 'len', 'marks', 'src', 'threw']);
@@ -110,8 +110,8 @@ describe('the sweep comparison', () => {
   });
 
   it('compares the fan fields when --fan recorded them', () => {
-    const b = [rec({ id: 'r:s:agbcc', arm: 'harness', fan: 32, fanHash: '111111111111' })];
-    const h = [rec({ id: 'r:s:agbcc', arm: 'harness', fan: 64, fanHash: '222222222222' })];
+    const b = [rec({ id: 'r:s:agbcc', mapMode: 'harness', fan: 32, fanHash: '111111111111' })];
+    const h = [rec({ id: 'r:s:agbcc', mapMode: 'harness', fan: 64, fanHash: '222222222222' })];
     const line = renderDiff(compareSweeps(b, h))[0];
     expect(line).toContain('fan 32 -> 64');
     expect(line).toContain('fanHash 111111111111 -> 222222222222');
@@ -121,8 +121,8 @@ describe('the sweep comparison', () => {
     // The move a count-only census cannot see, and the reason the record carries a hash of the
     // candidate SOURCES and not just `candidateCount`: a variation that swaps one spelling for another
     // leaves the count identical and is exactly the kind of change a round ships.
-    const b = [rec({ id: 'r:s:agbcc', arm: 'harness', fan: 32, fanHash: '111111111111' })];
-    const h = [rec({ id: 'r:s:agbcc', arm: 'harness', fan: 32, fanHash: '222222222222' })];
+    const b = [rec({ id: 'r:s:agbcc', mapMode: 'harness', fan: 32, fanHash: '111111111111' })];
+    const h = [rec({ id: 'r:s:agbcc', mapMode: 'harness', fan: 32, fanHash: '222222222222' })];
     const d = compareSweeps(b, h);
     expect(d.moved[0].fields).toEqual([{ field: 'fanHash', from: '111111111111', to: '222222222222' }]);
   });
@@ -135,8 +135,8 @@ describe('the three fan hashes', () => {
     'records differing only in %s yield exactly one move naming it',
     (field) => {
       expect(FIELDS).toContain(field);
-      const b = [rec({ id: 'r:s:agbcc', arm: 'harness', [field]: '111111111111' })];
-      const h = [rec({ id: 'r:s:agbcc', arm: 'harness', [field]: '222222222222' })];
+      const b = [rec({ id: 'r:s:agbcc', mapMode: 'harness', [field]: '111111111111' })];
+      const h = [rec({ id: 'r:s:agbcc', mapMode: 'harness', [field]: '222222222222' })];
       const d = compareSweeps(b, h);
       expect(d.moved).toHaveLength(1);
       expect(d.moved[0].fields).toEqual([{ field, from: '111111111111', to: '222222222222' }]);
@@ -185,7 +185,7 @@ describe('the three fan hashes', () => {
 });
 
 describe('a record neither tree lifted is not "identical"', () => {
-  const skipped = (id: string, why: string): SweepRecord => ({ id, arm: 'harness', skipped: why });
+  const skipped = (id: string, why: string): SweepRecord => ({ id, mapMode: 'harness', skipped: why });
 
   it('counts a row whose toolchain is missing apart from a row both trees spelled the same way', () => {
     // MEASURED DEFECT. With `ASMLIFT_AGBCC` unset — one login shell away, trap #6 of the round
@@ -193,7 +193,10 @@ describe('a record neither tree lifted is not "identical"', () => {
     // `1002 record(s) moved ... 618 identical`, and 618 of those 1,620 records had never been
     // lifted on either side. The two sides' records are field-for-field equal, so only the
     // `skipped` cause tells them apart.
-    const side = [rec({ id: 'synthetic:a:agbcc', arm: 'harness' }), skipped('synthetic:b:mwcc_242_81', 'toolchain')];
+    const side = [
+      rec({ id: 'synthetic:a:agbcc', mapMode: 'harness' }),
+      skipped('synthetic:b:mwcc_242_81', 'toolchain'),
+    ];
     const d = compareSweeps(side, side);
     expect(d.same).toBe(1);
     expect(d.notMeasured).toBe(1);
@@ -206,7 +209,7 @@ describe('a record neither tree lifted is not "identical"', () => {
     // every time.
     const side = [
       skipped('synthetic:c:agbcc', 'build'),
-      rec({ id: 'kleod:ProcessInputAndUpdateEntities:agbcc', arm: 'harness', skipped: 'fan-limit' }),
+      rec({ id: 'kleod:ProcessInputAndUpdateEntities:agbcc', mapMode: 'harness', skipped: 'fan-limit' }),
     ];
     const d = compareSweeps(side, side);
     expect(d.notMeasured).toBe(1);
@@ -222,11 +225,11 @@ describe('the record carries its INPUT, not only its output', () => {
     // one string in `dataset/synthetic.ts` — and no line of `packages/` — moved 6 records, every
     // one of them reading as a decompiler change. `baseOnly`/`headOnly` catches a row that appears
     // or vanishes; a row whose INPUT moved under a stable id was invisible.
-    const b = [rec({ id: 'synthetic:mini:agbcc', arm: 'harness', asm: 'aaaaaaaaaaaa', opts: 'oooooooooooo' })];
+    const b = [rec({ id: 'synthetic:mini:agbcc', mapMode: 'harness', asm: 'aaaaaaaaaaaa', opts: 'oooooooooooo' })];
     const h = [
       rec({
         id: 'synthetic:mini:agbcc',
-        arm: 'harness',
+        mapMode: 'harness',
         asm: 'bbbbbbbbbbbb',
         opts: 'oooooooooooo',
         src: 'zzzzzzzzzzzz',
@@ -294,7 +297,7 @@ describe('the record carries its INPUT, not only its output', () => {
 
   it('renders a container the same way whether or not it was digested before', () => {
     // The serializer caches on container IDENTITY (a project's symbol map is one object digested
-    // once per row per arm; `serialized`'s header carries what that A/B measured). A cache that
+    // once per row per map mode; `serialized`'s header carries what that A/B measured). A cache that
     // returned a different string on the second call would make a record's `opts` depend on where
     // it sat in the corpus, which is the one thing `--repeat` cannot tell from a real move.
     const m = new Map([[1, { a: [1, 2, 3] }]]);
@@ -311,38 +314,38 @@ describe('the record carries its INPUT, not only its output', () => {
   });
 });
 
-describe('the two arms', () => {
+describe('the two map modes', () => {
   it('asks for two DIFFERENT computations when the row has a symbol map', () => {
-    // THE ABLATION THIS PINS: `key: 'nomap'` for both arms collapses them onto one computation and
-    // makes the sweep blind to every symbol-map change — half of what the arms exist for, and the
-    // half that covers most naming and global-recovery work. The arms genuinely differ on 25 of 42
+    // THE ABLATION THIS PINS: `key: 'nomap'` for both map modes collapses them onto one computation and
+    // makes the sweep blind to every symbol-map change — half of what the map modes exist for, and the
+    // half that covers most naming and global-recovery work. The map modes genuinely differ on 25 of 42
     // `kleod` rows, so this is not a theoretical distinction.
     const seen: boolean[] = [];
-    const armed = armsFor(['harness', 'nomap'], true, (withMap) => {
+    const runs = mapModesFor(['harness', 'nomap'], true, (withMap) => {
       seen.push(withMap);
       return withMap ? { symbols: {} } : {};
     });
-    expect(armed.map((a) => a.key)).toEqual(['harness', 'nomap']);
+    expect(runs.map((a) => a.key)).toEqual(['harness', 'nomap']);
     expect(seen).toEqual([true, false]);
-    expect(armed[0].opts).not.toEqual(armed[1].opts);
+    expect(runs[0].opts).not.toEqual(runs[1].opts);
   });
 
   it('asks for ONE computation when the row has no map, and still reports it under both names', () => {
     // 810 of the 1,062 rows are synthetic and almost none carries a map, so lifting them twice
     // would double the only expensive part of the command. The record set stays rectangular.
     const seen: boolean[] = [];
-    const armed = armsFor(['harness', 'nomap'], false, (withMap) => {
+    const runs = mapModesFor(['harness', 'nomap'], false, (withMap) => {
       seen.push(withMap);
       return {};
     });
-    expect(armed.map((a) => a.arm)).toEqual(['harness', 'nomap']);
-    expect(armed.map((a) => a.key)).toEqual(['nomap', 'nomap']);
+    expect(runs.map((a) => a.mapMode)).toEqual(['harness', 'nomap']);
+    expect(runs.map((a) => a.key)).toEqual(['nomap', 'nomap']);
     expect(seen).toEqual([false]);
   });
 });
 
 describe('the sweep refusals', () => {
-  const ok = { tiers: ['synthetic'] as const, arms: ['harness'] };
+  const ok = { tiers: ['synthetic'] as const, mapModes: ['harness'] };
 
   it('accepts the ordinary selection', () => {
     expect(sweepRefusal(ok)).toBeUndefined();
@@ -369,8 +372,8 @@ describe('the sweep refusals', () => {
     expect(sweepRefusal({ ...ok, repeat: Number.NaN })).toContain('≥ 2');
   });
 
-  it('refuses an unknown arm by name, and lists the arms', () => {
-    const r = sweepRefusal({ ...ok, arms: ['harness', 'symbolz'] });
+  it('refuses an unknown map mode by name, and lists the map modes', () => {
+    const r = sweepRefusal({ ...ok, mapModes: ['harness', 'symbolz'] });
     expect(r).toContain('symbolz');
     expect(r).toContain('nomap');
   });
@@ -393,8 +396,8 @@ describe('the sweep refusals', () => {
     expect(sweepRefusal({ ...ok, compare: ['a.json', 'b.json'], json: 'out.json' })).toContain('nothing for --json');
   });
 
-  it('refuses a repeated arm instead of collapsing it in the diff Map', () => {
-    expect(sweepRefusal({ ...ok, arms: ['harness', 'harness'] })).toContain('at most once');
+  it('refuses a repeated map mode instead of collapsing it in the diff Map', () => {
+    expect(sweepRefusal({ ...ok, mapModes: ['harness', 'harness'] })).toContain('at most once');
   });
 
   it('refuses an unknown --toolchain by name instead of throwing a node stack on exit 1', () => {
@@ -593,7 +596,7 @@ describe('a --compare side that is not a sweep record file', () => {
     expect(recordFileRefusal('r.json', {})).toContain('not a sweep record file');
     expect(recordFileRefusal('r.json', {})).toContain('bench diff');
     expect(recordFileRefusal('r.json', null)).toContain('not a sweep record file');
-    expect(recordFileRefusal('r.json', [{ id: 'a:b:agbcc' }])).toContain('`id`/`arm`');
+    expect(recordFileRefusal('r.json', [{ id: 'a:b:agbcc' }])).toContain('`id`/`mapMode`');
   });
 
   it('refuses an EMPTY side, which compares clean against anything', () => {
@@ -602,7 +605,7 @@ describe('a --compare side that is not a sweep record file', () => {
     // bill of health at exit 0 (`0 record(s) moved ... 0 identical`) in the same gate shape the
     // empty-selection refusal below was filed for.
     expect(recordFileRefusal('r.json', [])).toContain('holds no records');
-    expect(recordFileRefusal('r.json', [{ id: 'a:b:agbcc', arm: 'harness' }])).toBeUndefined();
+    expect(recordFileRefusal('r.json', [{ id: 'a:b:agbcc', mapMode: 'harness' }])).toBeUndefined();
   });
 });
 
@@ -660,12 +663,12 @@ describe('a sweep that measured nothing is not a clean bill of health', () => {
     const spy = vi.spyOn(driver, 'collect');
     try {
       spy.mockResolvedValue([]);
-      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'], only: 'zzz-no-such-row' })).toBe(2);
+      expect(await sweep({ tiers: ['synthetic'], mapModes: ['harness'], only: 'zzz-no-such-row' })).toBe(2);
 
-      spy.mockResolvedValue([{ id: 'synthetic:a:mwcc_242_81', arm: 'harness', skipped: 'toolchain' }]);
-      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'] })).toBe(2);
+      spy.mockResolvedValue([{ id: 'synthetic:a:mwcc_242_81', mapMode: 'harness', skipped: 'toolchain' }]);
+      expect(await sweep({ tiers: ['synthetic'], mapModes: ['harness'] })).toBe(2);
       // and the machine that genuinely lacks a toolchain (mwcc needs Docker) can still ask
-      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'], allowUnmeasured: true })).toBe(0);
+      expect(await sweep({ tiers: ['synthetic'], mapModes: ['harness'], allowUnmeasured: true })).toBe(0);
     } finally {
       spy.mockRestore();
     }
@@ -684,10 +687,10 @@ describe('a base that cannot be resolved is refused before the head sweep is pai
     const driver = await import('../src/run/sweep-driver');
     const spy = vi.spyOn(driver, 'collect').mockResolvedValue([]);
     try {
-      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'], base: 'no/such/ref-here' })).toBe(2);
+      expect(await sweep({ tiers: ['synthetic'], mapModes: ['harness'], base: 'no/such/ref-here' })).toBe(2);
       expect(spy, 'the head sweep ran before the base ref was checked').not.toHaveBeenCalled();
 
-      expect(await sweep({ tiers: ['synthetic'], arms: ['harness'], baseDir: '/definitely/not/a/tree' })).toBe(2);
+      expect(await sweep({ tiers: ['synthetic'], mapModes: ['harness'], baseDir: '/definitely/not/a/tree' })).toBe(2);
       expect(spy, 'the head sweep ran before --base-dir was checked').not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();

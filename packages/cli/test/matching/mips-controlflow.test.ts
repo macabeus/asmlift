@@ -109,8 +109,8 @@ describe('MIPS (IDO) ranked candidates — scoring dispatches to the right compi
   test('the differ picks the unsigned candidate for `x >> 1` on MIPS/IDO', () => {
     const { obj, asm } = compileMipsTarget('unsigned ushr(unsigned x){ return x >> 1; }', 'ushr');
     const ranked = decompileRanked('ushr', asm, MIPS_IDO, obj);
-    expect(ranked.best.label).toBe('unsigned'); // srl ⇒ unsigned wins; agbcc-scoring couldn't tell
-    expect(ranked.best.score.match).toBe(true); // byte-exact via the IDO scorer, not agbcc
+    expect(ranked.winner.label).toBe('unsigned'); // srl ⇒ unsigned wins; agbcc-scoring couldn't tell
+    expect(ranked.winner.score.match).toBe(true); // byte-exact via the IDO scorer, not agbcc
     // What this pins is the DISPATCH: an agbcc-scored MIPS candidate would be compiled by the
     // wrong compiler and could not score 0 at all. It no longer pins signedness discrimination —
     // since the shift-direction fix the signed candidate spells `(u32)a0 >> 1`, the same bytes.

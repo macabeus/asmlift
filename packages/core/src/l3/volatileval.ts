@@ -80,7 +80,7 @@ export const VOL_SLOT_GATES: readonly Gate<SlotCtx>[] = [
   },
   {
     id: 'already-volatile',
-    why: 'the primary already declares it, so the candidate would duplicate it',
+    why: 'the default already declares it, so the candidate would duplicate it',
     sound: false,
     rejects: (c) => c.alreadyVolatile,
   },

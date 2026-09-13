@@ -31,7 +31,7 @@ function scoreLabel(r: DecompilerResult): string {
 function qualityFlags(q: DecompilerResult['quality']): string[] {
   const flags: string[] = [];
   if (q.unkGlue > 0) {
-    flags.push(`${q.unkGlue} undecompiled glue token(s)`);
+    flags.push(`${q.unkGlue} undecompiled glue marker(s)`);
   }
   if (q.gotos > 0) {
     flags.push(`${q.gotos} goto(s)`);

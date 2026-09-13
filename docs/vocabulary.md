@@ -10,7 +10,7 @@ the dominant one.
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **candidate** | One complete C source asmlift emits for a function. Each is compiled and scored against the target object.                                         |
 | **fan**       | Every candidate asmlift enumerated for one function, whether it built or not. `pnpm bench fan <row>` lists it.                                     |
-| **winner**    | The best-scoring candidate that may be published. Its source is the function's result.                                                             |
+| **winner**    | The best-scoring candidate that may be published. Its source is the function's result. `pnpm bench fan <row> --show winner` prints it.             |
 | **variation** | One way asmlift can write a function differently, e.g. `defsite`, `unmerge`, `raw-globals`. Signedness (`unsigned` / `signed`) is a variation too. |
 | **dropped**   | A candidate the scorer refused: its source did not build.                                                                                          |
 | **withheld**  | A candidate that compiled and scored, but was refused publication for want of a byte-exact proof.                                                  |
@@ -52,7 +52,8 @@ A candidate's variations appear in this order.
 
 For a reader, what happened to one variation on one function is one of two states: it **carried N
 candidates**, or it **threw**. N can be 0: the variation did not apply, or an earlier combination
-already produced every source it made.
+already produced every source it made. A variation that threw prints an `asmlift: [threw] …` line from
+`pnpm bench fan` and `pnpm asmlift --score-against`.
 
 ## Words the enumeration code uses
 
@@ -74,7 +75,7 @@ already produced every source it made.
 | **shared lift**                 | The one lift and type recovery run with no signedness pin, which learns the parameter kinds and answers the shared gates.                                                                                                                                |
 | **preference**                  | Which symbol-map setting a candidate carries. The lower one wins a score tie.                                                                                                                                                                            |
 | **route**                       | A derivation path that reaches a source. The first route to a source keeps its variations.                                                                                                                                                               |
-| **map mode**                    | One of the two ways `bench sweep` lifts a row: `harness`, as the row is configured, or `nomap`, the same without its symbol map.                                                                                                                         |
+| **map mode**                    | One of the two ways `bench sweep` lifts a row: `harness`, as the row is configured, or `nomap`, the same without its symbol map. `--map-modes` selects them.                                                                                             |
 | **shards**                      | A tier's run spread across worker processes.                                                                                                                                                                                                             |
 
 ## Words with more than one sense

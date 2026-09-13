@@ -47,5 +47,5 @@ test('the register-copy candidates are enumerated and ranked through the ranked 
   expect(cands.filter((x) => hasVariation(x.label.split('/'), 'regcopy', 'ret'))).toEqual([]);
   // every regcopy candidate is emittable C, not a shape that throws downstream of the seam
   const r = rankBy(cands, 'recip', (src) => scoreC(src, 'recip', obj));
-  expect(r.best.score.match).toBe(true);
+  expect(r.winner.score.match).toBe(true);
 });

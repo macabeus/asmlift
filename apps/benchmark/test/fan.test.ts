@@ -34,7 +34,7 @@ const cand = (label: string, score: number, rows: number, match = false): Ranked
   ({
     label,
     source: `/* ${label} */`,
-    group: 0,
+    preference: 0,
     score: { symbol: 'f', score, rows, match, matching: rows - score, breakdown: {} },
   }) as unknown as RankedCandidate;
 
@@ -88,7 +88,7 @@ describe('scoreLine', () => {
 describe('renderFan', () => {
   const ranked = (over: Partial<RankedResult> = {}): RankedResult =>
     ({
-      best: cand('a', 0, 12, true),
+      winner: cand('a', 0, 12, true),
       candidates: [cand('a', 0, 12, true), cand('b', 3, 12), cand('c', 4, 13)],
       dropped: [],
       withheld: [],
@@ -140,8 +140,8 @@ describe('pickCandidate', () => {
     expect(pickCandidate(cands, 'b')?.source).toBe('/* b */');
   });
 
-  it('spells the winner `best`, so the published row can be quoted without knowing its label', () => {
-    expect(pickCandidate(cands, 'best')?.label).toBe('a');
+  it('names the winner `winner`, so the published row can be quoted without knowing its label', () => {
+    expect(pickCandidate(cands, 'winner')?.label).toBe('a');
   });
 
   // A typo'd name and a variation that produced no candidate at all are the same silence otherwise.
@@ -164,7 +164,7 @@ it('will score a fan the size of the largest row measured through it', () => {
 describe('the [ranked] line', () => {
   const ranked = (over: Partial<RankedResult> = {}): RankedResult =>
     ({
-      best: cand('a', 0, 12, true),
+      winner: cand('a', 0, 12, true),
       candidates: [cand('a', 0, 12, true), cand('b', 3, 12)],
       dropped: [],
       withheld: [],
@@ -179,7 +179,7 @@ describe('the [ranked] line', () => {
         dropped: 0,
         withheld: 0,
         synthesized: 0,
-        best: cand('a', 0, 12, true),
+        winner: cand('a', 0, 12, true),
         stamp: 'asmlift source deadbee',
       }),
     );
@@ -222,20 +222,20 @@ describe('synthesizedRefs', () => {
   });
 });
 
-// Under `--enumerate` nothing is scored, so `best` would name whatever enumeration emitted first —
+// Under `--enumerate` nothing is scored, so `winner` would name whatever enumeration emitted first —
 // a near-worst spelling under the winner's name, to a round both briefs have told that `--show
-// best` is the winner.
+// winner` is the winner.
 describe('optionRefusal', () => {
-  it('refuses --show best under --enumerate, where nothing has been scored', () => {
-    expect(optionRefusal({ enumerateOnly: true, show: 'best' })).toContain('no winner to name');
+  it('refuses --show winner under --enumerate, where nothing has been scored', () => {
+    expect(optionRefusal({ enumerateOnly: true, show: 'winner' })).toContain('no winner to name');
   });
 
   it('allows --show <label> under --enumerate — an enumerated candidate carries its source', () => {
     expect(optionRefusal({ enumerateOnly: true, show: 'unsigned' })).toBeUndefined();
   });
 
-  it('allows --show best on the scored path, which is sorted best-first', () => {
-    expect(optionRefusal({ show: 'best' })).toBeUndefined();
+  it('allows --show winner on the scored path, which is sorted best-first', () => {
+    expect(optionRefusal({ show: 'winner' })).toBeUndefined();
   });
 
   // `--force` raises the COMPILE limit, and both enumeration-only paths compile nothing — `--asm`

@@ -382,7 +382,7 @@ test('where the sink deletes the follow, rank.ts still enumerates the follow alo
   const errors: string[] = [];
   const cands = enumerateCandidates('f', THUMB_LEFT_PARAM, ARMV4T_AGBCC, {
     prototypes: P,
-    onLeverError: (l, e) => errors.push(`${l}: ${e}`),
+    onEnumerationError: (l, e) => errors.push(`${l}: ${e}`),
   });
   const once = cands.filter((c) => count(c.source, '[1] = a1;') === 1);
   expect(once.length).toBeGreaterThan(0);
@@ -437,7 +437,7 @@ test('a tail that reads a forwarder parameter is copied with the value each path
   const errors: string[] = [];
   const cands = enumerateCandidates('f', THUMB_PAD, ARMV4T_AGBCC, {
     prototypes: P,
-    onLeverError: (l, e) => errors.push(`${l}: ${e}`),
+    onEnumerationError: (l, e) => errors.push(`${l}: ${e}`),
   });
   expect(errors).toEqual([]);
   expect(cands.some((c) => hasVariation(c.label.split('/'), 'shared-tail') && count(c.source, ' = 9;') === 1)).toBe(

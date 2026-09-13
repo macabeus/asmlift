@@ -171,7 +171,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
      toolchain and it agreed" from "copied from the sibling".)
   2. THE REACH IS MEASURED, which settles the COST of a variation here — item 1 is what decides
      compiler behavior versus variation, and no reach number rescues a mapping that is not a
-     function. A structure variation was POSSIBLE (`StructuringAxis.options` is `(on: boolean) => StructureOptions` and this flag is one
+     function. A structure variation was POSSIBLE (`StructureVariation.options` is `(on: boolean) => StructureOptions` and this flag is one
      more entry), so the absent dual is a fact about what Regime A enumerates today rather than an
      impossibility. What rules the variation out is the term the fork below already prices: lifting every
      synthetic and real row twice, once with the field and once with it deleted, moves the emitted
@@ -209,7 +209,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   structure variation that fires broadly, and a ranked run is already minutes:
   `/inlinebase` inverts `structure/analysis.ts`'s const value-home decision — the same question
   `/reread-globals`, `/addr-home`, `/expr-home` and `/derived-home` each answer as a structure
-  variation (a `STRUCTURING_AXES` entry) — and answering it by substitution instead costs **766
+  variation (a `STRUCTURE_VARIATIONS` entry) — and answering it by substitution instead costs **766
   extra candidates over 47058, +1.6%**, on the 33 of 69 klonoa functions that lift with no symbol
   map, where a structure variation over the same functions would have doubled every candidate on
   each of those 33. What a
@@ -224,7 +224,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   **A VARIATION'S PRICE IS ONLY VALID AT THE BASE IT WAS TAKEN AT — the #161 dating rule, generalised
   from counts to prices.** A number here is a delta between two candidate sets, and a round that
   changes the structurer changes both sets; so a variation measured as expensive is not refuted, it is
-  dated. `/unmerge` (`l3/unmerge.ts`, enumerated by `PRE_FAN_PRODUCTS` in `rank-variations.ts`) is the
+  dated. `/unmerge` (`l3/unmerge.ts`, enumerated by `PRE_RESPELL_VARIATIONS` in `rank-variations.ts`) is the
   worked case — one variation, one row (`kleod:CountCollectedGems:agbcc`), the variation untouched throughout,
   **+44** against the #172-era winner and **+24** at #169's base, both MEASURED, then **−17/352**
   once #184 and #185 flattened the ladder and dropped the accumulator copies. It was the most
@@ -238,7 +238,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   a variation whose sign is base-dependent can never be a compiler behavior, because its value is read
   off a base no predicate in the pass has. The delta such a measurement produces is a whole-FUNCTION
   one, and enumeration is what makes that honest — it buys no per-SITE reach, and saying otherwise is
-  the trap this project has paid for three times wearing its opposite face; `PRE_FAN_PRODUCTS`' own
+  the trap this project has paid for three times wearing its opposite face; `PRE_RESPELL_VARIATIONS`' own
   header in `rank-variations.ts` prices that refusal with a measured k.
 
   **The corollary a "shrink the fan" round wants, and it is that round's whole answer: a variation's
@@ -249,7 +249,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `LoadBGTilemapData` the one such skip that was built fires on every tree and leaves 112,896
   candidates at 112,896, the compile phase untouched. So a round out to buy compile CPU has to remove candidates
   that WOULD have compiled, which is not a licence question. `rank.ts`'s
-  `ORDERBASE_ADMISSIONS` carries the worked case, and with it the three wrong readings of one such
+  `ORDERBASE_HOISTS` carries the worked case, and with it the three wrong readings of one such
   predicate, each of which deletes live candidates — two of them the row's own neighbours in the
   same loop.
 
@@ -474,7 +474,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   expires whenever anything else learns to reach the same spelling: the rows this pair was bought
   with win under `/offmember`, which is a TIE broken on `lineCount` rather than a subsumption, and
   exactly one artifact row carries `basefold` among its winner's variations — `foldhead`, the one
-  authored to bracket the head entry. `rank.ts`'s BASEFOLD_ADMISSIONS note
+  authored to bracket the head entry. `rank.ts`'s BASEFOLD_HOISTS note
   carries the ablation, the per-configuration fan counts that prove it reached, and the recipe —
   there is no shipped ablation knob, so pricing a hoist means filtering the roster at its one
   use site behind a temporary env read and reverting, with a row that DOES move
@@ -483,7 +483,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,
   `homeMergeFeeds`) are one `materialize.add(op)` behind shared refusals, differing only in an
-  eligibility predicate, and `rank.ts` already holds them as a data table (`STRUCTURING_AXES`) —
+  eligibility predicate, and `rank.ts` already holds them as a data table (`STRUCTURE_VARIATIONS`) —
   only the consumer side is un-consolidated. What it can NOT absorb is `l3/basecse.ts`, on one
   premise: `coneHoldsAddr` excludes basecse's symbol bases through a refusal `analysis.ts` calls
   the soundness half of its own claim, and all four scopes carry it. The const exclusion is NOT a
@@ -515,9 +515,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   gate is a callback the pass fires from its own refusal (`raise/shortcircuit.ts`), so there is no
   second copy of the matcher to keep in step and the "no stricter than the scope it mirrors"
   obligation is vacuous — and `PreRecoveryOptions` is the steering channel that makes it reusable,
-  one field per pass, the L1 analogue of `AnalyzeOptions`. Absorbing it into `STRUCTURING_AXES`
+  one field per pass, the L1 analogue of `AnalyzeOptions`. Absorbing it into `STRUCTURE_VARIATIONS`
   still needs one more gate KIND, since what is shipped is a side-effecting report rather than a
-  `variantGate` predicate; that step is smaller than the ~200 lines above and is not paid here.
+  `perLiftGate` predicate; that step is smaller than the ~200 lines above and is not paid here.
 
 The **backends** ([`backend/`](../packages/core/src/backend)) then print L3 as concrete source —
 C, Pascal, and a scoped C++ — one neutral tree, three output languages. Every language-specific decision
@@ -557,7 +557,7 @@ _before_ the committed L3 rewrites, so a readability pass cannot hide a structur
 deleting the statement that carries it; deref-typing and effect-preservation then fire _again_
 after, so those passes cannot introduce one either. And each respell variation's tree gets its own
 `assertResolved` + `assertDerefsTyped` inside `respell`'s guard ([`rank.ts`](../packages/core/src/rank.ts)),
-where a failure costs that one candidate and is reported through `onLeverError` — never silently
+where a failure costs that one candidate and is reported through `onEnumerationError` — never silently
 dropped, which would be indistinguishable from a respell variation that correctly declined.
 
 This is the concrete meaning of "build the tower for real." It needs no per-op level tag and no
@@ -670,7 +670,7 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
   **The parameter is necessary and not sufficient, and the gap is where a round loses its
   afternoon**: nothing exports a corpus of lifted trees, and a tabled pass's only shipped caller is
   normally inside core, so a census is taken off a REAL `enumerateRanked` with that caller's entry
-  swapped — for `l3/unmerge.ts`, the `/unmerge` entry in `PRE_FAN_PRODUCTS`. **That is a subcommand,
+  swapped — for `l3/unmerge.ts`, the `/unmerge` entry in `PRE_RESPELL_VARIATIONS`. **That is a subcommand,
   `pnpm bench gates --pass unmerge`, and not a script to write**: its numbers reproduce
   `unmerge.ts`'s instrumented 40/16 split with no patch, and it has none of the three hazards a
   script has (where it may live, that an untracked one makes the next `bench run` stamp itself
@@ -679,7 +679,7 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
 
   **What makes a pass censusable is a fact about its CALLER.** Sixteen passes in `packages/core/src`
   take their table as a parameter; FIVE of them can be censused, because `rank-variations.ts` and
-  `raise/pre-recovery.ts` hold their callers in mutable records — `/unmerge` in `PRE_FAN_PRODUCTS`,
+  `raise/pre-recovery.ts` hold their callers in mutable records — `/unmerge` in `PRE_RESPELL_VARIATIONS`,
   and the branch short-circuit fold, `member-arrays`, `narrowlocal` and `paramwidth` in
   `PRE_RECOVERY_PASSES` — and two are registered (`--pass unmerge`, `--pass arm-reread`). A pass
   reached only through a static import has no seam — the binding is read-only
@@ -790,7 +790,7 @@ costs three agbcc byte-matches — `dmafield` MATCH -> diff:29, `fieldbase` MATC
 `bgfixed` MATCH -> diff:2. A clientele is a SHAPE, not a target, and reading this one as "Thumb has
 no such instruction pair" is what would lead the next reader to gate the pass off ARM and lose those
 three.) The `/merge-home` variation that would have hoisted the init has a correct scope and a correct
-`variantGate` — and the gate read FALSE on both owned rows, because the merge feed it looks for had
+`perLiftGate` — and the gate read FALSE on both owned rows, because the merge feed it looks for had
 been deleted two levels below it. Nothing reported anything: a candidate that was never enumerated
 is not a candidate that lost. **So a pass whose refusals are load-bearing states its CLIENTELE, not
 only its rule** (`raise/const.ts` now refuses an operand a successor edge carries — a register held

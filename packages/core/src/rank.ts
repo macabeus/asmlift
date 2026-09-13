@@ -70,18 +70,18 @@ import {
   makeRefCollector,
 } from './rank-declare';
 import {
-  BASEFOLD_ADMISSIONS,
-  type BaseAdmission,
-  LIVEBASE_ADMISSIONS,
+  BASEFOLD_HOISTS,
+  type BaseHoist,
+  LIVEBASE_HOISTS,
   NO_PIN_KINDS,
-  ORDERBASE_ADMISSIONS,
-  PRE_FAN_PRODUCTS,
-  SHAPE_SUBSETS,
-  SIGN_CANDS,
-  STRUCTURING_AXES,
-  type StructuringAxis,
-  UNFOLDED_ADMISSIONS,
-  applyShapes,
+  ORDERBASE_HOISTS,
+  PRE_RESPELL_VARIATIONS,
+  SIGNEDNESS,
+  STACKED_SUBSETS,
+  STRUCTURE_VARIATIONS,
+  type StructureVariation,
+  UNFOLDED_HOISTS,
+  applyStacked,
   createdLocals,
   sameBases,
 } from './rank-variations';
@@ -133,7 +133,7 @@ export interface EnumerateOptions {
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
    *  and without this it looks identical to a variation that correctly declined. */
-  onLeverError?: (label: string, error: string) => void;
+  onEnumerationError?: (label: string, error: string) => void;
   /** Called once per (name, reason) when the declaration synthesis REFUSES a name the tree
    *  references (see `RefusedDeclarationReason`). The name then stays undeclared and the
    *  candidate fails loudly in a self-declared world — this is what lets the consumer say which
@@ -143,7 +143,7 @@ export interface EnumerateOptions {
    *  function has no inhabitant for it, so the alternative is never enumerated.
    *
    *  The two callbacks below report the enumeration's two SILENT candidate-deleting sites, and
-   *  they exist for `onLeverError`'s reason read one level up: a candidate that was never
+   *  they exist for `onEnumerationError`'s reason read one level up: a candidate that was never
    *  enumerated is indistinguishable, from outside, from one the differ simply did not pick, and
    *  nothing else in the pipeline reports it. A gate that has stopped firing and a gate that
    *  correctly declines on every corpus row look identical without this.
@@ -154,9 +154,9 @@ export interface EnumerateOptions {
    *  Nothing shipped passes either one, so a channel that had stopped firing would be invisible in
    *  exactly the way the channel exists to prevent. `test/enumerate-signals.test.ts` pins that both
    *  reach a caller. */
-  onAxisGated?: (suffix: string) => void;
+  onVariationGated?: (suffix: string) => void;
   /** Called once per structure setting whose structured tree an earlier setting already produced —
-   *  the tree dedup, which is where most of the cross's factors of two go. See `onAxisGated` for why both
+   *  the tree dedup, which is where most of the cross's factors of two go. See `onVariationGated` for why both
    *  are here rather than on the result. */
   onTreeDeduped?: () => void;
   /** PROBE (`ASMLIFT_PERSITE_SENSE`, wired in the cli): fork the two per-FUNCTION branch-sense
@@ -172,9 +172,9 @@ export interface EnumerateOptions {
 export interface Candidate {
   label: string;
   source: string;
-  /** Which PREFERENCE GROUP this spelling belongs to — the symbol-map setting's index (0 = the map's own
-   *  named spellings, 1 = their `/raw-globals` siblings). Enumeration emits the groups in
-   *  preference order, and a lower group WINS a score tie: when both compile to the same bytes the
+  /** Which PREFERENCE this spelling carries — the symbol-map setting's index (0 = the map's own
+   *  named spellings, 1 = their `/raw-globals` siblings). Enumeration emits the settings in
+   *  preference order, and a lower preference WINS a score tie: when both compile to the same bytes the
    *  reader should get `gCounter.field`, not a byte offset off a hoisted `(u8 *)` base.
    *
    *  Carried structurally rather than left to enumeration order because the readability tie-break
@@ -182,7 +182,7 @@ export interface Candidate {
    *  thing. Ranking a named spelling against a raw-address one on cast count is not a readability
    *  comparison at all — the raw form's `(u8 *)` base is not counted, so it would win by
    *  construction, trading named struct fields for anonymous byte offsets. */
-  group: number;
+  preference: number;
   /** the DECLARABLE VALUE references this candidate's tree contains — what the scoring layer's
    *  declaration synthesis renders. DERIVED, never carried: computed once from the exact tree
    *  this candidate's source was emitted from, at the moment the candidate is finalized
@@ -283,7 +283,7 @@ export class NoSpellableCandidateError extends Error {
 }
 
 export interface RankedResult<S> {
-  best: Scored<S>; // lowest score
+  winner: Scored<S>; // lowest score
   candidates: Scored<S>[]; // sorted best (lowest) first
   /** candidates whose scoreFn threw — empty when every spelling built */
   dropped: DroppedCandidate[];
@@ -325,8 +325,8 @@ type RespellResult = SFn | { sfn: SFn; needsProof: boolean } | null | undefined;
  *
  *  REQUIRE-ALL, never skip-on-decline: one declining stage declines the whole composition, so the
  *  candidate's variations always name exactly the ones that fired. That is the property the pairing site turns
- *  on, and the reason it rejects `applyShapes` — see the POLICY note there. */
-export function composeLevers(sfn: SFn, stages: readonly ((s: SFn) => RespellResult)[]): RespellResult {
+ *  on, and the reason it rejects `applyStacked` — see the POLICY note there. */
+export function composeRespellVariations(sfn: SFn, stages: readonly ((s: SFn) => RespellResult)[]): RespellResult {
   let cur = sfn;
   let needsProof = false;
   for (const stage of stages) {
@@ -422,7 +422,7 @@ export function enumerateCandidates(
   // 2×2 cross: the fourth setting costs another quarter of the whole fan — the anchor dimension
   // multiplies everything below it — and no row has been shown to need it.
   //
-  // The four spelling booleans that PREDATE `STRUCTURING_AXES` and are still hand-carried
+  // The four spelling booleans that PREDATE `STRUCTURE_VARIATIONS` and are still hand-carried
   // (`bitfields`, `ptrElems`, `declRank` and the anchor pair) start from one record, so the
   // default setting lives in one place instead of six literals that can disagree. Each entry
   // states only what it VARIES — which is the whole content of the chain above.
@@ -711,29 +711,29 @@ export function enumerateCandidates(
   const declRankSettings = fnNamesMultidimArray
     ? [...ptrElemSettings, ...ptrElemSettings.map((s) => ({ ...s, suffix: `${s.suffix}/flat-rank`, declRank: false }))]
     : ptrElemSettings;
-  // The structure-variation chain, derived from STRUCTURING_AXES: each admitted variation doubles
+  // The structure-variation chain, derived from STRUCTURE_VARIATIONS: each admitted variation doubles
   // the list, OFF first — order is load-bearing for the dropped-default skip below (every OFF
   // sibling enumerates before its ON sibling, so an ON sibling's stripped-key lookup always finds a
   // sibling that has already run or been condemned). Each variation's rationale lives on its table
   // entry; both settings are always emitted and the differ referees, never a fixed default — the
   // dedup below collapses a pair wherever the variation changed nothing.
   const sharedLiftDefs = defOpMap(sharedLift);
-  type StructureSetting = (typeof ptrElemSettings)[number] & Record<StructuringAxis['flag'], boolean>;
+  type StructureSetting = (typeof ptrElemSettings)[number] & Record<StructureVariation['flag'], boolean>;
   /** Every structure variation OFF — seeded from the table so an added variation is one table entry and not a second
    *  hand-edited literal, in table order like everything else derived from it.
    *
-   *  WHAT THE CAST CANNOT CATCH: a `StructuringAxis['flag']` union member with NO table entry.
+   *  WHAT THE CAST CANNOT CATCH: a `StructureVariation['flag']` union member with NO table entry.
    *  `Object.fromEntries` types its result by the key type it was handed, not by the union, so the
    *  assertion is taken on trust where the hand-written literal was checked. Such a member is
-   *  inert either way — every reader of these flags iterates `STRUCTURING_AXES`, so a flag with no
+   *  inert either way — every reader of these flags iterates `STRUCTURE_VARIATIONS`, so a flag with no
    *  entry is never read — but it stops being a type error and becomes an absent field. */
   const allStructureVariationsOff = Object.fromEntries(
-    STRUCTURING_AXES.map((variation) => [variation.flag, false]),
-  ) as Record<StructuringAxis['flag'], boolean>;
+    STRUCTURE_VARIATIONS.map((variation) => [variation.flag, false]),
+  ) as Record<StructureVariation['flag'], boolean>;
   let structureSettings: StructureSetting[] = declRankSettings.map((s) => ({ ...s, ...allStructureVariationsOff }));
-  for (const variation of STRUCTURING_AXES) {
-    if (variation.probeGate !== undefined && !variation.probeGate(sharedLift, sharedLiftDefs)) {
-      opts.onAxisGated?.(variation.suffix);
+  for (const variation of STRUCTURE_VARIATIONS) {
+    if (variation.sharedGate !== undefined && !variation.sharedGate(sharedLift, sharedLiftDefs)) {
+      opts.onVariationGated?.(variation.suffix);
       continue;
     }
     structureSettings = [
@@ -758,7 +758,7 @@ export function enumerateCandidates(
     s.bitfields &&
     s.ptrElems &&
     s.declRank &&
-    STRUCTURING_AXES.every((variation) => !s[variation.flag]);
+    STRUCTURE_VARIATIONS.every((variation) => !s[variation.flag]);
 
   const seen = new Map<string, Candidate>();
   const seenTrees = new Set<string>();
@@ -824,12 +824,12 @@ export function enumerateCandidates(
   // candidate, it would DELETE one,
   // and nothing in the harness reports a candidate that was never enumerated.
   // `preRespellSuffix` names the tree this call re-spells, and it is a diagnostic argument only: it
-  // reaches `onLeverError` and nothing else, so the invariant the parameter list states above —
+  // reaches `onEnumerationError` and nothing else, so the invariant the parameter list states above —
   // every source is a pure function of the tree and this call's own constants — is untouched by
   // it. It exists because the pre-respell variations call this on a REWRITTEN tree, where a refusal
   // of the default source is a refusal of the rewrite, not of the row's own tree.
   //
-  // IT PREFIXES EVERY `onLeverError` IN THIS FUNCTION, not just the default emit's, and that is
+  // IT PREFIXES EVERY `onEnumerationError` IN THIS FUNCTION, not just the default emit's, and that is
   // the whole point rather than a detail: every one of them is reachable from both calls, and the
   // suffix each already carries names a VARIATION, which on a pre-respell tree is a variation applied
   // to the rewrite. Reported without this prefix, a refusal of `/unmerge/volatile` reads as a refusal
@@ -855,7 +855,7 @@ export function enumerateCandidates(
     try {
       sources.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {
-      opts.onLeverError?.(name + preRespellSuffix, firstLine(e));
+      opts.onEnumerationError?.(name + preRespellSuffix, firstLine(e));
       return { sources, emit: { error: e } };
     }
     // Respell variations — each on the same footing as signedness/branch sense, each guarded:
@@ -866,7 +866,7 @@ export function enumerateCandidates(
     // POLICY: respell variations derive from the DEFAULT tree only — they do not compose unless
     // one of these compositions sanctions it, each with its own admission bar: `/volatile`
     // narrowed onto a variation's own locals, the STACKED variations and the PAIRINGS, which all
-    // derive from or compose onto a source, plus the PRE-RESPELL variations (PRE_FAN_PRODUCTS,
+    // derive from or compose onto a source, plus the PRE-RESPELL variations (PRE_RESPELL_VARIATIONS,
     // applied to the TREE before this respell set runs over it; its admission bar is stated at the
     // table) —
     // plus MULTI-RESULT variations: one variation whose single application has several legitimate
@@ -877,7 +877,7 @@ export function enumerateCandidates(
     // `/volatile` composes only onto a variation whose output CENTRES ON a
     // numeric-address pointer local — the joint spelling is reachable from neither variation
     // alone, each composition narrows /volatile to that variation's own locals (volatilePtrLocals'
-    // `only`), and each needed a row to demand it. The STACKED variations (SHAPE_PRODUCTS) are
+    // `only`), and each needed a row to demand it. The STACKED variations (STACKED_VARIATIONS) are
     // derived onto EVERY source: statement order/shape is orthogonal to what any other respell
     // variation changes — the same kind of independent dimension as signedness —
     // so they are crossed with every source rather than paired; a third blanket composition needs
@@ -895,7 +895,7 @@ export function enumerateCandidates(
     // ground is narrower than it looks: it needs a committed decision INSIDE a variation with an
     // existing variation that expresses the alternative, not a variation one could imagine wanting
     // twice. Anything else stays un-composed. A pairing is admitted for a VARIATION, so it runs
-    // over that variation's whole hoist table (LIVEBASE_ADMISSIONS): an entry on the table changes
+    // over that variation's whole hoist table (LIVEBASE_HOISTS): an entry on the table changes
     // which bases the hoist binds, not what pairing it with /coalesce means.
     // And a respell variation must PRESERVE SEMANTICS by construction: the differ referees
     // byte-exactness (a wrong candidate can never fake a score-0 match), but on a NONMATCH row the
@@ -969,13 +969,13 @@ export function enumerateCandidates(
           // which moves only const or pure-read assigns and so cannot lift a read of a base local
           // above its init.
           const minted = createdLocals(sfn, alt);
-          for (const subset of SHAPE_SUBSETS) {
+          for (const subset of STACKED_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
             // Sharing the respell variation's outer try would let a throw deriving one subset
             // discard every later one, under a name (that variation's suffix) that names no shape.
             const shapeSuffix = subset.map((x) => x.suffix).join('');
             try {
-              const shaped = applyShapes(subset, alt);
+              const shaped = applyStacked(subset, alt);
               if (shaped !== null) {
                 assertResolved(shaped.out);
                 assertDerefsTyped(shaped.out);
@@ -992,7 +992,7 @@ export function enumerateCandidates(
                 });
               }
             } catch (e) {
-              opts.onLeverError?.(name + preRespellSuffix + suffix + shapeSuffix, firstLine(e));
+              opts.onEnumerationError?.(name + preRespellSuffix + suffix + shapeSuffix, firstLine(e));
             }
           }
         }
@@ -1002,17 +1002,17 @@ export function enumerateCandidates(
         // refused, so without this a variation that fails here vanishes with no trace — indistinguishable
         // from one that correctly declined, which is exactly the hidden failure
         // DroppedCandidate exists to surface.
-        opts.onLeverError?.(name + preRespellSuffix + suffix, firstLine(e));
+        opts.onEnumerationError?.(name + preRespellSuffix + suffix, firstLine(e));
       }
     };
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A variation on the
     // same footing as the others: the default inline spelling stays in the list, so the differ
     // referees and this can never cost a match.
-    for (const subset of SHAPE_SUBSETS) {
+    for (const subset of STACKED_SUBSETS) {
       // the truthful suffix needs the pass to RUN first, so this bypasses respell's
       // suffix-then-thunk shape: same try posture, suffix from the fired members
       try {
-        const shaped = applyShapes(subset, sfn);
+        const shaped = applyStacked(subset, sfn);
         if (shaped !== null) {
           // the ONE call whose suffix already names shapes — say so, rather than making `respell`
           // read it back out of the suffix it was handed
@@ -1021,7 +1021,7 @@ export function enumerateCandidates(
       } catch (e) {
         // the error label falls back to the full subset — the fired set is unknown mid-throw
         const label = subset.map((x) => x.suffix).join('');
-        opts.onLeverError?.(name + preRespellSuffix + label, firstLine(e));
+        opts.onEnumerationError?.(name + preRespellSuffix + label, firstLine(e));
       }
     }
     respell('/argbase', () => materializeArgBases(sfn));
@@ -1080,7 +1080,7 @@ export function enumerateCandidates(
     // evidence with a named base, this one with an aggregate member, and the two are different C
     // and different register pressure. Offered only where the target declares the fold — MIPS and
     // PPC put the addend in the instruction by construction, so nothing there says a member put
-    // it there, exactly as with BASEFOLD_ADMISSIONS above.
+    // it there, exactly as with BASEFOLD_HOISTS above.
     if (target.compilerBehaviors.foldsConstAddrOffset) {
       respell('/offmember', () => spellOperandMembers(sfn));
     }
@@ -1105,15 +1105,15 @@ export function enumerateCandidates(
     // `synthetic:dmastride` exists to show exactly that for `/unreduce`, at 33 against its match.
     //
     // AND THE SUBSET APPLIER IS NOT THE RIGHT MECHANISM HERE, though it looks like it: rebuilding
-    // this as a SHAPE_SUBSETS-style table would admit VT and RT by construction, because
-    // `applyShapes` is SKIP-ON-DECLINE and would emit "everything that fired" on any tree where
+    // this as a STACKED_SUBSETS-style table would admit VT and RT by construction, because
+    // `applyStacked` is SKIP-ON-DECLINE and would emit "everything that fired" on any tree where
     // one of the three declines. That is the property the stacked variations are designed around and
     // the one the pairing policy forbids — a pair reaches the fan only when a row demands it.
     //
-    // Both compose through `composeLevers`, which carries `/unreduce`'s proof obligation across
+    // Both compose through `composeRespellVariations`, which carries `/unreduce`'s proof obligation across
     // the stages after it — hand-writing that carry made dropping it a type-correct edit.
-    respell('/vol-store/unreduce', () => composeLevers(sfn, [volStore, unreduced]));
-    respell('/vol-store/unreduce/ptr-field', () => composeLevers(sfn, [volStore, unreduced, pointerFields]));
+    respell('/vol-store/unreduce', () => composeRespellVariations(sfn, [volStore, unreduced]));
+    respell('/vol-store/unreduce/ptr-field', () => composeRespellVariations(sfn, [volStore, unreduced, pointerFields]));
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
     // asm kept in a callee-saved register across a call; the register is real, but a constant
@@ -1217,7 +1217,7 @@ export function enumerateCandidates(
         const base = from();
         results = base ? resultsOf(base) : [];
       } catch (e) {
-        opts.onLeverError?.(name + preRespellSuffix + suffix, firstLine(e));
+        opts.onEnumerationError?.(name + preRespellSuffix + suffix, firstLine(e));
         return;
       }
       for (const c of results) {
@@ -1256,13 +1256,13 @@ export function enumerateCandidates(
     // declares the array-shape fork, so a target with neither is offered the two `/livebase` hoists
     // and nothing else. The same fact is stated at the POLICY sites above; a roster change repairs
     // all of them or none.
-    const admissions: readonly BaseAdmission[] = [
-      ...LIVEBASE_ADMISSIONS,
-      ...(target.compilerBehaviors.foldsConstAddrOffset ? [...BASEFOLD_ADMISSIONS, ...UNFOLDED_ADMISSIONS] : []),
+    const admissions: readonly BaseHoist[] = [
+      ...LIVEBASE_HOISTS,
+      ...(target.compilerBehaviors.foldsConstAddrOffset ? [...BASEFOLD_HOISTS, ...UNFOLDED_HOISTS] : []),
       // …and the ORDER hoists where the compiler's subscript expansion forks on the base's array-ness,
       // which is the same opt-in raise/globalshape.ts carries: with it off nothing is stamped, so
       // `order-licensed` would refuse every key anyway and this only saves the census.
-      ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_ADMISSIONS : []),
+      ...(target.compilerBehaviors.arrayShapeFromStride ? ORDERBASE_HOISTS : []),
     ];
     // AND THE SAME SKIP KEYED ON THE LICENCE ITSELF WOULD BUY NOTHING, which is worth a paragraph
     // because this hoist is where the next reader will propose it. `orderLicensedGlobals` is decidable
@@ -1661,7 +1661,7 @@ export function enumerateCandidates(
     // Read off the pin's OWN call, per symbol-map setting — the `/raw-globals` setting lifts without
     // the map and answers for itself, so no lift is governed by a fact measured on a different one.
     let pinnable = false;
-    for (const cand of SIGN_CANDS) {
+    for (const cand of SIGNEDNESS) {
       if (cand.signed && !pinnable) {
         break;
       }
@@ -1806,7 +1806,7 @@ export function enumerateCandidates(
             throw e; // the default lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped variation, never an aborted enumeration — the same posture as `respell`.
-          opts.onLeverError?.(name + liftSetting.suffix, firstLine(e));
+          opts.onEnumerationError?.(name + liftSetting.suffix, firstLine(e));
           continue;
         }
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
@@ -1862,7 +1862,7 @@ export function enumerateCandidates(
                 verify(fn);
               }
             } catch (e) {
-              opts.onLeverError?.(name + liftSetting.suffix + SHARED_TAIL_SUFFIX, firstLine(e));
+              opts.onEnumerationError?.(name + liftSetting.suffix + SHARED_TAIL_SUFFIX, firstLine(e));
               break;
             }
             // Unsunk, this fn is the `/shared-ret` pass's again.
@@ -1879,8 +1879,8 @@ export function enumerateCandidates(
                 ? liftSetting.suffix + SHARED_TAIL_SUFFIX
                 : liftSetting.suffix;
           // the per-lift gates, on THIS lift's fn — see the table doc
-          const offForThisLift = STRUCTURING_AXES.filter(
-            (variation) => variation.variantGate !== undefined && !variation.variantGate(fn),
+          const offForThisLift = STRUCTURE_VARIATIONS.filter(
+            (variation) => variation.perLiftGate !== undefined && !variation.perLiftGate(fn),
           );
           const settingsForLift = usableStructureSettings.filter((s) =>
             offForThisLift.every((variation) => !s[variation.flag]),
@@ -1901,7 +1901,7 @@ export function enumerateCandidates(
               continue;
             }
             if (
-              STRUCTURING_AXES.some(
+              STRUCTURE_VARIATIONS.some(
                 (variation) =>
                   variation.strip && s[variation.flag] && dropped.has(s.suffix.replace(variation.suffix, '')),
               )
@@ -1929,7 +1929,7 @@ export function enumerateCandidates(
                 spellBitfieldMembers: s.bitfields,
                 spellPtrMemberElements: s.ptrElems,
                 spellDeclaredSubscripts: s.declRank,
-                ...STRUCTURING_AXES.reduce(
+                ...STRUCTURE_VARIATIONS.reduce(
                   (acc, variation) => ({ ...acc, ...variation.options(s[variation.flag]) }),
                   {},
                 ),
@@ -1944,7 +1944,7 @@ export function enumerateCandidates(
               dropped.add(s.suffix);
               // an anchored setting that fails structuring or its contracts is a dropped variation, never
               // an aborted enumeration — same rule as respell below
-              opts.onLeverError?.(name + vsuffix + s.suffix, firstLine(e));
+              opts.onEnumerationError?.(name + vsuffix + s.suffix, firstLine(e));
               continue;
             }
             // A TREE another structure setting already produced. `respellTree` reads the tree and this
@@ -1985,11 +1985,11 @@ export function enumerateCandidates(
             if (own.emit) {
               lastEmitError = own.emit.error;
             }
-            // The PRE-RESPELL variations (PRE_FAN_PRODUCTS, the last composition the POLICY note
+            // The PRE-RESPELL variations (PRE_RESPELL_VARIATIONS, the last composition the POLICY note
             // names): rewrite the TREE, then run the whole respell set over the result, so every
             // respell variation derives from the rewrite instead of composing onto it. The gate is the pass's
             // own decline; the contracts are `respell`'s three, for `respell`'s reasons.
-            for (const pf of PRE_FAN_PRODUCTS) {
+            for (const pf of PRE_RESPELL_VARIATIONS) {
               try {
                 const made = pf.apply(sfn);
                 if (made === null) {
@@ -2014,7 +2014,7 @@ export function enumerateCandidates(
                 // tree, so it never becomes the row's stated cause: `TreeSources.emit` is dropped
                 // here and only the call over the row's own tree above records one.
                 //
-                // It is reported instead through `onLeverError` under `pf.suffix`, which is what
+                // It is reported instead through `onEnumerationError` under `pf.suffix`, which is what
                 // `respellTree`'s second argument is for: a default emit refusal does not THROW —
                 // `respellTree` returns it — so the `catch` below never sees it, and under the bare
                 // function name it would read as a refusal of the row's default source while the
@@ -2024,7 +2024,7 @@ export function enumerateCandidates(
                   sources.push({ ...sp, suffix: `${pf.suffix}${sp.suffix}` });
                 }
               } catch (e) {
-                opts.onLeverError?.(`${name}${pf.suffix}`, firstLine(e));
+                opts.onEnumerationError?.(`${name}${pf.suffix}`, firstLine(e));
               }
             }
             for (const sp of sources) {
@@ -2032,7 +2032,7 @@ export function enumerateCandidates(
               // Collapse a candidate whose source is identical (a function with no divergent `if`
               // structures the same either way): no point scoring a duplicate. Deduping the
               // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
-              // scores identically, so it can never change `best` — and it keeps the candidate set to
+              // scores identically, so it can never change the winner — and it keeps the candidate set to
               // the genuinely distinct sources.
               //
               // A CANDIDATE'S PUBLISHED VARIATIONS ARE THEREFORE NOT AN ATTRIBUTION, and every argument
@@ -2076,7 +2076,7 @@ export function enumerateCandidates(
               const made: Candidate = {
                 label: `${cand.label}${vsuffix}${s.suffix}${sp.suffix}${symbolSetting.suffix}`,
                 source,
-                group: symbolIndex,
+                preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
                 ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
@@ -2145,10 +2145,10 @@ export function rankBy<S extends { score: number; rows?: number }>(
     });
   }
   results.sort(compareScored);
-  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };
+  return { winner: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };
 }
 
-/** THE candidate ordering — score, then preference group, then readability, then enumeration
+/** THE candidate ordering — score, then preference, then readability, then enumeration
  *  order. Exported because there are TWO drivers over the same enumeration (this module's sync
  *  `rankBy` for the Node/objdiff scorer, and the webapp's async await-loop for the wasm one), and
  *  a per-driver copy would let the same input produce two different winners.
@@ -2157,7 +2157,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
  *  that separates these two candidates did not change the bytes — so everything below only chooses what
  *  the READER sees, and can never cost a match.
  *
- *  GROUP next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
+ *  PREFERENCE next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
  *
  *  DEVICE VOLATILITY next: at equal bytes, the spelling that qualifies a DEVICE REGISTER
  *  (`capabilities.deviceRegisters`) is the one to publish. A dropped `volatile` on an MMIO cell is
@@ -2176,7 +2176,7 @@ export function rankBy<S extends { score: number; rows?: number }>(
  *  term was declared to make, taken on the same evidence. What it must never do is change WHICH
  *  candidates exist; that stays an admission question, one variation at a time.
  *
- *  CAST COUNT next, and only WITHIN a group. A wrong signedness pin is what manufactures casts —
+ *  CAST COUNT next, and only WITHIN a preference. A wrong signedness pin is what manufactures casts —
  *  the C backend has to cast a shift operand back to the signedness the machine op needs, so
  *  pinning `u32` on a genuinely-signed parameter buys `s32 f(u32 a0) { return (s32)a0 >> a1; }`
  *  for the same bytes as `s32 f(s32 a0) { return a0 >> a1; }`. Before the backend synthesized that
@@ -2205,7 +2205,7 @@ export function compareScored<S extends { score: number }>(
 ): number {
   return (
     a.score.score - b.score.score ||
-    a.group - b.group ||
+    a.preference - b.preference ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     castCount(a.source) - castCount(b.source) ||
     lineCount(a.source) - lineCount(b.source) ||
@@ -2221,7 +2221,7 @@ function lineCount(source: string): number {
 
 /** Scalar casts in a candidate's rendered source — the readability tie-break above.
  *
- *  A WITHIN-GROUP tie-break over two spellings of ONE function, and deliberately NARROWER than
+ *  A WITHIN-PREFERENCE tie-break over two spellings of ONE function, and deliberately NARROWER than
  *  the published readability metric (apps/benchmark/src/eval/quality.ts `casts`): it counts the
  *  decomp SCALAR typedef vocabulary only — `(u8)` … `(s32)` — so a pointer, struct or C-keyword
  *  cast is not read as noise, those being structural spellings a candidate does not choose.

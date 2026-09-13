@@ -51,13 +51,13 @@ export function rankedSummaryLine(a: {
   dropped: number;
   withheld: number;
   synthesized: number;
-  best: { label: string; score: { score: number; rows?: number; match?: boolean } };
+  winner: { label: string; score: { score: number; rows?: number; match?: boolean } };
   stamp: string;
 }): string {
   return (
     `asmlift: [ranked] ${a.scored} candidate(s) scored, ${a.dropped} dropped, ` +
     `${a.withheld} withheld, ${a.synthesized} synthesized, ` +
-    `best ${a.best.label}: ${scoreOf(a.best.score)} ` +
+    `best ${a.winner.label}: ${scoreOf(a.winner.score)} ` +
     `[${a.stamp}]`
   );
 }

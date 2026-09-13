@@ -13,7 +13,7 @@ import type { Expr, SFn, Stmt } from '@asmlift/core/l3/ast';
 import { tallying } from '@asmlift/core/l3/gates';
 import { emptyScaleRecord } from '@asmlift/core/raise/extscale';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
-import { PRE_FAN_PRODUCTS, UNMERGE_SUFFIX } from '@asmlift/core/rank-variations';
+import { PRE_RESPELL_VARIATIONS, UNMERGE_SUFFIX } from '@asmlift/core/rank-variations';
 import { ARMV4T_AGBCC, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import { describe, expect, it } from 'vitest';
 
@@ -36,7 +36,7 @@ const emptyArmSite = (): SFn => ({
   ] as Stmt[],
 });
 
-const unmergeVariation = () => PRE_FAN_PRODUCTS.find((p) => p.suffix === UNMERGE_SUFFIX)!;
+const unmergeVariation = () => PRE_RESPELL_VARIATIONS.find((p) => p.suffix === UNMERGE_SUFFIX)!;
 
 describe('the gate census seam', () => {
   it('names the two registered passes', () => {

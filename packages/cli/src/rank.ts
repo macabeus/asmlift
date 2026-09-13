@@ -51,9 +51,9 @@ export interface RankOptions {
    *  because it always throws is a defect, and without this it looks identical to a variation that
    *  correctly declined"). THIS IS THE CHANNEL'S ONLY CONSUMER ANYWHERE: the benchmark reaches
    *  `decompileRanked` without supplying one, so a whole pre-fan half of a row's fan can still
-   *  vanish from a `pnpm bench run` with nothing printed. Read an absent `[lever]` line as a fact
+   *  vanish from a `pnpm bench run` with nothing printed. Read an absent `[threw]` line as a fact
    *  about the wiring before reading it as a fact about the variations. */
-  onLeverError?: (label: string, error: string) => void;
+  onEnumerationError?: (label: string, error: string) => void;
 }
 
 // Self-declaring candidates: a candidate that names map-derived symbols carries their refs
@@ -78,7 +78,7 @@ export const enumerateRanked = (name: string, asm: string, target: TargetDescrip
     prototypes: opts.prototypes,
     asmData: opts.asmData,
     symbols: opts.symbols,
-    ...(opts.onLeverError ? { onLeverError: opts.onLeverError } : {}),
+    ...(opts.onEnumerationError ? { onEnumerationError: opts.onEnumerationError } : {}),
     ...perSiteSenseProbe(),
   });
 
@@ -99,7 +99,7 @@ const perSiteSenseProbe = (): { perSiteSenseBits?: number } => {
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > PERSITE_SENSE_MAX_BITS) {
     throw new Error(
-      `ASMLIFT_PERSITE_SENSE must be an integer 1..${PERSITE_SENSE_MAX_BITS} (2^n candidate points per fan point), got '${raw}'`,
+      `ASMLIFT_PERSITE_SENSE must be an integer 1..${PERSITE_SENSE_MAX_BITS} (2^n candidates per structure setting), got '${raw}'`,
     );
   }
   return { perSiteSenseBits: n };

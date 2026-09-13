@@ -1033,7 +1033,7 @@ describe('ranking prefers the named spelling when bytes are equal', () => {
     const symbols = mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]);
     const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols });
     expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/raw-globals']);
-    const best = rankBy(cands, 'f', () => ({ score: 7 })).best; // every candidate scores the same
+    const best = rankBy(cands, 'f', () => ({ score: 7 })).winner; // every candidate scores the same
     expect(best.label).toBe('unsigned');
     expect(best.source).toContain('return gCounter;');
   });
@@ -1044,7 +1044,7 @@ describe('ranking prefers the named spelling when bytes are equal', () => {
     const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols });
     const best = rankBy(cands, 'f', (_s, _sym, c) => ({
       score: hasVariation(c.label.split('/'), 'raw-globals') ? 1 : 2,
-    })).best;
+    })).winner;
     expect(best.label).toBe('unsigned/raw-globals');
   });
 });

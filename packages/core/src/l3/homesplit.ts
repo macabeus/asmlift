@@ -104,7 +104,7 @@ export const HOMESPLIT_FAN_GATES: readonly Gate<HomeSplitFanCtx>[] = [
   },
   {
     id: 'homesplit-fan-cap',
-    why: 'one candidate per hoistable key, times the volatile products — the whole cost of the axis',
+    why: 'one candidate per hoistable key, times the volatile pairings — the whole cost of the variation',
     sound: false,
     rejects: (c) => c.hoistableKeys > 3,
   },
@@ -143,7 +143,7 @@ export interface HomeSplitCtx {
 export const HOMESPLIT_GATES: readonly Gate<HomeSplitCtx>[] = [
   {
     id: 'homesplit-no-region',
-    why: 'a withheld key the region rule declines to split leaves the spelling the primary carries',
+    why: 'a withheld key the region rule declines to split leaves the spelling the default carries',
     sound: false,
     rejects: (c) => !c.withheldSplits,
   },

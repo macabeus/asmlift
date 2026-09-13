@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { SIGN_CANDS } from '../src/rank-variations';
+import { SIGNEDNESS } from '../src/rank-variations';
 import {
   VARIATION_KINDS,
   VARIATION_TOKENS,
@@ -33,14 +33,13 @@ describe('the registry is well-formed', () => {
     }
   });
 
-  test('`winner` and `best` are never variations: `bench fan --show` reserves them', () => {
+  test('`winner` is never a variation: `bench fan --show` reserves it', () => {
     expect(names).not.toContain('winner');
-    expect(names).not.toContain('best');
   });
 
   test('the signedness variations are exactly the ones enumeration pins', () => {
     const signedness = VARIATION_TOKENS.filter((t) => t.variationKind === 'signedness').map((t) => t.name);
-    expect(signedness).toEqual(SIGN_CANDS.map((s) => s.label));
+    expect(signedness).toEqual(SIGNEDNESS.map((s) => s.label));
   });
 
   // `rank.ts` strips one structure variation out of a structure suffix with a substring `replace`,
@@ -178,7 +177,7 @@ describe('closure over the mint literals of rank.ts and rank-variations.ts', () 
   });
 
   test('every registered variation is minted', () => {
-    const minted = new Set([...segments.map((s) => parseVariation(s).name), ...SIGN_CANDS.map((s) => s.label)]);
+    const minted = new Set([...segments.map((s) => parseVariation(s).name), ...SIGNEDNESS.map((s) => s.label)]);
     expect(names.filter((n) => !minted.has(n))).toEqual([]);
   });
 });

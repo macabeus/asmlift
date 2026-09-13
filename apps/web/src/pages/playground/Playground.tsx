@@ -269,9 +269,9 @@ export function Playground({
   });
   // The Source view shows the RANKED-BEST C when scoring has resolved for the current input;
   // otherwise the deterministic decompile (instant, and the fallback if ranking is off/loading/
-  // errored). Because ranking resets to "loading" on every input change, `best.source` can never
+  // errored). Because ranking resets to "loading" on every input change, `winner.source` can never
   // be shown against a different asm than the one it was scored for.
-  const shownSource = ok ? (ranking.status === 'ok' ? ranking.result.best.source : result.source) : '';
+  const shownSource = ok ? (ranking.status === 'ok' ? ranking.result.winner.source : result.source) : '';
 
   const share = () => {
     const url = window.location.href;

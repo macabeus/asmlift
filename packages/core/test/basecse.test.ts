@@ -829,7 +829,7 @@ describe('the fold-evidence admission (WHICH reused bases the source PARKED)', (
   });
 
   test('and the ROSTER offers it — where the target declares the fold, and only there', () => {
-    // THE TABLE IS NOT THE VARIATION — `rank.ts`'s `UNFOLDED_ADMISSIONS` is, and it needs its own pin:
+    // THE TABLE IS NOT THE VARIATION — `rank.ts`'s `UNFOLDED_HOISTS` is, and it needs its own pin:
     // delete that one hoist and the whole `/unfolded` family leaves the ranked path
     // (`synthetic:unfoldpark`'s fan 44 → 36) without any table in `basecse.ts` changing its answer.
     // `sinkinit.test.ts` owns the sunk PROGRAM and must stay label-free to do it, so it cannot own

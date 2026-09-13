@@ -86,7 +86,7 @@ export function asmliftFan(
   sym: string,
   asm: string,
   obj: string,
-  opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onLeverError'>,
+  opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onEnumerationError'>,
 ): RankedResult {
   return decompileRanked(sym, asm, tc.targetDesc, obj, opts);
 }
@@ -183,7 +183,7 @@ export function runAsmlift(
   const rankT0 = Date.now();
   try {
     const ranked = asmliftFan(tc, sym, asm, obj, opts);
-    const best = ranked.best;
+    const best = ranked.winner;
     const s = best.score;
     return {
       decompiler: 'asmlift',

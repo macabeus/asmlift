@@ -134,7 +134,7 @@ const EMITTER_NAME = /^[avt]\d+$/;
 
 /** Why a name the candidate's tree references got NO declaration. Reported rather than silently
  *  applied, because an undeclared name and a REFUSED one produce the same `'x' undeclared` from
- *  the compiler and only the second one is asmlift's own decision. Same argument as `onLeverError`
+ *  the compiler and only the second one is asmlift's own decision. Same argument as `onEnumerationError`
  *  one screen down: a refusal nobody can see is indistinguishable from a capability that was
  *  never there.
  *

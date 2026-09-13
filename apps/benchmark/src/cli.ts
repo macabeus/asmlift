@@ -25,7 +25,7 @@
 //                                        # prices a .s that is not a row, no scoring. --toolchain
 //                                        # belongs to --asm alone: a row names its own in its id
 //   pnpm bench sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p]
-//                    [--arms harness,nomap] [--fan] [--force] [--repeat N]
+//                    [--map-modes harness,nomap] [--fan] [--force] [--repeat N]
 //                    [--json <f>] [--compare <base.json> <head.json>] [--asm-dir <d> --toolchain <id>]
 //                    [--allow-unmeasured]
 //                                        # THE CORPUS A/B: re-lift every row in this tree and in
@@ -145,7 +145,7 @@ const { values: opts, positionals } = parseArgs({
     // gates only: which tabled pass to census (see run/gate-census.ts's registry).
     pass: { type: 'string' },
     // sweep only: the corpus-wide differential re-lift (run/sweep.ts). `--base`/`--base-dir` name
-    // the OTHER tree; `--arms` which configurations to lift each row in; `--fan` adds enumeration
+    // the OTHER tree; `--map-modes` which map modes to lift each row in; `--fan` adds enumeration
     // (120x the lift); `--repeat` asks this tree whether it agrees with itself; `--json` and
     // `--compare` split a comparison into two runs that need not happen on the same machine.
     // `--asm-dir` swaps dataset rows for a tree of raw `.s`/`.inc` files, which is the corpus the
@@ -157,7 +157,7 @@ const { values: opts, positionals } = parseArgs({
     // PUBLISHED ARTIFACT at that ref. `sweep` needs the base revision's CODE, and no artifact
     // carries it.
     'base-dir': { type: 'string' },
-    arms: { type: 'string', default: 'harness,nomap' },
+    'map-modes': { type: 'string', default: 'harness,nomap' },
     'allow-unmeasured': { type: 'boolean', default: false },
     fan: { type: 'boolean', default: false },
     repeat: { type: 'string' },
@@ -519,13 +519,13 @@ switch (command) {
     break;
   }
   case 'sweep': {
-    // sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p] [--arms a,b]
+    // sweep [--base <ref>|--base-dir <path>] [--tier t] [--only s] [--project p] [--map-modes a,b]
     //       [--fan] [--force] [--repeat N] [--json f] [--compare <base.json> <head.json>]
     //       [--asm-dir d --toolchain t] [--allow-unmeasured]
     //
     // The corpus A/B twenty agents hand-built. CORPUS-WIDE and affordable for the same reason
     // `bench gates` is and `bench fan` is not: nothing here is COMPILED — all 1,062 available rows
-    // lift in both arms in about a minute. `--base <ref>` lifts the corpus TWICE and pays that
+    // lift in both map modes in about a minute. `--base <ref>` lifts the corpus TWICE and pays that
     // twice over, every time and not only the first; `--fan` adds enumeration and is several times
     // the lift, which is why it is a flag. Scope it with `--tier`/`--project`/`--only` when the
     // question is scoped. The figures are dated rows of `docs/bench-cost.md` §1 and live only
@@ -536,7 +536,7 @@ switch (command) {
         tiers,
         ...(opts.only !== undefined ? { only: opts.only } : {}),
         ...(opts.project !== undefined ? { project: opts.project } : {}),
-        arms: opts.arms.split(',').filter((a) => a !== ''),
+        mapModes: opts['map-modes'].split(',').filter((a) => a !== ''),
         allowUnmeasured: opts['allow-unmeasured'],
         fan: opts.fan,
         force: opts.force,

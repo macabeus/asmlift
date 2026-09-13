@@ -317,7 +317,7 @@ export function assertNoOrphanedLocals(before: SFn, after: SFn): void {
   const found = mentionedLocals(after.body, dropped);
   if (found.size) {
     throw new ContractError(
-      `a lever deleted the declaration of ${[...found]
+      `a respell variation deleted the declaration of ${[...found]
         .sort()
         .map((n) => `'${n}'`)
         .join(', ')} in '${after.name}' ` +

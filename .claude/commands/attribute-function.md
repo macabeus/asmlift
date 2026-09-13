@@ -77,7 +77,7 @@ Three docs carry what this command shares with `/match-function`, and it does no
    `--enumerate` lists the same candidates' VARIATIONS without compiling anything — no scores, because
    nothing was compiled — the rate, and what a huge fan therefore costs to merely LIST, is a row of
    `docs/bench-cost.md` §1; a long enumeration is a big fan, not a hang. It still serves
-   `--show <variations>`, though not `--show best`: nothing has been scored, so there is no winner to
+   `--show <variations>`, though not `--show winner`: nothing has been scored, so there is no winner to
    name. A fan over 2,000 is refused unless you pass `--force`, and the refusal quotes what
    `--force` would cost on THIS row — **but that refusal is not free**: it is checked after the
    enumeration (`fan.ts:914`), so on a huge row it prints only once the half-hour of enumeration has

@@ -434,7 +434,7 @@ describe('`scope` is the third placement: the init goes INSIDE the block holding
 
 describe('the `scope` placement DECLINES where it degenerates (l3/basecse.ts)', () => {
   // A `scope` run that put nothing in a nested list emits the `first-use` tree. `rank.ts` withholds
-  // the flat `first-use` row for this gate table deliberately (ORDERBASE_ADMISSIONS: measured at
+  // the flat `first-use` row for this gate table deliberately (ORDERBASE_HOISTS: measured at
   // zero over the four rows where it differs from `head`), so returning that tree here ships the
   // withheld candidate under the scoped one's name. Over each project's whole `asm` tree, map-ful:
   // of the 48 functions `ORDERBASE_GATES` admits, 7 place an init inside a nested list and 41 do

@@ -105,7 +105,7 @@ export function estimatedScoreTime(n: number, tier: Case['tier']): string {
 }
 
 export interface FanOptions {
-  /** print this candidate's SOURCE (its label, or `best`) after the table */
+  /** print this candidate's SOURCE (its label, or `winner`) after the table */
   show?: string;
   /** COMPARE this row's fan against the count the artifact at this ref recorded for it — the
    *  fan multiplier a round is asked to report before it merges a variation. Spelled `--base` rather
@@ -401,7 +401,7 @@ export function renderFan(ranked: RankedResult, a: { synthesized: SymbolRef[]; s
       dropped: ranked.dropped.length,
       withheld: ranked.withheld.length,
       synthesized: a.synthesized.length,
-      best: ranked.best,
+      winner: ranked.winner,
       stamp: a.stamp,
     }),
   );
@@ -423,20 +423,20 @@ export function renderFan(ranked: RankedResult, a: { synthesized: SymbolRef[]; s
  *  would make this over-report, which prints declarations to check that turn out to have been
  *  ignored. Under-reporting would publish a `(match)` resting on declarations nobody was told
  *  about. */
-export function synthesizedRefs(tier: Case['tier'], best: RankedCandidate): SymbolRef[] {
-  return tier === 'real' ? [] : (best.symbolRefs ?? []).filter((r) => r.synthesized);
+export function synthesizedRefs(tier: Case['tier'], winner: RankedCandidate): SymbolRef[] {
+  return tier === 'real' ? [] : (winner.symbolRefs ?? []).filter((r) => r.synthesized);
 }
 
-/** `--show`: the named candidate, or the winner under the reserved name `best`. Undefined ⇒ the
+/** `--show`: the named candidate, or the winner under the reserved name `winner`. Undefined ⇒ the
  *  caller lists what there was, because a typo'd name and a variation that produced no candidate at
  *  all are the same silence otherwise.
  *
- *  `best` IS `candidates[0]` and only because the caller hands it a SCORED list: `rankBy` sorts
+ *  `winner` IS `candidates[0]` and only because the caller hands it a SCORED list: `rankBy` sorts
  *  best-first (core rank.ts `compareScored`). An enumerated list is in enumeration order and has
- *  no best at all, so that combination is refused before any work happens — see `optionRefusal`,
+ *  no winner at all, so that combination is refused before any work happens — see `optionRefusal`,
  *  which exists because this function cannot tell the two arrays apart. */
 export function pickCandidate<C extends Candidate>(candidates: C[], label: string): C | undefined {
-  if (label === 'best') {
+  if (label === 'winner') {
     return candidates[0];
   }
   return candidates.find((c) => c.label === label);
@@ -447,9 +447,9 @@ export function pickCandidate<C extends Candidate>(candidates: C[], label: strin
  *
  *  There are two, and both are a flag about SCORING passed to a path that scores nothing:
  *
- *  `--enumerate --show best` — nothing has been scored, so `best` would resolve to whatever
+ *  `--enumerate --show winner` — nothing has been scored, so `winner` would resolve to whatever
  *  enumeration emitted first: a near-worst spelling presented under the name of the winner, to a
- *  round both briefs have told that `--show best` is the winner and that `--enumerate` still
+ *  round both briefs have told that `--show winner` is the winner and that `--enumerate` still
  *  serves `--show`. A wrong answer in the shape of a right one is worse than a refusal.
  *
  *  `--enumerate --force` — `--force` raises the FAN_SCORE_LIMIT compile guard, and a path that
@@ -473,11 +473,11 @@ export function optionRefusal(o: FanOptions): string | undefined {
       `\`bench fan <sym>\` prints the matching ids when more than one matches — or pass --asm.`
     );
   }
-  if (o.enumerateOnly && o.show === 'best') {
+  if (o.enumerateOnly && o.show === 'winner') {
     return (
-      `--show best names the WINNER and --enumerate scores nothing, so there is no winner to name ` +
+      `--show winner names the WINNER and --enumerate scores nothing, so there is no winner to name ` +
       `(an enumerated fan is in enumeration order, not score order). Drop --enumerate to score the ` +
-      `fan and get a real best, or pass --show <label> for a spelling you can name.`
+      `fan and get a real winner, or pass --show <label> for a spelling you can name.`
     );
   }
   if (o.enumerateOnly && o.force) {
@@ -624,7 +624,7 @@ export function unshowable(
       ? 'was withheld (it scored but is unpublishable), so it is not in the [score] table'
       : undefined;
   return where === undefined
-    ? `no candidate labelled ${JSON.stringify(label)} — see ${listedIn}`
+    ? `no candidate with variations ${JSON.stringify(label)} — see ${listedIn}`
     : `${JSON.stringify(label)} ${where}. Its source is still readable: re-run with --enumerate --show ${label}`;
 }
 
@@ -703,15 +703,15 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
     note(`asmlift: [declined] annotate pass threw: ${(e as Error).message.split('\n')[0]}`);
   }
 
-  const leverErrors = new Map<string, string>();
+  const enumerationErrors = new Map<string, string>();
   let cands: Candidate[];
   try {
     cands = enumerateRanked(sym, asm, tc.targetDesc, {
-      onLeverError: (label: string, error: string) => leverErrors.set(label, error.split('\n')[0]),
+      onEnumerationError: (label: string, error: string) => enumerationErrors.set(label, error.split('\n')[0]),
     });
   } catch (e) {
-    for (const [label, error] of leverErrors) {
-      note(`asmlift: [lever] ${label} threw (no candidate from it): ${error}`);
+    for (const [label, error] of enumerationErrors) {
+      note(`asmlift: [threw] ${label} threw (no candidate from it): ${error}`);
     }
     const r = noFanReport(`${sym} (${asmPath})`, e, o.show);
     if (r.fan.length > 0) {
@@ -725,15 +725,15 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
     }
     return 2;
   }
-  for (const [label, error] of leverErrors) {
-    note(`asmlift: [lever] ${label} threw (no candidate from it): ${error}`);
+  for (const [label, error] of enumerationErrors) {
+    note(`asmlift: [threw] ${label} threw (no candidate from it): ${error}`);
   }
   console.log(cands.map((cand) => `asmlift: [candidate] ${cand.label}`).join('\n'));
   console.log(`asmlift: [fan] ${cands.length} candidate(s) enumerated, none scored (--asm)`);
   if (o.show) {
     const picked = pickCandidate(cands, o.show);
     if (!picked) {
-      note(`no candidate labelled ${JSON.stringify(o.show)} — see the [candidate] lines above`);
+      note(`no candidate with variations ${JSON.stringify(o.show)} — see the [candidate] lines above`);
       return 2;
     }
     console.log(showSource(picked.label, picked.source));
@@ -833,14 +833,14 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // A variation that THREW produced no candidate to drop, and the benchmark supplies no sink for that
   // channel — cli/rank.ts says so at the field: "a whole pre-fan half of a row's fan can still
   // vanish from a `pnpm bench run` with nothing printed". Here it is printed.
-  const leverErrors = new Map<string, string>();
+  const enumerationErrors = new Map<string, string>();
   // ANNOTATED, for the same reason `rankOptionsFor`'s return type is: a mistyped option key is a
   // SILENTLY DROPPED option, and a dropped `symbols` is the 112,896-vs-135,936 discrepancy class
   // docs/ranked-repro.md is about. `rankOptionsFor`'s own annotation does not reach here —
   // excess-property checking fires on a literal only where that literal is itself annotated.
   const withLevers: RankOptions = {
     ...opts,
-    onLeverError: (label: string, error: string) => leverErrors.set(label, error.split('\n')[0]),
+    onEnumerationError: (label: string, error: string) => enumerationErrors.set(label, error.split('\n')[0]),
   };
   // ONCE PER LABEL. Both the pre-count enumeration and the scoring pass enumerate, and each
   // re-runs every variation, so a variation that throws throws twice — reported twice, it reads as two
@@ -882,10 +882,10 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     return code;
   };
   const printLevers = (): void => {
-    for (const [label, error] of leverErrors) {
+    for (const [label, error] of enumerationErrors) {
       if (!printedLevers.has(label)) {
         printedLevers.add(label);
-        note(`asmlift: [lever] ${label} threw (no candidate from it): ${error}`);
+        note(`asmlift: [threw] ${label} threw (no candidate from it): ${error}`);
       }
     }
   };
@@ -913,7 +913,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
       if (o.show) {
         const picked = pickCandidate(cands, o.show);
         if (!picked) {
-          note(`no candidate labelled ${JSON.stringify(o.show)} — see the [candidate] lines above`);
+          note(`no candidate with variations ${JSON.stringify(o.show)} — see the [candidate] lines above`);
           return 2;
         }
         console.log(showSource(picked.label, picked.source));
@@ -957,7 +957,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
     return noFanWithDiff(e);
   }
   printLevers();
-  console.log(renderFan(ranked, { synthesized: synthesizedRefs(c.tier, ranked.best), stamp: stampFrom(treeBefore) }));
+  console.log(renderFan(ranked, { synthesized: synthesizedRefs(c.tier, ranked.winner), stamp: stampFrom(treeBefore) }));
   // `fanSize`, not `candidates.length`: the recorded count this is compared against is the whole
   // fan, refusals included, and comparing the published half against the whole would report a
   // shrink on any row that dropped a spelling.

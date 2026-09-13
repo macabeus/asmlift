@@ -29,8 +29,8 @@ const rank = (sym: string, c: string) => {
 test('M3: the spelling carries the division signedness, so both candidates match', () => {
   // target built from the UNSIGNED division → a `__udivsi3` call
   const ranked = rank('udiv', 'unsigned udiv(unsigned x){ return x / 3; }');
-  expect(ranked.best.label).toBe('unsigned'); // the simpler spelling still wins the tie
-  expect(ranked.best.score.match).toBe(true);
+  expect(ranked.winner.label).toBe('unsigned'); // the simpler spelling still wins the tie
+  expect(ranked.winner.score.match).toBe(true);
   // Both match because the signed candidate spells `(u32)a0 / 3`, which is the same bytes — the
   // operand pin working, not the variation failing. A bare `a0 / 3` is C's SIGNED division and would
   // call `__divsi3` where the target calls `__udivsi3`.
@@ -39,7 +39,7 @@ test('M3: the spelling carries the division signedness, so both candidates match
 
 test('M3 control: the spelling carries the shift direction, so both candidates match', () => {
   const ranked = rank('ushr', 'unsigned ushr(unsigned x){ return x >> 1; }');
-  expect(ranked.best.label).toBe('unsigned');
-  expect(ranked.best.score.match).toBe(true);
+  expect(ranked.winner.label).toBe('unsigned');
+  expect(ranked.winner.score.match).toBe(true);
   expect(ranked.candidates.every((c) => c.score.match)).toBe(true);
 });

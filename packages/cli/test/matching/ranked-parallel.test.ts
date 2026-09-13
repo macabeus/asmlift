@@ -33,9 +33,9 @@ describe('the pooled ranked run is the serial ranked run', () => {
     // and the winner is decided by score rather than by being the only survivor
     const { serial, pooled } = await bothWays('ifor', 'int ifor(int a, int b){ if (a || b) return 42; return 7; }');
     expect(pooled.candidates.length).toBeGreaterThan(1);
-    expect(pooled.best.label).toBe(serial.best.label);
-    expect(pooled.best.source).toBe(serial.best.source);
-    expect(pooled.best.score).toEqual(serial.best.score);
+    expect(pooled.winner.label).toBe(serial.winner.label);
+    expect(pooled.winner.source).toBe(serial.winner.source);
+    expect(pooled.winner.score).toEqual(serial.winner.score);
     expect(pooled.candidates.map((c) => [c.label, c.score.score])).toEqual(
       serial.candidates.map((c) => [c.label, c.score.score]),
     );
@@ -47,7 +47,7 @@ describe('the pooled ranked run is the serial ranked run', () => {
     const obj = assembleTarget(asm);
     const one = await decompileRankedParallel('half', asm, ARMV4T_AGBCC, obj, { jobs: 1, worker });
     const many = await decompileRankedParallel('half', asm, ARMV4T_AGBCC, obj, { jobs: 8, worker });
-    expect(many.best.label).toBe(one.best.label);
+    expect(many.winner.label).toBe(one.winner.label);
     expect(many.candidates.map((c) => [c.label, c.score.score])).toEqual(
       one.candidates.map((c) => [c.label, c.score.score]),
     );
@@ -78,7 +78,7 @@ describe('the pooled ranked run is the serial ranked run', () => {
     const serial = decompileRanked('ifor', asm, ARMV4T_AGBCC, obj);
     const pooled = await decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, { jobs: 3, worker: slotWorker });
     expect(pooled.dropped).toEqual(serial.dropped); // a stale/absent object would land here
-    expect(pooled.best.label).toBe(serial.best.label);
+    expect(pooled.winner.label).toBe(serial.winner.label);
     expect(pooled.candidates.map((c) => [c.label, c.score.score])).toEqual(
       serial.candidates.map((c) => [c.label, c.score.score]),
     );

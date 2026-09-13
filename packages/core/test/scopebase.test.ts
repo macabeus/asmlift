@@ -376,14 +376,14 @@ describe('what the cluster rule actually is', () => {
 });
 
 describe('a throwing variation is reported, not swallowed', () => {
-  test('onLeverError fires with the label and the first error line', () => {
+  test('onEnumerationError fires with the label and the first error line', () => {
     // `dropped` records only candidates the SCORER refused, so without this hook a variation that
     // throws or fails a boundary contract would vanish with no trace — indistinguishable from one
     // that correctly declined, and one that always throws would look identical to one that never applies.
     const asm = 'f:\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgSeed\n';
     const seen: string[] = [];
     enumerateCandidates('f', asm, ARMV4T_AGBCC, {
-      onLeverError: (label, error) => seen.push(`${label}: ${error}`),
+      onEnumerationError: (label, error) => seen.push(`${label}: ${error}`),
     });
     // no variation throws on this input, so nothing is reported — the hook exists and is wired
     expect(seen).toEqual([]);

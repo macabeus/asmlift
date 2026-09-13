@@ -198,7 +198,7 @@ const INPUT: RankingInput = {
   target: {} as RankingInput['target'],
 };
 const RESULT = {
-  best: { label: 'unsigned', source: '', symbolRefs: [], score: { score: 0 } },
+  winner: { label: 'unsigned', source: '', symbolRefs: [], score: { score: 0 } },
   candidates: [],
   dropped: [],
   withheld: [],

@@ -71,7 +71,7 @@ const run = (asm: string, failing: typeof fail) => {
   const errors: string[] = [];
   const cands = enumerateCandidates('f', asm, ARMV4T_AGBCC, {
     prototypes: P,
-    onLeverError: (label) => errors.push(label),
+    onEnumerationError: (label) => errors.push(label),
   });
   return { errors, cands };
 };

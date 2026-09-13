@@ -686,7 +686,7 @@ function memAccess(
   // per-value census of address offsets this seam does not have.
   //
   // PRICED AT 0 ROWS EITHER WAY, which is why the narrow term ships: instrumenting this seam over
-  // `bench sweep --fan --arms harness,nomap` (2,126 records, 1,063 rows) counts 4,361 `advancedBy`
+  // `bench sweep --fan --map-modes harness,nomap` (2,126 records, 1,063 rows) counts 4,361 `advancedBy`
   // stamps, ALL of them at `off === 0` and none at `off !== 0`, over ten producing functions. So
   // the shape above has no corpus inhabitant to pay for the census, and the capability it costs is
   // recorded here rather than spent.
@@ -1013,7 +1013,7 @@ const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, numbe
  *  same tree and the fan does not grow.
  *
  *  A SUPERSET of the real sort, on purpose and in the safe direction — and the direction only
- *  holds because rank asks this of the SAME fn it then structures (a `variantGate`, evaluated on
+ *  holds because rank asks this of the SAME fn it then structures (a `perLiftGate`, evaluated on
  *  that lift's own fully-raised fn). Two gaps remain, both of which only say YES where the sort
  *  says nothing: `keepSlot`/`suppressedArgs` drop copies this still counts, and this asks of every
  *  edge where `preferDefPosCopyOrder` reorders only the acyclic ones (`copySetIsCyclic` needs the
@@ -1030,7 +1030,7 @@ const NO_WRITTEN_DESTINATIONS: ReadonlyMap<Value, number> = new Map<Value, numbe
  *  A SECOND, HAND-WRITTEN SPELLING of `edgeCopyRecords`' two comparators — including the stability
  *  that decides ties — not a call into them, and nothing forces the two to agree. A change to that
  *  sort has to be mirrored here BY HAND, or this gate keeps answering about an ordering the pass no
- *  longer produces. Unified deliberately not: this is `/copy-defpos`'s variantGate, so it decides
+ *  longer produces. Unified deliberately not: this is `/copy-defpos`'s perLiftGate, so it decides
  *  which candidates are ENUMERATED and its predicate cannot move without moving rows. */
 export function edgeCopyOrdersDiffer(fn: Fn): boolean {
   const order = fn.writeOrder;
@@ -1125,7 +1125,7 @@ export const FRESH_MERGE_GATES: readonly Gate<FreshMergeCarrier>[] = [
   },
   {
     id: 'param-rooted',
-    why: "the rule's scope — a chain rooted in an ordinary merge home is a separate, unmeasured axis",
+    why: "the rule's scope — a chain rooted in an ordinary merge home is a separate, unmeasured variation",
     sound: false,
     guardedBy: 'fresh-merge.test.ts: a merge over ordinary locals is untouched',
     rejects: (c) => !c.paramRooted,
@@ -1318,7 +1318,7 @@ export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
 //
 // WHAT A FIELD DOC BELOW HOLDS, narrowly: what the option MEANS to `structure()`, and the suffix of
 // the variation that enumerates it. A VARIATION's rationale, and any figure pricing its marginal value, live
-// ONCE at its `STRUCTURING_AXES` entry in rank.ts — restated here the two copies rot separately,
+// ONCE at its `STRUCTURE_VARIATIONS` entry in rank.ts — restated here the two copies rot separately,
 // and only the rank.ts one sits next to the enumeration that could refute it. Figures pricing a
 // DEFAULT this pass owns (the edge-copy ordering, `spellDeclaredSubscripts`) do belong here.
 export interface StructureOptions {
@@ -1912,7 +1912,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // IS this target's compiler behaviors, so resetting one would probe a spelling asmlift never emits
   // here.
   //
-  // THREE OF rank.ts's TEN `STRUCTURING_AXES` ENTRIES ARE DELIBERATE NON-MEMBERS, each for its own reason,
+  // THREE OF rank.ts's TEN `STRUCTURE_VARIATIONS` ENTRIES ARE DELIBERATE NON-MEMBERS, each for its own reason,
   // and the list here is the half of the split this side owns:
   //   - `/reread-globals` (rereadGlobals) is an ANALYSIS option, and it only ever RELAXES: it
   //     widens a load's render positions and narrows the write set that bars it, so it removes

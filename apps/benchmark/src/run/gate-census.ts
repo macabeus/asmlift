@@ -23,7 +23,7 @@
 // WHAT PUTS A PASS IN THE REGISTRY BELOW. Sixteen passes in `packages/core/src` take their gate
 // table as an optional parameter, which is necessary and NOT sufficient: the census also needs a
 // CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD holding the call. Five have
-// one — `unmergeJoins` in `rank-variations.ts`'s `PRE_FAN_PRODUCTS`, and four passes in
+// one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, and four passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
 // `arm-reread`), `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a script outside
 // core swaps and the driver then calls. Being in `raise/` is not the seam — `raise/retsink.ts` is
@@ -52,7 +52,7 @@ import {
 } from '@asmlift/core/l3/unmerge';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
-import { PRE_FAN_PRODUCTS, UNMERGE_SUFFIX } from '@asmlift/core/rank-variations';
+import { PRE_RESPELL_VARIATIONS, UNMERGE_SUFFIX } from '@asmlift/core/rank-variations';
 
 import { scrubObjectHeader } from '../asm-scrub';
 import { realCases } from '../cases/real';
@@ -83,12 +83,12 @@ export const PASSES: Record<string, CensusablePass> = {
       ['totality', UNMERGE_TOTALITY_GATES as readonly Gate<never>[]],
     ],
     install: (w) => {
-      // BY SUFFIX, never by index. `PRE_FAN_PRODUCTS` holds one entry today, and a census taken
+      // BY SUFFIX, never by index. `PRE_RESPELL_VARIATIONS` holds one entry today, and a census taken
       // through the wrong one enumerates normally and reports an EMPTY table — the silent-zero
       // failure this file's header names, arriving by a second route.
-      const unmergeVariation = PRE_FAN_PRODUCTS.find((p) => p.suffix === UNMERGE_SUFFIX);
+      const unmergeVariation = PRE_RESPELL_VARIATIONS.find((p) => p.suffix === UNMERGE_SUFFIX);
       if (!unmergeVariation) {
-        throw new Error(`no PRE_FAN_PRODUCTS entry '${UNMERGE_SUFFIX}' — the pass's caller-side seam moved`);
+        throw new Error(`no PRE_RESPELL_VARIATIONS entry '${UNMERGE_SUFFIX}' — the pass's caller-side seam moved`);
       }
       const restore = unmergeVariation.apply;
       const gates: UnmergeGates = {

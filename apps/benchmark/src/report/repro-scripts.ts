@@ -307,7 +307,7 @@ ${flagLine('--proto proto.json', 'the prototype hints above (callee arities / vo
       : ''
   }
 ${flagLine('--config decomp.yaml', 'the compile command from step 1')}
-${flagLine('--score-against target.o', 'rank candidate variants, objdiff-score each; exit 0 only on byte-exact')}
+${flagLine('--score-against target.o', 'rank the candidates, objdiff-score each; exit 0 only on byte-exact')}
 )
 # the checkout's own asmlift bin — the BUILT bundle, not the repo's TypeScript sources run
 # through a loader. That build output is gitignored, so a fresh clone's first \`pnpm install\`

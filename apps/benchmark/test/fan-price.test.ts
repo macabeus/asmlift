@@ -46,7 +46,7 @@ function rankInto(nDropped: number, nWithheld: number): void {
   ranked.mockImplementation((name, asm, target, _obj, opts) => {
     const scored = enumerateCandidates(name, asm, target, opts).map((c) => ({ ...c, score: SCORE }));
     return {
-      best: scored[0],
+      winner: scored[0],
       candidates: scored,
       dropped: Array.from({ length: nDropped }, (_, i) => ({ label: `d${i}`, error: 'error: boom' })),
       withheld: Array.from({ length: nWithheld }, (_, i) => ({ label: `w${i}`, score: 9, why: 'proof' })),

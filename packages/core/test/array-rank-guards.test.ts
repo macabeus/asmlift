@@ -14,7 +14,7 @@ import type { Expr, SFn } from '../src/l3/ast';
 import { exprChildren, exprEquals, mapExprChildren } from '../src/l3/ast';
 import { localMentions, readsOf } from '../src/l3/mentions';
 import { decompile } from '../src/pipeline';
-import { compareScored, composeLevers, rankBy, withheldReason } from '../src/rank';
+import { compareScored, composeRespellVariations, rankBy, withheldReason } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -166,8 +166,8 @@ describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReaso
   // moving a read down a span that arms a DMA transfer. It is offered, scored, and then either
   // wins on the differ's own proof or is withheld: never shown as the best-effort answer on a
   // nonmatch row, which is the case the POLICY note says a wrong re-spelling would poison.
-  const plain = { label: 'unsigned', group: 0, source: 'a;' };
-  const proofed = { label: 'unsigned/unreduce', group: 0, source: 'b;', matchOnly: true as const };
+  const plain = { label: 'unsigned', preference: 0, source: 'a;' };
+  const proofed = { label: 'unsigned/unreduce', preference: 0, source: 'b;', matchOnly: true as const };
 
   test('a byte-exact score publishes it, and any other score withholds it', () => {
     expect(withheldReason(proofed, { score: 0 })).toBeNull();
@@ -184,7 +184,7 @@ describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReaso
     expect(r.withheld.map((w) => [w.label, w.score])).toEqual([['unsigned/unreduce', 5]]);
     // …and it WINS when it earns it, even though it scored second-best above
     const won = rankBy([plain, proofed], 'f', (source) => (source === 'b;' ? { score: 0 } : { score: 40 }));
-    expect(won.best.label).toBe('unsigned/unreduce');
+    expect(won.winner.label).toBe('unsigned/unreduce');
     expect(won.withheld).toEqual([]);
   });
 
@@ -210,9 +210,9 @@ describe('the candidate ordering (rank.ts compareScored)', () => {
   // Score dominates absolutely; everything below only chooses what the READER sees. The pieces
   // under it exist because the C backend's shift cast made a WRONG signedness pin byte-equal to
   // the right one — before that, the wrong pin simply lost on score.
-  const cand = (label: string, group: number, source: string, score: number, order: number) => ({
+  const cand = (label: string, preference: number, source: string, score: number, order: number) => ({
     label,
-    group,
+    preference,
     source,
     score: { score },
     order,
@@ -306,41 +306,41 @@ describe('the LOGICAL right shift has no IDO Pascal spelling — it declines, ne
 // type-correct way to delete it: ablated, tsc stays clean and every offline and matching suite stays
 // green, and the triple publishes an unprovable spelling as asmlift's answer. Composing through one combinator makes that inexpressible, so the combinator is
 // the thing to pin.
-describe('a proof obligation survives every respell variation composed after it (rank.ts composeLevers)', () => {
+describe('a proof obligation survives every respell variation composed after it (rank.ts composeRespellVariations)', () => {
   const tree = (name: string): SFn => ({ name, params: [], locals: [], globals: [], retType: T.u(32), body: [] });
   const plain = (name: string) => (): SFn => tree(name);
   const proving = (name: string) => (): { sfn: SFn; needsProof: boolean } => ({ sfn: tree(name), needsProof: true });
   const settled = (name: string) => (): { sfn: SFn; needsProof: boolean } => ({ sfn: tree(name), needsProof: false });
-  const proofOf = (r: ReturnType<typeof composeLevers>) => (r && 'sfn' in r ? r.needsProof : false);
-  const treeOf = (r: ReturnType<typeof composeLevers>) => (r && 'sfn' in r ? r.sfn : r);
+  const proofOf = (r: ReturnType<typeof composeRespellVariations>) => (r && 'sfn' in r ? r.needsProof : false);
+  const treeOf = (r: ReturnType<typeof composeRespellVariations>) => (r && 'sfn' in r ? r.sfn : r);
 
   test('an obligation raised by an EARLY stage rides through the later ones', () => {
-    const out = composeLevers(tree('in'), [proving('a'), plain('b'), plain('c')]);
+    const out = composeRespellVariations(tree('in'), [proving('a'), plain('b'), plain('c')]);
     expect(proofOf(out)).toBe(true);
     expect(treeOf(out)?.name).toBe('c'); // and the last stage's tree is what is emitted
   });
 
   test('an obligation raised by a LATE stage is carried too', () => {
-    expect(proofOf(composeLevers(tree('in'), [plain('a'), proving('b')]))).toBe(true);
+    expect(proofOf(composeRespellVariations(tree('in'), [plain('a'), proving('b')]))).toBe(true);
   });
 
   test('a stage that settles its own fact does not gate the composition', () => {
-    const out = composeLevers(tree('in'), [settled('a'), plain('b')]);
+    const out = composeRespellVariations(tree('in'), [settled('a'), plain('b')]);
     expect(proofOf(out)).toBe(false);
     expect(treeOf(out)?.name).toBe('b');
   });
 
   test('no obligation anywhere leaves the spelling ungated', () => {
-    expect(proofOf(composeLevers(tree('in'), [plain('a'), plain('b')]))).toBe(false);
+    expect(proofOf(composeRespellVariations(tree('in'), [plain('a'), plain('b')]))).toBe(false);
   });
 
   // REQUIRE-ALL, not skip-on-decline: a candidate's variations name the ones that fired, so a
   // composition missing one of them must not be emitted under all of their names.
   test('one declining stage declines the whole composition, wherever it sits', () => {
     const decline = () => null;
-    expect(composeLevers(tree('in'), [decline, proving('b')])).toBeNull();
-    expect(composeLevers(tree('in'), [proving('a'), decline])).toBeNull();
-    expect(composeLevers(tree('in'), [plain('a'), decline, plain('c')])).toBeNull();
+    expect(composeRespellVariations(tree('in'), [decline, proving('b')])).toBeNull();
+    expect(composeRespellVariations(tree('in'), [proving('a'), decline])).toBeNull();
+    expect(composeRespellVariations(tree('in'), [plain('a'), decline, plain('c')])).toBeNull();
   });
 
   test("each stage is handed the PREVIOUS stage's tree, not the original", () => {
@@ -348,7 +348,7 @@ describe('a proof obligation survives every respell variation composed after it 
     const step =
       (name: string) =>
       (s: SFn): SFn => (seen.push(s.name), tree(name));
-    composeLevers(tree('in'), [step('a'), step('b'), step('c')]);
+    composeRespellVariations(tree('in'), [step('a'), step('b'), step('c')]);
     expect(seen).toEqual(['in', 'a', 'b']);
   });
 });

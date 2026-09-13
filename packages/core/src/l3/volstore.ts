@@ -114,7 +114,7 @@ interface AccessCtx {
 export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
   {
     id: 'no-window',
-    why: 'a target that declares no device range has no address this lever may call volatile',
+    why: 'a target that declares no device range has no address this variation may call volatile',
     sound: false,
     rejects: (c) => !c.hasWindow,
   },
@@ -129,7 +129,7 @@ export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
     // agbcc rows, one of them a published match, and it is right to: see the header's last
     // paragraph. This gate is about what THIS variation has evidence for, which is the address alone.
     id: 'outside-window',
-    why: 'the address is the only evidence this lever has, and outside the window it supports nothing',
+    why: 'the address is the only evidence this variation has, and outside the window it supports nothing',
     sound: false,
     rejects: (c) => !c.inWindow,
   },

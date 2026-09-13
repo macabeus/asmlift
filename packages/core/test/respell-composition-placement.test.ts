@@ -33,7 +33,7 @@ describe('a def-moving pass composed onto a placing variation is judged', () => 
   const errors: { label: string; error: string }[] = [];
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
     prototypes: { dmascope: { params: ['s32'], returnsVoid: true } },
-    onLeverError: (label, error) => errors.push({ label, error }),
+    onEnumerationError: (label, error) => errors.push({ label, error }),
   });
 
   test('the composition is DROPPED, not scored', () => {

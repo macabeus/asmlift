@@ -335,5 +335,5 @@ export async function rankCandidatesInBrowser(
     });
   }
   results.sort(compareScored);
-  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld, refused };
+  return { winner: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld, refused };
 }

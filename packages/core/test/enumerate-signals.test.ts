@@ -1,4 +1,4 @@
-// `EnumerateOptions.onAxisGated` and `onTreeDeduped` report the enumeration's two SILENT
+// `EnumerateOptions.onVariationGated` and `onTreeDeduped` report the enumeration's two SILENT
 // candidate-deleting sites. Nothing in the shipped pipeline passes either one, so a reporting
 // channel that had stopped firing would look exactly like one whose sites correctly never trip —
 // which is the failure the channels exist to make visible, reproduced one level up.
@@ -29,7 +29,7 @@ describe('the enumeration reports its own silent deletions', () => {
       }
       try {
         enumerateCandidates(m[1], asm, ARMV4T_AGBCC, {
-          onAxisGated: (suffix) => gated.push(suffix),
+          onVariationGated: (suffix) => gated.push(suffix),
           onTreeDeduped: () => {
             deduped++;
           },

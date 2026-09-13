@@ -3628,7 +3628,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // ALL-OR-NOTHING over bases — `hoistBaseLocals` hoisted every key the gate list admits,
   // with no candidate for a proper subset. A second admission, LIVEBASE_BLOCK_GATES, adds the
   // `single-cell` gate — a base every access of which is ONE fixed offset stays inline — and rank
-  // carries both in one roster (LIVEBASE_ADMISSIONS), running every `/livebase` pairing over each,
+  // carries both in one roster (LIVEBASE_HOISTS), running every `/livebase` pairing over each,
   // so this row MATCHES on `signed/livebase-block/volatile` and guards the gate.
   //
   // ATTRIBUTED BY ABLATION, not by reading. Adding one more gate to LIVEBASE_GATES that rejects a
@@ -4422,7 +4422,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //   which nothing else in this corpus is. Read off this row's own
   //   `[score]` table (12 candidates, `ASMLIFT_CANDCACHE=0`): `/basefold` 0, `/basefold/sinkinit`
   //   11, `/offmember` 11, no variation at all 11 — so deleting the HEAD entry of
-  //   `BASEFOLD_ADMISSIONS` costs this row its match while deleting the SUNK entry does not, which
+  //   `BASEFOLD_HOISTS` costs this row its match while deleting the SUNK entry does not, which
   //   is the separation `foldsink` makes in the other direction.
   //   WHAT SPLITS THE THREE SPELLINGS, on compiled objects rather than on a theory: the pool order
   //   is IDENTICAL in all three (`.word 0x3001100` then `.word 0x8024c35`) and the head-assigned
@@ -4516,7 +4516,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // `foldhead` postdate it) and both real rows score identically
   // before and after, and its structure.ts hunks (577, 1648, 1976-2048, 2221) do not touch
   // anchorConstCopies. Nothing here needs `l3/typing.ts`, `backend/cfamily.ts` or `rank.ts`'s
-  // `SIGN_CANDS` either: every `signed/` candidate scores identically to its `unsigned/` counterpart on
+  // `SIGNEDNESS` either: every `signed/` candidate scores identically to its `unsigned/` counterpart on
   // all 24 of 802's and all 4 of 832's, so the signedness variation contributes zero on both real rows.
   //
   // NO NEW TAG, and one was tried: `param-width`, on the theory that asmlift must consume
@@ -4891,7 +4891,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // this function is index 1, below `v0 = 0`. The endpoint needs it at index 0, and the difference
   // is compiled: the composed spelling scores 0 with the 0x03004000 assignment at the very head of
   // the body and 2 with it one statement lower. `HoistPlacement: 'head'` is where that lives
-  // (rank.ts LIVEBASE_ADMISSIONS), which is the OTHER variation — so the freedom that reaches 0 is not
+  // (rank.ts LIVEBASE_HOISTS), which is the OTHER variation — so the freedom that reaches 0 is not
   // which RULE a key gets, it is which key the head hoist WITHHOLDS.
   //
   // WHAT ASMLIFT DID BEFORE THE PAIRING (`7e78d80c`), AND WHAT EACH VARIATION WAS WORTH HERE — one
@@ -4922,8 +4922,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // THE TWO-SIDED ABLATION THIS FAMILY CANNOT HAVE IS A THEOREM. Ablation only
   // REMOVES candidates; with no candidate carrying both variations the winner carries at most one, so
-  // ablating the OTHER variation leaves the winner in the fan and `best` cannot move. On `dmapoll`
-  // both variations genuinely reach — the fan loses 8 candidates one way and 24 the other — and `best`
+  // ablating the OTHER variation leaves the winner in the fan and the winner cannot move. On `dmapoll`
+  // both variations genuinely reach — the fan loses 8 candidates one way and 24 the other — and the winner
   // still holds. The obligation the row carries INSTEAD is the compiled lattice above.
   //
   // THE OTHER VARIATION LEAVES THE EXISTING ROWS UNMOVED FOR TWO DIFFERENT REASONS, AND ONLY ONE OF
@@ -4934,7 +4934,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // wherever `single-cell` rejects nothing the two tables admit the same set and the second is
   // shadowed. Watched at the two sites rather than read off labels: on `dmascope`/`dmascope2`
   // `/livebase-block` BINDS (104 admission contexts each) and is SHADOWED in every one — drop the
-  // `/livebase` row from `LIVEBASE_ADMISSIONS` and 136 / 48 candidates carrying it appear, so that is
+  // `/livebase` row from `LIVEBASE_HOISTS` and 136 / 48 candidates carrying it appear, so that is
   // REACH. On `mixpoll`/`onepoll`/`sizebound` `/regionbase` really does emit nothing:
   // `hoistScopedBases(sfn, { regions: 'per-region' })` returns null on all 18 / 18 / 48 of its
   // invocations. First blocker per key, printed from `firstRejection`: `region-repeated-const-
@@ -4976,7 +4976,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // NEIGHBOURS THAT READ LIKE THIS AND ARE NOT. `armhomes` (MATCH) is per-region placement with
   // exactly ONE decision to get right; `sizebound` (8) has two bases but one question, WHERE one init
-  // goes, not two policies. And `LIVEBASE_ADMISSIONS` (rank.ts) gives `/livebase` and
+  // goes, not two policies. And `LIVEBASE_HOISTS` (rank.ts) gives `/livebase` and
   // `/livebase-block` the SAME
   // `placement: 'head'`: "block" is an eligibility gate, not a scope.
   //
@@ -5111,7 +5111,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // `livepark` and exactly what `/livebase-block` binds on `foldpark`, so on those two it is
   // offering an existing base set at its own placement rather than a set nothing else reaches.
   // What that costs is measured per row, not asserted: fan 28 → 32 on `livepark`, 34 → 34 on
-  // `foldpark` and 36 → 44 on `unfoldpark`, ablated the way BASEFOLD_ADMISSIONS' note describes
+  // `foldpark` and 36 → 44 on `unfoldpark`, ablated the way BASEFOLD_HOISTS' note describes
   // (a temporary env read filtering the roster at its one use site), cache off.
   // `foldpark`'s 34 → 34 is a RENAME and not a spelling: the same source that
   // won as `signed/livebase-block/volatile/sinkinit` wins as `signed/unfolded/volatile`, because
@@ -5491,7 +5491,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // that `->field_N` and `[idx]` compile identically, so the differ cannot referee between them —
   // and both citations have since been corrected (`raise/structs.ts` states the conditional form;
   // `rank.ts`'s copy was an orphaned docstring and is gone, its signedness half now on
-  // `SIGN_CANDS`). On agbcc the two do not compile identically, and the two passes are nameable.
+  // `SIGNEDNESS`). On agbcc the two do not compile identically, and the two passes are nameable.
   // The fold is TREE-level reassociation,
   // `((VAR+C1)+C2) → VAR+(C1+C2)` in `fold`'s `associate:` block (gcc/fold-const.c:4959, via
   // `split_tree` at :1226); a COMPONENT_REF never enters that arithmetic, because
@@ -7205,7 +7205,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // merge-home/uns-cmp/site-sense/unmerge/livebase`, 39/352. Two independent routes agree, both at
   // `d6b21ba`: `pnpm bench fan kleod:CountCollectedGems:agbcc --force` (5952 scored, 0 dropped)
   // gives best-WITH 39/352 against best-WITHOUT 56/352, the two candidates' variations differing only in the
-  // trailing home variation; and emptying `PRE_FAN_PRODUCTS` (packages/core/src/rank-variations.ts), then
+  // trailing home variation; and emptying `PRE_RESPELL_VARIATIONS` (packages/core/src/rank-variations.ts), then
   // `ASMLIFT_CANDCACHE=0 pnpm bench run --tier real --only CountCollectedGems`, lands the row on
   // that same 56/352. So the variation is neither missing nor mis-ranked: where the ladder duplicates an
   // arm, the duplicated copies must re-materialise their own pool operands and the merged spelling
@@ -7279,8 +7279,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // Rows that carry `/unmerge` in their winning label and are nevertheless INERT under the
   // ablation — `armshare`, `readshare`, `mergeloop`, `mergecast`, `mergecastu`, `mergeu16`,
   // `mergenarrow` — are why the winner's variations are a PRE-CHECK and not the evidence. The mechanism is NOT
-  // `applyShapes` (never called on the pre-fan path — its two call sites, `rank.ts:951` and `:988`,
-  // are `SHAPE_SUBSETS`; the `/unmerge` suffix is built inline at `rank.ts:1801-1836`) and NOT the
+  // `applyStacked` (never called on the pre-fan path — its two call sites, `rank.ts:951` and `:988`,
+  // are `STACKED_SUBSETS`; the `/unmerge` suffix is built inline at `rank.ts:1801-1836`) and NOT the
   // source dedup (the primary fan's spellings are pushed FIRST, so an identical source keeps the
   // PRIMARY label and never surfaces as a carrier). Measured on `synthetic:armshare:agbcc`, cache
   // off, one row each way: base MATCH 0/26 label `unsigned/unmerge`, ablated MATCH 0/26 label
@@ -7738,7 +7738,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // tail, was NOT needed: the sink's source walk sees through `^f(v): br ^t(v)` by construction,
   // and `gcsefwd` and CountCollectedGems MATCH with no threading step.
   //
-  // ROUTE B WAS REJECTED, and the claim that recommended it is REFUTED. An L3 `PRE_FAN_PRODUCTS`
+  // ROUTE B WAS REJECTED, and the claim that recommended it is REFUTED. An L3 `PRE_RESPELL_VARIATIONS`
   // entry that hoists one leaf statement out of the `if` does NOT reach every inhabitant: on
   // `gcseflat` and `gcsearms6` the `fnB` default is carried by ONE merge temp read at TWO join
   // sites, `/unmerge`'s totality refuses, and no tree the fan emits has the duplicated leaves to

@@ -42,8 +42,8 @@ describe('the emitted orientation decides the match, and only one orientation is
     const { rk, target } = ranked(src('&&'));
     // the `&&`'s tests all branch to the ELSE arm, so the fall-through IS the then-arm and the
     // default joined sense spells the source's own orientation — which is the bytes
-    expect(rk.best.source).toContain('&&');
-    expect(rk.best.score.match).toBe(true);
+    expect(rk.winner.source).toContain('&&');
+    expect(rk.winner.score.match).toBe(true);
     // the dual spelling is byte-identical evidence of the same fact, stated directly
     const dual = `int f(int a, int b, int *p, int *q){ if (a != 0 && b != 0) { ${ARM} } else { p[0] = -1; } return p[1]; }`;
     expect(scoreC(dual, 'f', target).match).toBe(true);
@@ -54,8 +54,8 @@ describe('the emitted orientation decides the match, and only one orientation is
     // test branches INTO the then-arm, so the fall-through reading is inverted here and the source
     // orientation is /flip-join's.
     const { rk } = ranked(src('||'));
-    expect(rk.best.source).toContain('||');
-    expect(rk.best.score.match).toBe(true);
+    expect(rk.winner.source).toContain('||');
+    expect(rk.winner.score.match).toBe(true);
   });
 
   test('a far arm recovers the source `&&` through its long-branch trampolines', () => {
@@ -69,11 +69,11 @@ describe('the emitted orientation decides the match, and only one orientation is
     const far = Array.from({ length: 32 }, (_, i) => `p[${i}] = ${i * 2 + 1}; q[${i}] = ${i * 2 + 2};`).join(' ');
     const c = `int f(int a, int b, int *p, int *q){ if (a && b) { ${far} } else { p[0] = -1; } return p[1]; }`;
     const { rk } = ranked(c);
-    expect(rk.best.source).toContain('&&');
-    expect(rk.best.source).not.toContain('||');
-    expect(rk.best.score.match).toBe(true);
+    expect(rk.winner.source).toContain('&&');
+    expect(rk.winner.source).not.toContain('||');
+    expect(rk.winner.score.match).toBe(true);
     // and the else arm is emitted ONCE — the tail duplication the fold exists to remove
-    expect(rk.best.source.split('-1').length - 1).toBe(1);
+    expect(rk.winner.source.split('-1').length - 1).toBe(1);
   });
 
   test('each if class carries its own orientation variation: /flip-branch divergent, /flip-join joined', () => {
@@ -84,7 +84,7 @@ describe('the emitted orientation decides the match, and only one orientation is
     );
     const dv = decompileRanked('f', divergent, ARMV4T_AGBCC, assembleTarget(divergent));
     expect(dv.candidates.some((c) => hasVariation(c.label.split('/'), 'flip-branch'))).toBe(true);
-    expect(dv.best.score.match).toBe(true);
+    expect(dv.winner.score.match).toBe(true);
     // the reconverging sibling, which differs only in that its arms rejoin, is /flip-join's:
     // its flipped spelling is a distinct candidate where the divergent-sense variation never fires
     const reconverging = compileTargetAsm(src('&&'));
@@ -105,7 +105,7 @@ describe('the emitted orientation decides the match, and only one orientation is
 describe('a three-clause short-circuit chain folds flat', () => {
   const best = (c: string) => {
     const asm = compileTargetAsm(c);
-    return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).best;
+    return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).winner;
   };
 
   test('`a || (b && c)` guarding two arms — 5 without the second fold, THEN arm duplicated', () => {
@@ -165,7 +165,7 @@ describe('a loop-exit connective folds, and the loop it un-declines stays recove
     const c =
       'int f(int*p,int*q,int n,int*o){ int i=0; while (i<n && (p[i]!=0 || q[i]!=0)) i++; o[0]=i; o[2]=q[1]; return i; }';
     const asm = compileTargetAsm(c);
-    const best = decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).best;
+    const best = decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).winner;
     expect(best.source).toMatch(/while \(v0 < a2 && \(a0\[v0\] != 0 \|\| a1\[v0\] != 0\)\)/);
     expect(best.source.split('do {').length - 1).toBe(1); // no tail-duplicated loop
     expect(best.source).not.toContain('ASMLIFT_ERROR');
@@ -187,7 +187,7 @@ describe('an arm that re-reads what its second test loaded', () => {
     const asm = compileTargetAsm(X + c);
     return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm), {
       prototypes: { f: { ...self, returnsVoid: true }, ...PROTOS },
-    }).best;
+    }).winner;
   };
 
   test('the compiler fact: an INLINE re-read is one load, a LOCAL is two', () => {

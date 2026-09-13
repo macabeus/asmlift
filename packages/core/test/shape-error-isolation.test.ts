@@ -37,7 +37,7 @@ describe('one throwing shape does not take the others with it', () => {
   const errors: { label: string; error: string }[] = [];
   const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
     prototypes: { dmascope: { params: ['s32'], returnsVoid: true } },
-    onLeverError: (label, error) => errors.push({ label, error }),
+    onEnumerationError: (label, error) => errors.push({ label, error }),
   });
 
   test('the FIRST subset throws…', () => {
@@ -45,7 +45,7 @@ describe('one throwing shape does not take the others with it', () => {
     expect(errors.every((e) => e.error.includes('mocked shape failure'))).toBe(true);
   });
 
-  test('…and the report names the SHAPE SUBSET, not just the variation it was derived onto', () => {
+  test('…and the report names the STACKED SUBSET, not just the variation it was derived onto', () => {
     // the subset is the candidate's identity, so that is what a failure is reported under: the
     // `/initfirst` singleton and the all-shapes subset are two candidates and two reports.
     expect(errors.every((e) => hasVariation(e.label.split('/').slice(1), 'initfirst'))).toBe(true);

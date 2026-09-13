@@ -179,7 +179,7 @@ function rankedStderr(a: {
   targetTrace: string;
   warn: string;
   ranked: RankedResult;
-  leverErrors: Map<string, string>;
+  enumerationErrors: Map<string, string>;
   /** the probe's verdict: `true` = candidates compiled in the SELF-DECLARED world */
   selfDeclared: boolean;
   phaseReport: string;
@@ -193,8 +193,8 @@ function rankedStderr(a: {
   // …and the same idea one stage EARLIER: `[dropped]` reports a candidate the SCORER refused,
   // which presumes the candidate was enumerated at all. A variation that threw produced no
   // candidate to drop.
-  const levers = [...a.leverErrors]
-    .map(([label, error]) => `asmlift: [lever] ${label} threw (no candidate from it): ${error}\n`)
+  const threw = [...a.enumerationErrors]
+    .map(([label, error]) => `asmlift: [threw] ${label} threw (no candidate from it): ${error}\n`)
     .join('');
   const drops = ranked.dropped.length
     ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
@@ -216,7 +216,7 @@ function rankedStderr(a: {
   // in the SELF-DECLARED world, which is the probe's verdict and nobody else's — in the
   // headers world the block is dropped and the project's own declarations did the work, so the
   // COUNT is zero there whatever the fan named.
-  const assumed = (ranked.best.symbolRefs ?? []).filter((r) => r.synthesized);
+  const assumed = (ranked.winner.symbolRefs ?? []).filter((r) => r.synthesized);
   const synthesized = a.selfDeclared ? assumed.length : 0;
   const declared = synthesized > 0 ? declaredBlock(assumed) : '';
   // The counts docs/ranked-repro.md requires beside every ranked score, as ONE line that is
@@ -241,7 +241,7 @@ function rankedStderr(a: {
     dropped: ranked.dropped.length,
     withheld: ranked.withheld.length,
     synthesized,
-    best: ranked.best,
+    winner: ranked.winner,
     stamp: a.stamp,
   })}\n`;
   // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
@@ -250,7 +250,7 @@ function rankedStderr(a: {
     a.targetTrace +
     a.warn +
     table +
-    levers +
+    threw +
     drops +
     held +
     declared +
@@ -656,16 +656,16 @@ export async function runCli(
       // makes that argument for its own channel, and this is the consumer it had been missing.
       // Deduped by name: the enumeration walks a variation over every setting, so one broken pass
       // would otherwise print thousands of identical lines. Silent when nothing threw.
-      const leverErrors = new Map<string, string>();
+      const enumerationErrors = new Map<string, string>();
       const rankOpts = {
         backend,
         asmData,
         prototypes,
         symbols,
         compile,
-        onLeverError: (label: string, error: string) => {
-          if (!leverErrors.has(label)) {
-            leverErrors.set(label, error);
+        onEnumerationError: (label: string, error: string) => {
+          if (!enumerationErrors.has(label)) {
+            enumerationErrors.set(label, error);
           }
         },
         ...(onProgress ? { onProgress } : {}),
@@ -685,13 +685,13 @@ export async function runCli(
       // Read AFTER the tree sample, which is work this run did and the clock should have charged.
       const phaseReport = clock?.report() ?? '';
       return {
-        code: rankedExitCode(ranked.best.score.match),
-        stdout: ranked.best.source,
+        code: rankedExitCode(ranked.winner.score.match),
+        stdout: ranked.winner.source,
         stderr: rankedStderr({
           targetTrace,
           warn,
           ranked,
-          leverErrors,
+          enumerationErrors,
           selfDeclared: compilers.selfDeclared() === true,
           phaseReport,
           stamp,

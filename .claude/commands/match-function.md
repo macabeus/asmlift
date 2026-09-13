@@ -129,15 +129,15 @@ symbol map), so it is comparable with the published row rather than with a check
 
 - `--show <variations>` prints that candidate's SOURCE. Nothing else can: `results.json` carries the
   winner's C and no other's, so "the near-miss spelling is right and only loses on X" is a claim
-  you can now read instead of infer. `--show best` is the winner (on the SCORED path only — under
-  `--enumerate` nothing has been scored, so `--enumerate --show best` is refused rather than
+  you can now read instead of infer. `--show winner` is the winner (on the SCORED path only — under
+  `--enumerate` nothing has been scored, so `--enumerate --show winner` is refused rather than
   answered with whatever came out of the enumerator first). A DROPPED candidate's source — usually
   the one worth reading — is reachable only as `--enumerate --show <variations>`, and the command says
   so when you ask for it the other way.
 - `--enumerate` lists the fan without compiling anything and still serves `--show <variations>`.
   Use it to answer "did my new variation produce a candidate at all" — a variation no listed
   candidate carries was never enumerated, and a variation that THREW prints as
-  `[lever] … threw (no candidate from it)`, which a `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely — the
+  `[threw] … threw (no candidate from it)`, which a `bench run` does not print anywhere. It is cheap against compiling, not cheap absolutely — the
   rate and what the biggest fans therefore cost to merely LIST are in `docs/bench-cost.md` §1, and
   that rate is the figure §2 shows moving fastest of all. A long enumeration is a big fan, not a
   hang.
@@ -211,7 +211,7 @@ Per commit:
   parameter is NECESSARY AND NOT SUFFICIENT: the census also needs a caller-side seam a process
   outside core can reach — a mutable record holding the call, not a static import (whose bindings
   are read-only). Five of the sixteen passes that take a table have one: `/unmerge` in
-  `PRE_FAN_PRODUCTS`, and every tabled pass in `PRE_RECOVERY_PASSES` (which is how `--pass
+  `PRE_RESPELL_VARIATIONS`, and every tabled pass in `PRE_RECOVERY_PASSES` (which is how `--pass
   arm-reread` reaches the branch short-circuit fold) — not every pass in `raise/`. Making a pass
   censusable is therefore a claim about its CALLER, not about its table —
   `grep -n "WHAT PUTS A PASS IN THE REGISTRY" apps/benchmark/src/run/gate-census.ts`.

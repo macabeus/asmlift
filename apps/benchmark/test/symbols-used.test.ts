@@ -50,7 +50,7 @@ function rankPicking(pick: (label: string) => boolean): void {
       throw new Error(`no candidate matches the pick among: ${cands.map((c) => c.label).join(', ')}`);
     }
     const scored = { ...cand, score: SCORE };
-    return { best: scored, candidates: [scored], dropped: [], withheld: [] };
+    return { winner: scored, candidates: [scored], dropped: [], withheld: [] };
   });
 }
 
@@ -167,7 +167,7 @@ describe('dropped candidates are recorded, never silently swallowed', () => {
       const cands = enumerateCandidates(name, asm, target, opts);
       const scored = { ...cands[0], score: SCORE };
       return {
-        best: scored,
+        winner: scored,
         candidates: [scored],
         dropped: [{ label: 'unsigned', error: "too many arguments to `thunk_sub_080002A0'" }],
         withheld: [],
@@ -192,7 +192,7 @@ describe('withheld candidates are recorded too, and are a different fact', () =>
       const cands = enumerateCandidates(name, asm, target, opts);
       const scored = { ...cands[0], score: SCORE };
       return {
-        best: scored,
+        winner: scored,
         candidates: [scored],
         dropped: [],
         withheld: [{ label: 'unsigned/unreduce', score: 35, why: WHY }],
