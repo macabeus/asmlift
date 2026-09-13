@@ -66,7 +66,7 @@ readers, none of which compiles anything:
 - **`pnpm bench baseline <sym>`** prints the row as published _plus its price_:
 
   ```
-  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=376.5s
+  kleod:WorldMapScreenCheckNewWorldUnlocked:agbcc  asmlift=nonmatch 106/361  m2c=noncompile -/-  fan=3600 rank=512.9s
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
@@ -119,10 +119,10 @@ main && echo clean`.** An empty selection — a typo'd `--only`/`--project`/`--a
   0.9 s to refuse). A row the artifact genuinely does not carry (one your branch adds) is refused
   for the same reason; `--force` enumerates anyway.
 
-Summed out of the committed artifact of 2026-09-13: the ranked pass alone is **3,920 s over 152
-real rows** and **366 s over 675 synthetic rows**; wall clock is lower because eight shards run in
-parallel. The single row `kleod:PauseMenuScreenHandler:agbcc` is 2,141 s of that real
-total — **55% of the tier in one row.**
+Summed out of the committed artifact of 2026-09-13: the ranked pass alone is **4,913 s over 152
+real rows** and **989 s over 675 synthetic rows**; wall clock is lower because eight shards run in
+parallel. The single row `kleod:PauseMenuScreenHandler:agbcc` is 2,454 s of that real
+total — **50% of the tier in one row.**
 
 ## 4. How many full runs a round gets
 
@@ -180,16 +180,16 @@ until grep -q 'EXIT=' "$LOG"; do
   sleep 60; waited=$((waited + 60))
   now=$(wc -c < "$LOG")
   if [ "$now" -eq "$prev" ]; then still=$((still + 60)); else still=0; prev=$now; fi
-  # 2800 s of no growth is ~30% over this corpus's long-pole ROW — the 2,141 s of §3, not the
+  # 3200 s of no growth is ~30% over this corpus's long-pole ROW — the 2,454 s of §3, not the
   # 2,169 s the whole real tier walls at. Below that, a static log is normal, not a hang.
   # Raise it, never lower it, as that row grows.
-  [ "$still" -ge 2800 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
+  [ "$still" -ge 3200 ] && { echo "NO GROWTH ${still}s — investigate, do NOT kill yet"; break; }
   [ "$waited" -ge 9000 ] && { echo "OVER BUDGET ${waited}s"; break; }
 done
 ```
 
 **A log that stopped growing is almost certainly `kleod:PauseMenuScreenHandler:agbcc`** — one row,
-~2,141 s of ranked pass over 27,360 spellings, alone on one shard while the other seven sit finished.
+~2,454 s of ranked pass over 27,360 spellings, alone on one shard while the other seven sit finished.
 Before 2026-09-13 the row at that address was `kleod:ProcessInputAndUpdateEntities:agbcc`: 77,760
 spellings and ~1,840 s. The swap cut the fan by nearly two thirds, and the ranked pass still grew. That is
 this corpus's normal long-pole shape, not a hang. **Never kill a bench you have not proven
